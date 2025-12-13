@@ -1,0 +1,31 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo
+# Note: For library crates, Cargo.lock is typically ignored
+# For binary crates or workspaces, you may want to commit it
+Cargo.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Rust-analyzer
+rust-project.json
+
+# Backup files
+*.bak
+*.orig
+

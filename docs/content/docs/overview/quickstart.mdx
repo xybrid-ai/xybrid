@@ -1,0 +1,125 @@
+---
+title: Quick Start
+description: Get up and running with Xybrid in minutes
+---
+
+Get Xybrid running and execute your first pipeline in under 5 minutes.
+
+## Prerequisites
+
+- **Rust** 1.75+ with `cargo`
+- **macOS** (Apple Silicon or Intel) or **Linux**
+- Optional: **Flutter** 3.19+ for mobile development
+
+## Installation
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/anthropics/xybrid.git
+cd xybrid
+```
+
+### Build the CLI
+
+```bash
+cargo build -p xybrid-cli --release
+```
+
+The binary is at `target/release/xybrid`.
+
+### Add to PATH (optional)
+
+```bash
+export PATH="$PATH:$(pwd)/target/release"
+```
+
+## Run Your First Pipeline
+
+### 1. Start the Registry Server
+
+The registry serves model bundles:
+
+```bash
+just registry::serve-local
+```
+
+This serves bundles from `~/.xybrid/registry/` on port 8080.
+
+### 2. Create a Pipeline
+
+Create `my-pipeline.yaml`:
+
+```yaml
+name: speech-to-text
+stages:
+  - wav2vec2-base-960h@1.0
+```
+
+### 3. Run It
+
+```bash
+xybrid run --config my-pipeline.yaml
+```
+
+## Voice Assistant Example
+
+A complete ASR → LLM → TTS pipeline:
+
+```yaml
+name: voice-assistant
+stages:
+  # Speech recognition (runs on device)
+  - whisper-tiny@1.0
+
+  # Language model (routes to cloud)
+  - target: integration
+    provider: openai
+    model: gpt-4o-mini
+
+  # Text-to-speech (runs on device)
+  - kokoro-82m@0.1
+```
+
+Set your API key and run:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+xybrid run --config voice-assistant.yaml
+```
+
+## Flutter Integration
+
+### Add Dependency
+
+```yaml
+# pubspec.yaml
+dependencies:
+  xybrid_flutter:
+    path: ../xybrid_flutter
+```
+
+### Run Inference
+
+```dart
+import 'package:xybrid_flutter/xybrid_flutter.dart';
+
+// Load pipeline
+final pipeline = await Xybrid.pipeline('assets/pipelines/asr.yaml');
+
+// Run inference
+final result = await pipeline.run(
+  envelope: Envelope.audio(bytes: audioBytes),
+);
+
+print(result.text);
+```
+
+## Next Steps
+
+<Cards>
+  <Card title="Pipelines" href="/docs/overview/pipelines" description="Learn the Pipeline DSL" />
+  <Card title="SDK Reference" href="/docs/overview/sdk" description="Flutter and Rust APIs" />
+  <Card title="CLI Reference" href="/docs/cli" description="All CLI commands" />
+  <Card title="Developer Guide" href="/docs/guides" description="Full development workflow" />
+</Cards>

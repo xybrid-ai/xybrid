@@ -1,0 +1,13 @@
+# Example Policy Bundle
+version: "1.0.0"
+rules:
+  - id: "audio_rule"
+    expression: "input.kind == \"AudioRaw\""
+    action: "deny"
+  - id: "high_rtt_rule"
+    expression: "metrics.network_rtt > 300"
+    action: "deny"
+  - id: "allow_all"
+    expression: "true"
+    action: "allow"
+

@@ -1,0 +1,93 @@
+---
+title: CLI Reference
+description: Command-line interface for Xybrid
+---
+
+The Xybrid CLI is the command surface for running pipelines, packaging models, deploying bundles, and inspecting telemetry.
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| **Binary** | `xybrid` |
+| **Invocation** | `xybrid <subcommand> [flags]` |
+
+## Design Principles
+
+- **Declarative** - Pipelines defined in YAML
+- **Composable** - Works with SDK and orchestrator
+- **Portable** - Same commands across all targets
+- **Observable** - Structured telemetry by default
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| [`run`](/docs/cli/run) | Execute a pipeline |
+| [`pack`](/docs/cli/pack) | Package models into `.xyb` bundles |
+| [`deploy`](/docs/cli/deploy) | Publish bundles to a registry |
+| [`trace`](/docs/cli/trace) | Inspect telemetry from previous runs |
+
+## Configuration
+
+Default configuration locations:
+
+| Scope | Path |
+|-------|------|
+| Global | `~/.config/xybrid/config.yml` |
+| Project | `./.xybrid/config.yml` |
+
+### Registry Configuration
+
+```yaml
+registry:
+  name: "main"
+  uri: "s3://xybrid-models"
+  credentials:
+    access_key: "..."
+    secret_key: "..."
+```
+
+### Remote Registry (HTTP)
+
+```yaml
+registry:
+  name: "prod-remote"
+  base_url: "https://registry.xybrid.dev/"
+  auth:
+    type: bearer
+    token: "${XYBRID_REGISTRY_TOKEN}"
+  timeout_ms: 5000
+  retry_attempts: 3
+```
+
+### Telemetry Configuration
+
+```yaml
+telemetry:
+  enabled: true
+  endpoint: "http://localhost:4318"
+  sampling_rate: 0.05
+  privacy_mode: "summary_only"
+```
+
+## Quick Examples
+
+### Run a pipeline
+
+```bash
+xybrid run --pipeline voice-assistant
+```
+
+### Package and deploy a model
+
+```bash
+xybrid pack whisper-tiny --version 1.0.0 --target macos-arm64
+xybrid deploy dist/whisper-tiny.xyb --registry local
+```
+
+### Inspect recent telemetry
+
+```bash
+xybrid trace --latest
+```

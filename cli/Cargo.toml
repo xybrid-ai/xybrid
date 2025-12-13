@@ -1,0 +1,22 @@
+[package]
+name = "xybrid-cli"
+version = "0.0.1"
+edition = "2021"
+
+[[bin]]
+name = "xybrid"
+path = "src/main.rs"
+
+[dependencies]
+xybrid-core = { path = "../core" }
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+anyhow = "1.0"
+dirs = "5.0"
+chrono = "0.4"
+sha2 = "0.10"
+colored = "2.1"
+tempfile = "3.10"
+

@@ -1,0 +1,12 @@
+{
+  "title": "Guides",
+  "root": true,
+  "description": "Developer guides and workflows",
+  "icon": "BookOpen",
+  "pages": [
+    "index",
+    "getting-started",
+    "packaging-and-deployment",
+    "observability"
+  ]
+}

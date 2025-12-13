@@ -1,0 +1,113 @@
+---
+title: xybrid pack
+description: Package models into .xyb bundles
+---
+
+Package models and runtime assets into `.xyb` bundles for distribution.
+
+## Usage
+
+```bash
+xybrid pack <model-name> --version <semver> --target <target>
+```
+
+## Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<model-name>` | Folder under `./models/` containing artifacts |
+
+## Options
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--version` | `-v` | `0.1.0` | Bundle version (semver) |
+| `--target` | `-t` | `generic` | Target platform |
+| `--output` | `-o` | Auto | Output path for bundle |
+
+## Behavior
+
+1. Walks `./models/<model-name>/` directory
+2. Reads `model_metadata.json` for execution config
+3. Writes `manifest.json` with bundle metadata
+4. Creates `.xyb` archive with embedded hash
+5. Skips duplicate filenames with warning
+
+## Examples
+
+### Basic packaging
+
+```bash
+xybrid pack whisper-tiny --version 1.0.0
+```
+
+Creates `whisper-tiny@1.0.0.xyb` in current directory.
+
+### Platform-specific bundle
+
+```bash
+xybrid pack whisper-tiny --version 1.0.0 --target macos-arm64
+```
+
+### Custom output path
+
+```bash
+xybrid pack whisper-tiny --version 1.0.0 --output dist/whisper-tiny.xyb
+```
+
+## Target Platforms
+
+| Target | Description |
+|--------|-------------|
+| `generic` | Platform-agnostic (default) |
+| `macos-arm64` | macOS Apple Silicon |
+| `macos-x86_64` | macOS Intel |
+| `ios-arm64` | iOS devices |
+| `android-arm64` | Android ARM64 |
+| `linux-x86_64` | Linux x86_64 |
+| `windows-x86_64` | Windows x86_64 |
+
+## Model Directory Structure
+
+The pack command expects this structure:
+
+```
+models/whisper-tiny/
+├── model_metadata.json    # Required: execution config
+├── model.onnx             # Model file
+├── vocab.json             # Vocabulary (if needed)
+└── ...                    # Other assets
+```
+
+## Bundle Output
+
+The resulting `.xyb` bundle contains:
+
+```
+whisper-tiny@1.0.0.xyb/
+├── manifest.json          # Bundle metadata + hash
+├── model_metadata.json    # Execution config
+├── model.onnx             # Model weights
+└── ...                    # All files from source
+```
+
+## Workflow
+
+Typical packaging workflow:
+
+```bash
+# 1. Create model directory
+mkdir -p models/my-model
+
+# 2. Add model files and metadata
+cp model.onnx models/my-model/
+# Create model_metadata.json...
+
+# 3. Package
+xybrid pack my-model --version 1.0.0 --target macos-arm64
+
+# 4. Deploy
+xybrid deploy my-model@1.0.0.xyb --registry local
+```
+
+See [Bundles](/docs/overview/bundles) for bundle format details.

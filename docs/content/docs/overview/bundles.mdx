@@ -1,0 +1,154 @@
+---
+title: Bundles
+description: Model packaging format
+---
+
+
+A **Bundle** (`.xyb` file) is a packaged model with all files needed for execution.
+
+## Bundle Format
+
+A bundle is a ZIP archive containing:
+
+```
+model-name.xyb/
+├── model_metadata.json    # Execution configuration
+├── model.onnx             # Model file (or .safetensors)
+├── vocab.json             # Vocabulary (for ASR)
+├── tokens.txt             # Token list (for TTS)
+├── voices.bin             # Voice embeddings (for TTS)
+└── ...                    # Other required files
+```
+
+## model_metadata.json
+
+The metadata file defines how the model is executed:
+
+```json
+{
+  "model_id": "wav2vec2-base-960h",
+  "version": "1.0",
+  "description": "Speech recognition model",
+
+  "execution_template": {
+    "type": "SimpleMode",
+    "model_file": "model.onnx"
+  },
+
+  "preprocessing": [
+    { "type": "AudioDecode", "sample_rate": 16000, "channels": 1 }
+  ],
+
+  "postprocessing": [
+    { "type": "CTCDecode", "vocab_file": "vocab.json", "blank_index": 0 }
+  ],
+
+  "files": ["model.onnx", "vocab.json"],
+
+  "metadata": {
+    "task": "speech-recognition",
+    "language": "en"
+  }
+}
+```
+
+## Bundle Types
+
+### ASR Bundle (Wav2Vec2)
+
+```json
+{
+  "model_id": "wav2vec2-base-960h",
+  "execution_template": {
+    "type": "SimpleMode",
+    "model_file": "model.onnx"
+  },
+  "preprocessing": [
+    { "type": "AudioDecode", "sample_rate": 16000, "channels": 1 }
+  ],
+  "postprocessing": [
+    { "type": "CTCDecode", "vocab_file": "vocab.json", "blank_index": 0 }
+  ]
+}
+```
+
+### ASR Bundle (Whisper)
+
+```json
+{
+  "model_id": "whisper-tiny",
+  "execution_template": {
+    "type": "CandleModel",
+    "model_type": "WhisperTiny"
+  },
+  "preprocessing": [
+    { "type": "AudioDecode", "sample_rate": 16000, "channels": 1 }
+  ],
+  "postprocessing": []
+}
+```
+
+### TTS Bundle (Kokoro)
+
+```json
+{
+  "model_id": "kokoro-82m",
+  "execution_template": {
+    "type": "SimpleMode",
+    "model_file": "model.onnx"
+  },
+  "preprocessing": [
+    {
+      "type": "Phonemize",
+      "tokens_file": "tokens.txt",
+      "backend": "EspeakNG"
+    }
+  ],
+  "postprocessing": [
+    {
+      "type": "TTSAudioEncode",
+      "sample_rate": 24000,
+      "apply_postprocessing": true
+    }
+  ]
+}
+```
+
+## Platform Variants
+
+Bundles are platform-specific. The same model may have different bundles for:
+
+| Platform | Identifier |
+|----------|------------|
+| macOS (Apple Silicon) | `macos-arm64` |
+| macOS (Intel) | `macos-x86_64` |
+| iOS | `ios-arm64` |
+| Android | `android-arm64` |
+| Linux | `linux-x86_64` |
+| Windows | `windows-x86_64` |
+
+## Bundle Resolution
+
+When a pipeline references `whisper-tiny@1.0`:
+
+1. **Detect Platform** - Determine current platform (e.g., `macos-arm64`)
+2. **Check Cache** - Look in local cache (`~/.xybrid/registry/`)
+3. **Download** - If not cached, fetch from registry
+4. **Extract** - Unzip bundle to cache
+5. **Execute** - TemplateExecutor reads `model_metadata.json`
+
+## Required Fields
+
+| Field | Description |
+|-------|-------------|
+| `model_id` | Unique identifier |
+| `version` | Semantic version |
+| `execution_template` | How to run the model |
+| `preprocessing` | Input transformation steps |
+| `postprocessing` | Output transformation steps |
+| `files` | List of files in bundle |
+
+## Related
+
+- [Registry](/docs/registry) - Bundle distribution
+- [TemplateExecutor](/docs/components/executor) - Bundle execution

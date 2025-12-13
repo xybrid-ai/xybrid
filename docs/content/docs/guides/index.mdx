@@ -1,0 +1,69 @@
+---
+title: Developer Guide
+description: End-to-end workflow for building with Xybrid
+---
+
+This guide walks through the complete developer workflow: initialize a project, define pipelines, run locally, package models, integrate with SDKs, and observe telemetry.
+
+## Workflow Overview
+
+Developers interact with Xybrid through three surfaces:
+
+| Surface | Purpose |
+|---------|---------|
+| **CLI** (`xybrid`) | Scaffolding, running pipelines, packaging models |
+| **SDKs** (Rust, Flutter) | Embedding orchestration in applications |
+| **Runtime** (`xybrid-core`) | Executing hybrid inference with policy and routing |
+
+## Development Loop
+
+```
+Build → Test → Deploy → Observe
+```
+
+1. **Build** - Define pipelines in YAML, prepare models
+2. **Test** - Run locally with dry-run and real execution
+3. **Deploy** - Package into `.xyb` bundles, publish to registry
+4. **Observe** - Inspect telemetry, profile performance
+
+## Guides
+
+<Cards>
+  <Card
+    title="Getting Started"
+    href="/docs/guides/getting-started"
+    description="Project setup, pipeline definition, local execution"
+  />
+  <Card
+    title="Packaging & Deployment"
+    href="/docs/guides/packaging-and-deployment"
+    description="Bundle creation, registry publishing"
+  />
+  <Card
+    title="Observability"
+    href="/docs/guides/observability"
+    description="Telemetry, tracing, device metrics"
+  />
+</Cards>
+
+## Best Practices
+
+### Model Optimization
+- Quantize models for edge execution to reduce latency and power consumption
+- Use platform-specific bundles when performance matters
+
+### Versioning
+- Version every pipeline, model bundle, and policy file
+- Use semantic versioning for bundles (`model@1.2.3`)
+
+### Observability
+- Run `xybrid trace` regularly to profile latency
+- Export traces to JSON for analysis
+
+### Privacy
+- Use policies to enforce data residency
+- Minimize egress by routing sensitive data locally
+
+### Architecture
+- Favor composition via traits and events
+- Avoid tight coupling between modules

@@ -1,0 +1,18 @@
+# Wav2Vec2 ASR Test Pipeline
+# Simple test: Audio Input → wav2vec2 ASR → Text Output
+
+name: "Wav2Vec2 ASR Test"
+
+stages:
+  - "wav2vec2-base-960h@1.0"    # Wav2Vec2 ASR model
+
+input:
+  kind: "Audio"
+
+metrics:
+  network_rtt: 50         # Good network
+  battery: 80             # Good battery
+  temperature: 24.0       # Normal temperature
+
+availability:
+  "wav2vec2-base-960h@1.0": true   # Available locally

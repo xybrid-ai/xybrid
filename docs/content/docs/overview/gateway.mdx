@@ -1,0 +1,105 @@
+---
+title: Gateway
+description: OpenAI-compatible LLM routing server
+---
+
+
+The **Gateway** provides a unified, OpenAI-compatible endpoint for cloud AI services. It routes requests to the appropriate backend provider.
+
+## Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Xybrid Gateway                               │
+│                 http://localhost:3000/v1                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐           │
+│  │  /chat/     │   │  /models    │   │  /health    │           │
+│  │ completions │   │             │   │             │           │
+│  └──────┬──────┘   └─────────────┘   └─────────────┘           │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌─────────────────────────────────────────────────┐           │
+│  │              Request Router                      │           │
+│  │  • API Key Validation  • Model Routing          │           │
+│  │  • Provider Selection  • Error Handling         │           │
+│  └─────────────────────────────────────────────────┘           │
+│              │               │               │                  │
+│              ▼               ▼               ▼                  │
+│       ┌──────────┐    ┌──────────┐    ┌──────────┐             │
+│       │  OpenAI  │    │ Anthropic│    │   Groq   │             │
+│       └──────────┘    └──────────┘    └──────────┘             │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Supported Providers
+
+### OpenAI
+- `gpt-4o`
+- `gpt-4o-mini`
+- `gpt-4-turbo`
+
+### Anthropic
+- `claude-3-5-sonnet`
+- `claude-3-opus`
+- `claude-3-haiku`
+
+### Groq
+- `llama-3.1-70b-versatile`
+- `llama-3.1-8b-instant`
+- `mixtral-8x7b-32768`
+
+## Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v1/chat/completions` | POST | Chat completions (OpenAI-compatible) |
+| `/v1/models` | GET | List available models |
+| `/health` | GET | Health check |
+
+## Integration with Pipelines
+
+The Gateway integrates with Xybrid pipelines via the `integration` target:
+
+```yaml
+name: voice-assistant
+stages:
+  - whisper-tiny@1.0
+
+  - target: integration
+    provider: openai
+    model: gpt-4o-mini
+    options:
+      system_prompt: "You are a helpful voice assistant."
+      max_tokens: 150
+
+  - kokoro-82m@0.1
+```
+
+When a pipeline stage has `target: integration`, the Orchestrator routes the request through the Gateway (or directly to the provider if configured).
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PORT` | Server port (default: 3000) |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `GROQ_API_KEY` | Groq API key |
+
+## How It Works
+
+1. **Request Received** - Client sends OpenAI-compatible request
+2. **Model Routing** - Gateway determines provider from model name
+3. **Format Conversion** - Request converted to provider's format (if needed)
+4. **Provider Call** - Request forwarded to backend
+5. **Response Normalization** - Response converted back to OpenAI format
+
+## Related
+
+- [Pipeline DSL](/docs/pipelines) - Integration stage configuration
+- [Orchestrator](/docs/components/orchestrator) - Routes to integration targets

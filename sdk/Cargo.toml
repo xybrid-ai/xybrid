@@ -1,0 +1,26 @@
+[package]
+name = "xybrid-sdk"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+name = "xybrid_sdk"
+path = "src/lib.rs"
+
+[dependencies]
+xybrid-core = { path = "../core" }
+xybrid-macros = { path = "../macros" }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+thiserror = "1.0"
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync", "fs", "time"] }
+tempfile = "3.10"
+ureq = "2.9"
+dirs = "5.0"
+
+# Re-export the macro
+[package.metadata.docs.rs]
+all-features = true
+

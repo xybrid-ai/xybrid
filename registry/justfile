@@ -1,0 +1,115 @@
+# Registry Server & Bundle Management
+# Run from project root: just registry::<command>
+# Or from registry folder: just <command>
+
+# Default recipe - show help
+default:
+    @just --list
+
+# ============================================================================
+# Server
+# ============================================================================
+
+# Start the registry server (serves from registry/bundles/)
+serve:
+    cargo run --bin registry-server -p registry
+
+# Start registry server on custom port
+serve-port port="8080":
+    cargo run --bin registry-server -p registry -- {{port}}
+
+# Start registry server serving local cache (~/.xybrid/registry/)
+serve-local:
+    cargo run --bin registry-server -p registry -- --local-cache
+
+# Start registry server serving custom path
+serve-path path:
+    cargo run --bin registry-server -p registry -- {{path}}
+
+# ============================================================================
+# Bundle Creation
+# ============================================================================
+
+# Create all bundles (to ~/.xybrid/registry/)
+create:
+    cargo run --bin create-bundles -p registry
+
+# Create a specific bundle (to ~/.xybrid/registry/)
+create-bundle name:
+    cargo run --bin create-bundles -p registry -- {{name}}
+
+# Create bundles to a custom directory
+create-to path:
+    cargo run --bin create-bundles -p registry -- --output {{path}}
+
+# List available bundle definitions
+list:
+    cargo run --bin create-bundles -p registry -- --list
+
+# ============================================================================
+# Navigation
+# ============================================================================
+
+# Open registry cache folder in Finder
+open:
+    @mkdir -p ~/.xybrid/registry
+    open ~/.xybrid/registry
+
+# ============================================================================
+# Cache Management
+# ============================================================================
+
+# Clean up bundles in local cache (~/.xybrid/registry/)
+clean:
+    cargo run --bin create-bundles -p registry -- --clean
+
+# Clean bundles in a specific directory
+clean-path path:
+    cargo run --bin create-bundles -p registry -- --clean --output {{path}}
+
+# Clean entire local xybrid cache (~/.xybrid/)
+cache-clean:
+    @echo "🧹 Cleaning local xybrid cache..."
+    rm -rf ~/.xybrid
+    @echo "✅ Cache cleaned"
+
+# Clean only the registry cache (~/.xybrid/registry/)
+cache-clean-registry:
+    @echo "🧹 Cleaning registry cache..."
+    rm -rf ~/.xybrid/registry
+    @echo "✅ Registry cache cleaned"
+
+# Show cache status and size
+cache-status:
+    @echo "📂 Xybrid Cache Status (~/.xybrid/)"
+    @echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    @if [ -d ~/.xybrid ]; then \
+        echo "Location: ~/.xybrid"; \
+        echo "Size: $(du -sh ~/.xybrid 2>/dev/null | cut -f1)"; \
+        echo ""; \
+        echo "Contents:"; \
+        ls -la ~/.xybrid 2>/dev/null || echo "  (empty)"; \
+        if [ -d ~/.xybrid/registry ]; then \
+            echo ""; \
+            echo "Registry bundles:"; \
+            find ~/.xybrid/registry -name "*.xyb" 2>/dev/null | wc -l | xargs -I {} echo "  {} bundle(s)"; \
+        fi; \
+    else \
+        echo "Cache does not exist yet."; \
+    fi
+
+# ============================================================================
+# Development
+# ============================================================================
+
+# Build registry package
+build:
+    cargo build -p registry
+
+# Check registry package
+check:
+    cargo check -p registry
+
+# Run registry tests
+test:
+    cargo test -p registry

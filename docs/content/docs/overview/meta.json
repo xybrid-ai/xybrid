@@ -1,0 +1,23 @@
+{
+  "title": "Documentation",
+  "description": "Xybrid Documentation",
+  "icon": "Book",
+  "root": true,
+  "pages": [
+    "---Getting Started---",
+    "index",
+    "quickstart",
+    "---How It Works---",
+    "...(how-it-works)",
+    "---Pipeline DSL---",
+    "pipelines",
+    "---Real-Time---",
+    "streaming",
+    "---Infrastructure---",
+    "registry",
+    "bundles",
+    "gateway",
+    "---SDK---",
+    "sdk"
+  ]
+}

@@ -1,0 +1,22 @@
+# Hiiipe Pipeline Configuration
+# Demonstrates: Audio Input -> ASR -> Motivator -> TTS
+
+name: "Hiiipe Demo Pipeline"
+
+stages:
+  - "wav2vec2-base-960h@1.0"  # ASR model (local) - must match registry
+  - "motivator-llm@5"          # Motivator model (cloud) - TODO: create bundle or cloud endpoint
+  - "xtts-mini@0.6"            # TTS model (local) - TODO: create bundle
+
+input:
+  kind: "AudioRaw"
+
+metrics:
+  network_rtt: 110        # Good network
+  battery: 75             # Good battery
+  temperature: 24.0       # Normal temperature
+
+availability:
+  "wav2vec2-base-960h@1.0": true  # Available locally in registry
+  "xtts-mini@0.6": true           # TODO: Available locally
+  "motivator-llm@5": false        # Only available in cloud

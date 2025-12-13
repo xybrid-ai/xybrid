@@ -1,0 +1,257 @@
+---
+title: SDK Reference
+description: Flutter and Rust SDK documentation
+---
+
+
+Xybrid provides SDKs for Flutter (Dart) and Rust.
+
+## Flutter SDK
+
+The Flutter SDK (`xybrid_flutter`) provides Dart bindings to the Rust core via FFI.
+
+### Installation
+
+```yaml
+dependencies:
+  xybrid_flutter:
+    path: ../xybrid_flutter  # Local development
+```
+
+### Quick Start
+
+```dart
+import 'package:xybrid_flutter/xybrid_flutter.dart';
+
+// Load a pipeline
+final pipeline = await Xybrid.pipeline('assets/pipelines/asr.yaml');
+
+// Run inference
+final result = await pipeline.run(
+  envelope: Envelope.audio(bytes: audioBytes),
+);
+
+print(result.text);
+```
+
+### Core Classes
+
+| Class | Description |
+|-------|-------------|
+| `Xybrid` | Main entry point |
+| `XybridPipeline` | Loaded pipeline for execution |
+| `XybridStreamer` | Real-time streaming inference |
+| `XybridRecorder` | Microphone recording |
+| `Envelope` | Data container (audio, text, embedding) |
+
+### Xybrid Class
+
+```dart
+class Xybrid {
+  /// Load pipeline from YAML
+  static Future<XybridPipeline> pipeline(String assetPath);
+
+  /// Get device capabilities
+  static HardwareCapabilities get deviceCapabilities;
+
+  /// Current platform (e.g., "macos-arm64")
+  static String get currentPlatform;
+
+  /// Set API key for cloud integrations
+  static void simple({required String apiKey});
+}
+```
+
+### XybridPipeline Class
+
+```dart
+class XybridPipeline {
+  /// Pipeline name from YAML
+  String? get name;
+
+  /// Number of stages
+  int get stageCount;
+
+  /// Stage names
+  List<String> get stageNames;
+
+  /// Expected input type
+  FfiPipelineInputType get inputType;
+
+  /// Whether models are loaded
+  bool get isLoaded;
+
+  /// Run inference
+  Future<FfiPipelineResult> run({required Envelope envelope});
+
+  /// Unload pipeline
+  void unload();
+}
+```
+
+### Envelope Class
+
+```dart
+class Envelope {
+  /// Create audio envelope
+  static Envelope audio({required Uint8List bytes});
+
+  /// Create text envelope
+  static Envelope text({required String text});
+
+  /// Create embedding envelope
+  static Envelope embedding({required Float32List embedding});
+}
+```
+
+### XybridStreamer Class
+
+```dart
+class XybridStreamer {
+  /// Create streaming session
+  static Future<XybridStreamer> create({
+    required String modelPath,
+    StreamingConfig? config,
+  });
+
+  /// Create from registry
+  static Future<XybridStreamer> createFromRegistry({
+    required RegistryStreamingConfig config,
+  });
+
+  /// Feed audio samples
+  void feed(Float32List samples);
+  void feedPcm16(Uint8List pcmChunk);
+
+  /// Partial results stream
+  Stream<String> get onPartialResult;
+
+  /// Flush and get final result
+  Future<String?> flush();
+
+  /// Reset for new utterance
+  void reset();
+
+  /// Cleanup
+  Future<void> dispose();
+}
+```
+
+### XybridRecorder Class
+
+```dart
+class XybridRecorder {
+  /// Start recording
+  Future<void> start();
+
+  /// Stop and get bytes
+  Future<Uint8List> stop();
+
+  /// Start streaming mode
+  Future<void> startStreaming(void Function(Float32List) onSamples);
+
+  /// Stop streaming
+  Future<void> stopStreaming();
+
+  /// Check permissions
+  static Future<bool> hasPermission();
+  static Future<bool> requestPermission();
+}
+```
+
+---
+
+## Rust SDK
+
+The Rust SDK (`xybrid-sdk`) provides high-level APIs for pipeline loading, caching, and telemetry.
+
+### Add Dependency
+
+```toml
+[dependencies]
+xybrid-sdk = { path = "../xybrid-sdk" }
+xybrid-core = { path = "../xybrid-core" }
+```
+
+### Quick Start
+
+```rust
+use xybrid_sdk::PipelineLoader;
+use xybrid_core::ir::{Envelope, EnvelopeKind};
+
+// Load pipeline from YAML
+let pipeline = PipelineLoader::from_yaml(&yaml_content)?
+    .load()?;
+
+// Create input
+let input = Envelope {
+    kind: EnvelopeKind::Audio(audio_bytes),
+    metadata: Default::default(),
+};
+
+// Run
+let result = pipeline.run(&input)?;
+```
+
+### Core Types
+
+| Type | Description |
+|------|-------------|
+| `PipelineLoader` | Loads pipelines from YAML |
+| `XybridPipeline` | Executable pipeline |
+| `CacheManager` | Model caching |
+| `LocalRegistry` | Registry client |
+
+### PipelineLoader
+
+```rust
+use xybrid_sdk::PipelineLoader;
+
+// From YAML string
+let loader = PipelineLoader::from_yaml(&yaml)?;
+
+// Load and validate
+let pipeline = loader.load()?;
+
+// Check input type
+match pipeline.input_type() {
+    PipelineInputType::Audio => { /* handle audio */ }
+    PipelineInputType::Text => { /* handle text */ }
+    _ => {}
+}
+```
+
+### LocalRegistry
+
+```rust
+use xybrid_sdk::registry::LocalRegistry;
+
+// Create registry client
+let registry = LocalRegistry::new()?;
+
+// Get bundle path
+let bundle = registry.get_bundle(
+    "wav2vec2-base-960h",
+    "1.0",
+    "macos-arm64"
+)?;
+
+// List all bundles
+let bundles = registry.list_bundles()?;
+```
+
+### CacheManager
+
+```rust
+use xybrid_sdk::cache::CacheManager;
+
+let cache = CacheManager::new()?;
+
+// Check if model is cached
+if cache.has_model("whisper-tiny", "1.0") {
+    let path = cache.get_model_path("whisper-tiny", "1.0")?;
+}
+
+// Clear cache
+cache.clear()?;
+```

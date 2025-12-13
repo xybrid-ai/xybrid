@@ -1,0 +1,221 @@
+---
+title: Streaming Inference
+description: Real-time audio transcription with partial results
+---
+
+
+Xybrid supports real-time streaming inference for speech recognition. Audio is processed in chunks with partial transcription results as you speak.
+
+## Architecture
+
+```
+Microphone → AudioBuffer → Chunking → Whisper → Partial Results
+                 ↑                         ↓
+             Overlap                  Callback
+```
+
+### Key Components
+
+| Component | Description |
+|-----------|-------------|
+| `StreamSession` | Manages streaming state and processing |
+| `AudioBuffer` | Ring buffer with overlap support |
+| `XybridStreamer` | Flutter SDK streaming class |
+
+## How It Works
+
+1. Audio is fed continuously to the `AudioBuffer`
+2. When a chunk is ready (5 seconds by default), it's processed
+3. Whisper transcribes the chunk
+4. Partial result is emitted via callback
+5. On stop, remaining audio is flushed
+
+## Flutter SDK
+
+### Basic Usage
+
+```dart
+import 'package:xybrid_flutter/xybrid_flutter.dart';
+
+// Create streaming session
+final streamer = await XybridStreamer.create(
+  modelPath: '/path/to/whisper-tiny-candle',
+  config: StreamingConfig(
+    chunkSizeMs: 5000,   // 5 second chunks
+    overlapMs: 500,       // 0.5s overlap
+  ),
+);
+
+// Listen for partial results
+streamer.onPartialResult.listen((partial) {
+  print('Partial: $partial');
+});
+
+// Feed audio from microphone
+micStream.listen((pcmChunk) {
+  streamer.feedPcm16(pcmChunk);
+});
+
+// Stop and get final result
+final result = await streamer.flush();
+print('Final: $result');
+
+// Cleanup
+await streamer.dispose();
+```
+
+### From Registry
+
+```dart
+final streamer = await XybridStreamer.createFromRegistry(
+  config: RegistryStreamingConfig(
+    modelId: 'whisper-tiny-candle',
+    version: '1.0',
+    registryUrl: 'http://localhost:8080',
+  ),
+);
+```
+
+### With XybridRecorder
+
+```dart
+final recorder = XybridRecorder();
+final streamer = await XybridStreamer.create(modelPath: modelPath);
+
+// Start streaming from microphone
+await recorder.startStreaming((samples) {
+  streamer.feed(samples);
+});
+
+streamer.onPartialResult.listen((text) {
+  setState(() => transcription = text);
+});
+
+// Stop
+await recorder.stopStreaming();
+final result = await streamer.flush();
+```
+
+## Streaming Config
+
+```dart
+StreamingConfig(
+  chunkSizeMs: 5000,    // Process every 5 seconds
+  overlapMs: 500,        // 0.5s overlap between chunks
+  useVad: false,         // Enable Voice Activity Detection
+)
+```
+
+### Chunk Size Trade-offs
+
+| Chunk Size | Latency | Accuracy |
+|------------|---------|----------|
+| 2 seconds | Low | Lower (less context) |
+| 5 seconds | Medium | Good balance |
+| 10 seconds | High | Better (more context) |
+
+## Session Lifecycle
+
+```dart
+// States
+enum StreamState {
+  idle,        // Ready to start
+  streaming,   // Receiving audio
+  finalizing,  // Processing remaining audio
+  completed,   // Done
+  error,       // Error occurred
+}
+
+// Check state
+if (streamer.state == StreamState.streaming) {
+  // Currently processing
+}
+```
+
+## Statistics
+
+```dart
+final stats = streamer.stats;
+print('Samples received: ${stats.samplesReceived}');
+print('Samples processed: ${stats.samplesProcessed}');
+print('Chunks processed: ${stats.chunksProcessed}');
+print('Audio duration: ${stats.audioDurationMs}ms');
+```
+
+## WebSocket Streaming
+
+For browser clients, use the WebSocket endpoint:
+
+### Connect
+
+```javascript
+const ws = new WebSocket('ws://localhost:3000/v1/audio/transcriptions/stream');
+```
+
+### Send Audio
+
+```javascript
+// Binary: PCM 16-bit, 16kHz, mono
+ws.send(audioChunk);
+
+// Control: JSON messages
+ws.send(JSON.stringify({ type: 'flush' }));
+ws.send(JSON.stringify({ type: 'reset' }));
+ws.send(JSON.stringify({ type: 'close' }));
+```
+
+### Receive Results
+
+```javascript
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  switch (msg.type) {
+    case 'ready':
+      console.log('Session ready');
+      break;
+    case 'partial':
+      console.log('Partial:', msg.text);
+      break;
+    case 'final':
+      console.log('Final:', msg.text);
+      break;
+    case 'error':
+      console.error('Error:', msg.message);
+      break;
+  }
+};
+```
+
+## Voice Activity Detection (VAD)
+
+VAD automatically segments audio based on speech detection:
+
+```dart
+final streamer = await XybridStreamer.create(
+  modelPath: modelPath,
+  config: StreamingConfig(
+    useVad: true,
+  ),
+);
+
+// Check VAD availability
+if (streamer.hasVad) {
+  print('VAD enabled');
+}
+```
+
+## Performance
+
+Current baseline (M1 Mac, whisper-tiny-candle):
+
+| Metric | Value |
+|--------|-------|
+| Chunk duration | 5 seconds |
+| Partial result latency | ~5-7 seconds |
+| Processing mode | CPU |
+
+### Optimization Opportunities
+
+- GPU/Metal acceleration
+- Smaller chunk sizes (2-3 seconds)
+- Distilled Whisper models

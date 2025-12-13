@@ -1,0 +1,171 @@
+---
+title: Getting Started
+description: Project initialization and local development
+---
+
+Set up a Xybrid project and run your first hybrid pipeline.
+
+## Phase 1: Initialize a Project
+
+### Using the CLI
+
+```bash
+xybrid init my-hybrid-app --template voice-assistant
+cd my-hybrid-app
+```
+
+### Project Structure
+
+The scaffold creates:
+
+```
+my-hybrid-app/
+├── pipelines/          # YAML pipeline definitions
+├── models/             # Local models or registry references
+├── policies/           # Privacy and routing policies
+└── src/                # Application code (Rust/Flutter)
+```
+
+### Manual Setup
+
+Alternatively, create the structure manually:
+
+```bash
+mkdir -p my-app/{pipelines,models,policies}
+cd my-app
+```
+
+## Phase 2: Define a Pipeline
+
+Pipelines describe the stage order, inputs, and routing in YAML.
+
+### Basic Pipeline
+
+```yaml
+name: speech-recognition
+stages:
+  - wav2vec2-base-960h@1.0
+```
+
+### Multi-Stage Pipeline
+
+```yaml
+name: voice-assistant
+stages:
+  - whisper-tiny@1.2       # Local ASR
+  - target: integration
+    provider: openai
+    model: gpt-4o-mini     # Cloud LLM
+  - kokoro-82m@0.1         # Local TTS
+```
+
+### With Environment Metrics
+
+```yaml
+name: adaptive-pipeline
+stages:
+  - whisper-tiny@1.2
+  - motivator-llm@5
+  - xtts-mini@0.6
+input:
+  kind: AudioRaw
+metrics:
+  network_rtt: 80          # milliseconds
+  battery: 70              # percent
+  temperature: 25.0        # celsius
+availability:
+  whisper-tiny@1.2: true
+  motivator-llm@5: false
+  xtts-mini@0.6: true
+```
+
+The Orchestrator uses these metrics to make routing decisions.
+
+## Phase 3: Run Locally
+
+### Execute Pipeline
+
+```bash
+xybrid run --pipeline voice-assistant.yaml
+```
+
+### Sample Output
+
+```
+▶️ Stage: whisper-tiny@1.2 → local
+🎯 Routing: local (fast path)
+⚙️ Execution complete (52ms)
+
+▶️ Stage: gpt-4o-mini → integration
+🎯 Routing: integration (OpenAI)
+⚙️ Execution complete (340ms)
+
+▶️ Stage: kokoro-82m@0.1 → local
+🎯 Routing: local (fast path)
+⚙️ Execution complete (89ms)
+
+🎉 Pipeline complete (total 481ms)
+```
+
+### Useful Flags
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Simulate routing without execution |
+| `--policy <file>` | Override default policy bundles |
+| `--export json` | Produce structured telemetry traces |
+
+### Dry Run
+
+Test routing decisions before actual execution:
+
+```bash
+xybrid run --pipeline voice-assistant.yaml --dry-run
+```
+
+Output shows what *would* happen:
+
+```
+▶️ Stage: whisper-tiny@1.2 → would route to: local
+▶️ Stage: gpt-4o-mini → would route to: integration
+▶️ Stage: kokoro-82m@0.1 → would route to: local
+```
+
+## SDK Integration
+
+### Rust
+
+```rust
+use xybrid_sdk::{run_pipeline, PipelineResult};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let result: PipelineResult = run_pipeline("pipelines/voice-assistant.yaml")?;
+
+    println!("Pipeline completed in {}ms", result.total_latency_ms);
+
+    for stage in &result.stages {
+        println!("  {}: {}ms ({})", stage.name, stage.latency_ms, stage.target);
+    }
+
+    Ok(())
+}
+```
+
+### Flutter
+
+```dart
+import 'package:xybrid_flutter/xybrid_flutter.dart';
+
+// Load and run pipeline
+final pipeline = await Xybrid.pipeline('assets/pipelines/asr.yaml');
+final result = await pipeline.run(
+  envelope: Envelope.audio(bytes: audioBytes),
+);
+
+print('Transcription: ${result.text}');
+```
+
+## Next Steps
+
+- [Packaging & Deployment](/docs/guides/packaging-and-deployment) - Bundle and distribute models
+- [Observability](/docs/guides/observability) - Monitor and debug pipelines

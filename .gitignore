@@ -1,0 +1,35 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock - commit for binary crates, ignore for libraries
+# Since this is a workspace with both, we commit it
+# Cargo.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+
+# Rust-analyzer
+rust-project.json
+
+# Backup files
+*.bak
+*.orig
+
+# Environment files
+.env
+.env.local
+
+# Test artifacts
+*.log

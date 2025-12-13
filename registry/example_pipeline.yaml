@@ -1,0 +1,24 @@
+# Example pipeline config using local registry server
+name: "Hiiipe Demo with Local Registry"
+
+# Use local registry server (start with: cargo run --bin registry-server)
+registry: http://localhost:8080
+
+stages:
+  - whisper-tiny@1.2
+  - motivator-llm@5
+  - xtts-mini@0.6
+
+input:
+  kind: AudioRaw
+
+metrics:
+  network_rtt: 50
+  battery: 75
+  temperature: 25.0
+
+availability:
+  whisper-tiny@1.2: true
+  xtts-mini@0.6: true
+  motivator-llm@5: false
+

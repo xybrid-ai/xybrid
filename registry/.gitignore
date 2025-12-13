@@ -1,0 +1,13 @@
+# Bundle files (large binary files)
+*.xyb
+
+# Temporary files
+*.tmp
+.xybrid_bundle_*
+
+# Keep config and scripts
+!bundles.json
+!create_bundles.rs
+!create_mock_bundles.sh
+!.gitignore
+!README.md

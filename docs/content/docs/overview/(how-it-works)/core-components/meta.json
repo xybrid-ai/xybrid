@@ -1,0 +1,10 @@
+{
+  "title": "Core Components",
+  "pages": [
+    "envelope",
+    "orchestrator",
+    "pipeline",
+    "executor",
+    "stream-session"
+  ]
+}

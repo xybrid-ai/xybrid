@@ -1,0 +1,173 @@
+{
+  "bundles": {
+    "wav2vec2-base-960h": {
+      "model_id": "wav2vec2-base-960h",
+      "version": "1.0",
+      "targets": [
+        {
+          "platform": "macos-arm64",
+          "model_file": "model.onnx",
+          "model_type": "onnx",
+          "source_dir": "test_models/wav2vec2-base-960h",
+          "fallback": "error"
+        },
+        {
+          "platform": "macos-x86_64",
+          "model_file": "model.onnx",
+          "model_type": "onnx",
+          "source_dir": "test_models/wav2vec2-base-960h",
+          "fallback": "error"
+        }
+      ],
+      "description": "Wav2Vec2 Base 960h ASR model with CTC decoding"
+    },
+    "whisper-tiny": {
+      "model_id": "whisper-tiny",
+      "version": "1.2",
+      "targets": [
+        {
+          "platform": "ios-aarch64",
+          "model_file": "whisper-tiny.mlmodel",
+          "model_type": "coreml",
+          "source_path": "test_models/whisper/whisper-tiny.onnx",
+          "fallback": "placeholder"
+        },
+        {
+          "platform": "android-arm64",
+          "model_file": "whisper-tiny.onnx",
+          "model_type": "onnx",
+          "source_path": "test_models/whisper/whisper-tiny.onnx",
+          "fallback": "placeholder"
+        },
+        {
+          "platform": "wasm-wgpu",
+          "model_file": "whisper-tiny.onnx",
+          "model_type": "onnx",
+          "source_path": "test_models/whisper/whisper-tiny.onnx",
+          "fallback": "placeholder"
+        }
+      ],
+      "description": "Whisper-tiny English ASR model for multiple platforms"
+    },
+    "xtts-mini": {
+      "model_id": "xtts-mini",
+      "version": "0.6",
+      "targets": [
+        {
+          "platform": "ios-aarch64",
+          "model_file": "xtts-mini.mlmodel",
+          "model_type": "coreml",
+          "source_path": "test_models/xtts-mini.onnx",
+          "fallback": "placeholder"
+        },
+        {
+          "platform": "android-arm64",
+          "model_file": "xtts-mini.onnx",
+          "model_type": "onnx",
+          "source_path": "test_models/xtts-mini.onnx",
+          "fallback": "placeholder"
+        }
+      ],
+      "description": "XTTS-mini text-to-speech model for iOS and Android"
+    },
+    "kitten-tts-nano": {
+      "model_id": "kitten-tts-nano",
+      "version": "0.1",
+      "targets": [
+        {
+          "platform": "macos-arm64",
+          "model_file": "model.fp16.onnx",
+          "model_type": "onnx",
+          "source_dir": "test_models/kitten-tts/kitten-nano-en-v0_1-fp16",
+          "fallback": "error"
+        },
+        {
+          "platform": "macos-x86_64",
+          "model_file": "model.fp16.onnx",
+          "model_type": "onnx",
+          "source_dir": "test_models/kitten-tts/kitten-nano-en-v0_1-fp16",
+          "fallback": "error"
+        },
+        {
+          "platform": "ios-aarch64",
+          "model_file": "model.fp16.onnx",
+          "model_type": "onnx",
+          "source_dir": "test_models/kitten-tts/kitten-nano-en-v0_1-fp16",
+          "fallback": "error"
+        },
+        {
+          "platform": "android-arm64",
+          "model_file": "model.fp16.onnx",
+          "model_type": "onnx",
+          "source_dir": "test_models/kitten-tts/kitten-nano-en-v0_1-fp16",
+          "fallback": "error"
+        }
+      ],
+      "description": "KittenTTS Nano - Ultra-lightweight TTS (15M params, 8 voices, 24kHz)"
+    },
+    "kokoro-82m": {
+      "model_id": "kokoro-82m",
+      "version": "1.0",
+      "targets": [
+        {
+          "platform": "macos-arm64",
+          "model_file": "kokoro-v1.0.fp16.onnx",
+          "model_type": "onnx",
+          "source_dir": "test_models/kokoro-82m",
+          "fallback": "error"
+        },
+        {
+          "platform": "macos-x86_64",
+          "model_file": "kokoro-v1.0.fp16.onnx",
+          "model_type": "onnx",
+          "source_dir": "test_models/kokoro-82m",
+          "fallback": "error"
+        },
+        {
+          "platform": "ios-aarch64",
+          "model_file": "kokoro-v1.0.fp16.onnx",
+          "model_type": "onnx",
+          "source_dir": "test_models/kokoro-82m",
+          "fallback": "error"
+        },
+        {
+          "platform": "android-arm64",
+          "model_file": "kokoro-v1.0.fp16.onnx",
+          "model_type": "onnx",
+          "source_dir": "test_models/kokoro-82m",
+          "fallback": "error"
+        }
+      ],
+      "description": "Kokoro-82M - High-quality TTS (82M params, 24 voices, 24kHz, Misaki dictionary phonemization)"
+    },
+    "whisper-tiny-candle": {
+      "model_id": "whisper-tiny-candle",
+      "version": "1.0",
+      "targets": [
+        {
+          "platform": "macos-arm64",
+          "model_file": "model.safetensors",
+          "model_type": "candle",
+          "source_dir": "test_models/whisper-tiny-candle",
+          "fallback": "error"
+        },
+        {
+          "platform": "macos-x86_64",
+          "model_file": "model.safetensors",
+          "model_type": "candle",
+          "source_dir": "test_models/whisper-tiny-candle",
+          "fallback": "error"
+        },
+        {
+          "platform": "linux-x86_64",
+          "model_file": "model.safetensors",
+          "model_type": "candle",
+          "source_dir": "test_models/whisper-tiny-candle",
+          "fallback": "error"
+        }
+      ],
+      "description": "Whisper-tiny ASR model for Candle runtime (pure Rust, SafeTensors format)"
+    }
+  }
+}
+
