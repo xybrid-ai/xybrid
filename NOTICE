@@ -1,0 +1,75 @@
+Xybrid
+Copyright 2024 Xybrid AI
+
+This product includes software developed at Xybrid AI (https://xybrid.dev/).
+
+================================================================================
+
+This software contains components with separate copyright notices and license
+terms. Your use of these components is subject to the terms and conditions of
+the following licenses.
+
+================================================================================
+
+ONNX Runtime
+Copyright (c) Microsoft Corporation
+Licensed under the MIT License
+https://github.com/microsoft/onnxruntime
+
+--------------------------------------------------------------------------------
+
+Candle (Hugging Face)
+Copyright (c) Hugging Face
+Licensed under the MIT License OR Apache License 2.0
+https://github.com/huggingface/candle
+
+--------------------------------------------------------------------------------
+
+Tokio
+Copyright (c) Tokio Contributors
+Licensed under the MIT License
+https://github.com/tokio-rs/tokio
+
+--------------------------------------------------------------------------------
+
+Serde
+Copyright (c) Serde Contributors
+Licensed under the MIT License OR Apache License 2.0
+https://github.com/serde-rs/serde
+
+--------------------------------------------------------------------------------
+
+CMU Pronouncing Dictionary
+Copyright (c) Carnegie Mellon University
+Licensed under a BSD-style license
+http://www.speech.cs.cmu.edu/cgi-bin/cmudict
+
+================================================================================
+
+For a complete list of dependencies and their licenses, please refer to:
+- Cargo.lock (for Rust dependencies)
+- The respective Cargo.toml files in each crate
+
+================================================================================
+
+Open Core Model
+---------------
+
+Xybrid uses an open-core licensing model:
+
+OPEN SOURCE (Apache-2.0):
+- xybrid-core: Core runtime library
+- xybrid-sdk: High-level Rust SDK
+- xybrid-cli: Command-line interface
+- xybrid-macros: Procedural macros
+- xybrid-flutter: Flutter plugin
+- registry: Self-hosted bundle registry
+
+COMMERCIAL (Proprietary):
+- Xybrid Cloud Gateway: Managed LLM routing service
+- Xybrid Cloud Registry: Hosted model distribution
+- Xybrid Enterprise: RBAC, audit logs, SSO, SLA
+- Xybrid Dashboard: Web management interface
+- Xybrid Analytics: Usage metrics and cost tracking
+
+For commercial licensing inquiries, contact: licensing@xybrid.dev
