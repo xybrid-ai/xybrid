@@ -1,0 +1,40 @@
+---
+title: Internals
+description: How Xybrid works under the hood
+---
+
+This section explains Xybrid's internal architecture for researchers, contributors, and developers who want to understand how the system works.
+
+## Overview
+
+Xybrid is a hybrid cloud-edge ML inference orchestrator. It routes ML workloads between on-device execution and cloud APIs based on model availability, device capabilities, and user policies.
+
+## Core Architecture
+
+The system is built around these key components:
+
+| Component | Purpose |
+|-----------|---------|
+| [Envelope](/docs/internals/envelope) | Universal data container for audio, text, embeddings |
+| [Orchestrator](/docs/internals/orchestrator) | Routes requests to appropriate execution targets |
+| [Pipeline](/docs/internals/pipeline) | Chains multiple stages (ASR → LLM → TTS) |
+| [Executor](/docs/internals/executor) | Runs models via ONNX or Candle runtime |
+| [StreamSession](/docs/internals/stream-session) | Real-time streaming inference |
+
+## Data Flow
+
+1. **Input** arrives as an `Envelope` (audio bytes, text, or embeddings)
+2. **Orchestrator** determines execution target (device, cloud, or fallback)
+3. **Executor** runs the model and produces output
+4. **Output** is wrapped in a new `Envelope` for the next stage
+
+See [Data Flow & Execution](/docs/internals/data-flow-and-execution) for details.
+
+## Infrastructure
+
+| Component | Purpose |
+|-----------|---------|
+| [Registry](/docs/internals/registry) | Bundle distribution server |
+| [Bundles](/docs/internals/bundles) | Packaged models (`.xyb` format) |
+| [Pipeline DSL](/docs/internals/pipelines) | YAML pipeline definitions |
+| [Streaming](/docs/internals/streaming) | Real-time inference |

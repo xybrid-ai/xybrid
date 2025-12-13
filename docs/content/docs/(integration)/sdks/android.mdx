@@ -1,0 +1,69 @@
+---
+title: Android
+description: Native Android SDK for on-device ML inference
+---
+
+The Android SDK provides native Kotlin/Java bindings to the Xybrid runtime for Android applications.
+
+<Callout type="info">
+**Coming Soon** - The Android SDK is currently in development. In the meantime, you can use the [Flutter SDK](/docs/integrations/sdks/flutter) for cross-platform Android development.
+</Callout>
+
+## Planned Features
+
+- Native Kotlin API with Java interop
+- Jetpack Compose integration
+- NNAPI acceleration
+- Vulkan GPU support
+- Qualcomm QNN support (Hexagon DSP)
+
+## Expected API
+
+Based on the Flutter SDK patterns, the Android SDK will follow a similar structure:
+
+```kotlin
+import ai.xybrid.sdk.*
+
+// Initialize
+Xybrid.initialize(context)
+
+// Load model from registry
+val model = Xybrid.model(
+    modelId = "whisper-tiny-candle",
+    version = "1.0",
+    registry = "https://registry.xybrid.ai"
+).load()
+
+// Run inference
+val envelope = Envelope.audio(audioBytes)
+val result = model.run(envelope)
+println("Transcription: ${result.text}")
+
+// Cleanup
+model.unload()
+```
+
+## Pipeline Example
+
+```kotlin
+val pipeline = Xybrid.pipeline(yaml = """
+name: voice-assistant
+stages:
+  - whisper-tiny-candle@1.0
+  - target: integration
+    provider: openai
+    model: gpt-4o-mini
+  - kokoro-82m@0.1
+""".trimIndent()).load()
+
+val result = pipeline.run(
+    envelope = Envelope.audio(audioBytes)
+)
+
+// Play TTS response
+val audioOutput = result.audio
+```
+
+## Stay Updated
+
+Follow the [GitHub repository](https://github.com/xybrid-ai/xybrid) for Android SDK announcements.

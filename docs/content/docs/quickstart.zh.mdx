@@ -1,0 +1,289 @@
+---
+title: 快速开始
+description: 几分钟内开始使用 Xybrid
+---
+
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+
+在 5 分钟内运行 Xybrid 并执行您的第一个流水线。
+
+<Steps>
+<Step>
+## 安装
+
+将 Xybrid SDK 添加到您的项目：
+
+<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
+  <Tab value="Flutter">
+```yaml
+# pubspec.yaml
+dependencies:
+  xybrid_flutter: ^0.1.0
+```
+```bash
+flutter pub get
+```
+  </Tab>
+  <Tab value="iOS">
+```swift
+// Package.swift
+dependencies: [
+    .package(url: "https://github.com/xybrid-ai/xybrid-swift.git", from: "0.1.0")
+]
+```
+  </Tab>
+  <Tab value="Android">
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation("ai.xybrid:xybrid-android:0.1.0")
+}
+```
+  </Tab>
+  <Tab value="Kotlin Multiplatform">
+```kotlin
+// build.gradle.kts
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("ai.xybrid:xybrid-kmp:0.1.0")
+        }
+    }
+}
+```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+CLI 安装请参见 [CLI 安装](/zh/docs/cli/installation)。
+</Callout>
+</Step>
+
+<Step>
+## 运行
+
+### 流水线
+
+流水线将多个模型串联在一起。定义 `voice-assistant.yaml`：
+
+```yaml
+name: voice-assistant
+stages:
+  # 语音识别（在设备端运行）
+  - whisper-tiny@1.0
+
+  # 语言模型（路由到云端）
+  - target: integration
+    provider: openai
+    model: gpt-4o-mini
+
+  # 文本转语音（在设备端运行）
+  - kokoro-82m@0.1
+```
+
+运行它：
+
+<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
+  <Tab value="Flutter">
+```dart
+import 'package:xybrid_flutter/xybrid_flutter.dart';
+
+await Xybrid.init();
+
+final loader = Xybrid.pipeline('assets/voice-assistant.yaml');
+final pipeline = await loader.load();
+
+final audioBytes = await recorder.readAudioBytes(recordingPath);
+final envelope = Envelope.audio(
+  audioBytes: audioBytes,
+  sampleRate: 16000,
+  channels: 1,
+);
+
+final result = await pipeline.run(envelope: envelope);
+await audioPlayer.play(result.audio);
+```
+  </Tab>
+  <Tab value="iOS">
+```swift
+import Xybrid
+
+let xybrid = Xybrid()
+let audioData = recorder.stop()
+
+let result = try await xybrid.runPipeline(
+    pipeline: "voice-assistant",
+    input: .audio(data: audioData)
+)
+
+audioPlayer.play(result.audio)
+```
+  </Tab>
+  <Tab value="Android">
+```kotlin
+import ai.xybrid.Xybrid
+import ai.xybrid.Envelope
+
+val xybrid = Xybrid()
+val audioBytes = recorder.stop()
+
+val result = xybrid.runPipeline(
+    pipeline = "voice-assistant",
+    input = Envelope.audio(audioBytes)
+)
+
+audioPlayer.play(result.audio)
+```
+  </Tab>
+  <Tab value="Kotlin Multiplatform">
+```kotlin
+import ai.xybrid.Xybrid
+import ai.xybrid.Envelope
+
+val xybrid = Xybrid()
+val audioBytes = recorder.stop()
+
+val result = xybrid.runPipeline(
+    pipeline = "voice-assistant",
+    input = Envelope.audio(audioBytes)
+)
+
+playAudio(result.audio)
+```
+  </Tab>
+</Tabs>
+
+### 单个模型
+
+直接运行单个模型：
+
+<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
+  <Tab value="Flutter">
+```dart
+final result = await xybrid.runModel(
+  modelId: 'whisper-tiny',
+  version: '1.0',
+  input: Envelope.audio(bytes: audioBytes),
+);
+
+print(result.text); // "你好，有什么可以帮助您的？"
+```
+  </Tab>
+  <Tab value="iOS">
+```swift
+let result = try await xybrid.runModel(
+    modelId: "whisper-tiny",
+    version: "1.0",
+    input: .audio(data: audioData)
+)
+
+print(result.text) // "你好，有什么可以帮助您的？"
+```
+  </Tab>
+  <Tab value="Android">
+```kotlin
+val result = xybrid.runModel(
+    modelId = "whisper-tiny",
+    version = "1.0",
+    input = Envelope.audio(audioBytes)
+)
+
+println(result.text) // "你好，有什么可以帮助您的？"
+```
+  </Tab>
+  <Tab value="Kotlin Multiplatform">
+```kotlin
+val result = xybrid.runModel(
+    modelId = "whisper-tiny",
+    version = "1.0",
+    input = Envelope.audio(audioBytes)
+)
+
+println(result.text) // "你好，有什么可以帮助您的？"
+```
+  </Tab>
+</Tabs>
+</Step>
+
+<Step>
+## 处理结果
+
+<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
+  <Tab value="Flutter">
+```dart
+try {
+  final result = await pipeline.run(envelope: envelope);
+
+  // 访问不同的结果类型
+  if (result.hasText) {
+    print('转录: ${result.text}');
+  }
+  if (result.hasAudio) {
+    await audioPlayer.play(result.audio);
+  }
+} on XybridException catch (e) {
+  print('流水线失败: ${e.message}');
+}
+```
+  </Tab>
+  <Tab value="iOS">
+```swift
+do {
+    let result = try await xybrid.runPipeline(
+        pipeline: "voice-assistant",
+        input: .audio(data: audioData)
+    )
+
+    if let text = result.text {
+        print("转录: \(text)")
+    }
+    if let audio = result.audio {
+        audioPlayer.play(audio)
+    }
+} catch let error as XybridError {
+    print("流水线失败: \(error.message)")
+}
+```
+  </Tab>
+  <Tab value="Android">
+```kotlin
+try {
+    val result = xybrid.runPipeline(
+        pipeline = "voice-assistant",
+        input = Envelope.audio(audioBytes)
+    )
+
+    result.text?.let { println("转录: $it") }
+    result.audio?.let { audioPlayer.play(it) }
+} catch (e: XybridException) {
+    println("流水线失败: ${e.message}")
+}
+```
+  </Tab>
+  <Tab value="Kotlin Multiplatform">
+```kotlin
+try {
+    val result = xybrid.runPipeline(
+        pipeline = "voice-assistant",
+        input = Envelope.audio(audioBytes)
+    )
+
+    result.text?.let { println("转录: $it") }
+    result.audio?.let { playAudio(it) }
+} catch (e: XybridException) {
+    println("流水线失败: ${e.message}")
+}
+```
+  </Tab>
+</Tabs>
+</Step>
+</Steps>
+
+## 下一步
+
+<Cards>
+  <Card title="流水线" href="/zh/docs/internals/pipelines" description="学习流水线 DSL" />
+  <Card title="SDK" href="/zh/docs/integrations/sdks" description="平台 SDK 指南" />
+  <Card title="CLI 参考" href="/zh/docs/cli/reference" description="所有 CLI 命令" />
+  <Card title="内部原理" href="/zh/docs/internals" description="Xybrid 的工作原理" />
+</Cards>

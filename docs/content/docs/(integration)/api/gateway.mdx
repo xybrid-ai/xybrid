@@ -1,0 +1,449 @@
+---
+title: Gateway API
+description: OpenAI-compatible LLM routing API
+---
+
+The Xybrid Gateway provides an OpenAI-compatible REST API that routes requests to multiple LLM providers (OpenAI, Anthropic, Groq).
+
+## Base URL
+
+```
+http://localhost:3000  (local development)
+https://gateway.xybrid.ai  (production)
+```
+
+## Authentication
+
+All requests require a Bearer token in the `Authorization` header:
+
+```http
+Authorization: Bearer your-api-key
+```
+
+---
+
+## Endpoints
+
+### Health Check
+
+Check gateway status.
+
+```http
+GET /health
+```
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "service": "xybrid-gateway"
+}
+```
+
+---
+
+### List Models
+
+Get available models from all providers.
+
+```http
+GET /v1/models
+Authorization: Bearer your-api-key
+```
+
+**Response:**
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "id": "gpt-4o", "object": "model", "created": 1734134400, "owned_by": "openai" },
+    { "id": "gpt-4o-mini", "object": "model", "created": 1734134400, "owned_by": "openai" },
+    { "id": "claude-3-5-sonnet", "object": "model", "created": 1734134400, "owned_by": "anthropic" },
+    { "id": "llama-3.1-70b-versatile", "object": "model", "created": 1734134400, "owned_by": "groq" }
+  ]
+}
+```
+
+---
+
+### Chat Completions
+
+Generate chat completions (OpenAI-compatible format).
+
+```http
+POST /v1/chat/completions
+Content-Type: application/json
+Authorization: Bearer your-api-key
+```
+
+**Request Body:**
+
+```json
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    { "role": "system", "content": "You are a helpful assistant." },
+    { "role": "user", "content": "Hello, how are you?" }
+  ],
+  "max_tokens": 150,
+  "temperature": 0.7
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1734134400,
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello! I'm doing well, thank you for asking. How can I help you today?"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 20,
+    "completion_tokens": 15,
+    "total_tokens": 35
+  }
+}
+```
+
+#### Request Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `model` | string | Yes | Model identifier |
+| `messages` | array | Yes | Conversation messages |
+| `max_tokens` | integer | No | Maximum tokens to generate |
+| `temperature` | float | No | Sampling temperature (0-2) |
+| `top_p` | float | No | Nucleus sampling parameter |
+| `stream` | boolean | No | Enable streaming responses |
+
+#### Message Format
+
+```json
+{
+  "role": "user|assistant|system",
+  "content": "Message text"
+}
+```
+
+---
+
+### Streaming ASR (WebSocket)
+
+Real-time speech-to-text via WebSocket.
+
+```
+WS /v1/audio/transcriptions/stream
+```
+
+#### Audio Format
+
+- **Format:** PCM 16-bit signed little-endian
+- **Sample Rate:** 16kHz
+- **Channels:** Mono
+
+#### Client Messages
+
+**Config:**
+```json
+{
+  "type": "config",
+  "model": "whisper-tiny",
+  "language": "en",
+  "vad": true,
+  "model_dir": "/path/to/model"
+}
+```
+
+**Flush:** Request final transcription
+```json
+{ "type": "flush" }
+```
+
+**Reset:** Clear buffer, start new utterance
+```json
+{ "type": "reset" }
+```
+
+**Close:** End session
+```json
+{ "type": "close" }
+```
+
+#### Server Messages
+
+**Ready:**
+```json
+{
+  "type": "ready",
+  "session_id": "stream_1734134400000",
+  "model": "whisper-tiny-candle",
+  "sample_rate": 16000
+}
+```
+
+**Partial:**
+```json
+{
+  "type": "partial",
+  "text": "hello wo",
+  "is_stable": false,
+  "chunk_index": 3
+}
+```
+
+**Final:**
+```json
+{
+  "type": "final",
+  "text": "hello world",
+  "duration_ms": 2340,
+  "chunks_processed": 5
+}
+```
+
+**Error:**
+```json
+{
+  "type": "error",
+  "message": "Failed to load model",
+  "code": "asr_error"
+}
+```
+
+**Closed:**
+```json
+{
+  "type": "closed",
+  "reason": "Client requested close"
+}
+```
+
+#### JavaScript Example
+
+```javascript
+const ws = new WebSocket('ws://localhost:3000/v1/audio/transcriptions/stream');
+
+ws.onopen = () => {
+  // Configure session
+  ws.send(JSON.stringify({
+    type: 'config',
+    model_dir: '/path/to/whisper-model',
+    language: 'en',
+    vad: true
+  }));
+};
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+
+  switch (msg.type) {
+    case 'ready':
+      console.log(`Session ${msg.session_id} ready with ${msg.model}`);
+      break;
+    case 'partial':
+      console.log(`Partial: ${msg.text}`);
+      break;
+    case 'final':
+      console.log(`Final: ${msg.text} (${msg.duration_ms}ms)`);
+      break;
+    case 'error':
+      console.error(`Error: ${msg.message}`);
+      break;
+  }
+};
+
+// Stream audio from microphone
+navigator.mediaDevices.getUserMedia({ audio: true })
+  .then(stream => {
+    const audioContext = new AudioContext({ sampleRate: 16000 });
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+    processor.onaudioprocess = (e) => {
+      const samples = e.inputBuffer.getChannelData(0);
+      // Convert to 16-bit PCM
+      const pcm = new Int16Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        pcm[i] = Math.max(-32768, Math.min(32767, samples[i] * 32768));
+      }
+      ws.send(pcm.buffer);
+    };
+
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+  });
+
+// Get final transcription
+function flush() {
+  ws.send(JSON.stringify({ type: 'flush' }));
+}
+```
+
+---
+
+## Supported Models
+
+### OpenAI
+
+| Model | Context | Use Case |
+|-------|---------|----------|
+| `gpt-4o` | 128k | Most capable |
+| `gpt-4o-mini` | 128k | Fast, cost-effective |
+| `gpt-4-turbo` | 128k | Previous generation |
+
+### Anthropic
+
+| Model | Context | Use Case |
+|-------|---------|----------|
+| `claude-3-5-sonnet` | 200k | Most capable |
+| `claude-3-opus` | 200k | Advanced reasoning |
+| `claude-3-haiku` | 200k | Fast, efficient |
+
+### Groq (Fast Inference)
+
+| Model | Context | Use Case |
+|-------|---------|----------|
+| `llama-3.1-70b-versatile` | 32k | High quality |
+| `llama-3.1-8b-instant` | 32k | Ultra-fast |
+| `mixtral-8x7b-32768` | 32k | MoE model |
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PORT` | Server port (default: 3000) |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `GROQ_API_KEY` | Groq API key |
+
+### Running the Gateway
+
+```bash
+# Set provider keys
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export GROQ_API_KEY="gsk_..."
+
+# Run via cargo
+cargo run -p xybrid-gateway
+
+# Or via just
+just gateway
+```
+
+---
+
+## Error Responses
+
+All errors return JSON with this format:
+
+```json
+{
+  "error": {
+    "message": "Error description",
+    "type": "error_type",
+    "code": "error_code"
+  }
+}
+```
+
+### Error Codes
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `authentication_error` | 401 | Invalid or missing API key |
+| `model_not_found` | 404 | Requested model not available |
+| `provider_error` | 502 | Upstream provider error |
+| `rate_limit_exceeded` | 429 | Too many requests |
+| `invalid_request` | 400 | Malformed request |
+
+---
+
+## cURL Examples
+
+### Chat Completion
+
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test-key" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [
+      {"role": "user", "content": "What is the capital of France?"}
+    ],
+    "max_tokens": 100
+  }'
+```
+
+### Using Anthropic
+
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test-key" \
+  -d '{
+    "model": "claude-3-5-sonnet",
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "Explain quantum computing briefly."}
+    ],
+    "max_tokens": 200
+  }'
+```
+
+### Using Groq (Fast)
+
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test-key" \
+  -d '{
+    "model": "llama-3.1-8b-instant",
+    "messages": [
+      {"role": "user", "content": "Hello!"}
+    ],
+    "max_tokens": 50
+  }'
+```
+
+---
+
+## Integration with Pipelines
+
+The Gateway integrates with Xybrid pipelines via the `integration` target:
+
+```yaml
+name: voice-assistant
+stages:
+  - whisper-tiny@1.0
+
+  - target: integration
+    provider: openai
+    model: gpt-4o-mini
+    options:
+      system_prompt: "You are a helpful voice assistant."
+      max_tokens: 150
+
+  - kokoro-82m@0.1
+```
+
+When a pipeline stage has `target: integration`, the Orchestrator routes the request through the Gateway (or directly to the provider if API keys are configured).
