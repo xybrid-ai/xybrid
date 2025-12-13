@@ -1,0 +1,289 @@
+---
+title: Quick Start
+description: Get up and running with Xybrid in minutes
+---
+
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+
+Get Xybrid running and execute your first pipeline in under 5 minutes.
+
+<Steps>
+<Step>
+## Installation
+
+Add the Xybrid SDK to your project:
+
+<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
+  <Tab value="Flutter">
+```yaml
+# pubspec.yaml
+dependencies:
+  xybrid_flutter: ^0.1.0
+```
+```bash
+flutter pub get
+```
+  </Tab>
+  <Tab value="iOS">
+```swift
+// Package.swift
+dependencies: [
+    .package(url: "https://github.com/xybrid-ai/xybrid-swift.git", from: "0.1.0")
+]
+```
+  </Tab>
+  <Tab value="Android">
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation("ai.xybrid:xybrid-android:0.1.0")
+}
+```
+  </Tab>
+  <Tab value="Kotlin Multiplatform">
+```kotlin
+// build.gradle.kts
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("ai.xybrid:xybrid-kmp:0.1.0")
+        }
+    }
+}
+```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+For CLI installation, see [CLI Installation](/docs/cli/installation).
+</Callout>
+</Step>
+
+<Step>
+## Run
+
+### Pipeline
+
+Pipelines chain multiple models together. Define a `voice-assistant.yaml`:
+
+```yaml
+name: voice-assistant
+stages:
+  # Speech recognition (runs on device)
+  - whisper-tiny@1.0
+
+  # Language model (routes to cloud)
+  - target: integration
+    provider: openai
+    model: gpt-4o-mini
+
+  # Text-to-speech (runs on device)
+  - kokoro-82m@0.1
+```
+
+Run it:
+
+<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
+  <Tab value="Flutter">
+```dart
+import 'package:xybrid_flutter/xybrid_flutter.dart';
+
+await Xybrid.init();
+
+final loader = Xybrid.pipeline('assets/voice-assistant.yaml');
+final pipeline = await loader.load();
+
+final audioBytes = await recorder.readAudioBytes(recordingPath);
+final envelope = Envelope.audio(
+  audioBytes: audioBytes,
+  sampleRate: 16000,
+  channels: 1,
+);
+
+final result = await pipeline.run(envelope: envelope);
+await audioPlayer.play(result.audio);
+```
+  </Tab>
+  <Tab value="iOS">
+```swift
+import Xybrid
+
+let xybrid = Xybrid()
+let audioData = recorder.stop()
+
+let result = try await xybrid.runPipeline(
+    pipeline: "voice-assistant",
+    input: .audio(data: audioData)
+)
+
+audioPlayer.play(result.audio)
+```
+  </Tab>
+  <Tab value="Android">
+```kotlin
+import ai.xybrid.Xybrid
+import ai.xybrid.Envelope
+
+val xybrid = Xybrid()
+val audioBytes = recorder.stop()
+
+val result = xybrid.runPipeline(
+    pipeline = "voice-assistant",
+    input = Envelope.audio(audioBytes)
+)
+
+audioPlayer.play(result.audio)
+```
+  </Tab>
+  <Tab value="Kotlin Multiplatform">
+```kotlin
+import ai.xybrid.Xybrid
+import ai.xybrid.Envelope
+
+val xybrid = Xybrid()
+val audioBytes = recorder.stop()
+
+val result = xybrid.runPipeline(
+    pipeline = "voice-assistant",
+    input = Envelope.audio(audioBytes)
+)
+
+playAudio(result.audio)
+```
+  </Tab>
+</Tabs>
+
+### Single Model
+
+Run a single model directly:
+
+<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
+  <Tab value="Flutter">
+```dart
+final result = await xybrid.runModel(
+  modelId: 'whisper-tiny',
+  version: '1.0',
+  input: Envelope.audio(bytes: audioBytes),
+);
+
+print(result.text); // "Hello, how can I help you?"
+```
+  </Tab>
+  <Tab value="iOS">
+```swift
+let result = try await xybrid.runModel(
+    modelId: "whisper-tiny",
+    version: "1.0",
+    input: .audio(data: audioData)
+)
+
+print(result.text) // "Hello, how can I help you?"
+```
+  </Tab>
+  <Tab value="Android">
+```kotlin
+val result = xybrid.runModel(
+    modelId = "whisper-tiny",
+    version = "1.0",
+    input = Envelope.audio(audioBytes)
+)
+
+println(result.text) // "Hello, how can I help you?"
+```
+  </Tab>
+  <Tab value="Kotlin Multiplatform">
+```kotlin
+val result = xybrid.runModel(
+    modelId = "whisper-tiny",
+    version = "1.0",
+    input = Envelope.audio(audioBytes)
+)
+
+println(result.text) // "Hello, how can I help you?"
+```
+  </Tab>
+</Tabs>
+</Step>
+
+<Step>
+## Handle Results
+
+<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
+  <Tab value="Flutter">
+```dart
+try {
+  final result = await pipeline.run(envelope: envelope);
+
+  // Access different result types
+  if (result.hasText) {
+    print('Transcription: ${result.text}');
+  }
+  if (result.hasAudio) {
+    await audioPlayer.play(result.audio);
+  }
+} on XybridException catch (e) {
+  print('Pipeline failed: ${e.message}');
+}
+```
+  </Tab>
+  <Tab value="iOS">
+```swift
+do {
+    let result = try await xybrid.runPipeline(
+        pipeline: "voice-assistant",
+        input: .audio(data: audioData)
+    )
+
+    if let text = result.text {
+        print("Transcription: \(text)")
+    }
+    if let audio = result.audio {
+        audioPlayer.play(audio)
+    }
+} catch let error as XybridError {
+    print("Pipeline failed: \(error.message)")
+}
+```
+  </Tab>
+  <Tab value="Android">
+```kotlin
+try {
+    val result = xybrid.runPipeline(
+        pipeline = "voice-assistant",
+        input = Envelope.audio(audioBytes)
+    )
+
+    result.text?.let { println("Transcription: $it") }
+    result.audio?.let { audioPlayer.play(it) }
+} catch (e: XybridException) {
+    println("Pipeline failed: ${e.message}")
+}
+```
+  </Tab>
+  <Tab value="Kotlin Multiplatform">
+```kotlin
+try {
+    val result = xybrid.runPipeline(
+        pipeline = "voice-assistant",
+        input = Envelope.audio(audioBytes)
+    )
+
+    result.text?.let { println("Transcription: $it") }
+    result.audio?.let { playAudio(it) }
+} catch (e: XybridException) {
+    println("Pipeline failed: ${e.message}")
+}
+```
+  </Tab>
+</Tabs>
+</Step>
+</Steps>
+
+## Next Steps
+
+<Cards>
+  <Card title="Pipelines" href="/docs/internals/pipelines" description="Learn the Pipeline DSL" />
+  <Card title="SDKs" href="/docs/integrations/sdks" description="Platform SDK guides" />
+  <Card title="CLI Reference" href="/docs/cli/reference" description="All CLI commands" />
+  <Card title="Internals" href="/docs/internals" description="How Xybrid works" />
+</Cards>

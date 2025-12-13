@@ -1,0 +1,148 @@
+---
+title: xybrid trace
+description: Inspect telemetry from previous runs
+---
+
+Inspect telemetry logs and traces from previous pipeline runs.
+
+## Usage
+
+```bash
+xybrid trace --session <id>
+xybrid trace --latest
+xybrid trace --latest --export <path>
+```
+
+## Options
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--session` | `-s` | Explicit session identifier |
+| `--latest` | | Load the most recent session |
+| `--export` | | Write JSON summary to file |
+| `--output` | | Output format: `pretty` or `json` |
+
+## Behavior
+
+1. Reads structured JSON traces from `~/.xybrid/traces/<session>.log`
+2. Parses stage latency, routing decisions, and policy outcomes
+3. Displays colorized summary table
+
+## Examples
+
+### View latest trace
+
+```bash
+xybrid trace --latest
+```
+
+### View specific session
+
+```bash
+xybrid trace --session abc123
+```
+
+### Export to JSON
+
+```bash
+xybrid trace --latest --export trace.json
+```
+
+### Pretty output
+
+```bash
+xybrid trace --latest --output pretty
+```
+
+## Sample Output
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Session: abc123                                             │
+│ Pipeline: voice-assistant                                   │
+│ Started: 2024-12-12T10:30:00Z                               │
+├─────────────────────────────────────────────────────────────┤
+│ Stage              │ Target      │ Latency │ Status         │
+├────────────────────┼─────────────┼─────────┼────────────────┤
+│ whisper-tiny@1.2   │ local       │ 52ms    │ ✓ success      │
+│ gpt-4o-mini        │ integration │ 340ms   │ ✓ success      │
+│ kokoro-82m@0.1     │ local       │ 89ms    │ ✓ success      │
+├─────────────────────────────────────────────────────────────┤
+│ Total: 481ms                                                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Trace Data
+
+Each trace captures:
+
+| Field | Description |
+|-------|-------------|
+| `session_id` | Unique identifier |
+| `pipeline_name` | Pipeline that was executed |
+| `started_at` | Execution start time |
+| `stages` | Array of stage results |
+| `total_latency_ms` | End-to-end duration |
+
+### Stage Data
+
+| Field | Description |
+|-------|-------------|
+| `name` | Stage identifier |
+| `target` | Where it ran (local, integration) |
+| `latency_ms` | Execution time |
+| `status` | Success or error |
+| `routing_reason` | Why this target was chosen |
+| `policy_result` | Policy evaluation outcome |
+
+## Trace Storage
+
+Traces are stored at:
+
+```
+~/.xybrid/traces/
+├── abc123.log
+├── def456.log
+└── ...
+```
+
+Each file contains newline-delimited JSON events.
+
+## Export Format
+
+Exported JSON includes full trace data:
+
+```json
+{
+  "session_id": "abc123",
+  "pipeline_name": "voice-assistant",
+  "started_at": "2024-12-12T10:30:00Z",
+  "stages": [
+    {
+      "name": "whisper-tiny@1.2",
+      "target": "local",
+      "latency_ms": 52,
+      "status": "success",
+      "routing_reason": "model_available_locally"
+    }
+  ],
+  "total_latency_ms": 481
+}
+```
+
+## Workflow
+
+Debug pipeline performance:
+
+```bash
+# Run pipeline
+xybrid run --pipeline voice-assistant
+
+# Check what happened
+xybrid trace --latest
+
+# Export for analysis
+xybrid trace --latest --export debug.json
+```
+
+See [Observability](/docs/internals/observability) for telemetry configuration.

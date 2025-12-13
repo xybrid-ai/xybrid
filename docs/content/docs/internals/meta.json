@@ -1,0 +1,27 @@
+{
+  "title": "Internals",
+  "description": "How Xybrid works under the hood",
+  "icon": "Cog",
+  "root": true,
+  "pages": [
+    "index",
+    "---Data Flow---",
+    "data-flow-and-execution",
+    "---Core Components---",
+    "envelope",
+    "orchestrator",
+    "pipeline",
+    "executor",
+    "stream-session",
+    "---Pipeline DSL---",
+    "pipelines",
+    "---Real-Time---",
+    "streaming",
+    "---Infrastructure---",
+    "registry",
+    "bundles",
+    "---Operations---",
+    "packaging-and-deployment",
+    "observability"
+  ]
+}

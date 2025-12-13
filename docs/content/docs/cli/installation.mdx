@@ -1,0 +1,57 @@
+---
+title: Installation
+description: Install the Xybrid CLI
+---
+
+Install the Xybrid CLI to run pipelines, package models, and manage bundles.
+
+## Prerequisites
+
+- **Rust** 1.75+ with `cargo`
+- **macOS** (Apple Silicon or Intel) or **Linux**
+
+## From Source
+
+### Clone and Build
+
+```bash
+git clone https://github.com/xybrid-ai/xybrid.git
+cd xybrid
+cargo build -p xybrid-cli --release
+```
+
+The binary is at `target/release/xybrid`.
+
+### Add to PATH
+
+```bash
+# Add to current session
+export PATH="$PATH:$(pwd)/target/release"
+
+# Or add to shell config
+echo 'export PATH="$PATH:/path/to/xybrid/target/release"' >> ~/.zshrc
+```
+
+## Verify Installation
+
+```bash
+xybrid --version
+xybrid --help
+```
+
+## Platform Support
+
+| Platform | Architecture | Status |
+|----------|--------------|--------|
+| macOS | Apple Silicon (arm64) | Supported |
+| macOS | Intel (x86_64) | Supported |
+| Linux | x86_64 | Supported |
+| Windows | x86_64 | Coming Soon |
+
+## Next Steps
+
+<Cards>
+  <Card title="Configuration" href="/docs/cli/configuration" description="Configure the CLI" />
+  <Card title="Command Reference" href="/docs/cli/reference" description="All CLI commands" />
+  <Card title="Quick Start" href="/docs/quickstart" description="Run your first pipeline" />
+</Cards>

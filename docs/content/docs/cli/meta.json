@@ -1,13 +1,7 @@
 {
-  "title": "CLI",
-  "root": true,
-  "description": "Command-line interface for Xybrid",
-  "icon": "Terminal",
   "pages": [
-    "index",
-    "run",
-    "pack",
-    "deploy",
-    "trace"
+    "installation",
+    "configuration",
+    "reference"
   ]
 }

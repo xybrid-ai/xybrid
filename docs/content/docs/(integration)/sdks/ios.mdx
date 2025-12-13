@@ -1,0 +1,69 @@
+---
+title: iOS
+description: Native iOS SDK for on-device ML inference
+---
+
+The iOS SDK provides native Swift bindings to the Xybrid runtime for iOS and macOS applications.
+
+<Callout type="info">
+**Coming Soon** - The iOS SDK is currently in development. In the meantime, you can use the [Flutter SDK](/docs/integrations/sdks/flutter) for cross-platform iOS development.
+</Callout>
+
+## Planned Features
+
+- Native Swift API
+- SwiftUI integration
+- CoreML acceleration
+- Metal GPU support
+- Neural Engine (ANE) optimization
+
+## Expected API
+
+Based on the Flutter SDK patterns, the iOS SDK will follow a similar structure:
+
+```swift
+import Xybrid
+
+// Initialize
+try await Xybrid.initialize()
+
+// Load model from registry
+let model = try await Xybrid.model(
+    modelId: "whisper-tiny-candle",
+    version: "1.0",
+    registry: "https://registry.xybrid.ai"
+).load()
+
+// Run inference
+let envelope = Envelope.audio(data: audioData)
+let result = try await model.run(envelope: envelope)
+print("Transcription: \(result.text)")
+
+// Cleanup
+model.unload()
+```
+
+## Pipeline Example
+
+```swift
+let pipeline = try await Xybrid.pipeline(yaml: """
+name: voice-assistant
+stages:
+  - whisper-tiny-candle@1.0
+  - target: integration
+    provider: openai
+    model: gpt-4o-mini
+  - kokoro-82m@0.1
+""").load()
+
+let result = try await pipeline.run(
+    envelope: .audio(data: audioData)
+)
+
+// Play TTS response
+let audioOutput = result.audio
+```
+
+## Stay Updated
+
+Follow the [GitHub repository](https://github.com/xybrid-ai/xybrid) for iOS SDK announcements.

@@ -1,0 +1,85 @@
+---
+title: Kotlin Multiplatform
+description: Kotlin Multiplatform SDK for iOS and Android
+---
+
+The Kotlin Multiplatform SDK enables sharing Xybrid integration code between iOS and Android applications.
+
+<Callout type="info">
+**Coming Soon** - The Kotlin Multiplatform SDK is currently in development. In the meantime, you can use the [Flutter SDK](/docs/integrations/sdks/flutter) for cross-platform development.
+</Callout>
+
+## Planned Features
+
+- Shared business logic for iOS and Android
+- Native platform optimizations
+- Coroutines-based async API
+- Platform-specific accelerators (CoreML, NNAPI)
+
+## Expected API
+
+Based on the Flutter SDK patterns, the KMP SDK will follow a similar structure:
+
+```kotlin
+// Shared code (commonMain)
+import ai.xybrid.sdk.*
+
+class VoiceAssistant {
+    private val xybrid = Xybrid()
+    private var pipeline: XybridPipeline? = null
+
+    suspend fun initialize() {
+        pipeline = xybrid.pipeline(yaml = """
+            name: voice-assistant
+            stages:
+              - whisper-tiny-candle@1.0
+              - target: integration
+                provider: openai
+                model: gpt-4o-mini
+              - kokoro-82m@0.1
+        """.trimIndent()).load()
+    }
+
+    suspend fun process(audioBytes: ByteArray): ByteArray {
+        val envelope = Envelope.audio(audioBytes)
+        val result = pipeline!!.run(envelope)
+        return result.audio
+    }
+
+    fun dispose() {
+        pipeline?.unload()
+    }
+}
+```
+
+## Platform Usage
+
+### Android
+
+```kotlin
+// androidMain
+class MainActivity : ComponentActivity() {
+    private val assistant = VoiceAssistant()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        lifecycleScope.launch {
+            assistant.initialize()
+        }
+    }
+}
+```
+
+### iOS
+
+```swift
+// iosMain via Kotlin/Native
+let assistant = VoiceAssistant()
+Task {
+    try await assistant.initialize()
+}
+```
+
+## Stay Updated
+
+Follow the [GitHub repository](https://github.com/xybrid-ai/xybrid) for Kotlin Multiplatform SDK announcements.

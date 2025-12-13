@@ -1,3 +1,13 @@
 {
-  "pages": ["overview", "guides", "cli"]
+  "pages": [
+    "---[Book]Introduction---",
+    "introduction",
+    "quickstart", 
+    "---[Puzzle]Integration---",
+    "...(integration)",
+    "---[Terminal]CLI---",
+    "...cli",
+    "---[Cog]Internals---",
+    "internals"
+  ]
 }

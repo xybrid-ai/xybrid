@@ -1,0 +1,50 @@
+---
+title: 什么是 Xybrid
+description: 混合 AI 编排，让推理在任何地方运行
+---
+
+Xybrid 是一个**混合 AI 编排运行时**，让开发者无需重写代码即可在设备端、边缘端或云端运行推理。
+
+## 问题
+
+AI 推理正在分散到多个计算平台：
+
+- **移动端 NPU** 现在的能力可以媲美云端 GPU
+- **隐私法规** 要求本地化处理
+- **云端成本** 随规模攀升
+- **延迟要求** 将计算推向边缘
+
+然而工具链仍然是孤立的。开发者必须手动处理设备检测、模型路由、格式转换和回退逻辑。
+
+## 解决方案
+
+Xybrid 提供统一的控制平面：
+
+```yaml
+name: voice-assistant
+stages:
+  - whisper-tiny@1.0      # ASR：在设备端运行（隐私）
+  - target: integration
+    provider: openai
+    model: gpt-4o-mini    # LLM：路由到云端（能力）
+  - kokoro-82m@0.1        # TTS：在设备端运行（延迟）
+```
+
+三个模型，两个执行位置，一个流水线。Xybrid 处理路由。
+
+## 核心原则
+
+| 原则 | 描述 |
+|-----------|-------------|
+| **隐私优先** | 策略控制哪些数据可以离开设备 |
+| **自适应计算** | 路由根据延迟、RTT 和功耗预算进行调整 |
+| **实时就绪** | 流式流水线输出增量结果 |
+| **可扩展** | `.xyb` 包支持无需重写即可添加模型 |
+
+## 下一步
+
+<Cards>
+  <Card title="快速开始" href="/zh/docs/quickstart" description="几分钟内开始运行" />
+  <Card title="集成" href="/zh/docs/integrations" description="适用于您平台的 SDK 和 API" />
+  <Card title="内部原理" href="/zh/docs/internals" description="Xybrid 的工作原理" />
+</Cards>
