@@ -2,7 +2,7 @@
 
 **Hybrid cloud-edge ML inference orchestrator** - Run ML models on-device or in the cloud with intelligent routing.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ## Overview
 
@@ -63,4 +63,13 @@ See the [docs/](docs/) directory for detailed documentation.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
+
+### Open Core Model
+
+Xybrid uses an **open-core licensing model**:
+
+- **Open Source (Apache-2.0)**: Core runtime, SDK, CLI, and self-hosted registry
+- **Commercial**: Cloud services, enterprise features, and managed offerings
+
+This means you can freely use, modify, and distribute the open source components for any purpose, including commercial applications.
