@@ -3,6 +3,11 @@
 //! This binary provides a `run` subcommand that loads pipeline configuration
 //! and executes it using the xybrid-core orchestrator.
 
+#[macro_use]
+extern crate lazy_static;
+
+mod tracing_viz;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::*;
@@ -30,6 +35,18 @@ use xybrid_core::template_executor::TemplateExecutor;
 #[command(name = "xybrid")]
 #[command(about = "Xybrid CLI - Run hybrid cloud-edge AI inference pipelines", long_about = None)]
 struct Cli {
+    /// Platform API key for telemetry (can also be set via XYBRID_API_KEY env var)
+    #[arg(long, global = true, env = "XYBRID_API_KEY")]
+    api_key: Option<String>,
+
+    /// Platform API endpoint for telemetry (default: https://api.xybrid.ai)
+    #[arg(long, global = true, env = "XYBRID_PLATFORM_URL", default_value = "https://api.xybrid.ai")]
+    platform_url: String,
+
+    /// Device ID for telemetry attribution
+    #[arg(long, global = true, env = "XYBRID_DEVICE_ID")]
+    device_id: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -74,6 +91,14 @@ enum Commands {
         /// If not specified, auto-detects based on platform
         #[arg(long, value_name = "TARGET")]
         target: Option<String>,
+
+        /// Enable detailed execution tracing with flame graph output
+        #[arg(long, default_value = "false")]
+        trace: bool,
+
+        /// Export trace to JSON file (Chrome trace format)
+        #[arg(long, value_name = "FILE")]
+        trace_export: Option<PathBuf>,
     },
     /// Trace and analyze telemetry logs from a session
     Trace {
@@ -178,6 +203,51 @@ fn display_stage_name(name: &str) -> &str {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Initialize platform telemetry if API key is provided
+    let telemetry_enabled = init_telemetry(&cli);
+    if telemetry_enabled {
+        println!("📡 Telemetry enabled ({})", cli.platform_url);
+    }
+
+    // Run command and ensure telemetry is flushed on exit
+    let result = run_command(cli);
+
+    // Flush and shutdown telemetry
+    if telemetry_enabled {
+        xybrid_sdk::flush_platform_telemetry();
+        xybrid_sdk::shutdown_platform_telemetry();
+    }
+
+    result
+}
+
+/// Initialize platform telemetry from CLI args
+fn init_telemetry(cli: &Cli) -> bool {
+    if let Some(ref api_key) = cli.api_key {
+        // Detect platform
+        let platform = Platform::detect().to_string();
+
+        // Use hostname as device ID if not provided
+        let device_id = cli.device_id.clone().unwrap_or_else(|| {
+            hostname::get()
+                .ok()
+                .and_then(|h| h.into_string().ok())
+                .unwrap_or_else(|| "cli-unknown".to_string())
+        });
+
+        // Build telemetry config
+        let mut config = xybrid_sdk::TelemetryConfig::new(&cli.platform_url, api_key);
+        config = config.with_device(&device_id, &platform);
+        config = config.with_app_version(env!("CARGO_PKG_VERSION"));
+
+        xybrid_sdk::init_platform_telemetry(config);
+        true
+    } else {
+        false
+    }
+}
+
+fn run_command(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Run {
             config,
@@ -189,10 +259,17 @@ fn main() -> Result<()> {
             input_text,
             registry,
             target,
+            trace,
+            trace_export,
         } => {
+            // Reset trace collector for fresh trace
+            if trace {
+                tracing_viz::reset_collector();
+            }
+
             // Handle direct bundle execution
             if let Some(bundle_path) = bundle {
-                return run_bundle(&bundle_path, input_audio.as_ref(), input_text.as_deref(), dry_run);
+                return run_bundle(&bundle_path, input_audio.as_ref(), input_text.as_deref(), dry_run, trace, trace_export.as_ref());
             }
 
             let config_path = if let Some(path) = config {
@@ -244,7 +321,7 @@ fn main() -> Result<()> {
                     "Either --config, --pipeline, or --bundle must be specified"
                 ));
             };
-            run_pipeline(&config_path, dry_run, policy.as_ref(), input_audio.as_ref(), registry.as_deref(), target.as_deref())
+            run_pipeline(&config_path, dry_run, policy.as_ref(), input_audio.as_ref(), registry.as_deref(), target.as_deref(), trace, trace_export.as_ref())
         }
         Commands::Trace {
             session,
@@ -1380,7 +1457,15 @@ fn run_pipeline(
     input_audio: Option<&PathBuf>,
     registry_url: Option<&str>,
     target: Option<&str>,
+    trace_enabled: bool,
+    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
+    // Start pipeline trace span
+    let _pipeline_span = if trace_enabled {
+        Some(tracing_viz::SpanGuard::new("pipeline_execution"))
+    } else {
+        None
+    };
     // Load and parse configuration file
     let config_content = fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
@@ -1528,6 +1613,9 @@ fn run_pipeline(
     // Create orchestrator for actual execution
     let mut orchestrator = Orchestrator::new();
 
+    // Bridge orchestrator events to telemetry (sends events to platform if API key is configured)
+    xybrid_sdk::bridge_orchestrator_events(&orchestrator);
+
     // Configure registry if provided
     if let Some(url) = registry_url {
         println!("🌐 Configuring registry: {}", url);
@@ -1604,6 +1692,20 @@ fn run_pipeline(
             println!();
             println!("{}", "=".repeat(60));
             println!("✨ Pipeline completed successfully!");
+
+            // Output trace visualization if enabled
+            if trace_enabled {
+                println!("{}", tracing_viz::render_trace());
+
+                // Export trace if requested
+                if let Some(export_path) = trace_export {
+                    let json = tracing_viz::GLOBAL_COLLECTOR.lock().unwrap().to_chrome_trace_json();
+                    fs::write(export_path, json)
+                        .with_context(|| format!("Failed to export trace to {}", export_path.display()))?;
+                    println!("💾 Trace exported to: {}", export_path.display());
+                }
+            }
+
             Ok(())
         }
         Err(e) => {
@@ -1619,7 +1721,23 @@ fn run_bundle(
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
     dry_run: bool,
+    trace_enabled: bool,
+    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
+    // Reset and start bundle trace span
+    if trace_enabled {
+        tracing_viz::reset_collector();
+    }
+    let _bundle_span = if trace_enabled {
+        Some(tracing_viz::SpanGuard::new("bundle_execution"))
+    } else {
+        None
+    };
+
+    // Generate trace ID for this execution
+    let trace_id = uuid::Uuid::new_v4();
+    xybrid_sdk::set_telemetry_pipeline_context(None, Some(trace_id));
+
     println!("🚀 Xybrid Bundle Runner");
     println!("📦 Bundle: {}\n", bundle_path.display());
 
@@ -1675,6 +1793,24 @@ fn run_bundle(
     println!("   Postprocessing: {} steps", metadata.postprocessing.len());
     println!();
 
+    // Emit PipelineStart telemetry event
+    xybrid_sdk::publish_telemetry_event(xybrid_sdk::TelemetryEvent {
+        event_type: "PipelineStart".to_string(),
+        stage_name: Some(metadata.model_id.clone()),
+        target: Some("local".to_string()),
+        latency_ms: None,
+        error: None,
+        data: Some(serde_json::json!({
+            "model_id": metadata.model_id,
+            "version": metadata.version,
+            "bundle_path": bundle_path.display().to_string()
+        }).to_string()),
+        timestamp_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+    });
+
     if dry_run {
         println!("🔎 Dry Run: Bundle inspection only");
         println!("{}", "=".repeat(60));
@@ -1710,6 +1846,16 @@ fn run_bundle(
     })?;
 
     let mut executor = TemplateExecutor::with_base_path(base_path);
+
+    // Trace inference execution
+    let _inference_span = if trace_enabled {
+        let span = tracing_viz::SpanGuard::new(format!("inference:{}", metadata.model_id));
+        tracing_viz::add_metadata("model_id", &metadata.model_id);
+        tracing_viz::add_metadata("version", &metadata.version);
+        Some(span)
+    } else {
+        None
+    };
 
     let start_time = std::time::Instant::now();
     let output = executor.execute(&metadata, &input)
@@ -1749,6 +1895,42 @@ fn run_bundle(
     println!();
     println!("{}", "=".repeat(60));
     println!("✨ Inference completed successfully!");
+
+    // Emit PipelineComplete telemetry event
+    xybrid_sdk::publish_telemetry_event(xybrid_sdk::TelemetryEvent {
+        event_type: "PipelineComplete".to_string(),
+        stage_name: Some(metadata.model_id.clone()),
+        target: Some("local".to_string()),
+        latency_ms: Some(elapsed.as_millis() as u32),
+        error: None,
+        data: Some(serde_json::json!({
+            "model_id": metadata.model_id,
+            "version": metadata.version,
+            "output_type": output.kind_str()
+        }).to_string()),
+        timestamp_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+    });
+
+    // End spans and output trace visualization if enabled
+    if trace_enabled {
+        // Explicitly end the inference span
+        drop(_inference_span);
+        // Explicitly end the bundle span
+        drop(_bundle_span);
+
+        println!("{}", tracing_viz::render_trace());
+
+        // Export trace if requested
+        if let Some(export_path) = trace_export {
+            let json = tracing_viz::GLOBAL_COLLECTOR.lock().unwrap().to_chrome_trace_json();
+            fs::write(export_path, json)
+                .with_context(|| format!("Failed to export trace to {}", export_path.display()))?;
+            println!("💾 Trace exported to: {}", export_path.display());
+        }
+    }
 
     Ok(())
 }

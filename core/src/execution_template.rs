@@ -391,6 +391,22 @@ pub enum PreprocessingStep {
     },
 }
 
+impl PreprocessingStep {
+    /// Get the name of this preprocessing step for tracing
+    pub fn step_name(&self) -> &'static str {
+        match self {
+            PreprocessingStep::MelSpectrogram { .. } => "MelSpectrogram",
+            PreprocessingStep::Tokenize { .. } => "Tokenize",
+            PreprocessingStep::Normalize { .. } => "Normalize",
+            PreprocessingStep::Resize { .. } => "Resize",
+            PreprocessingStep::CenterCrop { .. } => "CenterCrop",
+            PreprocessingStep::AudioDecode { .. } => "AudioDecode",
+            PreprocessingStep::Reshape { .. } => "Reshape",
+            PreprocessingStep::Phonemize { .. } => "Phonemize",
+        }
+    }
+}
+
 /// Phonemizer backend for text-to-phoneme conversion
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum PhonemizerBackend {
@@ -608,6 +624,25 @@ pub enum PostprocessingStep {
         /// Path to tokenizer.json file (HuggingFace format)
         tokenizer_file: String,
     },
+}
+
+impl PostprocessingStep {
+    /// Get the name of this postprocessing step for tracing
+    pub fn step_name(&self) -> &'static str {
+        match self {
+            PostprocessingStep::BPEDecode { .. } => "BPEDecode",
+            PostprocessingStep::Argmax { .. } => "Argmax",
+            PostprocessingStep::Softmax { .. } => "Softmax",
+            PostprocessingStep::TopK { .. } => "TopK",
+            PostprocessingStep::Threshold { .. } => "Threshold",
+            PostprocessingStep::TemperatureSample { .. } => "TemperatureSample",
+            PostprocessingStep::Denormalize { .. } => "Denormalize",
+            PostprocessingStep::MeanPool { .. } => "MeanPool",
+            PostprocessingStep::CTCDecode { .. } => "CTCDecode",
+            PostprocessingStep::TTSAudioEncode { .. } => "TTSAudioEncode",
+            PostprocessingStep::WhisperDecode { .. } => "WhisperDecode",
+        }
+    }
 }
 
 fn default_pool_dim() -> usize {

@@ -14,6 +14,7 @@ use crate::execution_template::{
     PostprocessingStep, PreprocessingStep,
 };
 use crate::ir::{Envelope, EnvelopeKind};
+use crate::tracing as trace;
 // Unified mel spectrogram API
 use crate::audio::mel::{compute_mel_spectrogram, MelConfig, MelScale, PaddingMode};
 // Legacy imports for audio bytes handling
@@ -142,12 +143,20 @@ impl TemplateExecutor {
         metadata: &ModelMetadata,
         input: &Envelope,
     ) -> ExecutorResult<Envelope> {
+        // Start execution span
+        let _exec_span = trace::SpanGuard::new(format!("execute:{}", metadata.model_id));
+        trace::add_metadata("model_id", &metadata.model_id);
+        trace::add_metadata("version", &metadata.version);
+
         // Step 1: Run preprocessing pipeline
         let preprocessed = self.run_preprocessing(metadata, input)?;
 
         // Step 2: Execute based on template type
         let raw_outputs = match &metadata.execution_template {
             ExecutionTemplate::SimpleMode { model_file } => {
+                let _span = trace::SpanGuard::new("onnx_inference");
+                trace::add_metadata("model_file", model_file);
+                trace::add_metadata("mode", "simple");
                 self.execute_simple_mode(model_file, preprocessed, metadata)?
             }
             ExecutionTemplate::CandleModel {
@@ -158,6 +167,12 @@ impl TemplateExecutor {
             } => {
                 #[cfg(feature = "candle")]
                 {
+                    let _span = trace::SpanGuard::new("candle_inference");
+                    trace::add_metadata("model_file", model_file);
+                    trace::add_metadata("mode", "candle");
+                    if let Some(mt) = model_type {
+                        trace::add_metadata("model_type", mt);
+                    }
                     self.execute_candle_model(
                         model_file,
                         config_file.as_deref(),
@@ -175,6 +190,8 @@ impl TemplateExecutor {
                 }
             }
             ExecutionTemplate::Pipeline { stages, config } => {
+                let _span = trace::SpanGuard::new("pipeline_inference");
+                trace::add_metadata("stages", &stages.len().to_string());
                 self.execute_pipeline(stages, config, preprocessed, metadata)?
             }
         };
@@ -191,9 +208,20 @@ impl TemplateExecutor {
         metadata: &ModelMetadata,
         input: &Envelope,
     ) -> ExecutorResult<PreprocessedData> {
+        if metadata.preprocessing.is_empty() {
+            return PreprocessedData::from_envelope(input);
+        }
+
+        let _preprocess_span = trace::SpanGuard::new("preprocessing");
+        trace::add_metadata("steps", &metadata.preprocessing.len().to_string());
+
         let mut data = PreprocessedData::from_envelope(input)?;
 
         for step in &metadata.preprocessing {
+            // Create span for each preprocessing step
+            let step_name = format!("preprocessing:{}", step.step_name());
+            let _step_span = trace::SpanGuard::new(&step_name);
+
             data = self.apply_preprocessing_step(step, data, metadata, input)?;
         }
 
@@ -1354,9 +1382,20 @@ impl TemplateExecutor {
         metadata: &ModelMetadata,
         outputs: RawOutputs,
     ) -> ExecutorResult<Envelope> {
+        if metadata.postprocessing.is_empty() {
+            return outputs.to_envelope();
+        }
+
+        let _postprocess_span = trace::SpanGuard::new("postprocessing");
+        trace::add_metadata("steps", &metadata.postprocessing.len().to_string());
+
         let mut data = outputs;
 
         for step in &metadata.postprocessing {
+            // Create span for each postprocessing step
+            let step_name = format!("postprocessing:{}", step.step_name());
+            let _step_span = trace::SpanGuard::new(&step_name);
+
             data = self.apply_postprocessing_step(step, data, metadata)?;
         }
 
