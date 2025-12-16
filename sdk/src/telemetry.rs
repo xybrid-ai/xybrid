@@ -3,6 +3,12 @@
 //! This module bridges events from the orchestrator's event bus to the
 //! telemetry stream used by Flutter and other consumers. It also supports
 //! exporting telemetry to the Xybrid Platform for analytics and monitoring.
+//!
+//! # Span Collection
+//!
+//! This module integrates with `xybrid_core::tracing` to capture execution spans.
+//! When a pipeline completes, the span tree is automatically included in the
+//! `PipelineComplete` telemetry event and sent to the Platform for visualization.
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,6 +18,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 use xybrid_core::event_bus::OrchestratorEvent;
+use xybrid_core::tracing as core_tracing;
 
 /// Telemetry event type (simplified for FFI)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -357,6 +364,17 @@ fn convert_to_platform_event(
     let timestamp = chrono::DateTime::from_timestamp_millis(event.timestamp_ms as i64)
         .map(|dt| dt.to_rfc3339());
 
+    // Capture spans for PipelineComplete events
+    // This includes the full span tree from TemplateExecutor instrumentation
+    let stages = if event.event_type == "PipelineComplete" && core_tracing::is_tracing_enabled() {
+        let spans = core_tracing::get_stages_json();
+        // Reset tracing for next pipeline execution
+        core_tracing::reset_tracing();
+        Some(spans)
+    } else {
+        None
+    };
+
     PlatformEvent {
         session_id: config.session_id,
         event_type: event.event_type.clone(),
@@ -367,7 +385,7 @@ fn convert_to_platform_event(
         timestamp,
         pipeline_id,
         trace_id,
-        stages: None,
+        stages,
     }
 }
 
@@ -378,6 +396,9 @@ fn convert_to_platform_event(
 static PLATFORM_EXPORTER: RwLock<Option<HttpTelemetryExporter>> = RwLock::new(None);
 
 /// Initialize the global platform telemetry exporter
+///
+/// This also enables span tracing in xybrid-core for detailed execution profiling.
+/// Spans are automatically captured and included in `PipelineComplete` events.
 ///
 /// # Example
 ///
@@ -391,6 +412,9 @@ static PLATFORM_EXPORTER: RwLock<Option<HttpTelemetryExporter>> = RwLock::new(No
 /// init_platform_telemetry(config);
 /// ```
 pub fn init_platform_telemetry(config: TelemetryConfig) {
+    // Enable span tracing in xybrid-core for execution profiling
+    core_tracing::init_tracing(true);
+
     let exporter = HttpTelemetryExporter::new(config);
     exporter.start();
 
@@ -406,8 +430,12 @@ pub fn init_platform_telemetry(config: TelemetryConfig) {
 /// Initialize platform telemetry from environment variables
 ///
 /// Returns `true` if initialization succeeded, `false` if XYBRID_API_KEY is not set.
+/// Also enables span tracing in xybrid-core for detailed execution profiling.
 pub fn init_platform_telemetry_from_env() -> bool {
     if let Some(exporter) = HttpTelemetryExporter::from_env() {
+        // Enable span tracing in xybrid-core for execution profiling
+        core_tracing::init_tracing(true);
+
         exporter.start();
         let sender = exporter.create_sender();
         register_telemetry_sender(sender);
@@ -440,7 +468,12 @@ pub fn flush_platform_telemetry() {
 }
 
 /// Shutdown platform telemetry exporter
+///
+/// This also disables span tracing in xybrid-core.
 pub fn shutdown_platform_telemetry() {
+    // Disable span tracing
+    core_tracing::init_tracing(false);
+
     if let Ok(mut exporter) = PLATFORM_EXPORTER.write() {
         if let Some(exp) = exporter.take() {
             exp.stop();

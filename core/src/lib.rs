@@ -28,6 +28,7 @@ pub mod streaming;
 pub mod target;
 pub mod telemetry;
 pub mod template_executor;
+pub mod tracing;
 
 // Universal Architecture System - configuration structures for ML models
 pub mod universal;
