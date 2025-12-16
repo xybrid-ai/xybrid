@@ -102,7 +102,15 @@ pub use pipeline::StageTiming as PipelineStageTiming;  // Renamed to avoid confl
 pub use result::{InferenceResult, OutputType};
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
-pub use telemetry::{register_telemetry_sender, TelemetryEvent, TelemetrySender};
+pub use telemetry::{
+    register_telemetry_sender, publish_telemetry_event, TelemetryEvent, TelemetrySender,
+    // Platform telemetry exports
+    TelemetryConfig, HttpTelemetryExporter,
+    init_platform_telemetry, init_platform_telemetry_from_env,
+    set_telemetry_pipeline_context, flush_platform_telemetry, shutdown_platform_telemetry,
+    // Orchestrator event bridge
+    bridge_orchestrator_events, convert_orchestrator_event,
+};
 
 /// Re-export OrchestratorEvent for event subscriptions
 pub use xybrid_core::event_bus::OrchestratorEvent;

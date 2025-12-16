@@ -11,6 +11,7 @@ path = "src/lib.rs"
 xybrid-core = { path = "../core" }
 xybrid-macros = { path = "../macros" }
 anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
@@ -18,6 +19,7 @@ thiserror = "1.0"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync", "fs", "time"] }
 tempfile = "3.10"
 ureq = "2.9"
+uuid = { version = "1.0", features = ["v4", "v5", "serde"] }
 dirs = "5.0"
 
 # Re-export the macro
