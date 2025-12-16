@@ -3,6 +3,11 @@
 //! This binary provides a `run` subcommand that loads pipeline configuration
 //! and executes it using the xybrid-core orchestrator.
 
+#[macro_use]
+extern crate lazy_static;
+
+mod tracing_viz;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::*;
@@ -74,6 +79,14 @@ enum Commands {
         /// If not specified, auto-detects based on platform
         #[arg(long, value_name = "TARGET")]
         target: Option<String>,
+
+        /// Enable detailed execution tracing with flame graph output
+        #[arg(long, default_value = "false")]
+        trace: bool,
+
+        /// Export trace to JSON file (Chrome trace format)
+        #[arg(long, value_name = "FILE")]
+        trace_export: Option<PathBuf>,
     },
     /// Trace and analyze telemetry logs from a session
     Trace {
@@ -189,10 +202,17 @@ fn main() -> Result<()> {
             input_text,
             registry,
             target,
+            trace,
+            trace_export,
         } => {
+            // Reset trace collector for fresh trace
+            if trace {
+                tracing_viz::reset_collector();
+            }
+
             // Handle direct bundle execution
             if let Some(bundle_path) = bundle {
-                return run_bundle(&bundle_path, input_audio.as_ref(), input_text.as_deref(), dry_run);
+                return run_bundle(&bundle_path, input_audio.as_ref(), input_text.as_deref(), dry_run, trace, trace_export.as_ref());
             }
 
             let config_path = if let Some(path) = config {
@@ -244,7 +264,7 @@ fn main() -> Result<()> {
                     "Either --config, --pipeline, or --bundle must be specified"
                 ));
             };
-            run_pipeline(&config_path, dry_run, policy.as_ref(), input_audio.as_ref(), registry.as_deref(), target.as_deref())
+            run_pipeline(&config_path, dry_run, policy.as_ref(), input_audio.as_ref(), registry.as_deref(), target.as_deref(), trace, trace_export.as_ref())
         }
         Commands::Trace {
             session,
@@ -1380,7 +1400,15 @@ fn run_pipeline(
     input_audio: Option<&PathBuf>,
     registry_url: Option<&str>,
     target: Option<&str>,
+    trace_enabled: bool,
+    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
+    // Start pipeline trace span
+    let _pipeline_span = if trace_enabled {
+        Some(tracing_viz::SpanGuard::new("pipeline_execution"))
+    } else {
+        None
+    };
     // Load and parse configuration file
     let config_content = fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
@@ -1604,6 +1632,20 @@ fn run_pipeline(
             println!();
             println!("{}", "=".repeat(60));
             println!("✨ Pipeline completed successfully!");
+
+            // Output trace visualization if enabled
+            if trace_enabled {
+                println!("{}", tracing_viz::render_trace());
+
+                // Export trace if requested
+                if let Some(export_path) = trace_export {
+                    let json = tracing_viz::GLOBAL_COLLECTOR.lock().unwrap().to_chrome_trace_json();
+                    fs::write(export_path, json)
+                        .with_context(|| format!("Failed to export trace to {}", export_path.display()))?;
+                    println!("💾 Trace exported to: {}", export_path.display());
+                }
+            }
+
             Ok(())
         }
         Err(e) => {
@@ -1619,7 +1661,18 @@ fn run_bundle(
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
     dry_run: bool,
+    trace_enabled: bool,
+    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
+    // Reset and start bundle trace span
+    if trace_enabled {
+        tracing_viz::reset_collector();
+    }
+    let _bundle_span = if trace_enabled {
+        Some(tracing_viz::SpanGuard::new("bundle_execution"))
+    } else {
+        None
+    };
     println!("🚀 Xybrid Bundle Runner");
     println!("📦 Bundle: {}\n", bundle_path.display());
 
@@ -1711,6 +1764,16 @@ fn run_bundle(
 
     let mut executor = TemplateExecutor::with_base_path(base_path);
 
+    // Trace inference execution
+    let _inference_span = if trace_enabled {
+        let span = tracing_viz::SpanGuard::new(format!("inference:{}", metadata.model_id));
+        tracing_viz::add_metadata("model_id", &metadata.model_id);
+        tracing_viz::add_metadata("version", &metadata.version);
+        Some(span)
+    } else {
+        None
+    };
+
     let start_time = std::time::Instant::now();
     let output = executor.execute(&metadata, &input)
         .map_err(|e| anyhow::anyhow!("Inference failed: {:?}", e))?;
@@ -1749,6 +1812,24 @@ fn run_bundle(
     println!();
     println!("{}", "=".repeat(60));
     println!("✨ Inference completed successfully!");
+
+    // End spans and output trace visualization if enabled
+    if trace_enabled {
+        // Explicitly end the inference span
+        drop(_inference_span);
+        // Explicitly end the bundle span
+        drop(_bundle_span);
+
+        println!("{}", tracing_viz::render_trace());
+
+        // Export trace if requested
+        if let Some(export_path) = trace_export {
+            let json = tracing_viz::GLOBAL_COLLECTOR.lock().unwrap().to_chrome_trace_json();
+            fs::write(export_path, json)
+                .with_context(|| format!("Failed to export trace to {}", export_path.display()))?;
+            println!("💾 Trace exported to: {}", export_path.display());
+        }
+    }
 
     Ok(())
 }

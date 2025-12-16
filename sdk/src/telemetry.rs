@@ -1,13 +1,16 @@
 //! Telemetry event bridge - Converts OrchestratorEvent to TelemetryEvent
 //!
 //! This module bridges events from the orchestrator's event bus to the
-//! telemetry stream used by Flutter and other consumers.
+//! telemetry stream used by Flutter and other consumers. It also supports
+//! exporting telemetry to the Xybrid Platform for analytics and monitoring.
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 use xybrid_core::event_bus::OrchestratorEvent;
 
 /// Telemetry event type (simplified for FFI)
@@ -33,6 +36,417 @@ pub struct TelemetryEvent {
 pub type TelemetrySender = mpsc::Sender<TelemetryEvent>;
 
 static TELEMETRY_SENDERS: Mutex<Vec<TelemetrySender>> = Mutex::new(Vec::new());
+
+// ============================================================================
+// HTTP Platform Exporter
+// ============================================================================
+
+/// Configuration for the HTTP telemetry exporter
+#[derive(Debug, Clone)]
+pub struct TelemetryConfig {
+    /// Platform API endpoint URL (e.g., "https://api.xybrid.ai")
+    pub endpoint: String,
+    /// API key for authentication
+    pub api_key: String,
+    /// Session ID for grouping events (generated if not provided)
+    pub session_id: Uuid,
+    /// Device identifier
+    pub device_id: Option<String>,
+    /// Platform name (e.g., "ios", "android", "macos")
+    pub platform: Option<String>,
+    /// App version string
+    pub app_version: Option<String>,
+    /// Batch size before flushing (default: 10)
+    pub batch_size: usize,
+    /// Flush interval in seconds (default: 5)
+    pub flush_interval_secs: u64,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            api_key: String::new(),
+            session_id: Uuid::new_v4(),
+            device_id: None,
+            platform: None,
+            app_version: None,
+            batch_size: 10,
+            flush_interval_secs: 5,
+        }
+    }
+}
+
+impl TelemetryConfig {
+    /// Create a new config with endpoint and API key
+    pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            api_key: api_key.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Set the session ID
+    pub fn with_session_id(mut self, session_id: Uuid) -> Self {
+        self.session_id = session_id;
+        self
+    }
+
+    /// Set device metadata
+    pub fn with_device(mut self, device_id: impl Into<String>, platform: impl Into<String>) -> Self {
+        self.device_id = Some(device_id.into());
+        self.platform = Some(platform.into());
+        self
+    }
+
+    /// Set app version
+    pub fn with_app_version(mut self, version: impl Into<String>) -> Self {
+        self.app_version = Some(version.into());
+        self
+    }
+
+    /// Set batch size
+    pub fn with_batch_size(mut self, size: usize) -> Self {
+        self.batch_size = size;
+        self
+    }
+
+    /// Set flush interval
+    pub fn with_flush_interval(mut self, secs: u64) -> Self {
+        self.flush_interval_secs = secs;
+        self
+    }
+}
+
+/// Event payload for platform API (matches IngestTelemetryEvent)
+#[derive(Debug, Serialize)]
+struct PlatformEvent {
+    session_id: Uuid,
+    event_type: String,
+    payload: serde_json::Value,
+    device_id: Option<String>,
+    platform: Option<String>,
+    app_version: Option<String>,
+    timestamp: Option<String>,
+    pipeline_id: Option<Uuid>,
+    trace_id: Option<Uuid>,
+    stages: Option<serde_json::Value>,
+}
+
+/// Batch payload for platform API
+#[derive(Debug, Serialize)]
+struct PlatformEventBatch {
+    events: Vec<PlatformEvent>,
+}
+
+/// HTTP telemetry exporter that sends events to the Xybrid Platform
+pub struct HttpTelemetryExporter {
+    config: TelemetryConfig,
+    buffer: Arc<Mutex<Vec<TelemetryEvent>>>,
+    running: Arc<AtomicBool>,
+    /// Current pipeline context for enriching events
+    pipeline_id: Arc<RwLock<Option<Uuid>>>,
+    trace_id: Arc<RwLock<Option<Uuid>>>,
+}
+
+impl HttpTelemetryExporter {
+    /// Create a new HTTP exporter with the given configuration
+    pub fn new(config: TelemetryConfig) -> Self {
+        Self {
+            config,
+            buffer: Arc::new(Mutex::new(Vec::new())),
+            running: Arc::new(AtomicBool::new(false)),
+            pipeline_id: Arc::new(RwLock::new(None)),
+            trace_id: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Create from environment variables
+    ///
+    /// Reads:
+    /// - `XYBRID_API_KEY` - Required API key
+    /// - `XYBRID_PLATFORM_URL` - Platform endpoint (default: https://api.xybrid.ai)
+    pub fn from_env() -> Option<Self> {
+        let api_key = std::env::var("XYBRID_API_KEY").ok()?;
+        let endpoint = std::env::var("XYBRID_PLATFORM_URL")
+            .unwrap_or_else(|_| "https://api.xybrid.ai".to_string());
+
+        let config = TelemetryConfig::new(endpoint, api_key);
+        Some(Self::new(config))
+    }
+
+    /// Set the current pipeline context for event enrichment
+    pub fn set_pipeline_context(&self, pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) {
+        if let Ok(mut pid) = self.pipeline_id.write() {
+            *pid = pipeline_id;
+        }
+        if let Ok(mut tid) = self.trace_id.write() {
+            *tid = trace_id;
+        }
+    }
+
+    /// Start the background flush thread
+    pub fn start(&self) {
+        if self.running.swap(true, Ordering::SeqCst) {
+            return; // Already running
+        }
+
+        let buffer = Arc::clone(&self.buffer);
+        let running = Arc::clone(&self.running);
+        let config = self.config.clone();
+        let flush_interval = Duration::from_secs(config.flush_interval_secs);
+
+        thread::spawn(move || {
+            while running.load(Ordering::SeqCst) {
+                thread::sleep(flush_interval);
+                flush_buffer(&buffer, &config);
+            }
+        });
+    }
+
+    /// Stop the background flush thread
+    pub fn stop(&self) {
+        self.running.store(false, Ordering::SeqCst);
+        // Final flush
+        flush_buffer(&self.buffer, &self.config);
+    }
+
+    /// Add an event to the buffer
+    pub fn push(&self, event: TelemetryEvent) {
+        let mut buffer = self.buffer.lock().unwrap();
+        buffer.push(event);
+
+        // Flush if buffer is full
+        if buffer.len() >= self.config.batch_size {
+            let events: Vec<TelemetryEvent> = buffer.drain(..).collect();
+            drop(buffer); // Release lock before HTTP call
+            send_batch(&events, &self.config, &self.pipeline_id, &self.trace_id);
+        }
+    }
+
+    /// Force flush all buffered events
+    pub fn flush(&self) {
+        flush_buffer(&self.buffer, &self.config);
+    }
+
+    /// Create a telemetry sender that feeds into this exporter
+    pub fn create_sender(&self) -> TelemetrySender {
+        let (tx, rx) = mpsc::channel::<TelemetryEvent>();
+        let buffer = Arc::clone(&self.buffer);
+        let batch_size = self.config.batch_size;
+        let config = self.config.clone();
+        let pipeline_id = Arc::clone(&self.pipeline_id);
+        let trace_id = Arc::clone(&self.trace_id);
+
+        thread::spawn(move || {
+            for event in rx {
+                let mut buf = buffer.lock().unwrap();
+                buf.push(event);
+
+                if buf.len() >= batch_size {
+                    let events: Vec<TelemetryEvent> = buf.drain(..).collect();
+                    drop(buf);
+                    send_batch(&events, &config, &pipeline_id, &trace_id);
+                }
+            }
+        });
+
+        tx
+    }
+}
+
+impl Drop for HttpTelemetryExporter {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Flush all buffered events to the platform
+fn flush_buffer(buffer: &Arc<Mutex<Vec<TelemetryEvent>>>, config: &TelemetryConfig) {
+    let events: Vec<TelemetryEvent> = {
+        let mut buf = buffer.lock().unwrap();
+        buf.drain(..).collect()
+    };
+
+    if !events.is_empty() {
+        send_batch(&events, config, &Arc::new(RwLock::new(None)), &Arc::new(RwLock::new(None)));
+    }
+}
+
+/// Send a batch of events to the platform API
+fn send_batch(
+    events: &[TelemetryEvent],
+    config: &TelemetryConfig,
+    pipeline_id: &Arc<RwLock<Option<Uuid>>>,
+    trace_id: &Arc<RwLock<Option<Uuid>>>,
+) {
+    if events.is_empty() || config.endpoint.is_empty() || config.api_key.is_empty() {
+        return;
+    }
+
+    let pid = pipeline_id.read().ok().and_then(|g| *g);
+    let tid = trace_id.read().ok().and_then(|g| *g);
+
+    let platform_events: Vec<PlatformEvent> = events
+        .iter()
+        .map(|e| convert_to_platform_event(e, config, pid, tid))
+        .collect();
+
+    let batch = PlatformEventBatch {
+        events: platform_events,
+    };
+
+    let url = format!("{}/v1/telemetry/batch", config.endpoint.trim_end_matches('/'));
+
+    // Send HTTP request
+    match ureq::post(&url)
+        .set("Authorization", &format!("Bearer {}", config.api_key))
+        .set("Content-Type", "application/json")
+        .send_json(&batch)
+    {
+        Ok(response) => {
+            if response.status() != 200 && response.status() != 201 {
+                eprintln!(
+                    "[xybrid-telemetry] Warning: Platform returned status {}",
+                    response.status()
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("[xybrid-telemetry] Failed to send telemetry: {}", e);
+        }
+    }
+}
+
+/// Convert SDK TelemetryEvent to Platform format
+fn convert_to_platform_event(
+    event: &TelemetryEvent,
+    config: &TelemetryConfig,
+    pipeline_id: Option<Uuid>,
+    trace_id: Option<Uuid>,
+) -> PlatformEvent {
+    // Build payload from event fields
+    let mut payload = serde_json::json!({});
+
+    if let Some(stage) = &event.stage_name {
+        payload["stage_name"] = serde_json::json!(stage);
+    }
+    if let Some(target) = &event.target {
+        payload["target"] = serde_json::json!(target);
+    }
+    if let Some(latency) = event.latency_ms {
+        payload["latency_ms"] = serde_json::json!(latency);
+    }
+    if let Some(error) = &event.error {
+        payload["error"] = serde_json::json!(error);
+        payload["status"] = serde_json::json!("error");
+    } else {
+        payload["status"] = serde_json::json!("success");
+    }
+    if let Some(data) = &event.data {
+        // Try to parse as JSON, otherwise store as string
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+            payload["data"] = parsed;
+        } else {
+            payload["data"] = serde_json::json!(data);
+        }
+    }
+
+    // Convert timestamp
+    let timestamp = chrono::DateTime::from_timestamp_millis(event.timestamp_ms as i64)
+        .map(|dt| dt.to_rfc3339());
+
+    PlatformEvent {
+        session_id: config.session_id,
+        event_type: event.event_type.clone(),
+        payload,
+        device_id: config.device_id.clone(),
+        platform: config.platform.clone(),
+        app_version: config.app_version.clone(),
+        timestamp,
+        pipeline_id,
+        trace_id,
+        stages: None,
+    }
+}
+
+// ============================================================================
+// Global Platform Exporter
+// ============================================================================
+
+static PLATFORM_EXPORTER: RwLock<Option<HttpTelemetryExporter>> = RwLock::new(None);
+
+/// Initialize the global platform telemetry exporter
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use xybrid_sdk::telemetry::{init_platform_telemetry, TelemetryConfig};
+///
+/// let config = TelemetryConfig::new("https://api.xybrid.ai", "your-api-key")
+///     .with_device("device-123", "ios")
+///     .with_app_version("1.0.0");
+///
+/// init_platform_telemetry(config);
+/// ```
+pub fn init_platform_telemetry(config: TelemetryConfig) {
+    let exporter = HttpTelemetryExporter::new(config);
+    exporter.start();
+
+    // Register as a telemetry sender
+    let sender = exporter.create_sender();
+    register_telemetry_sender(sender);
+
+    if let Ok(mut global) = PLATFORM_EXPORTER.write() {
+        *global = Some(exporter);
+    }
+}
+
+/// Initialize platform telemetry from environment variables
+///
+/// Returns `true` if initialization succeeded, `false` if XYBRID_API_KEY is not set.
+pub fn init_platform_telemetry_from_env() -> bool {
+    if let Some(exporter) = HttpTelemetryExporter::from_env() {
+        exporter.start();
+        let sender = exporter.create_sender();
+        register_telemetry_sender(sender);
+
+        if let Ok(mut global) = PLATFORM_EXPORTER.write() {
+            *global = Some(exporter);
+        }
+        true
+    } else {
+        false
+    }
+}
+
+/// Set pipeline context for event enrichment
+pub fn set_telemetry_pipeline_context(pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) {
+    if let Ok(exporter) = PLATFORM_EXPORTER.read() {
+        if let Some(exp) = exporter.as_ref() {
+            exp.set_pipeline_context(pipeline_id, trace_id);
+        }
+    }
+}
+
+/// Flush all pending telemetry events
+pub fn flush_platform_telemetry() {
+    if let Ok(exporter) = PLATFORM_EXPORTER.read() {
+        if let Some(exp) = exporter.as_ref() {
+            exp.flush();
+        }
+    }
+}
+
+/// Shutdown platform telemetry exporter
+pub fn shutdown_platform_telemetry() {
+    if let Ok(mut exporter) = PLATFORM_EXPORTER.write() {
+        if let Some(exp) = exporter.take() {
+            exp.stop();
+        }
+    }
+}
 
 /// Register a telemetry event sender
 pub fn register_telemetry_sender(sender: TelemetrySender) {
