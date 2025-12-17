@@ -637,6 +637,15 @@ impl XybridPipeline {
         let registry_config = handle.registry_config.clone();
         drop(handle); // Release lock before execution
 
+        // Automatically set telemetry pipeline context for this run
+        // Generate a unique trace_id for this execution
+        let trace_id = uuid::Uuid::new_v4();
+        let pipeline_id = self.name.as_ref().map(|n| {
+            // Create a deterministic UUID from the pipeline name
+            uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes())
+        });
+        crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
+
         // Create a fresh orchestrator for this run
         let mut orchestrator = Orchestrator::new();
         if let Some(ref config) = registry_config {
@@ -656,8 +665,15 @@ impl XybridPipeline {
                 &metrics,
                 &availability_fn,
             )
-            .map_err(|e| SdkError::PipelineError(format!("Pipeline execution failed: {}", e)))?;
+            .map_err(|e| {
+                // Clear context on error
+                crate::telemetry::set_telemetry_pipeline_context(None, None);
+                SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
+            })?;
         let total_latency_ms = start_time.elapsed().as_millis() as u32;
+
+        // Clear telemetry context after execution
+        crate::telemetry::set_telemetry_pipeline_context(None, None);
 
         let stages: Vec<StageTiming> = results
             .iter()
@@ -708,6 +724,13 @@ impl XybridPipeline {
         let name = self.name.clone();
 
         tokio::task::spawn_blocking(move || {
+            // Automatically set telemetry pipeline context for this run
+            let trace_id = uuid::Uuid::new_v4();
+            let pipeline_id = name.as_ref().map(|n| {
+                uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes())
+            });
+            crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
+
             // Create a fresh orchestrator inside the blocking task
             let mut orchestrator = Orchestrator::new();
             if let Some(ref config) = registry_config {
@@ -728,7 +751,10 @@ impl XybridPipeline {
                     &metrics,
                     &availability_fn,
                 )
-                .map_err(|e| SdkError::PipelineError(format!("Pipeline execution failed: {}", e)))?;
+                .map_err(|e| {
+                    crate::telemetry::set_telemetry_pipeline_context(None, None);
+                    SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
+                })?;
 
             let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
@@ -752,6 +778,9 @@ impl XybridPipeline {
             } else {
                 (OutputType::Unknown, Envelope::new(EnvelopeKind::Text(String::new())))
             };
+
+            // Clear telemetry context after execution
+            crate::telemetry::set_telemetry_pipeline_context(None, None);
 
             Ok(PipelineExecutionResult {
                 name,

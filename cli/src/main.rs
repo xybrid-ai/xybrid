@@ -35,6 +35,18 @@ use xybrid_core::template_executor::TemplateExecutor;
 #[command(name = "xybrid")]
 #[command(about = "Xybrid CLI - Run hybrid cloud-edge AI inference pipelines", long_about = None)]
 struct Cli {
+    /// Platform API key for telemetry (can also be set via XYBRID_API_KEY env var)
+    #[arg(long, global = true, env = "XYBRID_API_KEY")]
+    api_key: Option<String>,
+
+    /// Platform API endpoint for telemetry (default: https://api.xybrid.ai)
+    #[arg(long, global = true, env = "XYBRID_PLATFORM_URL", default_value = "https://api.xybrid.ai")]
+    platform_url: String,
+
+    /// Device ID for telemetry attribution
+    #[arg(long, global = true, env = "XYBRID_DEVICE_ID")]
+    device_id: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -191,6 +203,51 @@ fn display_stage_name(name: &str) -> &str {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Initialize platform telemetry if API key is provided
+    let telemetry_enabled = init_telemetry(&cli);
+    if telemetry_enabled {
+        println!("📡 Telemetry enabled ({})", cli.platform_url);
+    }
+
+    // Run command and ensure telemetry is flushed on exit
+    let result = run_command(cli);
+
+    // Flush and shutdown telemetry
+    if telemetry_enabled {
+        xybrid_sdk::flush_platform_telemetry();
+        xybrid_sdk::shutdown_platform_telemetry();
+    }
+
+    result
+}
+
+/// Initialize platform telemetry from CLI args
+fn init_telemetry(cli: &Cli) -> bool {
+    if let Some(ref api_key) = cli.api_key {
+        // Detect platform
+        let platform = Platform::detect().to_string();
+
+        // Use hostname as device ID if not provided
+        let device_id = cli.device_id.clone().unwrap_or_else(|| {
+            hostname::get()
+                .ok()
+                .and_then(|h| h.into_string().ok())
+                .unwrap_or_else(|| "cli-unknown".to_string())
+        });
+
+        // Build telemetry config
+        let mut config = xybrid_sdk::TelemetryConfig::new(&cli.platform_url, api_key);
+        config = config.with_device(&device_id, &platform);
+        config = config.with_app_version(env!("CARGO_PKG_VERSION"));
+
+        xybrid_sdk::init_platform_telemetry(config);
+        true
+    } else {
+        false
+    }
+}
+
+fn run_command(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Run {
             config,
