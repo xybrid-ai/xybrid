@@ -108,6 +108,8 @@ pub use telemetry::{
     TelemetryConfig, HttpTelemetryExporter,
     init_platform_telemetry, init_platform_telemetry_from_env,
     set_telemetry_pipeline_context, flush_platform_telemetry, shutdown_platform_telemetry,
+    // Orchestrator event bridge
+    bridge_orchestrator_events, convert_orchestrator_event,
 };
 
 /// Re-export OrchestratorEvent for event subscriptions

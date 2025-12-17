@@ -1613,6 +1613,9 @@ fn run_pipeline(
     // Create orchestrator for actual execution
     let mut orchestrator = Orchestrator::new();
 
+    // Bridge orchestrator events to telemetry (sends events to platform if API key is configured)
+    xybrid_sdk::bridge_orchestrator_events(&orchestrator);
+
     // Configure registry if provided
     if let Some(url) = registry_url {
         println!("🌐 Configuring registry: {}", url);
@@ -1730,6 +1733,11 @@ fn run_bundle(
     } else {
         None
     };
+
+    // Generate trace ID for this execution
+    let trace_id = uuid::Uuid::new_v4();
+    xybrid_sdk::set_telemetry_pipeline_context(None, Some(trace_id));
+
     println!("🚀 Xybrid Bundle Runner");
     println!("📦 Bundle: {}\n", bundle_path.display());
 
@@ -1784,6 +1792,24 @@ fn run_bundle(
     println!("   Preprocessing: {} steps", metadata.preprocessing.len());
     println!("   Postprocessing: {} steps", metadata.postprocessing.len());
     println!();
+
+    // Emit PipelineStart telemetry event
+    xybrid_sdk::publish_telemetry_event(xybrid_sdk::TelemetryEvent {
+        event_type: "PipelineStart".to_string(),
+        stage_name: Some(metadata.model_id.clone()),
+        target: Some("local".to_string()),
+        latency_ms: None,
+        error: None,
+        data: Some(serde_json::json!({
+            "model_id": metadata.model_id,
+            "version": metadata.version,
+            "bundle_path": bundle_path.display().to_string()
+        }).to_string()),
+        timestamp_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+    });
 
     if dry_run {
         println!("🔎 Dry Run: Bundle inspection only");
@@ -1869,6 +1895,24 @@ fn run_bundle(
     println!();
     println!("{}", "=".repeat(60));
     println!("✨ Inference completed successfully!");
+
+    // Emit PipelineComplete telemetry event
+    xybrid_sdk::publish_telemetry_event(xybrid_sdk::TelemetryEvent {
+        event_type: "PipelineComplete".to_string(),
+        stage_name: Some(metadata.model_id.clone()),
+        target: Some("local".to_string()),
+        latency_ms: Some(elapsed.as_millis() as u32),
+        error: None,
+        data: Some(serde_json::json!({
+            "model_id": metadata.model_id,
+            "version": metadata.version,
+            "output_type": output.kind_str()
+        }).to_string()),
+        timestamp_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+    });
 
     // End spans and output trace visualization if enabled
     if trace_enabled {
