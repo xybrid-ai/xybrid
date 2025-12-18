@@ -23,6 +23,7 @@ use crate::registry_resolver::RegistryResolver;
 use crate::runtime_adapter::{AdapterError, RuntimeAdapter};
 use crate::stage_resolver::parse_stage_name;
 use crate::template_executor::TemplateExecutor;
+use crate::tracing as trace;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -773,6 +774,15 @@ impl Executor {
             )
         })?;
 
+        // Start tracing span for integration execution
+        let model_name = stage.model.clone().unwrap_or_else(|| "unknown".to_string());
+        let _exec_span = trace::SpanGuard::new(format!("execute:{}", model_name));
+        trace::add_metadata("provider", provider.as_str());
+        trace::add_metadata("target", "integration");
+        if let Some(ref model) = stage.model {
+            trace::add_metadata("model", model);
+        }
+
         // Build LLM configuration
         // Default: Gateway (recommended for production)
         // Direct: Only if explicitly requested via options.backend = "direct"
@@ -831,6 +841,14 @@ impl Executor {
             llm_config.direct_provider = Some(provider.as_str().to_string());
         }
 
+        // Capture backend string for tracing before config is consumed
+        let backend_str = match llm_config.backend {
+            LlmBackend::Gateway => "gateway",
+            LlmBackend::Direct => "direct",
+            LlmBackend::Local => "local",
+            LlmBackend::Auto => "auto",
+        };
+
         // Create LLM client (gateway-aware)
         let client = Llm::with_config(llm_config).map_err(|e| {
             ExecutorError::IntegrationError(format!("Failed to create LLM client: {}", e))
@@ -869,9 +887,13 @@ impl Executor {
         }
 
         // Execute LLM request (via gateway by default)
-        let response = client.complete(request).map_err(|e| {
-            ExecutorError::IntegrationError(format!("LLM request failed: {}", e))
-        })?;
+        let response = {
+            let _llm_span = trace::SpanGuard::new("llm_inference");
+            trace::add_metadata("backend", backend_str);
+            client.complete(request).map_err(|e| {
+                ExecutorError::IntegrationError(format!("LLM request failed: {}", e))
+            })?
+        };
 
         // Build output envelope
         let output = Envelope::new(EnvelopeKind::Text(response.text));
