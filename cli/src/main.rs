@@ -39,8 +39,8 @@ struct Cli {
     #[arg(long, global = true, env = "XYBRID_API_KEY")]
     api_key: Option<String>,
 
-    /// Platform API endpoint for telemetry (default: https://api.xybrid.ai)
-    #[arg(long, global = true, env = "XYBRID_PLATFORM_URL", default_value = "https://api.xybrid.ai")]
+    /// Platform API endpoint for telemetry (default: https://api.xybrid.dev)
+    #[arg(long, global = true, env = "XYBRID_PLATFORM_URL", default_value = "https://api.xybrid.dev")]
     platform_url: String,
 
     /// Device ID for telemetry attribution

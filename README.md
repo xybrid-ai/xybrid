@@ -85,7 +85,7 @@ let audio_response = pipeline.run(audio_input).await?;
 
 ```bash
 # macOS (Apple Silicon)
-curl -fsSL https://xybrid.ai/install.sh | sh
+curl -fsSL https://xybrid.dev/install.sh | sh
 
 # From source
 cargo install xybrid-cli
@@ -150,7 +150,7 @@ println!("Transcription: {}", result.text);
 
 ## Community
 
-- 📖 [Documentation](https://docs.xybrid.ai)
+- 📖 [Documentation](https://docs.xybrid.dev)
 - 💬 [Discord](https://discord.gg/xybrid)
 - 🐛 [Issues](https://github.com/xybrid-ai/xybrid/issues)
 - 🗺️ [Roadmap](./ROADMAP.md)
