@@ -8,9 +8,12 @@ The Xybrid Gateway provides an OpenAI-compatible REST API that routes requests t
 ## Base URL
 
 ```
-http://localhost:3000  (local development)
-https://api.xybrid.dev  (production)
+http://localhost:3000/v1  (local standalone gateway)
+http://localhost:8000/v1  (local platform backend)
+https://api.xybrid.dev/v1 (production)
 ```
+
+All API endpoints are prefixed with `/v1` for OpenAI compatibility.
 
 ## Authentication
 
@@ -447,3 +450,53 @@ stages:
 ```
 
 When a pipeline stage has `target: integration`, the Orchestrator routes the request through the Gateway (or directly to the provider if API keys are configured).
+
+### Gateway URL Configuration
+
+The SDK determines the gateway URL using this priority:
+
+1. **Per-pipeline override**: Set `gateway_url` in stage options
+2. **Environment variable**: `XYBRID_GATEWAY_URL` (explicit override with full path)
+3. **Platform URL**: `XYBRID_PLATFORM_URL` + `/v1` suffix
+4. **Default**: `https://api.xybrid.dev/v1`
+
+#### Per-Pipeline Override
+
+Override the gateway URL for a specific LLM stage:
+
+```yaml
+stages:
+  - id: llm
+    model: gpt-4o-mini
+    target: integration
+    provider: openai
+    options:
+      gateway_url: "http://localhost:8000/v1"  # Custom gateway
+      system_prompt: "You are helpful."
+```
+
+#### Environment Variables
+
+```bash
+# Explicit gateway URL (must include /v1)
+export XYBRID_GATEWAY_URL="http://localhost:3000/v1"
+
+# Or use platform URL (SDK appends /v1 automatically)
+export XYBRID_PLATFORM_URL="http://localhost:8000"
+```
+
+#### Flutter SDK
+
+```dart
+void main() async {
+  await Xybrid.init();
+
+  // Configure gateway URL (SDK appends /v1 automatically)
+  Xybrid.setGatewayUrl('http://localhost:8000');
+
+  // Set API key for authentication
+  Xybrid.setApiKey('your-api-key');
+
+  runApp(MyApp());
+}
+```
