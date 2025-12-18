@@ -51,7 +51,7 @@ static TELEMETRY_SENDERS: Mutex<Vec<TelemetrySender>> = Mutex::new(Vec::new());
 /// Configuration for the HTTP telemetry exporter
 #[derive(Debug, Clone)]
 pub struct TelemetryConfig {
-    /// Platform API endpoint URL (e.g., "https://api.xybrid.ai")
+    /// Platform API endpoint URL (e.g., "https://api.xybrid.dev")
     pub endpoint: String,
     /// API key for authentication
     pub api_key: String,
@@ -173,11 +173,11 @@ impl HttpTelemetryExporter {
     ///
     /// Reads:
     /// - `XYBRID_API_KEY` - Required API key
-    /// - `XYBRID_PLATFORM_URL` - Platform endpoint (default: https://api.xybrid.ai)
+    /// - `XYBRID_PLATFORM_URL` - Platform endpoint (default: https://api.xybrid.dev)
     pub fn from_env() -> Option<Self> {
         let api_key = std::env::var("XYBRID_API_KEY").ok()?;
         let endpoint = std::env::var("XYBRID_PLATFORM_URL")
-            .unwrap_or_else(|_| "https://api.xybrid.ai".to_string());
+            .unwrap_or_else(|_| "https://api.xybrid.dev".to_string());
 
         let config = TelemetryConfig::new(endpoint, api_key);
         Some(Self::new(config))
@@ -405,7 +405,7 @@ static PLATFORM_EXPORTER: RwLock<Option<HttpTelemetryExporter>> = RwLock::new(No
 /// ```rust,no_run
 /// use xybrid_sdk::telemetry::{init_platform_telemetry, TelemetryConfig};
 ///
-/// let config = TelemetryConfig::new("https://api.xybrid.ai", "your-api-key")
+/// let config = TelemetryConfig::new("https://api.xybrid.dev", "your-api-key")
 ///     .with_device("device-123", "ios")
 ///     .with_app_version("1.0.0");
 ///
