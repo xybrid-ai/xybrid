@@ -542,16 +542,63 @@ For pipelines that use cloud LLM integrations:
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
 // Set Xybrid Gateway API key
-setApiKey(apiKey: 'your-xybrid-api-key');
+Xybrid.setApiKey('your-xybrid-api-key');
 
 // Or set provider-specific keys for direct API calls
-setProviderApiKey(provider: 'openai', apiKey: 'sk-...');
-setProviderApiKey(provider: 'anthropic', apiKey: 'sk-ant-...');
+Xybrid.setProviderApiKey('openai', 'sk-...');
+Xybrid.setProviderApiKey('anthropic', 'sk-ant-...');
 
 // Check if configured
-if (hasApiKey()) {
-  final key = getApiKey();
+if (Xybrid.hasApiKey()) {
+  final key = Xybrid.getApiKey();
 }
+```
+
+---
+
+## Gateway URL Configuration
+
+Configure the gateway URL for LLM API calls (used by pipelines with `target: integration`):
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Xybrid.init();
+
+  // Configure gateway URL for local development
+  // The SDK automatically appends /v1 for API endpoints
+  Xybrid.setGatewayUrl('http://localhost:8000');
+
+  // Set API key for authentication
+  Xybrid.setApiKey('your-api-key');
+
+  runApp(MyApp());
+}
+```
+
+### URL Resolution Priority
+
+The SDK determines the gateway URL using this priority:
+
+1. **Per-pipeline override**: Set `gateway_url` in pipeline YAML stage options
+2. **`XYBRID_GATEWAY_URL`**: Environment variable (explicit, must include `/v1`)
+3. **`XYBRID_PLATFORM_URL`**: Environment variable (SDK appends `/v1` automatically)
+4. **`Xybrid.setGatewayUrl()`**: Set programmatically (SDK appends `/v1` automatically)
+5. **Default**: `https://api.xybrid.dev/v1`
+
+### Per-Pipeline Override
+
+Override the gateway URL for a specific LLM stage in your pipeline YAML:
+
+```yaml
+stages:
+  - id: llm
+    model: gpt-4o-mini
+    target: integration
+    provider: openai
+    options:
+      gateway_url: "http://localhost:8000/v1"  # Must include /v1
+      system_prompt: "You are a helpful assistant."
 ```
 
 ---
@@ -604,8 +651,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Xybrid.init();
 
+  // Configure gateway URL for local development (optional)
+  // Xybrid.setGatewayUrl('http://localhost:8000');
+
   // Set API key for cloud integrations
-  setApiKey(apiKey: 'your-api-key');
+  Xybrid.setApiKey('your-api-key');
 
   runApp(MyApp());
 }
