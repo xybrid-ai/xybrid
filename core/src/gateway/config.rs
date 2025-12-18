@@ -27,7 +27,7 @@ pub struct GatewayConfig {
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
-            base_url: "https://gateway.xybrid.ai/v1".to_string(),
+            base_url: "https://api.xybrid.dev/v1".to_string(),
             default_model: Some("gpt-4o-mini".to_string()),
             timeout_ms: 60000,
             debug: false,
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = GatewayConfig::default();
-        assert_eq!(config.base_url, "https://gateway.xybrid.ai/v1");
+        assert_eq!(config.base_url, "https://api.xybrid.dev/v1");
         assert_eq!(config.default_model, Some("gpt-4o-mini".to_string()));
         assert_eq!(config.timeout_ms, 60000);
     }

@@ -70,9 +70,17 @@ pub struct LlmConfig {
 }
 
 fn default_gateway_url() -> String {
-    // SOOn https://gateway.xybrid.cloud/v1
-    // SOON https://gateway.xybrid.ai/v1
-    "https://gateway.xybrid.dev/v1".to_string()
+    // Priority:
+    // 1. XYBRID_GATEWAY_URL env var (explicit override)
+    // 2. XYBRID_PLATFORM_URL env var (shared with telemetry)
+    // 3. Default production URL (api.xybrid.dev)
+    if let Ok(url) = std::env::var("XYBRID_GATEWAY_URL") {
+        return url;
+    }
+    if let Ok(url) = std::env::var("XYBRID_PLATFORM_URL") {
+        return url;
+    }
+    "https://api.xybrid.dev".to_string()
 }
 
 fn default_timeout_ms() -> u32 {
@@ -174,7 +182,12 @@ mod tests {
     fn test_default_config() {
         let config = LlmConfig::default();
         assert_eq!(config.backend, LlmBackend::Gateway);
-        assert!(config.gateway_url.contains("xybrid"));
+        // Default URL should be api.xybrid.dev or from env vars
+        assert!(
+            config.gateway_url.contains("xybrid") || config.gateway_url.contains("localhost"),
+            "gateway_url should contain 'xybrid' or 'localhost', got: {}",
+            config.gateway_url
+        );
     }
 
     #[test]

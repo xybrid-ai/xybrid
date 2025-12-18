@@ -13,7 +13,7 @@ export function baseOptions(locale: string): BaseLayoutProps {
       {
         icon: <GlobeIcon />,
         text: 'Website',
-        url: 'https://xybrid.ai',
+        url: 'https://xybrid.dev',
         external: true,
         // secondary items will be displayed differently on navbar
         secondary: true,
