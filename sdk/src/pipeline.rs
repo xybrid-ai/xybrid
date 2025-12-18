@@ -696,6 +696,29 @@ impl XybridPipeline {
             (OutputType::Unknown, Envelope::new(EnvelopeKind::Text(String::new())))
         };
 
+        // Emit PipelineComplete telemetry event
+        // This will include the span tree captured during execution
+        let event = crate::telemetry::TelemetryEvent {
+            event_type: "PipelineComplete".to_string(),
+            stage_name: self.name.clone(),
+            target: None,
+            latency_ms: Some(total_latency_ms),
+            error: None,
+            data: Some(serde_json::json!({
+                "stages": stages.iter().map(|s| serde_json::json!({
+                    "name": s.name,
+                    "latency_ms": s.latency_ms,
+                    "target": s.target,
+                })).collect::<Vec<_>>(),
+                "output_type": format!("{:?}", output_type),
+            }).to_string()),
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
+        crate::telemetry::publish_telemetry_event(event);
+
         Ok(PipelineExecutionResult {
             name: self.name.clone(),
             stages,
@@ -778,6 +801,28 @@ impl XybridPipeline {
             } else {
                 (OutputType::Unknown, Envelope::new(EnvelopeKind::Text(String::new())))
             };
+
+            // Emit PipelineComplete telemetry event
+            let event = crate::telemetry::TelemetryEvent {
+                event_type: "PipelineComplete".to_string(),
+                stage_name: name.clone(),
+                target: None,
+                latency_ms: Some(total_latency_ms),
+                error: None,
+                data: Some(serde_json::json!({
+                    "stages": stages.iter().map(|s| serde_json::json!({
+                        "name": s.name,
+                        "latency_ms": s.latency_ms,
+                        "target": s.target,
+                    })).collect::<Vec<_>>(),
+                    "output_type": format!("{:?}", output_type),
+                }).to_string()),
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+            };
+            crate::telemetry::publish_telemetry_event(event);
 
             // Clear telemetry context after execution
             crate::telemetry::set_telemetry_pipeline_context(None, None);

@@ -364,11 +364,13 @@ fn convert_to_platform_event(
     let timestamp = chrono::DateTime::from_timestamp_millis(event.timestamp_ms as i64)
         .map(|dt| dt.to_rfc3339());
 
-    // Capture spans for PipelineComplete events
+    // Capture spans for PipelineComplete and ModelComplete events
     // This includes the full span tree from TemplateExecutor instrumentation
-    let stages = if event.event_type == "PipelineComplete" && core_tracing::is_tracing_enabled() {
+    let stages = if (event.event_type == "PipelineComplete" || event.event_type == "ModelComplete")
+        && core_tracing::is_tracing_enabled()
+    {
         let spans = core_tracing::get_stages_json();
-        // Reset tracing for next pipeline execution
+        // Reset tracing for next execution
         core_tracing::reset_tracing();
         Some(spans)
     } else {

@@ -516,6 +516,25 @@ impl XybridModel {
 
         let latency_ms = start.elapsed().as_millis() as u32;
 
+        // Emit ModelComplete telemetry event
+        let event = crate::telemetry::TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some(self.model_id.clone()),
+            target: Some("local".to_string()),
+            latency_ms: Some(latency_ms),
+            error: None,
+            data: Some(serde_json::json!({
+                "model_id": self.model_id,
+                "version": self.version,
+                "output_type": format!("{:?}", self.output_type),
+            }).to_string()),
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
+        crate::telemetry::publish_telemetry_event(event);
+
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
 
@@ -523,6 +542,8 @@ impl XybridModel {
     pub async fn run_async(&self, envelope: &Envelope) -> SdkResult<InferenceResult> {
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
+        let version = self.version.clone();
+        let output_type = self.output_type;
         let envelope = envelope.clone();
 
         tokio::task::spawn_blocking(move || {
@@ -544,6 +565,26 @@ impl XybridModel {
                 .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
 
             let latency_ms = start.elapsed().as_millis() as u32;
+
+            // Emit ModelComplete telemetry event
+            let event = crate::telemetry::TelemetryEvent {
+                event_type: "ModelComplete".to_string(),
+                stage_name: Some(model_id.clone()),
+                target: Some("local".to_string()),
+                latency_ms: Some(latency_ms),
+                error: None,
+                data: Some(serde_json::json!({
+                    "model_id": model_id,
+                    "version": version,
+                    "output_type": format!("{:?}", output_type),
+                }).to_string()),
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+            };
+            crate::telemetry::publish_telemetry_event(event);
+
             Ok(InferenceResult::new(output, &model_id, latency_ms))
         })
         .await
