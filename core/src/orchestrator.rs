@@ -25,6 +25,7 @@ use crate::routing_engine::{
 };
 use crate::stream_manager::{StreamConfig, StreamManager};
 use crate::telemetry::Telemetry;
+use crate::tracing as trace;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task;
@@ -336,6 +337,11 @@ impl Orchestrator {
         let pipeline_start = std::time::Instant::now();
         let stage_names: Vec<String> = stages.iter().map(|s| s.name.clone()).collect();
 
+        // Start top-level pipeline span
+        let pipeline_name = stage_names.join(" → ");
+        let _pipeline_span = trace::SpanGuard::new(format!("pipeline:{}", pipeline_name));
+        trace::add_metadata("stages", &stage_names.len().to_string());
+
         // Emit pipeline start event
         self.event_bus.publish(OrchestratorEvent::PipelineStart {
             stages: stage_names.clone(),
@@ -552,6 +558,11 @@ impl Orchestrator {
     ) -> OrchestratorResult<Vec<StageExecutionResult>> {
         let pipeline_start = std::time::Instant::now();
         let stage_names: Vec<String> = stages.iter().map(|s| s.name.clone()).collect();
+
+        // Start top-level pipeline span
+        let pipeline_name = stage_names.join(" → ");
+        let _pipeline_span = trace::SpanGuard::new(format!("pipeline:{}", pipeline_name));
+        trace::add_metadata("stages", &stage_names.len().to_string());
 
         // Emit pipeline start event
         self.event_bus.publish(OrchestratorEvent::PipelineStart {
