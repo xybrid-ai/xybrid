@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/xybrid-ai/xybrid/main/docs/logo.jpg" alt="Xybrid Logo" width="200"/>
+  <img src="./docs/logo.jpg" alt="Xybrid Logo" width="200"/>
 </p>
 
 <h1 align="center">Xybrid</h1>
