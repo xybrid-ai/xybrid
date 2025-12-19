@@ -6,8 +6,6 @@
     "---[Puzzle]Integration---",
     "...(integration)",
     "---[Terminal]CLI---",
-    "...cli",
-    "---[Cog]Internals---",
-    "internals"
+    "...cli"
   ]
 }
