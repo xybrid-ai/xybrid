@@ -72,6 +72,7 @@ const CLOUD_TTL_SECONDS: u64 = 24 * 60 * 60;
 /// Model Cache Manager.
 ///
 /// Manages `.xyb` bundle storage with platform-specific paths and cache policies.
+#[derive(Debug)]
 pub struct CacheManager {
     /// Base cache directory
     cache_dir: PathBuf,
