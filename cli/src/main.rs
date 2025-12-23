@@ -59,11 +59,27 @@ enum Commands {
         #[command(subcommand)]
         command: ModelsCommand,
     },
-    /// Pre-download a model from the registry
+    /// Parse and validate a pipeline configuration
+    Prepare {
+        /// Path to the pipeline configuration file (YAML)
+        #[arg(value_name = "FILE")]
+        config: PathBuf,
+    },
+    /// Show execution plan for a pipeline (models, targets, download status)
+    Plan {
+        /// Path to the pipeline configuration file (YAML)
+        #[arg(value_name = "FILE")]
+        config: PathBuf,
+    },
+    /// Pre-download models from the registry
     Fetch {
+        /// Path to pipeline configuration file (downloads all models)
+        #[arg(value_name = "FILE", conflicts_with = "model")]
+        config: Option<PathBuf>,
+
         /// Model ID to fetch (e.g., "kokoro-82m")
         #[arg(short, long, value_name = "ID")]
-        model: String,
+        model: Option<String>,
 
         /// Target platform (auto-detected if not specified)
         #[arg(short, long, value_name = "PLATFORM")]
@@ -218,26 +234,103 @@ enum CacheCommand {
 }
 
 /// Pipeline configuration loaded from YAML.
+/// Supports both legacy format (stages as strings) and new format (stages as objects).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PipelineConfig {
     /// Pipeline name/description
     #[serde(default)]
     name: Option<String>,
-    /// List of stage names to execute in order
-    stages: Vec<String>,
+    /// Registry URL for fetching models
+    #[serde(default)]
+    registry: Option<String>,
+    /// List of pipeline stages (can be strings or StageConfig objects)
+    #[serde(deserialize_with = "deserialize_stages")]
+    stages: Vec<StageConfig>,
     /// Input envelope configuration
     input: InputConfig,
     /// Device metrics configuration
     metrics: MetricsConfig,
     /// Model availability mapping (stage name -> available locally)
+    #[serde(default)]
     availability: HashMap<String, bool>,
+}
+
+/// Individual stage configuration in a pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StageConfig {
+    /// Stage identifier
+    #[serde(default)]
+    id: String,
+    /// Model ID (registry mask)
+    #[serde(default)]
+    model: Option<String>,
+    /// Model version
+    #[serde(default)]
+    version: Option<String>,
+    /// Execution target: "device", "cloud", "integration"
+    #[serde(default)]
+    target: Option<String>,
+    /// Provider for integration targets (e.g., "openai")
+    #[serde(default)]
+    provider: Option<String>,
+    /// Additional options
+    #[serde(default)]
+    options: HashMap<String, serde_json::Value>,
+}
+
+/// Custom deserializer to support both string stages and StageConfig objects.
+fn deserialize_stages<'de, D>(deserializer: D) -> Result<Vec<StageConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let raw: Vec<serde_json::Value> = Vec::deserialize(deserializer)?;
+    let mut stages = Vec::new();
+
+    for (i, item) in raw.into_iter().enumerate() {
+        match item {
+            serde_json::Value::String(s) => {
+                // Legacy format: stage is just a string name
+                stages.push(StageConfig {
+                    id: s.clone(),
+                    model: Some(s),
+                    version: None,
+                    target: None,
+                    provider: None,
+                    options: HashMap::new(),
+                });
+            }
+            serde_json::Value::Object(_) => {
+                // New format: stage is an object
+                let config: StageConfig = serde_json::from_value(item)
+                    .map_err(|e| D::Error::custom(format!("Invalid stage {}: {}", i, e)))?;
+                stages.push(config);
+            }
+            _ => {
+                return Err(D::Error::custom(format!(
+                    "Stage {} must be a string or object",
+                    i
+                )));
+            }
+        }
+    }
+
+    Ok(stages)
 }
 
 /// Input envelope configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct InputConfig {
-    /// Envelope kind (e.g., "AudioRaw", "Text", etc.)
-    kind: String,
+    /// Envelope kind (e.g., "AudioRaw", "Text", "audio", etc.)
+    #[serde(alias = "type")]
+    kind: Option<String>,
+    /// Sample rate for audio input
+    #[serde(default)]
+    sample_rate: Option<u32>,
+    /// Number of audio channels
+    #[serde(default)]
+    channels: Option<u8>,
 }
 
 /// Device metrics configuration.
@@ -305,7 +398,17 @@ fn init_telemetry(cli: &Cli) -> bool {
 fn run_command(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Models { command } => handle_models_command(command),
-        Commands::Fetch { model, platform } => handle_fetch_command(&model, platform.as_deref()),
+        Commands::Prepare { config } => handle_prepare_command(&config),
+        Commands::Plan { config } => handle_plan_command(&config),
+        Commands::Fetch { config, model, platform } => {
+            if let Some(config_path) = config {
+                handle_fetch_pipeline_command(&config_path, platform.as_deref())
+            } else if let Some(model_id) = model {
+                handle_fetch_command(&model_id, platform.as_deref())
+            } else {
+                Err(anyhow::anyhow!("Either a pipeline config file or --model <id> must be specified"))
+            }
+        },
         Commands::Cache { command } => handle_cache_command(command),
         Commands::Run {
             config,
@@ -1540,7 +1643,11 @@ fn run_pipeline(
     let stages: Vec<StageDescriptor> = config
         .stages
         .iter()
-        .map(|name| StageDescriptor::new(name.clone()))
+        .map(|stage| {
+            // Use model ID if available, otherwise use stage id
+            let name = stage.model.clone().unwrap_or_else(|| stage.id.clone());
+            StageDescriptor::new(name)
+        })
         .collect();
 
     // Create input envelope - use audio file if provided
@@ -1551,11 +1658,11 @@ fn run_pipeline(
         println!("   Loaded {} bytes", audio_bytes.len());
         Envelope::new(EnvelopeKind::Audio(audio_bytes))
     } else {
-        let kind = match config.input.kind.as_str() {
+        let kind = match config.input.kind.as_deref().unwrap_or("text") {
             "Audio" | "audio" => EnvelopeKind::Audio(vec![]),
             "Text" | "text" => EnvelopeKind::Text(String::new()),
             "Embedding" | "embedding" => EnvelopeKind::Embedding(vec![]),
-            _ => EnvelopeKind::Text(config.input.kind.clone()),
+            other => EnvelopeKind::Text(other.to_string()),
         };
         Envelope::new(kind)
     };
@@ -2318,6 +2425,350 @@ fn handle_cache_command(command: CacheCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+// ============================================================================
+// Pipeline Commands (Prepare, Plan, Fetch)
+// ============================================================================
+
+/// Handle `xybrid prepare <pipeline.yaml>` command
+/// Parses and validates the pipeline configuration.
+fn handle_prepare_command(config_path: &Path) -> Result<()> {
+    println!("📋 Xybrid Pipeline Prepare");
+    println!("{}", "=".repeat(60));
+    println!();
+
+    // Check file exists
+    if !config_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Pipeline config not found: {}",
+            config_path.display()
+        ));
+    }
+
+    println!("📂 Loading: {}", config_path.display());
+    println!();
+
+    // Load and parse configuration
+    let config_content = fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
+
+    let config: PipelineConfig = serde_yaml::from_str(&config_content)
+        .with_context(|| format!("Failed to parse YAML config: {}", config_path.display()))?;
+
+    // Display parsed configuration
+    println!("✅ Pipeline configuration is valid");
+    println!();
+
+    if let Some(name) = &config.name {
+        println!("  Name:     {}", name.cyan().bold());
+    }
+
+    if let Some(registry) = &config.registry {
+        println!("  Registry: {}", registry);
+    }
+
+    println!("  Stages:   {}", config.stages.len());
+    println!();
+
+    // List stages with details
+    println!("📦 Stages:");
+    for (i, stage) in config.stages.iter().enumerate() {
+        let stage_name = if stage.id.is_empty() {
+            stage.model.as_deref().unwrap_or("unnamed")
+        } else {
+            &stage.id
+        };
+
+        println!("  {}. {}", i + 1, stage_name.cyan().bold());
+
+        if let Some(model) = &stage.model {
+            println!("     Model:  {}", model);
+        }
+        if let Some(version) = &stage.version {
+            println!("     Version: {}", version);
+        }
+        if let Some(target) = &stage.target {
+            let target_colored = match target.as_str() {
+                "device" => target.bright_green(),
+                "cloud" => target.bright_blue(),
+                "integration" => target.bright_magenta(),
+                _ => target.white(),
+            };
+            println!("     Target: {}", target_colored);
+        }
+        if let Some(provider) = &stage.provider {
+            println!("     Provider: {}", provider);
+        }
+    }
+
+    println!();
+    println!("{}", "=".repeat(60));
+    println!("✅ Pipeline is ready for execution");
+    println!();
+    println!("Next steps:");
+    println!("  xybrid plan {}   # Show execution plan with model status", config_path.display());
+    println!("  xybrid fetch {}  # Pre-download all models", config_path.display());
+    println!("  xybrid run -c {} # Execute the pipeline", config_path.display());
+
+    Ok(())
+}
+
+/// Handle `xybrid plan <pipeline.yaml>` command
+/// Shows execution plan with model resolution status.
+fn handle_plan_command(config_path: &Path) -> Result<()> {
+    println!();
+
+    // Check file exists
+    if !config_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Pipeline config not found: {}",
+            config_path.display()
+        ));
+    }
+
+    // Load and parse configuration
+    let config_content = fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
+
+    let config: PipelineConfig = serde_yaml::from_str(&config_content)
+        .with_context(|| format!("Failed to parse YAML config: {}", config_path.display()))?;
+
+    // Initialize registry client
+    let client = RegistryClient::from_env()
+        .context("Failed to initialize registry client")?;
+
+    // Display header
+    let pipeline_name = config.name.as_deref().unwrap_or(
+        config_path.file_stem().and_then(|s| s.to_str()).unwrap_or("pipeline")
+    );
+    println!("Pipeline: {}", pipeline_name.cyan().bold());
+    println!("{}", "━".repeat(60));
+    println!();
+
+    let mut total_download_bytes: u64 = 0;
+    let mut requires_network = false;
+    let mut all_cached = true;
+
+    // Process each stage
+    for (i, stage) in config.stages.iter().enumerate() {
+        let stage_name = if stage.id.is_empty() {
+            stage.model.as_deref().unwrap_or("unnamed")
+        } else {
+            &stage.id
+        };
+
+        println!("Stage {}: {}", i + 1, stage_name.cyan().bold());
+
+        // Check target type
+        let target = stage.target.as_deref().unwrap_or("device");
+
+        if target == "integration" {
+            // Integration target - requires network
+            if let Some(provider) = &stage.provider {
+                println!("  Target:   {} ({})", "integration".bright_magenta(), provider);
+            } else {
+                println!("  Target:   {}", "integration".bright_magenta());
+            }
+            println!("  Status:   {} Requires network", "🌐".bright_blue());
+            requires_network = true;
+        } else if let Some(model_id) = &stage.model {
+            // Device/cloud target with model - check registry
+            println!("  Model:    {}", model_id);
+
+            // Try to resolve the model
+            match client.resolve(model_id, None) {
+                Ok(resolved) => {
+                    let size_str = format_size(resolved.size_bytes);
+                    println!("  Variant:  {} ({}, {})",
+                        resolved.file,
+                        size_str.bright_black(),
+                        format!("{}/{}", resolved.format, resolved.quantization).bright_black()
+                    );
+
+                    let target_colored = match target {
+                        "device" => target.bright_green(),
+                        "cloud" => target.bright_blue(),
+                        _ => target.white(),
+                    };
+                    println!("  Target:   {}", target_colored);
+
+                    // Check cache status
+                    match client.is_cached(model_id, None) {
+                        Ok(true) => {
+                            println!("  Status:   {} Cached", "✅".bright_green());
+                        }
+                        Ok(false) => {
+                            println!("  Status:   {} Not cached ({} to download)",
+                                "⬇️".bright_yellow(),
+                                size_str.bright_cyan()
+                            );
+                            total_download_bytes += resolved.size_bytes;
+                            all_cached = false;
+                        }
+                        Err(e) => {
+                            println!("  Status:   {} Cache check failed: {}", "❌".bright_red(), e);
+                            all_cached = false;
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("  Status:   {} Resolution failed: {}", "❌".bright_red(), e);
+                    all_cached = false;
+                }
+            }
+        } else {
+            println!("  Target:   {}", target);
+            println!("  Status:   {} No model specified", "⚠️".bright_yellow());
+        }
+
+        println!();
+    }
+
+    // Summary
+    println!("{}", "━".repeat(60));
+
+    if total_download_bytes > 0 {
+        println!("Total download: {}", format_size(total_download_bytes).bright_cyan());
+    } else if all_cached {
+        println!("Total download: {} (all models cached)", "0 bytes".bright_green());
+    }
+
+    let offline_capable = !requires_network && all_cached;
+    if offline_capable {
+        println!("Offline capable: {}", "Yes".bright_green());
+    } else if requires_network {
+        println!("Offline capable: {} (integration stages require network)", "No".bright_yellow());
+    } else {
+        println!("Offline capable: {} (models need downloading)", "No".bright_yellow());
+    }
+
+    println!();
+
+    if total_download_bytes > 0 {
+        println!("Run `xybrid fetch {}` to pre-download models.", config_path.display());
+    }
+
+    Ok(())
+}
+
+/// Handle `xybrid fetch <pipeline.yaml>` command
+/// Pre-downloads all models required by the pipeline.
+fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> Result<()> {
+    println!();
+
+    // Check file exists
+    if !config_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Pipeline config not found: {}",
+            config_path.display()
+        ));
+    }
+
+    // Load and parse configuration
+    let config_content = fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
+
+    let config: PipelineConfig = serde_yaml::from_str(&config_content)
+        .with_context(|| format!("Failed to parse YAML config: {}", config_path.display()))?;
+
+    // Initialize registry client
+    let client = RegistryClient::from_env()
+        .context("Failed to initialize registry client")?;
+
+    // Display header
+    let pipeline_name = config.name.as_deref().unwrap_or(
+        config_path.file_stem().and_then(|s| s.to_str()).unwrap_or("pipeline")
+    );
+    println!("Fetching models for: {}", pipeline_name.cyan().bold());
+    println!("{}", "━".repeat(60));
+    println!();
+
+    // Collect models to fetch (skip integration targets)
+    let models_to_fetch: Vec<_> = config.stages.iter()
+        .filter(|stage| {
+            let target = stage.target.as_deref().unwrap_or("device");
+            target != "integration" && stage.model.is_some()
+        })
+        .filter_map(|stage| stage.model.as_ref())
+        .collect();
+
+    if models_to_fetch.is_empty() {
+        println!("ℹ️  No device models to fetch in this pipeline.");
+        return Ok(());
+    }
+
+    let mut success_count = 0;
+    let mut skip_count = 0;
+    let mut error_count = 0;
+
+    for model_id in models_to_fetch {
+        // Check if already cached
+        match client.is_cached(model_id, platform) {
+            Ok(true) => {
+                println!("{} {} (cached)", "✅".bright_green(), model_id.cyan());
+                skip_count += 1;
+                continue;
+            }
+            Ok(false) => {
+                // Need to download
+            }
+            Err(e) => {
+                println!("{} {} (cache check failed: {})", "❌".bright_red(), model_id, e);
+                error_count += 1;
+                continue;
+            }
+        }
+
+        // Resolve and show info
+        match client.resolve(model_id, platform) {
+            Ok(resolved) => {
+                let size_str = format_size(resolved.size_bytes);
+                print!("{} {} [{}] ", "⬇️".bright_yellow(), model_id.cyan(), size_str.bright_black());
+                std::io::stdout().flush().ok();
+
+                // Download with inline progress
+                use std::cell::Cell;
+                let last_percent = Cell::new(0u32);
+
+                match client.fetch(model_id, platform, |progress| {
+                    let percent = (progress * 100.0) as u32;
+                    let prev = last_percent.get();
+                    if percent != prev && percent % 10 == 0 {
+                        last_percent.set(percent);
+                        print!("{}%", percent);
+                        if percent < 100 { print!(".."); }
+                        std::io::stdout().flush().ok();
+                    }
+                }) {
+                    Ok(_) => {
+                        println!(" ✓");
+                        success_count += 1;
+                    }
+                    Err(e) => {
+                        println!(" ✗ ({})", e);
+                        error_count += 1;
+                    }
+                }
+            }
+            Err(e) => {
+                println!("{} {} (resolution failed: {})", "❌".bright_red(), model_id, e);
+                error_count += 1;
+            }
+        }
+    }
+
+    println!();
+    println!("{}", "━".repeat(60));
+
+    if error_count == 0 {
+        println!("✅ All models ready ({} downloaded, {} cached)", success_count, skip_count);
+    } else {
+        println!("⚠️  Completed with errors: {} downloaded, {} cached, {} failed",
+            success_count, skip_count, error_count);
+    }
+
+    Ok(())
 }
 
 /// Format parameter count (e.g., 82000000 -> "82M")
