@@ -167,7 +167,8 @@ fn parse_args() -> (Option<String>, PathBuf, bool, bool) {
 /// Searches in multiple locations to support running from different directories
 fn find_config_file() -> Option<PathBuf> {
     let candidates = [
-        PathBuf::from("registry/bundles/bundles.json"), // From project root
+        PathBuf::from("repos/xybrid/registry/bundles/bundles.json"), // From workstation root
+        PathBuf::from("registry/bundles/bundles.json"), // From xybrid repo root
         PathBuf::from("bundles/bundles.json"),          // From registry directory
         PathBuf::from("bundles.json"),                  // From bundles directory
     ];
