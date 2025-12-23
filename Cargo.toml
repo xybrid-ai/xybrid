@@ -5,7 +5,6 @@ members = [
     "cli",
     "sdk",
     "macros",
-    "registry",
 ]
 
 [workspace.package]

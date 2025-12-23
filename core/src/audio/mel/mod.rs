@@ -1,7 +1,15 @@
-//! Mel spectrogram computation.
+//! Mel spectrogram computation - **CANONICAL IMPLEMENTATION**.
 //!
-//! This module provides mel spectrogram computation with support for different
-//! mel scales. The main entry point is [`compute_mel_spectrogram`].
+//! This is the single source of truth for mel spectrogram computation in xybrid.
+//! All other mel spectrogram modules delegate to this implementation.
+//!
+//! ## Quick Reference
+//!
+//! | Use Case | Function/Module |
+//! |----------|-----------------|
+//! | Direct computation | [`compute_mel_spectrogram`] |
+//! | Whisper ASR | [`compute_whisper_mel`] or [`MelConfig::whisper()`] |
+//! | Pipeline preprocessing | [`crate::preprocessing::mel_spectrogram`] |
 //!
 //! ## Architecture
 //!
@@ -24,7 +32,7 @@
 //! ```rust,ignore
 //! use xybrid_core::audio::mel::{compute_mel_spectrogram, MelConfig};
 //!
-//! // Using preset
+//! // Using preset for Whisper
 //! let config = MelConfig::whisper();
 //! let mel = compute_mel_spectrogram(&samples, &config)?;
 //!
@@ -36,6 +44,11 @@
 //! };
 //! let mel = compute_mel_spectrogram(&samples, &config)?;
 //! ```
+//!
+//! ## Deprecated Paths
+//!
+//! The following are deprecated and will be removed:
+//! - `runtime_adapter::mel_spectrogram` - Use this module instead
 
 pub mod common;
 pub mod config;

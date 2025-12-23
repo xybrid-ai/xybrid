@@ -1,13 +1,25 @@
 //! Orchestrator module - Coordinates the execution of hybrid cloud-edge AI inference pipelines.
 //!
-//! The orchestrator is the main entry point that manages the lifecycle of inference requests,
-//! coordinating between the policy engine, routing engine, stream manager, and executor.
+//! The orchestrator is the **highest-level** execution layer that manages the lifecycle of
+//! inference requests, coordinating between the policy engine, routing engine, stream manager,
+//! and executor.
 //!
-//! The orchestrator follows the runtime flow defined in the architecture:
+//! See [`EXECUTION_LAYERS.md`](./EXECUTION_LAYERS.md) for the full architecture.
+//!
+//! ## Responsibility
+//!
+//! The orchestrator handles:
+//! - **Policy evaluation**: Should this request be allowed?
+//! - **Routing decisions**: Local vs edge vs cloud
+//! - **Stream management**: Chunk buffering for real-time audio
+//! - **Telemetry**: Event emission for observability
+//!
+//! ## Runtime Flow
+//!
 //! 1. Receive input envelope
 //! 2. Evaluate policy
 //! 3. Decide route
-//! 4. Execute model
+//! 4. Execute model (delegates to [`Executor`])
 //! 5. Emit telemetry
 //!
 //! The orchestrator supports both batch and streaming execution modes, following the

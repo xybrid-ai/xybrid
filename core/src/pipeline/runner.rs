@@ -425,7 +425,7 @@ impl PipelineRunner {
     fn stage_config_to_descriptor(&self, stage_config: &StageConfig) -> StageDescriptor {
         StageDescriptor {
             name: stage_config.model_identifier(),
-            registry: None, // Registry handling deferred to orchestrator
+            bundle_path: None, // Set by SDK after downloading
             target: Some(stage_config.target.clone()),
             provider: stage_config.provider,
             model: Some(stage_config.model.clone()),

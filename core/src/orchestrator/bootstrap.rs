@@ -144,11 +144,12 @@ impl Orchestrator {
         });
 
         // Initialize executor
-        // Executor now uses RegistryResolver internally, which defaults to registry.xybrid.dev
+        // Note: Model downloading is handled by the SDK's RegistryClient.
+        // The executor works with already-downloaded models via bundle_path.
         let mut executor = Executor::new();
-        
+
         event_bus.publish(OrchestratorEvent::ComponentInitialized {
-            component: "registry_resolver".to_string(),
+            component: "executor".to_string(),
         });
 
         // Register adapters based on configuration

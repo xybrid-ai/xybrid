@@ -1,13 +1,5 @@
-//! Template Executor - Metadata-driven model execution engine.
-//!
-//! This module implements the core execution logic that interprets ModelMetadata
-//! and runs inference without hard-coding model-specific logic.
-//!
-//! The TemplateExecutor handles:
-//! - Preprocessing (mel spectrogram, tokenization, normalization)
-//! - Model execution (single-shot, autoregressive loops, iterative refinement)
-//! - Postprocessing (BPE decoding, argmax, sampling)
-//! - Multi-stage pipelines (encoder → decoder, etc.)
+// Executor implementation - included from mod.rs
+// Types are imported from the parent module
 
 use crate::execution_template::{
     ExecutionMode, ExecutionTemplate, MelScaleType, ModelMetadata, PipelineStage,
@@ -26,7 +18,8 @@ use ort::value::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub type ExecutorResult<T> = Result<T, AdapterError>;
+// Types (ExecutorResult, PreprocessedData, RawOutputs) are defined in types.rs
+// and imported via `pub use types::{...}` in mod.rs before this include!
 
 /// Execute TTS inference with phoneme IDs, voice embedding, and speed
 /// This is a standalone function to avoid borrow issues with the executor
@@ -2050,117 +2043,8 @@ fn parse_present_name_full(name: &str) -> Option<(usize, bool, bool)> {
     Some((layer, is_encoder, is_key))
 }
 
-/// Preprocessed data intermediate representation
-#[derive(Debug, Clone)]
-enum PreprocessedData {
-    AudioBytes(Vec<u8>),
-    AudioSamples(Vec<f32>),  // Decoded PCM audio samples
-    Text(String),
-    Tensor(ArrayD<f32>),
-    TokenIds {
-        ids: Vec<usize>,
-        attention_mask: Vec<usize>,
-        token_type_ids: Vec<usize>,
-        vocab_file: String,
-        original_text: String,
-    },
-    PhonemeIds {
-        ids: Vec<i64>,
-        phonemes: String,
-        original_text: String,
-    },
-}
-
-impl PreprocessedData {
-    /// Check if this is phoneme data (for TTS)
-    fn is_phoneme_ids(&self) -> bool {
-        matches!(self, PreprocessedData::PhonemeIds { .. })
-    }
-
-    /// Get phoneme IDs if this is phoneme data
-    fn as_phoneme_ids(&self) -> Option<&Vec<i64>> {
-        match self {
-            PreprocessedData::PhonemeIds { ids, .. } => Some(ids),
-            _ => None,
-        }
-    }
-}
-
-impl PreprocessedData {
-    fn from_envelope(envelope: &Envelope) -> ExecutorResult<Self> {
-        match &envelope.kind {
-            EnvelopeKind::Audio(bytes) => Ok(PreprocessedData::AudioBytes(bytes.clone())),
-            EnvelopeKind::Text(text) => Ok(PreprocessedData::Text(text.clone())),
-            EnvelopeKind::Embedding(floats) => {
-                // Convert embedding Vec<f32> to tensor
-                let tensor = ArrayD::from_shape_vec(IxDyn(&[floats.len()]), floats.clone())
-                    .map_err(|e| AdapterError::InvalidInput(format!("Failed to create tensor: {:?}", e)))?;
-                Ok(PreprocessedData::Tensor(tensor))
-            }
-        }
-    }
-
-    fn to_tensor(&self) -> ExecutorResult<ArrayD<f32>> {
-        match self {
-            PreprocessedData::Tensor(t) => Ok(t.clone()),
-            PreprocessedData::AudioSamples(samples) => {
-                // Convert audio samples to tensor [batch, samples]
-                let batch_size = 1;
-                let num_samples = samples.len();
-                let tensor = ArrayD::from_shape_vec(
-                    IxDyn(&[batch_size, num_samples]),
-                    samples.clone()
-                ).map_err(|e| {
-                    AdapterError::InvalidInput(format!("Failed to create audio tensor: {:?}", e))
-                })?;
-                Ok(tensor)
-            }
-            _ => Err(AdapterError::InvalidInput(
-                "Cannot convert to tensor".to_string(),
-            )),
-        }
-    }
-}
-
-/// Raw outputs from model execution
-#[derive(Debug, Clone)]
-enum RawOutputs {
-    TensorMap(HashMap<String, ArrayD<f32>>),
-    TokenIds(Vec<usize>),
-    Text(String),
-    ClassId(usize),
-    AudioBytes(Vec<u8>),
-}
-
-impl RawOutputs {
-    fn to_envelope(&self) -> ExecutorResult<Envelope> {
-        match self {
-            RawOutputs::Text(text) => Ok(Envelope::new(EnvelopeKind::Text(text.clone()))),
-            RawOutputs::ClassId(id) => Ok(Envelope::new(EnvelopeKind::Text(format!("Class: {}", id)))),
-            RawOutputs::TensorMap(map) => {
-                // Convert first tensor to embedding Vec<f32>
-                let tensor = map
-                    .values()
-                    .next()
-                    .ok_or_else(|| AdapterError::InvalidInput("No outputs".to_string()))?;
-
-                let data = tensor
-                    .as_slice()
-                    .ok_or_else(|| AdapterError::InvalidInput("Tensor not contiguous".to_string()))?;
-
-                Ok(Envelope::new(EnvelopeKind::Embedding(data.to_vec())))
-            }
-            RawOutputs::TokenIds(ids) => {
-                // Convert token IDs to text representation
-                Ok(Envelope::new(EnvelopeKind::Text(format!("{:?}", ids))))
-            }
-            RawOutputs::AudioBytes(bytes) => {
-                // Return audio bytes directly
-                Ok(Envelope::new(EnvelopeKind::Audio(bytes.clone())))
-            }
-        }
-    }
-}
+// PreprocessedData and RawOutputs types are defined in types.rs
+// and imported via `use super::{...}` at the top of this file
 
 // ============================================================================
 // Preprocessing Step Functions

@@ -1,16 +1,26 @@
 //! Executor module - Executes model inference stages using runtime adapters.
 //!
-//! The Executor maintains a registry of runtime adapters and delegates inference
-//! execution to the appropriate adapter based on the target (local, edge, or cloud).
+//! The Executor is the **mid-level** execution layer that maintains a registry of runtime
+//! adapters and delegates inference execution to the appropriate adapter based on the target.
 //!
-//! The executor coordinates between the orchestrator and runtime adapters, handling
-//! adapter selection, model loading, and metadata collection.
+//! See [`EXECUTION_LAYERS.md`](./EXECUTION_LAYERS.md) for the full architecture.
+//!
+//! ## Responsibility
+//!
+//! The executor handles:
+//! - **Adapter registry**: Maintain available runtime adapters
+//! - **Target selection**: Choose adapter based on execution target
+//! - **Model loading**: Load models from .xyb bundles (already downloaded)
+//! - **LLM integration**: Handle cloud API calls (OpenAI, Anthropic)
+//!
+//! Note: Model downloading is NOT the executor's responsibility. Models should be
+//! downloaded via the SDK's `RegistryClient` before invoking the executor.
 //!
 //! ## Cross-Layer Execution
 //!
 //! The executor supports cross-layer pipelines where different stages run on different targets:
-//! - **Device/Local**: On-device inference using .xyb bundles
-//! - **Integration**: Third-party API calls (OpenAI, Anthropic, etc.) via LlmClient
+//! - **Device/Local**: On-device inference using .xyb bundles (delegates to [`TemplateExecutor`])
+//! - **Integration**: Third-party API calls (OpenAI, Anthropic, etc.) via [`Llm`]
 //! - **Cloud/Server**: Xybrid-hosted inference (future)
 
 use crate::bundler::{BundleManifest, XyBundle};
@@ -18,10 +28,7 @@ use crate::context::StageDescriptor;
 use crate::llm::{Llm, LlmConfig, LlmBackend, CompletionRequest};
 use crate::execution_template::ModelMetadata;
 use crate::ir::{Envelope, EnvelopeKind};
-use crate::registry_config::RegistryConfig;
-use crate::registry_resolver::RegistryResolver;
 use crate::runtime_adapter::{AdapterError, RuntimeAdapter};
-use crate::stage_resolver::parse_stage_name;
 use crate::template_executor::TemplateExecutor;
 use crate::tracing as trace;
 use std::collections::HashMap;
@@ -74,6 +81,9 @@ pub struct StageMetadata {
 /// The executor maintains a registry of runtime adapters and selects the
 /// appropriate adapter based on the target. It handles model loading,
 /// inference execution, and metadata collection.
+///
+/// **Note**: The executor works with already-downloaded models. Model downloading
+/// is handled by the SDK's `RegistryClient` before invoking the executor.
 pub struct Executor {
     /// Registry of runtime adapters by name
     adapters: HashMap<String, Arc<dyn RuntimeAdapter>>,
@@ -83,10 +93,6 @@ pub struct Executor {
     default_cloud_adapter: Option<String>,
     /// Temporary directory for mock model files (demo only)
     _mock_models_dir: Option<TempDir>,
-    /// Registry resolver for hierarchical registry resolution
-    registry_resolver: RegistryResolver,
-    /// Pipeline-level registry config (optional, set per pipeline)
-    pipeline_registry: Option<RegistryConfig>,
     /// Temporary directory for extracted bundles
     _extracted_bundles_dir: Option<TempDir>,
 }
@@ -98,8 +104,6 @@ impl Clone for Executor {
             default_local_adapter: self.default_local_adapter.clone(),
             default_cloud_adapter: self.default_cloud_adapter.clone(),
             _mock_models_dir: None, // Don't clone temp dir
-            registry_resolver: RegistryResolver::default(), // Clone resolver (it's cheap)
-            pipeline_registry: self.pipeline_registry.clone(),
             _extracted_bundles_dir: None, // Don't clone temp dir
         }
     }
@@ -113,144 +117,40 @@ impl Executor {
             default_local_adapter: None,
             default_cloud_adapter: None,
             _mock_models_dir: None,
-            registry_resolver: RegistryResolver::default(),
-            pipeline_registry: None,
             _extracted_bundles_dir: None,
         }
     }
 
-    /// Sets the pipeline-level registry configuration.
+    /// Resolves a stage to a model file path.
     ///
-    /// This registry will be used for all stages unless overridden by stage-level registry.
+    /// If the stage has a bundle_path set, extracts and uses that bundle.
+    /// Otherwise, falls back to mock model creation (for demo/testing).
     ///
-    /// # Arguments
-    ///
-    /// * `registry_config` - The pipeline-level registry configuration
-    pub fn set_pipeline_registry(&mut self, registry_config: RegistryConfig) {
-        self.pipeline_registry = Some(registry_config);
-    }
-
-    /// Resolves a stage name to a bundle path via registry, or falls back to mock.
-    ///
-    /// # Arguments
-    ///
-    /// * `stage_name` - Stage name (e.g., "whisper-tiny@1.2")
-    /// * `stage_registry` - Optional stage-level registry config
-    ///
-    /// # Returns
-    ///
-    /// Path to bundle file (.xyb) or mock model file
-    fn resolve_stage_to_bundle(
-        &self,
-        stage_name: &str,
-        stage_registry: Option<&RegistryConfig>,
-    ) -> ExecutorResult<PathBuf> {
-        let (model_id, version) = parse_stage_name(stage_name);
-
-        // Resolve registry using hierarchical fallback chain
-        let registry = self.registry_resolver.resolve_registry(
-            stage_registry,
-            self.pipeline_registry.as_ref(),
-        );
-
-        // First, try to get bundle bytes to ensure it's downloaded and cached
-        // This is necessary for remote registries where get_metadata() would return
-        // a remote URL instead of a local cached path
-        match registry.get_bundle(&model_id, version.as_deref()) {
-            Ok(bundle_bytes) => {
-                // Bundle was successfully fetched (either from cache or downloaded)
-                // Now get metadata which should return the local cached path
-                match registry.get_metadata(&model_id, version.as_deref()) {
-                    Ok(metadata) => {
-                        let bundle_path = PathBuf::from(&metadata.path);
-
-                        // Check if path exists locally (for local registries or cached remote)
-                        if bundle_path.exists() {
-                            return Ok(bundle_path);
-                        }
-
-                        // If metadata path doesn't exist (still remote URL), write bytes to temp file
-                        // This handles the case where remote registry returns remote URL even after caching
-                        if !bundle_path.exists() && !bundle_bytes.is_empty() {
-                            return self.write_bundle_to_temp_file(&model_id, version.as_deref(), &bundle_bytes);
-                        }
-
-                        return Ok(bundle_path);
-                    }
-                    Err(_) => {
-                        // Metadata not available, but we have bytes - write to temp file
-                        if !bundle_bytes.is_empty() {
-                            return self.write_bundle_to_temp_file(&model_id, version.as_deref(), &bundle_bytes);
-                        }
-                    }
-                }
-            }
-            Err(_) => {
-                // Bundle not found in registry, fall through to mock fallback
-            }
-        }
-
-        // Fallback: return error to indicate mock should be used
-        // We'll handle this in resolve_stage_to_model_path
-        Err(ExecutorError::Other(format!(
-            "Bundle not found for stage: {}",
-            stage_name
-        )))
-    }
-
-    /// Writes bundle bytes to a temporary file and returns the path.
-    fn write_bundle_to_temp_file(
-        &self,
-        model_id: &str,
-        version: Option<&str>,
-        bundle_bytes: &[u8],
-    ) -> ExecutorResult<PathBuf> {
-        // Use the extracted bundles temp dir or create one
-        let temp_dir = std::env::temp_dir().join("xybrid_bundles");
-        fs::create_dir_all(&temp_dir).map_err(|e| {
-            ExecutorError::Other(format!("Failed to create temp bundle dir: {}", e))
-        })?;
-
-        let version_str = version.unwrap_or("latest");
-        let bundle_filename = format!("{}-{}.xyb", model_id, version_str);
-        let bundle_path = temp_dir.join(&bundle_filename);
-
-        // Write bundle bytes to file
-        fs::write(&bundle_path, bundle_bytes).map_err(|e| {
-            ExecutorError::Other(format!("Failed to write bundle to temp file: {}", e))
-        })?;
-
-        Ok(bundle_path)
-    }
-
-    /// Resolves a stage name to a model file path.
-    ///
-    /// First tries to resolve via registry and extract bundle, then falls back to mock model creation.
+    /// **Note**: Model downloading is handled by the SDK's `RegistryClient`.
+    /// The executor expects models to already be downloaded.
     fn resolve_stage_to_model_path(
         &mut self,
         stage: &StageDescriptor,
         adapter_name: &str,
     ) -> ExecutorResult<PathBuf> {
-        // Try to resolve via registry first
-        match self.resolve_stage_to_bundle(&stage.name, stage.registry.as_ref()) {
-            Ok(bundle_path) => {
+        // Check if stage has a bundle_path (set by SDK after downloading)
+        if let Some(bundle_path) = &stage.bundle_path {
+            let path = PathBuf::from(bundle_path);
+            if path.exists() {
                 // Check if it's a bundle file (.xyb) or direct model file
-                if bundle_path.extension().and_then(|s| s.to_str()) == Some("xyb")
-                    || bundle_path.extension().and_then(|s| s.to_str()) == Some("bundle")
+                if path.extension().and_then(|s| s.to_str()) == Some("xyb")
+                    || path.extension().and_then(|s| s.to_str()) == Some("bundle")
                 {
                     // Extract bundle and get model path
-                    return self.extract_bundle_and_get_model_path(&bundle_path, adapter_name);
+                    return self.extract_bundle_and_get_model_path(&path, adapter_name);
                 } else {
                     // Direct model file path (not a bundle)
-                    return Ok(bundle_path);
+                    return Ok(path);
                 }
-            }
-            Err(_) => {
-                // Bundle not found, fall through to mock creation
             }
         }
 
-        // Fallback: Create mock model file
+        // Fallback: Create mock model file (for demo/testing)
         self.resolve_stage_to_model_path_mock(&stage.name, adapter_name)
     }
 
@@ -616,30 +516,33 @@ impl Executor {
             return Ok((output, metadata));
         }
 
-        // Try to resolve via registry and check for metadata-driven execution
-        if let Ok(bundle_path) = self.resolve_stage_to_bundle(&stage.name, stage.registry.as_ref()) {
-            let ext = bundle_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            if ext == "xyb" || ext == "bundle" {
-                // Extract bundle and check for model_metadata.json
-                if let Ok((extract_dir, Some(model_metadata))) = self.extract_bundle_with_metadata(&bundle_path) {
-                    // Use TemplateExecutor for metadata-driven inference
-                    let base_path = extract_dir.to_str().ok_or_else(|| {
-                        ExecutorError::Other("Invalid extract dir path".to_string())
-                    })?;
+        // Try bundle_path for metadata-driven execution (bundles are pre-downloaded by SDK)
+        if let Some(bundle_path_str) = &stage.bundle_path {
+            let bundle_path = PathBuf::from(bundle_path_str);
+            if bundle_path.exists() {
+                let ext = bundle_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                if ext == "xyb" || ext == "bundle" {
+                    // Extract bundle and check for model_metadata.json
+                    if let Ok((extract_dir, Some(model_metadata))) = self.extract_bundle_with_metadata(&bundle_path) {
+                        // Use TemplateExecutor for metadata-driven inference
+                        let base_path = extract_dir.to_str().ok_or_else(|| {
+                            ExecutorError::Other("Invalid extract dir path".to_string())
+                        })?;
 
-                    let mut template_executor = TemplateExecutor::with_base_path(base_path);
+                        let mut template_executor = TemplateExecutor::with_base_path(base_path);
 
-                    let output = template_executor.execute(&model_metadata, input)
-                        .map_err(|e| ExecutorError::AdapterError(e))?;
+                        let output = template_executor.execute(&model_metadata, input)
+                            .map_err(|e| ExecutorError::AdapterError(e))?;
 
-                    let latency_ms = start_time.elapsed().as_millis();
-                    let metadata = StageMetadata {
-                        adapter: "template-executor".to_string(),
-                        target: target.to_string(),
-                        latency_ms,
-                    };
+                        let latency_ms = start_time.elapsed().as_millis();
+                        let metadata = StageMetadata {
+                            adapter: "template-executor".to_string(),
+                            target: target.to_string(),
+                            latency_ms,
+                        };
 
-                    return Ok((output, metadata));
+                        return Ok((output, metadata));
+                    }
                 }
             }
         }
