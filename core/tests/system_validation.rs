@@ -2,7 +2,6 @@
 //!
 //! This test suite validates end-to-end integration of core system components:
 //! - DeviceAdapter metrics collection
-//! - LocalRegistry bundle storage and retrieval
 //! - SDK pipeline execution
 //! - CLI policy loading
 //! - Trace command telemetry analysis
@@ -14,7 +13,6 @@ use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
-use xybrid_core::registry::{LocalRegistry, Registry};
 use xybrid_sdk::run_pipeline;
 
 /// Test 1: DeviceAdapter::collect_metrics() returns realistic DeviceMetrics values
@@ -48,64 +46,10 @@ fn test_device_adapter_metrics() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Test 2: LocalRegistry can publish() and fetch() a dummy model bundle file
-#[test]
-fn test_registry_store_and_fetch() -> Result<(), Box<dyn std::error::Error>> {
-    println!("📦 Test 2: LocalRegistry store and fetch");
-    println!("{}", "=".repeat(60));
-
-    // Create a temporary directory for the registry
-    let temp_dir = TempDir::new()?;
-    let registry_path = temp_dir.path().join("test_registry");
-
-    println!("   Creating registry at: {}", registry_path.display());
-    let mut registry = LocalRegistry::new(&registry_path)?;
-
-    // Create a dummy model bundle
-    let bundle_id = "test-model";
-    let bundle_version = "1.0.0";
-    let bundle_data = b"dummy model bundle data for testing purposes".to_vec();
-
-    println!("   Storing bundle: {} v{}", bundle_id, bundle_version);
-
-    // Store the bundle
-    let metadata = registry.store_bundle(bundle_id, bundle_version, bundle_data.clone())?;
-
-    println!("   Stored: {} bytes", metadata.size_bytes);
-    assert_eq!(metadata.id, bundle_id);
-    assert_eq!(metadata.version, bundle_version);
-    assert!(metadata.size_bytes > 0);
-
-    // Fetch the bundle
-    println!("   Fetching bundle: {} v{}", bundle_id, bundle_version);
-    let retrieved = registry.get_bundle(bundle_id, Some(bundle_version))?;
-
-    println!("   Retrieved: {} bytes", retrieved.len());
-    assert_eq!(
-        retrieved, bundle_data,
-        "Retrieved bundle should match stored bundle"
-    );
-
-    // Test fetching latest version
-    println!("   Fetching latest version");
-    let latest = registry.get_bundle(bundle_id, None)?;
-    assert_eq!(latest, bundle_data, "Latest version should match");
-
-    // Test listing bundles
-    println!("   Listing all bundles");
-    let bundles = registry.list_bundles()?;
-    assert_eq!(bundles.len(), 1);
-    assert_eq!(bundles[0].id, bundle_id);
-
-    println!("   ✅ Registry store and fetch successful");
-    println!();
-    Ok(())
-}
-
-/// Test 3: xybrid_sdk::run_pipeline() executes successfully and returns 3 stage results
+/// Test 2: xybrid_sdk::run_pipeline() executes successfully and returns 3 stage results
 #[test]
 fn test_sdk_pipeline_execution() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🚀 Test 3: SDK pipeline execution");
+    println!("🚀 Test 2: SDK pipeline execution");
     println!("{}", "=".repeat(60));
 
     // Create a test pipeline config
@@ -176,10 +120,10 @@ availability:
     Ok(())
 }
 
-/// Test 4: xybrid-cli supports --policy <path> by loading a mock policy file
+/// Test 3: xybrid-cli supports --policy <path> by loading a mock policy file
 #[test]
 fn test_cli_policy_loading() -> Result<(), Box<dyn std::error::Error>> {
-    println!("📜 Test 4: CLI policy loading");
+    println!("📜 Test 3: CLI policy loading");
     println!("{}", "=".repeat(60));
 
     // Create a mock policy file
@@ -272,10 +216,10 @@ availability:
     Ok(())
 }
 
-/// Test 5: xybrid trace --latest reads from ~/.xybrid/traces/ and prints telemetry summary
+/// Test 4: xybrid trace --latest reads from ~/.xybrid/traces/ and prints telemetry summary
 #[test]
 fn test_trace_latest_command() -> Result<(), Box<dyn std::error::Error>> {
-    println!("📊 Test 5: Trace command with --latest");
+    println!("📊 Test 4: Trace command with --latest");
     println!("{}", "=".repeat(60));
 
     // Get the CLI binary path

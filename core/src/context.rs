@@ -7,7 +7,6 @@
 
 pub use crate::ir::{Envelope, EnvelopeKind};
 use crate::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
-use crate::registry_config::RegistryConfig;
 
 /// Live device metrics (network, battery, temperature, etc.).
 #[derive(Debug, Clone)]
@@ -22,9 +21,9 @@ pub struct DeviceMetrics {
 #[derive(Debug, Clone)]
 pub struct StageDescriptor {
     pub name: String,
-    /// Optional stage-level registry configuration.
-    /// If specified, this registry takes precedence over pipeline/project/default registries.
-    pub registry: Option<RegistryConfig>,
+    /// Path to the downloaded bundle file (.xyb).
+    /// Set by the SDK's `RegistryClient` after downloading the model.
+    pub bundle_path: Option<String>,
     /// Execution target (device, server, integration, auto).
     /// If None, defaults to device/local execution.
     pub target: Option<ExecutionTarget>,
@@ -42,12 +41,18 @@ impl StageDescriptor {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            registry: None,
+            bundle_path: None,
             target: None,
             provider: None,
             model: None,
             options: None,
         }
+    }
+
+    /// Set the bundle path (path to downloaded .xyb file).
+    pub fn with_bundle_path(mut self, path: impl Into<String>) -> Self {
+        self.bundle_path = Some(path.into());
+        self
     }
 
     /// Set the execution target.
