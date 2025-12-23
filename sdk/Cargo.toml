@@ -21,6 +21,7 @@ tempfile = "3.10"
 ureq = "2.9"
 uuid = { version = "1.0", features = ["v4", "v5", "serde"] }
 dirs = "5.0"
+sha2 = "0.10"
 
 # Re-export the macro
 [package.metadata.docs.rs]

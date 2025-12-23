@@ -29,6 +29,7 @@ use xybrid_core::registry_remote::HttpRemoteRegistry;
 use xybrid_core::routing_engine::{LocalAvailability, RoutingEngine};
 use xybrid_core::target::{Platform, TargetResolver};
 use xybrid_core::template_executor::TemplateExecutor;
+use xybrid_sdk::registry_client::RegistryClient;
 
 /// Xybrid CLI - Hybrid Cloud-Edge AI Inference Pipeline Runner
 #[derive(Parser)]
@@ -53,6 +54,26 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Manage models from the registry
+    Models {
+        #[command(subcommand)]
+        command: ModelsCommand,
+    },
+    /// Pre-download a model from the registry
+    Fetch {
+        /// Model ID to fetch (e.g., "kokoro-82m")
+        #[arg(short, long, value_name = "ID")]
+        model: String,
+
+        /// Target platform (auto-detected if not specified)
+        #[arg(short, long, value_name = "PLATFORM")]
+        platform: Option<String>,
+    },
+    /// Manage the local model cache
+    Cache {
+        #[command(subcommand)]
+        command: CacheCommand,
+    },
     /// Run a pipeline from a configuration file or predefined pipeline name
     Run {
         /// Path to the pipeline configuration file (YAML)
@@ -162,6 +183,40 @@ enum Commands {
     },
 }
 
+/// Subcommands for `xybrid models`
+#[derive(Subcommand)]
+enum ModelsCommand {
+    /// List all available models in the registry
+    List,
+    /// Search for models by name or task
+    Search {
+        /// Search query (matches model ID, family, task, or description)
+        #[arg(value_name = "QUERY")]
+        query: String,
+    },
+    /// Show details about a specific model
+    Info {
+        /// Model ID (e.g., "kokoro-82m")
+        #[arg(value_name = "ID")]
+        model_id: String,
+    },
+}
+
+/// Subcommands for `xybrid cache`
+#[derive(Subcommand)]
+enum CacheCommand {
+    /// List all cached models
+    List,
+    /// Show cache statistics
+    Status,
+    /// Clear cached models
+    Clear {
+        /// Model ID to clear (clears all if not specified)
+        #[arg(value_name = "ID")]
+        model_id: Option<String>,
+    },
+}
+
 /// Pipeline configuration loaded from YAML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PipelineConfig {
@@ -249,6 +304,9 @@ fn init_telemetry(cli: &Cli) -> bool {
 
 fn run_command(cli: Cli) -> Result<()> {
     match cli.command {
+        Commands::Models { command } => handle_models_command(command),
+        Commands::Fetch { model, platform } => handle_fetch_command(&model, platform.as_deref()),
+        Commands::Cache { command } => handle_cache_command(command),
         Commands::Run {
             config,
             pipeline,
@@ -1933,4 +1991,374 @@ fn run_bundle(
     }
 
     Ok(())
+}
+
+// ============================================================================
+// Models Command Handlers
+// ============================================================================
+
+/// Handle `xybrid models` subcommands
+fn handle_models_command(command: ModelsCommand) -> Result<()> {
+    let client = RegistryClient::from_env()
+        .context("Failed to initialize registry client")?;
+
+    match command {
+        ModelsCommand::List => {
+            println!("📦 Xybrid Model Registry");
+            println!("{}", "=".repeat(60));
+            println!();
+
+            let models = client.list_models()
+                .context("Failed to list models from registry")?;
+
+            if models.is_empty() {
+                println!("ℹ️  No models found in registry.");
+                return Ok(());
+            }
+
+            // Group by task
+            use std::collections::BTreeMap;
+            let mut by_task: BTreeMap<String, Vec<_>> = BTreeMap::new();
+            for model in &models {
+                by_task.entry(model.task.clone()).or_default().push(model);
+            }
+
+            for (task, task_models) in by_task {
+                println!("{}", format!("📁 {}", task.to_uppercase()).cyan().bold());
+                println!();
+
+                for model in task_models {
+                    let params_str = format_params(model.parameters);
+                    println!("  {} {}", "•".bright_cyan(), model.id.cyan().bold());
+                    println!("    {} {} | {} params",
+                        model.family.bright_black(),
+                        "|".bright_black(),
+                        params_str.bright_black()
+                    );
+                    println!("    {}", model.description.bright_black());
+                    if !model.variants.is_empty() {
+                        println!("    Variants: {}", model.variants.join(", ").bright_green());
+                    }
+                    println!();
+                }
+            }
+
+            println!("{}", "=".repeat(60));
+            println!("Total: {} models", models.len());
+
+            Ok(())
+        }
+        ModelsCommand::Search { query } => {
+            println!("🔍 Searching for: {}", query.cyan().bold());
+            println!("{}", "=".repeat(60));
+            println!();
+
+            let models = client.list_models()
+                .context("Failed to list models from registry")?;
+
+            let query_lower = query.to_lowercase();
+            let matches: Vec<_> = models.iter()
+                .filter(|m| {
+                    m.id.to_lowercase().contains(&query_lower) ||
+                    m.family.to_lowercase().contains(&query_lower) ||
+                    m.task.to_lowercase().contains(&query_lower) ||
+                    m.description.to_lowercase().contains(&query_lower)
+                })
+                .collect();
+
+            if matches.is_empty() {
+                println!("ℹ️  No models found matching '{}'", query);
+                return Ok(());
+            }
+
+            for model in matches.iter() {
+                let params_str = format_params(model.parameters);
+                println!("  {} {}", "•".bright_cyan(), model.id.cyan().bold());
+                println!("    {} | {} | {} params",
+                    model.task.bright_magenta(),
+                    model.family.bright_black(),
+                    params_str.bright_black()
+                );
+                println!("    {}", model.description.bright_black());
+                println!();
+            }
+
+            println!("{}", "=".repeat(60));
+            println!("Found: {} models", matches.len());
+
+            Ok(())
+        }
+        ModelsCommand::Info { model_id } => {
+            println!("📋 Model Details: {}", model_id.cyan().bold());
+            println!("{}", "=".repeat(60));
+            println!();
+
+            let model = client.get_model(&model_id)
+                .context(format!("Failed to get model '{}'", model_id))?;
+
+            println!("  ID:          {}", model.id.cyan().bold());
+            println!("  Family:      {}", model.family);
+            println!("  Task:        {}", model.task.bright_magenta());
+            println!("  Parameters:  {}", format_params(model.parameters));
+            println!("  Description: {}", model.description);
+            println!();
+
+            if let Some(default) = &model.default_variant {
+                println!("  Default Variant: {}", default.bright_green());
+            }
+
+            if !model.variants.is_empty() {
+                println!();
+                println!("  {} Variants:", "📦".bright_cyan());
+                for (name, info) in &model.variants {
+                    let size_str = format_size(info.size_bytes);
+                    println!("    {} {} ({}, {})",
+                        "•".bright_cyan(),
+                        name.bright_green(),
+                        info.platform,
+                        size_str.bright_black()
+                    );
+                    println!("      Format: {} | Quantization: {}",
+                        info.format.bright_blue(),
+                        info.quantization.bright_yellow()
+                    );
+                }
+            }
+
+            println!();
+            println!("{}", "=".repeat(60));
+
+            Ok(())
+        }
+    }
+}
+
+/// Handle `xybrid fetch` command
+fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Result<()> {
+    println!("📥 Fetching model: {}", model_id.cyan().bold());
+    if let Some(p) = platform {
+        println!("   Platform: {}", p);
+    } else {
+        println!("   Platform: auto-detect");
+    }
+    println!("{}", "=".repeat(60));
+    println!();
+
+    let client = RegistryClient::from_env()
+        .context("Failed to initialize registry client")?;
+
+    // First resolve to show what we're downloading
+    let resolved = client.resolve(model_id, platform)
+        .context(format!("Failed to resolve model '{}'", model_id))?;
+
+    println!("📦 Resolved variant:");
+    println!("   Repository: {}", resolved.hf_repo);
+    println!("   File: {}", resolved.file);
+    println!("   Size: {}", format_size(resolved.size_bytes).bright_cyan());
+    println!("   Format: {} ({})", resolved.format, resolved.quantization);
+    println!();
+
+    // Check if already cached
+    if client.is_cached(model_id, platform)
+        .context("Failed to check cache status")? {
+        println!("✅ Model is already cached and verified");
+        let cache_path = client.get_cache_path(&resolved);
+        println!("   Location: {}", cache_path.display());
+        return Ok(());
+    }
+
+    // Download with progress bar
+    println!("⬇️  Downloading...");
+    println!();
+
+    // Use Cell for interior mutability in closure
+    use std::cell::Cell;
+    let last_percent = Cell::new(0u32);
+    let bar_width = 40;
+
+    let bundle_path = client.fetch(model_id, platform, |progress| {
+        let percent = (progress * 100.0) as u32;
+        let prev = last_percent.get();
+
+        // Only update if percentage changed
+        if percent != prev {
+            last_percent.set(percent);
+
+            // Calculate filled portion
+            let filled = (bar_width * percent / 100) as usize;
+            let empty = bar_width as usize - filled;
+
+            // Build progress bar: [████████████░░░░░░░░] 45%
+            let bar = format!(
+                "\r   [{}{}] {:>3}%",
+                "█".repeat(filled),
+                "░".repeat(empty),
+                percent
+            );
+            print!("{}", bar);
+            std::io::stdout().flush().ok();
+        }
+    }).context(format!("Failed to fetch model '{}'", model_id))?;
+
+    println!();
+    println!();
+    println!("✅ Model downloaded successfully!");
+    println!("   Location: {}", bundle_path.display());
+    println!();
+    println!("{}", "=".repeat(60));
+
+    Ok(())
+}
+
+/// Handle `xybrid cache` subcommands
+fn handle_cache_command(command: CacheCommand) -> Result<()> {
+    let mut client = RegistryClient::from_env()
+        .context("Failed to initialize registry client")?;
+
+    match command {
+        CacheCommand::List => {
+            println!("📦 Xybrid Model Cache");
+            println!("{}", "=".repeat(60));
+            println!();
+
+            let stats = client.cache_stats()
+                .context("Failed to get cache stats")?;
+
+            println!("📂 Cache directory: {}", stats.cache_path.display());
+            println!();
+
+            if stats.model_count == 0 {
+                println!("ℹ️  Cache is empty.");
+                println!("   Use 'xybrid fetch --model <id>' to download models.");
+                return Ok(());
+            }
+
+            // List cached models
+            if stats.cache_path.exists() {
+                for entry in fs::read_dir(&stats.cache_path)? {
+                    let entry = entry?;
+                    if entry.path().is_dir() {
+                        let model_name = entry.file_name();
+                        let model_name = model_name.to_string_lossy();
+
+                        // Get size of this model's cache
+                        let model_size = dir_size_bytes(&entry.path()).unwrap_or(0);
+                        let size_str = format_size(model_size);
+
+                        println!("  {} {} ({})",
+                            "•".bright_cyan(),
+                            model_name.cyan().bold(),
+                            size_str.bright_black()
+                        );
+                    }
+                }
+            }
+
+            println!();
+            println!("{}", "=".repeat(60));
+            println!("Total: {} models, {}", stats.model_count, stats.total_size_human());
+
+            Ok(())
+        }
+        CacheCommand::Status => {
+            println!("📊 Xybrid Cache Status");
+            println!("{}", "=".repeat(60));
+            println!();
+
+            let stats = client.cache_stats()
+                .context("Failed to get cache stats")?;
+
+            println!("  Cache Directory: {}", stats.cache_path.display());
+            println!("  Cached Models:   {}", stats.model_count);
+            println!("  Total Size:      {}", stats.total_size_human().bright_cyan());
+
+            // Check if directory exists
+            if !stats.cache_path.exists() {
+                println!();
+                println!("  ℹ️  Cache directory does not exist yet.");
+                println!("     It will be created when you download your first model.");
+            }
+
+            println!();
+            println!("{}", "=".repeat(60));
+
+            Ok(())
+        }
+        CacheCommand::Clear { model_id } => {
+            if let Some(id) = model_id {
+                println!("🗑️  Clearing cache for: {}", id.cyan().bold());
+                println!("{}", "=".repeat(60));
+                println!();
+
+                client.clear_cache(&id)
+                    .context(format!("Failed to clear cache for '{}'", id))?;
+
+                println!("✅ Cache cleared for model '{}'", id);
+            } else {
+                println!("🗑️  Clearing entire model cache");
+                println!("{}", "=".repeat(60));
+                println!();
+
+                // Confirm dangerous operation
+                println!("⚠️  This will delete ALL cached models.");
+                println!("   Press Enter to continue or Ctrl+C to cancel...");
+
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input).ok();
+
+                client.clear_all_cache()
+                    .context("Failed to clear cache")?;
+
+                println!("✅ All cached models cleared");
+            }
+
+            println!();
+            println!("{}", "=".repeat(60));
+
+            Ok(())
+        }
+    }
+}
+
+/// Format parameter count (e.g., 82000000 -> "82M")
+fn format_params(params: u64) -> String {
+    if params >= 1_000_000_000 {
+        format!("{:.1}B", params as f64 / 1_000_000_000.0)
+    } else if params >= 1_000_000 {
+        format!("{:.0}M", params as f64 / 1_000_000.0)
+    } else if params >= 1_000 {
+        format!("{:.0}K", params as f64 / 1_000.0)
+    } else {
+        format!("{}", params)
+    }
+}
+
+/// Format size in bytes to human-readable (e.g., 1048576 -> "1.0 MB")
+fn format_size(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 {
+        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
+    } else if bytes >= 1_000_000 {
+        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes >= 1_000 {
+        format!("{:.1} KB", bytes as f64 / 1_000.0)
+    } else {
+        format!("{} bytes", bytes)
+    }
+}
+
+/// Calculate directory size in bytes
+fn dir_size_bytes(path: &Path) -> Result<u64> {
+    let mut total: u64 = 0;
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let metadata = entry.metadata()?;
+            if metadata.is_file() {
+                total += metadata.len();
+            } else if metadata.is_dir() {
+                total += dir_size_bytes(&entry.path())?;
+            }
+        }
+    }
+    Ok(total)
 }

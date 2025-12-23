@@ -75,6 +75,7 @@ use xybrid_core::routing_engine::LocalAvailability;
 pub mod cache;
 pub mod model;
 pub mod pipeline;
+pub mod registry_client;
 pub mod result;
 pub mod source;
 pub mod stream;
@@ -97,6 +98,7 @@ pub use xybrid_core::template_executor;
 pub use cache::{CacheManager, CacheStatus};
 pub use model::{ModelLoader, SdkResult, StreamConfig, XybridModel};
 pub use model::SdkError;
+pub use registry_client::{RegistryClient, ModelSummary, ResolvedVariant, CacheStats};
 pub use pipeline::{PipelineExecutionResult, PipelineInputType, PipelineLoader, XybridPipeline};
 pub use pipeline::StageTiming as PipelineStageTiming;  // Renamed to avoid conflict with legacy StageTiming
 pub use result::{InferenceResult, OutputType};
