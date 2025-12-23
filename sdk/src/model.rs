@@ -5,6 +5,7 @@
 //! - `XybridModel`: Loaded model ready for inference
 //! - `ModelHandle`: Internal state management for the loaded model
 
+use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
 use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
@@ -112,12 +113,22 @@ struct ModelHandle {
 /// Created by `Xybrid::model()`, must call `.load()` to use.
 /// This is a preparatory step that doesn't download or load anything.
 ///
-/// # Example
+/// # Example (Recommended - Registry-based)
 ///
 /// ```ignore
-/// let loader = ModelLoader::from_registry("http://localhost:8080", "whisper-tiny", "1.0");
+/// // Load using registry (recommended - auto-resolves to best variant)
+/// let loader = ModelLoader::from_registry("kokoro-82m");
 /// let model = loader.load()?;
 /// let result = model.run(&envelope)?;
+/// ```
+///
+/// # Example (With progress callback)
+///
+/// ```ignore
+/// let loader = ModelLoader::from_registry("kokoro-82m");
+/// let model = loader.load_with_progress(|progress| {
+///     println!("Download: {:.1}%", progress * 100.0);
+/// })?;
 /// ```
 #[derive(Debug, Clone)]
 pub struct ModelLoader {
@@ -127,24 +138,68 @@ pub struct ModelLoader {
 }
 
 impl ModelLoader {
-    /// Create loader from registry.
-    pub fn from_registry(url: &str, model_id: &str, version: &str) -> Self {
+    /// Create loader from registry (recommended).
+    ///
+    /// Uses the registry API to resolve the model ID to the best variant
+    /// for the current platform, then downloads from HuggingFace with
+    /// caching and SHA256 verification.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let loader = ModelLoader::from_registry("kokoro-82m");
+    /// let model = loader.load()?;
+    /// ```
+    pub fn from_registry(id: &str) -> Self {
         Self {
-            source: ModelSource::registry(url, model_id, version),
+            source: ModelSource::registry(id),
+            model_id: Some(id.to_string()),
+            version: None, // Version is resolved by registry API
+        }
+    }
+
+    /// Create loader from registry with explicit platform.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let loader = ModelLoader::from_registry_with_platform("kokoro-82m", "macos-arm64");
+    /// let model = loader.load()?;
+    /// ```
+    pub fn from_registry_with_platform(id: &str, platform: &str) -> Self {
+        Self {
+            source: ModelSource::registry_with_platform(id, platform),
+            model_id: Some(id.to_string()),
+            version: None,
+        }
+    }
+
+    /// Create loader from legacy registry with direct URL.
+    ///
+    /// # Deprecated
+    /// Use `from_registry()` instead for automatic platform resolution and caching.
+    #[deprecated(since = "0.0.17", note = "Use ModelLoader::from_registry() instead")]
+    #[allow(deprecated)]
+    pub fn from_legacy_registry(url: &str, model_id: &str, version: &str) -> Self {
+        Self {
+            source: ModelSource::legacy_registry(url, model_id, version),
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
         }
     }
 
-    /// Create loader from registry with explicit platform.
-    pub fn from_registry_with_platform(
+    /// Create loader from legacy registry with explicit platform.
+    ///
+    /// # Deprecated
+    /// Use `from_registry_with_platform()` instead.
+    #[deprecated(since = "0.0.17", note = "Use ModelLoader::from_registry_with_platform() instead")]
+    #[allow(deprecated)]
+    pub fn from_legacy_registry_with_platform(
         url: &str,
         model_id: &str,
         version: &str,
         platform: &str,
     ) -> Self {
         Self {
-            source: ModelSource::registry_with_platform(url, model_id, version, platform),
+            source: ModelSource::legacy_registry_with_platform(url, model_id, version, platform),
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
         }
@@ -207,19 +262,43 @@ impl ModelLoader {
     /// Load the model into memory (synchronous).
     ///
     /// This will:
-    /// - For registry: Download the bundle if not cached, extract it
+    /// - For registry: Resolve via registry API, download from HuggingFace (with caching)
+    /// - For legacy_registry (deprecated): Download the bundle if not cached, extract it
     /// - For bundle: Extract the bundle to a temp directory
     /// - For directory: Load directly from the directory
     ///
     /// Returns a loaded `XybridModel` ready for inference.
+    #[allow(deprecated)]
     pub fn load(&self) -> SdkResult<XybridModel> {
+        self.load_with_progress(|_| {})
+    }
+
+    /// Load the model with a progress callback.
+    ///
+    /// The callback receives progress as a float from 0.0 to 1.0.
+    /// Only applies to registry-based loading (downloads from HuggingFace).
+    ///
+    /// # Example
+    /// ```ignore
+    /// let model = loader.load_with_progress(|progress| {
+    ///     println!("Download: {:.1}%", progress * 100.0);
+    /// })?;
+    /// ```
+    #[allow(deprecated)]
+    pub fn load_with_progress<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
+    where
+        F: Fn(f32),
+    {
         match &self.source {
-            ModelSource::Registry {
+            ModelSource::Registry { id, platform } => {
+                self.load_from_registry_api(id, platform.as_deref(), progress_callback)
+            }
+            ModelSource::LegacyRegistry {
                 url,
                 model_id,
                 version,
                 platform,
-            } => self.load_from_registry(url, model_id, version, platform.as_deref()),
+            } => self.load_from_legacy_registry(url, model_id, version, platform.as_deref()),
             ModelSource::Bundle { path } => self.load_from_bundle(path),
             ModelSource::Directory { path } => self.load_from_directory(path),
         }
@@ -234,7 +313,32 @@ impl ModelLoader {
             .map_err(|e| SdkError::LoadError(format!("Task join error: {}", e)))?
     }
 
-    fn load_from_registry(
+    /// Load model from registry using RegistryClient.
+    ///
+    /// This is the recommended loading method - it uses the registry API to resolve
+    /// the model ID to the best variant for the platform, downloads from HuggingFace,
+    /// and caches locally with SHA256 verification.
+    fn load_from_registry_api<F>(
+        &self,
+        id: &str,
+        platform: Option<&str>,
+        progress_callback: F,
+    ) -> SdkResult<XybridModel>
+    where
+        F: Fn(f32),
+    {
+        // Create registry client (uses default API or environment variable)
+        let client = RegistryClient::from_env()?;
+
+        // Fetch bundle (downloads if not cached, verifies SHA256)
+        let bundle_path = client.fetch(id, platform, progress_callback)?;
+
+        // Load from the cached bundle path
+        self.load_from_bundle(&bundle_path)
+    }
+
+    /// Load from legacy registry (deprecated - use load_from_registry_api instead).
+    fn load_from_legacy_registry(
         &self,
         url: &str,
         model_id: &str,
@@ -678,10 +782,26 @@ mod tests {
 
     #[test]
     fn test_model_loader_from_registry() {
-        let loader = ModelLoader::from_registry("http://localhost:8080", "whisper", "1.0");
+        let loader = ModelLoader::from_registry("kokoro-82m");
+        assert_eq!(loader.model_id(), Some("kokoro-82m"));
+        assert_eq!(loader.version(), None); // Version resolved by registry
+        assert_eq!(loader.source_type(), "registry");
+    }
+
+    #[test]
+    fn test_model_loader_from_registry_with_platform() {
+        let loader = ModelLoader::from_registry_with_platform("whisper-tiny", "macos-arm64");
+        assert_eq!(loader.model_id(), Some("whisper-tiny"));
+        assert_eq!(loader.source_type(), "registry");
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_model_loader_from_legacy_registry() {
+        let loader = ModelLoader::from_legacy_registry("http://localhost:8080", "whisper", "1.0");
         assert_eq!(loader.model_id(), Some("whisper"));
         assert_eq!(loader.version(), Some("1.0"));
-        assert_eq!(loader.source_type(), "registry");
+        assert_eq!(loader.source_type(), "legacy_registry");
     }
 
     #[test]
