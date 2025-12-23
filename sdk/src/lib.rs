@@ -99,8 +99,12 @@ pub use cache::{CacheManager, CacheStatus};
 pub use model::{ModelLoader, SdkResult, StreamConfig, XybridModel};
 pub use model::SdkError;
 pub use registry_client::{RegistryClient, ModelSummary, ResolvedVariant, CacheStats};
-pub use pipeline::{PipelineExecutionResult, PipelineInputType, PipelineLoader, XybridPipeline};
-pub use pipeline::StageTiming as PipelineStageTiming;  // Renamed to avoid conflict with legacy StageTiming
+// Pipeline API (PipelineRef → Pipeline)
+pub use pipeline::{
+    PipelineRef, Pipeline, StageInfo, StageStatus, StageTarget, DownloadProgress, Xybrid,
+    PipelineExecutionResult, PipelineInputType,
+    StageTiming as PipelineStageTiming,  // Alias to avoid conflict with legacy StageTiming
+};
 pub use result::{InferenceResult, OutputType};
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};

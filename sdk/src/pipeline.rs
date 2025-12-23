@@ -1,24 +1,45 @@
 //! Pipeline loading and execution for xybrid-sdk.
 //!
-//! This module provides:
-//! - `PipelineLoader`: Loads pipeline configuration from YAML
-//! - `XybridPipeline`: Loaded pipeline ready for execution
+//! This module provides a simple two-type API:
+//! - `PipelineRef`: Lightweight reference from parsed YAML (no network)
+//! - `Pipeline`: Loaded pipeline ready to preload models and run
 //!
-//! # Example
+//! # Example (Simple - just run)
 //!
 //! ```rust,no_run
-//! use xybrid_sdk::{PipelineLoader, Envelope};
+//! use xybrid_sdk::{PipelineRef, Envelope};
 //!
-//! // Load pipeline from YAML
-//! let loader = PipelineLoader::from_yaml(yaml_content)?;
-//! let pipeline = loader.load()?;
-//!
-//! // Run inference
+//! // Load and run in a few lines
+//! let pipeline = PipelineRef::from_yaml(yaml_content)?.load()?;
+//! pipeline.load_models()?;  // Optional: explicit preloading
 //! let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 //! println!("Pipeline completed in {}ms", result.total_latency_ms);
 //! ```
+//!
+//! # Example (Staged - inspect and preload)
+//!
+//! ```rust,no_run
+//! use xybrid_sdk::{PipelineRef, Envelope};
+//!
+//! // Step 1: Parse YAML (instant, no network)
+//! let ref_ = PipelineRef::from_yaml(yaml_content)?;
+//! println!("Stages: {:?}", ref_.stage_ids());
+//!
+//! // Step 2: Load pipeline (resolves models via registry)
+//! let pipeline = ref_.load()?;
+//! println!("Download size: {} bytes", pipeline.download_size());
+//!
+//! // Step 3: Preload models (optional - useful for app startup)
+//! pipeline.load_models_with_progress(|progress| {
+//!     println!("Downloading {}: {}%", progress.model_id, progress.percent);
+//! })?;
+//!
+//! // Step 4: Run
+//! let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+//! ```
 
 use crate::model::SdkError;
+use crate::registry_client::RegistryClient;
 use crate::result::OutputType;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -34,13 +55,175 @@ use xybrid_core::routing_engine::LocalAvailability;
 /// Result type for pipeline operations.
 pub type PipelineResult<T> = Result<T, SdkError>;
 
+// ============================================================================
+// PipelineRef - Lightweight reference from YAML
+// ============================================================================
+
+/// A lightweight reference to a pipeline from parsed YAML.
+///
+/// `PipelineRef` is created instantly from YAML without any network calls.
+/// Use `load()` to create a `Pipeline` that can preload models and run inference.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use xybrid_sdk::PipelineRef;
+///
+/// let ref_ = PipelineRef::from_yaml(yaml)?;
+/// println!("Pipeline: {:?}", ref_.name());
+/// println!("Stages: {:?}", ref_.stage_ids());
+///
+/// let pipeline = ref_.load()?;
+/// ```
+#[derive(Debug, Clone)]
+pub struct PipelineRef {
+    yaml_content: String,
+    config: PipelineConfig,
+}
+
+impl PipelineRef {
+    /// Parse a pipeline from YAML content (instant, no network).
+    pub fn from_yaml(yaml: &str) -> PipelineResult<Self> {
+        let config: PipelineConfig = serde_yaml::from_str(yaml)
+            .map_err(|e| SdkError::PipelineError(format!("Failed to parse YAML: {}", e)))?;
+
+        Ok(Self {
+            yaml_content: yaml.to_string(),
+            config,
+        })
+    }
+
+    /// Parse a pipeline from a YAML file.
+    pub fn from_file(path: impl Into<PathBuf>) -> PipelineResult<Self> {
+        let path = path.into();
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| SdkError::PipelineError(format!("Failed to read file: {}", e)))?;
+        Self::from_yaml(&content)
+    }
+
+    /// Get the pipeline name (if specified).
+    pub fn name(&self) -> Option<&str> {
+        self.config.name.as_deref()
+    }
+
+    /// Get the stage IDs (stage names/identifiers).
+    pub fn stage_ids(&self) -> Vec<String> {
+        self.config
+            .stages
+            .iter()
+            .map(|s| s.get_id().unwrap_or_else(|| s.get_name()))
+            .collect()
+    }
+
+    /// Get the number of stages.
+    pub fn stage_count(&self) -> usize {
+        self.config.stages.len()
+    }
+
+    /// Load the pipeline (resolves models via registry).
+    ///
+    /// This creates a `Pipeline` that can preload models and run inference.
+    pub fn load(&self) -> PipelineResult<Pipeline> {
+        Pipeline::from_ref(self)
+    }
+
+    /// Load the pipeline asynchronously.
+    pub async fn load_async(&self) -> PipelineResult<Pipeline> {
+        // For now, delegate to sync version
+        self.load()
+    }
+}
+
+// ============================================================================
+// Stage Types
+// ============================================================================
+
+/// Information about a stage in a loaded pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageInfo {
+    /// Stage identifier
+    pub id: String,
+    /// Model ID (if this stage uses a model)
+    pub model_id: Option<String>,
+    /// Execution target
+    pub target: StageTarget,
+    /// Current status
+    pub status: StageStatus,
+    /// Download size in bytes (if needs download)
+    pub download_bytes: Option<u64>,
+}
+
+/// Execution target for a stage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StageTarget {
+    /// Runs on device using local model
+    Device,
+    /// Runs on cloud server
+    Cloud,
+    /// Runs via integration provider (e.g., OpenAI API)
+    Integration { provider: String },
+}
+
+impl std::fmt::Display for StageTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StageTarget::Device => write!(f, "device"),
+            StageTarget::Cloud => write!(f, "cloud"),
+            StageTarget::Integration { provider } => write!(f, "integration:{}", provider),
+        }
+    }
+}
+
+/// Status of a stage's model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StageStatus {
+    /// Model is cached locally
+    Cached,
+    /// Model needs to be downloaded
+    NeedsDownload,
+    /// Integration stage (no local model needed)
+    Integration,
+    /// Resolution failed
+    Error(String),
+}
+
+impl std::fmt::Display for StageStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StageStatus::Cached => write!(f, "cached"),
+            StageStatus::NeedsDownload => write!(f, "needs_download"),
+            StageStatus::Integration => write!(f, "integration"),
+            StageStatus::Error(msg) => write!(f, "error: {}", msg),
+        }
+    }
+}
+
+/// Progress information during model loading.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadProgress {
+    /// Model currently being downloaded
+    pub model_id: String,
+    /// Download progress (0-100)
+    pub percent: u32,
+    /// Bytes downloaded so far
+    pub bytes_downloaded: u64,
+    /// Total bytes for this model
+    pub bytes_total: u64,
+    /// Current stage index (0-based)
+    pub stage_index: usize,
+    /// Total stages needing download
+    pub total_stages: usize,
+}
+
+// ============================================================================
+// Pipeline Configuration Types (internal)
+// ============================================================================
+
 /// Stage registry configuration - can be a string (URL) or RegistryConfig object.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum StageRegistryConfig {
-    /// Simple string format: "https://registry.example.com"
     Simple(String),
-    /// Full RegistryConfig object
     Full(RegistryConfig),
 }
 
@@ -48,46 +231,32 @@ enum StageRegistryConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum StageConfig {
-    /// Simple string format: "whisper-tiny@1.2"
     Simple(String),
-    /// Full object format with all stage configuration options
     Object {
-        /// Stage ID (new format) - e.g., "asr", "llm", "tts"
         #[serde(default)]
         id: Option<String>,
-        /// Model name - e.g., "wav2vec2-base-960h", "gpt-4o-mini"
         #[serde(default)]
         model: Option<String>,
-        /// Model version - e.g., "1.0"
         #[serde(default)]
         version: Option<String>,
-        /// Legacy name field (for backwards compatibility) - e.g., "whisper-tiny@1.0"
         #[serde(default)]
         name: Option<String>,
-        /// Execution target: "device", "integration", "server", "auto"
         #[serde(default)]
         target: Option<String>,
-        /// Integration provider: "openai", "anthropic", "google", etc.
         #[serde(default)]
         provider: Option<String>,
-        /// Stage-specific options (temperature, max_tokens, system_prompt, etc.)
         #[serde(default)]
         options: Option<HashMap<String, serde_json::Value>>,
-        /// Stage-level registry configuration
         #[serde(default)]
         registry: Option<StageRegistryConfig>,
     },
 }
 
 impl StageConfig {
-    /// Get the stage name/identifier.
-    /// For new format: uses "model@version" or "model" or "id".
-    /// For legacy format: uses "name" or the simple string.
     fn get_name(&self) -> String {
         match self {
             StageConfig::Simple(name) => name.clone(),
             StageConfig::Object { id, model, version, name, .. } => {
-                // Priority: model@version > model > name > id
                 if let Some(model_name) = model {
                     if let Some(ver) = version {
                         format!("{}@{}", model_name, ver)
@@ -105,7 +274,6 @@ impl StageConfig {
         }
     }
 
-    /// Get the stage ID (for display/identification purposes).
     fn get_id(&self) -> Option<String> {
         match self {
             StageConfig::Simple(_) => None,
@@ -113,7 +281,6 @@ impl StageConfig {
         }
     }
 
-    /// Get the execution target.
     fn get_target(&self) -> Option<String> {
         match self {
             StageConfig::Simple(_) => None,
@@ -121,7 +288,6 @@ impl StageConfig {
         }
     }
 
-    /// Get the integration provider.
     fn get_provider(&self) -> Option<String> {
         match self {
             StageConfig::Simple(_) => None,
@@ -129,7 +295,6 @@ impl StageConfig {
         }
     }
 
-    /// Get the model name.
     fn get_model(&self) -> Option<String> {
         match self {
             StageConfig::Simple(_) => None,
@@ -137,7 +302,6 @@ impl StageConfig {
         }
     }
 
-    /// Get the stage options.
     fn get_options(&self) -> Option<HashMap<String, serde_json::Value>> {
         match self {
             StageConfig::Simple(_) => None,
@@ -145,7 +309,6 @@ impl StageConfig {
         }
     }
 
-    /// Get the registry config.
     fn get_registry(&self) -> Option<StageRegistryConfig> {
         match self {
             StageConfig::Simple(_) => None,
@@ -158,30 +321,22 @@ impl StageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum RegistryConfigValue {
-    /// Simple string format: "https://registry.example.com"
     Simple(String),
-    /// Full RegistryConfig object
     Full(RegistryConfig),
 }
 
 /// Pipeline configuration loaded from YAML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PipelineConfig {
-    /// Pipeline name
     #[serde(default)]
     name: Option<String>,
-    /// Pipeline-level registry configuration
     #[serde(default)]
     registry: Option<RegistryConfigValue>,
-    /// Stage configurations
     stages: Vec<StageConfig>,
-    /// Input envelope configuration
     #[serde(default)]
     input: Option<InputConfig>,
-    /// Device metrics configuration
     #[serde(default)]
     metrics: Option<MetricsConfig>,
-    /// Model availability mapping
     #[serde(default)]
     availability: HashMap<String, bool>,
 }
@@ -189,25 +344,19 @@ struct PipelineConfig {
 /// Input envelope configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct InputConfig {
-    /// Input type (new format): "audio", "text"
     #[serde(default, rename = "type")]
     input_type: Option<String>,
-    /// Legacy kind field (for backwards compatibility): "AudioRaw", "Text"
     #[serde(default)]
     kind: Option<String>,
-    /// Sample rate for audio input
     #[serde(default)]
     sample_rate: Option<u32>,
-    /// Number of channels for audio input
     #[serde(default)]
     channels: Option<u8>,
-    /// Data payload (for text/embedding input)
     #[serde(default)]
     data: Option<String>,
 }
 
 impl InputConfig {
-    /// Get the input type string, preferring the new format over legacy
     fn get_type(&self) -> Option<&str> {
         self.input_type.as_deref().or(self.kind.as_deref())
     }
@@ -216,18 +365,13 @@ impl InputConfig {
 /// Input type for pipeline (public API)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PipelineInputType {
-    /// Audio input (raw PCM or WAV)
     Audio,
-    /// Text input
     Text,
-    /// Embedding input
     Embedding,
-    /// Unknown input type
     Unknown,
 }
 
 impl PipelineInputType {
-    /// Convert from YAML kind string
     fn from_kind(kind: &str) -> Self {
         match kind.to_lowercase().as_str() {
             "audio" | "audioraw" | "audio_raw" => PipelineInputType::Audio,
@@ -237,12 +381,10 @@ impl PipelineInputType {
         }
     }
 
-    /// Check if this is audio input
     pub fn is_audio(&self) -> bool {
         matches!(self, PipelineInputType::Audio)
     }
 
-    /// Check if this is text input
     pub fn is_text(&self) -> bool {
         matches!(self, PipelineInputType::Text)
     }
@@ -259,12 +401,8 @@ struct MetricsConfig {
     temperature: f32,
 }
 
-fn default_battery() -> u8 {
-    100
-}
-fn default_temperature() -> f32 {
-    25.0
-}
+fn default_battery() -> u8 { 100 }
+fn default_temperature() -> f32 { 25.0 }
 
 impl Default for MetricsConfig {
     fn default() -> Self {
@@ -276,36 +414,30 @@ impl Default for MetricsConfig {
     }
 }
 
+// ============================================================================
+// Pipeline Execution Result Types
+// ============================================================================
+
 /// Timing information for a single pipeline stage.
 #[derive(Debug, Clone, Serialize)]
 pub struct StageTiming {
-    /// Stage name
     pub name: String,
-    /// Stage latency in milliseconds
     pub latency_ms: u32,
-    /// Routing target (local, cloud, or fallback)
     pub target: String,
-    /// Routing decision reason
     pub reason: String,
 }
 
 /// Result of pipeline execution.
 #[derive(Debug, Clone, Serialize)]
 pub struct PipelineExecutionResult {
-    /// Pipeline name
     pub name: Option<String>,
-    /// Stage timing information
     pub stages: Vec<StageTiming>,
-    /// Total pipeline latency in milliseconds
     pub total_latency_ms: u32,
-    /// Final output type
     pub output_type: OutputType,
-    /// Final output envelope
     pub output: Envelope,
 }
 
 impl PipelineExecutionResult {
-    /// Get the final output as text (if text output).
     pub fn text(&self) -> Option<&str> {
         match &self.output.kind {
             EnvelopeKind::Text(s) => Some(s),
@@ -313,7 +445,6 @@ impl PipelineExecutionResult {
         }
     }
 
-    /// Get the final output as audio bytes (if audio output).
     pub fn audio_bytes(&self) -> Option<&[u8]> {
         match &self.output.kind {
             EnvelopeKind::Audio(bytes) => Some(bytes),
@@ -321,7 +452,6 @@ impl PipelineExecutionResult {
         }
     }
 
-    /// Get the final output as embedding (if embedding output).
     pub fn embedding(&self) -> Option<&[f32]> {
         match &self.output.kind {
             EnvelopeKind::Embedding(e) => Some(e),
@@ -330,87 +460,9 @@ impl PipelineExecutionResult {
     }
 }
 
-/// Pipeline source for loading.
-#[derive(Debug, Clone)]
-pub enum PipelineSource {
-    /// YAML content string
-    Yaml(String),
-    /// Path to YAML file
-    File(PathBuf),
-}
-
-/// Loader for creating pipeline instances.
-///
-/// # Example
-///
-/// ```rust,no_run
-/// use xybrid_sdk::PipelineLoader;
-///
-/// let loader = PipelineLoader::from_yaml(r#"
-/// name: "ASR Pipeline"
-/// stages:
-///   - whisper-tiny@1.0
-/// "#)?;
-/// let pipeline = loader.load()?;
-/// ```
-pub struct PipelineLoader {
-    source: PipelineSource,
-    config: PipelineConfig,
-}
-
-impl PipelineLoader {
-    /// Create a loader from YAML content string.
-    pub fn from_yaml(yaml_content: &str) -> PipelineResult<Self> {
-        let config: PipelineConfig = serde_yaml::from_str(yaml_content)
-            .map_err(|e| SdkError::PipelineError(format!("Failed to parse YAML: {}", e)))?;
-
-        Ok(PipelineLoader {
-            source: PipelineSource::Yaml(yaml_content.to_string()),
-            config,
-        })
-    }
-
-    /// Create a loader from a YAML file path.
-    pub fn from_file(path: impl Into<PathBuf>) -> PipelineResult<Self> {
-        let path = path.into();
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| SdkError::PipelineError(format!("Failed to read file: {}", e)))?;
-
-        let config: PipelineConfig = serde_yaml::from_str(&content)
-            .map_err(|e| SdkError::PipelineError(format!("Failed to parse YAML: {}", e)))?;
-
-        Ok(PipelineLoader {
-            source: PipelineSource::File(path),
-            config,
-        })
-    }
-
-    /// Get the pipeline name (if specified in config).
-    pub fn name(&self) -> Option<&str> {
-        self.config.name.as_deref()
-    }
-
-    /// Get the stage names.
-    pub fn stage_names(&self) -> Vec<String> {
-        self.config
-            .stages
-            .iter()
-            .map(|s| s.get_name())
-            .collect()
-    }
-
-    /// Load the pipeline, preparing it for execution.
-    pub fn load(self) -> PipelineResult<XybridPipeline> {
-        XybridPipeline::from_config(self.config, self.source)
-    }
-
-    /// Load the pipeline asynchronously.
-    pub async fn load_async(self) -> PipelineResult<XybridPipeline> {
-        // For now, just delegate to sync version
-        // In the future, this could prefetch models
-        self.load()
-    }
-}
+// ============================================================================
+// Internal Pipeline Handle
+// ============================================================================
 
 /// Internal state for the loaded pipeline.
 struct PipelineHandle {
@@ -419,27 +471,129 @@ struct PipelineHandle {
     availability_map: HashMap<String, bool>,
     registry_config: Option<RegistryConfig>,
     input_type: PipelineInputType,
+    stage_configs: Vec<StageConfig>,
 }
 
-/// A loaded pipeline ready for execution.
+// ============================================================================
+// Pipeline - Main Type
+// ============================================================================
+
+/// A loaded pipeline ready to preload models and run inference.
+///
+/// Created via `PipelineRef::load()`. This is the main type for running pipelines.
 ///
 /// # Example
 ///
 /// ```rust,no_run
-/// use xybrid_sdk::{PipelineLoader, Envelope};
+/// use xybrid_sdk::{PipelineRef, Envelope};
 ///
-/// let pipeline = PipelineLoader::from_yaml(yaml)?.load()?;
+/// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
+///
+/// // Inspect the pipeline
+/// println!("Name: {:?}", pipeline.name());
+/// println!("Stages: {:?}", pipeline.stage_names());
+/// println!("Download size: {} bytes", pipeline.download_size());
+///
+/// // Optional: Preload models (useful for app startup)
+/// pipeline.load_models()?;
+///
+/// // Run inference
 /// let result = pipeline.run(&Envelope::audio(audio_bytes))?;
-/// println!("Output: {:?}", result.text());
 /// ```
-pub struct XybridPipeline {
+pub struct Pipeline {
     name: Option<String>,
     handle: Arc<RwLock<PipelineHandle>>,
-    source: PipelineSource,
+    stages: Vec<StageInfo>,
+    total_download_bytes: u64,
 }
 
-impl XybridPipeline {
-    /// Parse a target string into ExecutionTarget.
+impl Pipeline {
+    /// Create a Pipeline from a PipelineRef by resolving models.
+    fn from_ref(ref_: &PipelineRef) -> PipelineResult<Self> {
+        let config = ref_.config.clone();
+
+        // Build stage descriptors
+        let stage_descriptors: Vec<StageDescriptor> = config
+            .stages
+            .iter()
+            .map(|stage_config| {
+                let name = stage_config.get_name();
+                let mut desc = StageDescriptor::new(name);
+
+                if let Some(reg) = stage_config.get_registry() {
+                    let registry_config = match reg {
+                        StageRegistryConfig::Simple(url) => Self::url_to_registry_config(&url),
+                        StageRegistryConfig::Full(config) => config,
+                    };
+                    desc.registry = Some(registry_config);
+                }
+
+                if let Some(target_str) = stage_config.get_target() {
+                    desc.target = Self::parse_target(&target_str);
+                }
+
+                if let Some(provider_str) = stage_config.get_provider() {
+                    desc.provider = Self::parse_provider(&provider_str);
+                    if desc.target.is_none() {
+                        desc.target = Some(ExecutionTarget::Integration);
+                    }
+                }
+
+                desc.model = stage_config.get_model();
+
+                if let Some(opts) = stage_config.get_options() {
+                    desc.options = Some(Self::convert_options(&opts));
+                }
+
+                desc
+            })
+            .collect();
+
+        let registry_config = config.registry.as_ref().map(|registry_value| {
+            match registry_value {
+                RegistryConfigValue::Simple(url) => Self::url_to_registry_config(url),
+                RegistryConfigValue::Full(config) => config.clone(),
+            }
+        });
+
+        let metrics_config = config.metrics.clone().unwrap_or_default();
+        let metrics = DeviceMetrics {
+            network_rtt: metrics_config.network_rtt,
+            battery: metrics_config.battery,
+            temperature: metrics_config.temperature,
+        };
+
+        let input_type = config
+            .input
+            .as_ref()
+            .and_then(|i| i.get_type())
+            .map(PipelineInputType::from_kind)
+            .unwrap_or(PipelineInputType::Unknown);
+
+        let stage_configs = config.stages.clone();
+
+        let handle = PipelineHandle {
+            stage_descriptors,
+            metrics,
+            availability_map: config.availability.clone(),
+            registry_config,
+            input_type,
+            stage_configs,
+        };
+
+        let handle = Arc::new(RwLock::new(handle));
+
+        // Resolve stages and compute download info
+        let (stages, total_download_bytes) = Self::resolve_stages(&handle, &config)?;
+
+        Ok(Self {
+            name: config.name,
+            handle,
+            stages,
+            total_download_bytes,
+        })
+    }
+
     fn parse_target(target: &str) -> Option<ExecutionTarget> {
         match target.to_lowercase().as_str() {
             "device" | "local" => Some(ExecutionTarget::Device),
@@ -450,7 +604,6 @@ impl XybridPipeline {
         }
     }
 
-    /// Parse a provider string into IntegrationProvider.
     fn parse_provider(provider: &str) -> Option<IntegrationProvider> {
         match provider.to_lowercase().as_str() {
             "openai" => Some(IntegrationProvider::OpenAI),
@@ -462,7 +615,6 @@ impl XybridPipeline {
         }
     }
 
-    /// Convert JSON options to StageOptions.
     fn convert_options(options: &HashMap<String, serde_json::Value>) -> StageOptions {
         let mut stage_options = StageOptions::new();
         for (key, value) in options {
@@ -486,89 +638,6 @@ impl XybridPipeline {
         stage_options
     }
 
-    fn from_config(config: PipelineConfig, source: PipelineSource) -> PipelineResult<Self> {
-        // Build stage descriptors with full configuration support
-        let stage_descriptors: Vec<StageDescriptor> = config
-            .stages
-            .iter()
-            .map(|stage_config| {
-                let name = stage_config.get_name();
-                let mut desc = StageDescriptor::new(name);
-
-                // Set registry config if specified
-                if let Some(reg) = stage_config.get_registry() {
-                    let registry_config = match reg {
-                        StageRegistryConfig::Simple(url) => Self::url_to_registry_config(&url),
-                        StageRegistryConfig::Full(config) => config,
-                    };
-                    desc.registry = Some(registry_config);
-                }
-
-                // Set target if specified
-                if let Some(target_str) = stage_config.get_target() {
-                    desc.target = Self::parse_target(&target_str);
-                }
-
-                // Set provider if specified (also sets target to Integration)
-                if let Some(provider_str) = stage_config.get_provider() {
-                    desc.provider = Self::parse_provider(&provider_str);
-                    // Integration provider implies integration target
-                    if desc.target.is_none() {
-                        desc.target = Some(ExecutionTarget::Integration);
-                    }
-                }
-
-                // Set model if specified
-                desc.model = stage_config.get_model();
-
-                // Set options if specified
-                if let Some(opts) = stage_config.get_options() {
-                    desc.options = Some(Self::convert_options(&opts));
-                }
-
-                desc
-            })
-            .collect();
-
-        // Extract pipeline-level registry config (will be applied when running)
-        let registry_config = config.registry.as_ref().map(|registry_value| {
-            match registry_value {
-                RegistryConfigValue::Simple(url) => Self::url_to_registry_config(url),
-                RegistryConfigValue::Full(config) => config.clone(),
-            }
-        });
-
-        // Create device metrics
-        let metrics_config = config.metrics.unwrap_or_default();
-        let metrics = DeviceMetrics {
-            network_rtt: metrics_config.network_rtt,
-            battery: metrics_config.battery,
-            temperature: metrics_config.temperature,
-        };
-
-        // Extract input type from config (supports both new "type" and legacy "kind" fields)
-        let input_type = config
-            .input
-            .as_ref()
-            .and_then(|i| i.get_type())
-            .map(PipelineInputType::from_kind)
-            .unwrap_or(PipelineInputType::Unknown);
-
-        let handle = PipelineHandle {
-            stage_descriptors,
-            metrics,
-            availability_map: config.availability.clone(),
-            registry_config,
-            input_type,
-        };
-
-        Ok(XybridPipeline {
-            name: config.name,
-            handle: Arc::new(RwLock::new(handle)),
-            source,
-        })
-    }
-
     fn url_to_registry_config(url: &str) -> RegistryConfig {
         if url.starts_with("file://") {
             RegistryConfig {
@@ -590,23 +659,107 @@ impl XybridPipeline {
         }
     }
 
-    /// Get the pipeline name.
+    /// Resolve stage information from the registry.
+    fn resolve_stages(
+        handle: &Arc<RwLock<PipelineHandle>>,
+        config: &PipelineConfig,
+    ) -> PipelineResult<(Vec<StageInfo>, u64)> {
+        let registry_url = config
+            .registry
+            .as_ref()
+            .and_then(|r| match r {
+                RegistryConfigValue::Simple(url) => Some(url.clone()),
+                RegistryConfigValue::Full(cfg) => cfg.remote.as_ref().map(|r| r.base_url.clone()),
+            });
+
+        let client = if let Some(url) = registry_url {
+            RegistryClient::new(url)?
+        } else {
+            RegistryClient::from_env()?
+        };
+
+        let mut stages = Vec::new();
+        let mut total_download_bytes: u64 = 0;
+
+        let handle_read = handle.read().map_err(|_| {
+            SdkError::PipelineError("Failed to read pipeline handle".to_string())
+        })?;
+
+        for stage_config in &config.stages {
+            let stage_id = stage_config.get_id().unwrap_or_else(|| stage_config.get_name());
+            let target_str = stage_config.get_target();
+            let provider = stage_config.get_provider();
+            let model_name = stage_config.get_model();
+
+            let stage_target = if provider.is_some() || target_str.as_deref() == Some("integration") {
+                StageTarget::Integration {
+                    provider: provider.unwrap_or_else(|| "unknown".to_string()),
+                }
+            } else if target_str.as_deref() == Some("cloud") || target_str.as_deref() == Some("server") {
+                StageTarget::Cloud
+            } else {
+                StageTarget::Device
+            };
+
+            let (status, download_bytes) = if matches!(stage_target, StageTarget::Device) {
+                if let Some(ref model_id) = model_name {
+                    match client.resolve(model_id, None) {
+                        Ok(resolved) => {
+                            let is_cached = client.is_cached(model_id, None).unwrap_or(false);
+                            if is_cached {
+                                (StageStatus::Cached, None)
+                            } else {
+                                total_download_bytes += resolved.size_bytes;
+                                (StageStatus::NeedsDownload, Some(resolved.size_bytes))
+                            }
+                        }
+                        Err(e) => (StageStatus::Error(e.to_string()), None),
+                    }
+                } else {
+                    let name = stage_config.get_name();
+                    if handle_read.availability_map.get(&name).copied().unwrap_or(false) {
+                        (StageStatus::Cached, None)
+                    } else {
+                        (StageStatus::NeedsDownload, None)
+                    }
+                }
+            } else {
+                (StageStatus::Integration, None)
+            };
+
+            stages.push(StageInfo {
+                id: stage_id,
+                model_id: model_name,
+                target: stage_target,
+                status,
+                download_bytes,
+            });
+        }
+
+        Ok((stages, total_download_bytes))
+    }
+
+    /// Get the pipeline name (if specified).
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }
 
     /// Get the stage names.
     pub fn stage_names(&self) -> Vec<String> {
-        self.handle
-            .read()
-            .ok()
-            .map(|h| h.stage_descriptors.iter().map(|s| s.name.clone()).collect())
-            .unwrap_or_default()
+        self.stages.iter().map(|s| s.id.clone()).collect()
+    }
+
+    /// Get detailed information about all stages.
+    pub fn stages(&self) -> &[StageInfo] {
+        &self.stages
+    }
+
+    /// Get the number of stages.
+    pub fn stage_count(&self) -> usize {
+        self.stages.len()
     }
 
     /// Get the expected input type for this pipeline.
-    ///
-    /// This is determined from the `input.kind` field in the YAML config.
     pub fn input_type(&self) -> PipelineInputType {
         self.handle
             .read()
@@ -615,38 +768,116 @@ impl XybridPipeline {
             .unwrap_or(PipelineInputType::Unknown)
     }
 
-    /// Get the number of stages in this pipeline.
-    pub fn stage_count(&self) -> usize {
-        self.handle
-            .read()
-            .ok()
-            .map(|h| h.stage_descriptors.len())
-            .unwrap_or(0)
+    /// Check if all device models are cached and ready.
+    pub fn is_ready(&self) -> bool {
+        self.stages.iter().all(|s| {
+            matches!(s.status, StageStatus::Cached | StageStatus::Integration)
+        })
     }
 
-    /// Run the pipeline with the given input envelope.
+    /// Get the total bytes that need to be downloaded.
+    pub fn download_size(&self) -> u64 {
+        self.total_download_bytes
+    }
+
+    /// Get stages that need models downloaded.
+    pub fn stages_needing_download(&self) -> Vec<&StageInfo> {
+        self.stages
+            .iter()
+            .filter(|s| matches!(s.status, StageStatus::NeedsDownload))
+            .collect()
+    }
+
+    /// Preload models (downloads if needed).
+    ///
+    /// This method downloads any models that aren't already cached.
+    /// Call this at app startup for smooth UX.
+    pub fn load_models(&self) -> PipelineResult<()> {
+        self.load_models_with_progress(|_| {})
+    }
+
+    /// Preload models with progress callback.
+    pub fn load_models_with_progress<F>(&self, progress_callback: F) -> PipelineResult<()>
+    where
+        F: Fn(DownloadProgress),
+    {
+        let registry_url = self.handle.read()
+            .map_err(|_| SdkError::PipelineError("Failed to read handle".to_string()))?
+            .registry_config
+            .as_ref()
+            .and_then(|c| c.remote.as_ref())
+            .map(|r| r.base_url.clone());
+
+        let client = if let Some(url) = registry_url {
+            RegistryClient::new(url)?
+        } else {
+            RegistryClient::from_env()?
+        };
+
+        let stages_to_fetch: Vec<_> = self.stages
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| matches!(s.status, StageStatus::NeedsDownload))
+            .filter_map(|(idx, s)| {
+                s.model_id.as_ref().map(|m| (idx, s.id.clone(), m.clone(), s.download_bytes.unwrap_or(0)))
+            })
+            .collect();
+
+        let total_stages = stages_to_fetch.len();
+
+        for (stage_idx, (_, stage_id, model_id, total_bytes)) in stages_to_fetch.into_iter().enumerate() {
+            let progress_for_model = |download_progress: f32| {
+                let bytes_downloaded = (download_progress * total_bytes as f32) as u64;
+                progress_callback(DownloadProgress {
+                    model_id: model_id.clone(),
+                    percent: (download_progress * 100.0) as u32,
+                    bytes_downloaded,
+                    bytes_total: total_bytes,
+                    stage_index: stage_idx,
+                    total_stages,
+                });
+            };
+
+            client.fetch(&model_id, None, progress_for_model)?;
+
+            {
+                let mut handle = self.handle.write().map_err(|_| {
+                    SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
+                })?;
+
+                handle.availability_map.insert(model_id.clone(), true);
+                handle.availability_map.insert(stage_id.clone(), true);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Run inference on the pipeline.
+    ///
+    /// If models aren't loaded yet, this will automatically download them first.
     pub fn run(&self, envelope: &Envelope) -> PipelineResult<PipelineExecutionResult> {
+        if !self.is_ready() {
+            self.load_models()?;
+        }
+
         let handle = self.handle.read().map_err(|_| {
             SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
         })?;
 
-        // Clone all needed data to avoid borrow issues
         let stage_descriptors = handle.stage_descriptors.clone();
         let metrics = handle.metrics.clone();
         let availability_map = handle.availability_map.clone();
         let registry_config = handle.registry_config.clone();
-        drop(handle); // Release lock before execution
+        drop(handle);
 
-        // Automatically set telemetry pipeline context for this run
-        // Generate a unique trace_id for this execution
+        // Set telemetry context
         let trace_id = uuid::Uuid::new_v4();
         let pipeline_id = self.name.as_ref().map(|n| {
-            // Create a deterministic UUID from the pipeline name
             uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes())
         });
         crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
 
-        // Create a fresh orchestrator for this run
         let mut orchestrator = Orchestrator::new();
         if let Some(ref config) = registry_config {
             orchestrator.executor_mut().set_pipeline_registry(config.clone());
@@ -659,20 +890,13 @@ impl XybridPipeline {
 
         let start_time = std::time::Instant::now();
         let results: Vec<StageExecutionResult> = orchestrator
-            .execute_pipeline(
-                &stage_descriptors,
-                envelope,
-                &metrics,
-                &availability_fn,
-            )
+            .execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn)
             .map_err(|e| {
-                // Clear context on error
                 crate::telemetry::set_telemetry_pipeline_context(None, None);
                 SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
             })?;
         let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
-        // Clear telemetry context after execution
         crate::telemetry::set_telemetry_pipeline_context(None, None);
 
         let stages: Vec<StageTiming> = results
@@ -696,8 +920,7 @@ impl XybridPipeline {
             (OutputType::Unknown, Envelope::new(EnvelopeKind::Text(String::new())))
         };
 
-        // Emit PipelineComplete telemetry event
-        // This will include the span tree captured during execution
+        // Emit telemetry event
         let event = crate::telemetry::TelemetryEvent {
             event_type: "PipelineComplete".to_string(),
             stage_name: self.name.clone(),
@@ -728,9 +951,12 @@ impl XybridPipeline {
         })
     }
 
-    /// Run the pipeline asynchronously.
+    /// Run inference asynchronously.
     pub async fn run_async(&self, envelope: &Envelope) -> PipelineResult<PipelineExecutionResult> {
-        // Extract all needed data from handle before spawning
+        if !self.is_ready() {
+            self.load_models()?;
+        }
+
         let (stage_descriptors, metrics, availability_map, registry_config) = {
             let handle = self.handle.read().map_err(|_| {
                 SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
@@ -747,14 +973,12 @@ impl XybridPipeline {
         let name = self.name.clone();
 
         tokio::task::spawn_blocking(move || {
-            // Automatically set telemetry pipeline context for this run
             let trace_id = uuid::Uuid::new_v4();
             let pipeline_id = name.as_ref().map(|n| {
                 uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes())
             });
             crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
 
-            // Create a fresh orchestrator inside the blocking task
             let mut orchestrator = Orchestrator::new();
             if let Some(ref config) = registry_config {
                 orchestrator.executor_mut().set_pipeline_registry(config.clone());
@@ -766,20 +990,15 @@ impl XybridPipeline {
             };
 
             let start_time = std::time::Instant::now();
-
             let results: Vec<StageExecutionResult> = orchestrator
-                .execute_pipeline(
-                    &stage_descriptors,
-                    &envelope_clone,
-                    &metrics,
-                    &availability_fn,
-                )
+                .execute_pipeline(&stage_descriptors, &envelope_clone, &metrics, &availability_fn)
                 .map_err(|e| {
                     crate::telemetry::set_telemetry_pipeline_context(None, None);
                     SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
                 })?;
-
             let total_latency_ms = start_time.elapsed().as_millis() as u32;
+
+            crate::telemetry::set_telemetry_pipeline_context(None, None);
 
             let stages: Vec<StageTiming> = results
                 .iter()
@@ -802,31 +1021,6 @@ impl XybridPipeline {
                 (OutputType::Unknown, Envelope::new(EnvelopeKind::Text(String::new())))
             };
 
-            // Emit PipelineComplete telemetry event
-            let event = crate::telemetry::TelemetryEvent {
-                event_type: "PipelineComplete".to_string(),
-                stage_name: name.clone(),
-                target: None,
-                latency_ms: Some(total_latency_ms),
-                error: None,
-                data: Some(serde_json::json!({
-                    "stages": stages.iter().map(|s| serde_json::json!({
-                        "name": s.name,
-                        "latency_ms": s.latency_ms,
-                        "target": s.target,
-                    })).collect::<Vec<_>>(),
-                    "output_type": format!("{:?}", output_type),
-                }).to_string()),
-                timestamp_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0),
-            };
-            crate::telemetry::publish_telemetry_event(event);
-
-            // Clear telemetry context after execution
-            crate::telemetry::set_telemetry_pipeline_context(None, None);
-
             Ok(PipelineExecutionResult {
                 name,
                 stages,
@@ -838,220 +1032,153 @@ impl XybridPipeline {
         .await
         .map_err(|e| SdkError::PipelineError(format!("Task join error: {}", e)))?
     }
+}
 
-    /// Update the device metrics used for routing decisions.
-    pub fn set_metrics(&self, metrics: DeviceMetrics) -> PipelineResult<()> {
-        let mut handle = self.handle.write().map_err(|_| {
-            SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
-        })?;
-        handle.metrics = metrics;
-        Ok(())
-    }
+// ============================================================================
+// Convenience Functions
+// ============================================================================
 
-    /// Update the availability map for routing decisions.
-    pub fn set_availability(&self, availability: HashMap<String, bool>) -> PipelineResult<()> {
-        let mut handle = self.handle.write().map_err(|_| {
-            SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
-        })?;
-        handle.availability_map = availability;
-        Ok(())
-    }
+/// Convenience struct for running pipelines in one call.
+pub struct Xybrid;
 
-    /// Unload/reset the pipeline.
+impl Xybrid {
+    /// Run a pipeline from YAML in one call.
     ///
-    /// This clears the availability map and any cached state.
-    /// After calling this, the pipeline will need models to be marked as available
-    /// again before execution will succeed.
-    pub fn unload(&self) -> PipelineResult<()> {
-        let mut handle = self.handle.write().map_err(|_| {
-            SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
-        })?;
-        handle.availability_map.clear();
-        Ok(())
+    /// This is the simplest way to run a pipeline - it handles everything:
+    /// parsing, model resolution, downloading, and execution.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use xybrid_sdk::{Xybrid, Envelope};
+    ///
+    /// let result = Xybrid::run_pipeline(yaml_content, &Envelope::audio(audio_bytes))?;
+    /// println!("Output: {:?}", result.text());
+    /// ```
+    pub fn run_pipeline(yaml: &str, envelope: &Envelope) -> PipelineResult<PipelineExecutionResult> {
+        let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
+        pipeline.run(envelope)
     }
 
-    /// Check if the pipeline has any models marked as available.
-    pub fn is_loaded(&self) -> bool {
-        self.handle
-            .read()
-            .ok()
-            .map(|h| h.availability_map.values().any(|&v| v))
-            .unwrap_or(false)
+    /// Create a pipeline reference from YAML.
+    ///
+    /// This is equivalent to `PipelineRef::from_yaml()`.
+    pub fn pipeline(yaml: &str) -> PipelineResult<PipelineRef> {
+        PipelineRef::from_yaml(yaml)
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_pipeline_loader_from_yaml() {
+    fn test_pipeline_ref_from_yaml() {
         let yaml = r#"
 name: "Test Pipeline"
 stages:
   - test-stage@1.0
 "#;
-        let loader = PipelineLoader::from_yaml(yaml).unwrap();
-        assert_eq!(loader.name(), Some("Test Pipeline"));
-        assert_eq!(loader.stage_names(), vec!["test-stage@1.0"]);
+        let ref_ = PipelineRef::from_yaml(yaml).unwrap();
+        assert_eq!(ref_.name(), Some("Test Pipeline"));
+        assert_eq!(ref_.stage_count(), 1);
     }
 
     #[test]
-    fn test_pipeline_loader_complex_stages() {
+    fn test_pipeline_ref_stage_ids() {
         let yaml = r#"
-name: "Complex Pipeline"
-registry: "http://localhost:8080"
-stages:
-  - whisper-tiny@1.0
-  - name: "llm-stage@1.0"
-    registry: "http://other-registry:8080"
-metrics:
-  network_rtt: 100
-  battery: 80
-  temperature: 30.0
-availability:
-  "whisper-tiny@1.0": true
-  "llm-stage@1.0": false
-"#;
-        let loader = PipelineLoader::from_yaml(yaml).unwrap();
-        assert_eq!(loader.name(), Some("Complex Pipeline"));
-        assert_eq!(
-            loader.stage_names(),
-            vec!["whisper-tiny@1.0", "llm-stage@1.0"]
-        );
-    }
-
-    #[test]
-    fn test_pipeline_loader_new_format_with_target_and_provider() {
-        // This is the new format used by voice-assistant.yaml
-        let yaml = r#"
-name: "Voice Assistant (wav2vec2 -> openai -> kokoro)"
-registry: "http://localhost:8080"
-
+name: "Multi-Stage"
 stages:
   - id: asr
     model: wav2vec2-base-960h
     version: "1.0"
-    target: device
-
   - id: llm
     model: gpt-4o-mini
-    target: integration
     provider: openai
-    options:
-      temperature: 0.7
-      max_tokens: 500
-      system_prompt: "You are a helpful voice assistant."
-
   - id: tts
     model: kokoro-82m
-    version: "0.1"
-    target: device
-
-input:
-  type: audio
-  sample_rate: 16000
-  channels: 1
-
-metrics:
-  network_rtt: 100
-  battery: 80
-  temperature: 25.0
-
-availability:
-  "wav2vec2-base-960h@1.0": true
-  "kokoro-82m@0.1": true
 "#;
-        let loader = PipelineLoader::from_yaml(yaml).unwrap();
-        assert_eq!(
-            loader.name(),
-            Some("Voice Assistant (wav2vec2 -> openai -> kokoro)")
-        );
-        assert_eq!(
-            loader.stage_names(),
-            vec!["wav2vec2-base-960h@1.0", "gpt-4o-mini", "kokoro-82m@0.1"]
-        );
-
-        // Load and verify descriptors
-        let pipeline = loader.load().unwrap();
-        assert_eq!(pipeline.stage_count(), 3);
-        assert_eq!(pipeline.input_type(), PipelineInputType::Audio);
+        let ref_ = PipelineRef::from_yaml(yaml).unwrap();
+        assert_eq!(ref_.stage_ids(), vec!["asr", "llm", "tts"]);
+        assert_eq!(ref_.stage_count(), 3);
     }
 
     #[test]
-    fn test_pipeline_loader_new_format_anthropic() {
-        // Test with Anthropic provider
-        let yaml = r#"
-name: "Voice Assistant B"
-registry: "http://localhost:8080"
-
-stages:
-  - id: asr
-    model: wav2vec2-base-960h
-    version: "1.0"
-    target: device
-
-  - id: llm
-    model: claude-3-5-sonnet-20241022
-    target: integration
-    provider: anthropic
-    options:
-      temperature: 0.7
-      max_tokens: 500
-      system_prompt: "You are a helpful voice assistant."
-
-  - id: tts
-    model: kokoro-82m
-    version: "0.1"
-    target: device
-
-input:
-  type: audio
-  sample_rate: 16000
-  channels: 1
-"#;
-        let loader = PipelineLoader::from_yaml(yaml).unwrap();
-        assert_eq!(loader.name(), Some("Voice Assistant B"));
-        assert_eq!(loader.stage_names().len(), 3);
-
-        let pipeline = loader.load().unwrap();
-        assert_eq!(pipeline.stage_count(), 3);
+    fn test_stage_target_display() {
+        assert_eq!(StageTarget::Device.to_string(), "device");
+        assert_eq!(StageTarget::Cloud.to_string(), "cloud");
+        assert_eq!(StageTarget::Integration { provider: "openai".to_string() }.to_string(), "integration:openai");
     }
 
     #[test]
-    fn test_pipeline_loader_minimal_asr_only() {
-        // Minimal pipeline with just ASR
+    fn test_stage_status_display() {
+        assert_eq!(StageStatus::Cached.to_string(), "cached");
+        assert_eq!(StageStatus::NeedsDownload.to_string(), "needs_download");
+        assert_eq!(StageStatus::Integration.to_string(), "integration");
+        assert_eq!(StageStatus::Error("failed".to_string()).to_string(), "error: failed");
+    }
+
+    #[test]
+    fn test_download_progress_serialization() {
+        let progress = DownloadProgress {
+            model_id: "kokoro-82m".to_string(),
+            percent: 75,
+            bytes_downloaded: 150_000_000,
+            bytes_total: 200_000_000,
+            stage_index: 1,
+            total_stages: 2,
+        };
+
+        let json = serde_json::to_string(&progress).unwrap();
+        assert!(json.contains("\"model_id\":\"kokoro-82m\""));
+        assert!(json.contains("\"percent\":75"));
+    }
+
+    #[test]
+    fn test_stage_info_serialization() {
+        let info = StageInfo {
+            id: "asr".to_string(),
+            model_id: Some("wav2vec2".to_string()),
+            target: StageTarget::Device,
+            status: StageStatus::Cached,
+            download_bytes: None,
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"id\":\"asr\""));
+        assert!(json.contains("\"status\":\"Cached\""));
+    }
+
+    #[test]
+    fn test_xybrid_pipeline_convenience() {
         let yaml = r#"
-name: "Speech-to-Text Demo"
-registry: "http://localhost:8080"
-
+name: "Test"
 stages:
-  - id: asr
-    model: wav2vec2-base-960h
-    version: "1.0"
-    target: device
-
-input:
-  type: audio
-  sample_rate: 16000
-  channels: 1
+  - test-stage@1.0
 "#;
-        let loader = PipelineLoader::from_yaml(yaml).unwrap();
-        assert_eq!(loader.name(), Some("Speech-to-Text Demo"));
-        assert_eq!(loader.stage_names(), vec!["wav2vec2-base-960h@1.0"]);
-
-        let pipeline = loader.load().unwrap();
-        assert_eq!(pipeline.stage_count(), 1);
-        assert_eq!(pipeline.input_type(), PipelineInputType::Audio);
+        let ref_ = Xybrid::pipeline(yaml).unwrap();
+        assert_eq!(ref_.name(), Some("Test"));
     }
 
     #[test]
     fn test_input_type_from_kind() {
         assert_eq!(PipelineInputType::from_kind("audio"), PipelineInputType::Audio);
+        assert_eq!(PipelineInputType::from_kind("Audio"), PipelineInputType::Audio);
         assert_eq!(PipelineInputType::from_kind("text"), PipelineInputType::Text);
         assert_eq!(PipelineInputType::from_kind("embedding"), PipelineInputType::Embedding);
-        assert_eq!(PipelineInputType::from_kind("AudioRaw"), PipelineInputType::Audio);
         assert_eq!(PipelineInputType::from_kind("unknown"), PipelineInputType::Unknown);
+    }
+
+    #[test]
+    fn test_pipeline_input_type_methods() {
+        assert!(PipelineInputType::Audio.is_audio());
+        assert!(!PipelineInputType::Audio.is_text());
+        assert!(PipelineInputType::Text.is_text());
+        assert!(!PipelineInputType::Text.is_audio());
     }
 
     #[test]
