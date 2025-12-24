@@ -2,11 +2,38 @@
 //!
 //! This binary provides a `run` subcommand that loads pipeline configuration
 //! and executes it using the xybrid-core orchestrator.
+//!
+//! ## Module Organization
+//!
+//! | Module | Purpose |
+//! |--------|---------|
+//! | [`commands`] | Command handlers organized by subcommand |
+//! | [`tracing_viz`] | Trace visualization utilities |
+//!
+//! ## Commands
+//!
+//! | Command | Description |
+//! |---------|-------------|
+//! | `run` | Execute a pipeline from config or bundle |
+//! | `models` | Manage models from the registry |
+//! | `cache` | Manage the local model cache |
+//! | `prepare` | Parse and validate a pipeline configuration |
+//! | `plan` | Show execution plan for a pipeline |
+//! | `fetch` | Pre-download models from the registry |
+//! | `trace` | View and analyze telemetry sessions |
+//! | `pack` | Create a model bundle |
+//! | `deploy` | Deploy a bundle to the registry |
 
 #[macro_use]
 extern crate lazy_static;
 
+mod commands;
 mod tracing_viz;
+
+// Import utility functions from commands module
+// Note: Some functions (format_timestamp, format_system_time, truncate) are kept
+// locally due to chrono dependencies and slightly different implementations
+use commands::{display_stage_name, format_params, format_size, dir_size_bytes};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -344,9 +371,7 @@ struct MetricsConfig {
     temperature: f32,
 }
 
-fn display_stage_name(name: &str) -> &str {
-    name.split('@').next().unwrap_or(name)
-}
+// display_stage_name is now in commands/utils.rs
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -2771,45 +2796,5 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
     Ok(())
 }
 
-/// Format parameter count (e.g., 82000000 -> "82M")
-fn format_params(params: u64) -> String {
-    if params >= 1_000_000_000 {
-        format!("{:.1}B", params as f64 / 1_000_000_000.0)
-    } else if params >= 1_000_000 {
-        format!("{:.0}M", params as f64 / 1_000_000.0)
-    } else if params >= 1_000 {
-        format!("{:.0}K", params as f64 / 1_000.0)
-    } else {
-        format!("{}", params)
-    }
-}
-
-/// Format size in bytes to human-readable (e.g., 1048576 -> "1.0 MB")
-fn format_size(bytes: u64) -> String {
-    if bytes >= 1_000_000_000 {
-        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
-    } else if bytes >= 1_000_000 {
-        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
-    } else if bytes >= 1_000 {
-        format!("{:.1} KB", bytes as f64 / 1_000.0)
-    } else {
-        format!("{} bytes", bytes)
-    }
-}
-
-/// Calculate directory size in bytes
-fn dir_size_bytes(path: &Path) -> Result<u64> {
-    let mut total: u64 = 0;
-    if path.is_dir() {
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
-            let metadata = entry.metadata()?;
-            if metadata.is_file() {
-                total += metadata.len();
-            } else if metadata.is_dir() {
-                total += dir_size_bytes(&entry.path())?;
-            }
-        }
-    }
-    Ok(total)
-}
+// Utility functions (format_params, format_size, dir_size_bytes, etc.)
+// are now defined in commands/utils.rs and imported at the top of this file.

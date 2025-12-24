@@ -1,16 +1,23 @@
 //! Executor module - Executes model inference stages using runtime adapters.
 //!
-//! The Executor maintains a registry of runtime adapters and delegates inference
-//! execution to the appropriate adapter based on the target (local, edge, or cloud).
+//! The Executor is the **mid-level** execution layer that maintains a registry of runtime
+//! adapters and delegates inference execution to the appropriate adapter based on the target.
 //!
-//! The executor coordinates between the orchestrator and runtime adapters, handling
-//! adapter selection, model loading, and metadata collection.
+//! See [`EXECUTION_LAYERS.md`](./EXECUTION_LAYERS.md) for the full architecture.
+//!
+//! ## Responsibility
+//!
+//! The executor handles:
+//! - **Adapter registry**: Maintain available runtime adapters
+//! - **Target selection**: Choose adapter based on execution target
+//! - **Model loading**: Load models from .xyb bundles or registry
+//! - **LLM integration**: Handle cloud API calls (OpenAI, Anthropic)
 //!
 //! ## Cross-Layer Execution
 //!
 //! The executor supports cross-layer pipelines where different stages run on different targets:
-//! - **Device/Local**: On-device inference using .xyb bundles
-//! - **Integration**: Third-party API calls (OpenAI, Anthropic, etc.) via LlmClient
+//! - **Device/Local**: On-device inference using .xyb bundles (delegates to [`TemplateExecutor`])
+//! - **Integration**: Third-party API calls (OpenAI, Anthropic, etc.) via [`Llm`]
 //! - **Cloud/Server**: Xybrid-hosted inference (future)
 
 use crate::bundler::{BundleManifest, XyBundle};
