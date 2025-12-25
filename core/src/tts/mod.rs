@@ -1,45 +1,40 @@
-//! Text-to-Speech (TTS) module.
+//! TTS (Text-to-Speech) helper utilities.
 //!
-//! This module provides a unified interface for text-to-speech synthesis,
-//! supporting both local on-device models (KittenTTS) and cloud providers.
+//! This module provides utilities for TTS model execution via `TemplateExecutor`.
+//! TTS models are executed through the standard metadata-driven pipeline:
 //!
-//! ## Features
+//! ```text
+//! model_metadata.json → TemplateExecutor → ONNX Runtime
+//!       ↓                      ↓
+//!   Phonemize preprocess    OnnxRuntime
+//!   TTSAudioEncode postprocess
+//! ```
 //!
-//! - **Local inference**: On-device TTS with KittenTTS (private, low-latency)
-//! - **Multiple voices**: 8 voices (4 male, 4 female)
-//! - **Audio postprocessing**: Loudness normalization, silence trimming, high-pass filter
-//! - **Phonemization**: CMU dictionary-based English phonemization
+//! ## Voice Embedding Loading
+//!
+//! The `VoiceEmbeddingLoader` utility handles loading voice embeddings from
+//! different formats used by TTS models:
+//!
+//! - **Raw binary** (KittenTTS): `voices.bin` - contiguous f32 arrays
+//! - **NPZ format** (Kokoro): `voices.npz` - NumPy ZIP archives
 //!
 //! ## Usage
 //!
+//! TTS models should be executed via `TemplateExecutor`:
+//!
 //! ```rust,ignore
-//! use xybrid_core::tts::{Tts, SynthesisRequest, Voice};
+//! use xybrid_core::template_executor::TemplateExecutor;
+//! use xybrid_core::execution_template::ModelMetadata;
+//! use xybrid_core::ir::{Envelope, EnvelopeKind};
 //!
-//! // Create TTS engine
-//! let tts = Tts::new()?;
-//!
-//! // Simple synthesis
-//! let audio = tts.synthesize("Hello, world!")?;
-//!
-//! // With options
-//! let audio = tts.synthesize_with(
-//!     SynthesisRequest::new("Hello!")
-//!         .with_voice(Voice::Female1)
-//!         .with_speed(1.0)
+//! let metadata: ModelMetadata = serde_json::from_str(
+//!     &std::fs::read_to_string("model_metadata.json")?
 //! )?;
-//!
-//! // Save to file
-//! audio.save_wav("output.wav")?;
+//! let mut executor = TemplateExecutor::with_base_path("models/kitten-tts");
+//! let input = Envelope::new(EnvelopeKind::Text("Hello, world!".to_string()));
+//! let output = executor.execute(&metadata, &input)?;
 //! ```
 
-mod engine;
-mod error;
-mod request;
-mod response;
 pub mod voice_embedding;
 
-pub use engine::{Tts, TtsConfig};
-pub use error::TtsError;
-pub use request::{SynthesisRequest, Voice};
-pub use response::{AudioOutput, AudioFormat};
 pub use voice_embedding::{VoiceEmbeddingLoader, VoiceError, VoiceFormat, DEFAULT_EMBEDDING_DIM};
