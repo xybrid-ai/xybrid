@@ -19,8 +19,7 @@
 //! - [`pipeline`] - Pipeline configuration and execution
 //! - [`streaming`] - Real-time audio streaming
 //!
-//! ### Registry & Bundles
-//! - [`registry`] - Bundle registry client
+//! ### Bundles
 //! - [`bundler`] - .xyb bundle creation and extraction
 //!
 //! ### High-Level APIs
@@ -91,46 +90,8 @@ pub mod preprocessing;
 pub mod phonemizer;
 
 // ============================================================================
-// Registry & Model Bundles
+// Model Bundles
 // ============================================================================
-
-/// Bundle registry - storage, retrieval, and resolution.
-///
-/// The registry module consolidates all registry functionality:
-/// - Local filesystem storage ([`registry::LocalRegistry`])
-/// - Remote HTTP transport ([`registry::RemoteRegistry`])
-/// - Fallback chain resolution ([`registry::RegistryResolver`])
-/// - Configuration types ([`registry::RegistryConfig`], [`registry::BundleDescriptor`])
-/// - Index management ([`registry::RegistryIndex`])
-pub mod registry;
-
-// Legacy module paths for backward compatibility (deprecated)
-#[doc(hidden)]
-#[deprecated(since = "0.1.0", note = "Use `registry::config` instead")]
-pub mod registry_config {
-    pub use crate::registry::{
-        BundleDescriptor, BundleLocation, BundleSource, RegistryAuth, RegistryConfig,
-        RemoteRegistryConfig,
-    };
-}
-
-#[doc(hidden)]
-#[deprecated(since = "0.1.0", note = "Use `registry::index` instead")]
-pub mod registry_index {
-    pub use crate::registry::{IndexEntry, IndexError, IndexResult, RegistryIndex};
-}
-
-#[doc(hidden)]
-#[deprecated(since = "0.1.0", note = "Use `registry::remote` instead")]
-pub mod registry_remote {
-    pub use crate::registry::{HttpRegistryTransport, HttpRemoteRegistry, RegistryTransport, RemoteRegistry};
-}
-
-#[doc(hidden)]
-#[deprecated(since = "0.1.0", note = "Use `registry::resolver` instead")]
-pub mod registry_resolver {
-    pub use crate::registry::RegistryResolver;
-}
 
 /// .xyb bundle creation and extraction
 pub mod bundler;

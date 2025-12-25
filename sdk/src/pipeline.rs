@@ -49,7 +49,6 @@ use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
-use xybrid_core::registry_config::RegistryConfig;
 use xybrid_core::routing_engine::LocalAvailability;
 
 /// Result type for pipeline operations.
@@ -219,13 +218,6 @@ pub struct DownloadProgress {
 // Pipeline Configuration Types (internal)
 // ============================================================================
 
-/// Stage registry configuration - can be a string (URL) or RegistryConfig object.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum StageRegistryConfig {
-    Simple(String),
-    Full(RegistryConfig),
-}
 
 /// Stage configuration - can be a string (name) or an object with full configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,8 +239,6 @@ enum StageConfig {
         provider: Option<String>,
         #[serde(default)]
         options: Option<HashMap<String, serde_json::Value>>,
-        #[serde(default)]
-        registry: Option<StageRegistryConfig>,
     },
 }
 
@@ -308,21 +298,23 @@ impl StageConfig {
             StageConfig::Object { options, .. } => options.clone(),
         }
     }
-
-    fn get_registry(&self) -> Option<StageRegistryConfig> {
-        match self {
-            StageConfig::Simple(_) => None,
-            StageConfig::Object { registry, .. } => registry.clone(),
-        }
-    }
 }
 
-/// Registry configuration value - can be a string (URL) or an object.
+/// Registry URL configuration - can be a string (URL) or an object with base_url.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-enum RegistryConfigValue {
+enum RegistryUrlConfig {
     Simple(String),
-    Full(RegistryConfig),
+    Object { base_url: String },
+}
+
+impl RegistryUrlConfig {
+    fn url(&self) -> &str {
+        match self {
+            RegistryUrlConfig::Simple(url) => url,
+            RegistryUrlConfig::Object { base_url } => base_url,
+        }
+    }
 }
 
 /// Pipeline configuration loaded from YAML.
@@ -331,7 +323,7 @@ struct PipelineConfig {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
-    registry: Option<RegistryConfigValue>,
+    registry: Option<RegistryUrlConfig>,
     stages: Vec<StageConfig>,
     #[serde(default)]
     input: Option<InputConfig>,
@@ -469,9 +461,12 @@ struct PipelineHandle {
     stage_descriptors: Vec<StageDescriptor>,
     metrics: DeviceMetrics,
     availability_map: HashMap<String, bool>,
-    registry_config: Option<RegistryConfig>,
+    /// Registry URL (for downloading models)
+    registry_url: Option<String>,
     input_type: PipelineInputType,
     stage_configs: Vec<StageConfig>,
+    /// Bundle paths for each stage (set after downloading)
+    bundle_paths: HashMap<String, PathBuf>,
 }
 
 // ============================================================================
@@ -512,21 +507,13 @@ impl Pipeline {
     fn from_ref(ref_: &PipelineRef) -> PipelineResult<Self> {
         let config = ref_.config.clone();
 
-        // Build stage descriptors
+        // Build stage descriptors (bundle_path will be set after downloading)
         let stage_descriptors: Vec<StageDescriptor> = config
             .stages
             .iter()
             .map(|stage_config| {
                 let name = stage_config.get_name();
                 let mut desc = StageDescriptor::new(name);
-
-                if let Some(reg) = stage_config.get_registry() {
-                    let registry_config = match reg {
-                        StageRegistryConfig::Simple(url) => Self::url_to_registry_config(&url),
-                        StageRegistryConfig::Full(config) => config,
-                    };
-                    desc.registry = Some(registry_config);
-                }
 
                 if let Some(target_str) = stage_config.get_target() {
                     desc.target = Self::parse_target(&target_str);
@@ -549,12 +536,8 @@ impl Pipeline {
             })
             .collect();
 
-        let registry_config = config.registry.as_ref().map(|registry_value| {
-            match registry_value {
-                RegistryConfigValue::Simple(url) => Self::url_to_registry_config(url),
-                RegistryConfigValue::Full(config) => config.clone(),
-            }
-        });
+        // Extract registry URL (just the URL, not the full config)
+        let registry_url = config.registry.as_ref().map(|r| r.url().to_string());
 
         let metrics_config = config.metrics.clone().unwrap_or_default();
         let metrics = DeviceMetrics {
@@ -576,9 +559,10 @@ impl Pipeline {
             stage_descriptors,
             metrics,
             availability_map: config.availability.clone(),
-            registry_config,
+            registry_url,
             input_type,
             stage_configs,
+            bundle_paths: HashMap::new(),
         };
 
         let handle = Arc::new(RwLock::new(handle));
@@ -638,39 +622,12 @@ impl Pipeline {
         stage_options
     }
 
-    fn url_to_registry_config(url: &str) -> RegistryConfig {
-        if url.starts_with("file://") {
-            RegistryConfig {
-                local_path: Some(url.strip_prefix("file://").unwrap().to_string()),
-                remote: None,
-            }
-        } else {
-            RegistryConfig {
-                local_path: None,
-                remote: Some(xybrid_core::registry_config::RemoteRegistryConfig {
-                    base_url: url.to_string(),
-                    index_path: None,
-                    bundle_path: None,
-                    auth: xybrid_core::registry_config::RegistryAuth::None,
-                    timeout_ms: Some(30000),
-                    retry_attempts: Some(3),
-                }),
-            }
-        }
-    }
-
     /// Resolve stage information from the registry.
     fn resolve_stages(
         handle: &Arc<RwLock<PipelineHandle>>,
         config: &PipelineConfig,
     ) -> PipelineResult<(Vec<StageInfo>, u64)> {
-        let registry_url = config
-            .registry
-            .as_ref()
-            .and_then(|r| match r {
-                RegistryConfigValue::Simple(url) => Some(url.clone()),
-                RegistryConfigValue::Full(cfg) => cfg.remote.as_ref().map(|r| r.base_url.clone()),
-            });
+        let registry_url = config.registry.as_ref().map(|r| r.url().to_string());
 
         let client = if let Some(url) = registry_url {
             RegistryClient::new(url)?
@@ -803,10 +760,8 @@ impl Pipeline {
     {
         let registry_url = self.handle.read()
             .map_err(|_| SdkError::PipelineError("Failed to read handle".to_string()))?
-            .registry_config
-            .as_ref()
-            .and_then(|c| c.remote.as_ref())
-            .map(|r| r.base_url.clone());
+            .registry_url
+            .clone();
 
         let client = if let Some(url) = registry_url {
             RegistryClient::new(url)?
@@ -838,7 +793,8 @@ impl Pipeline {
                 });
             };
 
-            client.fetch(&model_id, None, progress_for_model)?;
+            // Fetch model and get the bundle path
+            let bundle_path = client.fetch(&model_id, None, progress_for_model)?;
 
             {
                 let mut handle = self.handle.write().map_err(|_| {
@@ -847,6 +803,9 @@ impl Pipeline {
 
                 handle.availability_map.insert(model_id.clone(), true);
                 handle.availability_map.insert(stage_id.clone(), true);
+                // Store the bundle path for this stage
+                handle.bundle_paths.insert(stage_id.clone(), bundle_path.clone());
+                handle.bundle_paths.insert(model_id.clone(), bundle_path);
             }
         }
 
@@ -865,10 +824,15 @@ impl Pipeline {
             SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
         })?;
 
-        let stage_descriptors = handle.stage_descriptors.clone();
+        // Clone stage descriptors and set bundle_path on each
+        let mut stage_descriptors = handle.stage_descriptors.clone();
+        for desc in &mut stage_descriptors {
+            if let Some(bundle_path) = handle.bundle_paths.get(&desc.name) {
+                desc.bundle_path = Some(bundle_path.to_string_lossy().to_string());
+            }
+        }
         let metrics = handle.metrics.clone();
         let availability_map = handle.availability_map.clone();
-        let registry_config = handle.registry_config.clone();
         drop(handle);
 
         // Set telemetry context
@@ -879,9 +843,7 @@ impl Pipeline {
         crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
 
         let mut orchestrator = Orchestrator::new();
-        if let Some(ref config) = registry_config {
-            orchestrator.executor_mut().set_pipeline_registry(config.clone());
-        }
+        // No need to set registry config - executor uses bundle_path from stage descriptors
 
         let availability_fn = move |stage: &str| -> LocalAvailability {
             let exists = availability_map.get(stage).copied().unwrap_or(false);
@@ -957,15 +919,23 @@ impl Pipeline {
             self.load_models()?;
         }
 
-        let (stage_descriptors, metrics, availability_map, registry_config) = {
+        let (stage_descriptors, metrics, availability_map) = {
             let handle = self.handle.read().map_err(|_| {
                 SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
             })?;
+
+            // Clone stage descriptors and set bundle_path on each
+            let mut descriptors = handle.stage_descriptors.clone();
+            for desc in &mut descriptors {
+                if let Some(bundle_path) = handle.bundle_paths.get(&desc.name) {
+                    desc.bundle_path = Some(bundle_path.to_string_lossy().to_string());
+                }
+            }
+
             (
-                handle.stage_descriptors.clone(),
+                descriptors,
                 handle.metrics.clone(),
                 handle.availability_map.clone(),
-                handle.registry_config.clone(),
             )
         };
 
@@ -980,9 +950,7 @@ impl Pipeline {
             crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
 
             let mut orchestrator = Orchestrator::new();
-            if let Some(ref config) = registry_config {
-                orchestrator.executor_mut().set_pipeline_registry(config.clone());
-            }
+            // No need to set registry config - executor uses bundle_path from stage descriptors
 
             let availability_fn = move |stage: &str| -> LocalAvailability {
                 let exists = availability_map.get(stage).copied().unwrap_or(false);

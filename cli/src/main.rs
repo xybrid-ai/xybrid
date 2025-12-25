@@ -50,9 +50,6 @@ use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::Orchestrator;
 use xybrid_core::policy_engine::PolicyEngine;
-use xybrid_core::registry::{LocalRegistry, Registry};
-use xybrid_core::registry_config::{RegistryAuth, RegistryConfig, RemoteRegistryConfig};
-use xybrid_core::registry_remote::HttpRemoteRegistry;
 use xybrid_core::routing_engine::{LocalAvailability, RoutingEngine};
 use xybrid_core::target::{Platform, TargetResolver};
 use xybrid_core::template_executor::TemplateExecutor;
@@ -147,10 +144,6 @@ enum Commands {
         #[arg(long, value_name = "TEXT")]
         input_text: Option<String>,
 
-        /// Registry URL (e.g., http://localhost:8080) to fetch model bundles
-        #[arg(long, value_name = "URL")]
-        registry: Option<String>,
-
         /// Target format for model resolution (onnx, coreml, tflite)
         /// If not specified, auto-detects based on platform
         #[arg(long, value_name = "TARGET")]
@@ -195,34 +188,6 @@ enum Commands {
         /// Custom path to model directory (overrides default ./models/<name>/)
         #[arg(short, long, value_name = "PATH")]
         path: Option<PathBuf>,
-    },
-    /// List bundles in the local registry
-    List {
-        /// Target format filter (onnx, coreml, tflite)
-        #[arg(short, long, value_name = "TARGET")]
-        target: Option<String>,
-
-        /// Registry path (default: ~/.xybrid/registry)
-        #[arg(short = 'p', long, value_name = "PATH")]
-        registry_path: Option<PathBuf>,
-    },
-    /// Deploy a .xyb bundle to the registry
-    Deploy {
-        /// Path to the .xyb bundle file
-        #[arg(value_name = "BUNDLE")]
-        bundle_path: PathBuf,
-
-        /// Registry type (local or remote)
-        #[arg(long, value_name = "TYPE", default_value = "local")]
-        registry: String,
-
-        /// Registry path (for local) or URL (for remote)
-        #[arg(short = 'p', long, value_name = "PATH")]
-        registry_path: Option<PathBuf>,
-
-        /// Target format override (extracted from bundle if not specified)
-        #[arg(short, long, value_name = "TARGET")]
-        target: Option<String>,
     },
 }
 
@@ -443,7 +408,6 @@ fn run_command(cli: Cli) -> Result<()> {
             policy,
             input_audio,
             input_text,
-            registry,
             target,
             trace,
             trace_export,
@@ -507,7 +471,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     "Either --config, --pipeline, or --bundle must be specified"
                 ));
             };
-            run_pipeline(&config_path, dry_run, policy.as_ref(), input_audio.as_ref(), registry.as_deref(), target.as_deref(), trace, trace_export.as_ref())
+            run_pipeline(&config_path, dry_run, policy.as_ref(), input_audio.as_ref(), target.as_deref(), trace, trace_export.as_ref())
         }
         Commands::Trace {
             session,
@@ -532,16 +496,6 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             path,
         } => pack_model(&name, &version, &target, path.as_deref()),
-        Commands::List {
-            target,
-            registry_path,
-        } => list_bundles(target.as_deref(), registry_path.as_deref()),
-        Commands::Deploy {
-            bundle_path,
-            registry,
-            registry_path,
-            target,
-        } => deploy_bundle(&bundle_path, &registry, registry_path.as_deref(), target.as_deref()),
     }
 }
 
@@ -731,319 +685,6 @@ fn pack_model(name: &str, version: &str, target: &str, custom_path: Option<&Path
     Ok(())
 }
 
-/// Deploy a .xyb bundle to the registry, validate hash, and print deployment summary.
-fn deploy_bundle(
-    bundle_path: &Path,
-    registry_type: &str,
-    registry_path: Option<&Path>,
-    target_override: Option<&str>,
-) -> Result<()> {
-    println!("🚀 Xybrid Deploy");
-    println!("{}", "=".repeat(60));
-    println!("Bundle: {}", bundle_path.display());
-    println!("Registry: {}", registry_type);
-    println!();
-
-    // Load and validate bundle
-    if !bundle_path.exists() {
-        return Err(anyhow::anyhow!(
-            "Bundle file not found: {}",
-            bundle_path.display()
-        ));
-    }
-
-    println!("📦 Loading bundle...");
-    let bundle = XyBundle::load(bundle_path).context("Failed to load bundle")?;
-
-    let manifest = bundle.manifest();
-    // Use target override if provided, otherwise use manifest target
-    let deploy_target = target_override.unwrap_or(&manifest.target);
-
-    println!("   Model ID: {}", manifest.model_id);
-    println!("   Version:  {}", manifest.version);
-    println!("   Target:   {} {}", deploy_target,
-        if target_override.is_some() { "(overridden)" } else { "" });
-    println!("   Files:    {}", manifest.files.len());
-    println!("   Hash:     {}", manifest.hash);
-
-    if manifest.has_metadata {
-        println!("   Metadata: ✅ Included");
-    } else {
-        println!("   Metadata: ⚠️  Not included");
-    }
-    println!();
-
-    // Validate hash by reading bundle file and computing hash
-    println!("🔍 Validating bundle integrity...");
-    let bundle_bytes = fs::read(bundle_path)
-        .with_context(|| format!("Failed to read bundle file: {}", bundle_path.display()))?;
-
-    // Compute hash of the bundle file itself (simplified validation)
-    // In a real implementation, we might extract and validate the internal manifest hash
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(&bundle_bytes);
-    let file_hash = format!("{:x}", hasher.finalize());
-
-    // Note: The bundle's hash is the hash of its contents, not the compressed file
-    // For now, we'll verify the bundle loaded correctly and manifest is valid
-    if manifest.hash.is_empty() {
-        return Err(anyhow::anyhow!(
-            "Bundle manifest has empty hash - bundle may be corrupted"
-        ));
-    }
-
-    println!("   ✓ Bundle integrity validated");
-    println!("   ✓ Manifest hash: {}", manifest.hash);
-    println!("   ✓ File hash: {}", file_hash);
-    println!();
-
-    // Prepare registry
-    println!("📋 Preparing registry...");
-    let mut registry: Box<dyn Registry> = match registry_type {
-        "local" => {
-            let reg_path = if let Some(path) = registry_path {
-                path.to_path_buf()
-            } else {
-                // Use default registry location
-                dirs::home_dir()
-                    .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-                    .join(".xybrid")
-                    .join("registry")
-            };
-
-            println!("   Registry path: {}", reg_path.display());
-            Box::new(
-                LocalRegistry::new(&reg_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to create local registry: {}", e))?,
-            )
-        }
-        "remote" => {
-            let base_url = registry_path
-                .and_then(|p| p.to_str().map(|s| s.to_string()))
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Remote registry requires --registry-path <https://registry-url>"
-                    )
-                })?;
-
-            let config = RegistryConfig {
-                local_path: None,
-                remote: Some(RemoteRegistryConfig {
-                    base_url,
-                    index_path: None,
-                    bundle_path: None,
-                    auth: RegistryAuth::None,
-                    timeout_ms: None,
-                    retry_attempts: None,
-                }),
-            };
-
-            println!(
-                "   Remote URL: {}",
-                config.remote.as_ref().unwrap().base_url
-            );
-            let registry = HttpRemoteRegistry::from_config(&config)
-                .map_err(|e| anyhow::anyhow!("Failed to initialize remote registry: {}", e))?;
-            Box::new(registry)
-        }
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Invalid registry type: {}. Use 'local' or 'remote'",
-                registry_type
-            ));
-        }
-    };
-
-    // Check if bundle already exists
-    if let Ok(existing) = registry.get_metadata(&manifest.model_id, Some(&manifest.version)) {
-        println!(
-            "⚠️  Bundle {}@{} already exists in registry",
-            manifest.model_id, manifest.version
-        );
-        println!("   Location: {}", existing.path);
-        println!("   Size: {} bytes", existing.size_bytes);
-        println!();
-        println!("   Overwrite? (y/N): ");
-        // For MVP, we'll just warn and continue - in production you'd prompt
-        println!("   → Continuing with deployment...");
-        println!();
-    }
-
-    // Store bundle in registry
-    println!("💾 Uploading to registry...");
-    let metadata = registry
-        .store_bundle(&manifest.model_id, &manifest.version, bundle_bytes)
-        .map_err(|e| anyhow::anyhow!("Failed to store bundle in registry: {}", e))?;
-
-    println!("   ✓ Bundle stored successfully");
-    println!();
-
-    // Print deployment manifest summary
-    println!("{}", "=".repeat(60));
-    println!("✅ Deployment Complete");
-    println!("{}", "=".repeat(60));
-    println!();
-    println!("📊 Deployment Manifest:");
-    println!("   Model ID:    {}", metadata.id);
-    println!("   Version:     {}", metadata.version);
-    println!("   Target:      {}", deploy_target);
-    println!("   Registry:    {}", registry_type);
-    println!("   Location:    {}", metadata.path);
-    println!(
-        "   Size:        {} bytes ({:.2} KB)",
-        metadata.size_bytes,
-        metadata.size_bytes as f64 / 1024.0
-    );
-    println!("   Content Hash: {}", manifest.hash);
-    println!("   File Hash:    {}", file_hash);
-    println!("   Files:        {}", manifest.files.len());
-    if !manifest.files.is_empty() {
-        println!("   File List:");
-        for file in &manifest.files {
-            println!("     • {}", file);
-        }
-    }
-    println!();
-
-    // Display metadata information if present
-    if manifest.has_metadata {
-        println!("📋 Model Metadata:");
-        if let Ok(Some(metadata_json)) = bundle.get_metadata_json() {
-            // Parse and display metadata details
-            if let Ok(metadata_value) = serde_json::from_str::<serde_json::Value>(&metadata_json) {
-                if let Some(model_id) = metadata_value.get("model_id").and_then(|v| v.as_str()) {
-                    println!("   Model ID:      {}", model_id);
-                }
-                if let Some(version) = metadata_value.get("version").and_then(|v| v.as_str()) {
-                    println!("   Version:       {}", version);
-                }
-
-                // Show preprocessing steps
-                if let Some(preprocessing) = metadata_value.get("preprocessing").and_then(|v| v.as_array()) {
-                    println!("   Preprocessing: {} steps", preprocessing.len());
-                    for (i, step) in preprocessing.iter().enumerate() {
-                        if let Some(step_type) = step.get("type").and_then(|v| v.as_str()) {
-                            println!("     {}. {}", i + 1, step_type);
-                        }
-                    }
-                }
-
-                // Show postprocessing steps
-                if let Some(postprocessing) = metadata_value.get("postprocessing").and_then(|v| v.as_array()) {
-                    println!("   Postprocessing: {} steps", postprocessing.len());
-                    for (i, step) in postprocessing.iter().enumerate() {
-                        if let Some(step_type) = step.get("type").and_then(|v| v.as_str()) {
-                            println!("     {}. {}", i + 1, step_type);
-                        }
-                    }
-                }
-            }
-        }
-        println!();
-    }
-
-    Ok(())
-}
-
-/// List bundles in the local registry.
-fn list_bundles(target_filter: Option<&str>, registry_path: Option<&Path>) -> Result<()> {
-    println!("📦 Xybrid Registry");
-    println!("{}", "=".repeat(60));
-
-    // Determine registry path
-    let reg_path = if let Some(path) = registry_path {
-        path.to_path_buf()
-    } else {
-        dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-            .join(".xybrid")
-            .join("registry")
-    };
-
-    println!("📂 Registry: {}", reg_path.display());
-    println!();
-
-    if !reg_path.exists() {
-        println!("ℹ️  Registry directory does not exist.");
-        println!("   Run 'xybrid deploy' to add bundles to the registry.");
-        return Ok(());
-    }
-
-    // Create registry and list bundles
-    let registry = LocalRegistry::new(&reg_path)
-        .map_err(|e| anyhow::anyhow!("Failed to open registry: {}", e))?;
-
-    let bundles = registry.list_bundles()
-        .map_err(|e| anyhow::anyhow!("Failed to list bundles: {}", e))?;
-
-    if bundles.is_empty() {
-        println!("ℹ️  No bundles found in registry.");
-        println!("   Run 'xybrid deploy' to add bundles to the registry.");
-        return Ok(());
-    }
-
-    // Group bundles by model_id and version
-    use std::collections::BTreeMap;
-    let mut grouped: BTreeMap<String, Vec<&xybrid_core::registry::BundleMetadata>> = BTreeMap::new();
-
-    for bundle in &bundles {
-        let key = format!("{}@{}", bundle.id, bundle.version);
-        grouped.entry(key).or_default().push(bundle);
-    }
-
-    // Display bundles
-    println!("📋 Available Bundles:");
-    println!();
-
-    for (key, bundle_list) in grouped {
-        // Check if any bundle in this group matches the target filter
-        let has_matching_target = if let Some(filter) = target_filter {
-            bundle_list.iter().any(|b| {
-                // Extract target from path if possible
-                b.path.contains(filter)
-            })
-        } else {
-            true
-        };
-
-        if !has_matching_target {
-            continue;
-        }
-
-        println!("  {}", key.cyan());
-
-        for bundle in bundle_list {
-            // Try to extract target from path (e.g., .../1.0/onnx.xyb -> onnx)
-            let target = Path::new(&bundle.path)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("unknown");
-
-            if let Some(filter) = target_filter {
-                if !target.contains(filter) {
-                    continue;
-                }
-            }
-
-            let size_str = if bundle.size_bytes > 1_000_000 {
-                format!("{:.1} MB", bundle.size_bytes as f64 / 1_000_000.0)
-            } else if bundle.size_bytes > 1_000 {
-                format!("{:.1} KB", bundle.size_bytes as f64 / 1_000.0)
-            } else {
-                format!("{} bytes", bundle.size_bytes)
-            };
-
-            println!("    - {} ({})", target.bright_green(), size_str.bright_black());
-        }
-        println!();
-    }
-
-    println!("{}", "=".repeat(60));
-    println!("Total: {} bundles", bundles.len());
-
-    Ok(())
-}
 
 /// Get the traces directory path (~/.xybrid/traces/).
 fn get_traces_directory() -> Result<PathBuf> {
@@ -1641,7 +1282,6 @@ fn run_pipeline(
     dry_run: bool,
     policy_path: Option<&PathBuf>,
     input_audio: Option<&PathBuf>,
-    registry_url: Option<&str>,
     target: Option<&str>,
     trace_enabled: bool,
     trace_export: Option<&PathBuf>,
@@ -1805,25 +1445,6 @@ fn run_pipeline(
 
     // Bridge orchestrator events to telemetry (sends events to platform if API key is configured)
     xybrid_sdk::bridge_orchestrator_events(&orchestrator);
-
-    // Configure registry if provided
-    if let Some(url) = registry_url {
-        println!("🌐 Configuring registry: {}", url);
-        let registry_config = RegistryConfig {
-            local_path: None,
-            remote: Some(RemoteRegistryConfig {
-                base_url: url.to_string(),
-                index_path: None,
-                bundle_path: None,
-                auth: RegistryAuth::None,
-                timeout_ms: Some(30000),
-                retry_attempts: Some(3),
-            }),
-        };
-        orchestrator.executor_mut().set_pipeline_registry(registry_config);
-        println!("   ✓ Registry configured");
-        println!();
-    }
 
     // Load policy bundle if provided
     if let Some(policy_file) = policy_path {

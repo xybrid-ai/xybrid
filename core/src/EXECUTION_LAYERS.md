@@ -53,7 +53,7 @@ This document clarifies the responsibilities of the three execution layers in xy
 - `execute_local_stage()` - Execute on device using ONNX
 - `execute_integration_stage()` - Execute via LLM API
 
-**Dependencies**: TemplateExecutor, RuntimeAdapter, RegistryResolver, Llm
+**Dependencies**: TemplateExecutor, RuntimeAdapter, Llm
 
 **When to use**: Direct model execution when routing is already decided.
 
