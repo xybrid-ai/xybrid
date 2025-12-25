@@ -529,7 +529,7 @@ impl Executor {
                             ExecutorError::Other("Invalid extract dir path".to_string())
                         })?;
 
-                        let mut template_executor = TemplateExecutor::with_base_path(base_path);
+                        let mut template_executor = TemplateExecutor::new(base_path);
 
                         let output = template_executor.execute(&model_metadata, input)
                             .map_err(|e| ExecutorError::AdapterError(e))?;

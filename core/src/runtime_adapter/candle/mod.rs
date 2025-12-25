@@ -32,10 +32,12 @@ mod adapter;
 mod backend;
 mod device;
 mod model;
+mod runtime; // New runtime implementation
 mod whisper;
 
 pub use adapter::CandleRuntimeAdapter;
 pub use backend::CandleBackend;
 pub use device::{select_device, DeviceSelection};
 pub use model::{CandleModel, CandleModelType, ModelError, ModelResult, load_candle_model};
+pub use runtime::CandleRuntime;
 pub use whisper::{Task, WhisperConfig, WhisperModel, WhisperSize};

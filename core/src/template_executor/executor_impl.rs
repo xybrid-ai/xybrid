@@ -9,14 +9,18 @@ use crate::ir::{Envelope, EnvelopeKind};
 use crate::tracing as trace;
 // Unified mel spectrogram API
 use crate::audio::mel::{compute_mel_spectrogram, MelConfig, MelScale, PaddingMode};
+use crate::audio::convert::{decode_wav_audio, prepare_audio_samples};
 // Legacy imports for audio bytes handling
 use crate::preprocessing::mel_spectrogram::audio_bytes_to_whisper_mel;
-use crate::runtime_adapter::ONNXSession;
-use crate::runtime_adapter::AdapterError;
+use crate::runtime_adapter::onnx::ONNXSession;
+use crate::runtime_adapter::{AdapterError, AdapterResult, ModelMetadata, ModelRuntime};
+use crate::runtime_adapter::candle::CandleRuntime;
+use crate::runtime_adapter::onnx::OnnxRuntime;
+use crate::runtime_adapter::tts::TtsRuntime;
 use ndarray::{ArrayD, IxDyn};
 use ort::value::Value;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // Types (ExecutorResult, PreprocessedData, RawOutputs) are defined in types.rs
 // and imported via `pub use types::{...}` in mod.rs before this include!
@@ -96,36 +100,26 @@ fn execute_tts_inference(
     session.run_with_values(value_inputs)
 }
 
-/// Template-driven executor that interprets metadata and runs models
+/// Template Executor implementation.
+///
+/// Handles execution of models via pluggable runtimes.
 pub struct TemplateExecutor {
-    /// Cache of loaded ONNX sessions (model_file -> session)
-    session_cache: HashMap<String, ONNXSession>,
-
-    /// Cache of loaded Candle Whisper models (model_file -> model)
-    #[cfg(feature = "candle")]
-    candle_whisper_cache: HashMap<String, crate::runtime_adapter::candle::WhisperModel>,
-
-    /// Base path for resolving model files
+    /// Configured runtimes (e.g., "onnx", "candle", "tts")
+    runtimes: HashMap<String, Box<dyn ModelRuntime>>,
     base_path: String,
 }
 
 impl TemplateExecutor {
     /// Create a new TemplateExecutor
-    pub fn new() -> Self {
-        Self {
-            session_cache: HashMap::new(),
-            #[cfg(feature = "candle")]
-            candle_whisper_cache: HashMap::new(),
-            base_path: String::new(),
-        }
-    }
+    pub fn new(base_path: &str) -> Self {
+        let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
+        runtimes.insert("onnx".to_string(), Box::new(OnnxRuntime::new()));
+        #[cfg(feature = "candle")]
+        runtimes.insert("candle".to_string(), Box::new(CandleRuntime::new()));
+        runtimes.insert("tts".to_string(), Box::new(TtsRuntime::new()));
 
-    /// Create a new TemplateExecutor with a base path for model files
-    pub fn with_base_path(base_path: impl Into<String>) -> Self {
         Self {
-            session_cache: HashMap::new(),
-            #[cfg(feature = "candle")]
-            candle_whisper_cache: HashMap::new(),
+            runtimes,
             base_path: base_path.into(),
         }
     }
@@ -141,58 +135,55 @@ impl TemplateExecutor {
         trace::add_metadata("model_id", &metadata.model_id);
         trace::add_metadata("version", &metadata.version);
 
-        // Step 1: Run preprocessing pipeline
-        let preprocessed = self.run_preprocessing(metadata, input)?;
+        // Step 1: Handling Pipelines
+        if let ExecutionTemplate::Pipeline { stages, config } = &metadata.execution_template {
+             let _span = trace::SpanGuard::new("pipeline_inference");
+             trace::add_metadata("stages", &stages.len().to_string());
+             
+             // Run preprocessing
+             let preprocessed = self.run_preprocessing(metadata, input)?;
+             
+             let raw_outputs = self.execute_pipeline(stages, config, preprocessed, metadata)?;
+             return self.run_postprocessing(metadata, raw_outputs);
+        }
 
-        // Step 2: Execute based on template type
-        let raw_outputs = match &metadata.execution_template {
-            ExecutionTemplate::SimpleMode { model_file } => {
-                let _span = trace::SpanGuard::new("onnx_inference");
-                trace::add_metadata("model_file", model_file);
-                trace::add_metadata("mode", "simple");
-                self.execute_simple_mode(model_file, preprocessed, metadata)?
-            }
-            ExecutionTemplate::CandleModel {
-                model_file,
-                config_file,
-                tokenizer_file,
-                model_type,
-            } => {
-                #[cfg(feature = "candle")]
-                {
-                    let _span = trace::SpanGuard::new("candle_inference");
-                    trace::add_metadata("model_file", model_file);
-                    trace::add_metadata("mode", "candle");
-                    if let Some(mt) = model_type {
-                        trace::add_metadata("model_type", mt);
-                    }
-                    self.execute_candle_model(
-                        model_file,
-                        config_file.as_deref(),
-                        tokenizer_file.as_deref(),
-                        model_type.as_deref(),
-                        preprocessed,
-                        metadata,
-                    )?
-                }
-                #[cfg(not(feature = "candle"))]
-                {
-                    return Err(AdapterError::RuntimeError(
-                        "Candle support not enabled. Rebuild with --features candle".to_string(),
-                    ));
-                }
-            }
-            ExecutionTemplate::Pipeline { stages, config } => {
-                let _span = trace::SpanGuard::new("pipeline_inference");
-                trace::add_metadata("stages", &stages.len().to_string());
-                self.execute_pipeline(stages, config, preprocessed, metadata)?
-            }
+        // Step 2: Single Model Execution
+        // Determine runtime type
+        let runtime_type = if !metadata.runtime_type.is_empty() {
+            metadata.runtime_type.as_str()
+        } else {
+             // Inference fallback logic
+             match &metadata.execution_template {
+                 ExecutionTemplate::CandleModel { .. } => "candle",
+                 ExecutionTemplate::SimpleMode { .. } => "onnx",
+                 _ => "onnx"
+             }
         };
 
-        // Step 3: Run postprocessing pipeline
-        let output = self.run_postprocessing(metadata, raw_outputs)?;
+        // Run Preprocessing (may be redundant if runtime handles it, but keeps compatibility)
+        let preprocessed = self.run_preprocessing(metadata, input)?;
+        
+        let runtime_input = preprocessed.to_envelope()?;
 
-        Ok(output)
+        // Get Runtime & Execute
+        let runtime = self.runtimes.get_mut(runtime_type).ok_or_else(|| {
+            AdapterError::RuntimeError(format!("Runtime '{}' not configured", runtime_type))
+        })?;
+
+        let model_full_path = Path::new(&self.base_path).join(&metadata.model_path);
+        
+        // Ensure model is loaded (runtime handles caching)
+        // Note: Generic onnx runtime expects model_path to be the .onnx file?
+        // Or directory? Metadata model_path is usually relative path to file or dir.
+        // If SimpleMode { model_file }, metadata.model_path refers to that file.
+        // Candle expects directory/file.
+        runtime.load(&model_full_path).map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+        
+        let result_envelope = runtime.execute(&runtime_input)?;
+        
+        // Run Postprocessing
+        let raw_outputs = RawOutputs::from_envelope(&result_envelope)?; 
+        self.run_postprocessing(metadata, raw_outputs)
     }
 
     /// Run preprocessing steps from metadata
@@ -293,141 +284,6 @@ impl TemplateExecutor {
             }
         }
     }
-
-    /// Execute SimpleMode: single model, run once
-    fn execute_simple_mode(
-        &mut self,
-        model_file: &str,
-        input: PreprocessedData,
-        metadata: &ModelMetadata,
-    ) -> ExecutorResult<RawOutputs> {
-        // For TTS models (PhonemeIds), load voice embedding first to avoid borrow conflicts
-        let tts_voice_embedding = if input.is_phoneme_ids() {
-            Some(self.load_voice_embedding(metadata, 0)?)
-        } else {
-            None
-        };
-
-        let session = self.get_or_load_session(model_file)?;
-
-        // Get input names from the ONNX model
-        let input_names = session.input_names();
-        if input_names.is_empty() {
-            return Err(AdapterError::InvalidInput(
-                "Model has no inputs".to_string(),
-            ));
-        }
-
-        // Build input map based on input type
-        let outputs = match &input {
-            PreprocessedData::TokenIds {
-                ids,
-                attention_mask,
-                token_type_ids,
-                ..
-            } => {
-                // Multi-input case for BERT-style models
-                // BERT models expect int64 tensors, so we use run_with_values()
-                use ort::value::Value;
-                use ndarray::Array2;
-
-                let batch_size = 1;
-                let seq_len = ids.len();
-
-                // Convert token IDs to int64 tensor [batch_size, seq_len]
-                let input_ids_data: Vec<i64> = ids.iter().map(|&id| id as i64).collect();
-                let input_ids_array = Array2::<i64>::from_shape_vec(
-                    (batch_size, seq_len),
-                    input_ids_data,
-                )
-                .map_err(|e| {
-                    AdapterError::InvalidInput(format!("Failed to create input_ids array: {}", e))
-                })?;
-                let input_ids_value = Value::from_array(input_ids_array)
-                    .map_err(|e| {
-                        AdapterError::InvalidInput(format!("Failed to create input_ids value: {}", e))
-                    })?;
-
-                // Convert attention mask to int64 tensor [batch_size, seq_len]
-                let attention_mask_data: Vec<i64> =
-                    attention_mask.iter().map(|&mask| mask as i64).collect();
-                let attention_mask_array = Array2::<i64>::from_shape_vec(
-                    (batch_size, seq_len),
-                    attention_mask_data,
-                )
-                .map_err(|e| {
-                    AdapterError::InvalidInput(format!("Failed to create attention_mask array: {}", e))
-                })?;
-                let attention_mask_value = Value::from_array(attention_mask_array)
-                    .map_err(|e| {
-                        AdapterError::InvalidInput(format!("Failed to create attention_mask value: {}", e))
-                    })?;
-
-                // Convert token type IDs to int64 tensor [batch_size, seq_len]
-                let token_type_ids_data: Vec<i64> =
-                    token_type_ids.iter().map(|&type_id| type_id as i64).collect();
-                let token_type_ids_array = Array2::<i64>::from_shape_vec(
-                    (batch_size, seq_len),
-                    token_type_ids_data,
-                )
-                .map_err(|e| {
-                    AdapterError::InvalidInput(format!("Failed to create token_type_ids array: {}", e))
-                })?;
-                let token_type_ids_value = Value::from_array(token_type_ids_array)
-                    .map_err(|e| {
-                        AdapterError::InvalidInput(format!("Failed to create token_type_ids value: {}", e))
-                    })?;
-
-                // Map values to ONNX input names
-                let mut value_inputs = HashMap::new();
-
-                // Match ONNX input names to our values
-                // BERT models typically have: input_ids, attention_mask, token_type_ids
-                // Convert to dynamic Value type using .into()
-                for input_name in input_names.iter() {
-                    if input_name.contains("input_ids") || input_name == "input_ids" {
-                        value_inputs.insert(input_name.clone(), input_ids_value.clone().into());
-                    } else if input_name.contains("attention_mask") || input_name == "attention_mask"
-                    {
-                        value_inputs.insert(input_name.clone(), attention_mask_value.clone().into());
-                    } else if input_name.contains("token_type_ids") || input_name == "token_type_ids"
-                    {
-                        value_inputs.insert(input_name.clone(), token_type_ids_value.clone().into());
-                    }
-                }
-
-                // Verify we mapped all inputs
-                if value_inputs.len() != input_names.len() {
-                    return Err(AdapterError::InvalidInput(format!(
-                        "Could not map all model inputs. Expected {} inputs, mapped {}. Input names: {:?}",
-                        input_names.len(),
-                        value_inputs.len(),
-                        input_names
-                    )));
-                }
-
-                // Run inference with mixed types using run_with_values
-                session.run_with_values(value_inputs)?
-            }
-            PreprocessedData::PhonemeIds { ids, .. } => {
-                // TTS model case - requires input_ids, style (voice embedding), and speed
-                // Voice embedding was pre-loaded before getting session to avoid borrow issues
-                let voice_embedding = tts_voice_embedding
-                    .ok_or_else(|| AdapterError::InvalidInput("TTS voice embedding not loaded".to_string()))?;
-                execute_tts_inference(session, ids, voice_embedding)?
-            }
-            _ => {
-                // Single-input case (original behavior)
-                let input_tensor = input.to_tensor()?;
-                let mut input_map = HashMap::new();
-                input_map.insert(input_names[0].clone(), input_tensor);
-                session.run(input_map)?
-            }
-        };
-
-        Ok(RawOutputs::TensorMap(outputs))
-    }
-
 
     /// Load voice embedding from voices.bin file
     fn load_voice_embedding(
@@ -588,79 +444,6 @@ impl TemplateExecutor {
         Ok(voice_embedding)
     }
 
-    /// Execute CandleModel: Whisper ASR using Candle runtime
-    #[cfg(feature = "candle")]
-    fn execute_candle_model(
-        &mut self,
-        model_file: &str,
-        _config_file: Option<&str>,
-        _tokenizer_file: Option<&str>,
-        model_type: Option<&str>,
-        input: PreprocessedData,
-        _metadata: &ModelMetadata,
-    ) -> ExecutorResult<RawOutputs> {
-        use crate::runtime_adapter::candle::{select_device, DeviceSelection, WhisperConfig, WhisperModel, WhisperSize};
-
-        // Currently only Whisper is supported
-        let model_type = model_type.unwrap_or("whisper");
-        if model_type != "whisper" {
-            return Err(AdapterError::RuntimeError(format!(
-                "Unsupported Candle model type: {}. Currently only 'whisper' is supported.",
-                model_type
-            )));
-        }
-
-        // Extract PCM audio from preprocessed data
-        let pcm_data = match &input {
-            PreprocessedData::AudioSamples(samples) => samples.clone(),
-            PreprocessedData::Tensor(tensor) => {
-                // If tensor is 1D or flat, treat as PCM
-                tensor.as_slice().map(|s| s.to_vec()).ok_or_else(|| {
-                    AdapterError::InvalidInput("Cannot extract PCM from tensor".to_string())
-                })?
-            }
-            _ => {
-                return Err(AdapterError::InvalidInput(
-                    "Candle Whisper expects AudioSamples (PCM f32 @ 16kHz) input. \
-                     Add 'AudioDecode' preprocessing step.".to_string()
-                ));
-            }
-        };
-
-        // Get or load model
-        let model_path = self.resolve_file_path(model_file);
-        let model_dir = std::path::Path::new(&model_path)
-            .parent()
-            .unwrap_or(std::path::Path::new(&self.base_path));
-
-        // Check if model is cached
-        let cache_key = model_dir.to_string_lossy().to_string();
-        if !self.candle_whisper_cache.contains_key(&cache_key) {
-            // Load model
-            let device = select_device(DeviceSelection::Auto)
-                .map_err(|e| AdapterError::RuntimeError(format!("Device selection failed: {}", e)))?;
-
-            let config = WhisperConfig {
-                model_size: WhisperSize::Tiny,
-                language: Some("en".to_string()),
-                ..Default::default()
-            };
-
-            let model = WhisperModel::load_with_config(model_dir, &device, config)
-                .map_err(|e| AdapterError::RuntimeError(format!("Failed to load Candle model: {}", e)))?;
-
-            self.candle_whisper_cache.insert(cache_key.clone(), model);
-        }
-
-        // Run transcription
-        let model = self.candle_whisper_cache.get_mut(&cache_key).unwrap();
-        let text = model.transcribe_pcm(&pcm_data)
-            .map_err(|e| AdapterError::InferenceFailed(format!("Whisper transcription failed: {}", e)))?;
-
-        // Return as text output
-        Ok(RawOutputs::Text(text))
-    }
-
     /// Execute Pipeline: multi-stage execution with control flow
     fn execute_pipeline(
         &mut self,
@@ -756,35 +539,41 @@ impl TemplateExecutor {
     }
 
     /// Execute a single-shot stage (run once)
-    fn execute_stage_single_shot(
-        &mut self,
-        stage: &PipelineStage,
-        current_data: &PreprocessedData,
-        _stage_outputs: &HashMap<String, HashMap<String, ArrayD<f32>>>,
-    ) -> ExecutorResult<HashMap<String, ArrayD<f32>>> {
-        let session = self.get_or_load_session(&stage.model_file)?;
+fn execute_stage_single_shot(
+    &mut self,
+    stage: &PipelineStage,
+    current_data: &PreprocessedData,
+    _stage_outputs: &HashMap<String, HashMap<String, ArrayD<f32>>>,
+) -> ExecutorResult<HashMap<String, ArrayD<f32>>> {
+    // Identify runtime (default onnx)
+    // Pipeline stages don't explicitly say "runtime", they assume ONNX usually unless ModelMetadata says otherwise.
+    // Here we have Stage, which refers to model file.
+    let runtime_type = "onnx"; // Default for generic pipeline stages
 
-        // Convert input to tensor
-        let input_tensor = current_data.to_tensor()?;
+    let runtime = self.runtimes.get_mut(runtime_type).ok_or_else(|| {
+        AdapterError::RuntimeError(format!("Runtime '{}' not configured", runtime_type))
+    })?;
 
-        // Query ONNX session for actual input names (robust to metadata mismatches)
-        let actual_input_names = session.input_names();
-        if actual_input_names.is_empty() {
-            return Err(AdapterError::InvalidInput(
-                "Model has no inputs".to_string(),
-            ));
-        }
+    // Resolution of path
+    let model_full_path = Path::new(&self.base_path).join(&stage.model_file);
+    runtime.load(&model_full_path).map_err(|e| AdapterError::RuntimeError(format!("Stage load failed: {}", e)))?;
 
-        // Build input map using actual ONNX input name (first input)
-        // This makes the system robust to metadata naming mismatches
-        let mut inputs = HashMap::new();
-        inputs.insert(actual_input_names[0].clone(), input_tensor);
-
-        // Run inference
-        let outputs = session.run(inputs)?;
-
-        Ok(outputs)
+    // Convert input
+    // Single shot stages usually take Tensor inputs.
+    let input_envelope = current_data.to_envelope()?;
+    
+    // Execute
+    let output_envelope = runtime.execute(&input_envelope)?;
+    
+    // Convert output to TensorMap
+    let raw_outputs = RawOutputs::from_envelope(&output_envelope)?;
+    if let RawOutputs::TensorMap(map) = raw_outputs {
+        Ok(map)
+    } else {
+        // Adapt other outputs to TensorMap if possible, or error
+        Err(AdapterError::RuntimeError("Stage execution did not return tensors".to_string()))
     }
+}
 
     /// Execute an autoregressive stage (token generation loop)
     fn execute_stage_autoregressive(
@@ -1845,7 +1634,7 @@ impl TemplateExecutor {
             .map_err(|e| AdapterError::InvalidInput(format!("Failed to read vocab file: {}", e)))?;
 
         // Try to parse as JSON first (Wav2Vec2 format: {"char": id, ...})
-        let vocab: Vec<String> = if content.trim().starts_with('{') {
+        let json_vocab = if content.trim().starts_with('{') {
             // Parse JSON vocab: {"'": 27, "A": 7, "B": 24, ...}
             let json_vocab = serde_json::from_str::<std::collections::HashMap<String, usize>>(&content)
                 .map_err(|e| AdapterError::InvalidInput(format!("Failed to parse vocab JSON: {}", e)))?;
@@ -1859,8 +1648,13 @@ impl TemplateExecutor {
                     id_to_char[id] = char_str;
                 }
             }
+            Some(id_to_char)
+        } else {
+            None
+        };
 
-            id_to_char
+        let vocab: Vec<String> = if let Some(jv) = json_vocab {
+            jv
         } else {
             // Plain text format: one token per line
             content.lines().map(|line| line.trim().to_string()).collect()
@@ -1915,19 +1709,31 @@ impl TemplateExecutor {
 
     /// Get or load an ONNX session
     fn get_or_load_session(&mut self, model_file: &str) -> ExecutorResult<&ONNXSession> {
-        if !self.session_cache.contains_key(model_file) {
-            let model_path = self.resolve_file_path(model_file);
-
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            let use_metal = true;
-            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-            let use_metal = false;
-
-            let session = ONNXSession::new(&model_path, false, use_metal)?;
-            self.session_cache.insert(model_file.to_string(), session);
+        // Use OnnxRuntime to get session
+        // This maintains compatibility for pipeline stages that need raw session access
+        
+        // 1. Ensure Loaded
+        let model_full_path = Path::new(&self.base_path).join(model_file);
+        
+        // We need to borrow runtime mutably to load
+        {
+            let runtime = self.runtimes.get_mut("onnx").ok_or_else(|| {
+                AdapterError::RuntimeError("ONNX runtime not configured".to_string())
+            })?;
+            runtime.load(&model_full_path).map_err(|e| AdapterError::RuntimeError(format!("Failed to load session: {}", e)))?;
         }
-
-        Ok(self.session_cache.get(model_file).unwrap())
+        
+        // 2. Get Session (immutable borrow)
+        let runtime = self.runtimes.get("onnx").unwrap();
+        if let Some(onnx_rt) = runtime.as_any().downcast_ref::<OnnxRuntime>() {
+             // onnx_rt.get_session expects id or path? 
+             // OnnxRuntime::get_session calls adapter.get_session(model_file).
+             // Adapter expects path (extracts ID).
+             let path_str = model_full_path.to_string_lossy();
+             onnx_rt.get_session(&path_str)
+        } else {
+             Err(AdapterError::RuntimeError("Runtime 'onnx' is not OnnxRuntime".to_string()))
+        }
     }
 
     /// Resolve a file path relative to base_path
@@ -2905,99 +2711,26 @@ fn decode_audio_step(
         }
     };
 
-    decode_wav_audio(&audio_bytes, target_sample_rate, target_channels)
+    let samples = crate::audio::convert::decode_wav_audio(&audio_bytes, target_sample_rate, target_channels)
+        .map_err(|e| AdapterError::InvalidInput(format!("Failed to decode audio: {}", e)))?;
+    
+    Ok(PreprocessedData::AudioSamples(samples))
 }
 
-/// Decode WAV audio bytes to float32 samples.
-fn decode_wav_audio(
-    audio_bytes: &[u8],
-    target_sample_rate: u32,
-    target_channels: usize,
-) -> ExecutorResult<PreprocessedData> {
-    use std::io::Cursor;
-    let cursor = Cursor::new(audio_bytes);
-
-    match hound::WavReader::new(cursor) {
-        Ok(mut reader) => {
-            let spec = reader.spec();
-            let source_sample_rate = spec.sample_rate;
-            let source_channels = spec.channels as usize;
-
-            // Read samples as f32
-            let samples: Vec<f32> = match spec.sample_format {
-                hound::SampleFormat::Float => reader
-                    .samples::<f32>()
-                    .filter_map(|s| s.ok())
-                    .collect(),
-                hound::SampleFormat::Int => {
-                    let bits = spec.bits_per_sample;
-                    let max_value = match (1i32).checked_shl((bits - 1) as u32) {
-                        Some(val) => val as f32,
-                        None => {
-                            return Err(AdapterError::InvalidInput(format!(
-                                "Unsupported bits_per_sample: {} (must be < 32)",
-                                bits
-                            )));
-                        }
-                    };
-                    reader
-                        .samples::<i32>()
-                        .filter_map(|s| s.ok())
-                        .map(|s| s as f32 / max_value)
-                        .collect()
-                }
-            };
-
-            let prepared = prepare_audio_samples(
-                samples,
-                source_sample_rate,
-                source_channels,
-                target_sample_rate,
-                target_channels,
-            );
-
-            Ok(PreprocessedData::AudioSamples(prepared))
+            ) => {
+                let dict_path = dict_file.as_ref().map(|p| self.resolve_file_path(p));
+                phonemize_step(
+                    data,
+                    &self.resolve_file_path(tokens_file),
+                    backend,
+                    dict_path.as_deref(),
+                    language.as_deref(),
+                    *add_padding,
+                    *normalize_text,
+                )
+            }
         }
-        Err(e) => Err(AdapterError::InvalidInput(format!(
-            "Failed to decode WAV audio: {}. Only WAV format is currently supported.",
-            e
-        ))),
     }
-}
-
-/// Prepare audio samples by converting to target sample rate and channels.
-fn prepare_audio_samples(
-    samples: Vec<f32>,
-    source_sample_rate: u32,
-    source_channels: usize,
-    target_sample_rate: u32,
-    target_channels: usize,
-) -> Vec<f32> {
-    // Convert to mono if needed
-    let mono_samples = if source_channels > 1 && target_channels == 1 {
-        samples
-            .chunks(source_channels)
-            .map(|chunk| chunk.iter().sum::<f32>() / source_channels as f32)
-            .collect()
-    } else {
-        samples
-    };
-
-    // Resample if needed
-    if source_sample_rate != target_sample_rate {
-        let ratio = target_sample_rate as f32 / source_sample_rate as f32;
-        let target_len = (mono_samples.len() as f32 * ratio) as usize;
-
-        (0..target_len)
-            .map(|i| {
-                let source_idx = (i as f32 / ratio) as usize;
-                mono_samples.get(source_idx).copied().unwrap_or(0.0)
-            })
-            .collect()
-    } else {
-        mono_samples
-    }
-}
 
 #[cfg(test)]
 mod tests {

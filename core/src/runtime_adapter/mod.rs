@@ -42,6 +42,8 @@ pub mod inference_backend;
 pub mod mel_spectrogram;
 pub mod metadata_driven;
 pub mod tensor_utils;
+pub mod traits;
+pub mod tts;
 
 // Runtime backends (organized in subdirectories)
 pub mod onnx;
@@ -69,6 +71,7 @@ pub use candle::{CandleBackend, CandleRuntimeAdapter};
 
 // Re-export inference backend types
 pub use inference_backend::{BackendError, BackendResult, InferenceBackend, RuntimeType};
+pub use traits::ModelRuntime;
 
 /// Error type for runtime adapter operations.
 #[derive(Error, Debug)]
