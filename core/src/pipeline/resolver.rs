@@ -11,7 +11,7 @@ use super::stage::{FallbackConfig, StageConfig};
 use super::target::ExecutionTarget;
 use crate::context::DeviceMetrics;
 use crate::device::capabilities::{detect_capabilities, HardwareCapabilities};
-use crate::routing_engine::{LocalAvailability, RouteTarget, RoutingDecision};
+use crate::orchestrator::routing_engine::{LocalAvailability, RouteTarget, RoutingDecision};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Resolution context containing all information needed to resolve execution targets.

@@ -31,11 +31,11 @@ use crate::event_bus::{EventBus, OrchestratorEvent};
 use crate::executor::Executor;
 use crate::ir::Envelope;
 use crate::pipeline::ExecutionTarget;
-use crate::policy_engine::{DefaultPolicyEngine, PolicyEngine};
-use crate::routing_engine::{
+use self::policy_engine::{DefaultPolicyEngine, PolicyEngine};
+use self::routing_engine::{
     DefaultRoutingEngine, LocalAvailability, RouteTarget, RoutingDecision, RoutingEngine,
 };
-use crate::stream_manager::{StreamConfig, StreamManager};
+use crate::streaming::manager::{StreamManager, StreamManagerConfig as StreamConfig};
 use crate::telemetry::Telemetry;
 use crate::tracing as trace;
 use std::sync::Arc;
@@ -652,7 +652,7 @@ impl Orchestrator {
     /// Pop a processed chunk from the streaming pipeline.
     ///
     /// This is used to retrieve processed output chunks.
-    pub fn pop_stream_output(&mut self) -> Option<crate::stream_manager::StreamChunk> {
+    pub fn pop_stream_output(&mut self) -> Option<crate::streaming::manager::StreamChunk> {
         if self.execution_mode != ExecutionMode::Streaming {
             return None;
         }
@@ -705,6 +705,8 @@ impl Default for Orchestrator {
 
 // Bootstrap module for orchestrator initialization
 pub mod bootstrap;
+pub mod policy_engine;
+pub mod routing_engine;
 
 #[cfg(test)]
 mod tests {
