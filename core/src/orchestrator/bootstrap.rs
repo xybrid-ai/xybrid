@@ -23,14 +23,14 @@ use crate::device_adapter::LocalDeviceAdapter;
 use crate::event_bus::{EventBus, OrchestratorEvent};
 use crate::executor::Executor;
 use crate::orchestrator::{ExecutionMode, Orchestrator, OrchestratorError};
-use crate::policy_engine::DefaultPolicyEngine;
-use crate::routing_engine::DefaultRoutingEngine;
+use crate::orchestrator::policy_engine::DefaultPolicyEngine;
+use crate::orchestrator::routing_engine::DefaultRoutingEngine;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::runtime_adapter::CoreMLRuntimeAdapter;
 #[cfg(any(target_os = "android"))]
 use crate::runtime_adapter::ONNXMobileRuntimeAdapter;
 use crate::runtime_adapter::{OnnxRuntimeAdapter, RuntimeAdapter};
-use crate::stream_manager::StreamManager;
+use crate::streaming::manager::StreamManager;
 use crate::telemetry::{Severity, Telemetry};
 use anyhow::{Context, Result};
 use serde_json::json;

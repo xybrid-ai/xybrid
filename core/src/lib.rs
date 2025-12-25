@@ -67,8 +67,7 @@ pub mod pipeline;
 /// Real-time audio streaming infrastructure
 pub mod streaming;
 
-/// Stream buffering and chunk management
-pub mod stream_manager;
+
 
 /// Execution target definitions (local, edge, cloud)
 pub mod target;
@@ -100,11 +99,7 @@ pub mod bundler;
 // Policy & Routing
 // ============================================================================
 
-/// Policy engine for allow/deny decisions
-pub mod policy_engine;
 
-/// Routing engine for local/edge/cloud decisions
-pub mod routing_engine;
 
 // ============================================================================
 // Device & Hardware

@@ -17,7 +17,7 @@ use crate::context::{DeviceMetrics, StageDescriptor};
 use crate::device::capabilities::HardwareCapabilities;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::orchestrator::{Orchestrator, OrchestratorError};
-use crate::routing_engine::LocalAvailability;
+use crate::orchestrator::routing_engine::LocalAvailability;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

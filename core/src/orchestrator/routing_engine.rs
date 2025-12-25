@@ -5,7 +5,7 @@
 
 use crate::context::DeviceMetrics;
 use crate::device::capabilities::detect_capabilities;
-use crate::policy_engine::PolicyResult;
+use crate::orchestrator::policy_engine::PolicyResult;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
