@@ -757,7 +757,7 @@ impl XybridModel {
 
         handle.loaded = false;
         // Clear the session cache (drop executor and recreate empty)
-        handle.executor = TemplateExecutor::new();
+        handle.executor = TemplateExecutor::default();
 
         Ok(())
     }

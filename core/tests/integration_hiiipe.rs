@@ -12,7 +12,7 @@
 use xybrid_core::context::{DeviceMetrics, Envelope, EnvelopeKind, StageDescriptor};
 use xybrid_core::event_bus::OrchestratorEvent;
 use xybrid_core::orchestrator::{ExecutionMode, Orchestrator};
-use xybrid_core::routing_engine::LocalAvailability;
+use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 
 fn audio_envelope() -> Envelope {
     Envelope::new(EnvelopeKind::Audio(vec![0u8; 1600]))
@@ -261,10 +261,10 @@ fn test_hiiipe_pipeline_high_latency() {
 /// Test streaming execution mode for Hiiipe pipeline.
 #[test]
 fn test_hiiipe_pipeline_streaming() {
-    use xybrid_core::stream_manager::StreamConfig;
+    use xybrid_core::streaming::StreamManagerConfig;
 
     // Create orchestrator in streaming mode
-    let config = StreamConfig::default();
+    let config = StreamManagerConfig::default();
     let mut orchestrator = Orchestrator::with_streaming(config);
 
     assert_eq!(*orchestrator.execution_mode(), ExecutionMode::Streaming);

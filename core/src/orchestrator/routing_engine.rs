@@ -246,7 +246,7 @@ impl RoutingEngine for DefaultRoutingEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy_engine::PolicyResult;
+    use super::super::policy_engine::PolicyResult;
 
     #[test]
     fn test_policy_deny_routes_local() {
