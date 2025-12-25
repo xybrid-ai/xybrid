@@ -382,3 +382,93 @@ mod tests {
         assert!((mono[1] - 0.65).abs() < 0.001); // (0.5 + 0.6 + 0.7 + 0.8) / 4
     }
 }
+
+/// Prepares audio samples by converting channels and resampling if necessary.
+pub fn prepare_audio_samples(
+    samples: Vec<f32>,
+    source_rate: u32,
+    source_channels: usize,
+    target_rate: u32,
+    target_channels: usize,
+) -> Vec<f32> {
+    // Step 1: Channel Conversion
+    let samples = if source_channels == target_channels {
+        samples
+    } else if target_channels == 1 {
+        multichannel_to_mono(&samples, source_channels as u32)
+    } else {
+        // TODO: Support mono -> stereo or other mappings if needed
+        // For now, just clone (or error? But we return Vec<f32>)
+        // Assuming mono->stereo is rare for ASR input which expects mono
+        samples
+    };
+
+    // Step 2: Resampling
+    if source_rate == target_rate {
+        samples
+    } else {
+        resample_audio(
+            &samples,
+            source_rate,
+            target_rate,
+            ResampleMethod::Linear,
+        ).unwrap_or(samples) // Fallback to original if resampling fails (shouldn't happen)
+    }
+}
+
+/// Decode WAV audio bytes to float32 samples.
+pub fn decode_wav_audio(
+    audio_bytes: &[u8],
+    target_sample_rate: u32,
+    target_channels: usize,
+) -> Result<Vec<f32>, ConvertError> {
+    use std::io::Cursor;
+    let cursor = Cursor::new(audio_bytes);
+
+    match hound::WavReader::new(cursor) {
+        Ok(mut reader) => {
+            let spec = reader.spec();
+            let source_sample_rate = spec.sample_rate;
+            let source_channels = spec.channels as usize;
+
+            // Read samples as f32
+            let samples: Vec<f32> = match spec.sample_format {
+                hound::SampleFormat::Float => reader
+                    .samples::<f32>()
+                    .filter_map(|s| s.ok())
+                    .collect(),
+                hound::SampleFormat::Int => {
+                    let bits = spec.bits_per_sample;
+                    let max_value = match (1i32).checked_shl((bits - 1) as u32) {
+                        Some(val) => val as f32,
+                        None => {
+                            return Err(ConvertError::InvalidParameter(format!(
+                                "Unsupported bits_per_sample: {} (must be < 32)",
+                                bits
+                            )));
+                        }
+                    };
+                    reader
+                        .samples::<i32>()
+                        .filter_map(|s| s.ok())
+                        .map(|s| s as f32 / max_value)
+                        .collect()
+                }
+            };
+
+            let prepared = prepare_audio_samples(
+                samples,
+                source_sample_rate,
+                source_channels,
+                target_sample_rate,
+                target_channels,
+            );
+
+            Ok(prepared)
+        }
+        Err(e) => Err(ConvertError::InvalidParameter(format!(
+            "Failed to decode WAV audio: {}. Only WAV format is currently supported.",
+            e
+        ))),
+    }
+}

@@ -39,7 +39,7 @@ pub mod vad;
 
 pub use format::{AudioFormat, AudioFormatError};
 pub use envelope::{AudioEnvelope, AudioEnvelopeError};
-pub use convert::{resample_audio, normalize_pcm16_to_f32, f32_to_pcm16, samples_to_wav, ResampleMethod};
+pub use convert::{resample_audio, normalize_pcm16_to_f32, f32_to_pcm16, samples_to_wav, ResampleMethod, decode_wav_audio, prepare_audio_samples};
 
 // New unified mel spectrogram API
 pub use mel::{compute_mel_spectrogram, MelConfig, MelScale, PaddingMode};

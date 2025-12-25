@@ -106,6 +106,38 @@ impl PreprocessedData {
             _ => None,
         }
     }
+    /// Convert to envelope.
+    pub fn to_envelope(&self) -> ExecutorResult<Envelope> {
+        match self {
+            PreprocessedData::AudioBytes(bytes) => Ok(Envelope::new(EnvelopeKind::Audio(bytes.clone()))),
+            PreprocessedData::AudioSamples(samples) => {
+                // If samples are f32, we might want to encode to WAV or just pass raw bytes?
+                // Envelope::Audio expects "bytes", usually WAV/encoded.
+                // But Envelope implies "transportable".
+                // If we want to pass samples, we can convert to WAV using audio utils.
+                // Assuming crate::audio::samples_to_wav exists and is accessible.
+                // Or implementing a simpler conversion to bytes.
+                // For now, let's use a placeholder or assume Envelope accepts raw f32 bytes?
+                // EnvelopeKind::Audio is Vec<u8>.
+                let bytes = crate::audio::samples_to_wav(samples, 16000); // hardcoded rate?
+                Ok(Envelope::new(EnvelopeKind::Audio(bytes)))
+            }
+            PreprocessedData::Text(text) => Ok(Envelope::new(EnvelopeKind::Text(text.clone()))),
+            PreprocessedData::Tensor(tensor) => {
+                let data = tensor.as_slice().ok_or_else(|| {
+                    AdapterError::InvalidInput("Tensor not contiguous".to_string())
+                })?;
+                Ok(Envelope::new(EnvelopeKind::Embedding(data.to_vec())))
+            }
+            PreprocessedData::PhonemeIds { original_text, .. } => {
+                // Fallback to original text for now
+                Ok(Envelope::new(EnvelopeKind::Text(original_text.clone())))
+            }
+            PreprocessedData::TokenIds { original_text, .. } => {
+                Ok(Envelope::new(EnvelopeKind::Text(original_text.clone())))
+            }
+        }
+    }
 }
 
 /// Raw outputs from model execution.
@@ -166,6 +198,21 @@ impl RawOutputs {
     /// Create from text.
     pub fn from_text(text: String) -> Self {
         RawOutputs::Text(text)
+    }
+    /// Create from Envelope.
+    pub fn from_envelope(envelope: &Envelope) -> ExecutorResult<Self> {
+        match &envelope.kind {
+            EnvelopeKind::Text(text) => Ok(RawOutputs::Text(text.clone())),
+            EnvelopeKind::Audio(bytes) => Ok(RawOutputs::AudioBytes(bytes.clone())),
+            EnvelopeKind::Embedding(floats) => {
+                let tensor = ArrayD::from_shape_vec(IxDyn(&[floats.len()]), floats.clone())
+                    .map_err(|e| AdapterError::InvalidInput(format!("Failed to create tensor: {:?}", e)))?;
+                // Map it to "output" key by default? Or TensorMap
+                let mut map = HashMap::new();
+                map.insert("output".to_string(), tensor);
+                Ok(RawOutputs::TensorMap(map))
+            }
+        }
     }
 }
 

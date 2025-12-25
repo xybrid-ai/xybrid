@@ -123,6 +123,15 @@ impl OnnxRuntimeAdapter {
 
         Ok(output)
     }
+    /// Get session for a loaded model path
+    pub fn get_session(&self, model_path: &str) -> AdapterResult<&ONNXSession> {
+        // Extract ID just like load_model does
+        let model_id = self.extract_model_id(model_path);
+        
+        self.sessions.get(&model_id).ok_or_else(|| {
+             AdapterError::ModelNotLoaded(format!("Session for model '{}' (path: {}) not found", model_id, model_path))
+        })
+    }
 }
 
 impl Default for OnnxRuntimeAdapter {

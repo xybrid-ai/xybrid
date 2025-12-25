@@ -66,7 +66,7 @@ use tokio::sync::mpsc;
 use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
-use xybrid_core::routing_engine::LocalAvailability;
+use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 
 // ============================================================================
 // Module Declarations
@@ -91,7 +91,7 @@ pub use xybrid_core::context;
 pub use xybrid_core::execution_template;
 pub use xybrid_core::ir;
 pub use xybrid_core::orchestrator;
-pub use xybrid_core::routing_engine;
+pub use xybrid_core::orchestrator::routing_engine;
 pub use xybrid_core::template_executor;
 
 // SDK types (new API)
@@ -203,7 +203,7 @@ pub mod prelude {
     pub use xybrid_core::context::{DeviceMetrics, StageDescriptor};
     pub use xybrid_core::ir::{Envelope, EnvelopeKind};
     pub use xybrid_core::orchestrator::{Orchestrator, OrchestratorError, StageExecutionResult};
-    pub use xybrid_core::routing_engine::{LocalAvailability, RouteTarget, RoutingDecision};
+    pub use xybrid_core::orchestrator::routing_engine::{LocalAvailability, RouteTarget, RoutingDecision};
 }
 
 /// Async event stream for subscribing to orchestrator events.

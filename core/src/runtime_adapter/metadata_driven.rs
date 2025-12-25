@@ -28,7 +28,7 @@ impl MetadataDrivenAdapter {
     /// Create a new metadata-driven adapter
     pub fn new() -> Self {
         Self {
-            executor: TemplateExecutor::new(),
+            executor: TemplateExecutor::new("."),
             current_metadata: None,
             base_path: PathBuf::from("."),
         }
@@ -39,7 +39,7 @@ impl MetadataDrivenAdapter {
         let base_path_buf = base_path.into();
         Self {
             executor: TemplateExecutor::with_base_path(
-                base_path_buf.to_string_lossy().to_string()
+                &base_path_buf.to_string_lossy()
             ),
             current_metadata: None,
             base_path: base_path_buf,
@@ -84,7 +84,7 @@ impl MetadataDrivenAdapter {
         if let Some(parent) = path.parent() {
             self.base_path = parent.to_path_buf();
             self.executor = TemplateExecutor::with_base_path(
-                parent.to_string_lossy().to_string()
+                &parent.to_string_lossy()
             );
         }
 
