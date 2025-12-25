@@ -55,3 +55,6 @@ pub use session::{
     PartialResult, StreamConfig, StreamError, StreamResult, StreamSession, StreamState,
     StreamStats, VadStreamConfig,
 };
+
+pub mod manager;
+pub use manager::{StreamManager, StreamManagerConfig};

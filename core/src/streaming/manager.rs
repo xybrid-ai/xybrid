@@ -47,7 +47,7 @@ pub type StreamResult<T> = Result<T, StreamManagerError>;
 
 /// Configuration for stream buffering and chunking.
 #[derive(Debug, Clone)]
-pub struct StreamConfig {
+pub struct StreamManagerConfig {
     /// Maximum buffer size in chunks
     pub max_buffer_size: usize,
     /// Preferred chunk size for processing
@@ -56,7 +56,7 @@ pub struct StreamConfig {
     pub enable_backpressure: bool,
 }
 
-impl Default for StreamConfig {
+impl Default for StreamManagerConfig {
     fn default() -> Self {
         Self {
             max_buffer_size: 100,
@@ -147,7 +147,7 @@ impl StreamBuffer {
 
 /// Stream manager for handling streaming inference data.
 pub struct StreamManager {
-    config: StreamConfig,
+    config: StreamManagerConfig,
     input_buffer: StreamBuffer,
     output_buffer: StreamBuffer,
 }
@@ -155,11 +155,11 @@ pub struct StreamManager {
 impl StreamManager {
     /// Creates a new stream manager instance with default configuration.
     pub fn new() -> Self {
-        Self::with_config(StreamConfig::default())
+        Self::with_config(StreamManagerConfig::default())
     }
 
     /// Creates a new stream manager with custom configuration.
-    pub fn with_config(config: StreamConfig) -> Self {
+    pub fn with_config(config: StreamManagerConfig) -> Self {
         Self {
             input_buffer: StreamBuffer::new(config.max_buffer_size),
             output_buffer: StreamBuffer::new(config.max_buffer_size),
@@ -311,7 +311,7 @@ impl StreamManager {
     }
 
     /// Get the stream configuration.
-    pub fn config(&self) -> &StreamConfig {
+    pub fn config(pub fn config(&self) -> &StreamConfigself) -> &StreamManagerConfig {
         &self.config
     }
 }
