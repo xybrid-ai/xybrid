@@ -43,7 +43,6 @@ pub mod mel_spectrogram;
 pub mod metadata_driven;
 pub mod tensor_utils;
 pub mod traits;
-pub mod tts;
 
 // Runtime backends (organized in subdirectories)
 pub mod onnx;

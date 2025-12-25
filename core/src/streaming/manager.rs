@@ -311,7 +311,7 @@ impl StreamManager {
     }
 
     /// Get the stream configuration.
-    pub fn config(pub fn config(&self) -> &StreamConfigself) -> &StreamManagerConfig {
+    pub fn config(&self) -> &StreamManagerConfig {
         &self.config
     }
 }
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn test_buffer_overflow() {
-        let mut config = StreamConfig::default();
+        let mut config = StreamManagerConfig::default();
         config.max_buffer_size = 2;
         let mut manager = StreamManager::with_config(config);
 

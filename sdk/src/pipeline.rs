@@ -49,7 +49,7 @@ use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
-use xybrid_core::routing_engine::LocalAvailability;
+use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 
 /// Result type for pipeline operations.
 pub type PipelineResult<T> = Result<T, SdkError>;

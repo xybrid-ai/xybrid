@@ -5,22 +5,22 @@ use crate::execution_template::{
     ExecutionMode, ExecutionTemplate, MelScaleType, ModelMetadata, PipelineStage,
     PostprocessingStep, PreprocessingStep,
 };
-use crate::ir::{Envelope, EnvelopeKind};
+use crate::ir::Envelope;
 use crate::tracing as trace;
 // Unified mel spectrogram API
 use crate::audio::mel::{compute_mel_spectrogram, MelConfig, MelScale, PaddingMode};
-use crate::audio::convert::{decode_wav_audio, prepare_audio_samples};
+use crate::audio::{decode_wav_audio, prepare_audio_samples};
 // Legacy imports for audio bytes handling
 use crate::preprocessing::mel_spectrogram::audio_bytes_to_whisper_mel;
 use crate::runtime_adapter::onnx::ONNXSession;
-use crate::runtime_adapter::{AdapterError, AdapterResult, ModelMetadata, ModelRuntime};
+use crate::runtime_adapter::{AdapterError, ModelRuntime};
+#[cfg(feature = "candle")]
 use crate::runtime_adapter::candle::CandleRuntime;
 use crate::runtime_adapter::onnx::OnnxRuntime;
-use crate::runtime_adapter::tts::TtsRuntime;
 use ndarray::{ArrayD, IxDyn};
 use ort::value::Value;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // Types (ExecutorResult, PreprocessedData, RawOutputs) are defined in types.rs
 // and imported via `pub use types::{...}` in mod.rs before this include!
@@ -110,18 +110,22 @@ pub struct TemplateExecutor {
 }
 
 impl TemplateExecutor {
-    /// Create a new TemplateExecutor
+    /// Create a new TemplateExecutor with a base path for resolving relative model paths.
     pub fn new(base_path: &str) -> Self {
         let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
         runtimes.insert("onnx".to_string(), Box::new(OnnxRuntime::new()));
         #[cfg(feature = "candle")]
         runtimes.insert("candle".to_string(), Box::new(CandleRuntime::new()));
-        runtimes.insert("tts".to_string(), Box::new(TtsRuntime::new()));
 
         Self {
             runtimes,
             base_path: base_path.into(),
         }
+    }
+
+    /// Alias for `new` - creates executor with specified base path.
+    pub fn with_base_path(base_path: &str) -> Self {
+        Self::new(base_path)
     }
 
     /// Execute a model based on its metadata
@@ -148,21 +152,19 @@ impl TemplateExecutor {
         }
 
         // Step 2: Single Model Execution
-        // Determine runtime type
-        let runtime_type = if !metadata.runtime_type.is_empty() {
-            metadata.runtime_type.as_str()
-        } else {
-             // Inference fallback logic
-             match &metadata.execution_template {
-                 ExecutionTemplate::CandleModel { .. } => "candle",
-                 ExecutionTemplate::SimpleMode { .. } => "onnx",
-                 _ => "onnx"
-             }
+        // Determine runtime type and model path from execution_template
+        let (runtime_type, model_file) = match &metadata.execution_template {
+            ExecutionTemplate::CandleModel { model_file, .. } => ("candle", model_file.clone()),
+            ExecutionTemplate::SimpleMode { model_file } => ("onnx", model_file.clone()),
+            ExecutionTemplate::Pipeline { .. } => {
+                // Pipeline handled above, shouldn't reach here
+                return Err(AdapterError::RuntimeError("Pipeline execution should not reach single model path".to_string()));
+            }
         };
 
         // Run Preprocessing (may be redundant if runtime handles it, but keeps compatibility)
         let preprocessed = self.run_preprocessing(metadata, input)?;
-        
+
         let runtime_input = preprocessed.to_envelope()?;
 
         // Get Runtime & Execute
@@ -170,13 +172,9 @@ impl TemplateExecutor {
             AdapterError::RuntimeError(format!("Runtime '{}' not configured", runtime_type))
         })?;
 
-        let model_full_path = Path::new(&self.base_path).join(&metadata.model_path);
-        
+        let model_full_path = Path::new(&self.base_path).join(&model_file);
+
         // Ensure model is loaded (runtime handles caching)
-        // Note: Generic onnx runtime expects model_path to be the .onnx file?
-        // Or directory? Metadata model_path is usually relative path to file or dir.
-        // If SimpleMode { model_file }, metadata.model_path refers to that file.
-        // Candle expects directory/file.
         runtime.load(&model_full_path).map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
         
         let result_envelope = runtime.execute(&runtime_input)?;
@@ -283,165 +281,6 @@ impl TemplateExecutor {
                 )
             }
         }
-    }
-
-    /// Load voice embedding from voices.bin file
-    fn load_voice_embedding(
-        &self,
-        metadata: &ModelMetadata,
-        voice_index: usize,
-    ) -> ExecutorResult<Vec<f32>> {
-        // Find voices.bin in the model files
-        let voices_file = metadata
-            .files
-            .iter()
-            .find(|f| f.contains("voices.bin"))
-            .ok_or_else(|| {
-                AdapterError::InvalidInput("TTS model missing voices.bin file".to_string())
-            })?;
-
-        let voices_path = self.resolve_file_path(voices_file);
-
-        // Check file format (NPZ vs raw binary)
-        let voices_bytes = std::fs::read(&voices_path).map_err(|e| {
-            AdapterError::InvalidInput(format!("Failed to read voices.bin: {}", e))
-        })?;
-
-        // Get voice embedding dimension from metadata (default 256)
-        let embedding_dim = metadata
-            .metadata
-            .get("voice_embedding_dim")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(256) as usize;
-
-        // Check if file is NPZ format (starts with PK magic bytes for ZIP)
-        if voices_bytes.len() >= 2 && voices_bytes[0] == b'P' && voices_bytes[1] == b'K' {
-            // NPZ format (Kokoro-style)
-            self.load_voice_embedding_npz(&voices_path, metadata, voice_index, embedding_dim)
-        } else {
-            // Raw binary format (KittenTTS-style)
-            self.load_voice_embedding_raw(&voices_bytes, voice_index, embedding_dim)
-        }
-    }
-
-    /// Load voice embedding from NPZ file (Kokoro format)
-    /// NPZ contains named arrays, each with shape (510, 1, 256)
-    /// The embedding is selected based on token length
-    fn load_voice_embedding_npz(
-        &self,
-        voices_path: &str,
-        metadata: &ModelMetadata,
-        voice_index: usize,
-        embedding_dim: usize,
-    ) -> ExecutorResult<Vec<f32>> {
-        use ndarray_npy::NpzReader;
-        use std::fs::File;
-
-        let file = File::open(voices_path).map_err(|e| {
-            AdapterError::InvalidInput(format!("Failed to open voices NPZ: {}", e))
-        })?;
-
-        let mut npz = NpzReader::new(file).map_err(|e| {
-            AdapterError::InvalidInput(format!("Failed to read NPZ file: {}", e))
-        })?;
-
-        // Get list of voice names
-        let voice_names = npz.names().map_err(|e| {
-            AdapterError::InvalidInput(format!("Failed to get NPZ names: {}", e))
-        })?;
-
-        // Get voice name by index or from metadata
-        let voice_name = if let Some(names) = metadata.metadata.get("voice_names") {
-            if let Some(names_array) = names.as_array() {
-                if voice_index < names_array.len() {
-                    names_array[voice_index]
-                        .as_str()
-                        .map(|s| s.to_string())
-                        .ok_or_else(|| {
-                            AdapterError::InvalidInput("Invalid voice name in metadata".to_string())
-                        })?
-                } else {
-                    return Err(AdapterError::InvalidInput(format!(
-                        "Voice index {} out of range (max {})",
-                        voice_index,
-                        names_array.len() - 1
-                    )));
-                }
-            } else {
-                // Fall back to first voice in NPZ
-                voice_names.first().cloned().ok_or_else(|| {
-                    AdapterError::InvalidInput("No voices in NPZ file".to_string())
-                })?
-            }
-        } else {
-            // Fall back to first voice in NPZ
-            voice_names.first().cloned().ok_or_else(|| {
-                AdapterError::InvalidInput("No voices in NPZ file".to_string())
-            })?
-        };
-
-        // Load the voice array - shape is (510, 1, 256)
-        let voice_data: ndarray::Array3<f32> = npz.by_name(&voice_name).map_err(|e| {
-            AdapterError::InvalidInput(format!("Failed to load voice '{}': {}", voice_name, e))
-        })?;
-
-        // Use a default token length for the embedding (e.g., middle of range)
-        // In actual use, this should be based on the number of tokens
-        // For now, use index 100 as a reasonable default
-        let token_len_idx = 100.min(voice_data.shape()[0] - 1);
-
-        // Extract embedding at token_len_idx, row 0
-        let embedding: Vec<f32> = voice_data
-            .slice(ndarray::s![token_len_idx, 0, ..])
-            .iter()
-            .copied()
-            .collect();
-
-        if embedding.len() != embedding_dim {
-            return Err(AdapterError::InvalidInput(format!(
-                "Voice embedding dimension mismatch: expected {}, got {}",
-                embedding_dim,
-                embedding.len()
-            )));
-        }
-
-        Ok(embedding)
-    }
-
-    /// Load voice embedding from raw binary file (KittenTTS format)
-    fn load_voice_embedding_raw(
-        &self,
-        voices_bytes: &[u8],
-        voice_index: usize,
-        embedding_dim: usize,
-    ) -> ExecutorResult<Vec<f32>> {
-        // Each voice embedding is embedding_dim * 4 bytes (f32)
-        let voice_size = embedding_dim * 4;
-        let num_voices = voices_bytes.len() / voice_size;
-
-        if voice_index >= num_voices {
-            return Err(AdapterError::InvalidInput(format!(
-                "Voice index {} out of range (max {})",
-                voice_index,
-                num_voices - 1
-            )));
-        }
-
-        // Extract voice embedding
-        let start = voice_index * voice_size;
-        let end = start + voice_size;
-        let voice_bytes = &voices_bytes[start..end];
-
-        // Convert bytes to f32 (little-endian)
-        let voice_embedding: Vec<f32> = voice_bytes
-            .chunks_exact(4)
-            .map(|chunk| {
-                let bytes: [u8; 4] = chunk.try_into().unwrap();
-                f32::from_le_bytes(bytes)
-            })
-            .collect();
-
-        Ok(voice_embedding)
     }
 
     /// Execute Pipeline: multi-stage execution with control flow
@@ -1796,7 +1635,7 @@ fn execute_stage_single_shot(
 
 impl Default for TemplateExecutor {
     fn default() -> Self {
-        Self::new()
+        Self::new("")
     }
 }
 
@@ -2711,26 +2550,11 @@ fn decode_audio_step(
         }
     };
 
-    let samples = crate::audio::convert::decode_wav_audio(&audio_bytes, target_sample_rate, target_channels)
+    let samples = decode_wav_audio(&audio_bytes, target_sample_rate, target_channels)
         .map_err(|e| AdapterError::InvalidInput(format!("Failed to decode audio: {}", e)))?;
     
     Ok(PreprocessedData::AudioSamples(samples))
 }
-
-            ) => {
-                let dict_path = dict_file.as_ref().map(|p| self.resolve_file_path(p));
-                phonemize_step(
-                    data,
-                    &self.resolve_file_path(tokens_file),
-                    backend,
-                    dict_path.as_deref(),
-                    language.as_deref(),
-                    *add_padding,
-                    *normalize_text,
-                )
-            }
-        }
-    }
 
 #[cfg(test)]
 mod tests {
@@ -2739,7 +2563,7 @@ mod tests {
 
     #[test]
     fn test_executor_creation() {
-        let executor = TemplateExecutor::new();
+        let executor = TemplateExecutor::default();
         assert_eq!(executor.base_path, "");
     }
 

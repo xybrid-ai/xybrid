@@ -3,11 +3,12 @@
 use super::error::TtsError;
 use super::request::{SynthesisRequest, Voice};
 use super::response::AudioOutput;
+use super::voice_embedding::VoiceEmbeddingLoader;
 use crate::phonemizer::{load_tokens_map, postprocess_tts_audio, Phonemizer};
 use ndarray::Array;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 /// Default sample rate for KittenTTS output
@@ -141,7 +142,7 @@ impl Tts {
         let tokens_content = std::fs::read_to_string(&tokens_path)?;
         let tokens_map = load_tokens_map(&tokens_content);
 
-        // Load voice embeddings
+        // Load voice embeddings using VoiceEmbeddingLoader
         let voices_path = config.model_dir.join("voices.bin");
         if !voices_path.exists() {
             return Err(TtsError::ConfigError(format!(
@@ -149,7 +150,10 @@ impl Tts {
                 config.model_dir.display()
             )));
         }
-        let voice_embeddings = load_voice_embeddings(&voices_path)?;
+        let loader = VoiceEmbeddingLoader::new(EMBEDDING_DIM);
+        let voice_embeddings = loader.load_all_raw(&voices_path).map_err(|e| {
+            TtsError::ConfigError(format!("Failed to load voice embeddings: {}", e))
+        })?;
 
         // Initialize ONNX runtime
         ort::init()
@@ -280,33 +284,6 @@ impl Tts {
     }
 }
 
-/// Load voice embeddings from voices.bin file.
-fn load_voice_embeddings(path: &Path) -> Result<Vec<Vec<f32>>, TtsError> {
-    let data = std::fs::read(path)?;
-
-    // Each embedding is EMBEDDING_DIM * 4 bytes (f32)
-    let embedding_bytes = EMBEDDING_DIM * 4;
-    let num_voices = data.len() / embedding_bytes;
-
-    let mut embeddings = Vec::with_capacity(num_voices);
-
-    for voice_idx in 0..num_voices {
-        let offset = voice_idx * embedding_bytes;
-        let embedding: Vec<f32> = data[offset..offset + embedding_bytes]
-            .chunks(4)
-            .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-            .collect();
-        embeddings.push(embedding);
-    }
-
-    if embeddings.is_empty() {
-        return Err(TtsError::ConfigError(
-            "No voice embeddings found in voices.bin".to_string(),
-        ));
-    }
-
-    Ok(embeddings)
-}
 
 #[cfg(test)]
 mod tests {

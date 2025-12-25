@@ -1,8 +1,8 @@
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::{AdapterError, AdapterResult, ModelRuntime};
-use crate::audio::convert::decode_wav_audio;
+use crate::audio::decode_wav_audio;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use super::whisper::{WhisperModel, WhisperConfig, WhisperSize};
 use super::device::{select_device, DeviceSelection};
 

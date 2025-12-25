@@ -36,8 +36,10 @@ mod engine;
 mod error;
 mod request;
 mod response;
+pub mod voice_embedding;
 
 pub use engine::{Tts, TtsConfig};
 pub use error::TtsError;
 pub use request::{SynthesisRequest, Voice};
 pub use response::{AudioOutput, AudioFormat};
+pub use voice_embedding::{VoiceEmbeddingLoader, VoiceError, VoiceFormat, DEFAULT_EMBEDDING_DIM};
