@@ -94,20 +94,43 @@ pub mod phonemizer;
 // Registry & Model Bundles
 // ============================================================================
 
-/// Bundle registry client
+/// Bundle registry - storage, retrieval, and resolution.
+///
+/// The registry module consolidates all registry functionality:
+/// - Local filesystem storage ([`registry::LocalRegistry`])
+/// - Remote HTTP transport ([`registry::RemoteRegistry`])
+/// - Fallback chain resolution ([`registry::RegistryResolver`])
+/// - Configuration types ([`registry::RegistryConfig`], [`registry::BundleDescriptor`])
+/// - Index management ([`registry::RegistryIndex`])
 pub mod registry;
 
-/// Registry configuration and paths
-pub mod registry_config;
+// Legacy module paths for backward compatibility (deprecated)
+#[doc(hidden)]
+#[deprecated(since = "0.1.0", note = "Use `registry::config` instead")]
+pub mod registry_config {
+    pub use crate::registry::{
+        BundleDescriptor, BundleLocation, BundleSource, RegistryAuth, RegistryConfig,
+        RemoteRegistryConfig,
+    };
+}
 
-/// Registry index (bundle metadata)
-pub mod registry_index;
+#[doc(hidden)]
+#[deprecated(since = "0.1.0", note = "Use `registry::index` instead")]
+pub mod registry_index {
+    pub use crate::registry::{IndexEntry, IndexError, IndexResult, RegistryIndex};
+}
 
-/// Remote registry fetching
-pub mod registry_remote;
+#[doc(hidden)]
+#[deprecated(since = "0.1.0", note = "Use `registry::remote` instead")]
+pub mod registry_remote {
+    pub use crate::registry::{HttpRegistryTransport, HttpRemoteRegistry, RegistryTransport, RemoteRegistry};
+}
 
-/// Bundle resolution and caching
-pub mod registry_resolver;
+#[doc(hidden)]
+#[deprecated(since = "0.1.0", note = "Use `registry::resolver` instead")]
+pub mod registry_resolver {
+    pub use crate::registry::RegistryResolver;
+}
 
 /// .xyb bundle creation and extraction
 pub mod bundler;

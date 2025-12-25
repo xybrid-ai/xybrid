@@ -1,10 +1,8 @@
-//! Registry module - Storage and retrieval of bundles (policies, models, etc.).
+//! Local Registry module - Storage and retrieval of bundles from filesystem.
 //!
-//! The Registry provides a unified interface for storing and retrieving bundles
-//! from various backends (local file system, remote storage, etc.).
-//!
-//! For MVP, this module provides a LocalRegistry implementation that uses
-//! the file system to store and retrieve bundles.
+//! The LocalRegistry provides a unified interface for storing and retrieving bundles
+//! from the local filesystem. This is the primary storage backend used by both
+//! standalone local registries and as a cache for remote registries.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -131,10 +129,12 @@ pub trait Registry: Send + Sync {
 /// Local file system registry implementation.
 ///
 /// Stores bundles in a directory structure:
-/// ```
+/// ```text
 /// <base_path>/
 ///   <id>/
-///     <version>.bundle
+///     <version>/
+///       <platform>/
+///         <id>.xyb
 /// ```
 ///
 /// For MVP, this uses simple file paths. Future versions may support
@@ -281,7 +281,11 @@ impl LocalRegistry {
                                 // Look for .xyb files inside platform directory
                                 if let Ok(bundle_entries) = fs::read_dir(&platform_path) {
                                     for bundle_entry in bundle_entries.flatten() {
-                                        if bundle_entry.path().extension().map_or(false, |ext| ext == "xyb") {
+                                        if bundle_entry
+                                            .path()
+                                            .extension()
+                                            .map_or(false, |ext| ext == "xyb")
+                                        {
                                             versions.push(version.to_string());
                                             break 'find_version;
                                         }
@@ -440,9 +444,7 @@ impl LocalRegistry {
 
         Ok(migrated)
     }
-}
 
-impl LocalRegistry {
     /// Store a bundle with a specific target.
     /// Storage structure: {base_path}/{id}/{version}/{target}/{id}.xyb
     pub fn store_bundle_with_target(
@@ -631,11 +633,14 @@ impl Registry for LocalRegistry {
                             {
                                 // Check for platform subdirectories containing .xyb files
                                 if let Ok(platform_entries) = fs::read_dir(&version_path) {
-                                    'platform_loop: for platform_entry in platform_entries.flatten() {
+                                    'platform_loop: for platform_entry in platform_entries.flatten()
+                                    {
                                         let platform_path = platform_entry.path();
                                         if platform_path.is_dir() {
                                             // Look for .xyb files inside platform directory
-                                            if let Ok(bundle_entries) = fs::read_dir(&platform_path) {
+                                            if let Ok(bundle_entries) =
+                                                fs::read_dir(&platform_path)
+                                            {
                                                 for bundle_entry in bundle_entries.flatten() {
                                                     let bundle_path = bundle_entry.path();
                                                     if bundle_path
@@ -646,7 +651,8 @@ impl Registry for LocalRegistry {
                                                             self.get_metadata(id, Some(version))
                                                         {
                                                             bundles.push(metadata);
-                                                            break 'platform_loop; // Only add once per version
+                                                            break 'platform_loop;
+                                                            // Only add once per version
                                                         }
                                                     }
                                                 }

@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use xybrid_core::registry_index::{RegistryIndex, IndexEntry};
+//! use xybrid_core::registry::{RegistryIndex, IndexEntry};
 //!
 //! // Load or create index
 //! let mut index = RegistryIndex::load_or_create()?;
@@ -29,7 +29,7 @@
 //! let entries = index.find_by_model("whisper-tiny")?;
 //! ```
 
-use crate::registry_config::{BundleDescriptor, BundleLocation};
+use super::config::{BundleDescriptor, BundleLocation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

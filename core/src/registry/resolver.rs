@@ -15,17 +15,17 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use xybrid_core::registry_resolver::RegistryResolver;
+//! use xybrid_core::registry::RegistryResolver;
 //!
 //! let resolver = RegistryResolver::default();
 //! let registry = resolver.resolve_registry(None, None);
 //! // Returns registry pointing to registry.xybrid.dev
 //! ```
 
-use crate::registry::{LocalRegistry, Registry, RegistryError, RegistryResult};
-use crate::registry_config::{RegistryAuth, RegistryConfig, RemoteRegistryConfig};
-use crate::registry_index::RegistryIndex;
-use crate::registry_remote::{HttpRegistryTransport, RemoteRegistry};
+use super::config::{RegistryAuth, RegistryConfig, RemoteRegistryConfig};
+use super::index::RegistryIndex;
+use super::local::{LocalRegistry, Registry, RegistryError, RegistryResult};
+use super::remote::{HttpRegistryTransport, RemoteRegistry};
 use std::sync::Arc;
 
 /// Default remote registry URL
@@ -70,8 +70,9 @@ impl RegistryResolver {
             .map_err(|e| RegistryError::IOError(format!("Failed to create default cache: {}", e)))?;
         let default_index = RegistryIndex::load_or_create()
             .map_err(|e| RegistryError::IOError(format!("Failed to create default index: {}", e)))?;
-        let default_transport = HttpRegistryTransport::new(default_config)
-            .map_err(|e| RegistryError::RemoteError(format!("Failed to create default registry transport: {}", e)))?;
+        let default_transport = HttpRegistryTransport::new(default_config).map_err(|e| {
+            RegistryError::RemoteError(format!("Failed to create default registry transport: {}", e))
+        })?;
         let default_registry: Arc<dyn Registry> = Arc::new(RemoteRegistry::new(
             default_transport,
             default_cache,
@@ -196,13 +197,13 @@ impl RegistryResolver {
     ) -> RegistryResult<Arc<dyn Registry>> {
         let transport = HttpRegistryTransport::new(config.clone())
             .map_err(|e| RegistryError::RemoteError(format!("Failed to create transport: {}", e)))?;
-        
+
         // Create cache and index for remote registry
         let cache = LocalRegistry::default()
             .map_err(|e| RegistryError::IOError(format!("Failed to create cache: {}", e)))?;
         let index = RegistryIndex::load_or_create()
             .map_err(|e| RegistryError::IOError(format!("Failed to create index: {}", e)))?;
-        
+
         Ok(Arc::new(RemoteRegistry::new(transport, cache, index)))
     }
 
@@ -213,7 +214,6 @@ impl RegistryResolver {
     /// - `./xybrid.yaml`
     /// - `./.xybrid.yaml`
     fn load_project_config() -> RegistryResult<Option<RegistryConfig>> {
-
         // Try user home config
         if let Some(mut home) = dirs::home_dir() {
             home.push(".xybrid");
@@ -275,4 +275,3 @@ mod tests {
         assert!(Arc::ptr_eq(&registry, &resolver.default_remote_registry));
     }
 }
-

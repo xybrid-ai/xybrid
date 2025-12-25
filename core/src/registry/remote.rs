@@ -9,11 +9,9 @@ use std::io::Read;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use crate::registry::{BundleMetadata, LocalRegistry, Registry, RegistryError, RegistryResult};
-use crate::registry_config::{
-    BundleDescriptor, BundleLocation, RegistryAuth, RegistryConfig, RemoteRegistryConfig,
-};
-use crate::registry_index::{IndexEntry, RegistryIndex};
+use super::config::{BundleDescriptor, BundleLocation, RegistryAuth, RemoteRegistryConfig};
+use super::index::{IndexEntry, RegistryIndex};
+use super::local::{BundleMetadata, LocalRegistry, Registry, RegistryError, RegistryResult};
 use url::Url;
 
 /// Describes a transport capable of communicating with a remote registry
@@ -358,7 +356,7 @@ impl<T: RegistryTransport> RemoteRegistry<T> {
                     .target
                     .clone()
                     .unwrap_or_else(|| "unspecified".to_string()),
-                descriptor.hash.clone().unwrap_or_else(|| String::from("")),
+                descriptor.hash.clone().unwrap_or_default(),
                 descriptor.size_bytes,
                 metadata.path.clone(),
             ))
@@ -387,7 +385,7 @@ impl<T: RegistryTransport> RemoteRegistry<T> {
 
 impl RemoteRegistry<HttpRegistryTransport> {
     /// Convenience helper that constructs a remote registry from a high-level configuration.
-    pub fn from_config(config: &RegistryConfig) -> RegistryResult<Self> {
+    pub fn from_config(config: &super::config::RegistryConfig) -> RegistryResult<Self> {
         let local = if let Some(path) = &config.local_path {
             LocalRegistry::new(path)?
         } else {
