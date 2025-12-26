@@ -143,6 +143,9 @@ pub mod gateway;
 /// Universal architecture system (model configuration)
 pub mod universal;
 
+/// Testing utilities (mocks, fixtures)
+pub mod testing;
+
 // ============================================================================
 // Internal Modules
 // ============================================================================
