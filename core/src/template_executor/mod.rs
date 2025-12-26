@@ -10,12 +10,10 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`types`] | Data types (PreprocessedData, RawOutputs) |
-//!
-//! The main implementation (`executor_impl.rs`) contains:
-//! - `TemplateExecutor` struct and core execution methods
-//! - Preprocessing step functions (mel spectrogram, tokenize, phonemize, etc.)
-//! - Postprocessing step functions (decode, argmax, softmax, etc.)
-//! - Pipeline execution (SingleShot, Autoregressive, WhisperDecoder modes)
+//! | [`executor`] | Main TemplateExecutor struct and execute method |
+//! | [`preprocessing`] | Preprocessing step implementations |
+//! | [`postprocessing`] | Postprocessing step implementations |
+//! | [`execution`] | Execution mode implementations (SingleShot, Autoregressive, Whisper) |
 //!
 //! ## Execution Flow
 //!
@@ -52,13 +50,19 @@
 //! let output = executor.execute(&metadata, &input)?;
 //! ```
 
+// Data types
 mod types;
-
-// Re-export main types for public API
 pub use types::{ExecutorResult, PreprocessedData, RawOutputs};
 
-// Include the main executor implementation
-// Note: The impl is included inline because preprocessing/postprocessing functions
-// need access to types and are tightly coupled to the executor methods.
-// Future refactoring could move these to proper submodules with appropriate pub(crate) visibility.
-include!("executor_impl.rs");
+// Main executor
+mod executor;
+pub use executor::TemplateExecutor;
+
+// Preprocessing steps
+pub mod preprocessing;
+
+// Postprocessing steps
+pub mod postprocessing;
+
+// Execution modes
+pub mod execution;
