@@ -1,0 +1,48 @@
+{
+  "model_id": "resnet50-imagenet",
+  "version": "v2-7",
+  "execution_template": {
+    "type": "SimpleMode",
+    "model_file": "resnet50-v2-7.onnx"
+  },
+  "preprocessing": [
+    {
+      "type": "Reshape",
+      "shape": [1, 3, 256, 256]
+    },
+    {
+      "type": "CenterCrop",
+      "width": 224,
+      "height": 224
+    },
+    {
+      "type": "Normalize",
+      "mean": [123.675, 116.28, 103.53],
+      "std": [58.395, 57.12, 57.375]
+    }
+  ],
+  "postprocessing": [
+    {
+      "type": "Softmax",
+      "dim": 1
+    },
+    {
+      "type": "TopK",
+      "k": 5
+    }
+  ],
+  "files": ["resnet50-v2-7.onnx"],
+  "description": "ResNet-50 v2 image classification model trained on ImageNet. Input: [1, 3, 224, 224] RGB image with ImageNet normalization. Output: [1, 1000] probabilities for ImageNet classes.",
+  "metadata": {
+    "input_shape": [1, 3, 224, 224],
+    "output_shape": [1, 1000],
+    "opset_version": 7,
+    "task": "image_classification",
+    "num_classes": 1000,
+    "dataset": "ImageNet",
+    "accuracy": {
+      "top1": 0.7581,
+      "top5": 0.9282
+    }
+  }
+}

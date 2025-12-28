@@ -1,0 +1,5 @@
+name: "kokoro"
+
+stages:
+  - id: tts
+    model: kokoro-82m
