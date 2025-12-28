@@ -5,6 +5,7 @@ members = [
     "cli",
     "sdk",
     "macros",
+    "xtask",
 ]
 
 [workspace.package]
