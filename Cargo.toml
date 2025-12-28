@@ -6,6 +6,7 @@ members = [
     "sdk",
     "macros",
     "xtask",
+    "integration-tests",
 ]
 
 [workspace.package]
