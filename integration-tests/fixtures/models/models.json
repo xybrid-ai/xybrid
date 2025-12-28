@@ -1,0 +1,155 @@
+{
+  "version": "2.0",
+  "description": "Model manifest for xybrid integration tests - supports registry and direct URL downloads",
+  "models": {
+    "wav2vec2-base-960h": {
+      "description": "Wav2Vec2 Base 960h - English ASR with CTC decoding",
+      "source": "registry",
+      "size_mb": 220,
+      "task": "speech-recognition"
+    },
+    "kokoro-82m": {
+      "description": "High-quality TTS model (82M params)",
+      "source": "registry",
+      "size_mb": 330,
+      "task": "text-to-speech"
+    },
+    "whisper-tiny": {
+      "description": "Whisper tiny for ASR",
+      "source": "registry",
+      "size_mb": 150,
+      "task": "speech-recognition"
+    },
+    "mnist": {
+      "description": "Handwritten digit classification (28x28 grayscale, 10 classes)",
+      "source": "url",
+      "size_mb": 0.026,
+      "task": "image-classification",
+      "files": [
+        {
+          "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/mnist/model/mnist-12.onnx",
+          "output": "model.onnx"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "mnist",
+        "version": "12",
+        "execution_template": {
+          "type": "SimpleMode",
+          "model_file": "model.onnx"
+        },
+        "preprocessing": [],
+        "postprocessing": [
+          { "type": "ArgMax" }
+        ],
+        "files": ["model.onnx"],
+        "metadata": {
+          "task": "image-classification",
+          "input_shape": [1, 1, 28, 28],
+          "output_classes": 10
+        }
+      }
+    },
+    "resnet50": {
+      "description": "ImageNet classification (224x224 RGB, 1000 classes, 75.81% accuracy)",
+      "source": "url",
+      "size_mb": 98,
+      "task": "image-classification",
+      "files": [
+        {
+          "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-v2-7.onnx",
+          "output": "model.onnx"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "resnet50",
+        "version": "v2-7",
+        "execution_template": {
+          "type": "SimpleMode",
+          "model_file": "model.onnx"
+        },
+        "preprocessing": [],
+        "postprocessing": [
+          { "type": "ArgMax" }
+        ],
+        "files": ["model.onnx"],
+        "metadata": {
+          "task": "image-classification",
+          "input_shape": [1, 3, 224, 224],
+          "output_classes": 1000
+        }
+      }
+    },
+    "mobilenet": {
+      "description": "Lightweight ImageNet classification (224x224 RGB, 1000 classes)",
+      "source": "url",
+      "size_mb": 13.3,
+      "task": "image-classification",
+      "files": [
+        {
+          "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx",
+          "output": "model.onnx"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "mobilenet",
+        "version": "v2-12",
+        "execution_template": {
+          "type": "SimpleMode",
+          "model_file": "model.onnx"
+        },
+        "preprocessing": [],
+        "postprocessing": [
+          { "type": "ArgMax" }
+        ],
+        "files": ["model.onnx"],
+        "metadata": {
+          "task": "image-classification",
+          "input_shape": [1, 3, 224, 224],
+          "output_classes": 1000
+        }
+      }
+    },
+    "all-minilm": {
+      "description": "Sentence embeddings (384-dim, text to vector)",
+      "source": "url",
+      "size_mb": 86,
+      "task": "text-embedding",
+      "files": [
+        {
+          "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx",
+          "output": "model.onnx"
+        },
+        {
+          "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt",
+          "output": "vocab.txt"
+        },
+        {
+          "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json",
+          "output": "tokenizer.json"
+        },
+        {
+          "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json",
+          "output": "config.json"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "all-minilm",
+        "version": "L6-v2",
+        "execution_template": {
+          "type": "SimpleMode",
+          "model_file": "model.onnx"
+        },
+        "preprocessing": [
+          { "type": "Tokenize", "vocab_file": "vocab.txt" }
+        ],
+        "postprocessing": [],
+        "files": ["model.onnx", "vocab.txt", "tokenizer.json", "config.json"],
+        "metadata": {
+          "task": "text-embedding",
+          "embedding_dim": 384
+        }
+      }
+    }
+  }
+}

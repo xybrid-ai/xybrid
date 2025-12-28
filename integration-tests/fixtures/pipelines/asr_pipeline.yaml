@@ -1,0 +1,20 @@
+# ASR Pipeline Example
+# Used for integration testing
+
+name: asr-test-pipeline
+version: "1.0"
+
+models:
+  - id: asr
+    model: wav2vec2-base-960h
+
+input:
+  type: audio
+  format: wav
+  sample_rate: 16000
+
+output:
+  type: text
+
+options:
+  language: en

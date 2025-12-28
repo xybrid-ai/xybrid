@@ -1,0 +1,25 @@
+{
+  "model_id": "all-minilm",
+  "version": "L6-v2",
+  "execution_template": {
+    "type": "SimpleMode",
+    "model_file": "model.onnx"
+  },
+  "preprocessing": [
+    {
+      "type": "Tokenize",
+      "vocab_file": "vocab.txt"
+    }
+  ],
+  "postprocessing": [],
+  "files": [
+    "model.onnx",
+    "vocab.txt",
+    "tokenizer.json",
+    "config.json"
+  ],
+  "metadata": {
+    "task": "text-embedding",
+    "embedding_dim": 384
+  }
+}
