@@ -301,12 +301,32 @@ fn text_to_tensor(text: &str, target_shape: &[i64]) -> AdapterResult<ArrayD<f32>
         .map(|(i, _)| i as i64)
         .collect();
 
-    // Calculate expected size from shape
+    let actual_size = tokens.len();
+
+    // Check if shape contains dynamic dimensions (-1)
+    let has_dynamic = target_shape.iter().any(|&d| d < 0);
+
+    if has_dynamic {
+        // For dynamic shapes, use the actual token count
+        let shape: Vec<usize> = if target_shape == &[-1] {
+            vec![actual_size]
+        } else if target_shape.len() == 2 {
+            let batch = if target_shape[0] > 0 { target_shape[0] as usize } else { 1 };
+            vec![batch, actual_size]
+        } else {
+            vec![actual_size]
+        };
+
+        let tokens_f32: Vec<f32> = tokens.iter().map(|&t| t as f32).collect();
+        return Array::from_shape_vec(IxDyn(&shape), tokens_f32)
+            .map_err(|e| AdapterError::RuntimeError(format!("Failed to create text tensor: {}", e)));
+    }
+
+    // Calculate expected size from static shape
     let expected_size: i64 = target_shape.iter().product();
-    let actual_size = tokens.len() as i64;
 
     // Pad or truncate to match shape
-    let final_tokens = if actual_size < expected_size {
+    let final_tokens = if (actual_size as i64) < expected_size {
         // Pad with zeros (or special token ID)
         let mut padded = tokens;
         padded.resize(expected_size as usize, 0);
@@ -319,7 +339,7 @@ fn text_to_tensor(text: &str, target_shape: &[i64]) -> AdapterResult<ArrayD<f32>
     // Create tensor (convert i64 to f32)
     let shape: Vec<usize> = target_shape.iter().map(|&s| s as usize).collect();
     let tokens_f32: Vec<f32> = final_tokens.iter().map(|&t| t as f32).collect();
-    
+
     Array::from_shape_vec(IxDyn(&shape), tokens_f32)
         .map_err(|e| AdapterError::RuntimeError(format!("Failed to create text tensor: {}", e)))
 }
