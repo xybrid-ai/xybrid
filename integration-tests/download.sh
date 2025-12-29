@@ -71,6 +71,23 @@ check_models() {
     fi
 }
 
+# Validate that a downloaded file is not an error page
+validate_file() {
+    local file="$1"
+    if [ ! -f "$file" ]; then
+        return 1
+    fi
+    # Check file size (error pages are typically small)
+    local size=$(wc -c < "$file" | tr -d ' ')
+    if [ "$size" -lt 100 ]; then
+        # Check if it's an error message
+        if grep -qi "invalid\|error\|not found\|404" "$file" 2>/dev/null; then
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # Download a single model from HuggingFace
 download_model() {
     local model_name="$1"
@@ -106,29 +123,51 @@ download_model() {
 
     # Download using HuggingFace Hub URL pattern
     local base_url="https://huggingface.co/$repo/resolve/main"
+    local download_failed=false
 
     # If we have file list from jq, use it; otherwise download common files
     if [ -n "$files" ]; then
         for file in $files; do
             echo "  Downloading $file..."
-            curl -L -# -o "$model_dir/$file" "$base_url/$file" || {
-                echo -e "${RED}Failed to download $file${NC}"
-            }
+            if curl -L -# -f -o "$model_dir/$file" "$base_url/$file" 2>/dev/null; then
+                if validate_file "$model_dir/$file"; then
+                    echo -e "  ${GREEN}✓${NC} $file"
+                else
+                    echo -e "  ${RED}✗${NC} $file (invalid or error response)"
+                    rm -f "$model_dir/$file"
+                    download_failed=true
+                fi
+            else
+                echo -e "  ${RED}✗${NC} $file (download failed)"
+                download_failed=true
+            fi
         done
     else
         # Fallback: try common files
         for file in model.onnx model_metadata.json vocab.json tokens.txt voices.bin; do
             if curl -L -s -f -o "$model_dir/$file" "$base_url/$file" 2>/dev/null; then
-                echo "  Downloaded $file"
+                if validate_file "$model_dir/$file"; then
+                    echo "  Downloaded $file"
+                else
+                    rm -f "$model_dir/$file"
+                fi
             fi
         done
     fi
 
-    # Verify download
-    if [ -f "$model_dir/model_metadata.json" ]; then
+    # Verify download - check model_metadata.json exists and is valid JSON
+    if [ -f "$model_dir/model_metadata.json" ] && validate_file "$model_dir/model_metadata.json"; then
+        # Extra check: verify it's valid JSON
+        if $HAS_JQ && ! jq empty "$model_dir/model_metadata.json" 2>/dev/null; then
+            echo -e "${RED}✗ $model_name: model_metadata.json is not valid JSON${NC}"
+            rm -rf "$model_dir"
+            return 1
+        fi
         echo -e "${GREEN}✓ $model_name downloaded successfully${NC}"
     else
-        echo -e "${RED}✗ $model_name download incomplete (missing model_metadata.json)${NC}"
+        echo -e "${RED}✗ $model_name download failed${NC}"
+        echo -e "  The HuggingFace repo may not exist: https://huggingface.co/$repo"
+        rm -rf "$model_dir"
         return 1
     fi
 }
