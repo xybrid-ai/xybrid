@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::testing::model_fixtures;
 
 /// Compute cosine similarity between two vectors
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -49,7 +50,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Load metadata
-    let metadata_path = PathBuf::from("test_models/distilbert/model_metadata.json");
+    let model_dir = model_fixtures::require_model("all-minilm");
+    let metadata_path = model_dir.join("model_metadata.json");
     println!("📋 Loading metadata from: {}", metadata_path.display());
 
     let metadata_content = std::fs::read_to_string(&metadata_path)?;
@@ -59,8 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Create TemplateExecutor
-    let base_path = PathBuf::from("test_models/distilbert");
-    let mut executor = TemplateExecutor::with_base_path(base_path.to_str().unwrap());
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
 
     // Test sentence pairs
     let pairs = vec![

@@ -10,30 +10,31 @@
 //! ```bash
 //! # Run with Whisper (Candle backend, auto-detected)
 //! cargo run --example streaming_asr --features candle-metal -- \
-//!     --model-dir test_models/whisper-tiny-candle \
-//!     --audio-file test_models/whisper-tiny-candle/jfk.wav
+//!     --model-dir whisper-tiny-candle \
+//!     --audio-file test.wav
 //!
 //! # Run with Wav2Vec2 (ONNX backend, auto-detected)
 //! cargo run --example streaming_asr -- \
-//!     --model-dir test_models/wav2vec2-base-960h \
-//!     --audio-file test_models/wav2vec2-base-960h/test.wav
+//!     --model-dir wav2vec2-base-960h \
+//!     --audio-file test.wav
 //!
 //! # Simulate streaming with 500ms chunks
 //! cargo run --example streaming_asr --features candle-metal -- \
-//!     --model-dir test_models/whisper-tiny-candle \
-//!     --audio-file test_models/whisper-tiny-candle/jfk.wav \
+//!     --model-dir whisper-tiny-candle \
 //!     --chunk-ms 500
 //! ```
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use xybrid_core::streaming::{StreamConfig, StreamSession};
+use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse args
     let args: Vec<String> = std::env::args().collect();
-    let mut model_dir = PathBuf::from("test_models/whisper-tiny-candle");
-    let mut audio_file = PathBuf::from("test_models/whisper-tiny-candle/jfk.wav");
+    // Default model - will be resolved via model_fixtures
+    let mut model_name = "whisper-tiny-candle".to_string();
+    let mut audio_file: Option<PathBuf> = None;
     let mut chunk_ms: u64 = 0; // 0 = process all at once (non-streaming demo)
     let mut enable_vad = false;
 
@@ -41,11 +42,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while i < args.len() {
         match args[i].as_str() {
             "--model-dir" => {
-                model_dir = PathBuf::from(&args[i + 1]);
+                model_name = args[i + 1].clone();
                 i += 2;
             }
             "--audio-file" => {
-                audio_file = PathBuf::from(&args[i + 1]);
+                audio_file = Some(PathBuf::from(&args[i + 1]));
                 i += 2;
             }
             "--chunk-ms" => {
@@ -60,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Usage: streaming_asr [OPTIONS]");
                 println!();
                 println!("Options:");
-                println!("  --model-dir PATH    Model directory with model_metadata.json");
+                println!("  --model-dir NAME    Model name (e.g. whisper-tiny-candle, wav2vec2-base-960h)");
                 println!("  --audio-file PATH   Audio file to transcribe");
                 println!("  --chunk-ms MS       Chunk size in ms for streaming simulation (0 = all at once)");
                 println!("  --vad               Enable VAD (Voice Activity Detection) for smart chunking");
@@ -74,6 +75,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => i += 1,
         }
     }
+
+    // Resolve model directory via model_fixtures
+    let model_dir = model_fixtures::require_model(&model_name);
+
+    // Use provided audio file or default to jfk.wav in model dir
+    let audio_file = audio_file.unwrap_or_else(|| model_dir.join("jfk.wav"));
 
     println!("=== Streaming ASR Example ===");
     println!("Model: {:?}", model_dir);

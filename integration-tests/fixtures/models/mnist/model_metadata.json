@@ -8,7 +8,7 @@
   "preprocessing": [],
   "postprocessing": [
     {
-      "type": "ArgMax"
+      "type": "Argmax"
     }
   ],
   "files": [

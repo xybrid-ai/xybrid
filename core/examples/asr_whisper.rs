@@ -4,7 +4,7 @@
 //! through the standard xybrid execution pipeline.
 //!
 //! Prerequisites:
-//! - Whisper model at test_models/whisper-tiny/
+//! - Download model: ./integration-tests/download.sh whisper-tiny
 //! - encoder_model.onnx (FP16)
 //! - decoder_with_past_model.onnx (FP16)
 //! - tokenizer.json
@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
+use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
@@ -32,20 +33,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "test_audio.wav".to_string());
 
     // Load model metadata
-    let model_dir = PathBuf::from("test_models/whisper-tiny");
+    let model_dir = model_fixtures::require_model("whisper-tiny");
     let metadata_path = model_dir.join("model_metadata.json");
 
     println!("📋 Loading metadata from: {}", metadata_path.display());
-
-    if !metadata_path.exists() {
-        eprintln!("❌ Model metadata not found at: {}", metadata_path.display());
-        eprintln!("   Please ensure you have the whisper-tiny model files:");
-        eprintln!("   - test_models/whisper-tiny/encoder_model.onnx");
-        eprintln!("   - test_models/whisper-tiny/decoder_with_past_model.onnx");
-        eprintln!("   - test_models/whisper-tiny/tokenizer.json");
-        eprintln!("   - test_models/whisper-tiny/model_metadata.json");
-        return Err("Model files not found".into());
-    }
 
     let metadata_content = std::fs::read_to_string(&metadata_path)?;
     let metadata: ModelMetadata = serde_json::from_str(&metadata_content)?;

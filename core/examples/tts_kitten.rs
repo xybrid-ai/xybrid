@@ -11,10 +11,11 @@
 //!
 //! Prerequisites:
 //! - CMU dictionary at ~/.xybrid/cmudict.dict
-//! - KittenTTS model at test_models/kitten-tts/kitten-nano-en-v0_1-fp16/
+//! - Download model: ./integration-tests/download.sh kitten-tts
 
 use std::path::PathBuf;
 use xybrid_core::phonemizer::{load_tokens_map, Phonemizer};
+use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
@@ -37,12 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Check model directory
-    let model_dir = PathBuf::from("test_models/kitten-tts/kitten-nano-en-v0_1-fp16");
-    if !model_dir.exists() {
-        eprintln!("❌ Model not found at: {}", model_dir.display());
-        eprintln!("   Run: python scripts/download_models.py kitten-tts");
-        return Ok(());
-    }
+    let model_dir = model_fixtures::require_model("kitten-tts");
 
     // Check CMU dictionary
     let dict_path = dirs::home_dir()
