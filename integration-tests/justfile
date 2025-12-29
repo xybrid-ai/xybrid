@@ -1,0 +1,15 @@
+# Download all integration test models
+download-models *args:
+    ./download.sh {{args}}
+
+# Download a specific model for integration tests
+download-model name:
+    ./download.sh {{name}}
+
+# List available models for download
+list-models:
+    ./download.sh --list
+
+# Check which integration test models are present/missing
+check-models:
+    ./download.sh --check
