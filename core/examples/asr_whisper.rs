@@ -27,10 +27,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
     println!();
 
-    // Get audio file from command line or use default
-    let audio_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "test_audio.wav".to_string());
+    // Get audio file from command line or use fixtures default
+    let audio_path = std::env::args().nth(1).unwrap_or_else(|| {
+        // Try to find test audio in fixtures
+        if let Some(fixtures) = model_fixtures::fixtures_dir() {
+            let fixtures_audio = fixtures.join("input/test_audio.wav");
+            if fixtures_audio.exists() {
+                return fixtures_audio.to_string_lossy().to_string();
+            }
+        }
+        "test_audio.wav".to_string()
+    });
 
     // Load model metadata
     let model_dir = model_fixtures::require_model("whisper-tiny");
