@@ -2,6 +2,50 @@
   "version": "2.0",
   "description": "Model manifest for xybrid integration tests - supports registry and direct URL downloads",
   "models": {
+    "wav2vec2-base-960h": {
+      "description": "English speech recognition (16kHz, CTC-based ASR)",
+      "source": "url",
+      "size_mb": 360,
+      "task": "speech-recognition",
+      "files": [
+        {
+          "url": "https://huggingface.co/Xenova/wav2vec2-base-960h/resolve/main/onnx/model.onnx",
+          "output": "model.onnx"
+        },
+        {
+          "url": "https://huggingface.co/Xenova/wav2vec2-base-960h/resolve/main/vocab.json",
+          "output": "vocab.json"
+        },
+        {
+          "url": "https://huggingface.co/Xenova/wav2vec2-base-960h/resolve/main/config.json",
+          "output": "config.json"
+        },
+        {
+          "url": "https://huggingface.co/Xenova/wav2vec2-base-960h/resolve/main/tokenizer_config.json",
+          "output": "tokenizer_config.json"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "wav2vec2-base-960h",
+        "version": "1.0",
+        "execution_template": {
+          "type": "SimpleMode",
+          "model_file": "model.onnx"
+        },
+        "preprocessing": [
+          { "type": "AudioDecode", "sample_rate": 16000, "channels": 1 }
+        ],
+        "postprocessing": [
+          { "type": "CTCDecode", "vocab_file": "vocab.json", "blank_index": 0 }
+        ],
+        "files": ["model.onnx", "vocab.json", "config.json", "tokenizer_config.json"],
+        "metadata": {
+          "task": "speech-recognition",
+          "sample_rate": 16000,
+          "vocab_size": 32
+        }
+      }
+    },
     "kokoro-82m": {
       "description": "High-quality TTS model (82M params)",
       "source": "registry",

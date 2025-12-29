@@ -5,8 +5,11 @@
 !*/
 
 # Keep metadata and configuration files
-!model_metadata.json
-!**/model_metadata.json
+!/all-minilm/model_metadata.json
+!/distilbert/model_metadata.json
+!/resnet50/model_metadata.json
+!/mnist/model_metadata.json
+model_metadata.json
 
 # Keep scripts and tooling
 !download_models.sh
