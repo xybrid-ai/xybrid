@@ -1,6 +1,7 @@
 {
   "model_id": "mobilenetv2-imagenet",
   "version": "v2-12",
+  "description": "MobileNetV2 lightweight image classification model trained on ImageNet. Input: [1, 3, 224, 224] RGB image normalized to [0, 1] with ImageNet mean/std. Output: [1, 1000] probabilities for ImageNet classes.",
   "execution_template": {
     "type": "SimpleMode",
     "model_file": "mobilenetv2-12.onnx"
@@ -8,7 +9,12 @@
   "preprocessing": [
     {
       "type": "Reshape",
-      "shape": [1, 3, 256, 256]
+      "shape": [
+        1,
+        3,
+        256,
+        256
+      ]
     },
     {
       "type": "CenterCrop",
@@ -17,8 +23,16 @@
     },
     {
       "type": "Normalize",
-      "mean": [0.485, 0.456, 0.406],
-      "std": [0.229, 0.224, 0.225]
+      "mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "std": [
+        0.229,
+        0.224,
+        0.225
+      ]
     }
   ],
   "postprocessing": [
@@ -31,11 +45,20 @@
       "k": 5
     }
   ],
-  "files": ["mobilenetv2-12.onnx"],
-  "description": "MobileNetV2 lightweight image classification model trained on ImageNet. Input: [1, 3, 224, 224] RGB image normalized to [0, 1] with ImageNet mean/std. Output: [1, 1000] probabilities for ImageNet classes.",
+  "files": [
+    "mobilenetv2-12.onnx"
+  ],
   "metadata": {
-    "input_shape": [1, 3, 224, 224],
-    "output_shape": [1, 1000],
+    "input_shape": [
+      1,
+      3,
+      224,
+      224
+    ],
+    "output_shape": [
+      1,
+      1000
+    ],
     "opset_version": 12,
     "task": "image_classification",
     "num_classes": 1000,
