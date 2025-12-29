@@ -245,30 +245,67 @@ download_from_url() {
 
     local download_failed=false
 
-    # Download each file
-    local files
-    files=$(jq -c ".models[\"$model_name\"].files[]" "$MANIFEST")
+    # Check if it's an archive download or file list
+    local is_archive
+    is_archive=$(jq -r ".models[\"$model_name\"].archive // false" "$MANIFEST")
 
-    while IFS= read -r file_entry; do
-        local url
-        local output
-        url=$(echo "$file_entry" | jq -r '.url')
-        output=$(echo "$file_entry" | jq -r '.output')
+    if [ "$is_archive" = "true" ]; then
+        local archive_url
+        local archive_strip
+        archive_url=$(jq -r ".models[\"$model_name\"].archive_url" "$MANIFEST")
+        archive_strip=$(jq -r ".models[\"$model_name\"].archive_strip // empty" "$MANIFEST")
 
-        echo "  Downloading $output..."
-        if curl -L -# -f -o "$model_dir/$output" "$url" 2>/dev/null; then
-            if validate_file "$model_dir/$output"; then
-                echo -e "  ${GREEN}✓${NC} $output"
+        echo "  Downloading archive from $archive_url..."
+        local archive_file="$model_dir/archive.tar.bz2"
+        
+        if curl -L -# -f -o "$archive_file" "$archive_url"; then
+            echo "  Extracting..."
+            if tar -xf "$archive_file" -C "$model_dir" 2>/dev/null; then
+                rm -f "$archive_file"
+                
+                # If we need to strip a directory (mv subdir/* .)
+                if [ -n "$archive_strip" ] && [ -d "$model_dir/$archive_strip" ]; then
+                    mv "$model_dir/$archive_strip"/* "$model_dir/" 2>/dev/null
+                    rmdir "$model_dir/$archive_strip" 2>/dev/null
+                fi
+                echo -e "  ${GREEN}✓${NC} Archive extracted"
             else
-                echo -e "  ${RED}✗${NC} $output (invalid response)"
-                rm -f "$model_dir/$output"
-                download_failed=true
+                echo -e "  ${RED}✗${NC} Extraction failed"
+                rm -f "$archive_file"
+                return 1
             fi
         else
-            echo -e "  ${RED}✗${NC} $output (download failed)"
-            download_failed=true
+            echo -e "  ${RED}✗${NC} Archive download failed"
+            rm -f "$archive_file"
+            rm -rf "$model_dir"
+            return 1
         fi
-    done <<< "$files"
+    else
+        # Download each file
+        local files
+        files=$(jq -c ".models[\"$model_name\"].files[]" "$MANIFEST")
+
+        while IFS= read -r file_entry; do
+            local url
+            local output
+            url=$(echo "$file_entry" | jq -r '.url')
+            output=$(echo "$file_entry" | jq -r '.output')
+
+            echo "  Downloading $output..."
+            if curl -L -# -f -o "$model_dir/$output" "$url" 2>/dev/null; then
+                if validate_file "$model_dir/$output"; then
+                    echo -e "  ${GREEN}✓${NC} $output"
+                else
+                    echo -e "  ${RED}✗${NC} $output (invalid response)"
+                    rm -f "$model_dir/$output"
+                    download_failed=true
+                fi
+            else
+                echo -e "  ${RED}✗${NC} $output (download failed)"
+                download_failed=true
+            fi
+        done <<< "$files"
+    fi
 
     # Generate model_metadata.json if defined in manifest
     local has_metadata

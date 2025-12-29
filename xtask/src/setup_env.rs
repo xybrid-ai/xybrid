@@ -1,48 +1,40 @@
 use std::path::{Path, PathBuf};
-use std::fs;
-use anyhow::{Context, Result};
-
-const MODELS: &[(&str, &str)] = &[
-    ("wav2vec2-base-960h", "1.0"),
-    ("gpt-4o-mini", "1.0"), // Mock model file
-    ("kokoro-82m", "0.1"),
-];
+use std::process::{Command, Stdio};
+use anyhow::{Context, Result, bail};
 
 pub fn run(registry_url: Option<String>) -> Result<()> {
     let root = project_root();
-    let fixtures_models = root.join("integration-tests/fixtures/models");
+    let download_script = root.join("integration-tests/download.sh");
     
-    fs::create_dir_all(&fixtures_models)?;
+    if !download_script.exists() {
+        bail!("download.sh not found at {}", download_script.display());
+    }
+
+    println!("Executing download script: {}", download_script.display());
+
+    let mut cmd = Command::new(&download_script);
     
-    let registry = registry_url.unwrap_or_else(|| "https://mock-registry.xybrid.ai".to_string());
-    println!("Setting up test environment...");
-    println!("Registry: {}", registry);
-    println!("Target: {}", fixtures_models.display());
+    // Pass --all to download everything, as per bootstrap recipe
+    cmd.arg("--all");
+    
+    // We could pass registry URL if the script supported overriding it via env var or arg,
+    // but the current script hardcodes it or just uses what's there. 
+    // The user's script doesn't seem to take a registry arg easily without modification,
+    // but we are wrapping the existing script.
+    if let Some(reg) = registry_url {
+        println!("Note: Custom registry URL '{}' passed but download.sh might need update to use it.", reg);
+        // cmd.env("REGISTRY_API", reg); // Uncomment if we modify script to use env var
+    }
 
-    for (model, version) in MODELS {
-        let model_dir = fixtures_models.join(model).join(version);
-        if model_dir.exists() {
-            println!("Model {}@{} already exists, skipping.", model, version);
-            continue;
-        }
+    cmd.stdout(Stdio::inherit())
+       .stderr(Stdio::inherit());
 
-        println!("Downloading {}@{}...", model, version);
-        
-        // In a real scenario, we would download here.
-        // For this streamlining task, passing a flag or just mocking the file creation is sufficient 
-        // if we don't have a real public registry yet. 
-        // matching the user request "models need to be downloaded", we'll simulate it.
-        
-        simulate_download(&model_dir, model)?;
+    let status = cmd.status().context("Failed to execute download.sh")?;
+
+    if !status.success() {
+        bail!("download.sh failed with exit code: {}", status);
     }
     
-    Ok(())
-}
-
-fn simulate_download(path: &Path, name: &str) -> Result<()> {
-    fs::create_dir_all(path)?;
-    fs::write(path.join("model.bin"), format!("dummy content for {}", name))?;
-    fs::write(path.join("config.json"), "{}")?;
     Ok(())
 }
 
