@@ -1,0 +1,29 @@
+# Model files (downloaded via download.sh)
+fixtures/models/*/
+
+# Keep models.json manifest
+!fixtures/models/models.json
+
+# Large binary files
+*.onnx
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.gguf
+*.ggml
+
+# But keep small vocab/config files if accidentally placed here
+!*.json
+!*.txt
+!*.yaml
+!*.yml
+
+# Test outputs
+test_output/
+*.wav.out
+*.mp3.out
+
+# OS files
+.DS_Store
+Thumbs.db

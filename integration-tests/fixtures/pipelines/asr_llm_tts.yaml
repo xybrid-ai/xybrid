@@ -1,0 +1,21 @@
+name: "whisper -> openai -> kokoro"
+
+
+input:
+  type: audio
+  sample_rate: 16000
+  channels: 1
+
+stages:
+  - id: asr
+    model: whisper-tiny
+  - id: llm
+    model: gpt-4o-mini
+    target: integration
+    provider: openai
+    options:
+      temperature: 0.7
+      max_tokens: 500
+      system_prompt: "You are a helpful voice assistant. Keep responses concise and conversational."
+  - id: tts
+    model: kokoro-82m

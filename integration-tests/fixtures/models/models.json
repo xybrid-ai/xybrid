@@ -1,0 +1,68 @@
+{
+  "version": "1.0",
+  "description": "Model manifest for xybrid integration tests",
+  "models": {
+    "wav2vec2-base-960h": {
+      "description": "ASR model for speech recognition",
+      "source": "huggingface",
+      "repo": "xybrid-ai/wav2vec2-base-960h",
+      "files": [
+        "model.onnx",
+        "model_metadata.json",
+        "vocab.json"
+      ],
+      "size_mb": 380,
+      "task": "speech-recognition"
+    },
+    "kitten-tts": {
+      "description": "Lightweight TTS model",
+      "source": "huggingface",
+      "repo": "xybrid-ai/kitten-tts",
+      "files": [
+        "model.onnx",
+        "model_metadata.json",
+        "tokens.txt",
+        "voices.bin"
+      ],
+      "size_mb": 85,
+      "task": "text-to-speech"
+    },
+    "kokoro-82m": {
+      "description": "High-quality TTS model (82M params)",
+      "source": "huggingface",
+      "repo": "xybrid-ai/kokoro-82m",
+      "files": [
+        "model.onnx",
+        "model_metadata.json",
+        "tokens.txt",
+        "voices.bin"
+      ],
+      "size_mb": 330,
+      "task": "text-to-speech"
+    },
+    "whisper-tiny": {
+      "description": "Whisper tiny for ASR",
+      "source": "huggingface",
+      "repo": "xybrid-ai/whisper-tiny",
+      "files": [
+        "model.onnx",
+        "model_metadata.json",
+        "vocab.json",
+        "tokenizer.json"
+      ],
+      "size_mb": 150,
+      "task": "speech-recognition"
+    },
+    "mnist": {
+      "description": "MNIST digit classification (for testing)",
+      "source": "huggingface",
+      "repo": "xybrid-ai/mnist",
+      "files": [
+        "model.onnx",
+        "model_metadata.json"
+      ],
+      "size_mb": 1,
+      "task": "image-classification"
+    }
+  }
+}
