@@ -2,18 +2,6 @@
   "version": "2.0",
   "description": "Model manifest for xybrid integration tests - supports registry and direct URL downloads",
   "models": {
-    "wav2vec2-base-960h": {
-      "description": "ASR model for speech recognition",
-      "source": "registry",
-      "size_mb": 380,
-      "task": "speech-recognition"
-    },
-    "kitten-tts": {
-      "description": "Lightweight TTS model",
-      "source": "registry",
-      "size_mb": 85,
-      "task": "text-to-speech"
-    },
     "kokoro-82m": {
       "description": "High-quality TTS model (82M params)",
       "source": "registry",

@@ -98,45 +98,131 @@ validate_file() {
     return 0
 }
 
+# Detect current platform
+detect_platform() {
+    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    local arch=$(uname -m)
+
+    case "$os" in
+        darwin)
+            case "$arch" in
+                arm64) echo "macos-arm64" ;;
+                x86_64) echo "macos-x64" ;;
+                *) echo "macos" ;;
+            esac
+            ;;
+        linux)
+            case "$arch" in
+                aarch64) echo "linux-arm64" ;;
+                x86_64) echo "linux-x64" ;;
+                *) echo "linux" ;;
+            esac
+            ;;
+        *)
+            echo "universal"
+            ;;
+    esac
+}
+
 # Download model from xybrid registry
 download_from_registry() {
     local model_name="$1"
     local model_dir="$MODELS_DIR/$model_name"
+    local platform
+    platform=$(detect_platform)
 
     echo -e "${YELLOW}Downloading $model_name from xybrid registry...${NC}"
+    echo "  Platform: $platform"
 
-    # Try to resolve from registry
-    local resolve_url="$REGISTRY_API/v1/models/$model_name/resolve"
+    # Resolve model from registry
+    local resolve_url="$REGISTRY_API/v1/models/registry/$model_name/resolve?platform=$platform"
     local resolve_response
 
     if ! resolve_response=$(curl -sf "$resolve_url" 2>/dev/null); then
         echo -e "${RED}✗ Failed to resolve $model_name from registry${NC}"
         echo "  Registry may be unavailable or model not found"
+        echo "  Tried: $resolve_url"
         return 1
     fi
 
-    # Extract bundle URL from response
-    local bundle_url
-    bundle_url=$(echo "$resolve_response" | jq -r '.bundle_url // .url // empty')
+    # Extract download URL from response
+    local download_url
+    local file_name
+    local size_bytes
+    download_url=$(echo "$resolve_response" | jq -r '.resolved.download_url // empty')
+    file_name=$(echo "$resolve_response" | jq -r '.resolved.file // empty')
+    size_bytes=$(echo "$resolve_response" | jq -r '.resolved.size_bytes // 0')
 
-    if [ -z "$bundle_url" ]; then
-        echo -e "${RED}✗ No bundle URL found for $model_name${NC}"
+    if [ -z "$download_url" ]; then
+        echo -e "${RED}✗ No download URL found for $model_name${NC}"
+        echo "  Response: $resolve_response"
         return 1
     fi
+
+    local size_mb=$((size_bytes / 1024 / 1024))
+    echo "  File: $file_name (~${size_mb}MB)"
 
     mkdir -p "$model_dir"
 
-    # Download and extract bundle
-    local bundle_file="$model_dir/bundle.xyb"
-    echo "  Downloading bundle..."
+    # Download the bundle
+    local bundle_file="$model_dir/$file_name"
+    echo "  Downloading..."
 
-    if curl -L -# -f -o "$bundle_file" "$bundle_url"; then
+    if curl -L -# -f -o "$bundle_file" "$download_url"; then
         echo "  Extracting bundle..."
-        # .xyb files are zip archives
-        if unzip -q -o "$bundle_file" -d "$model_dir" 2>/dev/null; then
-            rm -f "$bundle_file"
-            echo -e "${GREEN}✓ $model_name downloaded successfully${NC}"
-            return 0
+
+        # Detect archive type by magic bytes
+        local magic
+        magic=$(xxd -l 4 -p "$bundle_file" 2>/dev/null)
+
+        local extract_success=false
+
+        case "$magic" in
+            28b52ffd)
+                # Zstandard compressed tar archive
+                if command -v zstd &> /dev/null; then
+                    if zstd -d "$bundle_file" -o "$model_dir/bundle.tar" 2>/dev/null && \
+                       tar -xf "$model_dir/bundle.tar" -C "$model_dir" 2>/dev/null; then
+                        rm -f "$model_dir/bundle.tar"
+                        extract_success=true
+                    fi
+                else
+                    echo -e "${RED}✗ zstd not installed. Install with: brew install zstd${NC}"
+                    rm -rf "$model_dir"
+                    return 1
+                fi
+                ;;
+            504b0304)
+                # ZIP archive
+                if unzip -q -o "$bundle_file" -d "$model_dir" 2>/dev/null; then
+                    extract_success=true
+                fi
+                ;;
+            1f8b08*)
+                # Gzip compressed tar archive
+                if tar -xzf "$bundle_file" -C "$model_dir" 2>/dev/null; then
+                    extract_success=true
+                fi
+                ;;
+            *)
+                echo -e "${RED}✗ Unknown archive format (magic: $magic)${NC}"
+                rm -rf "$model_dir"
+                return 1
+                ;;
+        esac
+
+        rm -f "$bundle_file"
+
+        if $extract_success; then
+            # Verify extraction
+            if [ -f "$model_dir/model_metadata.json" ] || [ -f "$model_dir/model.onnx" ]; then
+                echo -e "${GREEN}✓ $model_name downloaded successfully${NC}"
+                return 0
+            else
+                echo -e "${RED}✗ Bundle extracted but missing expected files${NC}"
+                ls -la "$model_dir"
+                return 1
+            fi
         else
             echo -e "${RED}✗ Failed to extract bundle${NC}"
             rm -rf "$model_dir"
