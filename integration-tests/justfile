@@ -13,3 +13,6 @@ list-models:
 # Check which integration test models are present/missing
 check-models:
     ./download.sh --check
+
+bootstrap:
+    ./download.sh --all 

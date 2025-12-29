@@ -9,13 +9,13 @@
       "task": "speech-recognition"
     },
     "kokoro-82m": {
-      "description": "High-quality TTS model (82M params)",
+      "description": "High-quality TTS model (82M params) with Misaki dictionary phonemizer",
       "source": "registry",
       "size_mb": 330,
       "task": "text-to-speech"
     },
     "whisper-tiny": {
-      "description": "Whisper tiny for ASR",
+      "description": "Whisper tiny for ASR (Candle/SafeTensors format)",
       "source": "registry",
       "size_mb": 150,
       "task": "speech-recognition"
@@ -32,30 +32,37 @@
         }
       ],
       "model_metadata": {
-        "model_id": "mnist",
+        "model_id": "mnist-digit-recognition",
         "version": "12",
+        "description": "MNIST handwritten digit recognition model (opset 12). Input: [1, 1, 28, 28] grayscale image normalized to [0.0, 1.0]. Output: [1, 10] probabilities for digits 0-9.",
         "execution_template": {
           "type": "SimpleMode",
           "model_file": "model.onnx"
         },
-        "preprocessing": [],
-        "postprocessing": [
+        "preprocessing": [
           {
-            "type": "ArgMax"
+            "type": "Reshape",
+            "shape": [1, 1, 28, 28]
+          },
+          {
+            "type": "Normalize",
+            "mean": [0.0],
+            "std": [255.0]
           }
         ],
-        "files": [
-          "model.onnx"
+        "postprocessing": [
+          {
+            "type": "Softmax",
+            "dim": 1
+          }
         ],
+        "files": ["model.onnx"],
         "metadata": {
-          "task": "image-classification",
-          "input_shape": [
-            1,
-            1,
-            28,
-            28
-          ],
-          "output_classes": 10
+          "input_shape": [1, 1, 28, 28],
+          "output_shape": [1, 10],
+          "opset_version": 12,
+          "task": "image_classification",
+          "num_classes": 10
         }
       }
     },
@@ -67,34 +74,55 @@
       "files": [
         {
           "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-v2-7.onnx",
-          "output": "model.onnx"
+          "output": "resnet50-v2-7.onnx"
         }
       ],
       "model_metadata": {
-        "model_id": "resnet50",
+        "model_id": "resnet50-imagenet",
         "version": "v2-7",
+        "description": "ResNet-50 v2 image classification model trained on ImageNet. Input: [1, 3, 224, 224] RGB image with ImageNet normalization. Output: [1, 1000] probabilities for ImageNet classes.",
         "execution_template": {
           "type": "SimpleMode",
-          "model_file": "model.onnx"
+          "model_file": "resnet50-v2-7.onnx"
         },
-        "preprocessing": [],
-        "postprocessing": [
+        "preprocessing": [
           {
-            "type": "ArgMax"
+            "type": "Reshape",
+            "shape": [1, 3, 256, 256]
+          },
+          {
+            "type": "CenterCrop",
+            "width": 224,
+            "height": 224
+          },
+          {
+            "type": "Normalize",
+            "mean": [123.675, 116.28, 103.53],
+            "std": [58.395, 57.12, 57.375]
           }
         ],
-        "files": [
-          "model.onnx"
+        "postprocessing": [
+          {
+            "type": "Softmax",
+            "dim": 1
+          },
+          {
+            "type": "TopK",
+            "k": 5
+          }
         ],
+        "files": ["resnet50-v2-7.onnx"],
         "metadata": {
-          "task": "image-classification",
-          "input_shape": [
-            1,
-            3,
-            224,
-            224
-          ],
-          "output_classes": 1000
+          "input_shape": [1, 3, 224, 224],
+          "output_shape": [1, 1000],
+          "opset_version": 7,
+          "task": "image_classification",
+          "num_classes": 1000,
+          "dataset": "ImageNet",
+          "accuracy": {
+            "top1": 0.7581,
+            "top5": 0.9282
+          }
         }
       }
     },
@@ -106,34 +134,56 @@
       "files": [
         {
           "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx",
-          "output": "model.onnx"
+          "output": "mobilenetv2-12.onnx"
         }
       ],
       "model_metadata": {
-        "model_id": "mobilenet",
+        "model_id": "mobilenetv2-imagenet",
         "version": "v2-12",
+        "description": "MobileNetV2 lightweight image classification model trained on ImageNet. Input: [1, 3, 224, 224] RGB image normalized to [0, 1] with ImageNet mean/std. Output: [1, 1000] probabilities for ImageNet classes.",
         "execution_template": {
           "type": "SimpleMode",
-          "model_file": "model.onnx"
+          "model_file": "mobilenetv2-12.onnx"
         },
-        "preprocessing": [],
-        "postprocessing": [
+        "preprocessing": [
           {
-            "type": "ArgMax"
+            "type": "Reshape",
+            "shape": [1, 3, 256, 256]
+          },
+          {
+            "type": "CenterCrop",
+            "width": 224,
+            "height": 224
+          },
+          {
+            "type": "Normalize",
+            "mean": [0.485, 0.456, 0.406],
+            "std": [0.229, 0.224, 0.225]
           }
         ],
-        "files": [
-          "model.onnx"
+        "postprocessing": [
+          {
+            "type": "Softmax",
+            "dim": 1
+          },
+          {
+            "type": "TopK",
+            "k": 5
+          }
         ],
+        "files": ["mobilenetv2-12.onnx"],
         "metadata": {
-          "task": "image-classification",
-          "input_shape": [
-            1,
-            3,
-            224,
-            224
-          ],
-          "output_classes": 1000
+          "input_shape": [1, 3, 224, 224],
+          "output_shape": [1, 1000],
+          "opset_version": 12,
+          "task": "image_classification",
+          "num_classes": 1000,
+          "dataset": "ImageNet",
+          "accuracy": {
+            "top1": 0.6948
+          },
+          "model_size_mb": 13.3,
+          "notes": "Lightweight mobile-optimized architecture. Normalize input to [0,1] then apply mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]"
         }
       }
     },
@@ -170,10 +220,17 @@
         "preprocessing": [
           {
             "type": "Tokenize",
-            "vocab_file": "vocab.txt"
+            "vocab_file": "tokenizer.json",
+            "tokenizer_type": "WordPiece",
+            "max_length": 512
           }
         ],
-        "postprocessing": [],
+        "postprocessing": [
+          {
+            "type": "MeanPool",
+            "dim": 1
+          }
+        ],
         "files": [
           "model.onnx",
           "vocab.txt",
@@ -186,19 +243,75 @@
         }
       }
     },
+    "distilbert": {
+      "description": "DistilBERT sentence embeddings (384-dim, same architecture as all-minilm)",
+      "source": "url",
+      "size_mb": 86,
+      "task": "text-embedding",
+      "files": [
+        {
+          "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx",
+          "output": "model.onnx"
+        },
+        {
+          "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt",
+          "output": "vocab.txt"
+        },
+        {
+          "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json",
+          "output": "tokenizer.json"
+        },
+        {
+          "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json",
+          "output": "config.json"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "all-minilm-l6-v2",
+        "version": "1.0",
+        "description": "Sentence transformer model for generating embeddings (384 dimensions)",
+        "execution_template": {
+          "type": "SimpleMode",
+          "model_file": "model.onnx"
+        },
+        "preprocessing": [
+          {
+            "type": "Tokenize",
+            "vocab_file": "tokenizer.json",
+            "tokenizer_type": "WordPiece",
+            "max_length": 512
+          }
+        ],
+        "postprocessing": [
+          {
+            "type": "MeanPool",
+            "dim": 1
+          }
+        ],
+        "files": [
+          "model.onnx",
+          "tokenizer.json",
+          "vocab.txt",
+          "config.json"
+        ],
+        "metadata": {
+          "architecture": "BertModel",
+          "hidden_size": 384,
+          "num_layers": 6,
+          "num_attention_heads": 12,
+          "max_position_embeddings": 512,
+          "vocab_size": 30522
+        }
+      }
+    },
     "kitten-tts": {
-      "description": "Ultra-lightweight TTS (15M params, 8 voices, 24kHz audio)",
+      "description": "Ultra-lightweight TTS (15M params, 8 voices, 24kHz audio, requires espeak-ng)",
       "source": "url",
       "size_mb": 24,
       "task": "text-to-speech",
-      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2",
       "archive": true,
-      "files": [
-        {
-          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2",
-          "output": "model.onnx"
-        }
-      ],
+      "archive_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2",
+      "archive_strip": "kitten-nano-en-v0_1-fp16",
       "model_metadata": {
         "model_id": "kitten-tts-nano",
         "version": "0.1",
@@ -225,8 +338,7 @@
         "files": [
           "model.fp16.onnx",
           "tokens.txt",
-          "voices.bin",
-          "cmudict.dict"
+          "voices.bin"
         ],
         "metadata": {
           "task": "text-to-speech",
@@ -245,34 +357,7 @@
           ],
           "license": "Apache-2.0",
           "source": "https://github.com/KittenML/KittenTTS",
-          "onnx_inputs": [
-            {
-              "name": "input_ids",
-              "shape": "[1, seq_len]",
-              "dtype": "int64",
-              "description": "Phoneme token IDs"
-            },
-            {
-              "name": "style",
-              "shape": "[1, 256]",
-              "dtype": "float32",
-              "description": "Voice embedding from voices.bin"
-            },
-            {
-              "name": "speed",
-              "shape": "[1]",
-              "dtype": "float32",
-              "description": "Speech speed multiplier (default: 1.0)"
-            }
-          ],
-          "onnx_outputs": [
-            {
-              "name": "waveform",
-              "shape": "[1, audio_samples]",
-              "dtype": "float32",
-              "description": "Audio waveform at 24kHz"
-            }
-          ]
+          "notes": "Requires espeak-ng for phonemization. Install: brew install espeak-ng (macOS) or apt install espeak-ng (Linux)"
         }
       }
     }

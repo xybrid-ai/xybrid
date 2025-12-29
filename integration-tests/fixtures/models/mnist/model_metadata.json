@@ -1,6 +1,7 @@
 {
   "model_id": "mnist-digit-recognition",
   "version": "12",
+  "description": "MNIST handwritten digit recognition model (opset 12). Input: [1, 1, 28, 28] grayscale image normalized to [0.0, 1.0]. Output: [1, 10] probabilities for digits 0-9.",
   "execution_template": {
     "type": "SimpleMode",
     "model_file": "model.onnx"
@@ -8,12 +9,21 @@
   "preprocessing": [
     {
       "type": "Reshape",
-      "shape": [1, 1, 28, 28]
+      "shape": [
+        1,
+        1,
+        28,
+        28
+      ]
     },
     {
       "type": "Normalize",
-      "mean": [0.0],
-      "std": [255.0]
+      "mean": [
+        0.0
+      ],
+      "std": [
+        255.0
+      ]
     }
   ],
   "postprocessing": [
@@ -22,11 +32,20 @@
       "dim": 1
     }
   ],
-  "files": ["model.onnx"],
-  "description": "MNIST handwritten digit recognition model (opset 12). Input: [1, 1, 28, 28] grayscale image normalized to [0.0, 1.0]. Output: [1, 10] probabilities for digits 0-9.",
+  "files": [
+    "model.onnx"
+  ],
   "metadata": {
-    "input_shape": [1, 1, 28, 28],
-    "output_shape": [1, 10],
+    "input_shape": [
+      1,
+      1,
+      28,
+      28
+    ],
+    "output_shape": [
+      1,
+      10
+    ],
     "opset_version": 12,
     "task": "image_classification",
     "num_classes": 10

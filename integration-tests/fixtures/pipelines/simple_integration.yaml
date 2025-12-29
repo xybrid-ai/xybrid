@@ -1,0 +1,15 @@
+name: "Integration Test Pipeline"
+version: "1.0"
+description: "Pipeline using local mock models"
+
+input:
+  type: text
+
+stages:
+  - id: llm
+    model: gpt-4o-mini
+    target: integration
+    provider: openai
+    options:
+      temperature: 0.7
+      max_tokens: 150
