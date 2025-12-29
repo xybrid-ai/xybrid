@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load metadata (same pattern as tts_xybrid.rs)
     let model_dir = model_fixtures::require_model("kokoro-82m");
-    let metadata_path = model_dir.join("model_metadata_espeak.json");
+    let metadata_path = model_dir.join("model_metadata.json");
 
     println!("📋 Loading metadata from: {}", metadata_path.display());
 
