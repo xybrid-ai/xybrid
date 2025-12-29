@@ -207,6 +207,21 @@ pub fn model_or_skip(model_name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Get the integration-tests fixtures directory (parent of models directory).
+///
+/// Returns the fixtures directory which contains `models/` and `input/` subdirectories.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// if let Some(fixtures) = model_fixtures::fixtures_dir() {
+///     let test_audio = fixtures.join("input/test_audio.wav");
+/// }
+/// ```
+pub fn fixtures_dir() -> Option<PathBuf> {
+    models_dir().and_then(|m| m.parent().map(|p| p.to_path_buf()))
+}
+
 /// List all available models in the models directory.
 pub fn list_available_models() -> Vec<String> {
     let Some(models) = models_dir() else {

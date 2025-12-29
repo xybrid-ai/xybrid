@@ -7,6 +7,8 @@
 //! | [`single_shot`] | Single forward pass execution |
 //! | [`autoregressive`] | Token-by-token generation with KV cache |
 //! | [`whisper`] | Whisper-specific decoder with encoder KV cache |
+//! | [`bert`] | BERT-style models with integer token inputs |
+//! | [`tts`] | TTS models with phoneme IDs and voice embeddings |
 //!
 //! ## Execution Flow
 //!
@@ -19,18 +21,24 @@
 //! │ SingleShot: run_with_inputs() once       │
 //! │ Autoregressive: token generation loop    │
 //! │ WhisperDecoder: encoder + decoder loop   │
+//! │ BERT: integer token inputs (int64)       │
+//! │ TTS: phoneme IDs + voice embedding       │
 //! └──────────────────────────────────────────┘
 //!        ↓
 //!    RawOutputs
 //! ```
 
 pub mod autoregressive;
+pub mod bert;
 pub mod single_shot;
+pub mod tts;
 pub mod whisper;
 
 // Re-export commonly used helpers
 pub use autoregressive::execute_autoregressive_stage;
+pub use bert::execute_bert_inference;
 pub use single_shot::execute_single_shot_stage;
+pub use tts::execute_tts_inference;
 pub use whisper::execute_whisper_decoder_stage;
 
 /// Parse KV cache input name from HuggingFace format.
