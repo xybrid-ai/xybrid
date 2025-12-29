@@ -54,15 +54,24 @@
       "task": "speech-recognition"
     },
     "mnist": {
-      "description": "MNIST digit classification (for testing)",
-      "source": "huggingface",
-      "repo": "xybrid-ai/mnist",
-      "files": [
-        "model.onnx",
-        "model_metadata.json"
-      ],
-      "size_mb": 1,
-      "task": "image-classification"
+      "name": "MNIST Digit Recognition",
+      "version": "12",
+      "type": "onnx",
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/mnist/model/mnist-12.onnx",
+      "output_file": "mnist-12.onnx",
+      "output_dir": "mnist",
+      "size_mb": 0.026,
+      "description": "Handwritten digit classification (28x28 grayscale, 10 classes)"
+    },
+    "resnet50": {
+      "name": "ResNet-50 v2",
+      "version": "v2-7",
+      "type": "onnx",
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-v2-7.onnx",
+      "output_file": "resnet50-v2-7.onnx",
+      "output_dir": "resnet50",
+      "size_mb": 98,
+      "description": "ImageNet classification (224x224 RGB, 1000 classes, 75.81% accuracy)"
     }
   }
 }

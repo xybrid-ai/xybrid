@@ -1,0 +1,58 @@
+# Ignore everything by default
+*
+
+# Keep the directory structure
+!*/
+
+# Keep metadata and configuration files
+!model_metadata.json
+!**/model_metadata.json
+
+# Keep scripts and tooling
+!download_models.sh
+!models.json
+!.gitignore
+!README.md
+!**/README.md
+
+# Keep justfile if we add it
+!justfile
+
+# Explicitly ignore model files (large binaries)
+*.onnx
+*.gguf
+*.mlpackage
+*.mlmodel
+*.safetensors
+*.bin
+
+# Ignore tokenizer/vocab files (can be downloaded)
+vocab.txt
+tokenizer.json
+config.json
+*.spm
+*.model
+
+# Ignore archives and compressed files
+*.tar.bz2
+*.tar.gz
+*.tar
+*.zip
+*.gz
+*.bz2
+
+# Ignore temporary files
+*.tmp
+.download_*
+.extract_*
+
+# Ignore extracted archive directories
+sherpa-onnx-*/
+
+# Ignore checksums
+*.sha256
+*.md5
+
+# Xybrid-specific
+*.md
+*.xyb
