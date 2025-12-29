@@ -2,16 +2,20 @@
 set -euo pipefail
 
 # Xybrid Integration Test Model Downloader
-# Downloads models from HuggingFace for integration testing
+# Supports two download sources:
+#   - registry: Downloads from xybrid registry (api.xybrid.dev)
+#   - url: Downloads directly from URLs (GitHub, HuggingFace, etc.)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODELS_DIR="$SCRIPT_DIR/fixtures/models"
 MANIFEST="$MODELS_DIR/models.json"
+REGISTRY_API="https://api.xybrid.dev"
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Check for required tools
@@ -21,10 +25,9 @@ check_dependencies() {
         exit 1
     fi
     if ! command -v jq &> /dev/null; then
-        echo -e "${YELLOW}Warning: jq not found, using basic parsing${NC}"
-        HAS_JQ=false
-    else
-        HAS_JQ=true
+        echo -e "${RED}Error: jq is required but not installed${NC}"
+        echo "Install with: brew install jq (macOS) or apt install jq (Linux)"
+        exit 1
     fi
 }
 
@@ -32,15 +35,11 @@ check_dependencies() {
 list_models() {
     echo "Available models:"
     echo ""
-    if $HAS_JQ; then
-        jq -r '.models | to_entries[] | "  \(.key) (\(.value.size_mb)MB) - \(.value.description)"' "$MANIFEST"
-    else
-        echo "  wav2vec2-base-960h (380MB) - ASR model"
-        echo "  kitten-tts (85MB) - Lightweight TTS"
-        echo "  kokoro-82m (330MB) - High-quality TTS"
-        echo "  whisper-tiny (150MB) - Whisper ASR"
-        echo "  mnist (1MB) - MNIST classification"
-    fi
+    echo -e "${BLUE}Registry models (via xybrid registry):${NC}"
+    jq -r '.models | to_entries[] | select(.value.source == "registry") | "  \(.key) (\(.value.size_mb)MB) - \(.value.description)"' "$MANIFEST"
+    echo ""
+    echo -e "${BLUE}Direct URL models:${NC}"
+    jq -r '.models | to_entries[] | select(.value.source == "url") | "  \(.key) (\(.value.size_mb)MB) - \(.value.description)"' "$MANIFEST"
     echo ""
     echo "Usage: $0 [model-name|--all|--list|--check]"
 }
@@ -50,126 +49,197 @@ check_models() {
     echo "Checking models..."
     echo ""
 
-    local models=("wav2vec2-base-960h" "kitten-tts" "kokoro-82m" "whisper-tiny" "mnist")
+    local models
+    models=$(jq -r '.models | keys[]' "$MANIFEST")
     local missing=0
+    local present=0
 
-    for model in "${models[@]}"; do
+    for model in $models; do
         local model_dir="$MODELS_DIR/$model"
-        if [ -d "$model_dir" ] && [ -f "$model_dir/model_metadata.json" ]; then
-            echo -e "  ${GREEN}✓${NC} $model"
+        local source
+        source=$(jq -r ".models[\"$model\"].source" "$MANIFEST")
+
+        # Check for model.onnx or model_metadata.json
+        if [ -d "$model_dir" ] && { [ -f "$model_dir/model_metadata.json" ] || [ -f "$model_dir/model.onnx" ]; }; then
+            echo -e "  ${GREEN}✓${NC} $model [$source]"
+            ((present++))
         else
-            echo -e "  ${RED}✗${NC} $model (missing)"
+            echo -e "  ${RED}✗${NC} $model [$source] (missing)"
             ((missing++))
         fi
     done
 
     echo ""
     if [ $missing -eq 0 ]; then
-        echo -e "${GREEN}All models present!${NC}"
+        echo -e "${GREEN}All $present models present!${NC}"
     else
-        echo -e "${YELLOW}$missing model(s) missing. Run '$0 --all' to download.${NC}"
+        echo -e "${YELLOW}$missing model(s) missing, $present present. Run '$0 --all' to download.${NC}"
     fi
 }
 
 # Validate that a downloaded file is not an error page
 validate_file() {
     local file="$1"
+    local min_size="${2:-100}"
+
     if [ ! -f "$file" ]; then
         return 1
     fi
-    # Check file size (error pages are typically small)
-    local size=$(wc -c < "$file" | tr -d ' ')
-    if [ "$size" -lt 100 ]; then
+
+    local size
+    size=$(wc -c < "$file" | tr -d ' ')
+
+    if [ "$size" -lt "$min_size" ]; then
         # Check if it's an error message
-        if grep -qi "invalid\|error\|not found\|404" "$file" 2>/dev/null; then
+        if grep -qi "invalid\|error\|not found\|404\|unauthorized" "$file" 2>/dev/null; then
             return 1
         fi
     fi
     return 0
 }
 
-# Download a single model from HuggingFace
-download_model() {
+# Download model from xybrid registry
+download_from_registry() {
     local model_name="$1"
     local model_dir="$MODELS_DIR/$model_name"
 
-    # Get model info from manifest
-    if $HAS_JQ; then
-        local repo=$(jq -r ".models[\"$model_name\"].repo // empty" "$MANIFEST")
-        local files=$(jq -r ".models[\"$model_name\"].files[]? // empty" "$MANIFEST")
-    else
-        # Fallback: hardcoded repos
-        case "$model_name" in
-            wav2vec2-base-960h) repo="xybrid-ai/wav2vec2-base-960h" ;;
-            kitten-tts) repo="xybrid-ai/kitten-tts" ;;
-            kokoro-82m) repo="xybrid-ai/kokoro-82m" ;;
-            whisper-tiny) repo="xybrid-ai/whisper-tiny" ;;
-            mnist) repo="xybrid-ai/mnist" ;;
-            *)
-                echo -e "${RED}Unknown model: $model_name${NC}"
-                return 1
-                ;;
-        esac
-        files=""
-    fi
+    echo -e "${YELLOW}Downloading $model_name from xybrid registry...${NC}"
 
-    if [ -z "$repo" ]; then
-        echo -e "${RED}Model '$model_name' not found in manifest${NC}"
+    # Try to resolve from registry
+    local resolve_url="$REGISTRY_API/v1/models/$model_name/resolve"
+    local resolve_response
+
+    if ! resolve_response=$(curl -sf "$resolve_url" 2>/dev/null); then
+        echo -e "${RED}✗ Failed to resolve $model_name from registry${NC}"
+        echo "  Registry may be unavailable or model not found"
         return 1
     fi
 
-    echo -e "${YELLOW}Downloading $model_name from $repo...${NC}"
-    mkdir -p "$model_dir"
+    # Extract bundle URL from response
+    local bundle_url
+    bundle_url=$(echo "$resolve_response" | jq -r '.bundle_url // .url // empty')
 
-    # Download using HuggingFace Hub URL pattern
-    local base_url="https://huggingface.co/$repo/resolve/main"
-    local download_failed=false
-
-    # If we have file list from jq, use it; otherwise download common files
-    if [ -n "$files" ]; then
-        for file in $files; do
-            echo "  Downloading $file..."
-            if curl -L -# -f -o "$model_dir/$file" "$base_url/$file" 2>/dev/null; then
-                if validate_file "$model_dir/$file"; then
-                    echo -e "  ${GREEN}✓${NC} $file"
-                else
-                    echo -e "  ${RED}✗${NC} $file (invalid or error response)"
-                    rm -f "$model_dir/$file"
-                    download_failed=true
-                fi
-            else
-                echo -e "  ${RED}✗${NC} $file (download failed)"
-                download_failed=true
-            fi
-        done
-    else
-        # Fallback: try common files
-        for file in model.onnx model_metadata.json vocab.json tokens.txt voices.bin; do
-            if curl -L -s -f -o "$model_dir/$file" "$base_url/$file" 2>/dev/null; then
-                if validate_file "$model_dir/$file"; then
-                    echo "  Downloaded $file"
-                else
-                    rm -f "$model_dir/$file"
-                fi
-            fi
-        done
+    if [ -z "$bundle_url" ]; then
+        echo -e "${RED}✗ No bundle URL found for $model_name${NC}"
+        return 1
     fi
 
-    # Verify download - check model_metadata.json exists and is valid JSON
-    if [ -f "$model_dir/model_metadata.json" ] && validate_file "$model_dir/model_metadata.json"; then
-        # Extra check: verify it's valid JSON
-        if $HAS_JQ && ! jq empty "$model_dir/model_metadata.json" 2>/dev/null; then
-            echo -e "${RED}✗ $model_name: model_metadata.json is not valid JSON${NC}"
+    mkdir -p "$model_dir"
+
+    # Download and extract bundle
+    local bundle_file="$model_dir/bundle.xyb"
+    echo "  Downloading bundle..."
+
+    if curl -L -# -f -o "$bundle_file" "$bundle_url"; then
+        echo "  Extracting bundle..."
+        # .xyb files are zip archives
+        if unzip -q -o "$bundle_file" -d "$model_dir" 2>/dev/null; then
+            rm -f "$bundle_file"
+            echo -e "${GREEN}✓ $model_name downloaded successfully${NC}"
+            return 0
+        else
+            echo -e "${RED}✗ Failed to extract bundle${NC}"
             rm -rf "$model_dir"
             return 1
         fi
-        echo -e "${GREEN}✓ $model_name downloaded successfully${NC}"
     else
-        echo -e "${RED}✗ $model_name download failed${NC}"
-        echo -e "  The HuggingFace repo may not exist: https://huggingface.co/$repo"
+        echo -e "${RED}✗ Failed to download bundle${NC}"
         rm -rf "$model_dir"
         return 1
     fi
+}
+
+# Download model from direct URLs
+download_from_url() {
+    local model_name="$1"
+    local model_dir="$MODELS_DIR/$model_name"
+
+    echo -e "${YELLOW}Downloading $model_name from direct URLs...${NC}"
+    mkdir -p "$model_dir"
+
+    local download_failed=false
+
+    # Download each file
+    local files
+    files=$(jq -c ".models[\"$model_name\"].files[]" "$MANIFEST")
+
+    while IFS= read -r file_entry; do
+        local url
+        local output
+        url=$(echo "$file_entry" | jq -r '.url')
+        output=$(echo "$file_entry" | jq -r '.output')
+
+        echo "  Downloading $output..."
+        if curl -L -# -f -o "$model_dir/$output" "$url" 2>/dev/null; then
+            if validate_file "$model_dir/$output"; then
+                echo -e "  ${GREEN}✓${NC} $output"
+            else
+                echo -e "  ${RED}✗${NC} $output (invalid response)"
+                rm -f "$model_dir/$output"
+                download_failed=true
+            fi
+        else
+            echo -e "  ${RED}✗${NC} $output (download failed)"
+            download_failed=true
+        fi
+    done <<< "$files"
+
+    # Generate model_metadata.json if defined in manifest
+    local has_metadata
+    has_metadata=$(jq -r ".models[\"$model_name\"].model_metadata // empty" "$MANIFEST")
+
+    if [ -n "$has_metadata" ]; then
+        echo "  Generating model_metadata.json..."
+        jq ".models[\"$model_name\"].model_metadata" "$MANIFEST" > "$model_dir/model_metadata.json"
+        echo -e "  ${GREEN}✓${NC} model_metadata.json"
+    fi
+
+    # Verify download
+    if [ "$download_failed" = true ]; then
+        echo -e "${RED}✗ $model_name download incomplete${NC}"
+        return 1
+    fi
+
+    # Check we have at least model.onnx
+    if [ -f "$model_dir/model.onnx" ]; then
+        echo -e "${GREEN}✓ $model_name downloaded successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ $model_name missing model.onnx${NC}"
+        return 1
+    fi
+}
+
+# Download a single model (auto-detect source)
+download_model() {
+    local model_name="$1"
+
+    # Check if model exists in manifest
+    local model_entry
+    model_entry=$(jq -r ".models[\"$model_name\"] // empty" "$MANIFEST")
+
+    if [ -z "$model_entry" ]; then
+        echo -e "${RED}Unknown model: $model_name${NC}"
+        echo "Run '$0 --list' to see available models"
+        return 1
+    fi
+
+    # Get source type
+    local source
+    source=$(jq -r ".models[\"$model_name\"].source" "$MANIFEST")
+
+    case "$source" in
+        registry)
+            download_from_registry "$model_name"
+            ;;
+        url)
+            download_from_url "$model_name"
+            ;;
+        *)
+            echo -e "${RED}Unknown source type: $source${NC}"
+            return 1
+            ;;
+    esac
 }
 
 # Download all models
@@ -177,18 +247,21 @@ download_all() {
     echo "Downloading all models..."
     echo ""
 
-    local models=("mnist" "wav2vec2-base-960h" "kitten-tts" "kokoro-82m" "whisper-tiny")
+    local models
+    models=$(jq -r '.models | keys[]' "$MANIFEST")
     local failed=0
+    local succeeded=0
 
-    for model in "${models[@]}"; do
-        download_model "$model" || ((failed++))
+    for model in $models; do
+        download_model "$model" && ((succeeded++)) || ((failed++))
         echo ""
     done
 
+    echo "========================================"
     if [ $failed -eq 0 ]; then
-        echo -e "${GREEN}All models downloaded successfully!${NC}"
+        echo -e "${GREEN}All $succeeded models downloaded successfully!${NC}"
     else
-        echo -e "${YELLOW}$failed model(s) failed to download${NC}"
+        echo -e "${YELLOW}$succeeded succeeded, $failed failed${NC}"
         exit 1
     fi
 }
@@ -217,9 +290,14 @@ case "${1:-}" in
         echo "  --all, -a      Download all models"
         echo "  --help, -h     Show this help"
         echo ""
+        echo "Download sources:"
+        echo "  registry  - Downloads from xybrid registry (api.xybrid.dev)"
+        echo "  url       - Downloads directly from URLs"
+        echo ""
         echo "Examples:"
         echo "  $0 --list           # List available models"
-        echo "  $0 kitten-tts       # Download specific model"
+        echo "  $0 mnist            # Download MNIST model (direct URL)"
+        echo "  $0 kitten-tts       # Download from registry"
         echo "  $0 --all            # Download all models"
         ;;
     *)
