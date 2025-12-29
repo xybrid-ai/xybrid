@@ -127,7 +127,19 @@ impl PreprocessedData {
                 let data = tensor.as_slice().ok_or_else(|| {
                     AdapterError::InvalidInput("Tensor not contiguous".to_string())
                 })?;
-                Ok(Envelope::new(EnvelopeKind::Embedding(data.to_vec())))
+                // Store shape in metadata so it can be reconstructed
+                let shape_str = tensor
+                    .shape()
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let mut metadata = std::collections::HashMap::new();
+                metadata.insert("tensor_shape".to_string(), shape_str);
+                Ok(Envelope::with_metadata(
+                    EnvelopeKind::Embedding(data.to_vec()),
+                    metadata,
+                ))
             }
             PreprocessedData::PhonemeIds { original_text, .. } => {
                 // Fallback to original text for now
@@ -205,7 +217,17 @@ impl RawOutputs {
             EnvelopeKind::Text(text) => Ok(RawOutputs::Text(text.clone())),
             EnvelopeKind::Audio(bytes) => Ok(RawOutputs::AudioBytes(bytes.clone())),
             EnvelopeKind::Embedding(floats) => {
-                let tensor = ArrayD::from_shape_vec(IxDyn(&[floats.len()]), floats.clone())
+                // Check if shape metadata is available
+                let shape: Vec<usize> = envelope
+                    .metadata
+                    .get("tensor_shape")
+                    .and_then(|s| {
+                        let parts: Result<Vec<usize>, _> = s.split(',').map(|p| p.parse()).collect();
+                        parts.ok()
+                    })
+                    .unwrap_or_else(|| vec![floats.len()]); // Default to 1D if no shape
+
+                let tensor = ArrayD::from_shape_vec(IxDyn(&shape), floats.clone())
                     .map_err(|e| AdapterError::InvalidInput(format!("Failed to create tensor: {:?}", e)))?;
                 // Map it to "output" key by default? Or TensorMap
                 let mut map = HashMap::new();
