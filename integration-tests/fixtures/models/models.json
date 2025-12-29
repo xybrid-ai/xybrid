@@ -40,12 +40,21 @@
         },
         "preprocessing": [],
         "postprocessing": [
-          { "type": "ArgMax" }
+          {
+            "type": "ArgMax"
+          }
         ],
-        "files": ["model.onnx"],
+        "files": [
+          "model.onnx"
+        ],
         "metadata": {
           "task": "image-classification",
-          "input_shape": [1, 1, 28, 28],
+          "input_shape": [
+            1,
+            1,
+            28,
+            28
+          ],
           "output_classes": 10
         }
       }
@@ -70,12 +79,21 @@
         },
         "preprocessing": [],
         "postprocessing": [
-          { "type": "ArgMax" }
+          {
+            "type": "ArgMax"
+          }
         ],
-        "files": ["model.onnx"],
+        "files": [
+          "model.onnx"
+        ],
         "metadata": {
           "task": "image-classification",
-          "input_shape": [1, 3, 224, 224],
+          "input_shape": [
+            1,
+            3,
+            224,
+            224
+          ],
           "output_classes": 1000
         }
       }
@@ -100,12 +118,21 @@
         },
         "preprocessing": [],
         "postprocessing": [
-          { "type": "ArgMax" }
+          {
+            "type": "ArgMax"
+          }
         ],
-        "files": ["model.onnx"],
+        "files": [
+          "model.onnx"
+        ],
         "metadata": {
           "task": "image-classification",
-          "input_shape": [1, 3, 224, 224],
+          "input_shape": [
+            1,
+            3,
+            224,
+            224
+          ],
           "output_classes": 1000
         }
       }
@@ -141,13 +168,111 @@
           "model_file": "model.onnx"
         },
         "preprocessing": [
-          { "type": "Tokenize", "vocab_file": "vocab.txt" }
+          {
+            "type": "Tokenize",
+            "vocab_file": "vocab.txt"
+          }
         ],
         "postprocessing": [],
-        "files": ["model.onnx", "vocab.txt", "tokenizer.json", "config.json"],
+        "files": [
+          "model.onnx",
+          "vocab.txt",
+          "tokenizer.json",
+          "config.json"
+        ],
         "metadata": {
           "task": "text-embedding",
           "embedding_dim": 384
+        }
+      }
+    },
+    "kitten-tts": {
+      "description": "Ultra-lightweight TTS (15M params, 8 voices, 24kHz audio)",
+      "source": "url",
+      "size_mb": 24,
+      "task": "text-to-speech",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2",
+      "archive": true,
+      "files": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2",
+          "output": "model.onnx"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "kitten-tts-nano",
+        "version": "0.1",
+        "description": "KittenTTS Nano - Ultra-lightweight TTS model (15M parameters, 24MB)",
+        "execution_template": {
+          "type": "SimpleMode",
+          "model_file": "model.fp16.onnx"
+        },
+        "preprocessing": [
+          {
+            "type": "Phonemize",
+            "tokens_file": "tokens.txt",
+            "dict_file": "cmudict.dict",
+            "add_padding": true
+          }
+        ],
+        "postprocessing": [
+          {
+            "type": "TTSAudioEncode",
+            "sample_rate": 24000,
+            "apply_postprocessing": true
+          }
+        ],
+        "files": [
+          "model.fp16.onnx",
+          "tokens.txt",
+          "voices.bin",
+          "cmudict.dict"
+        ],
+        "metadata": {
+          "task": "text-to-speech",
+          "language": "en",
+          "sample_rate": 24000,
+          "num_voices": 8,
+          "voice_names": [
+            "expr-voice-2-m",
+            "expr-voice-2-f",
+            "expr-voice-3-m",
+            "expr-voice-3-f",
+            "expr-voice-4-m",
+            "expr-voice-4-f",
+            "expr-voice-5-m",
+            "expr-voice-5-f"
+          ],
+          "license": "Apache-2.0",
+          "source": "https://github.com/KittenML/KittenTTS",
+          "onnx_inputs": [
+            {
+              "name": "input_ids",
+              "shape": "[1, seq_len]",
+              "dtype": "int64",
+              "description": "Phoneme token IDs"
+            },
+            {
+              "name": "style",
+              "shape": "[1, 256]",
+              "dtype": "float32",
+              "description": "Voice embedding from voices.bin"
+            },
+            {
+              "name": "speed",
+              "shape": "[1]",
+              "dtype": "float32",
+              "description": "Speech speed multiplier (default: 1.0)"
+            }
+          ],
+          "onnx_outputs": [
+            {
+              "name": "waveform",
+              "shape": "[1, audio_samples]",
+              "dtype": "float32",
+              "description": "Audio waveform at 24kHz"
+            }
+          ]
         }
       }
     }
