@@ -97,6 +97,24 @@ impl PreprocessedData {
         }
     }
 
+    /// Check if this is token data (for BERT-style models).
+    pub fn is_token_ids(&self) -> bool {
+        matches!(self, PreprocessedData::TokenIds { .. })
+    }
+
+    /// Get token IDs if this is token data.
+    pub fn as_token_ids(&self) -> Option<(&Vec<usize>, &Vec<usize>, &Vec<usize>)> {
+        match self {
+            PreprocessedData::TokenIds {
+                ids,
+                attention_mask,
+                token_type_ids,
+                ..
+            } => Some((ids, attention_mask, token_type_ids)),
+            _ => None,
+        }
+    }
+
     /// Get text content if available.
     pub fn as_text(&self) -> Option<&str> {
         match self {

@@ -5,7 +5,7 @@
 //!
 //! # Prerequisites
 //!
-//! Download model: ./integration-tests/download.sh whisper-tiny-candle
+//! Download model: ./integration-tests/download.sh whisper-tiny
 //! - model.safetensors (model weights)
 //! - config.json (model configuration)
 //! - tokenizer.json (tokenizer)
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== Candle Whisper ASR Example ===\n");
 
-    let model_path = model_fixtures::require_model("whisper-tiny-candle");
+    let model_path = model_fixtures::require_model("whisper-tiny");
 
     // 2. Select device
     println!("1. Selecting device...");
@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
-    let mut model = WhisperModel::load_with_config(model_path, &device, config)?;
+    let mut model = WhisperModel::load_with_config(&model_path, &device, config)?;
     println!("   Model loaded successfully!");
     println!("   Config: {:?}", model.config());
 

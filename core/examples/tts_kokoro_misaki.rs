@@ -5,7 +5,7 @@
 //!
 //! Prerequisites:
 //! - Download model: ./integration-tests/download.sh kokoro-82m
-//! - model_metadata_misaki.json with MisakiDictionary backend
+//! - model_metadata.json with MisakiDictionary backend
 //! - misaki/ directory with us_gold.json and us_silver.json
 //!
 //! Usage:
@@ -34,9 +34,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("📝 Input text: \"{}\"", text);
     println!();
 
-    // Load metadata with Misaki backend
+    // Load metadata with Misaki backend (default for kokoro-82m)
     let model_dir = model_fixtures::require_model("kokoro-82m");
-    let metadata_path = model_dir.join("model_metadata_misaki.json");
+    let metadata_path = model_dir.join("model_metadata.json");
 
     println!("📋 Loading metadata from: {}", metadata_path.display());
 
