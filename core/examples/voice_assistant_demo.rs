@@ -6,8 +6,7 @@
 //! 3. Response → TTS (KittenTTS) → Audio output
 //!
 //! Prerequisites:
-//! - Wav2Vec2 model at test_models/wav2vec2/
-//! - KittenTTS model at test_models/kitten-tts/kitten-nano-en-v0_1-fp16/
+//! - Download models: ./integration-tests/download.sh wav2vec2-base-960h kitten-tts
 //! - CMU dictionary at ~/.xybrid/cmudict.dict
 //! - For gateway mode: xybrid-gateway running at http://localhost:3000
 //! - For direct mode: OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable
@@ -33,6 +32,7 @@ use xybrid_core::llm::{Llm, LlmConfig, CompletionRequest};
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
+use xybrid_core::testing::model_fixtures;
 
 /// Latency tracking for each pipeline stage
 struct LatencyTracker {
@@ -116,10 +116,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Use provided audio file
         println!("🎤 Input audio: {}", path);
 
-        let asr_model_dir = PathBuf::from("test_models/wav2vec2-base-960h");
-        if !asr_model_dir.exists() {
-            eprintln!("❌ Wav2Vec2 model not found at: {}", asr_model_dir.display());
-            eprintln!("   Using simulated transcription instead.");
+        let asr_model_dir = match model_fixtures::model_path("wav2vec2-base-960h") {
+            Some(dir) => dir,
+            None => {
+                eprintln!("❌ Wav2Vec2 model not found");
+                eprintln!("   Run: ./integration-tests/download.sh wav2vec2-base-960h");
+                eprintln!("   Using simulated transcription instead.");
+                PathBuf::new()
+            }
+        };
+        if asr_model_dir.as_os_str().is_empty() {
             "Hello, how are you today?".to_string()
         } else {
             // Load ASR model and transcribe
@@ -251,17 +257,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("└─────────────────────────────────────────────────────────────────┘");
     println!();
 
-    let tts_model_dir = PathBuf::from("test_models/kitten-tts/kitten-nano-en-v0_1-fp16");
+    let tts_model_dir = match model_fixtures::model_path("kitten-tts") {
+        Some(dir) => dir,
+        None => {
+            eprintln!("❌ KittenTTS model not found");
+            eprintln!("   Run: ./integration-tests/download.sh kitten-tts");
+            eprintln!("   Skipping TTS synthesis.");
+            println!();
+            print_summary(false);
+            latency.print_summary();
+            return Ok(());
+        }
+    };
     let tts_metadata_path = tts_model_dir.join("model_metadata.json");
-
-    if !tts_metadata_path.exists() {
-        eprintln!("❌ KittenTTS model not found at: {}", tts_model_dir.display());
-        eprintln!("   Skipping TTS synthesis.");
-        println!();
-        print_summary(false);
-        latency.print_summary();
-        return Ok(());
-    }
 
     let tts_start = Instant::now();
 

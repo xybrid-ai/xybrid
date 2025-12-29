@@ -6,7 +6,7 @@
 //! This is the correct way to use TTS - same pattern as wav2vec2_transcription.rs
 //!
 //! Prerequisites:
-//! - KittenTTS model at test_models/kitten-tts/kitten-nano-en-v0_1-fp16/
+//! - Download model: ./integration-tests/download.sh kitten-tts
 //! - model_metadata.json with Phonemize preprocessing
 //! - cmudict.dict in the model directory
 //!
@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
+use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
@@ -35,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Load metadata (same pattern as wav2vec2_transcription.rs)
-    let model_dir = PathBuf::from("test_models/kitten-tts/kitten-nano-en-v0_1-fp16");
+    let model_dir = model_fixtures::require_model("kitten-tts");
     let metadata_path = model_dir.join("model_metadata.json");
 
     println!("📋 Loading metadata from: {}", metadata_path.display());

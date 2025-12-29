@@ -3,6 +3,9 @@
 //! This example demonstrates using the Candle Whisper model through the
 //! metadata-driven execution system, which is how bundled models are executed.
 //!
+//! Prerequisites:
+//! - Download model: ./integration-tests/download.sh whisper-tiny-candle
+//!
 //! # Running
 //!
 //! ```bash
@@ -11,6 +14,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+#[cfg(feature = "candle")]
+use xybrid_core::testing::model_fixtures;
 
 #[cfg(feature = "candle")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,15 +25,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== Candle Whisper Bundle Example ===\n");
 
-    let model_dir = PathBuf::from("test_models/whisper-tiny-candle");
+    let model_dir = model_fixtures::require_model("whisper-tiny-candle");
 
     // 1. Load model metadata
     println!("1. Loading model metadata...");
     let metadata_path = model_dir.join("model_metadata.json");
-    if !metadata_path.exists() {
-        println!("   Model metadata not found at {:?}", metadata_path);
-        return Ok(());
-    }
 
     let metadata_json = std::fs::read_to_string(&metadata_path)?;
     let metadata: ModelMetadata = serde_json::from_str(&metadata_json)?;

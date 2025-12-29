@@ -6,29 +6,30 @@
 //! # Usage
 //!
 //! ```bash
-//! cargo run --example vad_demo -- --audio-file test_models/whisper-tiny-candle/jfk.wav
+//! cargo run --example vad_demo -- --audio-file path/to/audio.wav
 //! ```
 
 use std::path::PathBuf;
 use std::time::Instant;
 use xybrid_core::audio::vad::{VadConfig, VadSession};
+use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse args
     let args: Vec<String> = std::env::args().collect();
-    let mut audio_file = PathBuf::from("test_models/whisper-tiny-candle/jfk.wav");
-    let mut model_dir = PathBuf::from("test_models/silero-vad");
+    let mut audio_file: Option<PathBuf> = None;
+    let mut model_name = "silero-vad".to_string();
     let mut threshold = 0.5f32;
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
             "--audio-file" => {
-                audio_file = PathBuf::from(&args[i + 1]);
+                audio_file = Some(PathBuf::from(&args[i + 1]));
                 i += 2;
             }
             "--model-dir" => {
-                model_dir = PathBuf::from(&args[i + 1]);
+                model_name = args[i + 1].clone();
                 i += 2;
             }
             "--threshold" => {
@@ -39,8 +40,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Usage: vad_demo [OPTIONS]");
                 println!();
                 println!("Options:");
-                println!("  --audio-file PATH   Audio file to analyze (default: test_models/whisper-tiny-candle/jfk.wav)");
-                println!("  --model-dir PATH    Silero VAD model directory (default: test_models/silero-vad)");
+                println!("  --audio-file PATH   Audio file to analyze (required)");
+                println!("  --model-dir NAME    Silero VAD model name (default: silero-vad)");
                 println!("  --threshold FLOAT   VAD threshold 0.0-1.0 (default: 0.5)");
                 println!("  --help              Show this help");
                 return Ok(());
@@ -48,6 +49,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => i += 1,
         }
     }
+
+    // Resolve model directory
+    let model_dir = model_fixtures::require_model(&model_name);
+
+    // Require audio file or use default from whisper-tiny-candle
+    let audio_file = audio_file.unwrap_or_else(|| {
+        model_fixtures::model_path("whisper-tiny-candle")
+            .map(|p| p.join("jfk.wav"))
+            .unwrap_or_else(|| PathBuf::from("test.wav"))
+    });
 
     println!("=== Voice Activity Detection Demo ===");
     println!("Audio: {:?}", audio_file);
