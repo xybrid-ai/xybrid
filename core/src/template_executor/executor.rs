@@ -9,8 +9,7 @@ use crate::ir::Envelope;
 use crate::runtime_adapter::onnx::{ONNXSession, OnnxRuntime};
 use crate::runtime_adapter::{AdapterError, ModelRuntime};
 use crate::tracing as trace;
-use ndarray::{Array1, Array2, ArrayD};
-use ort::value::Value;
+use ndarray::ArrayD;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -18,86 +17,12 @@ use std::path::Path;
 use crate::runtime_adapter::candle::CandleRuntime;
 
 use super::execution::{
-    execute_autoregressive_stage, execute_single_shot_stage, execute_whisper_decoder_stage,
+    execute_autoregressive_stage, execute_bert_inference, execute_single_shot_stage,
+    execute_tts_inference, execute_whisper_decoder_stage,
 };
 use super::postprocessing;
 use super::preprocessing;
 use super::types::{ExecutorResult, PreprocessedData, RawOutputs};
-
-/// Execute TTS inference with phoneme IDs, voice embedding, and speed.
-/// This is a standalone function to avoid borrow issues with the executor.
-#[allow(dead_code)]
-fn execute_tts_inference(
-    session: &ONNXSession,
-    phoneme_ids: &[i64],
-    voice_embedding: Vec<f32>,
-) -> ExecutorResult<HashMap<String, ArrayD<f32>>> {
-    // Get model input names
-    let input_names = session.input_names();
-
-    let batch_size = 1;
-    let seq_len = phoneme_ids.len();
-    let embedding_len = voice_embedding.len();
-
-    // Build inputs
-    let mut value_inputs: HashMap<String, Value> = HashMap::new();
-
-    for input_name in input_names.iter() {
-        // Token/phoneme IDs input - KittenTTS uses "input_ids", Kokoro uses "tokens"
-        if input_name.contains("input_ids")
-            || input_name == "input_ids"
-            || input_name.contains("tokens")
-            || input_name == "tokens"
-        {
-            let arr = Array2::<i64>::from_shape_vec((batch_size, seq_len), phoneme_ids.to_vec())
-                .map_err(|e| {
-                    AdapterError::InvalidInput(format!("Failed to create input_ids array: {}", e))
-                })?;
-            let val: Value = Value::from_array(arr)
-                .map_err(|e| {
-                    AdapterError::InvalidInput(format!("Failed to create input_ids value: {}", e))
-                })?
-                .into();
-            value_inputs.insert(input_name.clone(), val);
-        } else if input_name.contains("style") || input_name == "style" {
-            let arr =
-                Array2::<f32>::from_shape_vec((1, embedding_len), voice_embedding.clone())
-                    .map_err(|e| {
-                        AdapterError::InvalidInput(format!(
-                            "Failed to create style array: {}",
-                            e
-                        ))
-                    })?;
-            let val: Value = Value::from_array(arr)
-                .map_err(|e| {
-                    AdapterError::InvalidInput(format!("Failed to create style value: {}", e))
-                })?
-                .into();
-            value_inputs.insert(input_name.clone(), val);
-        } else if input_name.contains("speed") || input_name == "speed" {
-            let arr = Array1::<f32>::from_vec(vec![1.0]);
-            let val: Value = Value::from_array(arr)
-                .map_err(|e| {
-                    AdapterError::InvalidInput(format!("Failed to create speed value: {}", e))
-                })?
-                .into();
-            value_inputs.insert(input_name.clone(), val);
-        }
-    }
-
-    // Verify we mapped all inputs
-    if value_inputs.len() != input_names.len() {
-        return Err(AdapterError::InvalidInput(format!(
-            "TTS model input mismatch. Expected {} inputs ({:?}), mapped {}",
-            input_names.len(),
-            input_names,
-            value_inputs.len()
-        )));
-    }
-
-    // Run inference
-    session.run_with_values(value_inputs)
-}
 
 /// Template Executor implementation.
 ///
@@ -165,21 +90,61 @@ impl TemplateExecutor {
         // Run Preprocessing
         let preprocessed = self.run_preprocessing(metadata, input)?;
 
-        let runtime_input = preprocessed.to_envelope()?;
-
-        // Get Runtime & Execute
-        let runtime = self.runtimes.get_mut(runtime_type).ok_or_else(|| {
-            AdapterError::RuntimeError(format!("Runtime '{}' not configured", runtime_type))
-        })?;
-
         let model_full_path = Path::new(&self.base_path).join(&model_file);
 
-        // Ensure model is loaded (runtime handles caching)
-        runtime
-            .load(&model_full_path)
-            .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+        // Check if this is TTS with phoneme IDs - needs special handling
+        let result_envelope = if preprocessed.is_phoneme_ids() {
+            // TTS models need phoneme IDs + voice embedding + speed
+            let phoneme_ids = preprocessed.as_phoneme_ids().ok_or_else(|| {
+                AdapterError::InvalidInput("Expected phoneme IDs".to_string())
+            })?;
 
-        let result_envelope = runtime.execute(&runtime_input)?;
+            // Load voice embedding from voices.bin
+            let voices_path = Path::new(&self.base_path).join("voices.bin");
+            let voice_embedding = if voices_path.exists() {
+                let loader = crate::tts::voice_embedding::VoiceEmbeddingLoader::new(256);
+                loader.load(&voices_path, 0).map_err(|e| {
+                    AdapterError::RuntimeError(format!("Failed to load voice embedding: {}", e))
+                })?
+            } else {
+                // Default voice embedding (zeros)
+                vec![0.0f32; 256]
+            };
+
+            // Create and run TTS session directly
+            let session = ONNXSession::new(model_full_path.to_str().unwrap(), false, false)?;
+            let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
+
+            // Convert outputs to envelope
+            crate::runtime_adapter::tensor_utils::tensors_to_envelope(&raw_outputs, session.output_names())?
+        } else if preprocessed.is_token_ids() {
+            // BERT-style models need input_ids, attention_mask, and token_type_ids as int64
+            let (ids, attention_mask, token_type_ids) = preprocessed.as_token_ids().ok_or_else(|| {
+                AdapterError::InvalidInput("Expected token IDs".to_string())
+            })?;
+
+            // Create and run BERT session directly
+            let session = ONNXSession::new(model_full_path.to_str().unwrap(), false, false)?;
+            let raw_outputs = execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
+
+            // Convert outputs to envelope
+            crate::runtime_adapter::tensor_utils::tensors_to_envelope(&raw_outputs, session.output_names())?
+        } else {
+            // Standard execution path
+            let runtime_input = preprocessed.to_envelope()?;
+
+            // Get Runtime & Execute
+            let runtime = self.runtimes.get_mut(runtime_type).ok_or_else(|| {
+                AdapterError::RuntimeError(format!("Runtime '{}' not configured", runtime_type))
+            })?;
+
+            // Ensure model is loaded (runtime handles caching)
+            runtime
+                .load(&model_full_path)
+                .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+
+            runtime.execute(&runtime_input)?
+        };
 
         // Run Postprocessing
         let raw_outputs = RawOutputs::from_envelope(&result_envelope)?;

@@ -13,7 +13,12 @@
       "max_length": 512
     }
   ],
-  "postprocessing": [],
+  "postprocessing": [
+    {
+      "type": "MeanPool",
+      "dim": 1
+    }
+  ],
   "files": [
     "model.onnx",
     "vocab.txt",
