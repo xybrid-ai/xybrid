@@ -7,9 +7,12 @@ fn test_downloaded_models_existence() {
     let models_dir = fixtures::models_dir();
     assert!(models_dir.exists(), "Models directory should exist (run xtask setup-test-env)");
     
-    // Check specific models
-    assert!(models_dir.join("wav2vec2-base-960h/1.0/model.bin").exists());
-    assert!(models_dir.join("gpt-4o-mini/1.0/model.bin").exists());
+    // Check specific models (flat structure from download.sh)
+    // Wav2Vec2
+    assert!(models_dir.join("wav2vec2-base-960h/model.onnx").exists(), "wav2vec2 model.onnx missing");
+    
+    // Kitten TTS (archive extracted)
+    assert!(models_dir.join("kitten-tts/model.fp16.onnx").exists(), "kitten-tts model.fp16.onnx missing");
 }
 
 #[tokio::test]
