@@ -37,8 +37,22 @@ pub fn envelope_to_tensors(
         ));
     }
 
-    let target_shape = &input_shapes[0]; // Use first input shape for now
     let input_name = &input_names[0]; // Use first input name
+
+    // Check if envelope has shape metadata (from preprocessed tensor)
+    let shape_from_metadata: Option<Vec<i64>> = envelope
+        .metadata
+        .get("tensor_shape")
+        .and_then(|s| {
+            let parts: Result<Vec<i64>, _> = s.split(',').map(|p| p.parse::<i64>()).collect();
+            parts.ok()
+        });
+
+    // Use shape from metadata if available, otherwise use model's declared shape
+    let target_shape = match &shape_from_metadata {
+        Some(shape) => shape.as_slice(),
+        None => &input_shapes[0],
+    };
 
     let tensor = match &envelope.kind {
         EnvelopeKind::Audio(audio_data) => audio_to_tensor(audio_data, target_shape)?,
@@ -84,9 +98,26 @@ pub fn tensors_to_envelope(
         AdapterError::InvalidInput(format!("Output '{}' not found", output_name))
     })?;
 
-    // Try to detect output type and convert
-    // For MVP, we'll try to convert to Text (most common for ASR/TTS)
-    tensor_to_text_envelope(output, output_name)
+    // Convert tensor to embedding, preserving shape in metadata
+    let data = output
+        .as_slice()
+        .ok_or_else(|| AdapterError::InvalidInput("Output tensor not contiguous".to_string()))?;
+
+    // Store shape in metadata so postprocessing can reconstruct the tensor
+    let shape_str = output
+        .shape()
+        .iter()
+        .map(|d| d.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("tensor_shape".to_string(), shape_str);
+
+    Ok(Envelope::with_metadata(
+        EnvelopeKind::Embedding(data.to_vec()),
+        metadata,
+    ))
 }
 
 /// Converts audio bytes to an ONNX tensor.
@@ -304,21 +335,50 @@ fn text_to_tensor(text: &str, target_shape: &[i64]) -> AdapterResult<ArrayD<f32>
 ///
 /// An `ndarray::ArrayD<f32>` tensor containing embedding values as `f32`
 fn embedding_to_tensor(embedding: &[f32], target_shape: &[i64]) -> AdapterResult<ArrayD<f32>> {
-    // Calculate expected size from shape
-    let expected_size: i64 = target_shape.iter().product();
-    let actual_size = embedding.len() as i64;
+    let actual_size = embedding.len();
 
-    // Validate or reshape
-    if actual_size != expected_size {
+    // Check if shape contains dynamic dimensions (-1)
+    let has_dynamic = target_shape.iter().any(|&d| d < 0);
+
+    if has_dynamic {
+        // For dynamic shapes, infer the shape from data
+        // If shape is just [-1], treat the embedding as-is (1D tensor)
+        // Common patterns:
+        // - [-1] → [actual_size] (1D)
+        // - [1, -1] → [1, actual_size] (batch of 1)
+        // - [-1, -1] → [1, actual_size] (assume batch=1)
+
+        let shape: Vec<usize> = if target_shape == &[-1] {
+            // Single dynamic dimension: create 1D tensor
+            vec![actual_size]
+        } else if target_shape.len() == 2 {
+            // 2D with dynamics: [batch, features] or similar
+            let batch = if target_shape[0] > 0 { target_shape[0] as usize } else { 1 };
+            let features = if target_shape[1] > 0 { target_shape[1] as usize } else { actual_size / batch };
+            vec![batch, features]
+        } else {
+            // Fallback: treat as 1D
+            vec![actual_size]
+        };
+
+        return Array::from_shape_vec(IxDyn(&shape), embedding.to_vec())
+            .map_err(|e| AdapterError::RuntimeError(format!("Failed to create embedding tensor: {}", e)));
+    }
+
+    // Calculate expected size from static shape
+    let expected_size: i64 = target_shape.iter().product();
+
+    // Validate shape matches data size
+    if actual_size as i64 != expected_size {
         return Err(AdapterError::InvalidInput(format!(
             "Embedding size mismatch: expected {}, got {}",
             expected_size, actual_size
         )));
     }
 
-    // Create tensor
+    // Create tensor with specified shape
     let shape: Vec<usize> = target_shape.iter().map(|&s| s as usize).collect();
-    
+
     Array::from_shape_vec(IxDyn(&shape), embedding.to_vec())
         .map_err(|e| AdapterError::RuntimeError(format!("Failed to create embedding tensor: {}", e)))
 }
