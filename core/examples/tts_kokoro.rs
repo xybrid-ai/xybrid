@@ -4,7 +4,7 @@
 //! xybrid execution pipeline (TemplateExecutor + model_metadata.json).
 //!
 //! Prerequisites:
-//! - Kokoro model at test_models/kokoro-82m/
+//! - Download model: ./integration-tests/download.sh kokoro-82m
 //! - model_metadata.json with MisakiDictionary phonemization (default)
 //! - tokens.txt vocabulary file
 //! - kokoro-v1.0.fp16.onnx model file
@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
+use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
@@ -36,7 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Load metadata (same pattern as tts_xybrid.rs)
-    let model_dir = PathBuf::from("test_models/kokoro-82m");
+    let model_dir = model_fixtures::require_model("kokoro-82m");
     let metadata_path = model_dir.join("model_metadata_espeak.json");
 
     println!("📋 Loading metadata from: {}", metadata_path.display());

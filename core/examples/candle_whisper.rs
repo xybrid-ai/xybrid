@@ -5,7 +5,7 @@
 //!
 //! # Prerequisites
 //!
-//! The model files should be in `test_models/whisper-tiny-candle/`:
+//! Download model: ./integration-tests/download.sh whisper-tiny-candle
 //! - model.safetensors (model weights)
 //! - config.json (model configuration)
 //! - tokenizer.json (tokenizer)
@@ -21,6 +21,8 @@
 use xybrid_core::runtime_adapter::candle::{
     DeviceSelection, WhisperConfig, WhisperModel, WhisperSize,
 };
+#[cfg(feature = "candle")]
+use xybrid_core::testing::model_fixtures;
 
 #[cfg(feature = "candle")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,18 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== Candle Whisper ASR Example ===\n");
 
-    let model_path = std::path::Path::new("test_models/whisper-tiny-candle");
-
-    // 1. Check model directory exists
-    if !model_path.exists() {
-        println!("Model directory not found: {:?}", model_path);
-        println!("\nPlease ensure the following files exist:");
-        println!("  - test_models/whisper-tiny-candle/model.safetensors");
-        println!("  - test_models/whisper-tiny-candle/config.json");
-        println!("  - test_models/whisper-tiny-candle/tokenizer.json");
-        println!("  - test_models/whisper-tiny-candle/melfilters.bytes");
-        return Ok(());
-    }
+    let model_path = model_fixtures::require_model("whisper-tiny-candle");
 
     // 2. Select device
     println!("1. Selecting device...");

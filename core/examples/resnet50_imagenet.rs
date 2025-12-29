@@ -10,6 +10,7 @@ use ndarray::{Array4};
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::testing::model_fixtures;
 
 // ImageNet class labels (top 10 for demo)
 const IMAGENET_CLASSES: &[&str] = &[
@@ -32,7 +33,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Load metadata
-    let metadata_path = PathBuf::from("test_models/resnet50/model_metadata.json");
+    let model_dir = model_fixtures::require_model("resnet50");
+    let metadata_path = model_dir.join("model_metadata.json");
     println!("📋 Loading metadata from: {}", metadata_path.display());
 
     let metadata_content = std::fs::read_to_string(&metadata_path)?;
@@ -46,8 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Create TemplateExecutor
-    let base_path = PathBuf::from("test_models/resnet50");
-    let mut executor = TemplateExecutor::with_base_path(base_path.to_str().unwrap());
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
     println!("✅ TemplateExecutor created");
     println!();
 
