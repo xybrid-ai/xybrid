@@ -8,7 +8,9 @@
   "preprocessing": [
     {
       "type": "Tokenize",
-      "vocab_file": "vocab.txt"
+      "vocab_file": "tokenizer.json",
+      "tokenizer_type": "WordPiece",
+      "max_length": 512
     }
   ],
   "postprocessing": [],
