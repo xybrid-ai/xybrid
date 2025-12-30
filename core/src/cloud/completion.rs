@@ -69,7 +69,7 @@ pub struct Usage {
     pub total_tokens: u32,
 }
 
-/// Request for LLM completion.
+/// Request for cloud completion.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionRequest {
     /// Model identifier (optional - uses default if not specified).
@@ -183,7 +183,7 @@ impl CompletionRequest {
     }
 }
 
-/// Response from LLM completion.
+/// Response from cloud completion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionResponse {
     /// Generated text content.

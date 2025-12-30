@@ -87,7 +87,7 @@ impl StageConfig {
     /// Set the integration provider.
     pub fn with_provider(mut self, provider: IntegrationProvider) -> Self {
         self.provider = Some(provider);
-        self.target = ExecutionTarget::Integration;
+        self.target = ExecutionTarget::Cloud;
         self
     }
 
@@ -117,7 +117,7 @@ impl StageConfig {
         if self.model.is_empty() {
             return Err(format!("Stage '{}': model cannot be empty", self.id));
         }
-        if self.target == ExecutionTarget::Integration && self.provider.is_none() {
+        if self.target == ExecutionTarget::Cloud && self.provider.is_none() {
             return Err(format!(
                 "Stage '{}': integration target requires a provider",
                 self.id
@@ -255,7 +255,7 @@ mod tests {
         let stage = StageConfig::new("llm", "gpt-4o-mini")
             .with_provider(IntegrationProvider::OpenAI);
 
-        assert_eq!(stage.target, ExecutionTarget::Integration);
+        assert_eq!(stage.target, ExecutionTarget::Cloud);
         assert_eq!(stage.provider, Some(IntegrationProvider::OpenAI));
     }
 
@@ -267,11 +267,11 @@ mod tests {
         let stage = StageConfig::new("id", "");
         assert!(stage.validate().is_err());
 
-        let stage = StageConfig::new("id", "model").with_target(ExecutionTarget::Integration);
+        let stage = StageConfig::new("id", "model").with_target(ExecutionTarget::Cloud);
         assert!(stage.validate().is_err()); // Missing provider
 
         let stage = StageConfig::new("id", "model")
-            .with_target(ExecutionTarget::Integration)
+            .with_target(ExecutionTarget::Cloud)
             .with_provider(IntegrationProvider::OpenAI);
         assert!(stage.validate().is_ok());
     }
@@ -309,7 +309,7 @@ fallback:
     model: whisper-large-v3
   - target: device
     model: wav2vec2-base-960h
-  - target: integration
+  - target: cloud
     provider: openai
     model: whisper-1
 "#;
@@ -317,7 +317,7 @@ fallback:
         assert_eq!(stage.fallback.len(), 3);
         assert_eq!(stage.fallback[0].target, ExecutionTarget::Server);
         assert_eq!(stage.fallback[1].target, ExecutionTarget::Device);
-        assert_eq!(stage.fallback[2].target, ExecutionTarget::Integration);
+        assert_eq!(stage.fallback[2].target, ExecutionTarget::Cloud);
     }
 
     #[test]

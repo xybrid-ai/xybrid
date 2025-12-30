@@ -43,17 +43,17 @@ This document clarifies the responsibilities of the three execution layers in xy
 
 **Responsibilities**:
 - Maintain registry of runtime adapters
-- Select adapter based on execution target (local, integration, cloud)
+- Select adapter based on execution target (device, cloud)
 - Load models from .xyb bundles or registry
 - Delegate to TemplateExecutor for actual inference
-- Handle LLM integrations (OpenAI, Anthropic) for cloud stages
+- Handle cloud API calls (OpenAI, Anthropic) for cloud stages
 
 **Key Methods**:
 - `execute_stage()` - Execute a single stage with routing
 - `execute_local_stage()` - Execute on device using ONNX
-- `execute_integration_stage()` - Execute via LLM API
+- `execute_cloud()` - Execute via cloud API
 
-**Dependencies**: TemplateExecutor, RuntimeAdapter, Llm
+**Dependencies**: TemplateExecutor, RuntimeAdapter, Cloud
 
 **When to use**: Direct model execution when routing is already decided.
 

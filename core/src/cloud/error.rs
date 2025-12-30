@@ -1,12 +1,12 @@
-//! Error types for LLM operations.
+//! Error types for cloud operations.
 
 use thiserror::Error;
 
-/// Errors that can occur during LLM operations.
+/// Errors that can occur during cloud operations.
 #[derive(Debug, Error)]
-pub enum LlmError {
+pub enum CloudError {
     /// Backend not configured or unavailable.
-    #[error("LLM backend not available: {0}")]
+    #[error("Cloud backend not available: {0}")]
     BackendUnavailable(String),
 
     /// Gateway connection failed.
@@ -61,50 +61,46 @@ pub enum LlmError {
     /// Configuration error.
     #[error("Configuration error: {0}")]
     ConfigError(String),
-
-    /// Local model inference error.
-    #[error("Inference error: {0}")]
-    InferenceError(String),
 }
 
-impl From<std::io::Error> for LlmError {
+impl From<std::io::Error> for CloudError {
     fn from(err: std::io::Error) -> Self {
-        LlmError::NetworkError(err.to_string())
+        CloudError::NetworkError(err.to_string())
     }
 }
 
 // Allow conversion from cloud_llm errors
-impl From<crate::cloud_llm::LlmError> for LlmError {
+impl From<crate::cloud_llm::LlmError> for CloudError {
     fn from(err: crate::cloud_llm::LlmError) -> Self {
         match err {
             crate::cloud_llm::LlmError::ApiKeyMissing { provider, env_var } => {
-                LlmError::AuthenticationError(format!(
+                CloudError::AuthenticationError(format!(
                     "API key missing for {}. Set {} or use gateway.",
                     provider, env_var
                 ))
             }
-            crate::cloud_llm::LlmError::HttpError(msg) => LlmError::NetworkError(msg),
+            crate::cloud_llm::LlmError::HttpError(msg) => CloudError::NetworkError(msg),
             crate::cloud_llm::LlmError::ApiError { status, message } => {
-                LlmError::ApiError { status, message }
+                CloudError::ApiError { status, message }
             }
-            crate::cloud_llm::LlmError::ParseError(msg) => LlmError::ParseError(msg),
+            crate::cloud_llm::LlmError::ParseError(msg) => CloudError::ParseError(msg),
             crate::cloud_llm::LlmError::RateLimited { retry_after_secs } => {
-                LlmError::RateLimited { retry_after_secs }
+                CloudError::RateLimited { retry_after_secs }
             }
             crate::cloud_llm::LlmError::Timeout { timeout_ms } => {
-                LlmError::Timeout { timeout_ms }
+                CloudError::Timeout { timeout_ms }
             }
-            crate::cloud_llm::LlmError::InvalidRequest(msg) => LlmError::InvalidRequest(msg),
+            crate::cloud_llm::LlmError::InvalidRequest(msg) => CloudError::InvalidRequest(msg),
             crate::cloud_llm::LlmError::UnsupportedProvider(msg) => {
-                LlmError::BackendUnavailable(msg)
+                CloudError::BackendUnavailable(msg)
             }
             crate::cloud_llm::LlmError::UnsupportedModel { provider, model } => {
-                LlmError::ModelNotFound(format!("{}/{}", provider, model))
+                CloudError::ModelNotFound(format!("{}/{}", provider, model))
             }
             crate::cloud_llm::LlmError::ContentBlocked { reason } => {
-                LlmError::ContentBlocked { reason }
+                CloudError::ContentBlocked { reason }
             }
-            crate::cloud_llm::LlmError::IoError(msg) => LlmError::NetworkError(msg),
+            crate::cloud_llm::LlmError::IoError(msg) => CloudError::NetworkError(msg),
         }
     }
 }

@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use xybrid_core::llm::{Llm, LlmConfig, CompletionRequest};
+use xybrid_core::cloud::{Cloud, CloudConfig, CompletionRequest};
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
@@ -183,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("🌐 Mode: Gateway");
         println!("   URL: {}", gateway_url);
 
-        let config = LlmConfig::gateway()
+        let config = CloudConfig::gateway()
             .with_gateway_url(&gateway_url)
             .with_api_key(&api_key)
             .with_default_model("gpt-4o-mini");
@@ -202,11 +202,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("⚠️  {} not set - will use simulated response", env_var);
         }
 
-        let config = LlmConfig::direct(direct_provider);
+        let config = CloudConfig::direct(direct_provider);
         (config, format!("direct/{}", direct_provider))
     };
 
-    let llm_response = match Llm::with_config(config) {
+    let llm_response = match Cloud::with_config(config) {
         Ok(client) => {
             let request = CompletionRequest::new(&transcription)
                 .with_system(
