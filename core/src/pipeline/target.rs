@@ -3,7 +3,7 @@
 //! Each stage can execute on one of four targets:
 //! - `device`: On-device inference using .xyb bundles
 //! - `server`: Xybrid-hosted inference (e.g., vLLM)
-//! - `integration`: Third-party API (OpenAI, Anthropic, etc.)
+//! - `cloud`: Third-party cloud API (OpenAI, Anthropic, etc.)
 //! - `auto`: Framework decides based on availability and device capabilities
 
 use serde::{Deserialize, Serialize};
@@ -21,9 +21,10 @@ pub enum ExecutionTarget {
     /// Uses Xybrid's cloud infrastructure (e.g., vLLM for LLMs).
     Server,
 
-    /// Third-party API integration.
+    /// Third-party cloud API.
     /// Requires provider configuration (OpenAI, Anthropic, etc.).
-    Integration,
+    /// Uses CloudClient for gateway or direct API calls.
+    Cloud,
 
     /// Framework decides at runtime based on:
     /// - Model availability (device bundle, server endpoint, integration)
@@ -36,7 +37,7 @@ pub enum ExecutionTarget {
 impl ExecutionTarget {
     /// Returns true if this target requires network access.
     pub fn requires_network(&self) -> bool {
-        matches!(self, ExecutionTarget::Server | ExecutionTarget::Integration)
+        matches!(self, ExecutionTarget::Server | ExecutionTarget::Cloud)
     }
 
     /// Returns true if this target can work offline.
@@ -49,7 +50,7 @@ impl ExecutionTarget {
         match self {
             ExecutionTarget::Device => "device",
             ExecutionTarget::Server => "server",
-            ExecutionTarget::Integration => "integration",
+            ExecutionTarget::Cloud => "cloud",
             ExecutionTarget::Auto => "auto",
         }
     }
@@ -74,9 +75,9 @@ impl std::str::FromStr for ExecutionTarget {
         match s.to_lowercase().as_str() {
             "device" | "local" => Ok(ExecutionTarget::Device),
             "server" | "xybrid" => Ok(ExecutionTarget::Server),
-            "integration" | "api" => Ok(ExecutionTarget::Integration),
+            "cloud" | "integration" | "api" => Ok(ExecutionTarget::Cloud),
             "auto" | "default" => Ok(ExecutionTarget::Auto),
-            _ => Err(format!("Unknown execution target: '{}'. Valid values: device, server, integration, auto", s)),
+            _ => Err(format!("Unknown execution target: '{}'. Valid values: device, server, cloud, auto", s)),
         }
     }
 }
@@ -89,13 +90,14 @@ mod tests {
     fn test_execution_target_from_str() {
         assert_eq!("device".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Device);
         assert_eq!("server".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Server);
-        assert_eq!("integration".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Integration);
+        assert_eq!("cloud".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Cloud);
         assert_eq!("auto".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Auto);
 
         // Aliases
         assert_eq!("local".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Device);
         assert_eq!("xybrid".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Server);
-        assert_eq!("api".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Integration);
+        assert_eq!("integration".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Cloud); // backward compat
+        assert_eq!("api".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Cloud);
         assert_eq!("default".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Auto);
     }
 
@@ -103,7 +105,7 @@ mod tests {
     fn test_execution_target_display() {
         assert_eq!(ExecutionTarget::Device.to_string(), "device");
         assert_eq!(ExecutionTarget::Server.to_string(), "server");
-        assert_eq!(ExecutionTarget::Integration.to_string(), "integration");
+        assert_eq!(ExecutionTarget::Cloud.to_string(), "cloud");
         assert_eq!(ExecutionTarget::Auto.to_string(), "auto");
     }
 
@@ -111,7 +113,7 @@ mod tests {
     fn test_requires_network() {
         assert!(!ExecutionTarget::Device.requires_network());
         assert!(ExecutionTarget::Server.requires_network());
-        assert!(ExecutionTarget::Integration.requires_network());
+        assert!(ExecutionTarget::Cloud.requires_network());
         assert!(!ExecutionTarget::Auto.requires_network()); // Auto doesn't inherently require network
     }
 
@@ -119,7 +121,7 @@ mod tests {
     fn test_supports_offline() {
         assert!(ExecutionTarget::Device.supports_offline());
         assert!(!ExecutionTarget::Server.supports_offline());
-        assert!(!ExecutionTarget::Integration.supports_offline());
+        assert!(!ExecutionTarget::Cloud.supports_offline());
         assert!(!ExecutionTarget::Auto.supports_offline()); // Auto may or may not work offline
     }
 
@@ -128,7 +130,7 @@ mod tests {
         let targets = vec![
             ExecutionTarget::Device,
             ExecutionTarget::Server,
-            ExecutionTarget::Integration,
+            ExecutionTarget::Cloud,
             ExecutionTarget::Auto,
         ];
 

@@ -49,8 +49,8 @@ use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::Orchestrator;
-use xybrid_core::policy_engine::PolicyEngine;
-use xybrid_core::routing_engine::{LocalAvailability, RoutingEngine};
+use xybrid_core::orchestrator::policy_engine::PolicyEngine;
+use xybrid_core::orchestrator::routing_engine::{LocalAvailability, RoutingEngine};
 use xybrid_core::target::{Platform, TargetResolver};
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::registry_client::RegistryClient;
@@ -1391,8 +1391,8 @@ fn run_pipeline(
         println!();
 
         // Simulate routing decisions without executing
-        let mut routing_engine = xybrid_core::routing_engine::DefaultRoutingEngine::new();
-        let policy_engine = xybrid_core::policy_engine::DefaultPolicyEngine::with_default_policy();
+        let mut routing_engine = xybrid_core::orchestrator::routing_engine::DefaultRoutingEngine::new();
+        let policy_engine = xybrid_core::orchestrator::policy_engine::DefaultPolicyEngine::with_default_policy();
 
         let mut current_input = input.clone();
 

@@ -522,7 +522,7 @@ impl Pipeline {
                 if let Some(provider_str) = stage_config.get_provider() {
                     desc.provider = Self::parse_provider(&provider_str);
                     if desc.target.is_none() {
-                        desc.target = Some(ExecutionTarget::Integration);
+                        desc.target = Some(ExecutionTarget::Cloud);
                     }
                 }
 
@@ -581,8 +581,8 @@ impl Pipeline {
     fn parse_target(target: &str) -> Option<ExecutionTarget> {
         match target.to_lowercase().as_str() {
             "device" | "local" => Some(ExecutionTarget::Device),
-            "server" | "cloud" => Some(ExecutionTarget::Server),
-            "integration" => Some(ExecutionTarget::Integration),
+            "server" => Some(ExecutionTarget::Server),
+            "cloud" | "integration" | "api" => Some(ExecutionTarget::Cloud),
             "auto" => Some(ExecutionTarget::Auto),
             _ => None,
         }

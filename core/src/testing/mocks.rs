@@ -2,12 +2,28 @@
 //!
 //! Provides mock versions of runtime adapters and other components
 //! that can be used for unit testing without real model files.
+//!
+//! ## MockRuntimeAdapter
+//!
+//! Use `MockRuntimeAdapter` when testing the `Executor` - it implements
+//! the `RuntimeAdapter` trait and doesn't require real ONNX files.
+//!
+//! ```rust,ignore
+//! use xybrid_core::testing::mocks::MockRuntimeAdapter;
+//! use xybrid_core::executor::Executor;
+//! use std::sync::Arc;
+//!
+//! let mut executor = Executor::new();
+//! let adapter = MockRuntimeAdapter::with_text_output("transcribed text");
+//! executor.register_adapter(Arc::new(adapter));
+//! ```
 
 use crate::ir::{Envelope, EnvelopeKind};
-use crate::runtime_adapter::{AdapterError, ModelRuntime};
+use crate::runtime_adapter::{AdapterError, AdapterResult, ModelRuntime, RuntimeAdapter};
 use ndarray::{ArrayD, IxDyn};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 
 /// A mock model runtime that returns configurable outputs.
 ///
@@ -186,6 +202,128 @@ impl MockOnnxOutputs {
         let mut outputs = HashMap::new();
         outputs.insert("last_hidden_state".to_string(), hidden);
         Self { outputs }
+    }
+}
+
+// ============================================================================
+// MockRuntimeAdapter - Implements RuntimeAdapter for Executor unit tests
+// ============================================================================
+
+/// A mock runtime adapter for unit testing the Executor.
+///
+/// This adapter implements `RuntimeAdapter` and can be configured to return
+/// specific outputs without needing real ONNX files. Use this instead of
+/// `OnnxRuntimeAdapter` in executor unit tests.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use xybrid_core::testing::mocks::MockRuntimeAdapter;
+/// use xybrid_core::executor::Executor;
+/// use std::sync::Arc;
+///
+/// let mut executor = Executor::new();
+/// let mut adapter = MockRuntimeAdapter::with_text_output("transcribed text");
+/// adapter.load_model("/fake/path.onnx").unwrap();
+/// executor.register_adapter(Arc::new(adapter));
+///
+/// // Now execute_stage will use the mock adapter
+/// ```
+pub struct MockRuntimeAdapter {
+    /// The output to return from execute()
+    output: MockOutput,
+    /// Track the number of executions (thread-safe for RuntimeAdapter: Send + Sync)
+    call_count: Mutex<usize>,
+    /// Whether a model is "loaded"
+    is_loaded: Mutex<bool>,
+    /// Simulate an error if set
+    error: Option<String>,
+}
+
+impl MockRuntimeAdapter {
+    /// Create a mock adapter that returns text output (for ASR-like behavior).
+    pub fn with_text_output(text: impl Into<String>) -> Self {
+        Self {
+            output: MockOutput::Text(text.into()),
+            call_count: Mutex::new(0),
+            is_loaded: Mutex::new(false),
+            error: None,
+        }
+    }
+
+    /// Create a mock adapter that returns audio output (for TTS-like behavior).
+    pub fn with_audio_output(bytes: Vec<u8>) -> Self {
+        Self {
+            output: MockOutput::Audio(bytes),
+            call_count: Mutex::new(0),
+            is_loaded: Mutex::new(false),
+            error: None,
+        }
+    }
+
+    /// Create a mock adapter that returns embedding output.
+    pub fn with_embedding_output(values: Vec<f32>) -> Self {
+        Self {
+            output: MockOutput::Embedding(values),
+            call_count: Mutex::new(0),
+            is_loaded: Mutex::new(false),
+            error: None,
+        }
+    }
+
+    /// Configure the mock to simulate an error on execute.
+    pub fn with_execute_error(mut self, message: impl Into<String>) -> Self {
+        self.error = Some(message.into());
+        self
+    }
+
+    /// Get how many times execute() was called.
+    pub fn call_count(&self) -> usize {
+        *self.call_count.lock().unwrap()
+    }
+
+    /// Check if load_model was called successfully.
+    pub fn model_is_loaded(&self) -> bool {
+        *self.is_loaded.lock().unwrap()
+    }
+}
+
+impl RuntimeAdapter for MockRuntimeAdapter {
+    fn name(&self) -> &str {
+        "mock"
+    }
+
+    fn supported_formats(&self) -> Vec<&'static str> {
+        vec!["onnx", "safetensors", "mlpackage"]
+    }
+
+    fn load_model(&mut self, _path: &str) -> AdapterResult<()> {
+        *self.is_loaded.lock().unwrap() = true;
+        Ok(())
+    }
+
+    fn execute(&self, _input: &Envelope) -> AdapterResult<Envelope> {
+        if let Some(ref err) = self.error {
+            return Err(AdapterError::RuntimeError(err.clone()));
+        }
+
+        if !*self.is_loaded.lock().unwrap() {
+            return Err(AdapterError::ModelNotLoaded("No model loaded".to_string()));
+        }
+
+        *self.call_count.lock().unwrap() += 1;
+
+        let kind = match &self.output {
+            MockOutput::Text(t) => EnvelopeKind::Text(t.clone()),
+            MockOutput::Audio(b) => EnvelopeKind::Audio(b.clone()),
+            MockOutput::Embedding(v) => EnvelopeKind::Embedding(v.clone()),
+            MockOutput::TensorMap(_) => EnvelopeKind::Embedding(vec![0.0]),
+        };
+
+        Ok(Envelope {
+            kind,
+            metadata: HashMap::new(),
+        })
     }
 }
 

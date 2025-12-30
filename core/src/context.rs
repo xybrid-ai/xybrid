@@ -61,10 +61,10 @@ impl StageDescriptor {
         self
     }
 
-    /// Set the integration provider.
+    /// Set the cloud provider.
     pub fn with_provider(mut self, provider: IntegrationProvider) -> Self {
         self.provider = Some(provider);
-        self.target = Some(ExecutionTarget::Integration);
+        self.target = Some(ExecutionTarget::Cloud);
         self
     }
 
@@ -80,9 +80,9 @@ impl StageDescriptor {
         self
     }
 
-    /// Check if this stage is an integration stage.
-    pub fn is_integration(&self) -> bool {
-        matches!(self.target, Some(ExecutionTarget::Integration)) || self.provider.is_some()
+    /// Check if this stage is a cloud stage (uses third-party cloud API).
+    pub fn is_cloud(&self) -> bool {
+        matches!(self.target, Some(ExecutionTarget::Cloud)) || self.provider.is_some()
     }
 
     /// Check if this stage is a device/local stage.

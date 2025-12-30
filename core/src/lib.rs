@@ -23,7 +23,7 @@
 //! - [`bundler`] - .xyb bundle creation and extraction
 //!
 //! ### High-Level APIs
-//! - [`llm`] - LLM client (local + cloud)
+//! - [`cloud`] - Cloud client (third-party API integrations)
 //! - [`tts`] - Text-to-speech client
 //! - [`gateway`] - OpenAI-compatible gateway types
 
@@ -131,8 +131,9 @@ pub mod control_sync;
 // High-Level Client APIs
 // ============================================================================
 
-/// LLM client (abstracts local vs cloud execution)
-pub mod llm;
+/// Cloud client (third-party API integrations via gateway or direct)
+/// For local/on-device inference, use `target: device` in pipeline YAML.
+pub mod cloud;
 
 /// TTS client (text-to-speech)
 pub mod tts;

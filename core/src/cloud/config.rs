@@ -1,40 +1,33 @@
-//! LLM configuration types.
+//! Cloud client configuration types.
 
 use serde::{Deserialize, Serialize};
 
-/// LLM execution backend.
+/// Cloud execution backend.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum LlmBackend {
+pub enum CloudBackend {
     /// Route through Xybrid Gateway (default, recommended).
     /// Gateway handles authentication, rate limiting, and provider routing.
     Gateway,
-
-    /// Use local on-device model (ONNX).
-    /// Best for privacy-sensitive applications or offline use.
-    Local,
 
     /// Direct API calls (for development/testing only).
     /// Requires API keys in environment or config.
     /// NOT recommended for production mobile apps.
     Direct,
-
-    /// Auto-select based on availability and request type.
-    Auto,
 }
 
-impl Default for LlmBackend {
+impl Default for CloudBackend {
     fn default() -> Self {
-        LlmBackend::Gateway
+        CloudBackend::Gateway
     }
 }
 
-/// LLM client configuration.
+/// Cloud client configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LlmConfig {
-    /// Which backend to use for LLM requests.
+pub struct CloudConfig {
+    /// Which backend to use for cloud requests.
     #[serde(default)]
-    pub backend: LlmBackend,
+    pub backend: CloudBackend,
 
     /// Gateway URL (for Gateway backend).
     /// Defaults to Xybrid's hosted gateway.
@@ -59,10 +52,6 @@ pub struct LlmConfig {
     /// Enable request/response logging (for debugging).
     #[serde(default)]
     pub debug: bool,
-
-    /// Local model path (for Local backend).
-    #[serde(default)]
-    pub local_model_path: Option<String>,
 
     /// Direct provider (for Direct backend - development only).
     #[serde(default)]
@@ -91,35 +80,25 @@ fn default_timeout_ms() -> u32 {
     30000
 }
 
-impl Default for LlmConfig {
+impl Default for CloudConfig {
     fn default() -> Self {
         Self {
-            backend: LlmBackend::default(),
+            backend: CloudBackend::default(),
             gateway_url: default_gateway_url(),
             api_key: None,
             default_model: None,
             timeout_ms: default_timeout_ms(),
             debug: false,
-            local_model_path: None,
             direct_provider: None,
         }
     }
 }
 
-impl LlmConfig {
+impl CloudConfig {
     /// Create a new config with gateway backend.
     pub fn gateway() -> Self {
         Self {
-            backend: LlmBackend::Gateway,
-            ..Default::default()
-        }
-    }
-
-    /// Create a new config with local backend.
-    pub fn local(model_path: impl Into<String>) -> Self {
-        Self {
-            backend: LlmBackend::Local,
-            local_model_path: Some(model_path.into()),
+            backend: CloudBackend::Gateway,
             ..Default::default()
         }
     }
@@ -127,7 +106,7 @@ impl LlmConfig {
     /// Create a new config with direct backend (development only).
     pub fn direct(provider: impl Into<String>) -> Self {
         Self {
-            backend: LlmBackend::Direct,
+            backend: CloudBackend::Direct,
             direct_provider: Some(provider.into()),
             ..Default::default()
         }
@@ -184,8 +163,8 @@ mod tests {
 
     #[test]
     fn test_default_config() {
-        let config = LlmConfig::default();
-        assert_eq!(config.backend, LlmBackend::Gateway);
+        let config = CloudConfig::default();
+        assert_eq!(config.backend, CloudBackend::Gateway);
         // Default URL should be api.xybrid.dev/v1 or from env vars (with /v1)
         assert!(
             config.gateway_url.contains("xybrid") || config.gateway_url.contains("localhost"),
@@ -202,39 +181,29 @@ mod tests {
 
     #[test]
     fn test_gateway_config() {
-        let config = LlmConfig::gateway()
+        let config = CloudConfig::gateway()
             .with_api_key("test-key")
             .with_default_model("gpt-4o-mini");
 
-        assert_eq!(config.backend, LlmBackend::Gateway);
+        assert_eq!(config.backend, CloudBackend::Gateway);
         assert_eq!(config.api_key, Some("test-key".to_string()));
         assert_eq!(config.default_model, Some("gpt-4o-mini".to_string()));
     }
 
     #[test]
-    fn test_local_config() {
-        let config = LlmConfig::local("/models/llama.onnx");
-        assert_eq!(config.backend, LlmBackend::Local);
-        assert_eq!(
-            config.local_model_path,
-            Some("/models/llama.onnx".to_string())
-        );
-    }
-
-    #[test]
     fn test_direct_config() {
-        let config = LlmConfig::direct("openai");
-        assert_eq!(config.backend, LlmBackend::Direct);
+        let config = CloudConfig::direct("openai");
+        assert_eq!(config.backend, CloudBackend::Direct);
         assert_eq!(config.direct_provider, Some("openai".to_string()));
     }
 
     #[test]
     fn test_resolve_api_key_from_env() {
-        std::env::set_var("TEST_LLM_KEY", "secret123");
+        std::env::set_var("TEST_CLOUD_KEY", "secret123");
 
-        let config = LlmConfig::default().with_api_key("$TEST_LLM_KEY");
+        let config = CloudConfig::default().with_api_key("$TEST_CLOUD_KEY");
         assert_eq!(config.resolve_api_key(), Some("secret123".to_string()));
 
-        std::env::remove_var("TEST_LLM_KEY");
+        std::env::remove_var("TEST_CLOUD_KEY");
     }
 }
