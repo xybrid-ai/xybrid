@@ -11,7 +11,7 @@
 //!   cargo run --example cloud_llm_demo [openai|anthropic] [prompt]
 
 use std::time::Instant;
-use xybrid_core::llm::{Llm, LlmConfig, CompletionRequest};
+use xybrid_core::cloud::{Cloud, CloudConfig, CompletionRequest};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let total_start = Instant::now();
@@ -51,8 +51,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create client with direct provider access
     let client_start = Instant::now();
-    let config = LlmConfig::direct(provider);
-    let client = Llm::with_config(config)?;
+    let config = CloudConfig::direct(provider);
+    let client = Cloud::with_config(config)?;
     let client_latency = client_start.elapsed();
     println!("✅ Client created successfully");
     println!("   ⏱️  Client init: {:.2}ms", client_latency.as_secs_f64() * 1000.0);

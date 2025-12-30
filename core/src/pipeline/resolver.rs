@@ -65,7 +65,7 @@ impl ResolutionContext {
     }
 
     /// Check if an integration provider is available.
-    pub fn is_integration_available(&self, provider: &IntegrationProvider) -> bool {
+    pub fn is_cloud_available(&self, provider: &IntegrationProvider) -> bool {
         *self.integration_available.get(provider).unwrap_or(&true)
     }
 }
@@ -195,7 +195,7 @@ impl TargetResolver {
         match target {
             ExecutionTarget::Device => Self::resolve_device(model, version, context),
             ExecutionTarget::Server => Self::resolve_server(model, version, context),
-            ExecutionTarget::Integration => {
+            ExecutionTarget::Cloud => {
                 let provider = provider.ok_or_else(|| {
                     ResolutionError::MissingProvider(model.to_string())
                 })?;
@@ -257,7 +257,7 @@ impl TargetResolver {
         model: &str,
         context: &ResolutionContext,
     ) -> Result<ResolvedTarget, ResolutionError> {
-        if !context.is_integration_available(provider) {
+        if !context.is_cloud_available(provider) {
             return Err(ResolutionError::IntegrationUnavailable(
                 provider.clone(),
                 model.to_string(),
@@ -304,7 +304,7 @@ impl TargetResolver {
 
         // Check integration if provider specified
         if let Some(prov) = provider {
-            if context.is_integration_available(prov) {
+            if context.is_cloud_available(prov) {
                 return Ok(ResolvedTarget::integration(
                     prov.clone(),
                     model,
@@ -509,7 +509,7 @@ mod tests {
     fn test_resolve_integration_missing_provider() {
         let context = test_context();
         let stage = StageConfig::new("llm", "gpt-4o-mini")
-            .with_target(ExecutionTarget::Integration);
+            .with_target(ExecutionTarget::Cloud);
 
         let result = TargetResolver::resolve(&stage, &context);
         assert!(result.is_err());
@@ -554,7 +554,7 @@ mod tests {
         let stage = StageConfig::new("asr", "whisper-large-v3")
             .with_target(ExecutionTarget::Device)
             .with_fallback(
-                FallbackConfig::new(ExecutionTarget::Integration)
+                FallbackConfig::new(ExecutionTarget::Cloud)
                     .with_provider(IntegrationProvider::OpenAI)
                     .with_model("whisper-1"),
             );
@@ -581,9 +581,9 @@ mod tests {
 
         assert!(context.local_available);
         assert!(context.server_available);
-        assert!(context.is_integration_available(&IntegrationProvider::OpenAI));
-        assert!(!context.is_integration_available(&IntegrationProvider::Anthropic));
-        assert!(context.is_integration_available(&IntegrationProvider::Google)); // Default true
+        assert!(context.is_cloud_available(&IntegrationProvider::OpenAI));
+        assert!(!context.is_cloud_available(&IntegrationProvider::Anthropic));
+        assert!(context.is_cloud_available(&IntegrationProvider::Google)); // Default true
     }
 
     #[test]

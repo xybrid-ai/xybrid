@@ -249,7 +249,7 @@ impl Orchestrator {
                         .as_millis() as u64,
                 }
             }
-            Some(ExecutionTarget::Integration) => {
+            Some(ExecutionTarget::Cloud) => {
                 // Integration target - handled specially by executor
                 // Return a routing decision that indicates integration
                 RoutingDecision {
@@ -455,7 +455,7 @@ impl Orchestrator {
                         .as_millis() as u64,
                 }
             }
-            Some(ExecutionTarget::Integration) => {
+            Some(ExecutionTarget::Cloud) => {
                 // Integration target - handled specially by executor
                 RoutingDecision {
                     stage: stage.name.clone(),
@@ -712,6 +712,9 @@ pub mod routing_engine;
 mod tests {
     use super::*;
     use crate::ir::{Envelope, EnvelopeKind};
+    use crate::runtime_adapter::RuntimeAdapter;
+    use crate::testing::mocks::MockRuntimeAdapter;
+    use std::sync::Arc;
 
     fn text_envelope(value: &str) -> Envelope {
         Envelope::new(EnvelopeKind::Text(value.to_string()))
@@ -719,6 +722,21 @@ mod tests {
 
     fn audio_envelope(bytes: &[u8]) -> Envelope {
         Envelope::new(EnvelopeKind::Audio(bytes.to_vec()))
+    }
+
+    /// Helper to create an orchestrator with a mock adapter registered.
+    fn orchestrator_with_mock_adapter(execution_mode: ExecutionMode) -> Orchestrator {
+        let mut orchestrator = match execution_mode {
+            ExecutionMode::Streaming => Orchestrator::with_streaming(StreamConfig::default()),
+            ExecutionMode::Batch => Orchestrator::new(),
+        };
+
+        // Register a mock adapter that returns text output
+        let mut adapter = MockRuntimeAdapter::with_text_output("mock output");
+        adapter.load_model("/mock/model.onnx").unwrap();
+        orchestrator.executor_mut().register_adapter(Arc::new(adapter));
+
+        orchestrator
     }
 
     #[test]
@@ -833,7 +851,8 @@ mod tests {
 
     #[test]
     fn test_push_and_execute_stream_chunk() {
-        let mut orchestrator = Orchestrator::with_streaming(StreamConfig::default());
+        // Create orchestrator with mock adapter for streaming mode
+        let mut orchestrator = orchestrator_with_mock_adapter(ExecutionMode::Streaming);
         let stage = StageDescriptor::new("asr");
         let envelope = audio_envelope(&[1, 2, 3, 4]);
 
