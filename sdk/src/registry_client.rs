@@ -5,6 +5,8 @@
 //! - Mask-based model lookup with platform resolution
 //! - SHA256 hash verification
 //! - Download progress callbacks
+//! - Automatic retry with exponential backoff
+//! - Circuit breaker for failing endpoints
 //!
 //! # Example
 //!
@@ -38,25 +40,48 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryableError};
 
 /// Default registry API URL.
 pub const DEFAULT_REGISTRY_URL: &str = "https://api.xybrid.dev";
 
+/// Connection timeout in milliseconds.
+const CONNECT_TIMEOUT_MS: u64 = 10000;
+
+/// Request timeout in milliseconds.
+const REQUEST_TIMEOUT_MS: u64 = 30000;
+
 /// Registry client for model resolution and download.
-#[derive(Debug)]
 pub struct RegistryClient {
     /// Base URL for the registry API
     api_url: String,
     /// Cache manager for storing downloaded bundles
     cache: CacheManager,
+    /// HTTP agent with timeouts configured
+    agent: ureq::Agent,
+    /// Circuit breaker for the registry API
+    circuit: Arc<CircuitBreaker>,
+    /// Retry policy for API calls
+    retry_policy: RetryPolicy,
 }
 
 impl RegistryClient {
     /// Create a new registry client with the specified API URL.
     pub fn new(api_url: impl Into<String>) -> Result<Self, SdkError> {
+        // Create HTTP agent with timeouts
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(CONNECT_TIMEOUT_MS))
+            .timeout(Duration::from_millis(REQUEST_TIMEOUT_MS))
+            .build();
+
         Ok(Self {
             api_url: api_url.into(),
             cache: CacheManager::new()?,
+            agent,
+            circuit: Arc::new(CircuitBreaker::new(CircuitConfig::default())),
+            retry_policy: RetryPolicy::default(),
         })
     }
 
@@ -76,55 +101,57 @@ impl RegistryClient {
         Self::new(url)
     }
 
+    /// Check if the circuit breaker is open (blocking requests).
+    pub fn is_circuit_open(&self) -> bool {
+        self.circuit.is_open()
+    }
+
+    /// Reset the circuit breaker to closed state.
+    pub fn reset_circuit(&self) {
+        self.circuit.reset();
+    }
+
     /// List all available models in the registry.
+    ///
+    /// Automatically retries on transient failures and respects circuit breaker.
     pub fn list_models(&self) -> Result<Vec<ModelSummary>, SdkError> {
         let url = format!("{}/v1/models/registry", self.api_url);
 
-        let response = ureq::get(&url)
-            .call()
-            .map_err(|e| SdkError::NetworkError(format!("Failed to list models: {}", e)))?;
-
-        if response.status() != 200 {
-            return Err(SdkError::NetworkError(format!(
-                "Registry returned status {}",
-                response.status()
-            )));
-        }
-
-        let list_response: ListModelsResponse = response
-            .into_json()
-            .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))?;
-
-        Ok(list_response.models)
+        self.execute_with_retry(|| {
+            let response = self.agent.get(&url).call();
+            self.handle_response(response, "list models")
+        })
+        .and_then(|response| {
+            let list_response: ListModelsResponse = response
+                .into_json()
+                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))?;
+            Ok(list_response.models)
+        })
     }
 
     /// Get detailed information about a specific model.
+    ///
+    /// Automatically retries on transient failures and respects circuit breaker.
     pub fn get_model(&self, mask: &str) -> Result<ModelDetail, SdkError> {
         let url = format!("{}/v1/models/registry/{}", self.api_url, mask);
 
-        let response = ureq::get(&url)
-            .call()
-            .map_err(|e| SdkError::NetworkError(format!("Failed to get model: {}", e)))?;
-
-        if response.status() == 404 {
-            return Err(SdkError::ModelNotFound(format!("Model '{}' not found", mask)));
-        }
-
-        if response.status() != 200 {
-            return Err(SdkError::NetworkError(format!(
-                "Registry returned status {}",
-                response.status()
-            )));
-        }
-
-        response
-            .into_json()
-            .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))
+        self.execute_with_retry(|| {
+            let response = self.agent.get(&url).call();
+            self.handle_response_with_404(response, "get model", || {
+                SdkError::ModelNotFound(format!("Model '{}' not found", mask))
+            })
+        })
+        .and_then(|response| {
+            response
+                .into_json()
+                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))
+        })
     }
 
     /// Resolve a model mask to the best variant for the given platform.
     ///
     /// If platform is None, auto-detects the current platform.
+    /// Automatically retries on transient failures and respects circuit breaker.
     pub fn resolve(&self, mask: &str, platform: Option<&str>) -> Result<ResolvedVariant, SdkError> {
         let platform = platform
             .map(String::from)
@@ -135,29 +162,176 @@ impl RegistryClient {
             self.api_url, mask, platform
         );
 
-        let response = ureq::get(&url)
-            .call()
-            .map_err(|e| SdkError::NetworkError(format!("Failed to resolve model: {}", e)))?;
+        self.execute_with_retry(|| {
+            let response = self.agent.get(&url).call();
+            self.handle_response_with_404(response, "resolve model", || {
+                SdkError::ModelNotFound(format!(
+                    "Model '{}' not found or no compatible variant for platform '{}'",
+                    mask, platform
+                ))
+            })
+        })
+        .and_then(|response| {
+            let resolve_response: ResolveResponse = response
+                .into_json()
+                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))?;
+            Ok(resolve_response.resolved)
+        })
+    }
 
-        if response.status() == 404 {
-            return Err(SdkError::ModelNotFound(format!(
-                "Model '{}' not found or no compatible variant for platform '{}'",
-                mask, platform
-            )));
+    /// Execute an operation with retry and circuit breaker.
+    fn execute_with_retry<T, F>(&self, mut operation: F) -> Result<T, SdkError>
+    where
+        F: FnMut() -> Result<T, SdkError>,
+    {
+        // Check circuit breaker before starting
+        if !self.circuit.can_execute() {
+            return Err(SdkError::CircuitOpen(
+                "Registry API circuit breaker is open, try again later".to_string(),
+            ));
         }
 
-        if response.status() != 200 {
-            return Err(SdkError::NetworkError(format!(
-                "Registry returned status {}",
-                response.status()
-            )));
+        let mut last_error: Option<SdkError> = None;
+
+        for attempt in 0..self.retry_policy.max_attempts {
+            // Calculate delay for this attempt
+            let delay = if let Some(ref err) = last_error {
+                err.retry_after()
+                    .unwrap_or_else(|| self.retry_policy.delay_for_attempt(attempt))
+            } else {
+                self.retry_policy.delay_for_attempt(attempt)
+            };
+
+            if !delay.is_zero() {
+                std::thread::sleep(delay);
+            }
+
+            // Check circuit breaker again (might have opened)
+            if !self.circuit.can_execute() {
+                return Err(SdkError::CircuitOpen(
+                    "Registry API circuit breaker is open, try again later".to_string(),
+                ));
+            }
+
+            match operation() {
+                Ok(result) => {
+                    self.circuit.record_success();
+                    return Ok(result);
+                }
+                Err(err) => {
+                    self.circuit.record_failure();
+
+                    // Check for rate limit (opens circuit immediately)
+                    if let SdkError::RateLimited { .. } = &err {
+                        self.circuit.record_rate_limited();
+                    }
+
+                    // Don't retry non-retryable errors
+                    if !err.is_retryable() {
+                        return Err(err);
+                    }
+
+                    last_error = Some(err);
+                }
+            }
         }
 
-        let resolve_response: ResolveResponse = response
-            .into_json()
-            .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))?;
+        Err(last_error.unwrap_or_else(|| {
+            SdkError::NetworkError("All retry attempts exhausted".to_string())
+        }))
+    }
 
-        Ok(resolve_response.resolved)
+    /// Handle HTTP response, converting errors appropriately.
+    fn handle_response(
+        &self,
+        response: Result<ureq::Response, ureq::Error>,
+        operation: &str,
+    ) -> Result<ureq::Response, SdkError> {
+        match response {
+            Ok(resp) => {
+                if resp.status() == 200 {
+                    Ok(resp)
+                } else {
+                    Err(self.status_to_error(resp.status(), operation))
+                }
+            }
+            Err(e) => Err(self.ureq_error_to_sdk_error(e, operation)),
+        }
+    }
+
+    /// Handle HTTP response with special 404 handling.
+    fn handle_response_with_404<F>(
+        &self,
+        response: Result<ureq::Response, ureq::Error>,
+        operation: &str,
+        not_found_err: F,
+    ) -> Result<ureq::Response, SdkError>
+    where
+        F: FnOnce() -> SdkError,
+    {
+        match response {
+            Ok(resp) => {
+                if resp.status() == 200 {
+                    Ok(resp)
+                } else if resp.status() == 404 {
+                    Err(not_found_err())
+                } else {
+                    Err(self.status_to_error(resp.status(), operation))
+                }
+            }
+            Err(ureq::Error::Status(404, _)) => Err(not_found_err()),
+            Err(e) => Err(self.ureq_error_to_sdk_error(e, operation)),
+        }
+    }
+
+    /// Convert HTTP status code to SdkError.
+    fn status_to_error(&self, status: u16, operation: &str) -> SdkError {
+        match status {
+            429 => {
+                // TODO: Parse Retry-After header when available
+                SdkError::RateLimited {
+                    retry_after_secs: 60,
+                }
+            }
+            502 | 503 | 504 => SdkError::NetworkError(format!(
+                "Registry {} failed with status {} (server error)",
+                operation, status
+            )),
+            400 | 401 | 403 | 422 => SdkError::ConfigError(format!(
+                "Registry {} failed with status {} (client error)",
+                operation, status
+            )),
+            _ => SdkError::NetworkError(format!(
+                "Registry {} returned status {}",
+                operation, status
+            )),
+        }
+    }
+
+    /// Convert ureq error to SdkError.
+    fn ureq_error_to_sdk_error(&self, error: ureq::Error, operation: &str) -> SdkError {
+        match error {
+            ureq::Error::Status(status, _) => self.status_to_error(status, operation),
+            ureq::Error::Transport(transport) => {
+                let kind = transport.kind();
+                match kind {
+                    ureq::ErrorKind::Dns => SdkError::NetworkError(format!(
+                        "Failed to {} (DNS resolution failed)",
+                        operation
+                    )),
+                    ureq::ErrorKind::ConnectionFailed => SdkError::NetworkError(format!(
+                        "Failed to {} (connection failed)",
+                        operation
+                    )),
+                    ureq::ErrorKind::Io => SdkError::NetworkError(format!(
+                        "Failed to {} (I/O error: {})",
+                        operation,
+                        transport.message().unwrap_or("unknown")
+                    )),
+                    _ => SdkError::NetworkError(format!("Failed to {}: {}", operation, transport)),
+                }
+            }
+        }
     }
 
     /// Check if a model is cached locally.
@@ -248,7 +422,12 @@ impl RegistryClient {
         Ok(cache_path)
     }
 
-    /// Download a file with progress tracking.
+    /// Download a file with progress tracking and retry on connection failures.
+    ///
+    /// Note: Downloads use a separate retry mechanism because:
+    /// 1. HuggingFace is a different endpoint than the registry API
+    /// 2. Large file downloads need longer timeouts
+    /// 3. We don't want a failed HuggingFace download to trip the registry circuit breaker
     fn download_with_progress<F>(
         &self,
         url: &str,
@@ -259,15 +438,65 @@ impl RegistryClient {
     where
         F: Fn(f32),
     {
-        let response = ureq::get(url)
+        // Use a more conservative retry policy for downloads (longer delays)
+        let download_policy = RetryPolicy::conservative();
+        let mut last_error: Option<SdkError> = None;
+
+        for attempt in 0..download_policy.max_attempts {
+            // Calculate delay
+            let delay = if let Some(ref err) = last_error {
+                err.retry_after()
+                    .unwrap_or_else(|| download_policy.delay_for_attempt(attempt))
+            } else {
+                download_policy.delay_for_attempt(attempt)
+            };
+
+            if !delay.is_zero() {
+                std::thread::sleep(delay);
+            }
+
+            match self.try_download(url, dest, total_size, &progress_callback) {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    if !err.is_retryable() {
+                        return Err(err);
+                    }
+                    // Clean up partial file before retry
+                    std::fs::remove_file(dest).ok();
+                    last_error = Some(err);
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            SdkError::NetworkError("Download failed after all retry attempts".to_string())
+        }))
+    }
+
+    /// Attempt a single download.
+    fn try_download<F>(
+        &self,
+        url: &str,
+        dest: &PathBuf,
+        total_size: u64,
+        progress_callback: &F,
+    ) -> Result<(), SdkError>
+    where
+        F: Fn(f32),
+    {
+        // Use a longer timeout for downloads (5 minutes for large models)
+        let download_agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(CONNECT_TIMEOUT_MS))
+            .timeout(Duration::from_secs(300)) // 5 minute timeout for downloads
+            .build();
+
+        let response = download_agent
+            .get(url)
             .call()
-            .map_err(|e| SdkError::NetworkError(format!("Failed to download: {}", e)))?;
+            .map_err(|e| self.ureq_error_to_sdk_error(e, "download bundle"))?;
 
         if response.status() != 200 {
-            return Err(SdkError::NetworkError(format!(
-                "Download failed with status {}",
-                response.status()
-            )));
+            return Err(self.status_to_error(response.status(), "download bundle"));
         }
 
         let mut file = File::create(dest)?;
