@@ -36,8 +36,8 @@ Building ML-powered apps shouldn't require choosing between **on-device privacy*
 | **Voice Assistants** | ASR + LLM + TTS | On-device speech recognition with cloud LLM fallback |
 | **Real-time Transcription** | Whisper, Wav2Vec2 | Offline-capable meeting transcription |
 | **Text-to-Speech** | Kokoro, KittenTTS | Natural voice synthesis that works offline |
-| **Embeddings** | Sentence Transformers | Local semantic search without API costs |
-| **Vision** | ResNet, MobileNet | On-device image classification |
+| **Embeddings** | all-MiniLM-L6-v2 | Local semantic search without API costs |
+| **Vision** | ResNet, MobileNet, MNIST | On-device image classification |
 
 ## How It Works
 

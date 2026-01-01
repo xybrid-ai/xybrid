@@ -249,7 +249,7 @@ impl Orchestrator {
                         .as_millis() as u64,
                 }
             }
-            Some(ExecutionTarget::Integration) => {
+            Some(ExecutionTarget::Cloud) => {
                 // Integration target - handled specially by executor
                 // Return a routing decision that indicates integration
                 RoutingDecision {
@@ -455,7 +455,7 @@ impl Orchestrator {
                         .as_millis() as u64,
                 }
             }
-            Some(ExecutionTarget::Integration) => {
+            Some(ExecutionTarget::Cloud) => {
                 // Integration target - handled specially by executor
                 RoutingDecision {
                     stage: stage.name.clone(),

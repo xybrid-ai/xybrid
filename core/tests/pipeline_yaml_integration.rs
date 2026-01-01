@@ -67,7 +67,7 @@ stages:
     let llm = &pipeline.stages[1];
     assert_eq!(llm.id, "llm");
     assert_eq!(llm.model, "gpt-4o-mini");
-    assert!(matches!(llm.target, xybrid_core::pipeline::ExecutionTarget::Integration));
+    assert!(matches!(llm.target, xybrid_core::pipeline::ExecutionTarget::Cloud));
     assert_eq!(llm.provider, Some(IntegrationProvider::OpenAI));
 
     // Verify TTS stage (device)
@@ -113,21 +113,21 @@ fn test_stage_descriptor_integration_identification() {
     use xybrid_core::context::StageDescriptor;
     use xybrid_core::pipeline::ExecutionTarget;
 
-    // Test is_integration() with provider
+    // Test is_cloud() with provider
     let stage = StageDescriptor::new("llm")
         .with_provider(IntegrationProvider::OpenAI);
-    assert!(stage.is_integration());
+    assert!(stage.is_cloud());
     assert!(!stage.is_device());
 
     // Test is_device() without provider
     let device_stage = StageDescriptor::new("asr");
-    assert!(!device_stage.is_integration());
+    assert!(!device_stage.is_cloud());
     assert!(device_stage.is_device());
 
     // Test with explicit target but no provider
     let mut explicit_device = StageDescriptor::new("tts");
     explicit_device.target = Some(ExecutionTarget::Device);
-    assert!(!explicit_device.is_integration());
+    assert!(!explicit_device.is_cloud());
     assert!(explicit_device.is_device());
 }
 
@@ -179,7 +179,7 @@ stages:
     assert!(matches!(pipeline.stages[0].target, xybrid_core::pipeline::ExecutionTarget::Device));
 
     // The second stage should be integration target with OpenAI provider
-    assert!(matches!(pipeline.stages[1].target, xybrid_core::pipeline::ExecutionTarget::Integration));
+    assert!(matches!(pipeline.stages[1].target, xybrid_core::pipeline::ExecutionTarget::Cloud));
     assert_eq!(pipeline.stages[1].provider, Some(IntegrationProvider::OpenAI));
 }
 
@@ -225,7 +225,7 @@ stages:
     // Verify StageConfig has provider
     assert_eq!(stage_config.provider, Some(IntegrationProvider::OpenAI));
     assert_eq!(stage_config.model, "gpt-4o-mini");
-    assert!(matches!(stage_config.target, xybrid_core::pipeline::ExecutionTarget::Integration));
+    assert!(matches!(stage_config.target, xybrid_core::pipeline::ExecutionTarget::Cloud));
 
     // Verify options
     let options = &stage_config.options;
@@ -329,7 +329,7 @@ availability:
     // Stage 2: LLM (integration)
     let llm = &pipeline.stages[1];
     assert_eq!(llm.id, "llm");
-    assert!(matches!(llm.target, xybrid_core::pipeline::ExecutionTarget::Integration));
+    assert!(matches!(llm.target, xybrid_core::pipeline::ExecutionTarget::Cloud));
     assert_eq!(llm.provider, Some(IntegrationProvider::OpenAI));
     assert_eq!(llm.options.system_prompt(), Some("You are a helpful voice assistant. Keep responses concise and conversational.".to_string()));
 
@@ -362,7 +362,7 @@ fn test_demo_voice_assistant_yaml_parses() {
 
     // Verify cross-layer structure: device -> integration -> device
     assert!(matches!(pipeline.stages[0].target, xybrid_core::pipeline::ExecutionTarget::Device));
-    assert!(matches!(pipeline.stages[1].target, xybrid_core::pipeline::ExecutionTarget::Integration));
+    assert!(matches!(pipeline.stages[1].target, xybrid_core::pipeline::ExecutionTarget::Cloud));
     assert!(matches!(pipeline.stages[2].target, xybrid_core::pipeline::ExecutionTarget::Device));
 
     // Verify LLM provider

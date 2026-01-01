@@ -20,12 +20,12 @@
 //!
 //! The executor supports cross-layer pipelines where different stages run on different targets:
 //! - **Device/Local**: On-device inference using .xyb bundles (delegates to [`TemplateExecutor`])
-//! - **Integration**: Third-party API calls (OpenAI, Anthropic, etc.) via [`Llm`]
+//! - **Integration**: Third-party API calls (OpenAI, Anthropic, etc.) via [`Cloud`]
 //! - **Cloud/Server**: Xybrid-hosted inference (future)
 
 use crate::bundler::{BundleManifest, XyBundle};
 use crate::context::StageDescriptor;
-use crate::llm::{Llm, LlmConfig, LlmBackend, CompletionRequest};
+use crate::cloud::{Cloud, CloudConfig, CloudBackend, CompletionRequest};
 use crate::execution_template::ModelMetadata;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::{AdapterError, RuntimeAdapter};
@@ -462,7 +462,7 @@ impl Executor {
     ///
     /// * `stage` - Stage descriptor containing stage information
     /// * `input` - Input envelope containing the inference data
-    /// * `target` - Target where execution should occur ("local", "edge", "cloud", "integration")
+    /// * `target` - Target where execution should occur ("local", "edge", "cloud")
     ///
     /// # Returns
     ///
@@ -489,9 +489,9 @@ impl Executor {
     ) -> ExecutorResult<(Envelope, StageMetadata)> {
         let start_time = Instant::now();
 
-        // Check if this is an integration stage (third-party API like OpenAI/Anthropic)
-        if stage.is_integration() {
-            return self.execute_integration(stage, input, start_time);
+        // Check if this is a cloud stage (third-party API like OpenAI/Anthropic)
+        if stage.is_cloud() {
+            return self.execute_cloud(stage, input, start_time);
         }
 
         // Select adapter based on target
@@ -650,10 +650,10 @@ impl Executor {
             .map_err(|e| ExecutorError::Other(format!("Task join error: {}", e)))?
     }
 
-    /// Executes a stage via third-party integration (OpenAI, Anthropic, etc.).
+    /// Executes a stage via third-party cloud API (OpenAI, Anthropic, etc.).
     ///
     /// This method handles cross-layer pipeline execution where a stage runs on
-    /// a remote LLM provider rather than locally on-device.
+    /// a remote cloud provider rather than locally on-device.
     ///
     /// # Arguments
     ///
@@ -663,8 +663,8 @@ impl Executor {
     ///
     /// # Returns
     ///
-    /// Output envelope with LLM response and stage metadata
-    fn execute_integration(
+    /// Output envelope with cloud response and stage metadata
+    fn execute_cloud(
         &self,
         stage: &StageDescriptor,
         input: &Envelope,
@@ -677,19 +677,19 @@ impl Executor {
             )
         })?;
 
-        // Start tracing span for integration execution
+        // Start tracing span for cloud execution
         let model_name = stage.model.clone().unwrap_or_else(|| "unknown".to_string());
         let _exec_span = trace::SpanGuard::new(format!("execute:{}", model_name));
         trace::add_metadata("provider", provider.as_str());
-        trace::add_metadata("target", "integration");
+        trace::add_metadata("target", "cloud");
         if let Some(ref model) = stage.model {
             trace::add_metadata("model", model);
         }
 
-        // Build LLM configuration
+        // Build cloud configuration
         // Default: Gateway (recommended for production)
         // Direct: Only if explicitly requested via options.backend = "direct"
-        let mut llm_config = LlmConfig::default(); // Gateway by default
+        let mut cloud_config = CloudConfig::default(); // Gateway by default
 
         // Apply stage options if available
         if let Some(ref options) = stage.options {
@@ -698,63 +698,46 @@ impl Executor {
                 match backend.to_lowercase().as_str() {
                     "direct" => {
                         // Use direct API calls (requires provider API key)
-                        llm_config.backend = LlmBackend::Direct;
-                        llm_config.direct_provider = Some(provider.as_str().to_string());
-                    }
-                    "local" => {
-                        llm_config.backend = LlmBackend::Local;
-                        if let Some(model_path) = options.get::<String>("local_model_path") {
-                            llm_config.local_model_path = Some(model_path);
-                        }
-                    }
-                    "auto" => {
-                        llm_config.backend = LlmBackend::Auto;
-                        llm_config.direct_provider = Some(provider.as_str().to_string());
+                        cloud_config.backend = CloudBackend::Direct;
+                        cloud_config.direct_provider = Some(provider.as_str().to_string());
                     }
                     _ => {
                         // Default to gateway
-                        llm_config.backend = LlmBackend::Gateway;
+                        cloud_config.backend = CloudBackend::Gateway;
                     }
                 }
             }
 
             // Custom gateway URL (for self-hosted gateway)
             if let Some(gateway_url) = options.get::<String>("gateway_url") {
-                llm_config.gateway_url = gateway_url;
+                cloud_config.gateway_url = gateway_url;
             }
 
             // Explicit API key (for gateway or direct)
             if let Some(api_key) = options.get::<String>("api_key") {
-                llm_config.api_key = Some(api_key);
+                cloud_config.api_key = Some(api_key);
             }
 
             // Timeout override
             if let Some(timeout) = options.timeout_ms() {
-                llm_config.timeout_ms = timeout;
+                cloud_config.timeout_ms = timeout;
             }
 
             // Debug mode
             if let Some(debug) = options.get::<bool>("debug") {
-                llm_config.debug = debug;
+                cloud_config.debug = debug;
             }
         }
 
-        // For direct backend, also set provider for fallback in Auto mode
-        if llm_config.backend == LlmBackend::Auto && llm_config.direct_provider.is_none() {
-            llm_config.direct_provider = Some(provider.as_str().to_string());
-        }
-
         // Capture backend string for tracing before config is consumed
-        let backend_str = match llm_config.backend {
-            LlmBackend::Gateway => "gateway",
-            LlmBackend::Direct => "direct",
-            LlmBackend::Local => "local",
-            LlmBackend::Auto => "auto",
+        let backend_str = match cloud_config.backend {
+            CloudBackend::Gateway => "gateway",
+            CloudBackend::Direct => "direct",
         };
 
-        // Create LLM client (gateway-aware)
-        let client = Llm::with_config(llm_config).map_err(|e| {
-            ExecutorError::IntegrationError(format!("Failed to create LLM client: {}", e))
+        // Create cloud client (gateway-aware)
+        let client = Cloud::with_config(cloud_config).map_err(|e| {
+            ExecutorError::IntegrationError(format!("Failed to create cloud client: {}", e))
         })?;
 
         // Extract text input
@@ -807,8 +790,8 @@ impl Executor {
         // Build metadata (include backend info)
         let backend_info = response.backend.unwrap_or_else(|| "gateway".to_string());
         let metadata = StageMetadata {
-            adapter: format!("integration:{}:{}", provider, backend_info),
-            target: "integration".to_string(),
+            adapter: format!("cloud:{}:{}", provider, backend_info),
+            target: "cloud".to_string(),
             latency_ms,
         };
 

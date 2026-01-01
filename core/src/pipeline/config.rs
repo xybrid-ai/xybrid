@@ -237,7 +237,7 @@ stages:
 
   - id: llm
     model: gpt-4o-mini
-    target: integration
+    target: cloud
     provider: openai
     options:
       temperature: 0.7
@@ -249,7 +249,7 @@ stages:
     target: auto
     prefer: device
     fallback:
-      - target: integration
+      - target: cloud
         provider: elevenlabs
 "#;
 
@@ -271,7 +271,7 @@ stages:
         // Check LLM stage
         let llm = pipeline.get_stage("llm").unwrap();
         assert_eq!(llm.model, "gpt-4o-mini");
-        assert_eq!(llm.target, ExecutionTarget::Integration);
+        assert_eq!(llm.target, ExecutionTarget::Cloud);
         assert_eq!(llm.provider, Some(IntegrationProvider::OpenAI));
 
         // Check TTS stage
