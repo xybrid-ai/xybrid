@@ -9,15 +9,24 @@
 //! This module integrates with `xybrid_core::tracing` to capture execution spans.
 //! When a pipeline completes, the span tree is automatically included in the
 //! `PipelineComplete` telemetry event and sent to the Platform for visualization.
+//!
+//! # Resilience Features
+//!
+//! The HTTP exporter includes production-hardening features:
+//! - **Circuit breaker**: Prevents hammering failing endpoints
+//! - **Automatic retry**: Exponential backoff with jitter for transient failures
+//! - **Failed event queue**: Retries failed events in the background
 
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 use xybrid_core::event_bus::OrchestratorEvent;
+use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 use xybrid_core::tracing as core_tracing;
 
 /// Telemetry event type (simplified for FFI)
@@ -48,6 +57,15 @@ static TELEMETRY_SENDERS: Mutex<Vec<TelemetrySender>> = Mutex::new(Vec::new());
 // HTTP Platform Exporter
 // ============================================================================
 
+/// Maximum number of events to keep in the failed queue
+const MAX_FAILED_QUEUE_SIZE: usize = 1000;
+
+/// Connection timeout for telemetry requests (5 seconds)
+const CONNECT_TIMEOUT_MS: u64 = 5000;
+
+/// Request timeout for telemetry requests (10 seconds)
+const REQUEST_TIMEOUT_MS: u64 = 10000;
+
 /// Configuration for the HTTP telemetry exporter
 #[derive(Debug, Clone)]
 pub struct TelemetryConfig {
@@ -67,6 +85,10 @@ pub struct TelemetryConfig {
     pub batch_size: usize,
     /// Flush interval in seconds (default: 5)
     pub flush_interval_secs: u64,
+    /// Maximum retry attempts for failed batches (default: 3)
+    pub max_retries: u32,
+    /// Enable retry queue for failed events (default: true)
+    pub enable_retry_queue: bool,
 }
 
 impl Default for TelemetryConfig {
@@ -80,6 +102,8 @@ impl Default for TelemetryConfig {
             app_version: None,
             batch_size: 10,
             flush_interval_secs: 5,
+            max_retries: 3,
+            enable_retry_queue: true,
         }
     }
 }
@@ -127,7 +151,7 @@ impl TelemetryConfig {
 }
 
 /// Event payload for platform API (matches IngestTelemetryEvent)
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct PlatformEvent {
     session_id: Uuid,
     event_type: String,
@@ -148,6 +172,12 @@ struct PlatformEventBatch {
 }
 
 /// HTTP telemetry exporter that sends events to the Xybrid Platform
+///
+/// # Resilience Features
+///
+/// - **Circuit breaker**: Opens after 3 consecutive failures, stays open for 30s
+/// - **Automatic retry**: Up to 3 attempts with exponential backoff
+/// - **Failed event queue**: Stores up to 1000 failed events for later retry
 pub struct HttpTelemetryExporter {
     config: TelemetryConfig,
     buffer: Arc<Mutex<Vec<TelemetryEvent>>>,
@@ -155,17 +185,49 @@ pub struct HttpTelemetryExporter {
     /// Current pipeline context for enriching events
     pipeline_id: Arc<RwLock<Option<Uuid>>>,
     trace_id: Arc<RwLock<Option<Uuid>>>,
+    /// HTTP agent with timeouts configured
+    agent: ureq::Agent,
+    /// Circuit breaker for the telemetry endpoint
+    circuit: Arc<CircuitBreaker>,
+    /// Retry policy for batch submissions
+    retry_policy: RetryPolicy,
+    /// Queue for failed events that will be retried
+    failed_queue: Arc<Mutex<VecDeque<PlatformEvent>>>,
+    /// Counter for dropped events (when queue is full)
+    dropped_count: Arc<AtomicU32>,
 }
 
 impl HttpTelemetryExporter {
     /// Create a new HTTP exporter with the given configuration
     pub fn new(config: TelemetryConfig) -> Self {
+        // Create HTTP agent with timeouts
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(CONNECT_TIMEOUT_MS))
+            .timeout(Duration::from_millis(REQUEST_TIMEOUT_MS))
+            .build();
+
+        // Circuit breaker: open after 3 failures, stay open for 30s
+        let circuit = Arc::new(CircuitBreaker::new(CircuitConfig::default()));
+
+        // Retry policy with configurable max attempts
+        let retry_policy = RetryPolicy {
+            max_attempts: config.max_retries,
+            initial_delay_ms: 500,
+            max_delay_ms: 5000,
+            jitter_factor: 0.3,
+        };
+
         Self {
             config,
             buffer: Arc::new(Mutex::new(Vec::new())),
             running: Arc::new(AtomicBool::new(false)),
             pipeline_id: Arc::new(RwLock::new(None)),
             trace_id: Arc::new(RwLock::new(None)),
+            agent,
+            circuit,
+            retry_policy,
+            failed_queue: Arc::new(Mutex::new(VecDeque::new())),
+            dropped_count: Arc::new(AtomicU32::new(0)),
         }
     }
 
@@ -193,6 +255,26 @@ impl HttpTelemetryExporter {
         }
     }
 
+    /// Check if the circuit breaker is open (blocking requests).
+    pub fn is_circuit_open(&self) -> bool {
+        self.circuit.is_open()
+    }
+
+    /// Reset the circuit breaker to closed state.
+    pub fn reset_circuit(&self) {
+        self.circuit.reset();
+    }
+
+    /// Get the number of events waiting in the failed queue.
+    pub fn failed_queue_size(&self) -> usize {
+        self.failed_queue.lock().map(|q| q.len()).unwrap_or(0)
+    }
+
+    /// Get the number of events that were dropped due to queue overflow.
+    pub fn dropped_count(&self) -> u32 {
+        self.dropped_count.load(Ordering::Relaxed)
+    }
+
     /// Start the background flush thread
     pub fn start(&self) {
         if self.running.swap(true, Ordering::SeqCst) {
@@ -203,11 +285,41 @@ impl HttpTelemetryExporter {
         let running = Arc::clone(&self.running);
         let config = self.config.clone();
         let flush_interval = Duration::from_secs(config.flush_interval_secs);
+        let pipeline_id = Arc::clone(&self.pipeline_id);
+        let trace_id = Arc::clone(&self.trace_id);
+        let agent = self.agent.clone();
+        let circuit = Arc::clone(&self.circuit);
+        let retry_policy = self.retry_policy.clone();
+        let failed_queue = Arc::clone(&self.failed_queue);
+        let dropped_count = Arc::clone(&self.dropped_count);
 
         thread::spawn(move || {
             while running.load(Ordering::SeqCst) {
                 thread::sleep(flush_interval);
-                flush_buffer(&buffer, &config);
+
+                // First, try to send any failed events from the queue
+                if config.enable_retry_queue {
+                    retry_failed_events(
+                        &failed_queue,
+                        &config,
+                        &agent,
+                        &circuit,
+                        &retry_policy,
+                    );
+                }
+
+                // Then flush the current buffer
+                flush_buffer_with_retry(
+                    &buffer,
+                    &config,
+                    &pipeline_id,
+                    &trace_id,
+                    &agent,
+                    &circuit,
+                    &retry_policy,
+                    &failed_queue,
+                    &dropped_count,
+                );
             }
         });
     }
@@ -215,8 +327,18 @@ impl HttpTelemetryExporter {
     /// Stop the background flush thread
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
-        // Final flush
-        flush_buffer(&self.buffer, &self.config);
+        // Final flush with retry
+        flush_buffer_with_retry(
+            &self.buffer,
+            &self.config,
+            &self.pipeline_id,
+            &self.trace_id,
+            &self.agent,
+            &self.circuit,
+            &self.retry_policy,
+            &self.failed_queue,
+            &self.dropped_count,
+        );
     }
 
     /// Add an event to the buffer
@@ -228,13 +350,33 @@ impl HttpTelemetryExporter {
         if buffer.len() >= self.config.batch_size {
             let events: Vec<TelemetryEvent> = buffer.drain(..).collect();
             drop(buffer); // Release lock before HTTP call
-            send_batch(&events, &self.config, &self.pipeline_id, &self.trace_id);
+            send_batch_with_retry(
+                &events,
+                &self.config,
+                &self.pipeline_id,
+                &self.trace_id,
+                &self.agent,
+                &self.circuit,
+                &self.retry_policy,
+                &self.failed_queue,
+                &self.dropped_count,
+            );
         }
     }
 
     /// Force flush all buffered events
     pub fn flush(&self) {
-        flush_buffer(&self.buffer, &self.config);
+        flush_buffer_with_retry(
+            &self.buffer,
+            &self.config,
+            &self.pipeline_id,
+            &self.trace_id,
+            &self.agent,
+            &self.circuit,
+            &self.retry_policy,
+            &self.failed_queue,
+            &self.dropped_count,
+        );
     }
 
     /// Create a telemetry sender that feeds into this exporter
@@ -245,6 +387,11 @@ impl HttpTelemetryExporter {
         let config = self.config.clone();
         let pipeline_id = Arc::clone(&self.pipeline_id);
         let trace_id = Arc::clone(&self.trace_id);
+        let agent = self.agent.clone();
+        let circuit = Arc::clone(&self.circuit);
+        let retry_policy = self.retry_policy.clone();
+        let failed_queue = Arc::clone(&self.failed_queue);
+        let dropped_count = Arc::clone(&self.dropped_count);
 
         thread::spawn(move || {
             for event in rx {
@@ -254,7 +401,17 @@ impl HttpTelemetryExporter {
                 if buf.len() >= batch_size {
                     let events: Vec<TelemetryEvent> = buf.drain(..).collect();
                     drop(buf);
-                    send_batch(&events, &config, &pipeline_id, &trace_id);
+                    send_batch_with_retry(
+                        &events,
+                        &config,
+                        &pipeline_id,
+                        &trace_id,
+                        &agent,
+                        &circuit,
+                        &retry_policy,
+                        &failed_queue,
+                        &dropped_count,
+                    );
                 }
             }
         });
@@ -269,26 +426,66 @@ impl Drop for HttpTelemetryExporter {
     }
 }
 
-/// Flush all buffered events to the platform
-fn flush_buffer(buffer: &Arc<Mutex<Vec<TelemetryEvent>>>, config: &TelemetryConfig) {
+/// Flush all buffered events to the platform with retry logic.
+fn flush_buffer_with_retry(
+    buffer: &Arc<Mutex<Vec<TelemetryEvent>>>,
+    config: &TelemetryConfig,
+    pipeline_id: &Arc<RwLock<Option<Uuid>>>,
+    trace_id: &Arc<RwLock<Option<Uuid>>>,
+    agent: &ureq::Agent,
+    circuit: &Arc<CircuitBreaker>,
+    retry_policy: &RetryPolicy,
+    failed_queue: &Arc<Mutex<VecDeque<PlatformEvent>>>,
+    dropped_count: &Arc<AtomicU32>,
+) {
     let events: Vec<TelemetryEvent> = {
         let mut buf = buffer.lock().unwrap();
         buf.drain(..).collect()
     };
 
     if !events.is_empty() {
-        send_batch(&events, config, &Arc::new(RwLock::new(None)), &Arc::new(RwLock::new(None)));
+        send_batch_with_retry(
+            &events,
+            config,
+            pipeline_id,
+            trace_id,
+            agent,
+            circuit,
+            retry_policy,
+            failed_queue,
+            dropped_count,
+        );
     }
 }
 
-/// Send a batch of events to the platform API
-fn send_batch(
+/// Send a batch of events to the platform API with retry and circuit breaker.
+fn send_batch_with_retry(
     events: &[TelemetryEvent],
     config: &TelemetryConfig,
     pipeline_id: &Arc<RwLock<Option<Uuid>>>,
     trace_id: &Arc<RwLock<Option<Uuid>>>,
+    agent: &ureq::Agent,
+    circuit: &Arc<CircuitBreaker>,
+    retry_policy: &RetryPolicy,
+    failed_queue: &Arc<Mutex<VecDeque<PlatformEvent>>>,
+    dropped_count: &Arc<AtomicU32>,
 ) {
     if events.is_empty() || config.endpoint.is_empty() || config.api_key.is_empty() {
+        return;
+    }
+
+    // Check circuit breaker
+    if !circuit.can_execute() {
+        // Circuit is open, queue events for later
+        if config.enable_retry_queue {
+            let pid = pipeline_id.read().ok().and_then(|g| *g);
+            let tid = trace_id.read().ok().and_then(|g| *g);
+            let platform_events: Vec<PlatformEvent> = events
+                .iter()
+                .map(|e| convert_to_platform_event(e, config, pid, tid))
+                .collect();
+            queue_failed_events(platform_events, failed_queue, dropped_count);
+        }
         return;
     }
 
@@ -300,28 +497,148 @@ fn send_batch(
         .map(|e| convert_to_platform_event(e, config, pid, tid))
         .collect();
 
+    // Try to send with retry
+    let result = send_batch_inner(&platform_events, config, agent, circuit, retry_policy);
+
+    if let Err(failed_events) = result {
+        // Queue failed events for later retry
+        if config.enable_retry_queue {
+            queue_failed_events(failed_events, failed_queue, dropped_count);
+        }
+    }
+}
+
+/// Inner send function that returns the events on failure for queueing.
+fn send_batch_inner(
+    events: &[PlatformEvent],
+    config: &TelemetryConfig,
+    agent: &ureq::Agent,
+    circuit: &Arc<CircuitBreaker>,
+    retry_policy: &RetryPolicy,
+) -> Result<(), Vec<PlatformEvent>> {
     let batch = PlatformEventBatch {
-        events: platform_events,
+        events: events.to_vec(),
     };
 
     let url = format!("{}/v1/telemetry/batch", config.endpoint.trim_end_matches('/'));
 
-    // Send HTTP request
-    match ureq::post(&url)
-        .set("Authorization", &format!("Bearer {}", config.api_key))
-        .set("Content-Type", "application/json")
-        .send_json(&batch)
-    {
-        Ok(response) => {
-            if response.status() != 200 && response.status() != 201 {
-                eprintln!(
-                    "[xybrid-telemetry] Warning: Platform returned status {}",
-                    response.status()
-                );
+    for attempt in 0..retry_policy.max_attempts {
+        // Calculate delay for this attempt
+        let delay = retry_policy.delay_for_attempt(attempt);
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
+
+        // Check circuit breaker again
+        if !circuit.can_execute() {
+            return Err(events.to_vec());
+        }
+
+        // Send HTTP request
+        let result = agent
+            .post(&url)
+            .set("Authorization", &format!("Bearer {}", config.api_key))
+            .set("Content-Type", "application/json")
+            .send_json(&batch);
+
+        match result {
+            Ok(response) => {
+                let status = response.status();
+                if status == 200 || status == 201 {
+                    circuit.record_success();
+                    return Ok(());
+                } else if is_retryable_status(status) {
+                    circuit.record_failure();
+                    // Continue to retry
+                } else {
+                    // Non-retryable error (4xx client errors)
+                    circuit.record_success(); // Don't trip circuit for client errors
+                    eprintln!(
+                        "[xybrid-telemetry] Warning: Platform returned status {}",
+                        status
+                    );
+                    return Ok(()); // Don't retry or queue client errors
+                }
+            }
+            Err(ureq::Error::Status(status, _)) => {
+                if status == 429 {
+                    circuit.record_rate_limited();
+                } else if is_retryable_status(status) {
+                    circuit.record_failure();
+                } else {
+                    // Non-retryable status
+                    circuit.record_success();
+                    eprintln!(
+                        "[xybrid-telemetry] Warning: Platform returned status {}",
+                        status
+                    );
+                    return Ok(());
+                }
+            }
+            Err(ureq::Error::Transport(_)) => {
+                circuit.record_failure();
+                // Continue to retry
             }
         }
-        Err(e) => {
-            eprintln!("[xybrid-telemetry] Failed to send telemetry: {}", e);
+    }
+
+    // All retries exhausted
+    Err(events.to_vec())
+}
+
+/// Check if an HTTP status code is retryable.
+fn is_retryable_status(status: u16) -> bool {
+    matches!(status, 429 | 502 | 503 | 504)
+}
+
+/// Queue failed events for later retry.
+fn queue_failed_events(
+    events: Vec<PlatformEvent>,
+    failed_queue: &Arc<Mutex<VecDeque<PlatformEvent>>>,
+    dropped_count: &Arc<AtomicU32>,
+) {
+    let mut queue = failed_queue.lock().unwrap();
+
+    for event in events {
+        if queue.len() >= MAX_FAILED_QUEUE_SIZE {
+            // Queue is full, drop oldest event
+            queue.pop_front();
+            dropped_count.fetch_add(1, Ordering::Relaxed);
+        }
+        queue.push_back(event);
+    }
+}
+
+/// Retry sending failed events from the queue.
+fn retry_failed_events(
+    failed_queue: &Arc<Mutex<VecDeque<PlatformEvent>>>,
+    config: &TelemetryConfig,
+    agent: &ureq::Agent,
+    circuit: &Arc<CircuitBreaker>,
+    retry_policy: &RetryPolicy,
+) {
+    // Don't retry if circuit is open
+    if !circuit.can_execute() {
+        return;
+    }
+
+    // Take a batch of events from the queue
+    let events: Vec<PlatformEvent> = {
+        let mut queue = failed_queue.lock().unwrap();
+        let batch_size = config.batch_size.min(queue.len());
+        queue.drain(..batch_size).collect()
+    };
+
+    if events.is_empty() {
+        return;
+    }
+
+    // Try to send the batch
+    if let Err(failed_events) = send_batch_inner(&events, config, agent, circuit, retry_policy) {
+        // Put them back at the front of the queue
+        let mut queue = failed_queue.lock().unwrap();
+        for event in failed_events.into_iter().rev() {
+            queue.push_front(event);
         }
     }
 }
@@ -878,5 +1195,82 @@ mod tests {
         assert!(received.is_ok());
         let received_event = received.unwrap();
         assert_eq!(received_event.event_type, "TestEvent");
+    }
+
+    #[test]
+    fn test_telemetry_config_defaults() {
+        let config = TelemetryConfig::default();
+        assert_eq!(config.batch_size, 10);
+        assert_eq!(config.flush_interval_secs, 5);
+        assert_eq!(config.max_retries, 3);
+        assert!(config.enable_retry_queue);
+    }
+
+    #[test]
+    fn test_http_exporter_circuit_breaker_initial_state() {
+        let config = TelemetryConfig::new("https://example.com", "test-key");
+        let exporter = HttpTelemetryExporter::new(config);
+        assert!(!exporter.is_circuit_open());
+    }
+
+    #[test]
+    fn test_http_exporter_circuit_breaker_reset() {
+        let config = TelemetryConfig::new("https://example.com", "test-key");
+        let exporter = HttpTelemetryExporter::new(config);
+
+        // Manually trigger failures to open the circuit
+        for _ in 0..3 {
+            exporter.circuit.record_failure();
+        }
+        assert!(exporter.is_circuit_open());
+
+        // Reset should close it
+        exporter.reset_circuit();
+        assert!(!exporter.is_circuit_open());
+    }
+
+    #[test]
+    fn test_http_exporter_failed_queue_initial_empty() {
+        let config = TelemetryConfig::new("https://example.com", "test-key");
+        let exporter = HttpTelemetryExporter::new(config);
+        assert_eq!(exporter.failed_queue_size(), 0);
+        assert_eq!(exporter.dropped_count(), 0);
+    }
+
+    #[test]
+    fn test_queue_failed_events() {
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let dropped = Arc::new(AtomicU32::new(0));
+
+        let events = vec![
+            PlatformEvent {
+                session_id: Uuid::new_v4(),
+                event_type: "Test".to_string(),
+                payload: serde_json::json!({}),
+                device_id: None,
+                platform: None,
+                app_version: None,
+                timestamp: None,
+                pipeline_id: None,
+                trace_id: None,
+                stages: None,
+            },
+        ];
+
+        queue_failed_events(events, &queue, &dropped);
+        assert_eq!(queue.lock().unwrap().len(), 1);
+        assert_eq!(dropped.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_is_retryable_status() {
+        assert!(is_retryable_status(429));
+        assert!(is_retryable_status(502));
+        assert!(is_retryable_status(503));
+        assert!(is_retryable_status(504));
+        assert!(!is_retryable_status(200));
+        assert!(!is_retryable_status(400));
+        assert!(!is_retryable_status(401));
+        assert!(!is_retryable_status(404));
     }
 }

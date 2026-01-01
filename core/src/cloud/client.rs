@@ -3,8 +3,13 @@
 use super::completion::{CompletionRequest, CompletionResponse};
 use super::config::{CloudBackend, CloudConfig};
 use super::error::CloudError;
+use crate::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryResult, with_retry};
 use serde_json::json;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Default timeout for HTTP connections (10 seconds).
+const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 10_000;
 
 /// Cloud client for completions.
 ///
@@ -14,9 +19,30 @@ use std::time::{Duration, Instant};
 ///
 /// For local/on-device inference, use `target: device` in your pipeline YAML,
 /// which routes to [`crate::template_executor::TemplateExecutor`] instead.
+///
+/// # Resilience Features
+///
+/// The client includes production-hardening features:
+/// - **Circuit breaker**: Prevents hammering failing gateway endpoints
+/// - **Automatic retry**: Exponential backoff with jitter for transient failures
+/// - **Connection timeouts**: Fail fast on unresponsive endpoints
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use xybrid_core::cloud::Cloud;
+///
+/// let cloud = Cloud::new()?;
+/// let response = cloud.prompt("Hello, world!")?;
+/// println!("Response: {}", response);
+/// ```
 pub struct Cloud {
     config: CloudConfig,
     agent: ureq::Agent,
+    /// Circuit breaker for gateway endpoint.
+    gateway_circuit: Arc<CircuitBreaker>,
+    /// Retry policy for gateway requests.
+    retry_policy: RetryPolicy,
 }
 
 impl Cloud {
@@ -28,11 +54,24 @@ impl Cloud {
 
     /// Create a new cloud client with custom configuration.
     pub fn with_config(config: CloudConfig) -> Result<Self, CloudError> {
+        // Configure HTTP agent with both connection and request timeouts
         let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
             .timeout(Duration::from_millis(config.timeout_ms as u64))
             .build();
 
-        Ok(Self { config, agent })
+        // Circuit breaker: open after 3 failures, stay open for 30s
+        let gateway_circuit = Arc::new(CircuitBreaker::new(CircuitConfig::default()));
+
+        // Retry policy: 3 attempts with exponential backoff (conservative for LLM calls)
+        let retry_policy = RetryPolicy::conservative();
+
+        Ok(Self {
+            config,
+            agent,
+            gateway_circuit,
+            retry_policy,
+        })
     }
 
     /// Create a client that uses the gateway.
@@ -45,17 +84,54 @@ impl Cloud {
         Self::with_config(CloudConfig::direct(provider))
     }
 
+    /// Check if the gateway circuit breaker is open.
+    pub fn is_circuit_open(&self) -> bool {
+        self.gateway_circuit.is_open()
+    }
+
+    /// Reset the gateway circuit breaker (use with caution).
+    pub fn reset_circuit(&self) {
+        self.gateway_circuit.reset();
+    }
+
     /// Send a completion request.
+    ///
+    /// For gateway backend, this wraps the call with retry logic and circuit breaker.
+    /// For direct backend, retries are not applied (direct calls are for development only).
     pub fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, CloudError> {
         let start = Instant::now();
 
         let mut response = match self.config.backend {
-            CloudBackend::Gateway => self.call_gateway(request)?,
+            CloudBackend::Gateway => self.complete_via_gateway(request)?,
             CloudBackend::Direct => self.call_direct(request)?,
         };
 
         response.latency_ms = Some(start.elapsed().as_millis() as u32);
         Ok(response)
+    }
+
+    /// Complete via gateway with retry logic and circuit breaker.
+    fn complete_via_gateway(
+        &self,
+        request: CompletionRequest,
+    ) -> Result<CompletionResponse, CloudError> {
+        // Check circuit breaker before attempting
+        if !self.gateway_circuit.can_execute() {
+            return Err(CloudError::CircuitOpen(
+                "Gateway circuit breaker is open due to recent failures. Try again later.".into(),
+            ));
+        }
+
+        // Clone request data needed for retry closure
+        let request_clone = request.clone();
+
+        let result: RetryResult<CompletionResponse, CloudError> = with_retry(
+            &self.retry_policy,
+            Some(&self.gateway_circuit),
+            || self.call_gateway(request_clone.clone()),
+        );
+
+        result.into_result()
     }
 
     /// Simple prompt completion (convenience method).
@@ -175,19 +251,26 @@ impl Cloud {
                 })
             }
             Err(ureq::Error::Status(status, resp)) => {
+                // Parse Retry-After header for rate limiting (before consuming response)
+                let retry_after_secs = resp
+                    .header("Retry-After")
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(60); // Default to 60 seconds if not specified
+
                 let error_body: Result<serde_json::Value, _> = resp.into_json();
                 let message = error_body
                     .ok()
                     .and_then(|v| v["error"]["message"].as_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| "Unknown error".into());
 
-                if status == 429 {
-                    return Err(CloudError::RateLimited {
-                        retry_after_secs: 60,
-                    });
+                match status {
+                    429 => Err(CloudError::RateLimited { retry_after_secs }),
+                    502 | 503 | 504 => Err(CloudError::GatewayError(format!(
+                        "Gateway returned {}: {}",
+                        status, message
+                    ))),
+                    _ => Err(CloudError::ApiError { status, message }),
                 }
-
-                Err(CloudError::ApiError { status, message })
             }
             Err(ureq::Error::Transport(transport)) => {
                 let msg = transport.to_string();
@@ -264,5 +347,44 @@ mod tests {
         let cloud = Cloud::direct("openai");
         assert!(cloud.is_ok());
         std::env::remove_var("OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn test_cloud_circuit_breaker_initial_state() {
+        let cloud = Cloud::new().unwrap();
+        assert!(!cloud.is_circuit_open());
+    }
+
+    #[test]
+    fn test_cloud_circuit_breaker_reset() {
+        let cloud = Cloud::new().unwrap();
+
+        // Manually trigger failures to open the circuit
+        for _ in 0..3 {
+            cloud.gateway_circuit.record_failure();
+        }
+        assert!(cloud.is_circuit_open());
+
+        // Reset should close it
+        cloud.reset_circuit();
+        assert!(!cloud.is_circuit_open());
+    }
+
+    #[test]
+    fn test_cloud_error_circuit_open() {
+        let err = CloudError::CircuitOpen("test".to_string());
+        assert!(matches!(err, CloudError::CircuitOpen(_)));
+        assert_eq!(
+            err.to_string(),
+            "Circuit breaker open: test"
+        );
+    }
+
+    #[test]
+    fn test_circuit_open_not_retryable() {
+        use crate::http::RetryableError;
+
+        let err = CloudError::CircuitOpen("test".to_string());
+        assert!(!err.is_retryable());
     }
 }

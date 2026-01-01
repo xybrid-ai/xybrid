@@ -43,10 +43,52 @@ pub enum SdkError {
     CacheError(String),
     #[error("Pipeline error: {0}")]
     PipelineError(String),
+    #[error("Circuit breaker open: {0}")]
+    CircuitOpen(String),
+    #[error("Rate limited, retry after {retry_after_secs} seconds")]
+    RateLimited {
+        retry_after_secs: u64,
+    },
+    #[error("Request timeout after {timeout_ms}ms")]
+    Timeout {
+        timeout_ms: u64,
+    },
 }
 
 /// Result type for SDK operations.
 pub type SdkResult<T> = Result<T, SdkError>;
+
+impl xybrid_core::http::RetryableError for SdkError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Retryable errors (transient failures)
+            SdkError::NetworkError(_) => true,
+            SdkError::RateLimited { .. } => true,
+            SdkError::Timeout { .. } => true,
+
+            // Non-retryable errors (permanent failures)
+            SdkError::ModelNotFound(_) => false,
+            SdkError::LoadError(_) => false,
+            SdkError::InferenceError(_) => false,
+            SdkError::StreamingNotSupported => false,
+            SdkError::NotLoaded => false,
+            SdkError::ConfigError(_) => false,
+            SdkError::IoError(_) => false,
+            SdkError::CacheError(_) => false,
+            SdkError::PipelineError(_) => false,
+            SdkError::CircuitOpen(_) => false, // Don't retry when circuit is open
+        }
+    }
+
+    fn retry_after(&self) -> Option<std::time::Duration> {
+        match self {
+            SdkError::RateLimited { retry_after_secs } => {
+                Some(std::time::Duration::from_secs(*retry_after_secs))
+            }
+            _ => None,
+        }
+    }
+}
 
 /// Configuration for streaming ASR sessions.
 #[derive(Debug, Clone)]
