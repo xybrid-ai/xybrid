@@ -64,6 +64,10 @@ pub enum CloudError {
     /// Configuration error.
     #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    /// Circuit breaker is open (too many recent failures).
+    #[error("Circuit breaker open: {0}")]
+    CircuitOpen(String),
 }
 
 impl From<std::io::Error> for CloudError {
@@ -129,6 +133,7 @@ impl RetryableError for CloudError {
             CloudError::ModelNotFound(_) => false,
             CloudError::ContentBlocked { .. } => false,
             CloudError::ConfigError(_) => false,
+            CloudError::CircuitOpen(_) => false,
         }
     }
 
