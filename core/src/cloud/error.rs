@@ -1,6 +1,9 @@
 //! Error types for cloud operations.
 
+use std::time::Duration;
 use thiserror::Error;
+
+use crate::http::RetryableError;
 
 /// Errors that can occur during cloud operations.
 #[derive(Debug, Error)]
@@ -61,6 +64,10 @@ pub enum CloudError {
     /// Configuration error.
     #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    /// Circuit breaker is open (too many recent failures).
+    #[error("Circuit breaker open: {0}")]
+    CircuitOpen(String),
 }
 
 impl From<std::io::Error> for CloudError {
@@ -101,6 +108,41 @@ impl From<crate::cloud_llm::LlmError> for CloudError {
                 CloudError::ContentBlocked { reason }
             }
             crate::cloud_llm::LlmError::IoError(msg) => CloudError::NetworkError(msg),
+        }
+    }
+}
+
+impl RetryableError for CloudError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Retryable errors (transient failures)
+            CloudError::RateLimited { .. } => true,
+            CloudError::Timeout { .. } => true,
+            CloudError::NetworkError(_) => true,
+            CloudError::GatewayError(_) => true,
+            CloudError::ApiError { status, .. } => {
+                // Retry on server errors and specific client errors
+                matches!(status, 429 | 502 | 503 | 504)
+            }
+
+            // Non-retryable errors (permanent failures)
+            CloudError::BackendUnavailable(_) => false,
+            CloudError::AuthenticationError(_) => false,
+            CloudError::ParseError(_) => false,
+            CloudError::InvalidRequest(_) => false,
+            CloudError::ModelNotFound(_) => false,
+            CloudError::ContentBlocked { .. } => false,
+            CloudError::ConfigError(_) => false,
+            CloudError::CircuitOpen(_) => false,
+        }
+    }
+
+    fn retry_after(&self) -> Option<Duration> {
+        match self {
+            CloudError::RateLimited { retry_after_secs } => {
+                Some(Duration::from_secs(*retry_after_secs))
+            }
+            _ => None,
         }
     }
 }
