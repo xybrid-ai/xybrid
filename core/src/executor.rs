@@ -884,22 +884,24 @@ mod tests {
     use super::*;
     use crate::ir::EnvelopeKind;
     use crate::runtime_adapter::OnnxRuntimeAdapter;
-    use std::fs;
+    use crate::testing::mocks::MockRuntimeAdapter;
     use std::sync::Arc;
-    use tempfile::TempDir;
 
+    /// Create a test executor with a mock adapter (returns text output).
     fn create_test_executor() -> Executor {
+        let mut executor = Executor::new();
+        let mut adapter = MockRuntimeAdapter::with_text_output("mock output");
+        adapter.load_model("/mock/model.onnx").unwrap();
+        executor.register_adapter(Arc::new(adapter));
+        executor
+    }
+
+    /// Create a test executor with a real ONNX adapter (for tests that need adapter metadata).
+    fn create_onnx_executor() -> Executor {
         let mut executor = Executor::new();
         let adapter = Arc::new(OnnxRuntimeAdapter::new());
         executor.register_adapter(adapter);
         executor
-    }
-
-    fn create_mock_onnx_file() -> (TempDir, String) {
-        let temp_dir = TempDir::new().unwrap();
-        let model_path = temp_dir.path().join("test_model.onnx");
-        fs::write(&model_path, b"fake onnx model data").unwrap();
-        (temp_dir, model_path.to_string_lossy().to_string())
     }
 
     #[test]
@@ -935,12 +937,11 @@ mod tests {
 
     #[test]
     fn test_execute_stage_local() -> ExecutorResult<()> {
-        let (_temp_dir, model_path) = create_mock_onnx_file();
         let mut executor = Executor::new();
 
-        // Create and register adapter
-        let mut adapter = OnnxRuntimeAdapter::new();
-        adapter.load_model(&model_path)?;
+        // Create and register mock adapter that returns text (simulates ASR)
+        let mut adapter = MockRuntimeAdapter::with_text_output("transcribed text");
+        adapter.load_model("/mock/asr.onnx")?;
         executor.register_adapter(Arc::new(adapter));
 
         let stage = StageDescriptor::new("asr");
@@ -949,19 +950,19 @@ mod tests {
         let (output, metadata) = executor.execute_stage(&stage, &input, "local")?;
 
         // Verify output
-        assert_eq!(output.kind_str(), "Text"); // ASR converts audio to text
+        assert_eq!(output.kind_str(), "Text"); // Mock returns text (simulating ASR)
         assert_eq!(metadata.target, "local");
-        assert_eq!(metadata.adapter, "onnx");
+        assert_eq!(metadata.adapter, "mock");
         Ok(())
     }
 
     #[test]
-    fn test_execute_stage_cloud() -> ExecutorResult<()> {
-        let (_temp_dir, model_path) = create_mock_onnx_file();
+    fn test_execute_stage_cloud_target() -> ExecutorResult<()> {
         let mut executor = Executor::new();
 
-        let mut adapter = OnnxRuntimeAdapter::new();
-        adapter.load_model(&model_path)?;
+        // Create and register mock adapter
+        let mut adapter = MockRuntimeAdapter::with_text_output("cloud response");
+        adapter.load_model("/mock/model.onnx")?;
         executor.register_adapter(Arc::new(adapter));
 
         let stage = StageDescriptor::new("motivator");
@@ -969,6 +970,7 @@ mod tests {
 
         let (_output, metadata) = executor.execute_stage(&stage, &input, "cloud")?;
 
+        // Cloud target still routes through the adapter (no provider set = not integration)
         assert_eq!(metadata.target, "cloud");
 
         Ok(())
