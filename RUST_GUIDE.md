@@ -150,6 +150,444 @@ pub trait ModelRuntime: Send + Sync {
 
 ---
 
+## Architectural Quality Requirements
+
+This section defines the structural quality standards that all code must meet. These are not guidelines—they are requirements.
+
+### 1. Layered Architecture Discipline
+
+**The layer hierarchy is inviolable:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Application Layer (CLI, examples, bindings)                │
+│  - Entry points, user interaction, configuration            │
+├─────────────────────────────────────────────────────────────┤
+│  Orchestration Layer (orchestrator, pipeline)               │
+│  - Policy, routing, streaming, telemetry                    │
+├─────────────────────────────────────────────────────────────┤
+│  Execution Layer (executor, template_executor)              │
+│  - Model loading, preprocessing, inference, postprocessing  │
+├─────────────────────────────────────────────────────────────┤
+│  Infrastructure Layer (runtime_adapter, ir, device)         │
+│  - ONNX/Candle backends, Envelope types, hardware detection │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Rules:**
+- Dependencies flow **downward only** (upper layers depend on lower layers)
+- Lower layers MUST NOT import from upper layers
+- Each layer has its own error types that wrap lower-layer errors
+- Cross-cutting concerns (logging, telemetry) use traits, not direct dependencies
+
+```rust
+// CORRECT: Orchestrator depends on Executor (upper → lower)
+use crate::executor::Executor;
+
+// VIOLATION: Executor importing from Orchestrator (lower → upper)
+use crate::orchestrator::PolicyEngine;  // ❌ NEVER DO THIS
+```
+
+**Verification:** Before adding an import, ask: "Am I importing from a higher layer?" If yes, refactor.
+
+### 2. Module Boundaries & Cohesion
+
+**Each module must have a single, clear responsibility.**
+
+| Module | Responsibility | NOT Responsible For |
+|--------|---------------|---------------------|
+| `ir/` | Data types for pipeline flow | Serialization formats, I/O |
+| `runtime_adapter/` | Backend abstraction | Model-specific logic |
+| `template_executor/` | Metadata-driven execution | Routing decisions |
+| `orchestrator/` | Pipeline coordination | Direct model inference |
+| `device/` | Hardware detection | Model optimization |
+
+**Signs of poor module boundaries:**
+- Module A imports most of module B's internals
+- Circular dependencies between modules
+- A single change requires modifying multiple unrelated modules
+- Module name doesn't describe what it does
+
+**Module structure requirements:**
+
+```rust
+// mod.rs - ONLY re-exports and module declarations
+pub mod types;
+pub mod traits;
+mod internal;  // Private implementation
+
+pub use types::{PublicType, AnotherType};
+pub use traits::PublicTrait;
+
+// DO NOT put implementation logic in mod.rs
+```
+
+### 3. No Code Duplication (DRY)
+
+**Duplicate code is a bug.** It means changes must be made in multiple places, inviting inconsistency.
+
+**Detection:** If you copy-paste more than 3 lines, stop and extract.
+
+```rust
+// VIOLATION: Duplicated validation logic
+fn process_audio(input: &Envelope) -> Result<_> {
+    let bytes = match &input.kind {
+        EnvelopeKind::Audio(b) => b,
+        _ => return Err(AdapterError::InvalidInput("expected audio".into())),
+    };
+    // ...
+}
+
+fn analyze_audio(input: &Envelope) -> Result<_> {
+    let bytes = match &input.kind {  // ❌ Same pattern duplicated
+        EnvelopeKind::Audio(b) => b,
+        _ => return Err(AdapterError::InvalidInput("expected audio".into())),
+    };
+    // ...
+}
+
+// CORRECT: Extract common logic
+impl Envelope {
+    pub fn require_audio(&self) -> AdapterResult<&[u8]> {
+        match &self.kind {
+            EnvelopeKind::Audio(b) => Ok(b),
+            _ => Err(AdapterError::InvalidInput("expected audio".into())),
+        }
+    }
+}
+
+fn process_audio(input: &Envelope) -> Result<_> {
+    let bytes = input.require_audio()?;
+    // ...
+}
+```
+
+**Acceptable duplication:**
+- Test setup code (prefer fixtures, but some duplication is OK)
+- Simple one-liners where extraction hurts readability
+- Platform-specific implementations that happen to look similar
+
+### 4. Function Length & Complexity
+
+**Functions must be short and focused.** A function should do one thing.
+
+**Hard limits:**
+| Metric | Limit | Action if Exceeded |
+|--------|-------|-------------------|
+| Lines of code | 50 | Split into smaller functions |
+| Cyclomatic complexity | 10 | Reduce branching, extract helpers |
+| Nesting depth | 3 | Flatten with early returns |
+| Parameters | 5 | Use a config struct |
+
+```rust
+// VIOLATION: Function does too much (validation + loading + execution + postprocessing)
+fn run_model(path: &Path, input: &[u8], config: &Config) -> Result<Vec<u8>> {
+    // 1. Validate input (10 lines)
+    // 2. Load model (15 lines)
+    // 3. Preprocess (20 lines)
+    // 4. Execute (10 lines)
+    // 5. Postprocess (15 lines)
+    // 6. Validate output (10 lines)
+    // Total: 80+ lines ❌
+}
+
+// CORRECT: Each function has one job
+fn run_model(path: &Path, input: &[u8], config: &Config) -> Result<Vec<u8>> {
+    let validated_input = validate_input(input)?;
+    let model = load_model(path)?;
+    let preprocessed = preprocess(&validated_input, config)?;
+    let output = execute(&model, &preprocessed)?;
+    let result = postprocess(&output, config)?;
+    validate_output(&result)?;
+    Ok(result)
+}
+```
+
+**Refactoring strategies:**
+- **Extract method:** Pull out a coherent block into its own function
+- **Replace conditional with polymorphism:** Use enums with match instead of if/else chains
+- **Introduce parameter object:** Group related parameters into a struct
+
+### 5. Testability Requirements
+
+**All code must be testable in isolation.**
+
+**Testability checklist:**
+- [ ] No hardcoded file paths (accept `Path` or `PathBuf` parameters)
+- [ ] No direct network calls (inject HTTP client or use trait)
+- [ ] No global mutable state (use dependency injection)
+- [ ] Pure functions where possible (same input → same output)
+- [ ] Side effects isolated to boundaries
+
+```rust
+// VIOLATION: Hardcoded path, untestable
+fn load_config() -> Config {
+    let data = std::fs::read_to_string("/etc/xybrid/config.json").unwrap();
+    serde_json::from_str(&data).unwrap()
+}
+
+// CORRECT: Accepts path, testable
+fn load_config(path: &Path) -> Result<Config> {
+    let data = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read config from {}", path.display()))?;
+    serde_json::from_str(&data)
+        .context("failed to parse config JSON")
+}
+
+// VIOLATION: Direct network call, untestable
+fn fetch_model(url: &str) -> Result<Vec<u8>> {
+    reqwest::blocking::get(url)?.bytes()?.to_vec()
+}
+
+// CORRECT: Inject client, mockable
+fn fetch_model(client: &dyn HttpClient, url: &str) -> Result<Vec<u8>> {
+    client.get(url)
+}
+```
+
+**Test organization:**
+
+```
+crate/
+├── src/
+│   └── lib.rs
+└── tests/                    # Integration tests (test public API)
+    └── integration_test.rs
+
+# Unit tests go in the same file as the code:
+// src/envelope.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // ...
+}
+```
+
+**Test naming:**
+
+```rust
+#[test]
+fn envelope_from_audio_preserves_bytes() { }  // what_condition_expectedResult
+
+#[test]
+fn execute_returns_error_when_model_missing() { }
+
+#[test]
+fn phonemizer_handles_empty_string() { }
+```
+
+### 6. Dependency Injection & Inversion
+
+**Depend on abstractions, not concretions.**
+
+```rust
+// VIOLATION: Concrete dependency
+struct Executor {
+    runtime: OnnxRuntime,  // ❌ Tied to ONNX
+}
+
+// CORRECT: Abstract dependency
+struct Executor {
+    runtime: Box<dyn ModelRuntime>,  // ✓ Any runtime
+}
+
+// Or use generics for zero-cost abstraction:
+struct Executor<R: ModelRuntime> {
+    runtime: R,
+}
+```
+
+**Constructor injection pattern:**
+
+```rust
+impl Orchestrator {
+    pub fn new(
+        policy: Box<dyn PolicyEngine>,
+        routing: Box<dyn RoutingEngine>,
+        executor: Executor,
+    ) -> Self {
+        Self { policy, routing, executor }
+    }
+
+    // Convenience constructor with defaults
+    pub fn with_defaults() -> Self {
+        Self::new(
+            Box::new(DefaultPolicyEngine::new()),
+            Box::new(DefaultRoutingEngine::new()),
+            Executor::new(),
+        )
+    }
+}
+```
+
+### 7. Clear Public API Surface
+
+**Minimize what you expose. Every public item is a commitment.**
+
+```rust
+// lib.rs - Curated public API
+pub mod ir;
+pub mod template_executor;
+
+// Re-export commonly used types at crate root
+pub use ir::{Envelope, EnvelopeKind};
+pub use template_executor::TemplateExecutor;
+
+// DON'T expose implementation details
+// pub mod internal_helpers;  ❌
+```
+
+**Visibility hierarchy:**
+1. `pub` - Part of public API, documented, stable
+2. `pub(crate)` - Shared within crate, not for external use
+3. `pub(super)` - Shared with parent module only
+4. (private) - Default, implementation detail
+
+```rust
+pub struct TemplateExecutor {
+    pub(crate) session_cache: HashMap<PathBuf, Session>,  // Internal sharing
+    base_path: Option<PathBuf>,                            // Fully private
+}
+
+impl TemplateExecutor {
+    pub fn execute(&mut self, ...) -> Result<_> { }        // Public API
+    pub(crate) fn get_cached_session(&self, ...) { }       // Internal use
+    fn load_session(&self, ...) { }                        // Private helper
+}
+```
+
+### 8. Invariants & Type Safety
+
+**Encode invariants in types, not runtime checks.**
+
+```rust
+// WEAK: Runtime check every time
+fn process(samples: &[f32], sample_rate: u32) -> Result<_> {
+    if sample_rate != 16000 {
+        return Err("sample rate must be 16000");
+    }
+    // ...
+}
+
+// STRONG: Type encodes the invariant
+pub struct Audio16kHz {
+    samples: Vec<f32>,  // Guaranteed 16kHz by construction
+}
+
+impl Audio16kHz {
+    pub fn from_samples(samples: Vec<f32>, original_rate: u32) -> Self {
+        let resampled = resample_to_16k(samples, original_rate);
+        Self { samples: resampled }
+    }
+}
+
+fn process(audio: &Audio16kHz) -> Result<_> {
+    // No runtime check needed - type guarantees 16kHz
+}
+```
+
+**Newtype pattern for domain concepts:**
+
+```rust
+// Instead of raw types that could be confused:
+fn process(model_id: &str, version: &str, platform: &str) { }  // Easy to mix up
+
+// Use newtypes:
+pub struct ModelId(String);
+pub struct Version(String);
+pub struct Platform(String);
+
+fn process(model_id: &ModelId, version: &Version, platform: &Platform) { }
+```
+
+### 9. Error Boundaries
+
+**Each architectural layer owns its error type.**
+
+```
+Application     →  anyhow::Error (convenient, contextual)
+    ↓
+Orchestration   →  OrchestratorError (policy, routing, execution)
+    ↓
+Execution       →  AdapterError (model, input, inference)
+    ↓
+Infrastructure  →  EnvelopeError, IoError, etc.
+```
+
+**Error wrapping at boundaries:**
+
+```rust
+// Executor wraps lower-level errors
+#[derive(Error, Debug)]
+pub enum AdapterError {
+    #[error("inference failed: {0}")]
+    InferenceFailed(String),
+
+    #[error("envelope error: {0}")]
+    Envelope(#[from] EnvelopeError),  // Wraps lower layer
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+// Orchestrator wraps executor errors
+#[derive(Error, Debug)]
+pub enum OrchestratorError {
+    #[error("execution failed: {0}")]
+    ExecutionFailed(#[from] AdapterError),  // Wraps lower layer
+
+    #[error("policy denied: {reason}")]
+    PolicyDenied { reason: String },
+}
+```
+
+### 10. Documentation Requirements
+
+**Public items MUST be documented. Internal items SHOULD be documented.**
+
+| Item | Requirement |
+|------|-------------|
+| Public module | `//!` module doc with overview and example |
+| Public struct/enum | `///` doc with purpose and usage |
+| Public function | `///` doc with arguments, returns, errors, example |
+| Public trait | `///` doc with purpose, implementor requirements |
+| Complex private code | `//` inline comments explaining why |
+
+```rust
+/// Execute a preprocessing step on the input envelope.
+///
+/// # Arguments
+///
+/// * `step` - The preprocessing step configuration
+/// * `input` - Input data to preprocess
+/// * `base_path` - Base directory for resolving relative file paths
+///
+/// # Returns
+///
+/// Preprocessed data ready for model inference.
+///
+/// # Errors
+///
+/// * `AdapterError::InvalidInput` - Input type doesn't match step requirements
+/// * `AdapterError::Io` - Failed to read required files (vocab, tokens)
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let step = PreprocessingStep::AudioDecode { sample_rate: 16000, channels: 1 };
+/// let result = run_preprocessing(&step, &input, Path::new("models/whisper"))?;
+/// ```
+pub fn run_preprocessing(
+    step: &PreprocessingStep,
+    input: &Envelope,
+    base_path: &Path,
+) -> AdapterResult<PreprocessedData> {
+    // ...
+}
+```
+
+---
+
 ## Error Handling
 
 ### Two-Level Strategy
@@ -740,18 +1178,39 @@ metal = "0.27"
 
 ## Checklist for Code Review
 
-Before submitting code, verify:
+Before submitting code, verify all requirements are met:
 
+### Architecture
+- [ ] Respects layer boundaries (no upward dependencies)
+- [ ] Module has single, clear responsibility
+- [ ] No circular dependencies introduced
 - [ ] Uses `TemplateExecutor` for model inference (not raw ONNX)
 - [ ] Data flows through `Envelope` types
-- [ ] Errors use `thiserror` in library code
-- [ ] No `unwrap()` or `expect()` in library code (use `?` instead)
-- [ ] Public items have doc comments
-- [ ] Feature flags used for optional dependencies
-- [ ] Tests cover the happy path and at least one error case
+
+### Code Quality
+- [ ] No code duplication (extracted shared logic)
+- [ ] Functions ≤50 lines, complexity ≤10, nesting ≤3
+- [ ] No `unwrap()` or `expect()` in library code
 - [ ] No stringly-typed APIs (use enums)
-- [ ] Functions validate inputs early
-- [ ] No premature abstractions
+- [ ] Inputs validated early with meaningful errors
+
+### Testability
+- [ ] No hardcoded paths (accept as parameters)
+- [ ] Dependencies injected (not instantiated internally)
+- [ ] Unit tests cover happy path + error cases
+- [ ] Pure functions where possible
+
+### API Design
+- [ ] Minimal public surface (default to private)
+- [ ] Public items documented with `///`
+- [ ] Errors use `thiserror` in library code
+- [ ] Feature flags for optional dependencies
+
+### Naming
+- [ ] Types: `PascalCase`
+- [ ] Functions/variables: `snake_case`
+- [ ] Error types: `<Context>Error`
+- [ ] Constructors: `new()`, `with_*()`
 
 ---
 
