@@ -24,13 +24,17 @@ dirs = "5.0"
 sha2 = "0.10"
 
 # Platform-specific xybrid-core dependencies
-# Android uses ort-load-dynamic (loads .so at runtime from AAR)
-# Other platforms use default features (download-binaries)
+# Android: ort-load-dynamic (loads .so at runtime from AAR)
+# iOS: No ort (prebuilt binaries not available), uses Candle with Metal
+# Other platforms: Default features (download-binaries)
 
 [target.'cfg(target_os = "android")'.dependencies]
 xybrid-core = { path = "../core", default-features = false, features = ["ort-load-dynamic"] }
 
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(target_os = "ios")'.dependencies]
+xybrid-core = { path = "../core", default-features = false, features = ["candle-metal"] }
+
+[target.'cfg(all(not(target_os = "android"), not(target_os = "ios")))'.dependencies]
 xybrid-core = { path = "../core" }
 
 # Re-export the macro
