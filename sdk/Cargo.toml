@@ -8,7 +8,7 @@ name = "xybrid_sdk"
 path = "src/lib.rs"
 
 [dependencies]
-xybrid-core = { path = "../core" }
+# xybrid-core is defined per-target below to support Android's ort-load-dynamic requirement
 xybrid-macros = { path = "../macros" }
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
@@ -22,6 +22,20 @@ ureq = "2.9"
 uuid = { version = "1.0", features = ["v4", "v5", "serde"] }
 dirs = "5.0"
 sha2 = "0.10"
+
+# Platform-specific xybrid-core dependencies
+# Android: ort-load-dynamic (loads .so at runtime from AAR)
+# iOS: No ort (prebuilt binaries not available), uses Candle with Metal
+# Other platforms: Default features (download-binaries)
+
+[target.'cfg(target_os = "android")'.dependencies]
+xybrid-core = { path = "../core", default-features = false, features = ["ort-load-dynamic"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+xybrid-core = { path = "../core", default-features = false, features = ["candle-metal"] }
+
+[target.'cfg(all(not(target_os = "android"), not(target_os = "ios")))'.dependencies]
+xybrid-core = { path = "../core" }
 
 # Re-export the macro
 [package.metadata.docs.rs]
