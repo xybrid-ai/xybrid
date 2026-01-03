@@ -20,20 +20,24 @@ thiserror = "1.0"
 uuid = { version = "1.0", features = ["v4"] }
 chrono = "0.4"
 bincode = "1.3"
-ureq = { version = "2.8", features = ["json"] }
+ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
 url = "2.5"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync"] }
 tempfile = "3.8"
+log = "0.4"  # Standard logging facade
 
 # System information for device detection (v0.0.7)
 sysinfo = "0.32"
 
 # ONNX Runtime for model inference
 # Note: Using ort crate for ONNX Runtime bindings
-# For macOS/iOS: Uses Metal backend
-# For Android: Uses NNAPI backend (if available)
+# For macOS/iOS: Uses CoreML/Metal backend
+# For Android: Uses NNAPI backend (requires load-dynamic + AAR)
 # For desktop: Uses CPU backend
-ort = { version = "2.0.0-rc.10" }
+# Note: Using default-features = false for cross-platform compatibility.
+# - For Android: Use ort-load-dynamic feature (loads .so at runtime)
+# - For other platforms: Use ort-download feature to download prebuilt binaries
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["ndarray", "std"] }
 ndarray = "0.16"  # Used by ort for tensor operations
 base64 = "0.21"  # For BPE token decoding
 mel_spec = "0.2"  # For mel spectrogram computation (audio preprocessing)
@@ -62,8 +66,13 @@ byteorder = { version = "1.5", optional = true }  # For reading mel filter bytes
 num-traits = { version = "0.2", optional = true }  # Required by candle audio
 
 [features]
-default = ["onnx-runtime"]
+default = ["onnx-runtime", "ort-download"]
 onnx-runtime = []
+# Desktop/iOS/macOS: Download prebuilt ONNX Runtime binaries during build
+ort-download = ["ort/download-binaries"]
+# Android: Load ONNX Runtime dynamically at runtime (from AAR .so files)
+# Note: When using ort-load-dynamic, don't enable ort-download
+ort-load-dynamic = ["ort/load-dynamic"]
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:hf-hub", "dep:byteorder", "dep:num-traits"]
 candle-metal = ["candle", "candle-core/metal", "candle-nn/metal", ]
 candle-cuda = ["candle", "candle-core/cuda"]
@@ -75,4 +84,4 @@ dirs = "5.0"
 filetime = "0.2"
 hound = "3.5"  # WAV file reading for tests
 walkdir = "2.4"  # For directory traversal in tests
-ureq = { version = "2.8", features = ["json"] }  # For HTTP in tests
+ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }  # For HTTP in tests
