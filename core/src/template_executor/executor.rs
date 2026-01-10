@@ -4,11 +4,13 @@
 //! Preprocessing, postprocessing, and execution mode implementations are delegated
 //! to their respective submodules.
 
+use log::{debug, info};
+
 use crate::execution_template::{ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage};
 use crate::ir::Envelope;
 use crate::runtime_adapter::onnx::{ONNXSession, OnnxRuntime};
 use crate::runtime_adapter::{AdapterError, ModelRuntime};
-use crate::tracing as trace;
+use crate::tracing as xybrid_trace;
 use ndarray::ArrayD;
 use std::collections::HashMap;
 use std::path::Path;
@@ -59,15 +61,32 @@ impl TemplateExecutor {
         metadata: &ModelMetadata,
         input: &Envelope,
     ) -> ExecutorResult<Envelope> {
+        info!(
+            target: "xybrid_core",
+            "Executing model: {} v{}",
+            metadata.model_id,
+            metadata.version
+        );
+        debug!(
+            target: "xybrid_core",
+            "Input envelope kind: {}",
+            input.kind_str()
+        );
+
         // Start execution span
-        let _exec_span = trace::SpanGuard::new(format!("execute:{}", metadata.model_id));
-        trace::add_metadata("model_id", &metadata.model_id);
-        trace::add_metadata("version", &metadata.version);
+        let _exec_span = xybrid_trace::SpanGuard::new(format!("execute:{}", metadata.model_id));
+        xybrid_trace::add_metadata("model_id", &metadata.model_id);
+        xybrid_trace::add_metadata("version", &metadata.version);
 
         // Step 1: Handling Pipelines
         if let ExecutionTemplate::Pipeline { stages, config } = &metadata.execution_template {
-            let _span = trace::SpanGuard::new("pipeline_inference");
-            trace::add_metadata("stages", &stages.len().to_string());
+            info!(
+                target: "xybrid_core",
+                "Executing pipeline with {} stages",
+                stages.len()
+            );
+            let _span = xybrid_trace::SpanGuard::new("pipeline_inference");
+            xybrid_trace::add_metadata("stages", &stages.len().to_string());
 
             // Run preprocessing
             let preprocessed = self.run_preprocessing(metadata, input)?;
@@ -87,6 +106,13 @@ impl TemplateExecutor {
             }
         };
 
+        debug!(
+            target: "xybrid_core",
+            "Using {} runtime with model: {}",
+            runtime_type,
+            model_file
+        );
+
         // Run Preprocessing
         let preprocessed = self.run_preprocessing(metadata, input)?;
 
@@ -94,6 +120,7 @@ impl TemplateExecutor {
 
         // Check if this is TTS with phoneme IDs - needs special handling
         let result_envelope = if preprocessed.is_phoneme_ids() {
+            debug!(target: "xybrid_core", "Detected TTS inference (phoneme IDs)");
             // TTS models need phoneme IDs + voice embedding + speed
             let phoneme_ids = preprocessed.as_phoneme_ids().ok_or_else(|| {
                 AdapterError::InvalidInput("Expected phoneme IDs".to_string())
@@ -118,6 +145,7 @@ impl TemplateExecutor {
             // Convert outputs to envelope
             crate::runtime_adapter::tensor_utils::tensors_to_envelope(&raw_outputs, session.output_names())?
         } else if preprocessed.is_token_ids() {
+            debug!(target: "xybrid_core", "Detected BERT-style inference (token IDs)");
             // BERT-style models need input_ids, attention_mask, and token_type_ids as int64
             let (ids, attention_mask, token_type_ids) = preprocessed.as_token_ids().ok_or_else(|| {
                 AdapterError::InvalidInput("Expected token IDs".to_string())
@@ -131,6 +159,7 @@ impl TemplateExecutor {
             crate::runtime_adapter::tensor_utils::tensors_to_envelope(&raw_outputs, session.output_names())?
         } else {
             // Standard execution path
+            debug!(target: "xybrid_core", "Using standard execution path");
             let runtime_input = preprocessed.to_envelope()?;
 
             // Get Runtime & Execute
@@ -139,16 +168,27 @@ impl TemplateExecutor {
             })?;
 
             // Ensure model is loaded (runtime handles caching)
+            debug!(target: "xybrid_core", "Loading model: {:?}", model_full_path);
             runtime
                 .load(&model_full_path)
                 .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
 
+            debug!(target: "xybrid_core", "Running inference");
             runtime.execute(&runtime_input)?
         };
 
         // Run Postprocessing
         let raw_outputs = RawOutputs::from_envelope(&result_envelope)?;
-        self.run_postprocessing(metadata, raw_outputs)
+        let result = self.run_postprocessing(metadata, raw_outputs)?;
+
+        info!(
+            target: "xybrid_core",
+            "Model execution complete: {} -> {}",
+            metadata.model_id,
+            result.kind_str()
+        );
+
+        Ok(result)
     }
 
     /// Run preprocessing steps from metadata.
@@ -158,21 +198,31 @@ impl TemplateExecutor {
         input: &Envelope,
     ) -> ExecutorResult<PreprocessedData> {
         if metadata.preprocessing.is_empty() {
+            debug!(target: "xybrid_core", "No preprocessing steps configured");
             return PreprocessedData::from_envelope(input);
         }
 
-        let _preprocess_span = trace::SpanGuard::new("preprocessing");
-        trace::add_metadata("steps", &metadata.preprocessing.len().to_string());
+        info!(
+            target: "xybrid_core",
+            "Running {} preprocessing step(s)",
+            metadata.preprocessing.len()
+        );
+
+        let _preprocess_span = xybrid_trace::SpanGuard::new("preprocessing");
+        xybrid_trace::add_metadata("steps", &metadata.preprocessing.len().to_string());
 
         let mut data = PreprocessedData::from_envelope(input)?;
 
         for step in &metadata.preprocessing {
-            let step_name = format!("preprocessing:{}", step.step_name());
-            let _step_span = trace::SpanGuard::new(&step_name);
+            let step_name = step.step_name();
+            debug!(target: "xybrid_core", "Applying preprocessing: {}", step_name);
+
+            let _step_span = xybrid_trace::SpanGuard::new(&format!("preprocessing:{}", step_name));
 
             data = preprocessing::apply_preprocessing_step(step, data, input, &self.base_path)?;
         }
 
+        debug!(target: "xybrid_core", "Preprocessing complete");
         Ok(data)
     }
 
@@ -182,12 +232,21 @@ impl TemplateExecutor {
         stages: &[PipelineStage],
         config: &HashMap<String, serde_json::Value>,
         initial_input: PreprocessedData,
-        metadata: &ModelMetadata,
+        _metadata: &ModelMetadata,
     ) -> ExecutorResult<RawOutputs> {
         let mut stage_outputs: HashMap<String, HashMap<String, ArrayD<f32>>> = HashMap::new();
         let mut current_data = initial_input;
 
-        for stage in stages {
+        for (idx, stage) in stages.iter().enumerate() {
+            debug!(
+                target: "xybrid_core",
+                "Executing pipeline stage {}/{}: {} ({:?})",
+                idx + 1,
+                stages.len(),
+                stage.name,
+                stage.execution_mode
+            );
+
             match &stage.execution_mode {
                 ExecutionMode::SingleShot => {
                     let runtime = self.runtimes.get_mut("onnx").ok_or_else(|| {
@@ -284,21 +343,31 @@ impl TemplateExecutor {
         outputs: RawOutputs,
     ) -> ExecutorResult<Envelope> {
         if metadata.postprocessing.is_empty() {
+            debug!(target: "xybrid_core", "No postprocessing steps configured");
             return outputs.to_envelope();
         }
 
-        let _postprocess_span = trace::SpanGuard::new("postprocessing");
-        trace::add_metadata("steps", &metadata.postprocessing.len().to_string());
+        info!(
+            target: "xybrid_core",
+            "Running {} postprocessing step(s)",
+            metadata.postprocessing.len()
+        );
+
+        let _postprocess_span = xybrid_trace::SpanGuard::new("postprocessing");
+        xybrid_trace::add_metadata("steps", &metadata.postprocessing.len().to_string());
 
         let mut data = outputs;
 
         for step in &metadata.postprocessing {
-            let step_name = format!("postprocessing:{}", step.step_name());
-            let _step_span = trace::SpanGuard::new(&step_name);
+            let step_name = step.step_name();
+            debug!(target: "xybrid_core", "Applying postprocessing: {}", step_name);
+
+            let _step_span = xybrid_trace::SpanGuard::new(&format!("postprocessing:{}", step_name));
 
             data = postprocessing::apply_postprocessing_step(step, data, &self.base_path)?;
         }
 
+        debug!(target: "xybrid_core", "Postprocessing complete");
         data.to_envelope()
     }
 
