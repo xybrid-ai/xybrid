@@ -24,6 +24,7 @@ ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
 url = "2.5"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync"] }
 tempfile = "3.8"
+log = "0.4"  # Standard logging facade
 
 # System information for device detection (v0.0.7)
 sysinfo = "0.32"
