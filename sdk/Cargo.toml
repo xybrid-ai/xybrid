@@ -11,6 +11,7 @@ path = "src/lib.rs"
 # xybrid-core is defined per-target below to support Android's ort-load-dynamic requirement
 xybrid-macros = { path = "../macros" }
 anyhow = "1.0"
+log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
