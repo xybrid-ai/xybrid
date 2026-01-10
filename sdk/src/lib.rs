@@ -378,11 +378,11 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
     let config: PipelineConfig = serde_yaml::from_str(&config_content)
         .map_err(|e| PipelineConfigError::ConfigParseError(format!("{}: {}", config_path, e)))?;
 
-    // Minimal logging
+    // Log pipeline start
     if let Some(name) = &config.name {
-        eprintln!("[xybrid-sdk] Running pipeline: {}", name);
+        log::info!(target: "xybrid_sdk", "Running pipeline: {}", name);
     } else {
-        eprintln!("[xybrid-sdk] Running pipeline from: {}", config_path);
+        log::info!(target: "xybrid_sdk", "Running pipeline from: {}", config_path);
     }
 
     // Build stage descriptors from config
@@ -392,7 +392,7 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
         .map(|name| StageDescriptor::new(name.clone()))
         .collect();
 
-    eprintln!("[xybrid-sdk] Pipeline has {} stages", stages.len());
+    log::debug!(target: "xybrid_sdk", "Pipeline has {} stages", stages.len());
 
     // Create input envelope
     let kind = match config.input.kind.as_str() {
@@ -442,7 +442,7 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
         .map(|r| r.output.kind_str().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    eprintln!("[xybrid-sdk] Pipeline completed in {}ms", total_latency_ms);
+    log::info!(target: "xybrid_sdk", "Pipeline completed in {}ms", total_latency_ms);
 
     Ok(PipelineResult {
         name: config.name.clone(),
@@ -488,14 +488,11 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
     let config: PipelineConfig = serde_yaml::from_str(&config_content)
         .map_err(|e| PipelineConfigError::ConfigParseError(format!("{}: {}", config_path, e)))?;
 
-    // Minimal logging
+    // Log pipeline start
     if let Some(name) = &config.name {
-        eprintln!("[xybrid-sdk] Running pipeline (async): {}", name);
+        log::info!(target: "xybrid_sdk", "Running pipeline (async): {}", name);
     } else {
-        eprintln!(
-            "[xybrid-sdk] Running pipeline (async) from: {}",
-            config_path
-        );
+        log::info!(target: "xybrid_sdk", "Running pipeline (async) from: {}", config_path);
     }
 
     // Build stage descriptors from config
@@ -505,7 +502,7 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
         .map(|name| StageDescriptor::new(name.clone()))
         .collect();
 
-    eprintln!("[xybrid-sdk] Pipeline has {} stages", stages.len());
+    log::debug!(target: "xybrid_sdk", "Pipeline has {} stages", stages.len());
 
     // Create input envelope
     let kind = match config.input.kind.as_str() {
@@ -556,7 +553,7 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
         .map(|r| r.output.kind_str().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    eprintln!("[xybrid-sdk] Pipeline completed in {}ms", total_latency_ms);
+    log::info!(target: "xybrid_sdk", "Pipeline completed in {}ms", total_latency_ms);
 
     Ok(PipelineResult {
         name: config.name.clone(),

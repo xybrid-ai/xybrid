@@ -553,8 +553,9 @@ fn send_batch_inner(
                 } else {
                     // Non-retryable error (4xx client errors)
                     circuit.record_success(); // Don't trip circuit for client errors
-                    eprintln!(
-                        "[xybrid-telemetry] Warning: Platform returned status {}",
+                    log::warn!(
+                        target: "xybrid_telemetry",
+                        "Platform returned status {}",
                         status
                     );
                     return Ok(()); // Don't retry or queue client errors
@@ -568,8 +569,9 @@ fn send_batch_inner(
                 } else {
                     // Non-retryable status
                     circuit.record_success();
-                    eprintln!(
-                        "[xybrid-telemetry] Warning: Platform returned status {}",
+                    log::warn!(
+                        target: "xybrid_telemetry",
+                        "Platform returned status {}",
                         status
                     );
                     return Ok(());
