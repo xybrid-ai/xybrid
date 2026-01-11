@@ -1,18 +1,10 @@
-# Wav2vec2 Single-Stage Pipeline Configuration
-# Tests: Audio Input -> ASR -> Text Output
-
-name: "Wav2vec2 ASR Test"
+# Wav2vec2 Single-Stage Pipeline
+# Audio Input -> ASR -> Text Output
 
 stages:
-  - "wav2vec2-base-960h@1.0"    # ASR model - must match registry
-
-input:
-  kind: "Audio"
-
-metrics:
-  network_rtt: 50         # Fast network
-  battery: 80             # Good battery
-  temperature: 24.0       # Normal temperature
-
-availability:
-  "wav2vec2-base-960h@1.0": true   # Available locally
+  - wav2vec2-base-960h@1.0
+  # Complete version:
+  # - id: asr
+  #   model: wav2vec2-base-960h
+  #   version: "1.0"
+  #   target: device

@@ -46,11 +46,13 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use xybrid_core::bundler::XyBundle;
 use xybrid_core::context::{DeviceMetrics, StageDescriptor};
+use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::Orchestrator;
 use xybrid_core::orchestrator::policy_engine::PolicyEngine;
 use xybrid_core::orchestrator::routing_engine::{LocalAvailability, RoutingEngine};
+use xybrid_core::pipeline_config::PipelineConfig;
 use xybrid_core::target::{Platform, TargetResolver};
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::registry_client::RegistryClient;
@@ -225,116 +227,10 @@ enum CacheCommand {
     },
 }
 
-/// Pipeline configuration loaded from YAML.
-/// Supports both legacy format (stages as strings) and new format (stages as objects).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PipelineConfig {
-    /// Pipeline name/description
-    #[serde(default)]
-    name: Option<String>,
-    /// Registry URL for fetching models
-    #[serde(default)]
-    registry: Option<String>,
-    /// List of pipeline stages (can be strings or StageConfig objects)
-    #[serde(deserialize_with = "deserialize_stages")]
-    stages: Vec<StageConfig>,
-    /// Input envelope configuration
-    input: InputConfig,
-    /// Device metrics configuration
-    metrics: MetricsConfig,
-    /// Model availability mapping (stage name -> available locally)
-    #[serde(default)]
-    availability: HashMap<String, bool>,
-}
-
-/// Individual stage configuration in a pipeline.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StageConfig {
-    /// Stage identifier
-    #[serde(default)]
-    id: String,
-    /// Model ID (registry mask)
-    #[serde(default)]
-    model: Option<String>,
-    /// Model version
-    #[serde(default)]
-    version: Option<String>,
-    /// Execution target: "device", "cloud", "integration"
-    #[serde(default)]
-    target: Option<String>,
-    /// Provider for integration targets (e.g., "openai")
-    #[serde(default)]
-    provider: Option<String>,
-    /// Additional options
-    #[serde(default)]
-    options: HashMap<String, serde_json::Value>,
-}
-
-/// Custom deserializer to support both string stages and StageConfig objects.
-fn deserialize_stages<'de, D>(deserializer: D) -> Result<Vec<StageConfig>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::Error;
-
-    let raw: Vec<serde_json::Value> = Vec::deserialize(deserializer)?;
-    let mut stages = Vec::new();
-
-    for (i, item) in raw.into_iter().enumerate() {
-        match item {
-            serde_json::Value::String(s) => {
-                // Legacy format: stage is just a string name
-                stages.push(StageConfig {
-                    id: s.clone(),
-                    model: Some(s),
-                    version: None,
-                    target: None,
-                    provider: None,
-                    options: HashMap::new(),
-                });
-            }
-            serde_json::Value::Object(_) => {
-                // New format: stage is an object
-                let config: StageConfig = serde_json::from_value(item)
-                    .map_err(|e| D::Error::custom(format!("Invalid stage {}: {}", i, e)))?;
-                stages.push(config);
-            }
-            _ => {
-                return Err(D::Error::custom(format!(
-                    "Stage {} must be a string or object",
-                    i
-                )));
-            }
-        }
-    }
-
-    Ok(stages)
-}
-
-/// Input envelope configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct InputConfig {
-    /// Envelope kind (e.g., "AudioRaw", "Text", "audio", etc.)
-    #[serde(alias = "type")]
-    kind: Option<String>,
-    /// Sample rate for audio input
-    #[serde(default)]
-    sample_rate: Option<u32>,
-    /// Number of audio channels
-    #[serde(default)]
-    channels: Option<u8>,
-}
-
-/// Device metrics configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MetricsConfig {
-    /// Network round-trip time in milliseconds
-    network_rtt: u32,
-    /// Battery level (0-100)
-    battery: u8,
-    /// Device temperature in Celsius
-    temperature: f32,
-}
+// PipelineConfig is now imported from xybrid_core::pipeline_config
+// This unified schema makes `stages` the only required field.
+// Metrics are auto-detected at runtime via LocalDeviceAdapter.
+// Input/output types are inferred from model_metadata.json.
 
 // display_stage_name is now in commands/utils.rs
 
@@ -471,7 +367,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     "Either --config, --pipeline, or --bundle must be specified"
                 ));
             };
-            run_pipeline(&config_path, dry_run, policy.as_ref(), input_audio.as_ref(), target.as_deref(), trace, trace_export.as_ref())
+            run_pipeline(&config_path, dry_run, policy.as_ref(), input_audio.as_ref(), input_text.as_deref(), target.as_deref(), trace, trace_export.as_ref())
         }
         Commands::Trace {
             session,
@@ -1282,6 +1178,7 @@ fn run_pipeline(
     dry_run: bool,
     policy_path: Option<&PathBuf>,
     input_audio: Option<&PathBuf>,
+    input_text: Option<&str>,
     target: Option<&str>,
     trace_enabled: bool,
     trace_export: Option<&PathBuf>,
@@ -1296,7 +1193,7 @@ fn run_pipeline(
     let config_content = fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
 
-    let config: PipelineConfig = serde_yaml::from_str(&config_content)
+    let config = PipelineConfig::from_yaml(&config_content)
         .with_context(|| format!("Failed to parse YAML config: {}", config_path.display()))?;
 
     println!("🚀 Xybrid Pipeline Runner");
@@ -1308,42 +1205,38 @@ fn run_pipeline(
     let stages: Vec<StageDescriptor> = config
         .stages
         .iter()
-        .map(|stage| {
-            // Use model ID if available, otherwise use stage id
-            let name = stage.model.clone().unwrap_or_else(|| stage.id.clone());
-            StageDescriptor::new(name)
-        })
+        .map(|stage| StageDescriptor::new(stage.model_id()))
         .collect();
 
-    // Create input envelope - use audio file if provided
+    // Create input envelope based on CLI args
     let input = if let Some(audio_path) = input_audio {
         println!("📂 Loading audio file: {}", audio_path.display());
         let audio_bytes = fs::read(audio_path)
             .with_context(|| format!("Failed to read audio file: {}", audio_path.display()))?;
         println!("   Loaded {} bytes", audio_bytes.len());
         Envelope::new(EnvelopeKind::Audio(audio_bytes))
+    } else if let Some(text) = input_text {
+        println!("📝 Input text: \"{}\"", text);
+        Envelope::new(EnvelopeKind::Text(text.to_string()))
     } else {
-        let kind = match config.input.kind.as_deref().unwrap_or("text") {
-            "Audio" | "audio" => EnvelopeKind::Audio(vec![]),
-            "Text" | "text" => EnvelopeKind::Text(String::new()),
-            "Embedding" | "embedding" => EnvelopeKind::Embedding(vec![]),
-            other => EnvelopeKind::Text(other.to_string()),
-        };
-        Envelope::new(kind)
+        // Default to empty text envelope
+        Envelope::new(EnvelopeKind::Text(String::new()))
     };
 
-    // Create device metrics
-    let metrics = DeviceMetrics {
-        network_rtt: config.metrics.network_rtt,
-        battery: config.metrics.battery,
-        temperature: config.metrics.temperature,
-    };
+    // Collect device metrics at runtime (not from YAML)
+    let device_adapter = LocalDeviceAdapter::new();
+    let metrics = device_adapter.collect_metrics();
 
-    // Create availability function from config
-    let availability_map = config.availability.clone();
+    // Create availability function using registry client cache check
+    let registry_client = RegistryClient::from_env().ok();
     let availability_fn = move |stage: &str| -> LocalAvailability {
-        let exists = availability_map.get(stage).copied().unwrap_or(false);
-        LocalAvailability::new(exists)
+        if let Some(ref client) = registry_client {
+            let is_cached = client.is_cached(stage, None).unwrap_or(false);
+            LocalAvailability::new(is_cached)
+        } else {
+            // Fallback: assume not available locally
+            LocalAvailability::new(false)
+        }
     };
 
     // Display configuration
@@ -1356,20 +1249,10 @@ fn run_pipeline(
 
     println!("📦 Input: {}", input.kind_str());
 
-    println!("📊 Device Metrics:");
+    println!("📊 Device Metrics (live):");
     println!("   Network RTT: {}ms", metrics.network_rtt);
     println!("   Battery: {}%", metrics.battery);
-    println!("   Temperature: {}°C", metrics.temperature);
-    println!();
-
-    println!("🔍 Model Availability:");
-    for (stage, available) in &config.availability {
-        println!(
-            "   {} {}",
-            if *available { "✅" } else { "❌" },
-            display_stage_name(stage)
-        );
-    }
+    println!("   Temperature: {:.1}°C", metrics.temperature);
     println!();
 
     // Target resolution
@@ -2099,7 +1982,7 @@ fn handle_prepare_command(config_path: &Path) -> Result<()> {
     let config_content = fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
 
-    let config: PipelineConfig = serde_yaml::from_str(&config_content)
+    let config = PipelineConfig::from_yaml(&config_content)
         .with_context(|| format!("Failed to parse YAML config: {}", config_path.display()))?;
 
     // Display parsed configuration
@@ -2110,32 +1993,20 @@ fn handle_prepare_command(config_path: &Path) -> Result<()> {
         println!("  Name:     {}", name.cyan().bold());
     }
 
-    if let Some(registry) = &config.registry {
-        println!("  Registry: {}", registry);
-    }
-
-    println!("  Stages:   {}", config.stages.len());
+    println!("  Registry: {}", config.registry_url());
+    println!("  Stages:   {}", config.stage_count());
     println!();
 
     // List stages with details
     println!("📦 Stages:");
     for (i, stage) in config.stages.iter().enumerate() {
-        let stage_name = if stage.id.is_empty() {
-            stage.model.as_deref().unwrap_or("unnamed")
-        } else {
-            &stage.id
-        };
-
-        println!("  {}. {}", i + 1, stage_name.cyan().bold());
-
-        if let Some(model) = &stage.model {
-            println!("     Model:  {}", model);
-        }
-        if let Some(version) = &stage.version {
+        println!("  {}. {}", i + 1, stage.stage_id().cyan().bold());
+        println!("     Model:  {}", stage.model_id());
+        if let Some(version) = stage.version() {
             println!("     Version: {}", version);
         }
-        if let Some(target) = &stage.target {
-            let target_colored = match target.as_str() {
+        if let Some(target) = stage.target() {
+            let target_colored = match target {
                 "device" => target.bright_green(),
                 "cloud" => target.bright_blue(),
                 "integration" => target.bright_magenta(),
@@ -2143,7 +2014,7 @@ fn handle_prepare_command(config_path: &Path) -> Result<()> {
             };
             println!("     Target: {}", target_colored);
         }
-        if let Some(provider) = &stage.provider {
+        if let Some(provider) = stage.provider() {
             println!("     Provider: {}", provider);
         }
     }
@@ -2177,7 +2048,7 @@ fn handle_plan_command(config_path: &Path) -> Result<()> {
     let config_content = fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
 
-    let config: PipelineConfig = serde_yaml::from_str(&config_content)
+    let config = PipelineConfig::from_yaml(&config_content)
         .with_context(|| format!("Failed to parse YAML config: {}", config_path.display()))?;
 
     // Initialize registry client
@@ -2198,32 +2069,27 @@ fn handle_plan_command(config_path: &Path) -> Result<()> {
 
     // Process each stage
     for (i, stage) in config.stages.iter().enumerate() {
-        let stage_name = if stage.id.is_empty() {
-            stage.model.as_deref().unwrap_or("unnamed")
-        } else {
-            &stage.id
-        };
-
-        println!("Stage {}: {}", i + 1, stage_name.cyan().bold());
+        println!("Stage {}: {}", i + 1, stage.stage_id().cyan().bold());
 
         // Check target type
-        let target = stage.target.as_deref().unwrap_or("device");
+        let target = stage.target().unwrap_or("device");
 
-        if target == "integration" {
+        if stage.is_cloud_stage() {
             // Integration target - requires network
-            if let Some(provider) = &stage.provider {
-                println!("  Target:   {} ({})", "integration".bright_magenta(), provider);
+            if let Some(provider) = stage.provider() {
+                println!("  Target:   {} ({})", "cloud".bright_magenta(), provider);
             } else {
-                println!("  Target:   {}", "integration".bright_magenta());
+                println!("  Target:   {}", "cloud".bright_magenta());
             }
             println!("  Status:   {} Requires network", "🌐".bright_blue());
             requires_network = true;
-        } else if let Some(model_id) = &stage.model {
-            // Device/cloud target with model - check registry
+        } else {
+            // Device target with model - check registry
+            let model_id = stage.model_id();
             println!("  Model:    {}", model_id);
 
             // Try to resolve the model
-            match client.resolve(model_id, None) {
+            match client.resolve(&model_id, None) {
                 Ok(resolved) => {
                     let size_str = format_size(resolved.size_bytes);
                     println!("  Variant:  {} ({}, {})",
@@ -2240,7 +2106,7 @@ fn handle_plan_command(config_path: &Path) -> Result<()> {
                     println!("  Target:   {}", target_colored);
 
                     // Check cache status
-                    match client.is_cached(model_id, None) {
+                    match client.is_cached(&model_id, None) {
                         Ok(true) => {
                             println!("  Status:   {} Cached", "✅".bright_green());
                         }
@@ -2263,9 +2129,6 @@ fn handle_plan_command(config_path: &Path) -> Result<()> {
                     all_cached = false;
                 }
             }
-        } else {
-            println!("  Target:   {}", target);
-            println!("  Status:   {} No model specified", "⚠️".bright_yellow());
         }
 
         println!();
@@ -2284,7 +2147,7 @@ fn handle_plan_command(config_path: &Path) -> Result<()> {
     if offline_capable {
         println!("Offline capable: {}", "Yes".bright_green());
     } else if requires_network {
-        println!("Offline capable: {} (integration stages require network)", "No".bright_yellow());
+        println!("Offline capable: {} (cloud stages require network)", "No".bright_yellow());
     } else {
         println!("Offline capable: {} (models need downloading)", "No".bright_yellow());
     }
@@ -2315,7 +2178,7 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
     let config_content = fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
 
-    let config: PipelineConfig = serde_yaml::from_str(&config_content)
+    let config = PipelineConfig::from_yaml(&config_content)
         .with_context(|| format!("Failed to parse YAML config: {}", config_path.display()))?;
 
     // Initialize registry client
@@ -2330,13 +2193,10 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
     println!("{}", "━".repeat(60));
     println!();
 
-    // Collect models to fetch (skip integration targets)
-    let models_to_fetch: Vec<_> = config.stages.iter()
-        .filter(|stage| {
-            let target = stage.target.as_deref().unwrap_or("device");
-            target != "integration" && stage.model.is_some()
-        })
-        .filter_map(|stage| stage.model.as_ref())
+    // Collect models to fetch (skip cloud/integration stages)
+    let models_to_fetch: Vec<String> = config.stages.iter()
+        .filter(|stage| !stage.is_cloud_stage())
+        .map(|stage| stage.model_id())
         .collect();
 
     if models_to_fetch.is_empty() {
@@ -2350,7 +2210,7 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
 
     for model_id in models_to_fetch {
         // Check if already cached
-        match client.is_cached(model_id, platform) {
+        match client.is_cached(&model_id, platform) {
             Ok(true) => {
                 println!("{} {} (cached)", "✅".bright_green(), model_id.cyan());
                 skip_count += 1;
@@ -2367,7 +2227,7 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
         }
 
         // Resolve and show info
-        match client.resolve(model_id, platform) {
+        match client.resolve(&model_id, platform) {
             Ok(resolved) => {
                 let size_str = format_size(resolved.size_bytes);
                 print!("{} {} [{}] ", "⬇️".bright_yellow(), model_id.cyan(), size_str.bright_black());
@@ -2377,7 +2237,7 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
                 use std::cell::Cell;
                 let last_percent = Cell::new(0u32);
 
-                match client.fetch(model_id, platform, |progress| {
+                match client.fetch(&model_id, platform, |progress| {
                     let percent = (progress * 100.0) as u32;
                     let prev = last_percent.get();
                     if percent != prev && percent % 10 == 0 {

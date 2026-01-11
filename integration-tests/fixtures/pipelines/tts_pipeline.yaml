@@ -1,5 +1,10 @@
-name: "kokoro"
+# TTS Pipeline - Minimal Format
+# Only `stages` is required. Everything else is optional or inferred.
 
 stages:
-  - id: tts
-    model: kokoro-82m
+  - kokoro-82m
+  # Complete version:
+  # - id: tts
+  #   model: kokoro-82m
+  #   version: "0.1"
+  #   target: device

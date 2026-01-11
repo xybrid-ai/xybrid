@@ -1,22 +1,24 @@
-# Hiiipe Pipeline Configuration
-# Demonstrates: Audio Input -> ASR -> Motivator -> TTS
+# Hiiipe Demo Pipeline
+# ASR -> Cloud LLM -> TTS
 
-name: "Hiiipe Demo Pipeline"
+name: hiiipe-demo
 
 stages:
-  - "wav2vec2-base-960h@1.0"  # ASR model (local) - must match registry
-  - "motivator-llm@5"          # Motivator model (cloud) - TODO: create bundle or cloud endpoint
-  - "xtts-mini@0.6"            # TTS model (local) - TODO: create bundle
+  - wav2vec2-base-960h
+  # Complete version:
+  # - id: asr
+  #   model: wav2vec2-base-960h
+  #   version: "1.0"
+  #   target: device
 
-input:
-  kind: "AudioRaw"
+  - model: gpt-4o-mini
+    target: cloud
+    provider: openai
+    system_prompt: "You are a motivational coach. Give short, energetic responses."
+    max_tokens: 100
 
-metrics:
-  network_rtt: 110        # Good network
-  battery: 75             # Good battery
-  temperature: 24.0       # Normal temperature
-
-availability:
-  "wav2vec2-base-960h@1.0": true  # Available locally in registry
-  "xtts-mini@0.6": true           # TODO: Available locally
-  "motivator-llm@5": false        # Only available in cloud
+  - kokoro-82m
+  # Complete version:
+  # - id: tts
+  #   model: kokoro-82m
+  #   target: device
