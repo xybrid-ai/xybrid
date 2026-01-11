@@ -95,6 +95,9 @@ pub mod runtime_adapter;
 /// Pipeline configuration, stages, and runners
 pub mod pipeline;
 
+/// Pipeline DSL configuration (unified schema for CLI and SDK)
+pub mod pipeline_config;
+
 /// Real-time audio streaming infrastructure
 pub mod streaming;
 

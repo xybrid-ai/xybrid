@@ -1,21 +1,25 @@
-name: "whisper -> openai -> kokoro"
+# Voice Assistant Pipeline (ASR -> LLM -> TTS)
+# Demonstrates multi-stage pipeline with cloud integration
 
-
-input:
-  type: audio
-  sample_rate: 16000
-  channels: 1
+name: voice-assistant
 
 stages:
-  - id: asr
-    model: whisper-tiny
-  - id: llm
-    model: gpt-4o-mini
+  - whisper-tiny
+  # Complete version:
+  # - id: asr
+  #   model: whisper-tiny
+  #   target: device
+
+  - model: gpt-4o-mini
     target: cloud
     provider: openai
-    options:
-      temperature: 0.7
-      max_tokens: 500
-      system_prompt: "You are a helpful voice assistant. Keep responses concise and conversational."
-  - id: tts
-    model: kokoro-82m
+    system_prompt: "You are a helpful voice assistant. Keep responses concise."
+    max_tokens: 150
+    temperature: 0.7
+  # This is the complete version - cloud stages need explicit config
+
+  - kokoro-82m
+  # Complete version:
+  # - id: tts
+  #   model: kokoro-82m
+  #   target: device

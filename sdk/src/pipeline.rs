@@ -45,11 +45,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use xybrid_core::context::{DeviceMetrics, StageDescriptor};
+use xybrid_core::context::StageDescriptor;
+use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
-use xybrid_core::orchestrator::routing_engine::LocalAvailability;
+use xybrid_core::pipeline_config::PipelineConfig;
 
 /// Result type for pipeline operations.
 pub type PipelineResult<T> = Result<T, SdkError>;
@@ -110,7 +112,7 @@ impl PipelineRef {
         self.config
             .stages
             .iter()
-            .map(|s| s.get_id().unwrap_or_else(|| s.get_name()))
+            .map(|s| s.stage_id())
             .collect()
     }
 
@@ -218,143 +220,11 @@ pub struct DownloadProgress {
 // Pipeline Configuration Types (internal)
 // ============================================================================
 
+// Use StageConfig from xybrid_core::pipeline_config
+use xybrid_core::pipeline_config::StageConfig;
 
-/// Stage configuration - can be a string (name) or an object with full configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum StageConfig {
-    Simple(String),
-    Object {
-        #[serde(default)]
-        id: Option<String>,
-        #[serde(default)]
-        model: Option<String>,
-        #[serde(default)]
-        version: Option<String>,
-        #[serde(default)]
-        name: Option<String>,
-        #[serde(default)]
-        target: Option<String>,
-        #[serde(default)]
-        provider: Option<String>,
-        #[serde(default)]
-        options: Option<HashMap<String, serde_json::Value>>,
-    },
-}
-
-impl StageConfig {
-    fn get_name(&self) -> String {
-        match self {
-            StageConfig::Simple(name) => name.clone(),
-            StageConfig::Object { id, model, version, name, .. } => {
-                if let Some(model_name) = model {
-                    if let Some(ver) = version {
-                        format!("{}@{}", model_name, ver)
-                    } else {
-                        model_name.clone()
-                    }
-                } else if let Some(n) = name {
-                    n.clone()
-                } else if let Some(stage_id) = id {
-                    stage_id.clone()
-                } else {
-                    "unknown".to_string()
-                }
-            }
-        }
-    }
-
-    fn get_id(&self) -> Option<String> {
-        match self {
-            StageConfig::Simple(_) => None,
-            StageConfig::Object { id, .. } => id.clone(),
-        }
-    }
-
-    fn get_target(&self) -> Option<String> {
-        match self {
-            StageConfig::Simple(_) => None,
-            StageConfig::Object { target, .. } => target.clone(),
-        }
-    }
-
-    fn get_provider(&self) -> Option<String> {
-        match self {
-            StageConfig::Simple(_) => None,
-            StageConfig::Object { provider, .. } => provider.clone(),
-        }
-    }
-
-    fn get_model(&self) -> Option<String> {
-        match self {
-            StageConfig::Simple(_) => None,
-            StageConfig::Object { model, .. } => model.clone(),
-        }
-    }
-
-    fn get_options(&self) -> Option<HashMap<String, serde_json::Value>> {
-        match self {
-            StageConfig::Simple(_) => None,
-            StageConfig::Object { options, .. } => options.clone(),
-        }
-    }
-}
-
-/// Registry URL configuration - can be a string (URL) or an object with base_url.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum RegistryUrlConfig {
-    Simple(String),
-    Object { base_url: String },
-}
-
-impl RegistryUrlConfig {
-    fn url(&self) -> &str {
-        match self {
-            RegistryUrlConfig::Simple(url) => url,
-            RegistryUrlConfig::Object { base_url } => base_url,
-        }
-    }
-}
-
-/// Pipeline configuration loaded from YAML.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PipelineConfig {
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    registry: Option<RegistryUrlConfig>,
-    stages: Vec<StageConfig>,
-    #[serde(default)]
-    input: Option<InputConfig>,
-    #[serde(default)]
-    metrics: Option<MetricsConfig>,
-    #[serde(default)]
-    availability: HashMap<String, bool>,
-}
-
-/// Input envelope configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct InputConfig {
-    #[serde(default, rename = "type")]
-    input_type: Option<String>,
-    #[serde(default)]
-    kind: Option<String>,
-    #[serde(default)]
-    sample_rate: Option<u32>,
-    #[serde(default)]
-    channels: Option<u8>,
-    #[serde(default)]
-    data: Option<String>,
-}
-
-impl InputConfig {
-    fn get_type(&self) -> Option<&str> {
-        self.input_type.as_deref().or(self.kind.as_deref())
-    }
-}
-
-/// Input type for pipeline (public API)
+/// Input type for pipeline (public API).
+/// This will be auto-inferred from model metadata in a future release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PipelineInputType {
     Audio,
@@ -364,45 +234,12 @@ pub enum PipelineInputType {
 }
 
 impl PipelineInputType {
-    fn from_kind(kind: &str) -> Self {
-        match kind.to_lowercase().as_str() {
-            "audio" | "audioraw" | "audio_raw" => PipelineInputType::Audio,
-            "text" => PipelineInputType::Text,
-            "embedding" => PipelineInputType::Embedding,
-            _ => PipelineInputType::Unknown,
-        }
-    }
-
     pub fn is_audio(&self) -> bool {
         matches!(self, PipelineInputType::Audio)
     }
 
     pub fn is_text(&self) -> bool {
         matches!(self, PipelineInputType::Text)
-    }
-}
-
-/// Device metrics configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MetricsConfig {
-    #[serde(default)]
-    network_rtt: u32,
-    #[serde(default = "default_battery")]
-    battery: u8,
-    #[serde(default = "default_temperature")]
-    temperature: f32,
-}
-
-fn default_battery() -> u8 { 100 }
-fn default_temperature() -> f32 { 25.0 }
-
-impl Default for MetricsConfig {
-    fn default() -> Self {
-        MetricsConfig {
-            network_rtt: 50,
-            battery: 100,
-            temperature: 25.0,
-        }
     }
 }
 
@@ -459,11 +296,10 @@ impl PipelineExecutionResult {
 /// Internal state for the loaded pipeline.
 struct PipelineHandle {
     stage_descriptors: Vec<StageDescriptor>,
-    metrics: DeviceMetrics,
+    /// Availability map (updated when models are downloaded)
     availability_map: HashMap<String, bool>,
     /// Registry URL (for downloading models)
     registry_url: Option<String>,
-    input_type: PipelineInputType,
     stage_configs: Vec<StageConfig>,
     /// Bundle paths for each stage (set after downloading)
     bundle_paths: HashMap<String, PathBuf>,
@@ -512,23 +348,25 @@ impl Pipeline {
             .stages
             .iter()
             .map(|stage_config| {
-                let name = stage_config.get_name();
+                let name = stage_config.model_id();
                 let mut desc = StageDescriptor::new(name);
 
-                if let Some(target_str) = stage_config.get_target() {
+                if let Some(target_str) = stage_config.target() {
                     desc.target = Self::parse_target(&target_str);
                 }
 
-                if let Some(provider_str) = stage_config.get_provider() {
+                if let Some(provider_str) = stage_config.provider() {
                     desc.provider = Self::parse_provider(&provider_str);
                     if desc.target.is_none() {
                         desc.target = Some(ExecutionTarget::Cloud);
                     }
                 }
 
-                desc.model = stage_config.get_model();
+                // Use model_id() for descriptor's model field
+                desc.model = Some(stage_config.model_id());
 
-                if let Some(opts) = stage_config.get_options() {
+                let opts = stage_config.options();
+                if !opts.is_empty() {
                     desc.options = Some(Self::convert_options(&opts));
                 }
 
@@ -536,31 +374,31 @@ impl Pipeline {
             })
             .collect();
 
-        // Extract registry URL (just the URL, not the full config)
-        let registry_url = config.registry.as_ref().map(|r| r.url().to_string());
-
-        let metrics_config = config.metrics.clone().unwrap_or_default();
-        let metrics = DeviceMetrics {
-            network_rtt: metrics_config.network_rtt,
-            battery: metrics_config.battery,
-            temperature: metrics_config.temperature,
-        };
-
-        let input_type = config
-            .input
-            .as_ref()
-            .and_then(|i| i.get_type())
-            .map(PipelineInputType::from_kind)
-            .unwrap_or(PipelineInputType::Unknown);
+        // Extract registry URL
+        let registry_url = config.registry.clone();
 
         let stage_configs = config.stages.clone();
 
+        // Auto-detect availability by checking cache
+        let mut availability_map = HashMap::new();
+        let client = if let Some(ref url) = registry_url {
+            RegistryClient::new(url.clone()).ok()
+        } else {
+            RegistryClient::from_env().ok()
+        };
+
+        if let Some(ref client) = client {
+            for stage_config in &stage_configs {
+                let model_id = stage_config.model_id();
+                let is_cached = client.is_cached(&model_id, None).unwrap_or(false);
+                availability_map.insert(model_id, is_cached);
+            }
+        }
+
         let handle = PipelineHandle {
             stage_descriptors,
-            metrics,
-            availability_map: config.availability.clone(),
+            availability_map,
             registry_url,
-            input_type,
             stage_configs,
             bundle_paths: HashMap::new(),
         };
@@ -627,7 +465,7 @@ impl Pipeline {
         handle: &Arc<RwLock<PipelineHandle>>,
         config: &PipelineConfig,
     ) -> PipelineResult<(Vec<StageInfo>, u64)> {
-        let registry_url = config.registry.as_ref().map(|r| r.url().to_string());
+        let registry_url = config.registry.clone();
 
         let client = if let Some(url) = registry_url {
             RegistryClient::new(url)?
@@ -643,41 +481,41 @@ impl Pipeline {
         })?;
 
         for stage_config in &config.stages {
-            let stage_id = stage_config.get_id().unwrap_or_else(|| stage_config.get_name());
-            let target_str = stage_config.get_target();
-            let provider = stage_config.get_provider();
-            let model_name = stage_config.get_model();
+            let stage_id = stage_config.stage_id();
+            let target_str = stage_config.target();
+            let provider = stage_config.provider();
+            let model_name = Some(stage_config.model_id());
 
-            let stage_target = if provider.is_some() || target_str.as_deref() == Some("integration") {
+            let stage_target = if provider.is_some() || target_str == Some("integration") {
                 StageTarget::Integration {
-                    provider: provider.unwrap_or_else(|| "unknown".to_string()),
+                    provider: provider.unwrap_or("unknown").to_string(),
                 }
-            } else if target_str.as_deref() == Some("cloud") || target_str.as_deref() == Some("server") {
+            } else if target_str == Some("cloud") || target_str == Some("server") {
                 StageTarget::Cloud
             } else {
                 StageTarget::Device
             };
 
             let (status, download_bytes) = if matches!(stage_target, StageTarget::Device) {
-                if let Some(ref model_id) = model_name {
-                    match client.resolve(model_id, None) {
-                        Ok(resolved) => {
-                            let is_cached = client.is_cached(model_id, None).unwrap_or(false);
-                            if is_cached {
-                                (StageStatus::Cached, None)
-                            } else {
-                                total_download_bytes += resolved.size_bytes;
-                                (StageStatus::NeedsDownload, Some(resolved.size_bytes))
-                            }
+                // For device stages, check if model is cached
+                let model_id = stage_config.model_id();
+                match client.resolve(&model_id, None) {
+                    Ok(resolved) => {
+                        let is_cached = client.is_cached(&model_id, None).unwrap_or(false);
+                        if is_cached {
+                            (StageStatus::Cached, None)
+                        } else {
+                            total_download_bytes += resolved.size_bytes;
+                            (StageStatus::NeedsDownload, Some(resolved.size_bytes))
                         }
-                        Err(e) => (StageStatus::Error(e.to_string()), None),
                     }
-                } else {
-                    let name = stage_config.get_name();
-                    if handle_read.availability_map.get(&name).copied().unwrap_or(false) {
-                        (StageStatus::Cached, None)
-                    } else {
-                        (StageStatus::NeedsDownload, None)
+                    Err(e) => {
+                        // Check availability map as fallback
+                        if handle_read.availability_map.get(&model_id).copied().unwrap_or(false) {
+                            (StageStatus::Cached, None)
+                        } else {
+                            (StageStatus::Error(e.to_string()), None)
+                        }
                     }
                 }
             } else {
@@ -717,12 +555,12 @@ impl Pipeline {
     }
 
     /// Get the expected input type for this pipeline.
+    ///
+    /// Note: In a future release, this will be auto-inferred from the first stage's
+    /// model metadata preprocessing steps.
     pub fn input_type(&self) -> PipelineInputType {
-        self.handle
-            .read()
-            .ok()
-            .map(|h| h.input_type)
-            .unwrap_or(PipelineInputType::Unknown)
+        // TODO: Auto-infer from first stage's model_metadata.json preprocessing
+        PipelineInputType::Unknown
     }
 
     /// Check if all device models are cached and ready.
@@ -831,9 +669,12 @@ impl Pipeline {
                 desc.bundle_path = Some(bundle_path.to_string_lossy().to_string());
             }
         }
-        let metrics = handle.metrics.clone();
         let availability_map = handle.availability_map.clone();
         drop(handle);
+
+        // Collect runtime metrics from device
+        let device_adapter = LocalDeviceAdapter::new();
+        let metrics = device_adapter.collect_metrics();
 
         // Set telemetry context
         let trace_id = uuid::Uuid::new_v4();
@@ -919,7 +760,7 @@ impl Pipeline {
             self.load_models()?;
         }
 
-        let (stage_descriptors, metrics, availability_map) = {
+        let (stage_descriptors, availability_map) = {
             let handle = self.handle.read().map_err(|_| {
                 SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
             })?;
@@ -934,7 +775,6 @@ impl Pipeline {
 
             (
                 descriptors,
-                handle.metrics.clone(),
                 handle.availability_map.clone(),
             )
         };
@@ -943,6 +783,10 @@ impl Pipeline {
         let name = self.name.clone();
 
         tokio::task::spawn_blocking(move || {
+            // Collect runtime metrics from device
+            let device_adapter = LocalDeviceAdapter::new();
+            let metrics = device_adapter.collect_metrics();
+
             let trace_id = uuid::Uuid::new_v4();
             let pipeline_id = name.as_ref().map(|n| {
                 uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes())
@@ -1133,15 +977,6 @@ stages:
     }
 
     #[test]
-    fn test_input_type_from_kind() {
-        assert_eq!(PipelineInputType::from_kind("audio"), PipelineInputType::Audio);
-        assert_eq!(PipelineInputType::from_kind("Audio"), PipelineInputType::Audio);
-        assert_eq!(PipelineInputType::from_kind("text"), PipelineInputType::Text);
-        assert_eq!(PipelineInputType::from_kind("embedding"), PipelineInputType::Embedding);
-        assert_eq!(PipelineInputType::from_kind("unknown"), PipelineInputType::Unknown);
-    }
-
-    #[test]
     fn test_pipeline_input_type_methods() {
         assert!(PipelineInputType::Audio.is_audio());
         assert!(!PipelineInputType::Audio.is_text());
@@ -1150,30 +985,25 @@ stages:
     }
 
     #[test]
-    fn test_stage_config_get_name_priority() {
-        // Test model@version format
-        let stage: StageConfig = serde_yaml::from_str(r#"
-model: wav2vec2
-version: "1.0"
-"#).unwrap();
-        assert_eq!(stage.get_name(), "wav2vec2@1.0");
+    fn test_stage_config_model_id() {
+        // Test simple string format
+        let stage: StageConfig = serde_yaml::from_str(r#""kokoro-82m""#).unwrap();
+        assert_eq!(stage.model_id(), "kokoro-82m");
 
-        // Test model only format
+        // Test simple string with version (model_id strips version)
+        let stage: StageConfig = serde_yaml::from_str(r#""wav2vec2@1.0""#).unwrap();
+        assert_eq!(stage.model_id(), "wav2vec2");
+
+        // Test object format with model only
         let stage: StageConfig = serde_yaml::from_str(r#"
 model: gpt-4o-mini
 "#).unwrap();
-        assert_eq!(stage.get_name(), "gpt-4o-mini");
+        assert_eq!(stage.model_id(), "gpt-4o-mini");
 
-        // Test legacy name format
-        let stage: StageConfig = serde_yaml::from_str(r#"
-name: "legacy-model@1.0"
-"#).unwrap();
-        assert_eq!(stage.get_name(), "legacy-model@1.0");
-
-        // Test id fallback
+        // Test id fallback when no model specified
         let stage: StageConfig = serde_yaml::from_str(r#"
 id: asr
 "#).unwrap();
-        assert_eq!(stage.get_name(), "asr");
+        assert_eq!(stage.stage_id(), "asr");
     }
 }

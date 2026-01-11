@@ -1,20 +1,10 @@
-# ASR Pipeline Example
-# Used for integration testing
+# ASR Pipeline - Minimal Format
+# Only `stages` is required. Everything else is optional or inferred.
 
-name: asr-test-pipeline
-version: "1.0"
-
-models:
-  - id: asr
-    model: wav2vec2-base-960h
-
-input:
-  type: audio
-  format: wav
-  sample_rate: 16000
-
-output:
-  type: text
-
-options:
-  language: en
+stages:
+  - wav2vec2-base-960h
+  # Complete version:
+  # - id: asr
+  #   model: wav2vec2-base-960h
+  #   version: "1.0"
+  #   target: device
