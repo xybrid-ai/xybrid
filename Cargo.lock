@@ -4814,6 +4814,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dirs",
+ "log",
  "serde",
  "serde_json",
  "serde_yaml",
