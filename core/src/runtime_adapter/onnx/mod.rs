@@ -6,9 +6,11 @@
 //! - `OnnxBackend`: Low-level backend implementing `InferenceBackend` trait
 //! - `ONNXSession`: ONNX Runtime session wrapper
 //! - `ONNXMobileRuntimeAdapter`: Mobile-optimized adapter with NNAPI support
+//! - `ExecutionProviderKind`: Execution provider selection (CPU, CoreML, etc.)
 
 mod adapter;
 mod backend;
+mod execution_provider;
 mod session;
 mod runtime; // New runtime wrapper
 
@@ -18,6 +20,9 @@ mod mobile;
 // Re-exports
 pub use adapter::OnnxRuntimeAdapter;
 pub use backend::OnnxBackend;
+pub use execution_provider::ExecutionProviderKind;
+#[cfg(feature = "coreml-ep")]
+pub use execution_provider::{CoreMLComputeUnits, CoreMLConfig};
 pub use session::ONNXSession;
 pub use runtime::OnnxRuntime;
 
