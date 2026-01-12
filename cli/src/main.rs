@@ -1804,39 +1804,23 @@ fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Result<()> {
     }
 
     // Download with progress bar
-    println!("⬇️  Downloading...");
-    println!();
+    use indicatif::{ProgressBar, ProgressStyle};
 
-    // Use Cell for interior mutability in closure
-    use std::cell::Cell;
-    let last_percent = Cell::new(0u32);
-    let bar_width = 40;
+    let pb = ProgressBar::new(resolved.size_bytes);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} Downloading {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+            .unwrap()
+            .progress_chars("█▓▒░  ")
+    );
+    pb.set_message(model_id.to_string());
 
     let bundle_path = client.fetch(model_id, platform, |progress| {
-        let percent = (progress * 100.0) as u32;
-        let prev = last_percent.get();
-
-        // Only update if percentage changed
-        if percent != prev {
-            last_percent.set(percent);
-
-            // Calculate filled portion
-            let filled = (bar_width * percent / 100) as usize;
-            let empty = bar_width as usize - filled;
-
-            // Build progress bar: [████████████░░░░░░░░] 45%
-            let bar = format!(
-                "\r   [{}{}] {:>3}%",
-                "█".repeat(filled),
-                "░".repeat(empty),
-                percent
-            );
-            print!("{}", bar);
-            std::io::stdout().flush().ok();
-        }
+        let bytes_done = (progress * resolved.size_bytes as f32) as u64;
+        pb.set_position(bytes_done);
     }).context(format!("Failed to fetch model '{}'", model_id))?;
 
-    println!();
+    pb.finish_with_message(format!("✅ Downloaded {}", model_id));
     println!();
     println!("✅ Model downloaded successfully!");
     println!("   Location: {}", bundle_path.display());
@@ -2229,30 +2213,27 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
         // Resolve and show info
         match client.resolve(&model_id, platform) {
             Ok(resolved) => {
-                let size_str = format_size(resolved.size_bytes);
-                print!("{} {} [{}] ", "⬇️".bright_yellow(), model_id.cyan(), size_str.bright_black());
-                std::io::stdout().flush().ok();
+                use indicatif::{ProgressBar, ProgressStyle};
 
-                // Download with inline progress
-                use std::cell::Cell;
-                let last_percent = Cell::new(0u32);
+                let pb = ProgressBar::new(resolved.size_bytes);
+                pb.set_style(
+                    ProgressStyle::default_bar()
+                        .template("{spinner:.green} {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+                        .unwrap()
+                        .progress_chars("█▓▒░  ")
+                );
+                pb.set_message(model_id.clone());
 
                 match client.fetch(&model_id, platform, |progress| {
-                    let percent = (progress * 100.0) as u32;
-                    let prev = last_percent.get();
-                    if percent != prev && percent % 10 == 0 {
-                        last_percent.set(percent);
-                        print!("{}%", percent);
-                        if percent < 100 { print!(".."); }
-                        std::io::stdout().flush().ok();
-                    }
+                    let bytes_done = (progress * resolved.size_bytes as f32) as u64;
+                    pb.set_position(bytes_done);
                 }) {
                     Ok(_) => {
-                        println!(" ✓");
+                        pb.finish_with_message(format!("{} ✓", model_id));
                         success_count += 1;
                     }
                     Err(e) => {
-                        println!(" ✗ ({})", e);
+                        pb.abandon_with_message(format!("{} ✗ {}", model_id, e));
                         error_count += 1;
                     }
                 }
