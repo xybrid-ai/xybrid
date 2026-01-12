@@ -31,14 +31,15 @@ sysinfo = "0.32"
 
 # ONNX Runtime for model inference
 # Note: Using ort crate for ONNX Runtime bindings
-# For macOS/iOS: Uses CoreML/Metal backend
+# For macOS/iOS: Uses CoreML/Metal backend (enable coreml-ep feature)
 # For Android: Uses NNAPI backend (requires load-dynamic + AAR)
 # For desktop: Uses CPU backend
 # Note: Using default-features = false for cross-platform compatibility.
 # - For Android: Use ort-load-dynamic feature (loads .so at runtime)
 # - For other platforms: Use ort-download feature to download prebuilt binaries
-ort = { version = "2.0.0-rc.10", default-features = false, features = ["ndarray", "std"] }
-ndarray = "0.16"  # Used by ort for tensor operations
+# - For CoreML acceleration: Use coreml-ep feature (macOS/iOS only)
+ort = { version = "2.0.0-rc.11", default-features = false, features = ["ndarray", "std"] }
+ndarray = "0.17"  # Used by ort for tensor operations (must match ort's ndarray version)
 base64 = "0.21"  # For BPE token decoding
 mel_spec = "0.2"  # For mel spectrogram computation (audio preprocessing)
 num-complex = "0.4"  # Required by mel_spec for Complex numbers
@@ -52,7 +53,7 @@ unicode-normalization = "0.1"  # For NFC normalization of IPA phonemes
 
 # Kokoro TTS dependencies (v0.0.10)
 # Note: espeak-ng phonemization now uses system command (no library linking required)
-ndarray-npy = "0.9"  # For loading voice embeddings from npz files
+ndarray-npy = "0.10"  # For loading voice embeddings from npz files (must match ndarray version)
 regex = "1.10"  # For text normalization patterns
 
 # Candle - Pure Rust ML framework (optional, for Whisper ASR)
@@ -69,13 +70,17 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 default = ["onnx-runtime", "ort-download"]
 onnx-runtime = []
 # Desktop/iOS/macOS: Download prebuilt ONNX Runtime binaries during build
-ort-download = ["ort/download-binaries"]
+# Note: tls-native required for ort 2.0.0-rc.11+ to download binaries
+ort-download = ["ort/download-binaries", "ort/tls-native"]
 # Android: Load ONNX Runtime dynamically at runtime (from AAR .so files)
 # Note: When using ort-load-dynamic, don't enable ort-download
 ort-load-dynamic = ["ort/load-dynamic"]
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:hf-hub", "dep:byteorder", "dep:num-traits"]
 candle-metal = ["candle", "candle-core/metal", "candle-nn/metal", ]
 candle-cuda = ["candle", "candle-core/cuda"]
+# CoreML Execution Provider for Apple Neural Engine acceleration (macOS/iOS)
+# Enable with: cargo build --features coreml-ep
+coreml-ep = ["ort/coreml"]
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -85,3 +90,8 @@ filetime = "0.2"
 hound = "3.5"  # WAV file reading for tests
 walkdir = "2.4"  # For directory traversal in tests
 ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }  # For HTTP in tests
+criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarking framework
+
+[[bench]]
+name = "inference_backends"
+harness = false

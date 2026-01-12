@@ -1,23 +1,31 @@
 //! ONNX Runtime Adapter implementation.
 //!
 //! This module provides real ONNX Runtime inference for desktop platforms.
-//! It uses the ort crate for ONNX Runtime bindings and supports CPU execution
-//! with optional Metal acceleration on macOS/iOS.
+//! It uses the ort crate for ONNX Runtime bindings and supports multiple
+//! execution providers (CPU, CoreML, etc.).
 //!
 //! # Example
 //!
 //! ```rust,no_run
-//! use xybrid_core::runtime_adapter::onnx::OnnxRuntimeAdapter;
+//! use xybrid_core::runtime_adapter::onnx::{OnnxRuntimeAdapter, ExecutionProviderKind};
 //! use xybrid_core::runtime_adapter::RuntimeAdapter;
 //!
+//! // CPU execution (default)
 //! let mut adapter = OnnxRuntimeAdapter::new();
 //! adapter.load_model("/path/to/model.onnx")?;
+//!
+//! // CoreML execution (macOS/iOS, requires coreml-ep feature)
+//! #[cfg(feature = "coreml-ep")]
+//! let mut adapter = OnnxRuntimeAdapter::with_execution_provider(
+//!     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
+//! );
 //! ```
 
-use crate::ir::{Envelope, EnvelopeKind};
+use crate::ir::Envelope;
 use crate::runtime_adapter::{
     AdapterError, AdapterResult, ModelMetadata, RuntimeAdapter, RuntimeAdapterExt,
 };
+use super::execution_provider::ExecutionProviderKind;
 use super::session::ONNXSession;
 use crate::runtime_adapter::tensor_utils::{envelope_to_tensors, tensors_to_envelope};
 use std::collections::HashMap;
@@ -26,7 +34,12 @@ use std::path::Path;
 /// ONNX Runtime Adapter for desktop platforms.
 ///
 /// This adapter provides real ONNX Runtime inference using the ort crate.
-/// It supports CPU execution with optional Metal acceleration on macOS/iOS.
+/// It supports multiple execution providers including CPU and CoreML (on Apple platforms).
+///
+/// # Execution Providers
+///
+/// - **CPU**: Default, always available
+/// - **CoreML**: Apple Neural Engine/GPU acceleration (requires `coreml-ep` feature)
 ///
 /// # Behavior
 ///
@@ -40,15 +53,66 @@ pub struct OnnxRuntimeAdapter {
     sessions: HashMap<String, ONNXSession>,
     /// Currently active model (for simple single-model execution)
     current_model: Option<String>,
+    /// Execution provider to use for new sessions
+    execution_provider: ExecutionProviderKind,
 }
 
 impl OnnxRuntimeAdapter {
-    /// Creates a new ONNX Runtime Adapter instance.
+    /// Creates a new ONNX Runtime Adapter instance with CPU execution.
     pub fn new() -> Self {
         Self {
             models: HashMap::new(),
             sessions: HashMap::new(),
             current_model: None,
+            execution_provider: ExecutionProviderKind::Cpu,
+        }
+    }
+
+    /// Creates a new ONNX Runtime Adapter with the specified execution provider.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use xybrid_core::runtime_adapter::onnx::{OnnxRuntimeAdapter, ExecutionProviderKind};
+    ///
+    /// // CPU execution
+    /// let adapter = OnnxRuntimeAdapter::with_execution_provider(ExecutionProviderKind::Cpu);
+    ///
+    /// // CoreML with Neural Engine (requires coreml-ep feature)
+    /// #[cfg(feature = "coreml-ep")]
+    /// let adapter = OnnxRuntimeAdapter::with_execution_provider(
+    ///     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
+    /// );
+    /// ```
+    pub fn with_execution_provider(execution_provider: ExecutionProviderKind) -> Self {
+        Self {
+            models: HashMap::new(),
+            sessions: HashMap::new(),
+            current_model: None,
+            execution_provider,
+        }
+    }
+
+    /// Returns the execution provider used by this adapter.
+    pub fn execution_provider(&self) -> &ExecutionProviderKind {
+        &self.execution_provider
+    }
+
+    /// Selects the optimal execution provider for the current platform.
+    ///
+    /// On macOS/iOS with the `coreml-ep` feature enabled, this returns CoreML
+    /// with Neural Engine. Otherwise, returns CPU.
+    #[allow(dead_code)]
+    pub fn select_optimal_provider() -> ExecutionProviderKind {
+        #[cfg(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios")))]
+        {
+            use super::execution_provider::CoreMLConfig;
+            ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
+        }
+
+        #[cfg(not(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios"))))]
+        {
+            ExecutionProviderKind::Cpu
         }
     }
 
@@ -164,16 +228,14 @@ impl RuntimeAdapter for OnnxRuntimeAdapter {
             )));
         }
 
-        // Create ONNX Runtime session
-        // Use Metal on macOS/iOS if available, otherwise CPU
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        let use_metal = true;
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-        let use_metal = false;
+        // Create ONNX Runtime session with configured execution provider
+        let session = ONNXSession::with_provider(path, self.execution_provider.clone())?;
 
-        let use_nnapi = false; // NNAPI is Android-specific
-
-        let session = ONNXSession::new(path, use_nnapi, use_metal)?;
+        log::info!(
+            "Loaded model '{}' with {} execution provider",
+            model_id,
+            self.execution_provider
+        );
 
         // Extract real input/output shapes from session
         let input_shapes = session.input_shapes();
@@ -288,6 +350,7 @@ impl RuntimeAdapterExt for OnnxRuntimeAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::EnvelopeKind;
     use std::fs;
     use tempfile::TempDir;
 
@@ -302,6 +365,13 @@ mod tests {
     fn test_create_adapter() {
         let adapter = OnnxRuntimeAdapter::new();
         assert!(adapter.list_loaded_models().is_empty());
+        assert_eq!(*adapter.execution_provider(), ExecutionProviderKind::Cpu);
+    }
+
+    #[test]
+    fn test_adapter_with_execution_provider() {
+        let adapter = OnnxRuntimeAdapter::with_execution_provider(ExecutionProviderKind::Cpu);
+        assert_eq!(*adapter.execution_provider(), ExecutionProviderKind::Cpu);
     }
 
     #[test]
@@ -341,5 +411,13 @@ mod tests {
 
         let result = adapter.infer("nonexistent-model", &input);
         assert!(matches!(result, Err(AdapterError::ModelNotLoaded(_))));
+    }
+
+    #[test]
+    fn test_select_optimal_provider() {
+        let provider = OnnxRuntimeAdapter::select_optimal_provider();
+        // On non-Apple platforms without coreml-ep feature, should be CPU
+        #[cfg(not(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios"))))]
+        assert_eq!(provider, ExecutionProviderKind::Cpu);
     }
 }
