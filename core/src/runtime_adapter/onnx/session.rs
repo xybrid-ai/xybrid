@@ -3,19 +3,29 @@
 //! This module provides a wrapper around ONNX Runtime sessions that:
 //! - Manages session lifecycle
 //! - Extracts model metadata (input/output names and shapes)
-//! - Handles execution provider selection (NNAPI, Metal, CPU)
+//! - Handles execution provider selection (CPU, CoreML, etc.)
 //! - Provides a clean interface for running inference
 //!
 //! # Example
 //!
 //! ```rust,no_run
-//! use xybrid_core::runtime_adapter::onnx::ONNXSession;
+//! use xybrid_core::runtime_adapter::onnx::{ONNXSession, ExecutionProviderKind};
 //!
-//! let session = ONNXSession::new("/path/to/model.onnx", false, true)?;
+//! // CPU execution (default)
+//! let session = ONNXSession::with_provider("/path/to/model.onnx", ExecutionProviderKind::Cpu)?;
+//!
+//! // CoreML execution (requires coreml-ep feature)
+//! #[cfg(feature = "coreml-ep")]
+//! let session = ONNXSession::with_provider(
+//!     "/path/to/model.onnx",
+//!     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
+//! )?;
+//!
 //! let inputs = /* prepare inputs */;
 //! let outputs = session.run(inputs)?;
 //! ```
 
+use super::execution_provider::ExecutionProviderKind;
 use crate::runtime_adapter::{AdapterError, AdapterResult};
 use ndarray::{ArrayD, IxDyn};
 use ort::session::{builder::GraphOptimizationLevel, Session};
@@ -42,16 +52,36 @@ pub struct ONNXSession {
     input_shapes: Vec<Vec<i64>>,
     /// Output shapes (may contain dynamic dimensions)
     output_shapes: Vec<Vec<i64>>,
+    /// The execution provider used for this session
+    execution_provider: ExecutionProviderKind,
 }
 
 impl ONNXSession {
-    /// Creates a new ONNX session from a model file.
+    /// Creates a new ONNX session from a model file (legacy API).
+    ///
+    /// This method is kept for backwards compatibility. For new code,
+    /// prefer using `with_provider()` which gives explicit control over
+    /// the execution provider.
     ///
     /// # Arguments
     ///
     /// * `model_path` - Path to the ONNX model file
-    /// * `use_nnapi` - Whether to use NNAPI execution provider (Android)
-    /// * `use_metal` - Whether to use Metal execution provider (macOS/iOS)
+    /// * `_use_nnapi` - Deprecated: use `with_provider()` instead
+    /// * `_use_metal` - Deprecated: use `with_provider()` instead
+    ///
+    /// # Returns
+    ///
+    /// A new `ONNXSession` instance using CPU execution
+    pub fn new(model_path: &str, _use_nnapi: bool, _use_metal: bool) -> AdapterResult<Self> {
+        Self::with_provider(model_path, ExecutionProviderKind::Cpu)
+    }
+
+    /// Creates a new ONNX session with the specified execution provider.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_path` - Path to the ONNX model file
+    /// * `execution_provider` - The execution provider to use (CPU, CoreML, etc.)
     ///
     /// # Returns
     ///
@@ -62,8 +92,28 @@ impl ONNXSession {
     /// Returns an error if:
     /// - Model file doesn't exist
     /// - Model loading fails
+    /// - Execution provider initialization fails
     /// - Metadata extraction fails
-    pub fn new(model_path: &str, _use_nnapi: bool, _use_metal: bool) -> AdapterResult<Self> {
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use xybrid_core::runtime_adapter::onnx::{ONNXSession, ExecutionProviderKind};
+    ///
+    /// // CPU execution
+    /// let session = ONNXSession::with_provider("model.onnx", ExecutionProviderKind::Cpu)?;
+    ///
+    /// // CoreML with Neural Engine (requires coreml-ep feature)
+    /// #[cfg(feature = "coreml-ep")]
+    /// let session = ONNXSession::with_provider(
+    ///     "model.onnx",
+    ///     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
+    /// )?;
+    /// ```
+    pub fn with_provider(
+        model_path: &str,
+        execution_provider: ExecutionProviderKind,
+    ) -> AdapterResult<Self> {
         let path = Path::new(model_path);
         if !path.exists() {
             return Err(AdapterError::ModelNotFound(format!(
@@ -73,27 +123,37 @@ impl ONNXSession {
         }
 
         // Initialize ONNX Runtime environment (singleton, safe to call multiple times)
-        // ort::init() returns an EnvironmentBuilder, we need to commit it
         let _ = ort::init().commit();
 
-        // Create session builder and load model
-        let session = Session::builder()
+        // Create session builder with optimization
+        let mut builder = Session::builder()
             .map_err(|e| {
                 AdapterError::RuntimeError(format!("Failed to create session builder: {}", e))
             })?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| {
                 AdapterError::RuntimeError(format!("Failed to set optimization level: {}", e))
-            })?
+            })?;
+
+        // Configure execution provider
+        builder = Self::configure_execution_provider(builder, &execution_provider)?;
+
+        // Load model
+        let session = builder
             .commit_from_file(model_path)
             .map_err(|e| {
                 AdapterError::RuntimeError(format!("Failed to load ONNX model: {}", e))
             })?;
 
         // Extract input/output metadata from session
-        // Access session.inputs and session.outputs directly
         let (input_names, input_shapes) = Self::extract_input_metadata(&session)?;
         let (output_names, output_shapes) = Self::extract_output_metadata(&session)?;
+
+        log::info!(
+            "Created ONNX session with {} execution provider for model: {}",
+            execution_provider,
+            model_path
+        );
 
         Ok(Self {
             session: Mutex::new(session),
@@ -101,7 +161,56 @@ impl ONNXSession {
             output_names,
             input_shapes,
             output_shapes,
+            execution_provider,
         })
+    }
+
+    /// Configures the execution provider on the session builder.
+    fn configure_execution_provider(
+        builder: ort::session::builder::SessionBuilder,
+        provider: &ExecutionProviderKind,
+    ) -> AdapterResult<ort::session::builder::SessionBuilder> {
+        match provider {
+            ExecutionProviderKind::Cpu => {
+                // CPU is the default, no additional configuration needed
+                Ok(builder)
+            }
+
+            #[cfg(feature = "coreml-ep")]
+            ExecutionProviderKind::CoreML(config) => {
+                use super::execution_provider::CoreMLComputeUnits;
+                use ort::ep;
+
+                // Build CoreML execution provider with configuration
+                let coreml_ep = {
+                    let mut coreml = ep::CoreML::default();
+
+                    // Configure subgraphs
+                    coreml = coreml.with_subgraphs(config.use_subgraphs);
+
+                    // Configure compute units
+                    coreml = coreml.with_compute_units(match config.compute_units {
+                        CoreMLComputeUnits::CpuOnly => ep::coreml::ComputeUnits::CPUOnly,
+                        CoreMLComputeUnits::CpuAndGpu => ep::coreml::ComputeUnits::CPUAndGPU,
+                        CoreMLComputeUnits::CpuAndNeuralEngine => ep::coreml::ComputeUnits::CPUAndNeuralEngine,
+                        CoreMLComputeUnits::All => ep::coreml::ComputeUnits::All,
+                    });
+
+                    coreml.build()
+                };
+
+                log::debug!("Configuring CoreML execution provider: {:?}", config);
+
+                builder
+                    .with_execution_providers([coreml_ep])
+                    .map_err(|e| {
+                        AdapterError::RuntimeError(format!(
+                            "Failed to configure CoreML execution provider: {}",
+                            e
+                        ))
+                    })
+            }
+        }
     }
 
     /// Extracts input metadata from the session.
@@ -111,8 +220,8 @@ impl ONNXSession {
 
         // Access session.inputs directly - ort exposes inputs as Vec<Input>
         // Each Input has a name field
-        for input in &session.inputs {
-            input_names.push(input.name.clone());
+        for input in session.inputs() {
+            input_names.push(input.name().to_string());
             // Note: ort's Input struct doesn't directly expose shapes
             // Shapes may be dynamic or need to be inferred from the model
             // For now, use placeholder shapes - we'll need to infer from actual model or use default
@@ -136,8 +245,8 @@ impl ONNXSession {
 
         // Access session.outputs directly - ort exposes outputs as Vec<Output>
         // Each Output has a name field
-        for output in &session.outputs {
-            output_names.push(output.name.clone());
+        for output in session.outputs() {
+            output_names.push(output.name().to_string());
             // Note: ort's Output struct doesn't directly expose shapes
             // Shapes may be dynamic or need to be inferred from the model
             // For now, use placeholder shapes
@@ -285,6 +394,11 @@ impl ONNXSession {
     /// Returns output shapes.
     pub fn output_shapes(&self) -> &[Vec<i64>] {
         &self.output_shapes
+    }
+
+    /// Returns the execution provider used for this session.
+    pub fn execution_provider(&self) -> &ExecutionProviderKind {
+        &self.execution_provider
     }
 }
 
