@@ -1201,12 +1201,94 @@ fn run_pipeline(
         println!("📋 Pipeline: {}\n", name);
     }
 
-    // Build stage descriptors from config
-    let stages: Vec<StageDescriptor> = config
-        .stages
-        .iter()
-        .map(|stage| StageDescriptor::new(stage.model_id()))
-        .collect();
+    // Initialize registry client for model resolution
+    let client = RegistryClient::from_env()
+        .context("Failed to initialize registry client")?;
+
+    // Build stage descriptors from config, resolving bundle paths
+    let mut stages: Vec<StageDescriptor> = Vec::new();
+    for stage_config in &config.stages {
+        let model_id = stage_config.model_id();
+        let mut desc = StageDescriptor::new(&model_id);
+
+        // Check if this is a cloud/integration stage (no local model needed)
+        if stage_config.is_cloud_stage() {
+            // Set provider info for cloud stages
+            if let Some(provider) = stage_config.provider() {
+                desc.provider = Some(match provider {
+                    "openai" => xybrid_core::pipeline::IntegrationProvider::OpenAI,
+                    "anthropic" => xybrid_core::pipeline::IntegrationProvider::Anthropic,
+                    "google" => xybrid_core::pipeline::IntegrationProvider::Google,
+                    _ => xybrid_core::pipeline::IntegrationProvider::OpenAI,
+                });
+            }
+            desc.target = Some(xybrid_core::pipeline::ExecutionTarget::Cloud);
+            desc.model = Some(model_id.clone());
+
+            // Copy stage options
+            let opts = stage_config.options();
+            if !opts.is_empty() {
+                let mut stage_opts = xybrid_core::pipeline::StageOptions::new();
+                for (key, value) in opts {
+                    stage_opts.values.insert(key, value);
+                }
+                desc.options = Some(stage_opts);
+            }
+        } else {
+            // Device stage - need to resolve and potentially download the model
+            // Check if model is cached
+            let is_cached = client.is_cached(&model_id, None).unwrap_or(false);
+
+            if !is_cached {
+                // Need to download
+                println!("📥 Downloading model: {}", model_id);
+                use indicatif::{ProgressBar, ProgressStyle};
+
+                match client.resolve(&model_id, None) {
+                    Ok(resolved) => {
+                        let pb = ProgressBar::new(resolved.size_bytes);
+                        pb.set_style(
+                            ProgressStyle::default_bar()
+                                .template("{spinner:.green} {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+                                .unwrap()
+                                .progress_chars("█▓▒░  ")
+                        );
+                        pb.set_message(model_id.clone());
+
+                        match client.fetch(&model_id, None, |progress| {
+                            let bytes_done = (progress * resolved.size_bytes as f32) as u64;
+                            pb.set_position(bytes_done);
+                        }) {
+                            Ok(bundle_path) => {
+                                pb.finish_with_message(format!("{} ✓", model_id));
+                                desc.bundle_path = Some(bundle_path.to_string_lossy().to_string());
+                            }
+                            Err(e) => {
+                                pb.abandon_with_message(format!("{} ✗", model_id));
+                                return Err(anyhow::anyhow!("Failed to download model '{}': {}", model_id, e));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Err(anyhow::anyhow!("Failed to resolve model '{}': {}", model_id, e));
+                    }
+                }
+            } else {
+                // Model is cached - get the cache path
+                match client.resolve(&model_id, None) {
+                    Ok(resolved) => {
+                        let cache_path = client.get_cache_path(&resolved);
+                        desc.bundle_path = Some(cache_path.to_string_lossy().to_string());
+                    }
+                    Err(e) => {
+                        return Err(anyhow::anyhow!("Failed to resolve model '{}': {}", model_id, e));
+                    }
+                }
+            }
+        }
+
+        stages.push(desc);
+    }
 
     // Create input envelope based on CLI args
     let input = if let Some(audio_path) = input_audio {
@@ -1227,16 +1309,15 @@ fn run_pipeline(
     let device_adapter = LocalDeviceAdapter::new();
     let metrics = device_adapter.collect_metrics();
 
-    // Create availability function using registry client cache check
-    let registry_client = RegistryClient::from_env().ok();
+    // Create availability function - models are already downloaded at this point
+    // so we check if they have a bundle_path set
+    let stage_bundle_paths: std::collections::HashMap<String, bool> = stages
+        .iter()
+        .map(|s| (s.name.clone(), s.bundle_path.is_some()))
+        .collect();
     let availability_fn = move |stage: &str| -> LocalAvailability {
-        if let Some(ref client) = registry_client {
-            let is_cached = client.is_cached(stage, None).unwrap_or(false);
-            LocalAvailability::new(is_cached)
-        } else {
-            // Fallback: assume not available locally
-            LocalAvailability::new(false)
-        }
+        let available = stage_bundle_paths.get(stage).copied().unwrap_or(false);
+        LocalAvailability::new(available)
     };
 
     // Display configuration
@@ -1804,39 +1885,23 @@ fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Result<()> {
     }
 
     // Download with progress bar
-    println!("⬇️  Downloading...");
-    println!();
+    use indicatif::{ProgressBar, ProgressStyle};
 
-    // Use Cell for interior mutability in closure
-    use std::cell::Cell;
-    let last_percent = Cell::new(0u32);
-    let bar_width = 40;
+    let pb = ProgressBar::new(resolved.size_bytes);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} Downloading {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+            .unwrap()
+            .progress_chars("█▓▒░  ")
+    );
+    pb.set_message(model_id.to_string());
 
     let bundle_path = client.fetch(model_id, platform, |progress| {
-        let percent = (progress * 100.0) as u32;
-        let prev = last_percent.get();
-
-        // Only update if percentage changed
-        if percent != prev {
-            last_percent.set(percent);
-
-            // Calculate filled portion
-            let filled = (bar_width * percent / 100) as usize;
-            let empty = bar_width as usize - filled;
-
-            // Build progress bar: [████████████░░░░░░░░] 45%
-            let bar = format!(
-                "\r   [{}{}] {:>3}%",
-                "█".repeat(filled),
-                "░".repeat(empty),
-                percent
-            );
-            print!("{}", bar);
-            std::io::stdout().flush().ok();
-        }
+        let bytes_done = (progress * resolved.size_bytes as f32) as u64;
+        pb.set_position(bytes_done);
     }).context(format!("Failed to fetch model '{}'", model_id))?;
 
-    println!();
+    pb.finish_with_message(format!("✅ Downloaded {}", model_id));
     println!();
     println!("✅ Model downloaded successfully!");
     println!("   Location: {}", bundle_path.display());
@@ -2229,30 +2294,27 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
         // Resolve and show info
         match client.resolve(&model_id, platform) {
             Ok(resolved) => {
-                let size_str = format_size(resolved.size_bytes);
-                print!("{} {} [{}] ", "⬇️".bright_yellow(), model_id.cyan(), size_str.bright_black());
-                std::io::stdout().flush().ok();
+                use indicatif::{ProgressBar, ProgressStyle};
 
-                // Download with inline progress
-                use std::cell::Cell;
-                let last_percent = Cell::new(0u32);
+                let pb = ProgressBar::new(resolved.size_bytes);
+                pb.set_style(
+                    ProgressStyle::default_bar()
+                        .template("{spinner:.green} {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+                        .unwrap()
+                        .progress_chars("█▓▒░  ")
+                );
+                pb.set_message(model_id.clone());
 
                 match client.fetch(&model_id, platform, |progress| {
-                    let percent = (progress * 100.0) as u32;
-                    let prev = last_percent.get();
-                    if percent != prev && percent % 10 == 0 {
-                        last_percent.set(percent);
-                        print!("{}%", percent);
-                        if percent < 100 { print!(".."); }
-                        std::io::stdout().flush().ok();
-                    }
+                    let bytes_done = (progress * resolved.size_bytes as f32) as u64;
+                    pb.set_position(bytes_done);
                 }) {
                     Ok(_) => {
-                        println!(" ✓");
+                        pb.finish_with_message(format!("{} ✓", model_id));
                         success_count += 1;
                     }
                     Err(e) => {
-                        println!(" ✗ ({})", e);
+                        pb.abandon_with_message(format!("{} ✗ {}", model_id, e));
                         error_count += 1;
                     }
                 }
