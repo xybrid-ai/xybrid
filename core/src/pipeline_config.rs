@@ -183,6 +183,14 @@ impl StageConfig {
         matches!(self.target(), Some("device"))
     }
 
+    /// Get the execution provider override (cpu, coreml, coreml-ane, coreml-gpu).
+    pub fn execution_provider(&self) -> Option<&str> {
+        match self {
+            StageConfig::Simple(_) => None,
+            StageConfig::Object(obj) => obj.execution_provider.as_deref(),
+        }
+    }
+
     /// Convert to StageObjectConfig for uniform handling.
     pub fn to_object(&self) -> StageObjectConfig {
         match self {
@@ -199,6 +207,7 @@ impl StageConfig {
                     version,
                     target: None,
                     provider: None,
+                    execution_provider: None,
                     options: HashMap::new(),
                 }
             }
@@ -229,6 +238,12 @@ pub struct StageObjectConfig {
     /// Cloud provider: "openai", "anthropic", "google", "elevenlabs"
     #[serde(default)]
     pub provider: Option<String>,
+
+    /// ONNX Runtime execution provider override.
+    /// If not set, auto-selection will be used based on model hints.
+    /// Valid values: "cpu", "coreml", "coreml-ane", "coreml-gpu"
+    #[serde(default)]
+    pub execution_provider: Option<String>,
 
     /// Stage-specific options (flattened for convenience)
     /// Common options: system_prompt, max_tokens, temperature
@@ -412,5 +427,26 @@ stages: []
         let obj = simple.to_object();
         assert_eq!(obj.model, Some("model".to_string()));
         assert_eq!(obj.version, Some("1.0".to_string()));
+    }
+
+    #[test]
+    fn test_execution_provider_override() {
+        let yaml = r#"
+stages:
+  - model: mobilenet-v2
+    execution_provider: coreml-ane
+"#;
+        let config = PipelineConfig::from_yaml(yaml).unwrap();
+        assert_eq!(config.stages[0].execution_provider(), Some("coreml-ane"));
+    }
+
+    #[test]
+    fn test_execution_provider_default_none() {
+        let yaml = r#"
+stages:
+  - mobilenet-v2
+"#;
+        let config = PipelineConfig::from_yaml(yaml).unwrap();
+        assert_eq!(config.stages[0].execution_provider(), None);
     }
 }

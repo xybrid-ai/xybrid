@@ -58,6 +58,12 @@ pub struct StageConfig {
     /// Stage-specific options.
     #[serde(default)]
     pub options: StageOptions,
+
+    /// ONNX Runtime execution provider override.
+    /// If not set, auto-selection will be used based on model hints.
+    /// Valid values: "cpu", "coreml", "coreml-ane", "coreml-gpu"
+    #[serde(default)]
+    pub execution_provider: Option<String>,
 }
 
 impl StageConfig {
@@ -75,6 +81,7 @@ impl StageConfig {
             when: None,
             streaming: false,
             options: StageOptions::default(),
+            execution_provider: None,
         }
     }
 
@@ -106,6 +113,14 @@ impl StageConfig {
     /// Set the conditional expression.
     pub fn with_condition(mut self, when: impl Into<String>) -> Self {
         self.when = Some(when.into());
+        self
+    }
+
+    /// Set the ONNX Runtime execution provider.
+    ///
+    /// Valid values: "cpu", "coreml", "coreml-ane", "coreml-gpu"
+    pub fn with_execution_provider(mut self, provider: impl Into<String>) -> Self {
+        self.execution_provider = Some(provider.into());
         self
     }
 
@@ -333,5 +348,36 @@ fallback:
             options.system_prompt(),
             Some("You are a helpful assistant.".to_string())
         );
+    }
+
+    #[test]
+    fn test_stage_execution_provider() {
+        let stage = StageConfig::new("vision", "mobilenet-v2")
+            .with_execution_provider("coreml-ane");
+
+        assert_eq!(stage.execution_provider, Some("coreml-ane".to_string()));
+    }
+
+    #[test]
+    fn test_stage_execution_provider_serde() {
+        let yaml = r#"
+id: vision
+model: mobilenet-v2
+target: device
+execution_provider: coreml-ane
+"#;
+        let stage: StageConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(stage.execution_provider, Some("coreml-ane".to_string()));
+    }
+
+    #[test]
+    fn test_stage_execution_provider_default_none() {
+        let yaml = r#"
+id: vision
+model: mobilenet-v2
+target: device
+"#;
+        let stage: StageConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(stage.execution_provider, None);
     }
 }

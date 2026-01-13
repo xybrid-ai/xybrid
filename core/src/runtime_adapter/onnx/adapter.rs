@@ -98,10 +98,46 @@ impl OnnxRuntimeAdapter {
         &self.execution_provider
     }
 
+    /// Sets the execution provider for future model loads.
+    pub fn set_execution_provider(&mut self, provider: ExecutionProviderKind) {
+        self.execution_provider = provider;
+    }
+
+    /// Creates a new adapter with auto-selected execution provider based on model hints.
+    ///
+    /// This uses heuristics to choose the optimal provider:
+    /// - Vision models with static shapes → CoreML ANE (on Apple platforms)
+    /// - TTS/autoregressive models → CPU
+    /// - Tiny models (<1MB) → CPU
+    /// - Unknown → CPU (safe default)
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use xybrid_core::runtime_adapter::onnx::{OnnxRuntimeAdapter, ModelHints};
+    ///
+    /// let hints = ModelHints {
+    ///     task: Some("image_classification".to_string()),
+    ///     static_shapes: Some(true),
+    ///     model_size_mb: Some(13.0),
+    ///     ..Default::default()
+    /// };
+    ///
+    /// let adapter = OnnxRuntimeAdapter::with_auto_selection(&hints);
+    /// ```
+    pub fn with_auto_selection(hints: &super::execution_provider::ModelHints) -> Self {
+        let provider = super::execution_provider::select_optimal_provider(hints);
+        Self::with_execution_provider(provider)
+    }
+
     /// Selects the optimal execution provider for the current platform.
+    ///
+    /// This is a simple platform-based selection (deprecated in favor of
+    /// `with_auto_selection` which uses model hints).
     ///
     /// On macOS/iOS with the `coreml-ep` feature enabled, this returns CoreML
     /// with Neural Engine. Otherwise, returns CPU.
+    #[deprecated(since = "0.0.24", note = "Use with_auto_selection() with ModelHints instead")]
     #[allow(dead_code)]
     pub fn select_optimal_provider() -> ExecutionProviderKind {
         #[cfg(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios")))]
