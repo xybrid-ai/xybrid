@@ -20,7 +20,9 @@ mod mobile;
 // Re-exports
 pub use adapter::OnnxRuntimeAdapter;
 pub use backend::OnnxBackend;
-pub use execution_provider::ExecutionProviderKind;
+pub use execution_provider::{
+    ExecutionProviderKind, ModelHints, parse_provider_string, select_optimal_provider,
+};
 #[cfg(feature = "coreml-ep")]
 pub use execution_provider::{CoreMLComputeUnits, CoreMLConfig};
 pub use session::ONNXSession;
