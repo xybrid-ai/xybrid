@@ -109,22 +109,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use ndarray::Array;
 
     // Initialize ORT
-    ort::init().commit()?;
+    ort::init().commit().expect("Failed to initialize ONNX Runtime");
 
-    let mut session = Session::builder()?
+    let session = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)?
         .commit_from_file(&model_path)?;
 
     println!("   Model loaded successfully!");
     println!();
     println!("   Model inputs:");
-    for input in session.inputs.iter() {
-        println!("     - {} ({:?})", input.name, input.input_type);
+    for input in session.inputs() {
+        println!("     - {} ({:?})", input.name(), input.input_type);
     }
     println!();
     println!("   Model outputs:");
-    for output in session.outputs.iter() {
-        println!("     - {} ({:?})", output.name, output.output_type);
+    for output in session.outputs() {
+        println!("     - {} ({:?})", output.name(), output.output_type);
     }
 
     // Prepare inputs
