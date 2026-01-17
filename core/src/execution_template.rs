@@ -13,43 +13,54 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Main execution template enum - defines how a model should be executed
+/// Main execution template enum - defines how a model should be executed.
+///
+/// Variants are named by **format**, not by runtime implementation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ExecutionTemplate {
-    /// Simple Mode: Single ONNX model, run once
+    /// ONNX model execution via ONNX Runtime
     ///
-    /// Use for: Image classifiers, embedders, simple encoders (BERT, ResNet, CLIP)
+    /// Use for: Image classifiers, embedders, encoders, TTS, ASR (BERT, ResNet, CLIP, Kokoro, wav2vec2)
     ///
     /// Example:
     /// ```json
     /// {
-    ///   "type": "SimpleMode",
-    ///   "model_file": "mnist.onnx"
+    ///   "type": "Onnx",
+    ///   "model_file": "model.onnx"
     /// }
     /// ```
-    SimpleMode {
+    Onnx {
         /// Path to the ONNX model file (relative to bundle root)
         model_file: String,
     },
 
-    /// Candle Model: SafeTensors model using Candle runtime (pure Rust)
+    /// SafeTensors model execution via Candle runtime (pure Rust)
+    ///
+    /// **Important**: Unlike ONNX/CoreML/TFLite, SafeTensors only contains weights.
+    /// The model architecture must be implemented in Rust, so `architecture` is required
+    /// to route to the correct implementation (whisper, llama, bert, etc.)
     ///
     /// Use for: Whisper ASR, LLaMA, and other HuggingFace models with SafeTensors weights
     ///
     /// Example:
     /// ```json
     /// {
-    ///   "type": "CandleModel",
+    ///   "type": "SafeTensors",
     ///   "model_file": "model.safetensors",
+    ///   "architecture": "whisper",
     ///   "config_file": "config.json",
-    ///   "tokenizer_file": "tokenizer.json",
-    ///   "model_type": "whisper"
+    ///   "tokenizer_file": "tokenizer.json"
     /// }
     /// ```
-    CandleModel {
+    SafeTensors {
         /// Path to the SafeTensors model file (relative to bundle root)
         model_file: String,
+
+        /// Model architecture for routing to Rust implementation (e.g., "whisper", "llama", "bert")
+        /// Required because SafeTensors only contains weights, not the model logic
+        #[serde(default)]
+        architecture: Option<String>,
 
         /// Path to model configuration JSON (HuggingFace config.json format)
         #[serde(default)]
@@ -58,13 +69,41 @@ pub enum ExecutionTemplate {
         /// Path to tokenizer JSON (HuggingFace tokenizer format)
         #[serde(default)]
         tokenizer_file: Option<String>,
-
-        /// Model type hint for specialized execution (e.g., "whisper", "llama")
-        #[serde(default)]
-        model_type: Option<String>,
     },
 
-    /// Pipeline Architecture: Structured multi-step execution
+    /// CoreML model execution (Apple platforms: iOS, macOS)
+    ///
+    /// Use for: Optimized models for Apple Neural Engine
+    ///
+    /// Example:
+    /// ```json
+    /// {
+    ///   "type": "CoreMl",
+    ///   "model_file": "model.mlpackage"
+    /// }
+    /// ```
+    CoreMl {
+        /// Path to the CoreML model file (.mlmodel or .mlpackage)
+        model_file: String,
+    },
+
+    /// TensorFlow Lite model execution (mobile: Android, iOS)
+    ///
+    /// Use for: Mobile-optimized models
+    ///
+    /// Example:
+    /// ```json
+    /// {
+    ///   "type": "TfLite",
+    ///   "model_file": "model.tflite"
+    /// }
+    /// ```
+    TfLite {
+        /// Path to the TFLite model file (.tflite)
+        model_file: String,
+    },
+
+    /// Multi-model graph execution (DAG of models)
     ///
     /// Defines a sequence of stages that process data through multiple models
     /// with control flow (loops, conditionals, etc.)
@@ -75,7 +114,7 @@ pub enum ExecutionTemplate {
     /// Example:
     /// ```json
     /// {
-    ///   "type": "Pipeline",
+    ///   "type": "ModelGraph",
     ///   "stages": [
     ///     {
     ///       "name": "encoder",
@@ -101,7 +140,7 @@ pub enum ExecutionTemplate {
     ///   }
     /// }
     /// ```
-    Pipeline {
+    ModelGraph {
         /// Sequence of execution stages
         stages: Vec<PipelineStage>,
 
@@ -686,8 +725,8 @@ pub struct ModelMetadata {
 }
 
 impl ModelMetadata {
-    /// Create a simple one-shot model metadata
-    pub fn simple(
+    /// Create an ONNX model metadata
+    pub fn onnx(
         model_id: impl Into<String>,
         version: impl Into<String>,
         model_file: impl Into<String>,
@@ -696,7 +735,7 @@ impl ModelMetadata {
         Self {
             model_id: model_id.into(),
             version: version.into(),
-            execution_template: ExecutionTemplate::SimpleMode {
+            execution_template: ExecutionTemplate::Onnx {
                 model_file: model_file.clone(),
             },
             preprocessing: Vec::new(),
@@ -707,8 +746,33 @@ impl ModelMetadata {
         }
     }
 
-    /// Create a pipeline-based model metadata
-    pub fn pipeline(
+    /// Create a SafeTensors model metadata (Candle runtime)
+    pub fn safetensors(
+        model_id: impl Into<String>,
+        version: impl Into<String>,
+        model_file: impl Into<String>,
+        architecture: impl Into<String>,
+    ) -> Self {
+        let model_file = model_file.into();
+        Self {
+            model_id: model_id.into(),
+            version: version.into(),
+            execution_template: ExecutionTemplate::SafeTensors {
+                model_file: model_file.clone(),
+                architecture: Some(architecture.into()),
+                config_file: None,
+                tokenizer_file: None,
+            },
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: vec![model_file],
+            description: None,
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Create a model graph metadata (multi-model DAG)
+    pub fn model_graph(
         model_id: impl Into<String>,
         version: impl Into<String>,
         stages: Vec<PipelineStage>,
@@ -717,7 +781,7 @@ impl ModelMetadata {
         Self {
             model_id: model_id.into(),
             version: version.into(),
-            execution_template: ExecutionTemplate::Pipeline {
+            execution_template: ExecutionTemplate::ModelGraph {
                 stages,
                 config: HashMap::new(),
             },
@@ -753,8 +817,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_simple_mode_serialization() {
-        let metadata = ModelMetadata::simple("mnist", "1.0", "mnist.onnx")
+    fn test_onnx_serialization() {
+        let metadata = ModelMetadata::onnx("mnist", "1.0", "mnist.onnx")
             .with_preprocessing(PreprocessingStep::Normalize {
                 mean: vec![0.1307],
                 std: vec![0.3081],
@@ -769,10 +833,13 @@ mod tests {
         assert_eq!(parsed.model_id, "mnist");
         assert_eq!(parsed.preprocessing.len(), 1);
         assert_eq!(parsed.postprocessing.len(), 1);
+
+        // Verify the JSON contains "Onnx" type
+        assert!(json.contains("\"type\": \"Onnx\""));
     }
 
     #[test]
-    fn test_pipeline_mode_serialization() {
+    fn test_model_graph_serialization() {
         let encoder_stage = PipelineStage {
             name: "encoder".to_string(),
             model_file: "encoder.onnx".to_string(),
@@ -807,7 +874,7 @@ mod tests {
             config: HashMap::new(),
         };
 
-        let metadata = ModelMetadata::pipeline(
+        let metadata = ModelMetadata::model_graph(
             "whisper-tiny",
             "1.2",
             vec![encoder_stage, decoder_stage],
@@ -839,7 +906,7 @@ mod tests {
         assert_eq!(parsed.model_id, "whisper-tiny");
 
         match &parsed.execution_template {
-            ExecutionTemplate::Pipeline { stages, .. } => {
+            ExecutionTemplate::ModelGraph { stages, .. } => {
                 assert_eq!(stages.len(), 2);
                 assert_eq!(stages[0].name, "encoder");
                 assert_eq!(stages[1].name, "decoder");
@@ -851,8 +918,11 @@ mod tests {
                     _ => panic!("Expected autoregressive mode"),
                 }
             }
-            _ => panic!("Expected pipeline template"),
+            _ => panic!("Expected ModelGraph template"),
         }
+
+        // Verify the JSON contains "ModelGraph" type
+        assert!(json.contains("\"type\": \"ModelGraph\""));
     }
 
     #[test]

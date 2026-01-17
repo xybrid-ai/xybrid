@@ -78,14 +78,14 @@ impl TemplateExecutor {
         xybrid_trace::add_metadata("model_id", &metadata.model_id);
         xybrid_trace::add_metadata("version", &metadata.version);
 
-        // Step 1: Handling Pipelines
-        if let ExecutionTemplate::Pipeline { stages, config } = &metadata.execution_template {
+        // Step 1: Handling ModelGraph (multi-model DAG)
+        if let ExecutionTemplate::ModelGraph { stages, config } = &metadata.execution_template {
             info!(
                 target: "xybrid_core",
-                "Executing pipeline with {} stages",
+                "Executing model graph with {} stages",
                 stages.len()
             );
-            let _span = xybrid_trace::SpanGuard::new("pipeline_inference");
+            let _span = xybrid_trace::SpanGuard::new("model_graph_inference");
             xybrid_trace::add_metadata("stages", &stages.len().to_string());
 
             // Run preprocessing
@@ -97,11 +97,13 @@ impl TemplateExecutor {
 
         // Step 2: Single Model Execution
         let (runtime_type, model_file) = match &metadata.execution_template {
-            ExecutionTemplate::CandleModel { model_file, .. } => ("candle", model_file.clone()),
-            ExecutionTemplate::SimpleMode { model_file } => ("onnx", model_file.clone()),
-            ExecutionTemplate::Pipeline { .. } => {
+            ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file.clone()),
+            ExecutionTemplate::Onnx { model_file } => ("onnx", model_file.clone()),
+            ExecutionTemplate::CoreMl { model_file } => ("coreml", model_file.clone()),
+            ExecutionTemplate::TfLite { model_file } => ("tflite", model_file.clone()),
+            ExecutionTemplate::ModelGraph { .. } => {
                 return Err(AdapterError::RuntimeError(
-                    "Pipeline execution should not reach single model path".to_string(),
+                    "ModelGraph execution should not reach single model path".to_string(),
                 ));
             }
         };

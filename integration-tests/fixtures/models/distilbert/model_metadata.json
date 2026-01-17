@@ -3,7 +3,7 @@
   "version": "1.0",
   "description": "Sentence transformer model for generating embeddings (384 dimensions)",
   "execution_template": {
-    "type": "SimpleMode",
+    "type": "Onnx",
     "model_file": "model.onnx"
   },
   "preprocessing": [
