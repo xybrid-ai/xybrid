@@ -528,10 +528,10 @@ impl ModelLoader {
 
         // Check execution template type
         match &metadata.execution_template {
-            ExecutionTemplate::CandleModel { model_type, .. } => {
-                model_type.as_deref() == Some("whisper")
+            ExecutionTemplate::SafeTensors { architecture, .. } => {
+                architecture.as_deref() == Some("whisper")
             }
-            ExecutionTemplate::SimpleMode { .. } => {
+            ExecutionTemplate::Onnx { .. } => {
                 // Check if preprocessing includes AudioDecode (likely ASR)
                 metadata.preprocessing.iter().any(|step| {
                     matches!(
