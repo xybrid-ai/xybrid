@@ -375,10 +375,10 @@ impl StreamSession {
 
     /// Infer optimal buffer configuration from model metadata.
     fn infer_buffer_config(metadata: &ModelMetadata, config: &StreamConfig) -> AudioBufferConfig {
-        // Check if this is a Whisper model (Candle)
+        // Check if this is a Whisper model (SafeTensors/Candle)
         let is_whisper = match &metadata.execution_template {
-            ExecutionTemplate::CandleModel { model_type, .. } => {
-                model_type.as_deref() == Some("whisper")
+            ExecutionTemplate::SafeTensors { architecture, .. } => {
+                architecture.as_deref() == Some("whisper")
             }
             _ => false,
         };

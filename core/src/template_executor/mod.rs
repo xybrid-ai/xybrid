@@ -25,7 +25,7 @@
 //!     │         ▼
 //!     ├── PreprocessedData
 //!     │         │
-//!     ├── Execution (SimpleMode, CandleModel, Pipeline)
+//!     ├── Execution (Onnx, SafeTensors, CoreMl, TfLite, ModelGraph)
 //!     │         │
 //!     │         ▼
 //!     ├── RawOutputs
