@@ -704,9 +704,17 @@ impl Default for Orchestrator {
 }
 
 // Bootstrap module for orchestrator initialization
+pub mod authority;
 pub mod bootstrap;
 pub mod policy_engine;
 pub mod routing_engine;
+
+// Re-export authority types for convenience
+pub use authority::{
+    AuthorityDecision, DecisionSource, ExecutionOutcome, LocalAuthority, ModelConstraints,
+    ModelRequest, ModelSelection, ModelSource, OrchestrationAuthority, PolicyOutcome,
+    PolicyRequest, RemoteAuthority, ResolvedTarget, StageContext,
+};
 
 #[cfg(test)]
 mod tests {
