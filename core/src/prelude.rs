@@ -68,3 +68,9 @@ pub use crate::context::{DeviceMetrics, StageDescriptor};
 // ============================================================================
 
 pub use crate::device::HardwareCapabilities;
+
+// ============================================================================
+// Cache Provider
+// ============================================================================
+
+pub use crate::cache_provider::{CacheProvider, FilesystemCacheProvider, NoopCacheProvider};
