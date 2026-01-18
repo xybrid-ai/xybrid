@@ -72,6 +72,10 @@ pub mod executor;
 /// Metadata-driven model inference (preprocessing → ONNX → postprocessing)
 pub mod template_executor;
 
+/// Cache provider abstraction for model availability checks.
+/// Allows Core to check cache without depending on SDK.
+pub mod cache_provider;
+
 // ============================================================================
 // Data Types & Intermediate Representation
 // ============================================================================
