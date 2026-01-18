@@ -66,6 +66,11 @@ hf-hub = { version = "0.3", optional = true }  # For downloading models from Hug
 byteorder = { version = "1.5", optional = true }  # For reading mel filter bytes
 num-traits = { version = "0.2", optional = true }  # Required by candle audio
 
+# Mistral.rs - Pure Rust LLM inference (optional, for local LLMs)
+# Enable with: cargo build --features local-llm
+# For GPU: cargo build --features local-llm,local-llm-metal (macOS) or local-llm-cuda (NVIDIA)
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", optional = true }
+
 [features]
 default = ["onnx-runtime", "ort-download"]
 onnx-runtime = []
@@ -81,6 +86,13 @@ candle-cuda = ["candle", "candle-core/cuda"]
 # CoreML Execution Provider for Apple Neural Engine acceleration (macOS/iOS)
 # Enable with: cargo build --features coreml-ep
 coreml-ep = ["ort/coreml"]
+# Local LLM inference via mistral.rs (CPU by default)
+# Enable with: cargo build --features local-llm
+local-llm = ["dep:mistralrs"]
+# Local LLM with Metal acceleration (macOS/iOS)
+local-llm-metal = ["local-llm", "mistralrs/metal"]
+# Local LLM with CUDA acceleration (NVIDIA GPUs)
+local-llm-cuda = ["local-llm", "mistralrs/cuda"]
 
 [dev-dependencies]
 tempfile = "3.8"
