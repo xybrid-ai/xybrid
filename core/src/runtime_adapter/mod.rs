@@ -14,7 +14,8 @@
 //! Each runtime backend is organized in its own subdirectory:
 //! - `onnx/` - ONNX Runtime backend (cross-platform)
 //! - `coreml/` - CoreML backend (iOS/macOS)
-//! - `candle/` - Candle backend (pure Rust, feature-gated) [planned]
+//! - `candle/` - Candle backend (pure Rust, feature-gated)
+//! - `llm/` - Local LLM backend (GGUF models via mistral.rs, feature-gated)
 //!
 //! # Example
 //!
@@ -54,6 +55,10 @@ pub mod coreml;
 #[cfg(feature = "candle")]
 pub mod candle;
 
+// LLM backend (feature-gated, local LLM inference via mistral.rs)
+#[cfg(feature = "local-llm")]
+pub mod llm;
+
 // Re-exports from runtime backends
 pub use onnx::OnnxBackend;
 pub use onnx::OnnxRuntimeAdapter;
@@ -67,6 +72,9 @@ pub use coreml::CoreMLRuntimeAdapter;
 
 #[cfg(feature = "candle")]
 pub use candle::{CandleBackend, CandleRuntimeAdapter};
+
+#[cfg(feature = "local-llm")]
+pub use llm::{LlmRuntimeAdapter, LlmBackend, MistralBackend, LlmConfig, GenerationConfig};
 
 // Re-export inference backend types
 pub use inference_backend::{BackendError, BackendResult, InferenceBackend, RuntimeType};
