@@ -1,7 +1,7 @@
 //! Inference Backend Trait - Low-level runtime abstraction for model execution.
 //!
 //! This module provides a unified interface for different inference runtimes
-//! (ONNX Runtime, Burn, CoreML, etc.) at the tensor level.
+//! (ONNX Runtime, CoreML, etc.) at the tensor level.
 //!
 //! Unlike the high-level RuntimeAdapter trait which works with Envelopes,
 //! InferenceBackend works directly with tensors, allowing the TemplateExecutor
@@ -42,9 +42,6 @@ pub enum RuntimeType {
     /// ONNX Runtime (ort crate)
     Onnx,
 
-    /// Burn framework (pure Rust)
-    Burn,
-
     /// CoreML (Apple platforms)
     CoreML,
 
@@ -57,7 +54,6 @@ impl RuntimeType {
     pub fn as_str(&self) -> &'static str {
         match self {
             RuntimeType::Onnx => "onnx",
-            RuntimeType::Burn => "burn",
             RuntimeType::CoreML => "coreml",
             #[cfg(feature = "candle")]
             RuntimeType::Candle => "candle",
@@ -82,7 +78,7 @@ pub trait InferenceBackend: Send + Sync {
     /// # Arguments
     ///
     /// * `model_path` - Path to the model file (e.g., .onnx, .mpk.gz)
-    /// * `config_path` - Optional path to config file (e.g., .cfg for Burn)
+    /// * `config_path` - Optional path to config file (e.g., .cfg for CoreML)
     ///
     /// # Returns
     ///
