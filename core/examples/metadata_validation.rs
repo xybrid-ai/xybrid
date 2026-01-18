@@ -1,7 +1,7 @@
 //! Example: Validate model metadata JSON files
 //!
 //! This example demonstrates loading and validating model metadata
-//! for different execution templates (SimpleMode and Pipeline).
+//! for different execution templates (Onnx, SafeTensors, and ModelGraph).
 
 use std::fs;
 use xybrid_core::execution_template::ModelMetadata;
@@ -10,8 +10,8 @@ use xybrid_core::testing::model_fixtures;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Model Metadata Validation ===\n");
 
-    // Test 1: Whisper Pipeline Metadata
-    println!("1. Loading Whisper-tiny metadata (Pipeline)...");
+    // Test 1: Whisper Metadata (could be SafeTensors with Candle or ONNX)
+    println!("1. Loading Whisper-tiny metadata...");
     let whisper_dir = model_fixtures::require_model("whisper-tiny");
     let whisper_json = fs::read_to_string(whisper_dir.join("model_metadata.json"))?;
     let whisper_metadata: ModelMetadata = serde_json::from_str(&whisper_json)?;
@@ -38,8 +38,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     match &whisper_metadata.execution_template {
-        xybrid_core::execution_template::ExecutionTemplate::Pipeline { stages, config } => {
-            println!("   ✓ Execution: Pipeline with {} stages", stages.len());
+        xybrid_core::execution_template::ExecutionTemplate::ModelGraph { stages, config } => {
+            println!("   ✓ Execution: ModelGraph with {} stages", stages.len());
             for stage in stages {
                 println!(
                     "      - Stage '{}': {} (mode: {:?})",
@@ -51,15 +51,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 config.keys().collect::<Vec<_>>()
             );
         }
-        xybrid_core::execution_template::ExecutionTemplate::SimpleMode { model_file } => {
-            println!("   ✓ Execution: SimpleMode ({})", model_file);
+        xybrid_core::execution_template::ExecutionTemplate::Onnx { model_file } => {
+            println!("   ✓ Execution: Onnx ({})", model_file);
+        }
+        xybrid_core::execution_template::ExecutionTemplate::SafeTensors { model_file, architecture, .. } => {
+            println!("   ✓ Execution: SafeTensors ({}, arch: {:?})", model_file, architecture);
         }
         _ => println!("   ✓ Execution: Other template type"),
     }
     println!();
 
-    // Test 2: MNIST SimpleMode Metadata
-    println!("2. Loading MNIST metadata (SimpleMode)...");
+    // Test 2: MNIST ONNX Metadata
+    println!("2. Loading MNIST metadata (Onnx)...");
     let mnist_dir = model_fixtures::require_model("mnist");
     let mnist_json = fs::read_to_string(mnist_dir.join("model_metadata.json"))?;
     let mnist_metadata: ModelMetadata = serde_json::from_str(&mnist_json)?;
@@ -86,8 +89,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     match &mnist_metadata.execution_template {
-        xybrid_core::execution_template::ExecutionTemplate::SimpleMode { model_file } => {
-            println!("   ✓ Execution: SimpleMode ({})", model_file);
+        xybrid_core::execution_template::ExecutionTemplate::Onnx { model_file } => {
+            println!("   ✓ Execution: Onnx ({})", model_file);
         }
         _ => println!("   ✗ Unexpected execution template type!"),
     }

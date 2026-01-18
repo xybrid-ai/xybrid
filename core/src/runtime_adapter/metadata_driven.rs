@@ -179,7 +179,7 @@ mod tests {
             "model_id": "test-model",
             "version": "1.0",
             "execution_template": {
-                "type": "SimpleMode",
+                "type": "Onnx",
                 "model_file": "model.onnx"
             },
             "preprocessing": [],
