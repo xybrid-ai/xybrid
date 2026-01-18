@@ -360,6 +360,45 @@
           "notes": "Requires espeak-ng for phonemization. Install: brew install espeak-ng (macOS) or apt install espeak-ng (Linux)"
         }
       }
+    },
+    "qwen2.5-0.5b-instruct": {
+      "description": "Qwen 2.5 0.5B Instruct - Small but capable instruction-tuned LLM (GGUF Q4_K_M)",
+      "source": "url",
+      "size_mb": 468,
+      "task": "text-generation",
+      "feature_gate": "local-llm",
+      "files": [
+        {
+          "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+          "output": "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "qwen2.5-0.5b-instruct",
+        "version": "1.0",
+        "description": "Qwen 2.5 0.5B Instruct - Small but capable instruction-tuned LLM from Alibaba Cloud",
+        "execution_template": {
+          "type": "Gguf",
+          "model_file": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+          "context_length": 4096
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": [
+          "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+          "model_metadata.json"
+        ],
+        "metadata": {
+          "task": "text-generation",
+          "architecture": "qwen2",
+          "parameters": "0.5B",
+          "quantization": "Q4_K_M",
+          "license": "Apache-2.0",
+          "languages": ["en", "zh"],
+          "source": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+          "notes": "Requires --features local-llm to run. CPU release: ~10 tok/s. Metal has dispatch overhead for this small model."
+        }
+      }
     }
   }
 }

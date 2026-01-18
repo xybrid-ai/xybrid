@@ -148,6 +148,35 @@ pub enum ExecutionTemplate {
         #[serde(default)]
         config: HashMap<String, serde_json::Value>,
     },
+
+    /// GGUF model execution for local LLMs (via mistral.rs)
+    ///
+    /// Use for: Local LLM inference (Qwen, Llama, Mistral, Phi, etc.)
+    ///
+    /// GGUF is the standard format for quantized LLMs (from llama.cpp ecosystem).
+    /// Requires the `local-llm` feature flag.
+    ///
+    /// Example:
+    /// ```json
+    /// {
+    ///   "type": "Gguf",
+    ///   "model_file": "qwen2.5-1.5b-q4_k_m.gguf",
+    ///   "chat_template": "chat_templates/qwen.json"
+    /// }
+    /// ```
+    Gguf {
+        /// Path to the GGUF model file (relative to bundle root)
+        model_file: String,
+
+        /// Path to chat template JSON file (optional)
+        /// If not provided, uses model's built-in template or defaults
+        #[serde(default)]
+        chat_template: Option<String>,
+
+        /// Maximum context length (tokens). Default: 4096
+        #[serde(default = "default_context_length")]
+        context_length: usize,
+    },
 }
 
 /// A single stage in a pipeline execution
@@ -493,6 +522,10 @@ fn default_add_padding() -> bool {
 
 fn default_repetition_penalty() -> f32 {
     1.1 // Moderate penalty for Whisper
+}
+
+fn default_context_length() -> usize {
+    4096 // Default context length for LLMs
 }
 
 fn default_n_mels() -> usize {

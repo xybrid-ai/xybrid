@@ -18,6 +18,11 @@ use std::path::Path;
 #[cfg(feature = "candle")]
 use crate::runtime_adapter::candle::CandleRuntime;
 
+#[cfg(feature = "local-llm")]
+use crate::runtime_adapter::llm::{LlmConfig, LlmRuntimeAdapter};
+#[cfg(feature = "local-llm")]
+use crate::runtime_adapter::RuntimeAdapter;
+
 use super::execution::{
     execute_autoregressive_stage, execute_bert_inference, execute_single_shot_stage,
     execute_tts_inference, execute_whisper_decoder_stage,
@@ -106,6 +111,17 @@ impl TemplateExecutor {
                     "ModelGraph execution should not reach single model path".to_string(),
                 ));
             }
+            #[cfg(feature = "local-llm")]
+            ExecutionTemplate::Gguf { model_file, chat_template, context_length } => {
+                // LLM execution via LlmRuntimeAdapter
+                return self.execute_llm(model_file, chat_template.as_deref(), *context_length, input);
+            }
+            #[cfg(not(feature = "local-llm"))]
+            ExecutionTemplate::Gguf { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "GGUF/LLM execution requires the 'local-llm' feature. Build with --features local-llm".to_string(),
+                ));
+            }
         };
 
         debug!(
@@ -188,6 +204,54 @@ impl TemplateExecutor {
             "Model execution complete: {} -> {}",
             metadata.model_id,
             result.kind_str()
+        );
+
+        Ok(result)
+    }
+
+    /// Execute LLM inference via LlmRuntimeAdapter.
+    ///
+    /// This is a separate execution path for GGUF-based LLMs that bypasses
+    /// the standard preprocessing/inference/postprocessing pipeline.
+    #[cfg(feature = "local-llm")]
+    fn execute_llm(
+        &self,
+        model_file: &str,
+        chat_template: Option<&str>,
+        context_length: usize,
+        input: &Envelope,
+    ) -> ExecutorResult<Envelope> {
+        info!(
+            target: "xybrid_core",
+            "Executing LLM inference: {}",
+            model_file
+        );
+
+        let _llm_span = xybrid_trace::SpanGuard::new("llm_inference");
+        xybrid_trace::add_metadata("model", model_file);
+
+        // Build full model path
+        let model_path = Path::new(&self.base_path).join(model_file);
+
+        // Create LLM config
+        let mut config = LlmConfig::new(model_path.to_string_lossy().to_string())
+            .with_context_length(context_length);
+
+        if let Some(template) = chat_template {
+            let template_path = Path::new(&self.base_path).join(template);
+            config = config.with_chat_template(template_path.to_string_lossy().to_string());
+        }
+
+        // Create and load the adapter
+        let mut adapter = LlmRuntimeAdapter::new()?;
+        adapter.load_model(&config.model_path)?;
+
+        // Execute inference
+        let result = adapter.execute(input)?;
+
+        info!(
+            target: "xybrid_core",
+            "LLM inference complete"
         );
 
         Ok(result)
