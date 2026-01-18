@@ -129,12 +129,10 @@ impl RuntimeAdapter for CandleRuntimeAdapter {
 
         let model_id = self.extract_model_id(path);
 
-        // Check if already loaded
+        // Check if already loaded - just log and continue
         if self.models.contains_key(&model_id) {
-            return Err(AdapterError::RuntimeError(format!(
-                "Model '{}' is already loaded",
-                model_id
-            )));
+            log::warn!("Model '{}' is already loaded, skipping reload", model_id);
+            return Ok(());
         }
 
         // Load Whisper model

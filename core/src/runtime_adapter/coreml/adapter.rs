@@ -176,12 +176,10 @@ impl RuntimeAdapter for CoreMLRuntimeAdapter {
         // Extract model ID from path
         let model_id = self.extract_model_id(path);
 
-        // Check if model is already loaded
+        // Check if model is already loaded - just log and continue
         if self.models.contains_key(&model_id) {
-            return Err(AdapterError::RuntimeError(format!(
-                "Model '{}' is already loaded",
-                model_id
-            )));
+            log::warn!("Model '{}' is already loaded, skipping reload", model_id);
+            return Ok(());
         }
 
         // Create metadata (stub: in real implementation, would parse CoreML model)
@@ -479,13 +477,14 @@ mod tests {
     }
 
     #[test]
-    fn test_double_load_error() -> AdapterResult<()> {
+    fn test_double_load_succeeds() -> AdapterResult<()> {
         let (_temp_dir, model_path) = create_mock_mlpackage();
         let mut adapter = CoreMLRuntimeAdapter::new();
         adapter.load_model(&model_path)?;
 
+        // Double load should succeed (idempotent) - just logs a warning
         let result = adapter.load_model(&model_path);
-        assert!(matches!(result, Err(AdapterError::RuntimeError(_))));
+        assert!(result.is_ok());
 
         Ok(())
     }
