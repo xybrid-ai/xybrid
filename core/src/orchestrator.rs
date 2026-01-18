@@ -25,21 +25,39 @@
 //! The orchestrator supports both batch and streaming execution modes, following the
 //! architecture appendix: "Build local first, orchestrate distributed later."
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Module declarations (must come first)
+// ─────────────────────────────────────────────────────────────────────────────
+pub mod authority;
+pub mod bootstrap;
+pub mod policy_engine;
+pub mod routing_engine;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Re-exports for public API
+// ─────────────────────────────────────────────────────────────────────────────
+pub use authority::{
+    AuthorityDecision, DecisionSource, ExecutionOutcome, LocalAuthority, ModelConstraints,
+    ModelRequest, ModelSelection, ModelSource, OrchestrationAuthority, PolicyOutcome,
+    PolicyRequest, RemoteAuthority, ResolvedTarget, StageContext,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal imports
+// ─────────────────────────────────────────────────────────────────────────────
 use crate::context::{DeviceMetrics, StageDescriptor};
 use crate::control_sync::ControlSync;
 use crate::event_bus::{EventBus, OrchestratorEvent};
 use crate::executor::Executor;
 use crate::ir::Envelope;
-use crate::pipeline::ExecutionTarget;
-use self::policy_engine::{DefaultPolicyEngine, PolicyEngine};
-use self::routing_engine::{
+use policy_engine::{DefaultPolicyEngine, PolicyEngine};
+use routing_engine::{
     DefaultRoutingEngine, LocalAvailability, RouteTarget, RoutingDecision, RoutingEngine,
 };
 use crate::streaming::manager::{StreamManager, StreamManagerConfig as StreamConfig};
 use crate::telemetry::Telemetry;
 use crate::tracing as trace;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task;
 
 /// Error type for orchestrator operations.
@@ -102,8 +120,32 @@ pub enum ExecutionMode {
 }
 
 /// Main orchestrator struct that coordinates pipeline execution.
+///
+/// ## Authority-Based Decisions
+///
+/// The Orchestrator uses an `OrchestrationAuthority` for all routing and policy decisions.
+/// By default, it uses `LocalAuthority` which works completely offline with no phone-home.
+///
+/// For smarter decisions based on fleet-wide data, configure a `RemoteAuthority` which
+/// will automatically fall back to `LocalAuthority` when the backend is unavailable.
+///
+/// ```rust,ignore
+/// use xybrid_core::orchestrator::{Orchestrator, RemoteAuthority};
+///
+/// // Default: LocalAuthority (fully offline)
+/// let orchestrator = Orchestrator::new();
+///
+/// // With RemoteAuthority (smart routing, with fallback)
+/// let authority = Box::new(RemoteAuthority::new("https://api.xybrid.dev"));
+/// let orchestrator = Orchestrator::with_authority(authority);
+/// ```
 pub struct Orchestrator {
+    /// The orchestration authority for routing and policy decisions.
+    /// Default: LocalAuthority (offline, no phone-home).
+    authority: Box<dyn OrchestrationAuthority>,
+    /// Policy engine for backward compatibility (load_policies, redact).
     policy_engine: Box<dyn PolicyEngine>,
+    /// Routing engine for backward compatibility (record_feedback).
     routing_engine: Box<dyn RoutingEngine>,
     executor: Executor,
     stream_manager: StreamManager,
@@ -116,6 +158,7 @@ pub struct Orchestrator {
 impl Orchestrator {
     /// Creates a new orchestrator with custom components.
     pub fn with_all(
+        authority: Box<dyn OrchestrationAuthority>,
         policy_engine: Box<dyn PolicyEngine>,
         routing_engine: Box<dyn RoutingEngine>,
         executor: Executor,
@@ -126,6 +169,7 @@ impl Orchestrator {
         execution_mode: ExecutionMode,
     ) -> Self {
         Self {
+            authority,
             policy_engine,
             routing_engine,
             executor,
@@ -138,18 +182,51 @@ impl Orchestrator {
     }
 
     /// Creates a new orchestrator with default components.
+    ///
+    /// Uses `LocalAuthority` by default - fully offline, no phone-home.
     pub fn new() -> Self {
         Self::bootstrap(None)
             .expect("orchestrator bootstrap with default configuration should succeed")
     }
 
+    /// Creates a new orchestrator with a custom authority.
+    ///
+    /// Use this to configure smart routing via `RemoteAuthority`:
+    ///
+    /// ```rust,ignore
+    /// use xybrid_core::orchestrator::{Orchestrator, RemoteAuthority};
+    ///
+    /// // RemoteAuthority automatically falls back to LocalAuthority
+    /// // when the backend is unavailable.
+    /// let authority = Box::new(RemoteAuthority::new("https://api.xybrid.dev"));
+    /// let orchestrator = Orchestrator::with_authority(authority);
+    /// ```
+    pub fn with_authority(authority: Box<dyn OrchestrationAuthority>) -> Self {
+        let telemetry = Arc::new(Telemetry::new());
+        Self {
+            authority,
+            policy_engine: Box::new(DefaultPolicyEngine::with_default_policy()),
+            routing_engine: Box::new(DefaultRoutingEngine::new()),
+            executor: Executor::new(),
+            stream_manager: StreamManager::new(),
+            event_bus: EventBus::new(),
+            telemetry,
+            control_sync: None,
+            execution_mode: ExecutionMode::Batch,
+        }
+    }
+
     /// Creates a new orchestrator with custom policy and routing engines.
+    ///
+    /// Note: This uses `LocalAuthority` internally. For custom authority,
+    /// use `with_authority()` instead.
     pub fn with_engines(
         policy_engine: Box<dyn PolicyEngine>,
         routing_engine: Box<dyn RoutingEngine>,
     ) -> Self {
         let telemetry = Arc::new(Telemetry::new());
         Self {
+            authority: Box::new(LocalAuthority::new()),
             policy_engine,
             routing_engine,
             executor: Executor::new(),
@@ -162,9 +239,12 @@ impl Orchestrator {
     }
 
     /// Creates a new orchestrator configured for streaming execution.
+    ///
+    /// Uses `LocalAuthority` by default - fully offline, no phone-home.
     pub fn with_streaming(config: StreamConfig) -> Self {
         let telemetry = Arc::new(Telemetry::new());
         Self {
+            authority: Box::new(LocalAuthority::new()),
             policy_engine: Box::new(DefaultPolicyEngine::with_default_policy()),
             routing_engine: Box::new(DefaultRoutingEngine::new()),
             executor: Executor::new(),
@@ -180,16 +260,20 @@ impl Orchestrator {
     ///
     /// This method orchestrates the full lifecycle according to the architecture:
     /// 1. Receive input envelope
-    /// 2. Evaluate policy
-    /// 3. Decide route
+    /// 2. Evaluate policy (via OrchestrationAuthority)
+    /// 3. Decide route (via OrchestrationAuthority)
     /// 4. Execute model
     /// 5. Emit telemetry
+    /// 6. Record outcome for learning
+    ///
+    /// All routing and policy decisions go through the `OrchestrationAuthority`.
+    /// By default, `LocalAuthority` is used (fully offline, no phone-home).
     pub fn execute_stage(
         &mut self,
         stage: &StageDescriptor,
         input: &Envelope,
         metrics: &DeviceMetrics,
-        availability: &LocalAvailability,
+        _availability: &LocalAvailability,
     ) -> OrchestratorResult<StageExecutionResult> {
         let _start_time = std::time::Instant::now();
 
@@ -200,74 +284,49 @@ impl Orchestrator {
         });
         self.telemetry.log_stage_start(&stage.name);
 
-        // Step 2: Evaluate policy
-        let policy_result = self.policy_engine.evaluate(&stage.name, input, metrics);
+        // Step 2: Evaluate policy via OrchestrationAuthority
+        let policy_request = PolicyRequest {
+            stage_id: stage.name.clone(),
+            envelope: input.clone(),
+            metrics: metrics.clone(),
+        };
+        let policy_decision = self.authority.apply_policy(&policy_request);
+        let policy_allowed = policy_decision.result.is_allowed();
+        let needs_transform = matches!(&policy_decision.result, PolicyOutcome::Transform { .. });
 
         // Emit policy evaluation event
         self.event_bus.publish(OrchestratorEvent::PolicyEvaluated {
             stage_name: stage.name.clone(),
-            allowed: policy_result.allowed,
-            reason: policy_result.reason.clone(),
+            allowed: policy_allowed,
+            reason: Some(policy_decision.reason.clone()),
         });
         self.telemetry.log_policy_evaluation(
             &stage.name,
-            policy_result.allowed,
-            policy_result.reason.as_deref(),
+            policy_allowed,
+            Some(&policy_decision.reason),
         );
 
-        // Apply redaction if needed
+        // Apply redaction if transforms needed (use policy_engine for actual redaction)
         let mut redacted_input = input.clone();
-        if !policy_result.transforms_applied.is_empty() {
+        if needs_transform {
             self.policy_engine.redact(&mut redacted_input);
         }
 
-        // Step 3: Decide route
-        // If stage has an explicit target (not Auto), use it directly
-        // Otherwise, use the routing engine for dynamic routing
-        let routing_decision = match &stage.target {
-            Some(ExecutionTarget::Device) => {
-                // Explicit device target - bypass routing engine
-                RoutingDecision {
-                    stage: stage.name.clone(),
-                    target: RouteTarget::Local,
-                    reason: "explicit_target: stage declares target=device".to_string(),
-                    timestamp_ms: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
-                }
-            }
-            Some(ExecutionTarget::Server) => {
-                // Explicit server target - use cloud adapter
-                RoutingDecision {
-                    stage: stage.name.clone(),
-                    target: RouteTarget::Cloud,
-                    reason: "explicit_target: stage declares target=server".to_string(),
-                    timestamp_ms: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
-                }
-            }
-            Some(ExecutionTarget::Cloud) => {
-                // Integration target - handled specially by executor
-                // Return a routing decision that indicates integration
-                RoutingDecision {
-                    stage: stage.name.clone(),
-                    target: RouteTarget::Cloud, // Will be handled as integration by executor
-                    reason: "explicit_target: stage declares target=integration".to_string(),
-                    timestamp_ms: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
-                }
-            }
-            Some(ExecutionTarget::Auto) | None => {
-                // Auto or unspecified - use routing engine for dynamic decision
-                self.routing_engine
-                    .decide(&stage.name, metrics, &policy_result, availability)
-            }
+        // Step 3: Resolve target via OrchestrationAuthority
+        let stage_context = StageContext {
+            stage_id: stage.name.clone(),
+            model_id: stage.name.clone(), // Use stage name as model_id if not specified
+            input_kind: input.kind.clone(),
+            metrics: metrics.clone(),
+            explicit_target: stage.target.clone(),
         };
+        let target_decision = self.authority.resolve_target(&stage_context);
+
+        // Convert ResolvedTarget to RoutingDecision for backward compatibility
+        let routing_decision = self.resolved_target_to_routing_decision(
+            &stage.name,
+            &target_decision,
+        );
 
         // Emit routing decision event
         self.event_bus.publish(OrchestratorEvent::RoutingDecided {
@@ -290,10 +349,25 @@ impl Orchestrator {
             .log_execution_start(&stage.name, &routing_decision.target.to_json_string());
 
         let target = routing_decision.target.to_json_string();
-        let (output, stage_metadata) = self
+        let execution_result = self
             .executor
-            .execute_stage(stage, &redacted_input, &target)
-            .map_err(|e| OrchestratorError::ExecutionFailed(format!("{:?}", e)))?;
+            .execute_stage(stage, &redacted_input, &target);
+
+        let (output, stage_metadata, success, error_msg) = match execution_result {
+            Ok((out, meta)) => (out, meta, true, None),
+            Err(e) => {
+                let error_msg = format!("{:?}", e);
+                // Record failure outcome
+                self.authority.record_outcome(&ExecutionOutcome {
+                    stage_id: stage.name.clone(),
+                    target: target_decision.result.clone(),
+                    latency_ms: 0,
+                    success: false,
+                    error: Some(error_msg.clone()),
+                });
+                return Err(OrchestratorError::ExecutionFailed(error_msg));
+            }
+        };
 
         let latency_ms = stage_metadata.latency_ms as u32;
 
@@ -310,7 +384,16 @@ impl Orchestrator {
             latency_ms,
         );
 
-        // Record feedback for adaptive routing
+        // Step 6: Record outcome for learning (via OrchestrationAuthority)
+        self.authority.record_outcome(&ExecutionOutcome {
+            stage_id: stage.name.clone(),
+            target: target_decision.result.clone(),
+            latency_ms: latency_ms as u64,
+            success,
+            error: error_msg,
+        });
+
+        // Also record feedback for backward compatibility with routing engine
         self.routing_engine
             .record_feedback(&routing_decision, latency_ms);
 
@@ -383,12 +466,15 @@ impl Orchestrator {
     /// This is an async wrapper around `execute_stage` that runs the sync
     /// orchestrator logic in a blocking thread pool.
     ///
+    /// All routing and policy decisions go through the `OrchestrationAuthority`.
+    /// By default, `LocalAuthority` is used (fully offline, no phone-home).
+    ///
     /// # Arguments
     ///
     /// * `stage` - Stage descriptor
     /// * `input` - Input envelope
     /// * `metrics` - Device metrics
-    /// * `availability` - Local availability
+    /// * `availability` - Local availability (deprecated, decisions now via authority)
     ///
     /// # Returns
     ///
@@ -398,7 +484,7 @@ impl Orchestrator {
         stage: &StageDescriptor,
         input: &Envelope,
         metrics: &DeviceMetrics,
-        availability: &LocalAvailability,
+        _availability: &LocalAvailability,
     ) -> OrchestratorResult<StageExecutionResult> {
         // Emit stage start event (consistent with sync execute_stage)
         self.event_bus.publish(OrchestratorEvent::StageStart {
@@ -406,73 +492,49 @@ impl Orchestrator {
         });
         self.telemetry.log_stage_start(&stage.name);
 
-        // Run policy and routing on the async runtime (they're fast)
-        let policy_result = self.policy_engine.evaluate(&stage.name, input, metrics);
+        // Step 2: Evaluate policy via OrchestrationAuthority
+        let policy_request = PolicyRequest {
+            stage_id: stage.name.clone(),
+            envelope: input.clone(),
+            metrics: metrics.clone(),
+        };
+        let policy_decision = self.authority.apply_policy(&policy_request);
+        let policy_allowed = policy_decision.result.is_allowed();
+        let needs_transform = matches!(&policy_decision.result, PolicyOutcome::Transform { .. });
 
         // Emit policy evaluation event
         self.event_bus.publish(OrchestratorEvent::PolicyEvaluated {
             stage_name: stage.name.clone(),
-            allowed: policy_result.allowed,
-            reason: policy_result.reason.clone(),
+            allowed: policy_allowed,
+            reason: Some(policy_decision.reason.clone()),
         });
         self.telemetry.log_policy_evaluation(
             &stage.name,
-            policy_result.allowed,
-            policy_result.reason.as_deref(),
+            policy_allowed,
+            Some(&policy_decision.reason),
         );
 
-        // Apply redaction if needed
+        // Apply redaction if transforms needed (use policy_engine for actual redaction)
         let mut redacted_input = input.clone();
-        if !policy_result.transforms_applied.is_empty() {
+        if needs_transform {
             self.policy_engine.redact(&mut redacted_input);
         }
 
-        // Decide route
-        // If stage has an explicit target (not Auto), use it directly
-        // Otherwise, use the routing engine for dynamic routing
-        let routing_decision = match &stage.target {
-            Some(ExecutionTarget::Device) => {
-                // Explicit device target - bypass routing engine
-                RoutingDecision {
-                    stage: stage.name.clone(),
-                    target: RouteTarget::Local,
-                    reason: "explicit_target: stage declares target=device".to_string(),
-                    timestamp_ms: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
-                }
-            }
-            Some(ExecutionTarget::Server) => {
-                // Explicit server target - use cloud adapter
-                RoutingDecision {
-                    stage: stage.name.clone(),
-                    target: RouteTarget::Cloud,
-                    reason: "explicit_target: stage declares target=server".to_string(),
-                    timestamp_ms: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
-                }
-            }
-            Some(ExecutionTarget::Cloud) => {
-                // Integration target - handled specially by executor
-                RoutingDecision {
-                    stage: stage.name.clone(),
-                    target: RouteTarget::Cloud, // Will be handled as integration by executor
-                    reason: "explicit_target: stage declares target=integration".to_string(),
-                    timestamp_ms: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
-                }
-            }
-            Some(ExecutionTarget::Auto) | None => {
-                // Auto or unspecified - use routing engine for dynamic decision
-                self.routing_engine
-                    .decide(&stage.name, metrics, &policy_result, availability)
-            }
+        // Step 3: Resolve target via OrchestrationAuthority
+        let stage_context = StageContext {
+            stage_id: stage.name.clone(),
+            model_id: stage.name.clone(), // Use stage name as model_id if not specified
+            input_kind: input.kind.clone(),
+            metrics: metrics.clone(),
+            explicit_target: stage.target.clone(),
         };
+        let target_decision = self.authority.resolve_target(&stage_context);
+
+        // Convert ResolvedTarget to RoutingDecision for backward compatibility
+        let routing_decision = self.resolved_target_to_routing_decision(
+            &stage.name,
+            &target_decision,
+        );
 
         // Emit routing decision event
         self.event_bus.publish(OrchestratorEvent::RoutingDecided {
@@ -499,12 +561,27 @@ impl Orchestrator {
             .log_execution_start(&stage.name, &routing_decision.target.to_json_string());
 
         let mut executor_clone = self.executor.clone();
-        let (output, stage_metadata) = task::spawn_blocking(move || {
+        let execution_result = task::spawn_blocking(move || {
             executor_clone.execute_stage(&stage_clone, &redacted_input_clone, &target)
         })
         .await
-        .map_err(|e| OrchestratorError::ExecutionFailed(format!("Task join error: {}", e)))?
-        .map_err(|e| OrchestratorError::ExecutionFailed(format!("{:?}", e)))?;
+        .map_err(|e| OrchestratorError::ExecutionFailed(format!("Task join error: {}", e)))?;
+
+        let (output, stage_metadata, success, error_msg) = match execution_result {
+            Ok((out, meta)) => (out, meta, true, None),
+            Err(e) => {
+                let error_msg = format!("{:?}", e);
+                // Record failure outcome
+                self.authority.record_outcome(&ExecutionOutcome {
+                    stage_id: stage.name.clone(),
+                    target: target_decision.result.clone(),
+                    latency_ms: 0,
+                    success: false,
+                    error: Some(error_msg.clone()),
+                });
+                return Err(OrchestratorError::ExecutionFailed(error_msg));
+            }
+        };
 
         let latency_ms = stage_metadata.latency_ms as u32;
 
@@ -521,7 +598,16 @@ impl Orchestrator {
             latency_ms,
         );
 
-        // Record feedback for adaptive routing
+        // Step 6: Record outcome for learning (via OrchestrationAuthority)
+        self.authority.record_outcome(&ExecutionOutcome {
+            stage_id: stage.name.clone(),
+            target: target_decision.result.clone(),
+            latency_ms: latency_ms as u64,
+            success,
+            error: error_msg,
+        });
+
+        // Also record feedback for backward compatibility with routing engine
         self.routing_engine
             .record_feedback(&routing_decision, latency_ms);
 
@@ -695,6 +781,49 @@ impl Orchestrator {
     pub fn set_execution_mode(&mut self, mode: ExecutionMode) {
         self.execution_mode = mode;
     }
+
+    /// Get the authority name (for debugging/logging).
+    pub fn authority_name(&self) -> &str {
+        self.authority.name()
+    }
+
+    /// Invalidate any cached authority decisions.
+    ///
+    /// Call this when conditions change significantly (e.g., network status change).
+    pub fn invalidate_authority_cache(&self) {
+        self.authority.invalidate_cache();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Private helpers
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// Convert a ResolvedTarget to a RoutingDecision for backward compatibility.
+    fn resolved_target_to_routing_decision(
+        &self,
+        stage_name: &str,
+        decision: &AuthorityDecision<ResolvedTarget>,
+    ) -> RoutingDecision {
+        let target = match &decision.result {
+            ResolvedTarget::Device => RouteTarget::Local,
+            ResolvedTarget::Cloud { .. } => RouteTarget::Cloud,
+            ResolvedTarget::Server { endpoint } => {
+                RouteTarget::Fallback(endpoint.clone())
+            }
+        };
+
+        RoutingDecision {
+            stage: stage_name.to_string(),
+            target,
+            reason: format!(
+                "[{}] {} (confidence: {:.0}%)",
+                decision.source,
+                decision.reason,
+                decision.confidence * 100.0
+            ),
+            timestamp_ms: decision.timestamp_ms,
+        }
+    }
 }
 
 impl Default for Orchestrator {
@@ -702,19 +831,6 @@ impl Default for Orchestrator {
         Self::new()
     }
 }
-
-// Bootstrap module for orchestrator initialization
-pub mod authority;
-pub mod bootstrap;
-pub mod policy_engine;
-pub mod routing_engine;
-
-// Re-export authority types for convenience
-pub use authority::{
-    AuthorityDecision, DecisionSource, ExecutionOutcome, LocalAuthority, ModelConstraints,
-    ModelRequest, ModelSelection, ModelSource, OrchestrationAuthority, PolicyOutcome,
-    PolicyRequest, RemoteAuthority, ResolvedTarget, StageContext,
-};
 
 #[cfg(test)]
 mod tests {
@@ -811,10 +927,13 @@ mod tests {
     }
 
     #[test]
-    fn test_policy_deny_routes_to_local() {
+    fn test_model_unavailable_routes_to_cloud() {
+        // With the new authority-based routing, LocalAuthority checks if the model
+        // actually exists locally. Since there's no actual model for "test_stage",
+        // it routes to cloud for execution.
         let mut orchestrator = Orchestrator::new();
         let stage = StageDescriptor::new("test_stage");
-        let input = audio_envelope(&[9, 9, 9, 9]); // This should be denied by default policy
+        let input = audio_envelope(&[9, 9, 9, 9]);
         let metrics = DeviceMetrics {
             network_rtt: 100,
             battery: 50,
@@ -826,8 +945,9 @@ mod tests {
 
         assert!(result.is_ok());
         let exec_result = result.unwrap();
-        // Policy should deny cloud execution, routing should choose local
-        assert_eq!(exec_result.routing_decision.target.as_str(), "local");
+        // LocalAuthority routes to cloud when model is not found locally
+        assert_eq!(exec_result.routing_decision.target.as_str(), "cloud");
+        assert!(exec_result.routing_decision.reason.contains("model_unavailable"));
     }
 
     #[test]

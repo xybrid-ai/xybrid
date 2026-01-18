@@ -22,7 +22,7 @@ use crate::device_adapter::DeviceAdapter;
 use crate::device_adapter::LocalDeviceAdapter;
 use crate::event_bus::{EventBus, OrchestratorEvent};
 use crate::executor::Executor;
-use crate::orchestrator::{ExecutionMode, Orchestrator, OrchestratorError};
+use crate::orchestrator::{ExecutionMode, LocalAuthority, Orchestrator, OrchestrationAuthority, OrchestratorError};
 use crate::orchestrator::policy_engine::DefaultPolicyEngine;
 use crate::orchestrator::routing_engine::DefaultRoutingEngine;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -288,20 +288,27 @@ impl Orchestrator {
             }
         };
 
+        // Initialize authority (local by default - fully offline, no phone-home)
+        let authority: Box<dyn OrchestrationAuthority> = Box::new(LocalAuthority::new());
+        event_bus.publish(OrchestratorEvent::ComponentInitialized {
+            component: "authority".to_string(),
+        });
+
         event_bus.publish(OrchestratorEvent::ExecutorReady);
         event_bus.publish(OrchestratorEvent::OrchestratorReady);
 
         // Create orchestrator instance
-        let orchestrator = Orchestrator {
+        let orchestrator = Orchestrator::with_all(
+            authority,
             policy_engine,
             routing_engine,
             executor,
             stream_manager,
             event_bus,
-            telemetry: telemetry.clone(),
+            telemetry.clone(),
             control_sync,
             execution_mode,
-        };
+        );
 
         if orchestrator.control_sync.is_some() {
             orchestrator.telemetry.log_control_sync_event(
