@@ -388,7 +388,7 @@ impl Pipeline {
         // Auto-detect availability by checking cache
         let mut availability_map = HashMap::new();
         let client = if let Some(ref url) = registry_url {
-            RegistryClient::new(url.clone()).ok()
+            RegistryClient::with_url(url.clone()).ok()
         } else {
             RegistryClient::from_env().ok()
         };
@@ -474,7 +474,7 @@ impl Pipeline {
         let registry_url = config.registry.clone();
 
         let client = if let Some(url) = registry_url {
-            RegistryClient::new(url)?
+            RegistryClient::with_url(url)?
         } else {
             RegistryClient::from_env()?
         };
@@ -618,7 +618,7 @@ impl Pipeline {
             .clone();
 
         let client = if let Some(url) = registry_url {
-            RegistryClient::new(url)?
+            RegistryClient::with_url(url)?
         } else {
             RegistryClient::from_env()?
         };
