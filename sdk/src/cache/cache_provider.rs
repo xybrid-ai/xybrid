@@ -21,9 +21,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use xybrid_core::cache_provider::CacheProvider;
 
-use crate::cache::CacheManager;
+use super::cache_manager::CacheManager;
+use crate::model::SdkError;
 use crate::registry_client::RegistryClient;
-use crate::SdkError;
 
 /// SDK Cache Provider - Unified cache interface for the SDK.
 ///

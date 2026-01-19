@@ -73,7 +73,6 @@ use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 // ============================================================================
 
 pub mod cache;
-pub mod cache_provider;
 pub mod model;
 pub mod pipeline;
 pub mod registry_client;
@@ -97,8 +96,7 @@ pub use xybrid_core::orchestrator::routing_engine;
 pub use xybrid_core::template_executor;
 
 // SDK types (new API)
-pub use cache::{CacheManager, CacheStatus};
-pub use cache_provider::SdkCacheProvider;
+pub use cache::{CacheManager, CacheStatus, SdkCacheProvider};
 pub use model::{ModelLoader, SdkResult, StreamConfig, XybridModel};
 pub use model::SdkError;
 pub use registry_client::{RegistryClient, ModelSummary, ResolvedVariant, CacheStats};
@@ -127,6 +125,65 @@ pub use xybrid_core::event_bus::OrchestratorEvent;
 // ============================================================================
 // SDK Configuration
 // ============================================================================
+
+use std::sync::OnceLock;
+
+/// Global SDK configuration.
+static SDK_CONFIG: OnceLock<SdkConfig> = OnceLock::new();
+
+/// SDK configuration options.
+#[derive(Debug, Clone)]
+pub struct SdkConfig {
+    /// Custom cache directory (required on Android, optional elsewhere)
+    pub cache_dir: Option<std::path::PathBuf>,
+}
+
+impl Default for SdkConfig {
+    fn default() -> Self {
+        Self { cache_dir: None }
+    }
+}
+
+/// Initialize the SDK with a custom cache directory.
+///
+/// **IMPORTANT**: On Android, this MUST be called before any model loading operations.
+/// The cache directory should be obtained from Flutter's `path_provider` package
+/// (e.g., `getApplicationDocumentsDirectory()`).
+///
+/// On other platforms (iOS, macOS, Linux, Windows), this is optional - the SDK
+/// will use platform-specific default directories if not configured.
+///
+/// # Example (Flutter/Dart)
+///
+/// ```dart
+/// import 'package:path_provider/path_provider.dart';
+///
+/// Future<void> initXybrid() async {
+///   final appDir = await getApplicationDocumentsDirectory();
+///   final cacheDir = '${appDir.path}/xybrid/models';
+///   initSdkCacheDir(cacheDir);
+/// }
+/// ```
+///
+/// # Arguments
+///
+/// * `cache_dir` - Path to the directory where model bundles will be cached
+pub fn init_sdk_cache_dir(cache_dir: impl Into<std::path::PathBuf>) {
+    let config = SdkConfig {
+        cache_dir: Some(cache_dir.into()),
+    };
+    let _ = SDK_CONFIG.set(config);
+}
+
+/// Get the configured cache directory (if set).
+pub fn get_sdk_cache_dir() -> Option<std::path::PathBuf> {
+    SDK_CONFIG.get().and_then(|c| c.cache_dir.clone())
+}
+
+/// Check if the SDK cache directory has been configured.
+pub fn is_sdk_cache_configured() -> bool {
+    SDK_CONFIG.get().and_then(|c| c.cache_dir.as_ref()).is_some()
+}
 
 /// Set the Xybrid API key for gateway authentication.
 ///

@@ -20,7 +20,8 @@ thiserror = "1.0"
 uuid = { version = "1.0", features = ["v4"] }
 chrono = "0.4"
 bincode = "1.3"
-ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
+# ureq is configured per-platform below for Android compatibility
+# Android needs rustls with ring (aws-lc-rs uses getentropy unavailable on API 24)
 url = "2.5"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync"] }
 tempfile = "3.8"
@@ -107,3 +108,14 @@ criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarking fra
 [[bench]]
 name = "inference_backends"
 harness = false
+
+# Platform-specific ureq dependencies
+# Non-Android: Use default ureq with TLS
+[target.'cfg(not(target_os = "android"))'.dependencies]
+ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
+
+# Android: Use ureq with explicit rustls/ring (aws-lc-rs uses getentropy unavailable on API 24)
+[target.'cfg(target_os = "android")'.dependencies]
+ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
+# Force rustls to use ring crypto backend instead of aws-lc-rs
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
