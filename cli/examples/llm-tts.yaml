@@ -1,0 +1,26 @@
+# LLM → TTS Pipeline
+# Text Input -> Local LLM -> TTS -> Audio Output
+#
+# Demonstrates a 2-stage pipeline:
+# 1. Local LLM generates text response
+# 2. Local TTS converts response to speech
+#
+# Both stages run fully on-device, no network required.
+#
+# Run with:
+#   xybrid run examples/llm-tts.yaml --input "Tell me a short joke"
+
+name: llm-to-speech
+
+stages:
+  # Stage 1: Local LLM for text generation
+  - id: llm
+    model: qwen2.5-0.5b-instruct
+    target: device
+    # Keep responses short for faster TTS
+    max_tokens: 100
+
+  # Stage 2: Local TTS for speech synthesis
+  - id: tts
+    model: kokoro-82m
+    target: device

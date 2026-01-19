@@ -1,0 +1,18 @@
+# Single-Stage Local LLM Pipeline
+# Text Input -> LLM -> Text Output
+#
+# Demonstrates running a local GGUF model for text generation.
+# Uses the Qwen 2.5 0.5B Instruct model (Apache 2.0 license).
+#
+# Run with:
+#   xybrid run examples/llm-single.yaml --input "What is the capital of France?"
+
+name: llm-single
+
+stages:
+  - id: llm
+    model: qwen2.5-0.5b-instruct
+    target: device
+    # Optional: override generation parameters
+    # max_tokens: 128
+    # temperature: 0.7
