@@ -1,4 +1,4 @@
-//! Registry client for fetching models from api.xybrid.dev.
+//! Registry client for fetching models from registry.xybrid.dev.
 //!
 //! This module provides:
 //! - `RegistryClient`: High-level API for model resolution and download
@@ -7,6 +7,7 @@
 //! - Download progress callbacks
 //! - Automatic retry with exponential backoff
 //! - Circuit breaker for failing endpoints
+//! - **Dual-endpoint failover** (primary: registry.xybrid.dev, fallback: r2.xybrid.dev)
 //!
 //! # Example
 //!
@@ -45,32 +46,39 @@ use std::time::Duration;
 use log::{debug, info};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryableError};
 
-/// Default registry API URL.
-pub const DEFAULT_REGISTRY_URL: &str = "https://api.xybrid.dev";
+pub const DEFAULT_REGISTRY_URL: &str = "https://registry.xybrid.dev";
+pub const FALLBACK_REGISTRY_URL: &str = "https://r2.xybrid.dev";
+
+/// All registry URLs in priority order.
+pub const REGISTRY_URLS: &[&str] = &[DEFAULT_REGISTRY_URL, FALLBACK_REGISTRY_URL];
 
 /// Connection timeout in milliseconds.
-const CONNECT_TIMEOUT_MS: u64 = 10000;
+const CONNECT_TIMEOUT_MS: u64 = 5000;
 
 /// Request timeout in milliseconds.
-const REQUEST_TIMEOUT_MS: u64 = 30000;
+const REQUEST_TIMEOUT_MS: u64 = 15000;
 
 /// Registry client for model resolution and download.
 pub struct RegistryClient {
-    /// Base URL for the registry API
-    api_url: String,
+    /// Registry URLs in priority order (primary first, then fallbacks)
+    api_urls: Vec<String>,
     /// Cache manager for storing downloaded bundles
     cache: CacheManager,
     /// HTTP agent with timeouts configured
     agent: ureq::Agent,
-    /// Circuit breaker for the registry API
-    circuit: Arc<CircuitBreaker>,
+    /// Circuit breakers for each registry URL
+    circuits: Vec<Arc<CircuitBreaker>>,
     /// Retry policy for API calls
     retry_policy: RetryPolicy,
 }
 
 impl RegistryClient {
-    /// Create a new registry client with the specified API URL.
-    pub fn new(api_url: impl Into<String>) -> Result<Self, SdkError> {
+    /// Create a new registry client with the specified API URLs (primary first).
+    pub fn new(api_urls: Vec<String>) -> Result<Self, SdkError> {
+        if api_urls.is_empty() {
+            return Err(SdkError::ConfigError("No registry URLs provided".to_string()));
+        }
+
         // Create HTTP agent with timeouts
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_millis(CONNECT_TIMEOUT_MS))
@@ -78,53 +86,76 @@ impl RegistryClient {
             .build();
 
         let cache = CacheManager::new()?;
+
+        // Create circuit breakers for each URL
+        let circuits: Vec<Arc<CircuitBreaker>> = api_urls
+            .iter()
+            .map(|_| Arc::new(CircuitBreaker::new(CircuitConfig::default())))
+            .collect();
+
         debug!(
-            "RegistryClient created with cache_dir={}",
+            "RegistryClient created with {} URLs, cache_dir={}",
+            api_urls.len(),
             cache.cache_dir().display()
         );
 
         Ok(Self {
-            api_url: api_url.into(),
+            api_urls,
             cache,
             agent,
-            circuit: Arc::new(CircuitBreaker::new(CircuitConfig::default())),
+            circuits,
             retry_policy: RetryPolicy::default(),
         })
     }
 
-    /// Create a registry client with default API URL.
+    /// Create a new registry client with a single API URL.
+    pub fn with_url(api_url: impl Into<String>) -> Result<Self, SdkError> {
+        Self::new(vec![api_url.into()])
+    }
+
+    /// Create a registry client with default URLs (primary + fallback).
     pub fn default_client() -> Result<Self, SdkError> {
-        Self::new(DEFAULT_REGISTRY_URL)
+        Self::new(REGISTRY_URLS.iter().map(|s| s.to_string()).collect())
     }
 
-    /// Create a registry client from environment variable or default.
+    /// Create a registry client from environment variable or defaults.
     ///
-    /// Checks `XYBRID_REGISTRY_URL` environment variable first,
-    /// then falls back to `XYBRID_PLATFORM_URL`, then default.
+    /// Checks `XYBRID_REGISTRY_URL` environment variable first.
+    /// If set, uses only that URL. Otherwise uses default URLs with fallback.
     pub fn from_env() -> Result<Self, SdkError> {
-        let url = std::env::var("XYBRID_REGISTRY_URL")
-            .or_else(|_| std::env::var("XYBRID_PLATFORM_URL"))
-            .unwrap_or_else(|_| DEFAULT_REGISTRY_URL.to_string());
-        Self::new(url)
+        if let Ok(url) = std::env::var("XYBRID_REGISTRY_URL") {
+            // User specified a custom URL, use only that
+            Self::with_url(url)
+        } else {
+            // Use default URLs with fallback
+            Self::default_client()
+        }
     }
 
-    /// Check if the circuit breaker is open (blocking requests).
+    /// Get the primary API URL.
+    pub fn primary_url(&self) -> &str {
+        &self.api_urls[0]
+    }
+
+    /// Check if any circuit breaker is allowing requests.
     pub fn is_circuit_open(&self) -> bool {
-        self.circuit.is_open()
+        self.circuits.iter().all(|c| c.is_open())
     }
 
-    /// Reset the circuit breaker to closed state.
+    /// Reset all circuit breakers to closed state.
     pub fn reset_circuit(&self) {
-        self.circuit.reset();
+        for circuit in &self.circuits {
+            circuit.reset();
+        }
     }
 
     /// List all available models in the registry.
     ///
+    /// Tries primary URL first, falls back to secondary on failure.
     /// Automatically retries on transient failures and respects circuit breaker.
     pub fn list_models(&self) -> Result<Vec<ModelSummary>, SdkError> {
-        let url = format!("{}/v1/models/registry", self.api_url);
-
-        self.execute_with_retry(|| {
+        self.execute_with_fallback(|api_url| {
+            let url = format!("{}/v1/models", api_url);
             let response = self.agent.get(&url).call();
             self.handle_response(response, "list models")
         })
@@ -138,11 +169,11 @@ impl RegistryClient {
 
     /// Get detailed information about a specific model.
     ///
+    /// Tries primary URL first, falls back to secondary on failure.
     /// Automatically retries on transient failures and respects circuit breaker.
     pub fn get_model(&self, mask: &str) -> Result<ModelDetail, SdkError> {
-        let url = format!("{}/v1/models/registry/{}", self.api_url, mask);
-
-        self.execute_with_retry(|| {
+        self.execute_with_fallback(|api_url| {
+            let url = format!("{}/v1/models/{}", api_url, mask);
             let response = self.agent.get(&url).call();
             self.handle_response_with_404(response, "get model", || {
                 SdkError::ModelNotFound(format!("Model '{}' not found", mask))
@@ -158,18 +189,18 @@ impl RegistryClient {
     /// Resolve a model mask to the best variant for the given platform.
     ///
     /// If platform is None, auto-detects the current platform.
+    /// Tries primary URL first, falls back to secondary on failure.
     /// Automatically retries on transient failures and respects circuit breaker.
     pub fn resolve(&self, mask: &str, platform: Option<&str>) -> Result<ResolvedVariant, SdkError> {
         let platform = platform
             .map(String::from)
             .unwrap_or_else(detect_platform);
 
-        let url = format!(
-            "{}/v1/models/registry/{}/resolve?platform={}",
-            self.api_url, mask, platform
-        );
-
-        self.execute_with_retry(|| {
+        self.execute_with_fallback(|api_url| {
+            let url = format!(
+                "{}/v1/models/{}/resolve?platform={}",
+                api_url, mask, platform
+            );
             let response = self.agent.get(&url).call();
             self.handle_response_with_404(response, "resolve model", || {
                 SdkError::ModelNotFound(format!(
@@ -186,18 +217,57 @@ impl RegistryClient {
         })
     }
 
-    /// Execute an operation with retry and circuit breaker.
-    fn execute_with_retry<T, F>(&self, mut operation: F) -> Result<T, SdkError>
+    /// Execute an operation with fallback to secondary URLs.
+    ///
+    /// Tries each URL in order until one succeeds or all fail.
+    fn execute_with_fallback<T, F>(&self, mut operation: F) -> Result<T, SdkError>
     where
-        F: FnMut() -> Result<T, SdkError>,
+        F: FnMut(&str) -> Result<T, SdkError>,
     {
-        // Check circuit breaker before starting
-        if !self.circuit.can_execute() {
-            return Err(SdkError::CircuitOpen(
-                "Registry API circuit breaker is open, try again later".to_string(),
-            ));
+        let mut last_error: Option<SdkError> = None;
+
+        for (idx, api_url) in self.api_urls.iter().enumerate() {
+            let circuit = &self.circuits[idx];
+
+            // Skip if circuit is open
+            if !circuit.can_execute() {
+                debug!("Skipping {} (circuit open)", api_url);
+                continue;
+            }
+
+            match self.execute_with_retry_for_url(api_url, circuit, &mut operation) {
+                Ok(result) => {
+                    if idx > 0 {
+                        info!("Request succeeded using fallback URL: {}", api_url);
+                    }
+                    return Ok(result);
+                }
+                Err(err) => {
+                    // Don't try fallback for non-retryable errors (like 404)
+                    if !err.is_retryable() {
+                        return Err(err);
+                    }
+                    debug!("URL {} failed: {}, trying next", api_url, err);
+                    last_error = Some(err);
+                }
+            }
         }
 
+        Err(last_error.unwrap_or_else(|| {
+            SdkError::NetworkError("All registry URLs failed or circuits open".to_string())
+        }))
+    }
+
+    /// Execute an operation with retry for a specific URL.
+    fn execute_with_retry_for_url<T, F>(
+        &self,
+        api_url: &str,
+        circuit: &Arc<CircuitBreaker>,
+        operation: &mut F,
+    ) -> Result<T, SdkError>
+    where
+        F: FnMut(&str) -> Result<T, SdkError>,
+    {
         let mut last_error: Option<SdkError> = None;
 
         for attempt in 0..self.retry_policy.max_attempts {
@@ -214,23 +284,24 @@ impl RegistryClient {
             }
 
             // Check circuit breaker again (might have opened)
-            if !self.circuit.can_execute() {
-                return Err(SdkError::CircuitOpen(
-                    "Registry API circuit breaker is open, try again later".to_string(),
-                ));
+            if !circuit.can_execute() {
+                return Err(SdkError::CircuitOpen(format!(
+                    "Circuit breaker open for {}",
+                    api_url
+                )));
             }
 
-            match operation() {
+            match operation(api_url) {
                 Ok(result) => {
-                    self.circuit.record_success();
+                    circuit.record_success();
                     return Ok(result);
                 }
                 Err(err) => {
-                    self.circuit.record_failure();
+                    circuit.record_failure();
 
                     // Check for rate limit (opens circuit immediately)
                     if let SdkError::RateLimited { .. } = &err {
-                        self.circuit.record_rate_limited();
+                        circuit.record_rate_limited();
                     }
 
                     // Don't retry non-retryable errors
@@ -244,7 +315,7 @@ impl RegistryClient {
         }
 
         Err(last_error.unwrap_or_else(|| {
-            SdkError::NetworkError("All retry attempts exhausted".to_string())
+            SdkError::NetworkError(format!("All retry attempts exhausted for {}", api_url))
         }))
     }
 
@@ -836,7 +907,22 @@ mod tests {
     #[test]
     fn test_default_client() {
         let client = RegistryClient::default_client().unwrap();
-        assert_eq!(client.api_url, DEFAULT_REGISTRY_URL);
+        assert_eq!(client.api_urls.len(), 2);
+        assert_eq!(client.primary_url(), DEFAULT_REGISTRY_URL);
+    }
+
+    #[test]
+    fn test_single_url_client() {
+        let client = RegistryClient::with_url("https://custom.example.com").unwrap();
+        assert_eq!(client.api_urls.len(), 1);
+        assert_eq!(client.primary_url(), "https://custom.example.com");
+    }
+
+    #[test]
+    fn test_registry_urls_constant() {
+        assert_eq!(REGISTRY_URLS.len(), 2);
+        assert_eq!(REGISTRY_URLS[0], DEFAULT_REGISTRY_URL);
+        assert_eq!(REGISTRY_URLS[1], FALLBACK_REGISTRY_URL);
     }
 
     #[test]
