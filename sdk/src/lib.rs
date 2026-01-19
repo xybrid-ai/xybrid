@@ -73,6 +73,7 @@ use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 // ============================================================================
 
 pub mod cache;
+pub mod cache_provider;
 pub mod model;
 pub mod pipeline;
 pub mod registry_client;
@@ -87,6 +88,7 @@ pub mod telemetry;
 
 // Re-export xybrid_core modules (selective to avoid conflicts)
 pub use xybrid_core::bundler;
+pub use xybrid_core::cache_provider::CacheProvider;
 pub use xybrid_core::context;
 pub use xybrid_core::execution_template;
 pub use xybrid_core::ir;
@@ -96,6 +98,7 @@ pub use xybrid_core::template_executor;
 
 // SDK types (new API)
 pub use cache::{CacheManager, CacheStatus};
+pub use cache_provider::SdkCacheProvider;
 pub use model::{ModelLoader, SdkResult, StreamConfig, XybridModel};
 pub use model::SdkError;
 pub use registry_client::{RegistryClient, ModelSummary, ResolvedVariant, CacheStats};
