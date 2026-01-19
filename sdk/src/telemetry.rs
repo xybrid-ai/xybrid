@@ -804,8 +804,10 @@ pub fn shutdown_platform_telemetry() {
 
 /// Register a telemetry event sender
 pub fn register_telemetry_sender(sender: TelemetrySender) {
-    let mut senders = TELEMETRY_SENDERS.lock().unwrap();
-    senders.push(sender);
+    // Use if-let to gracefully handle poisoned mutex
+    if let Ok(mut senders) = TELEMETRY_SENDERS.lock() {
+        senders.push(sender);
+    }
 }
 
 /// Convert OrchestratorEvent to TelemetryEvent
@@ -950,7 +952,12 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
 
 /// Publish a telemetry event to all registered subscribers
 pub fn publish_telemetry_event(event: TelemetryEvent) {
-    let senders = TELEMETRY_SENDERS.lock().unwrap();
+    // Use unwrap_or_else to recover from poisoned mutex - this prevents
+    // a panic in one component from permanently breaking telemetry
+    let Ok(senders) = TELEMETRY_SENDERS.lock() else {
+        // Mutex is poisoned, silently skip telemetry rather than crash
+        return;
+    };
     let mut dead_senders = Vec::new();
 
     for (idx, sender) in senders.iter().enumerate() {
@@ -962,9 +969,10 @@ pub fn publish_telemetry_event(event: TelemetryEvent) {
     // Remove dead senders
     drop(senders);
     if !dead_senders.is_empty() {
-        let mut senders = TELEMETRY_SENDERS.lock().unwrap();
-        for idx in dead_senders.iter().rev() {
-            senders.remove(*idx);
+        if let Ok(mut senders) = TELEMETRY_SENDERS.lock() {
+            for idx in dead_senders.iter().rev() {
+                senders.remove(*idx);
+            }
         }
     }
 }
