@@ -45,11 +45,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use xybrid_core::context::StageDescriptor;
+use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
-use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
+use xybrid_core::orchestrator::{
+    LocalAuthority, OrchestrationAuthority, Orchestrator, ResolvedTarget, StageContext,
+    StageExecutionResult,
+};
 use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
 use xybrid_core::pipeline_config::PipelineConfig;
 
@@ -157,9 +160,11 @@ pub struct StageInfo {
 /// Execution target for a stage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StageTarget {
-    /// Runs on device using local model
+    /// Runs on device using local model (explicit `target: device` in YAML)
     Device,
-    /// Runs on cloud server
+    /// Let authority decide (default when no target specified, or `target: auto`)
+    Auto,
+    /// Runs on cloud server (explicit `target: cloud` in YAML)
     Cloud,
     /// Runs via integration provider (e.g., OpenAI API)
     Integration { provider: String },
@@ -169,6 +174,7 @@ impl std::fmt::Display for StageTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StageTarget::Device => write!(f, "device"),
+            StageTarget::Auto => write!(f, "auto"),
             StageTarget::Cloud => write!(f, "cloud"),
             StageTarget::Integration { provider } => write!(f, "integration:{}", provider),
         }
@@ -492,12 +498,14 @@ impl Pipeline {
                 }
             } else if target_str == Some("cloud") || target_str == Some("server") {
                 StageTarget::Cloud
+            } else if target_str == Some("device") || target_str == Some("local") || target_str == Some("edge") {
+                StageTarget::Device // Explicit local execution
             } else {
-                StageTarget::Device
+                StageTarget::Auto // Default: let authority decide (includes "auto" and None)
             };
 
-            let (status, download_bytes) = if matches!(stage_target, StageTarget::Device) {
-                // For device stages, check if model is cached
+            let (status, download_bytes) = if matches!(stage_target, StageTarget::Device | StageTarget::Auto) {
+                // For device/auto stages, check if model is cached (might run locally)
                 let model_id = stage_config.model_id();
                 match client.resolve(&model_id, None) {
                     Ok(resolved) => {
@@ -592,6 +600,14 @@ impl Pipeline {
     }
 
     /// Preload models with progress callback.
+    ///
+    /// **Routing-Aware Downloads**: Before downloading each model, this method
+    /// consults the `OrchestrationAuthority` to determine if the stage will
+    /// actually run locally. If the authority routes to cloud (e.g., low battery,
+    /// model too large), the download is skipped.
+    ///
+    /// This ensures we don't waste bandwidth downloading models that won't be
+    /// used locally.
     pub fn load_models_with_progress<F>(&self, progress_callback: F) -> PipelineResult<()>
     where
         F: Fn(DownloadProgress),
@@ -607,44 +623,100 @@ impl Pipeline {
             RegistryClient::from_env()?
         };
 
+        // Create authority for routing decisions
+        let authority = LocalAuthority::new();
+
+        // Get current device metrics for routing decisions
+        let device_adapter = LocalDeviceAdapter::new();
+        let metrics = device_adapter.collect_metrics();
+
         let stages_to_fetch: Vec<_> = self.stages
             .iter()
             .enumerate()
             .filter(|(_, s)| matches!(s.status, StageStatus::NeedsDownload))
             .filter_map(|(idx, s)| {
-                s.model_id.as_ref().map(|m| (idx, s.id.clone(), m.clone(), s.download_bytes.unwrap_or(0)))
+                s.model_id.as_ref().map(|m| {
+                    (idx, s.id.clone(), m.clone(), s.download_bytes.unwrap_or(0), s.target.clone())
+                })
             })
             .collect();
 
         let total_stages = stages_to_fetch.len();
+        let mut skipped_count = 0;
 
-        for (stage_idx, (_, stage_id, model_id, total_bytes)) in stages_to_fetch.into_iter().enumerate() {
-            let progress_for_model = |download_progress: f32| {
-                let bytes_downloaded = (download_progress * total_bytes as f32) as u64;
-                progress_callback(DownloadProgress {
-                    model_id: model_id.clone(),
-                    percent: (download_progress * 100.0) as u32,
-                    bytes_downloaded,
-                    bytes_total: total_bytes,
-                    stage_index: stage_idx,
-                    total_stages,
-                });
+        for (stage_idx, (_, stage_id, model_id, total_bytes, stage_target)) in stages_to_fetch.into_iter().enumerate() {
+            // Convert StageTarget to ExecutionTarget for authority
+            // - Device: user explicitly wants local, authority should respect it
+            // - Auto: let authority decide based on device conditions
+            // - Cloud/Integration: shouldn't reach here (filtered earlier), but handle anyway
+            let explicit_target = match &stage_target {
+                StageTarget::Device => Some(ExecutionTarget::Device),
+                StageTarget::Auto => None, // Let authority decide
+                StageTarget::Cloud => Some(ExecutionTarget::Cloud),
+                StageTarget::Integration { .. } => Some(ExecutionTarget::Cloud),
             };
 
-            // Fetch model and get the bundle path
-            let bundle_path = client.fetch(&model_id, None, progress_for_model)?;
+            // Consult authority before downloading
+            let stage_context = StageContext {
+                stage_id: stage_id.clone(),
+                model_id: model_id.clone(),
+                input_kind: EnvelopeKind::Text("".to_string()), // At preload time, we don't have actual input
+                metrics: metrics.clone(),
+                explicit_target,
+            };
 
-            {
-                let mut handle = self.handle.write().map_err(|_| {
-                    SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
-                })?;
+            let decision = authority.resolve_target(&stage_context);
 
-                handle.availability_map.insert(model_id.clone(), true);
-                handle.availability_map.insert(stage_id.clone(), true);
-                // Store the bundle path for this stage
-                handle.bundle_paths.insert(stage_id.clone(), bundle_path.clone());
-                handle.bundle_paths.insert(model_id.clone(), bundle_path);
+            // Only download if authority routes to device
+            match decision.result {
+                ResolvedTarget::Device => {
+                    // Authority says run locally - proceed with download
+                    let progress_for_model = |download_progress: f32| {
+                        let bytes_downloaded = (download_progress * total_bytes as f32) as u64;
+                        progress_callback(DownloadProgress {
+                            model_id: model_id.clone(),
+                            percent: (download_progress * 100.0) as u32,
+                            bytes_downloaded,
+                            bytes_total: total_bytes,
+                            stage_index: stage_idx,
+                            total_stages,
+                        });
+                    };
+
+                    // Fetch model and get the bundle path
+                    let bundle_path = client.fetch(&model_id, None, progress_for_model)?;
+
+                    {
+                        let mut handle = self.handle.write().map_err(|_| {
+                            SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
+                        })?;
+
+                        handle.availability_map.insert(model_id.clone(), true);
+                        handle.availability_map.insert(stage_id.clone(), true);
+                        // Store the bundle path for this stage
+                        handle.bundle_paths.insert(stage_id.clone(), bundle_path.clone());
+                        handle.bundle_paths.insert(model_id.clone(), bundle_path);
+                    }
+                }
+                ResolvedTarget::Cloud { .. } | ResolvedTarget::Server { .. } => {
+                    // Authority routes to cloud/server - skip download
+                    skipped_count += 1;
+                    // Log the skip decision (could use telemetry here)
+                    #[cfg(debug_assertions)]
+                    eprintln!(
+                        "[pipeline] Skipping download for '{}': authority routed to {:?} ({})",
+                        model_id, decision.result, decision.reason
+                    );
+                }
             }
+        }
+
+        if skipped_count > 0 {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[pipeline] Skipped {} downloads based on authority routing decisions",
+                skipped_count
+            );
         }
 
         Ok(())
@@ -922,6 +994,7 @@ stages:
     #[test]
     fn test_stage_target_display() {
         assert_eq!(StageTarget::Device.to_string(), "device");
+        assert_eq!(StageTarget::Auto.to_string(), "auto");
         assert_eq!(StageTarget::Cloud.to_string(), "cloud");
         assert_eq!(StageTarget::Integration { provider: "openai".to_string() }.to_string(), "integration:openai");
     }
