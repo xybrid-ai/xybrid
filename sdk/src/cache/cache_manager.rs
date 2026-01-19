@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use xybrid_core::bundler::XyBundle;
 
-use crate::SdkError;
+use crate::model::SdkError;
 
 /// Cache status information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +85,7 @@ impl CacheManager {
     ///
     /// # Platform Paths
     /// - iOS: `~/Library/Application Support/Xybrid/Models`
-    /// - Android: `/data/data/app.xybrid/files/models`
+    /// - Android: Requires `init_sdk_cache_dir()` to be called first
     /// - Desktop: `~/.xybrid/cache/models`
     pub fn new() -> Result<Self, SdkError> {
         let cache_dir = Self::get_cache_dir()?;
