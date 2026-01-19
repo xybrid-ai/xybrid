@@ -19,7 +19,7 @@ serde_yaml = "0.9"
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync", "fs", "time"] }
 tempfile = "3.10"
-ureq = "2.9"
+# ureq is configured per-platform below for Android compatibility
 uuid = { version = "1.0", features = ["v4", "v5", "serde"] }
 dirs = "5.0"
 sha2 = "0.10"
@@ -31,12 +31,17 @@ sha2 = "0.10"
 
 [target.'cfg(target_os = "android")'.dependencies]
 xybrid-core = { path = "../core", default-features = false, features = ["ort-load-dynamic"] }
+ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
+# Force rustls to use ring crypto backend instead of aws-lc-rs (uses getentropy unavailable on API 24)
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 xybrid-core = { path = "../core", default-features = false, features = ["candle-metal"] }
+ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 
 [target.'cfg(all(not(target_os = "android"), not(target_os = "ios")))'.dependencies]
 xybrid-core = { path = "../core" }
+ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 
 # Re-export the macro
 [package.metadata.docs.rs]

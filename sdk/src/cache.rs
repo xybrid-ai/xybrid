@@ -62,7 +62,7 @@ struct CacheEntry {
 enum CacheType {
     /// Local models persist indefinitely
     Local,
-    /// Cloud models have 24h TTL
+    /// Cloud models have  weeks TTL
     Cloud,
 }
 
@@ -122,7 +122,18 @@ impl CacheManager {
     }
 
     /// Gets the platform-specific cache directory.
+    ///
+    /// Priority:
+    /// 1. Global SDK config (set via `init_sdk_cache_dir()`)
+    /// 2. Platform-specific default (iOS/macOS/Linux/Windows)
+    /// 3. On Android: REQUIRES SDK config - returns error if not set
     fn get_cache_dir() -> Result<PathBuf, SdkError> {
+        // First, check if SDK config has a custom cache directory
+        if let Some(cache_dir) = crate::get_sdk_cache_dir() {
+            return Ok(cache_dir);
+        }
+
+        // Platform-specific defaults
         #[cfg(target_os = "ios")]
         {
             let home = std::env::var("HOME")
@@ -136,8 +147,14 @@ impl CacheManager {
 
         #[cfg(target_os = "android")]
         {
-            // In real implementation, would use Context.getFilesDir()
-            Ok(PathBuf::from("/data/data/app.xybrid/files/models"))
+            // Android apps cannot write to arbitrary paths - they MUST use
+            // the app's sandbox directory provided by the platform.
+            // The directory must be passed from Flutter using path_provider.
+            Err(SdkError::CacheError(
+                "Android requires cache directory to be configured. \
+                Call init_sdk_cache_dir() with a path from path_provider before loading models. \
+                Example: initSdkCacheDir('${appDir.path}/xybrid/models')".to_string()
+            ))
         }
 
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
