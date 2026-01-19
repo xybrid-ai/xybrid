@@ -42,6 +42,7 @@ use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use log::{debug, info};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryableError};
 
 /// Default registry API URL.
@@ -76,9 +77,15 @@ impl RegistryClient {
             .timeout(Duration::from_millis(REQUEST_TIMEOUT_MS))
             .build();
 
+        let cache = CacheManager::new()?;
+        debug!(
+            "RegistryClient created with cache_dir={}",
+            cache.cache_dir().display()
+        );
+
         Ok(Self {
             api_url: api_url.into(),
-            cache: CacheManager::new()?,
+            cache,
             agent,
             circuit: Arc::new(CircuitBreaker::new(CircuitConfig::default())),
             retry_policy: RetryPolicy::default(),
@@ -388,15 +395,55 @@ impl RegistryClient {
         let resolved = self.resolve(mask, platform)?;
         let cache_path = self.get_cache_path(&resolved);
 
+        debug!(
+            "Cache check for '{}': path={}, exists={}, sha256_provided={}",
+            mask,
+            cache_path.display(),
+            cache_path.exists(),
+            !resolved.sha256.is_empty()
+        );
+
         // Check if already cached with correct hash
         if cache_path.exists() && !resolved.sha256.is_empty() {
-            let hash = compute_sha256(&cache_path)?;
+            // Try fast path: read cached hash from sidecar file
+            let hash = match read_cached_hash(&cache_path) {
+                Some(cached_hash) => {
+                    debug!("Using cached hash for '{}'", mask);
+                    cached_hash
+                }
+                None => {
+                    // Fall back to computing hash (slow for large files)
+                    debug!("Computing hash for '{}' (no cached hash found)", mask);
+                    let computed = compute_sha256(&cache_path)?;
+                    // Cache the hash for next time
+                    write_cached_hash(&cache_path, &computed);
+                    computed
+                }
+            };
+
+            debug!(
+                "Cache verification for '{}': expected={}, actual={}",
+                mask, resolved.sha256, hash
+            );
             if hash == resolved.sha256 {
                 // Already cached and verified
+                info!("Cache hit for '{}' at {}", mask, cache_path.display());
                 return Ok(cache_path);
             }
             // Hash mismatch - re-download
+            info!(
+                "Cache hash mismatch for '{}', re-downloading",
+                mask
+            );
             std::fs::remove_file(&cache_path).ok();
+            remove_cached_hash(&cache_path);
+        } else if cache_path.exists() {
+            info!(
+                "Cache exists for '{}' but no sha256 to verify, re-downloading",
+                mask
+            );
+        } else {
+            info!("Cache miss for '{}', downloading to {}", mask, cache_path.display());
         }
 
         // Create cache directory
@@ -405,9 +452,10 @@ impl RegistryClient {
         }
 
         // Download from HuggingFace
+        info!("Downloading '{}' from {}", mask, resolved.download_url);
         self.download_with_progress(&resolved.download_url, &cache_path, resolved.size_bytes, progress_callback)?;
 
-        // Verify hash
+        // Verify hash and cache it for fast future lookups
         if !resolved.sha256.is_empty() {
             let hash = compute_sha256(&cache_path)?;
             if hash != resolved.sha256 {
@@ -417,6 +465,19 @@ impl RegistryClient {
                     resolved.sha256, hash
                 )));
             }
+            // Cache the verified hash for instant verification next time
+            write_cached_hash(&cache_path, &hash);
+            info!(
+                "Download complete for '{}', SHA256 verified, cached at {}",
+                mask,
+                cache_path.display()
+            );
+        } else {
+            info!(
+                "Download complete for '{}' (no SHA256 verification), cached at {}",
+                mask,
+                cache_path.display()
+            );
         }
 
         Ok(cache_path)
@@ -582,6 +643,56 @@ fn compute_sha256(path: &PathBuf) -> Result<String, SdkError> {
     }
 
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Get the path to the cached hash sidecar file.
+fn hash_cache_path(bundle_path: &PathBuf) -> PathBuf {
+    bundle_path.with_extension("xyb.sha256")
+}
+
+/// Read cached hash from sidecar file if it exists and is still valid.
+///
+/// Returns None if:
+/// - Sidecar file doesn't exist
+/// - Sidecar file is older than the bundle file (bundle was modified)
+/// - Sidecar file can't be read
+fn read_cached_hash(bundle_path: &PathBuf) -> Option<String> {
+    let hash_path = hash_cache_path(bundle_path);
+
+    // Check if sidecar exists
+    if !hash_path.exists() {
+        return None;
+    }
+
+    // Check if bundle is newer than sidecar (invalidates cache)
+    let bundle_mtime = std::fs::metadata(bundle_path).ok()?.modified().ok()?;
+    let hash_mtime = std::fs::metadata(&hash_path).ok()?.modified().ok()?;
+    if bundle_mtime > hash_mtime {
+        // Bundle was modified after hash was cached
+        return None;
+    }
+
+    // Read and validate hash format (64 hex chars)
+    let hash = std::fs::read_to_string(&hash_path).ok()?;
+    let hash = hash.trim();
+    if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(hash.to_string())
+    } else {
+        None
+    }
+}
+
+/// Write hash to sidecar file for fast future lookups.
+fn write_cached_hash(bundle_path: &PathBuf, hash: &str) {
+    let hash_path = hash_cache_path(bundle_path);
+    // Ignore errors - this is just an optimization
+    let _ = std::fs::write(&hash_path, hash);
+}
+
+/// Remove the cached hash sidecar file.
+fn remove_cached_hash(bundle_path: &PathBuf) {
+    let hash_path = hash_cache_path(bundle_path);
+    let _ = std::fs::remove_file(&hash_path);
 }
 
 /// Calculate total size of a directory.
