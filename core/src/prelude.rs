@@ -39,10 +39,7 @@ pub use crate::ir::{Envelope, EnvelopeKind};
 // ============================================================================
 
 pub use crate::execution_template::{
-    ExecutionTemplate,
-    ModelMetadata,
-    PostprocessingStep,
-    PreprocessingStep,
+    ExecutionTemplate, ModelMetadata, PostprocessingStep, PreprocessingStep,
 };
 
 // ============================================================================

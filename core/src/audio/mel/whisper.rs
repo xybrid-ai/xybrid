@@ -26,7 +26,7 @@
 //! - max_frames = 3000 (30 seconds @ 100fps)
 
 use ndarray::{ArrayD, IxDyn};
-use rustfft::{FftPlanner, num_complex::Complex};
+use rustfft::{num_complex::Complex, FftPlanner};
 
 /// Configuration for Whisper mel spectrogram computation.
 #[derive(Debug, Clone)]
@@ -47,9 +47,9 @@ impl Default for WhisperMelConfig {
             n_fft: 400,
             hop_length: 160,
             sample_rate: 16000,
-            max_frames: 3000,  // 30 seconds @ 100fps
+            max_frames: 3000, // 30 seconds @ 100fps
             f_min: 0.0,
-            f_max: 8000.0,     // Nyquist / 2 for 16kHz
+            f_max: 8000.0, // Nyquist / 2 for 16kHz
         }
     }
 }
@@ -113,7 +113,8 @@ pub fn compute_whisper_mel(
     }
 
     // Find max value for dynamic range compression
-    let max_val = mel_spec.iter()
+    let max_val = mel_spec
+        .iter()
         .flat_map(|row| row.iter())
         .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 
@@ -311,10 +312,7 @@ fn stft_whisper(samples: &[f32], n_fft: usize, hop_length: usize) -> Vec<Vec<f64
 
         fft.process(&mut fft_input);
 
-        let frame_power: Vec<f64> = fft_input[..n_freqs]
-            .iter()
-            .map(|c| c.norm_sqr())
-            .collect();
+        let frame_power: Vec<f64> = fft_input[..n_freqs].iter().map(|c| c.norm_sqr()).collect();
 
         power_spec.push(frame_power);
     }

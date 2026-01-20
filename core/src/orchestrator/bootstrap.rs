@@ -22,9 +22,11 @@ use crate::device_adapter::DeviceAdapter;
 use crate::device_adapter::LocalDeviceAdapter;
 use crate::event_bus::{EventBus, OrchestratorEvent};
 use crate::executor::Executor;
-use crate::orchestrator::{ExecutionMode, LocalAuthority, Orchestrator, OrchestrationAuthority, OrchestratorError};
 use crate::orchestrator::policy_engine::DefaultPolicyEngine;
 use crate::orchestrator::routing_engine::DefaultRoutingEngine;
+use crate::orchestrator::{
+    ExecutionMode, LocalAuthority, OrchestrationAuthority, Orchestrator, OrchestratorError,
+};
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::runtime_adapter::CoreMLRuntimeAdapter;
 #[cfg(any(target_os = "android"))]

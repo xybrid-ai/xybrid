@@ -58,14 +58,10 @@ pub fn execute_tts_inference(
                 .into();
             value_inputs.insert(input_name.clone(), val);
         } else if input_name.contains("style") || input_name == "style" {
-            let arr =
-                Array2::<f32>::from_shape_vec((1, embedding_len), voice_embedding.clone())
-                    .map_err(|e| {
-                        AdapterError::InvalidInput(format!(
-                            "Failed to create style array: {}",
-                            e
-                        ))
-                    })?;
+            let arr = Array2::<f32>::from_shape_vec((1, embedding_len), voice_embedding.clone())
+                .map_err(|e| {
+                    AdapterError::InvalidInput(format!("Failed to create style array: {}", e))
+                })?;
             let val: Value = Value::from_array(arr)
                 .map_err(|e| {
                     AdapterError::InvalidInput(format!("Failed to create style value: {}", e))

@@ -8,8 +8,8 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use xybrid_core::streaming::{
-    PartialResult as CorePartialResult, StreamConfig as CoreStreamConfig,
-    StreamSession, StreamState as CoreStreamState, StreamStats as CoreStreamStats,
+    PartialResult as CorePartialResult, StreamConfig as CoreStreamConfig, StreamSession,
+    StreamState as CoreStreamState, StreamStats as CoreStreamStats,
 };
 
 /// Current state of a streaming session.
@@ -209,9 +209,10 @@ impl XybridStream {
     ///
     /// Optional partial result if transcription is ready.
     pub fn feed(&self, samples: &[f32]) -> Result<Option<PartialResult>, SdkError> {
-        let mut handle = self.handle.write().map_err(|_| {
-            SdkError::InferenceError("Failed to acquire stream lock".to_string())
-        })?;
+        let mut handle = self
+            .handle
+            .write()
+            .map_err(|_| SdkError::InferenceError("Failed to acquire stream lock".to_string()))?;
 
         handle
             .session
@@ -235,9 +236,10 @@ impl XybridStream {
     /// This processes any remaining audio and returns the complete transcript.
     /// After calling this, you must call `reset()` to reuse the stream.
     pub fn flush(&self) -> Result<TranscriptionResult, SdkError> {
-        let mut handle = self.handle.write().map_err(|_| {
-            SdkError::InferenceError("Failed to acquire stream lock".to_string())
-        })?;
+        let mut handle = self
+            .handle
+            .write()
+            .map_err(|_| SdkError::InferenceError("Failed to acquire stream lock".to_string()))?;
 
         let text = handle
             .session
@@ -259,9 +261,10 @@ impl XybridStream {
     /// keeping the loaded model. Use this to start a new transcription
     /// session without reloading the model.
     pub fn reset(&self) -> Result<(), SdkError> {
-        let mut handle = self.handle.write().map_err(|_| {
-            SdkError::InferenceError("Failed to acquire stream lock".to_string())
-        })?;
+        let mut handle = self
+            .handle
+            .write()
+            .map_err(|_| SdkError::InferenceError("Failed to acquire stream lock".to_string()))?;
 
         handle.session.reset();
         Ok(())

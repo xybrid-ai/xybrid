@@ -92,7 +92,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         samples
     };
 
-    println!("   Audio duration: {:.2}s", mono_samples.len() as f32 / spec.sample_rate as f32);
+    println!(
+        "   Audio duration: {:.2}s",
+        mono_samples.len() as f32 / spec.sample_rate as f32
+    );
 
     // Resample to 16kHz if needed
     let pcm_16k = if spec.sample_rate != 16000 {

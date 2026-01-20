@@ -58,5 +58,5 @@ mod error;
 
 pub use client::Cloud;
 pub use completion::{CompletionRequest, CompletionResponse, Message, Role, Usage};
-pub use config::{CloudConfig, CloudBackend};
+pub use config::{CloudBackend, CloudConfig};
 pub use error::CloudError;

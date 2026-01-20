@@ -112,8 +112,9 @@ pub fn load_candle_model(
     match model_type {
         CandleModelType::Whisper => {
             use super::whisper::{WhisperConfig, WhisperModel};
-            let model = WhisperModel::load_with_config(model_path, device, WhisperConfig::default())
-                .map_err(|e| ModelError::LoadFailed(e.to_string()))?;
+            let model =
+                WhisperModel::load_with_config(model_path, device, WhisperConfig::default())
+                    .map_err(|e| ModelError::LoadFailed(e.to_string()))?;
             Ok(Box::new(WhisperModelWrapper { model }))
         }
         CandleModelType::LLaMA => Err(ModelError::Unsupported(
@@ -145,7 +146,9 @@ impl CandleModel for WhisperModelWrapper {
     fn run(&mut self, inputs: HashMap<String, Tensor>) -> ModelResult<HashMap<String, Tensor>> {
         // Whisper expects either "mel" tensor or "pcm" audio
         if let Some(mel) = inputs.get("mel") {
-            let text = self.model.transcribe(mel)
+            let text = self
+                .model
+                .transcribe(mel)
                 .map_err(|e| ModelError::InferenceFailed(e.to_string()))?;
 
             // Return text as a simple tensor (for compatibility with trait interface)
@@ -161,11 +164,12 @@ impl CandleModel for WhisperModelWrapper {
             // PCM audio input - convert to mel and transcribe
             Err(ModelError::Unsupported(
                 "Direct PCM input not supported via trait interface. \
-                 Use WhisperModel::transcribe_pcm() directly.".to_string()
+                 Use WhisperModel::transcribe_pcm() directly."
+                    .to_string(),
             ))
         } else {
             Err(ModelError::InvalidInput(
-                "Whisper expects 'mel' tensor input".to_string()
+                "Whisper expects 'mel' tensor input".to_string(),
             ))
         }
     }
@@ -185,10 +189,19 @@ mod tests {
 
     #[test]
     fn test_model_type_from_str() {
-        assert_eq!(CandleModelType::from_str("whisper"), CandleModelType::Whisper);
-        assert_eq!(CandleModelType::from_str("WHISPER"), CandleModelType::Whisper);
+        assert_eq!(
+            CandleModelType::from_str("whisper"),
+            CandleModelType::Whisper
+        );
+        assert_eq!(
+            CandleModelType::from_str("WHISPER"),
+            CandleModelType::Whisper
+        );
         assert_eq!(CandleModelType::from_str("llama"), CandleModelType::LLaMA);
         assert_eq!(CandleModelType::from_str("bert"), CandleModelType::Bert);
-        assert_eq!(CandleModelType::from_str("unknown"), CandleModelType::Generic);
+        assert_eq!(
+            CandleModelType::from_str("unknown"),
+            CandleModelType::Generic
+        );
     }
 }

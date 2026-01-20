@@ -188,8 +188,8 @@ impl TranscriptAccumulator {
         self.current_partial = None;
     }
 
-     fn set_partial(&mut self, text: String) {
-       self.current_partial = Some(text);
+    fn set_partial(&mut self, text: String) {
+        self.current_partial = Some(text);
     }
 
     fn get_full_text(&self) -> String {
@@ -309,8 +309,7 @@ impl StreamSession {
             .map_err(|e| StreamError::ConfigError(format!("Failed to parse metadata: {}", e)))?;
 
         // Create executor with model directory as base path
-        let executor =
-            TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
+        let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
 
         // Infer optimal buffer config from model type
         let buffer_config = Self::infer_buffer_config(&metadata, &config);

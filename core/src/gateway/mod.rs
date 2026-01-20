@@ -79,8 +79,8 @@ mod error;
 mod models;
 
 pub use api::{
-    ChatChoice, ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse,
-    ChatChunkChoice, ChatDelta, ChatMessage, ErrorResponse, MessageRole, Usage,
+    ChatChoice, ChatChunkChoice, ChatCompletionChunk, ChatCompletionRequest,
+    ChatCompletionResponse, ChatDelta, ChatMessage, ErrorResponse, MessageRole, Usage,
 };
 pub use config::{GatewayConfig, ProviderCredentials, RateLimitConfig};
 pub use error::GatewayError;

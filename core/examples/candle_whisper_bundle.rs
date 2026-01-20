@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. Create executor and run
     println!("\n4. Running transcription via TemplateExecutor...");
     let mut executor = xybrid_core::template_executor::TemplateExecutor::with_base_path(
-        model_dir.to_str().unwrap()
+        model_dir.to_str().unwrap(),
     );
 
     let start = std::time::Instant::now();

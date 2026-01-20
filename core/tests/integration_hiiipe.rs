@@ -11,8 +11,8 @@
 
 use xybrid_core::context::{DeviceMetrics, Envelope, EnvelopeKind, StageDescriptor};
 use xybrid_core::event_bus::OrchestratorEvent;
-use xybrid_core::orchestrator::{ExecutionMode, Orchestrator};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
+use xybrid_core::orchestrator::{ExecutionMode, Orchestrator};
 
 fn audio_envelope() -> Envelope {
     Envelope::new(EnvelopeKind::Audio(vec![0u8; 1600]))
@@ -40,9 +40,9 @@ fn test_hiiipe_pipeline() {
 
     // Define the Hiiipe pipeline stages
     let stages = vec![
-        StageDescriptor::new("asr"), // whisper-tiny@1.2 (local)
+        StageDescriptor::new("asr"),       // whisper-tiny@1.2 (local)
         StageDescriptor::new("motivator"), // motivator-llm@5 (cloud)
-        StageDescriptor::new("tts"), // xtts-mini@0.6 (local)
+        StageDescriptor::new("tts"),       // xtts-mini@0.6 (local)
     ];
 
     // Simulate mic input (raw audio)
@@ -325,9 +325,9 @@ fn test_hiiipe_complete_workflow() {
 
     // Simulate the complete Hiiipe demo workflow
     let stages = vec![
-        StageDescriptor::new("wav2vec2@1.0"), // ASR model
+        StageDescriptor::new("wav2vec2@1.0"),    // ASR model
         StageDescriptor::new("motivator-llm@5"), // Motivator model
-        StageDescriptor::new("xtts-mini@0.6"), // TTS model
+        StageDescriptor::new("xtts-mini@0.6"),   // TTS model
     ];
 
     // Mic input (raw audio)
@@ -343,8 +343,8 @@ fn test_hiiipe_complete_workflow() {
     // Model availability matching the demo
     let availability_fn = |stage: &str| -> LocalAvailability {
         match stage {
-            "wav2vec2@1.0" => LocalAvailability::new(true),     // ASR available locally
-            "xtts-mini@0.6" => LocalAvailability::new(true),    // TTS available locally
+            "wav2vec2@1.0" => LocalAvailability::new(true), // ASR available locally
+            "xtts-mini@0.6" => LocalAvailability::new(true), // TTS available locally
             "motivator-llm@5" => LocalAvailability::new(false), // Motivator only in cloud
             _ => LocalAvailability::new(false),
         }

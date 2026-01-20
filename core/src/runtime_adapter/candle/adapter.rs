@@ -89,7 +89,11 @@ impl CandleRuntimeAdapter {
     ///
     /// Expects the embedding to be a flattened mel spectrogram [1, n_mels, n_frames].
     /// The shape should be provided in metadata as "mel_shape": "[1, 80, N]".
-    fn process_mel_input(&self, mel_data: &[f32], metadata: &HashMap<String, String>) -> AdapterResult<candle_core::Tensor> {
+    fn process_mel_input(
+        &self,
+        mel_data: &[f32],
+        metadata: &HashMap<String, String>,
+    ) -> AdapterResult<candle_core::Tensor> {
         // Try to get shape from metadata
         let n_mels = 80; // Whisper standard
         let n_frames = mel_data.len() / n_mels;
@@ -98,7 +102,8 @@ impl CandleRuntimeAdapter {
         if mel_data.len() % n_mels != 0 {
             return Err(AdapterError::InvalidInput(format!(
                 "Mel spectrogram size {} is not divisible by n_mels {}",
-                mel_data.len(), n_mels
+                mel_data.len(),
+                n_mels
             )));
         }
 
@@ -136,8 +141,9 @@ impl RuntimeAdapter for CandleRuntimeAdapter {
         }
 
         // Load Whisper model
-        let model = WhisperModel::load_with_config(model_path, &self.device, self.whisper_config.clone())
-            .map_err(|e| AdapterError::RuntimeError(format!("Failed to load model: {}", e)))?;
+        let model =
+            WhisperModel::load_with_config(model_path, &self.device, self.whisper_config.clone())
+                .map_err(|e| AdapterError::RuntimeError(format!("Failed to load model: {}", e)))?;
 
         // Create metadata
         let metadata = ModelMetadata {
@@ -189,20 +195,18 @@ impl RuntimeAdapter for CandleRuntimeAdapter {
                 Err(AdapterError::RuntimeError(
                     "Candle Whisper requires mutable model access for inference. \
                      Use CandleBackend::run_whisper() directly with mutable reference, \
-                     or wait for interior mutability implementation.".to_string()
+                     or wait for interior mutability implementation."
+                        .to_string(),
                 ))
             }
-            EnvelopeKind::Audio(_) => {
-                Err(AdapterError::InvalidInput(
-                    "Candle Whisper expects pre-computed mel spectrogram as Embedding. \
-                     Use xybrid preprocessing pipeline to convert Audio to Embedding first.".to_string()
-                ))
-            }
-            EnvelopeKind::Text(_) => {
-                Err(AdapterError::InvalidInput(
-                    "Whisper expects Embedding (mel spectrogram) input, not Text".to_string()
-                ))
-            }
+            EnvelopeKind::Audio(_) => Err(AdapterError::InvalidInput(
+                "Candle Whisper expects pre-computed mel spectrogram as Embedding. \
+                     Use xybrid preprocessing pipeline to convert Audio to Embedding first."
+                    .to_string(),
+            )),
+            EnvelopeKind::Text(_) => Err(AdapterError::InvalidInput(
+                "Whisper expects Embedding (mel spectrogram) input, not Text".to_string(),
+            )),
         }
     }
 }
@@ -237,7 +241,8 @@ impl RuntimeAdapterExt for CandleRuntimeAdapter {
         } else {
             Err(AdapterError::RuntimeError(
                 "Cannot switch models in infer() without mutable access. \
-                 Use load_model() to set the active model.".to_string()
+                 Use load_model() to set the active model."
+                    .to_string(),
             ))
         }
     }

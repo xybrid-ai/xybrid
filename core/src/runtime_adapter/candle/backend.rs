@@ -63,11 +63,13 @@ impl CandleBackend {
     ///
     /// Transcribed text
     pub fn run_whisper(&mut self, mel: &Tensor) -> BackendResult<String> {
-        let model = self.whisper_model.as_mut().ok_or_else(|| {
-            BackendError::ModelNotLoaded
-        })?;
+        let model = self
+            .whisper_model
+            .as_mut()
+            .ok_or_else(|| BackendError::ModelNotLoaded)?;
 
-        model.transcribe(mel)
+        model
+            .transcribe(mel)
             .map_err(|e| BackendError::InferenceFailed(format!("Whisper inference failed: {}", e)))
     }
 }
@@ -93,8 +95,9 @@ impl InferenceBackend for CandleBackend {
             || model_path.join("model.safetensors").exists();
 
         if is_whisper {
-            let model = WhisperModel::load(model_path, &self.device)
-                .map_err(|e| BackendError::LoadFailed(format!("Failed to load Whisper model: {}", e)))?;
+            let model = WhisperModel::load(model_path, &self.device).map_err(|e| {
+                BackendError::LoadFailed(format!("Failed to load Whisper model: {}", e))
+            })?;
             self.whisper_model = Some(model);
             self.model_path = Some(path_str.to_string());
             Ok(())
@@ -113,10 +116,14 @@ impl InferenceBackend for CandleBackend {
         // For Whisper, we expect a "mel" input and return "text" as embedding
         // (The actual text decoding is done in run_whisper)
 
-        let mel_input = inputs.get("mel").or_else(|| inputs.get("input"))
-            .ok_or_else(|| BackendError::InvalidInput(
-                "Expected 'mel' or 'input' tensor for Whisper inference".to_string()
-            ))?;
+        let mel_input = inputs
+            .get("mel")
+            .or_else(|| inputs.get("input"))
+            .ok_or_else(|| {
+                BackendError::InvalidInput(
+                    "Expected 'mel' or 'input' tensor for Whisper inference".to_string(),
+                )
+            })?;
 
         // Convert ndarray to Candle tensor
         let shape: Vec<usize> = mel_input.shape().to_vec();
@@ -135,7 +142,8 @@ impl InferenceBackend for CandleBackend {
 
         Err(BackendError::InferenceFailed(
             "Candle Whisper requires mutable model access for inference. \
-             Use CandleBackend::run_whisper() directly with mutable reference.".to_string()
+             Use CandleBackend::run_whisper() directly with mutable reference."
+                .to_string(),
         ))
     }
 
@@ -181,6 +189,9 @@ mod tests {
     #[test]
     fn test_input_names_without_model() {
         let backend = CandleBackend::new().unwrap();
-        assert!(matches!(backend.input_names(), Err(BackendError::ModelNotLoaded)));
+        assert!(matches!(
+            backend.input_names(),
+            Err(BackendError::ModelNotLoaded)
+        ));
     }
 }

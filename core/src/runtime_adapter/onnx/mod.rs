@@ -11,8 +11,8 @@
 mod adapter;
 mod backend;
 mod execution_provider;
-mod session;
-mod runtime; // New runtime wrapper
+mod runtime;
+mod session; // New runtime wrapper
 
 #[cfg(any(target_os = "android", test))]
 mod mobile;
@@ -21,12 +21,12 @@ mod mobile;
 pub use adapter::OnnxRuntimeAdapter;
 pub use backend::OnnxBackend;
 pub use execution_provider::{
-    ExecutionProviderKind, ModelHints, parse_provider_string, select_optimal_provider,
+    parse_provider_string, select_optimal_provider, ExecutionProviderKind, ModelHints,
 };
 #[cfg(feature = "coreml-ep")]
 pub use execution_provider::{CoreMLComputeUnits, CoreMLConfig};
-pub use session::ONNXSession;
 pub use runtime::OnnxRuntime;
+pub use session::ONNXSession;
 
 #[cfg(any(target_os = "android", test))]
 pub use mobile::ONNXMobileRuntimeAdapter;

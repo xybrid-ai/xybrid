@@ -38,4 +38,4 @@ mod circuit_breaker;
 mod retry;
 
 pub use circuit_breaker::{CircuitBreaker, CircuitConfig, CircuitState};
-pub use retry::{RetryPolicy, RetryResult, RetryableError, with_retry};
+pub use retry::{with_retry, RetryPolicy, RetryResult, RetryableError};

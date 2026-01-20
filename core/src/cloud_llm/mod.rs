@@ -33,4 +33,4 @@ mod response;
 pub use client::LlmClient;
 pub use error::LlmError;
 pub use request::{LlmRequest, Message, Role};
-pub use response::{LlmResponse};
+pub use response::LlmResponse;

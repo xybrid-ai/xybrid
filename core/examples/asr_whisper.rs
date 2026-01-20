@@ -86,7 +86,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .flat_map(|&s| s.to_le_bytes())
             .collect();
 
-        println!("   Generated {} samples ({:.1}s at {}Hz)", num_samples, duration_secs, sample_rate);
+        println!(
+            "   Generated {} samples ({:.1}s at {}Hz)",
+            num_samples, duration_secs, sample_rate
+        );
 
         // Create executor
         let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());

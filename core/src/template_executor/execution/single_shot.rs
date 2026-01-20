@@ -3,12 +3,12 @@
 //! This module handles single forward pass execution for pipeline stages
 //! that don't require iterative processing.
 
+use super::super::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use crate::execution_template::PipelineStage;
 use crate::runtime_adapter::{AdapterError, ModelRuntime};
 use ndarray::ArrayD;
 use std::collections::HashMap;
 use std::path::Path;
-use super::super::types::{ExecutorResult, PreprocessedData, RawOutputs};
 
 /// Execute a single-shot stage (run once).
 ///

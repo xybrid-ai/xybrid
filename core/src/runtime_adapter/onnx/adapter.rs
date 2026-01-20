@@ -21,13 +21,13 @@
 //! );
 //! ```
 
+use super::execution_provider::ExecutionProviderKind;
+use super::session::ONNXSession;
 use crate::ir::Envelope;
+use crate::runtime_adapter::tensor_utils::{envelope_to_tensors, tensors_to_envelope};
 use crate::runtime_adapter::{
     AdapterError, AdapterResult, ModelMetadata, RuntimeAdapter, RuntimeAdapterExt,
 };
-use super::execution_provider::ExecutionProviderKind;
-use super::session::ONNXSession;
-use crate::runtime_adapter::tensor_utils::{envelope_to_tensors, tensors_to_envelope};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -137,7 +137,10 @@ impl OnnxRuntimeAdapter {
     ///
     /// On macOS/iOS with the `coreml-ep` feature enabled, this returns CoreML
     /// with Neural Engine. Otherwise, returns CPU.
-    #[deprecated(since = "0.0.24", note = "Use with_auto_selection() with ModelHints instead")]
+    #[deprecated(
+        since = "0.0.24",
+        note = "Use with_auto_selection() with ModelHints instead"
+    )]
     #[allow(dead_code)]
     pub fn select_optimal_provider() -> ExecutionProviderKind {
         #[cfg(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios")))]
@@ -207,15 +210,20 @@ impl OnnxRuntimeAdapter {
         let input_tensors = envelope_to_tensors(input, &input_shapes, &input_names)?;
 
         // Run inference (session uses RefCell for interior mutability)
-        let output_tensors = session
-            .run(input_tensors)
-            .map_err(|e| AdapterError::InferenceFailed(format!("ONNX Runtime inference failed: {e}")))?;
+        let output_tensors = session.run(input_tensors).map_err(|e| {
+            AdapterError::InferenceFailed(format!("ONNX Runtime inference failed: {e}"))
+        })?;
 
         // DEBUG: Log raw output tensor info before conversion
         eprintln!("🔵 DEBUG: Raw ONNX Output Tensors");
         eprintln!("   Number of outputs: {}", output_tensors.len());
         for (name, tensor) in &output_tensors {
-            eprintln!("   Output '{}': shape {:?}, size {}", name, tensor.shape(), tensor.len());
+            eprintln!(
+                "   Output '{}': shape {:?}, size {}",
+                name,
+                tensor.shape(),
+                tensor.len()
+            );
         }
 
         let output_names: Vec<String> = session.output_names().to_vec();
@@ -227,9 +235,12 @@ impl OnnxRuntimeAdapter {
     pub fn get_session(&self, model_path: &str) -> AdapterResult<&ONNXSession> {
         // Extract ID just like load_model does
         let model_id = self.extract_model_id(model_path);
-        
+
         self.sessions.get(&model_id).ok_or_else(|| {
-             AdapterError::ModelNotLoaded(format!("Session for model '{}' (path: {}) not found", model_id, model_path))
+            AdapterError::ModelNotLoaded(format!(
+                "Session for model '{}' (path: {}) not found",
+                model_id, model_path
+            ))
         })
     }
 }

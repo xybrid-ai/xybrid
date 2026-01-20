@@ -541,8 +541,9 @@ impl XyBundle {
     /// ```
     pub fn get_metadata_json(&self) -> BundlerResult<Option<String>> {
         if let Some(contents) = self.files.get("model_metadata.json") {
-            let json_str = String::from_utf8(contents.clone())
-                .map_err(|e| BundlerError::InvalidManifest(format!("Invalid UTF-8 in metadata: {}", e)))?;
+            let json_str = String::from_utf8(contents.clone()).map_err(|e| {
+                BundlerError::InvalidManifest(format!("Invalid UTF-8 in metadata: {}", e))
+            })?;
             Ok(Some(json_str))
         } else {
             Ok(None)

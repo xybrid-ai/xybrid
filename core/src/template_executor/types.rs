@@ -70,13 +70,14 @@ impl PreprocessedData {
             PreprocessedData::AudioSamples(samples) => {
                 let batch_size = 1;
                 let num_samples = samples.len();
-                ArrayD::from_shape_vec(IxDyn(&[batch_size, num_samples]), samples.clone())
-                    .map_err(|e| {
+                ArrayD::from_shape_vec(IxDyn(&[batch_size, num_samples]), samples.clone()).map_err(
+                    |e| {
                         AdapterError::InvalidInput(format!(
                             "Failed to create audio tensor: {:?}",
                             e
                         ))
-                    })
+                    },
+                )
             }
             _ => Err(AdapterError::InvalidInput(
                 "Cannot convert to tensor".to_string(),
@@ -127,7 +128,9 @@ impl PreprocessedData {
     /// Convert to envelope.
     pub fn to_envelope(&self) -> ExecutorResult<Envelope> {
         match self {
-            PreprocessedData::AudioBytes(bytes) => Ok(Envelope::new(EnvelopeKind::Audio(bytes.clone()))),
+            PreprocessedData::AudioBytes(bytes) => {
+                Ok(Envelope::new(EnvelopeKind::Audio(bytes.clone())))
+            }
             PreprocessedData::AudioSamples(samples) => {
                 // If samples are f32, we might want to encode to WAV or just pass raw bytes?
                 // Envelope::Audio expects "bytes", usually WAV/encoded.
@@ -205,18 +208,16 @@ impl RawOutputs {
                     .next()
                     .ok_or_else(|| AdapterError::InvalidInput("No outputs".to_string()))?;
 
-                let data = tensor
-                    .as_slice()
-                    .ok_or_else(|| AdapterError::InvalidInput("Tensor not contiguous".to_string()))?;
+                let data = tensor.as_slice().ok_or_else(|| {
+                    AdapterError::InvalidInput("Tensor not contiguous".to_string())
+                })?;
 
                 Ok(Envelope::new(EnvelopeKind::Embedding(data.to_vec())))
             }
             RawOutputs::TokenIds(ids) => {
                 Ok(Envelope::new(EnvelopeKind::Text(format!("{:?}", ids))))
             }
-            RawOutputs::AudioBytes(bytes) => {
-                Ok(Envelope::new(EnvelopeKind::Audio(bytes.clone())))
-            }
+            RawOutputs::AudioBytes(bytes) => Ok(Envelope::new(EnvelopeKind::Audio(bytes.clone()))),
         }
     }
 
@@ -240,13 +241,16 @@ impl RawOutputs {
                     .metadata
                     .get("tensor_shape")
                     .and_then(|s| {
-                        let parts: Result<Vec<usize>, _> = s.split(',').map(|p| p.parse()).collect();
+                        let parts: Result<Vec<usize>, _> =
+                            s.split(',').map(|p| p.parse()).collect();
                         parts.ok()
                     })
                     .unwrap_or_else(|| vec![floats.len()]); // Default to 1D if no shape
 
-                let tensor = ArrayD::from_shape_vec(IxDyn(&shape), floats.clone())
-                    .map_err(|e| AdapterError::InvalidInput(format!("Failed to create tensor: {:?}", e)))?;
+                let tensor =
+                    ArrayD::from_shape_vec(IxDyn(&shape), floats.clone()).map_err(|e| {
+                        AdapterError::InvalidInput(format!("Failed to create tensor: {:?}", e))
+                    })?;
                 // Map it to "output" key by default? Or TensorMap
                 let mut map = HashMap::new();
                 map.insert("output".to_string(), tensor);

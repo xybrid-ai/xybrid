@@ -4,10 +4,10 @@
 //! - `center_crop_step`: Center crop image tensor to target dimensions
 //! - `resize_step`: Resize image tensor using interpolation
 
+use super::super::types::{ExecutorResult, PreprocessedData};
 use crate::execution_template::InterpolationMethod;
 use crate::runtime_adapter::AdapterError;
 use ndarray::{ArrayD, IxDyn};
-use super::super::types::{ExecutorResult, PreprocessedData};
 
 /// Center crop image tensor to target dimensions.
 ///

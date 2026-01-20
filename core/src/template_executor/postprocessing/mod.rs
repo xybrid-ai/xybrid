@@ -13,8 +13,8 @@ pub mod audio;
 pub mod decode;
 pub mod tensor_ops;
 
-use crate::execution_template::PostprocessingStep;
 use super::types::{ExecutorResult, RawOutputs};
+use crate::execution_template::PostprocessingStep;
 
 /// Apply a postprocessing step to data.
 ///
@@ -25,7 +25,10 @@ pub fn apply_postprocessing_step(
     base_path: &str,
 ) -> ExecutorResult<RawOutputs> {
     match step {
-        PostprocessingStep::CTCDecode { vocab_file, blank_index } => {
+        PostprocessingStep::CTCDecode {
+            vocab_file,
+            blank_index,
+        } => {
             let vocab_path = resolve_file_path(base_path, vocab_file);
             decode::ctc_decode_step(data, &vocab_path, *blank_index)
         }
@@ -46,13 +49,18 @@ pub fn apply_postprocessing_step(
 
         PostprocessingStep::TopK { k, dim } => tensor_ops::topk_step(data, *k, *dim),
 
-        PostprocessingStep::Threshold { threshold, return_indices } => {
-            tensor_ops::threshold_step(data, *threshold, *return_indices)
-        }
+        PostprocessingStep::Threshold {
+            threshold,
+            return_indices,
+        } => tensor_ops::threshold_step(data, *threshold, *return_indices),
 
         PostprocessingStep::MeanPool { dim } => tensor_ops::meanpool_step(data, *dim),
 
-        PostprocessingStep::TemperatureSample { temperature: _, top_k: _, top_p: _ } => {
+        PostprocessingStep::TemperatureSample {
+            temperature: _,
+            top_k: _,
+            top_p: _,
+        } => {
             // TODO: Implement temperature sampling
             Ok(data)
         }
@@ -62,9 +70,10 @@ pub fn apply_postprocessing_step(
             Ok(data)
         }
 
-        PostprocessingStep::TTSAudioEncode { sample_rate, apply_postprocessing } => {
-            audio::tts_audio_encode_step(data, *sample_rate, *apply_postprocessing)
-        }
+        PostprocessingStep::TTSAudioEncode {
+            sample_rate,
+            apply_postprocessing,
+        } => audio::tts_audio_encode_step(data, *sample_rate, *apply_postprocessing),
     }
 }
 

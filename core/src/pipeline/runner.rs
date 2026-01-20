@@ -16,8 +16,8 @@ use super::{
 use crate::context::{DeviceMetrics, StageDescriptor};
 use crate::device::capabilities::HardwareCapabilities;
 use crate::ir::{Envelope, EnvelopeKind};
-use crate::orchestrator::{Orchestrator, OrchestratorError};
 use crate::orchestrator::routing_engine::LocalAvailability;
+use crate::orchestrator::{Orchestrator, OrchestratorError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -250,9 +250,13 @@ impl PipelineRunner {
     }
 
     /// Execute a pipeline from a YAML string.
-    pub fn run_yaml(&mut self, yaml: &str, input: Envelope) -> Result<PipelineResult, PipelineRunnerError> {
-        let pipeline = PipelineConfig::from_yaml(yaml)
-            .map_err(PipelineRunnerError::ValidationFailed)?;
+    pub fn run_yaml(
+        &mut self,
+        yaml: &str,
+        input: Envelope,
+    ) -> Result<PipelineResult, PipelineRunnerError> {
+        let pipeline =
+            PipelineConfig::from_yaml(yaml).map_err(PipelineRunnerError::ValidationFailed)?;
         self.run(&pipeline, input)
     }
 
@@ -265,7 +269,9 @@ impl PipelineRunner {
         let start_time = Instant::now();
 
         // Validate pipeline
-        pipeline.validate().map_err(PipelineRunnerError::ValidationFailed)?;
+        pipeline
+            .validate()
+            .map_err(PipelineRunnerError::ValidationFailed)?;
 
         // Reset output context for new pipeline run
         self.output_context = StageOutputContext::new();
@@ -288,7 +294,8 @@ impl PipelineRunner {
                     current_input = self.value_to_envelope(output);
 
                     // Store output in context for condition evaluation
-                    self.output_context.add_output(&stage_config.id, output.clone());
+                    self.output_context
+                        .add_output(&stage_config.id, output.clone());
                 }
             } else {
                 stages_skipped += 1;
@@ -374,7 +381,11 @@ impl PipelineRunner {
         // Convert to orchestrator types
         let stage_descriptor = self.stage_config_to_descriptor(stage_config);
         let availability = LocalAvailability::new(
-            self.config.local_models.get(&stage_config.model).copied().unwrap_or(true)
+            self.config
+                .local_models
+                .get(&stage_config.model)
+                .copied()
+                .unwrap_or(true),
         );
 
         // Execute through orchestrator
@@ -503,9 +514,10 @@ impl PipelineRunner {
                     sample_rate: 16000, // Default, should come from metadata
                 },
             ),
-            EnvelopeKind::Embedding(values) => {
-                (OutputResultType::Embedding, OutputResult::Embedding(values.clone()))
-            }
+            EnvelopeKind::Embedding(values) => (
+                OutputResultType::Embedding,
+                OutputResult::Embedding(values.clone()),
+            ),
         }
     }
 
@@ -536,12 +548,16 @@ impl PipelineRunner {
 
     /// Register a local model as available.
     pub fn register_local_model(&mut self, model_id: &str, available: bool) {
-        self.config.local_models.insert(model_id.to_string(), available);
+        self.config
+            .local_models
+            .insert(model_id.to_string(), available);
     }
 
     /// Register a server model as available.
     pub fn register_server_model(&mut self, model_id: &str, available: bool) {
-        self.config.server_models.insert(model_id.to_string(), available);
+        self.config
+            .server_models
+            .insert(model_id.to_string(), available);
     }
 
     /// Register an integration provider as available.
@@ -718,8 +734,18 @@ stages: []
         runner.register_server_model("whisper-large", true);
         runner.register_integration(IntegrationProvider::OpenAI, true);
 
-        assert!(runner.config().local_models.get("wav2vec2").copied().unwrap_or(false));
-        assert!(runner.config().server_models.get("whisper-large").copied().unwrap_or(false));
+        assert!(runner
+            .config()
+            .local_models
+            .get("wav2vec2")
+            .copied()
+            .unwrap_or(false));
+        assert!(runner
+            .config()
+            .server_models
+            .get("whisper-large")
+            .copied()
+            .unwrap_or(false));
         assert!(runner
             .config()
             .integrations

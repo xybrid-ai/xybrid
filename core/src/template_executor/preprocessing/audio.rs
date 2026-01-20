@@ -4,13 +4,13 @@
 //! - `mel_spectrogram_step`: Convert audio samples to mel spectrogram
 //! - `decode_audio_step`: Decode audio from various formats to float32 samples
 
+use super::super::types::{ExecutorResult, PreprocessedData};
 use crate::audio::mel::{compute_mel_spectrogram, MelConfig, MelScale, PaddingMode};
 use crate::audio::{decode_wav_audio, prepare_audio_samples};
 use crate::execution_template::MelScaleType;
 use crate::ir::Envelope;
 use crate::preprocessing::mel_spectrogram::audio_bytes_to_whisper_mel;
 use crate::runtime_adapter::AdapterError;
-use super::super::types::{ExecutorResult, PreprocessedData};
 
 /// Convert audio samples to mel spectrogram.
 ///
@@ -44,10 +44,24 @@ pub fn mel_spectrogram_step(
                 "[WARN] Unknown mel spectrogram preset '{}', using parameters",
                 preset_name
             );
-            build_mel_config(n_mels, sample_rate, fft_size, hop_length, mel_scale, max_frames)
+            build_mel_config(
+                n_mels,
+                sample_rate,
+                fft_size,
+                hop_length,
+                mel_scale,
+                max_frames,
+            )
         })
     } else {
-        build_mel_config(n_mels, sample_rate, fft_size, hop_length, mel_scale, max_frames)
+        build_mel_config(
+            n_mels,
+            sample_rate,
+            fft_size,
+            hop_length,
+            mel_scale,
+            max_frames,
+        )
     };
 
     match data {

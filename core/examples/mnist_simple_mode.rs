@@ -4,11 +4,11 @@
 //! simple MNIST classifier. It proves that the TemplateExecutor can run models via
 //! JSON metadata with full preprocessing/postprocessing pipelines.
 
+use ndarray::Array4;
 use std::collections::HashMap;
-use ndarray::{Array4};
 use xybrid_core::execution_template::ModelMetadata;
-use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -105,7 +105,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             if output_data.len() == 10 {
                 // Find predicted digit (argmax)
-                let (predicted_digit, confidence) = output_data.iter()
+                let (predicted_digit, confidence) = output_data
+                    .iter()
                     .enumerate()
                     .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
                     .ok_or("Failed to find max")?;
@@ -121,7 +122,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for (digit, prob) in output_data.iter().enumerate() {
                     let bar_length = (prob * 50.0).min(50.0).max(0.0) as usize;
                     let bar: String = "█".repeat(bar_length);
-                    println!("     {}: {:.4} ({:5.2}%) {}", digit, prob, prob * 100.0, bar);
+                    println!(
+                        "     {}: {:.4} ({:5.2}%) {}",
+                        digit,
+                        prob,
+                        prob * 100.0,
+                        bar
+                    );
                 }
 
                 // Verify prediction is correct
@@ -132,7 +139,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("⚠️  UNEXPECTED: Predicted {} instead of 7", predicted_digit);
                 }
             } else {
-                println!("   Raw output: {:?}", &output_data[..10.min(output_data.len())]);
+                println!(
+                    "   Raw output: {:?}",
+                    &output_data[..10.min(output_data.len())]
+                );
             }
         }
         EnvelopeKind::Text(text) => {

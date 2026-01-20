@@ -18,13 +18,13 @@
 //! adapter.load_model("/path/to/model.onnx")?;
 //! ```
 
+use super::session::ONNXSession;
 use crate::device::capabilities::ThermalState;
 use crate::ir::{Envelope, EnvelopeKind};
+use crate::runtime_adapter::tensor_utils::{envelope_to_tensors, tensors_to_envelope};
 use crate::runtime_adapter::{
     AdapterError, AdapterResult, ModelMetadata, RuntimeAdapter, RuntimeAdapterExt,
 };
-use super::session::ONNXSession;
-use crate::runtime_adapter::tensor_utils::{envelope_to_tensors, tensors_to_envelope};
 use std::collections::HashMap;
 use std::path::Path;
 

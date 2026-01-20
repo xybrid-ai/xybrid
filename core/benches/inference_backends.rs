@@ -391,10 +391,7 @@ fn benchmark_coreml_gpu(c: &mut Criterion) {
         ) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!(
-                    "Skipping {} CoreML GPU benchmark: {}",
-                    model_config.name, e
-                );
+                eprintln!("Skipping {} CoreML GPU benchmark: {}", model_config.name, e);
                 continue;
             }
         };
@@ -426,6 +423,11 @@ fn benchmark_coreml_gpu(c: &mut Criterion) {
 criterion_group!(benches, benchmark_cpu);
 
 #[cfg(feature = "coreml-ep")]
-criterion_group!(benches, benchmark_cpu, benchmark_coreml_ane, benchmark_coreml_gpu);
+criterion_group!(
+    benches,
+    benchmark_cpu,
+    benchmark_coreml_ane,
+    benchmark_coreml_gpu
+);
 
 criterion_main!(benches);

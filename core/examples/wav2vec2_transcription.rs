@@ -8,11 +8,11 @@
 //! Model: facebook/wav2vec2-base-960h (ONNX format)
 //! Expected input: 16kHz mono WAV audio
 
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use xybrid_core::execution_template::ModelMetadata;
-use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -39,19 +39,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
 
     // Test with a sample audio file (user should provide this)
-    let audio_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| {
-            println!("⚠️  No audio file provided!");
-            println!();
-            println!("Usage: cargo run --example wav2vec2_transcription <audio.wav>");
-            println!();
-            println!("Example:");
-            println!("  cargo run --example wav2vec2_transcription test_audio.wav");
-            println!();
-            println!("Note: Audio must be WAV format (any sample rate, will be resampled to 16kHz)");
-            std::process::exit(1);
-        });
+    let audio_path = std::env::args().nth(1).unwrap_or_else(|| {
+        println!("⚠️  No audio file provided!");
+        println!();
+        println!("Usage: cargo run --example wav2vec2_transcription <audio.wav>");
+        println!();
+        println!("Example:");
+        println!("  cargo run --example wav2vec2_transcription test_audio.wav");
+        println!();
+        println!("Note: Audio must be WAV format (any sample rate, will be resampled to 16kHz)");
+        std::process::exit(1);
+    });
 
     println!("🎤 Loading audio from: {}", audio_path);
 

@@ -5,11 +5,11 @@
 //! - Multi-input BERT model execution (input_ids, attention_mask, token_type_ids)
 //! - Mean pooling postprocessing to generate sentence embeddings
 
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use xybrid_core::execution_template::ModelMetadata;
-use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,7 +28,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("✅ Metadata loaded:");
     println!("   Model: {} v{}", metadata.model_id, metadata.version);
-    println!("   Description: {}", metadata.description.as_ref().unwrap_or(&"N/A".to_string()));
+    println!(
+        "   Description: {}",
+        metadata.description.as_ref().unwrap_or(&"N/A".to_string())
+    );
     println!("   Execution: {:?}", metadata.execution_template);
     println!("   Preprocessing: {} steps", metadata.preprocessing.len());
     println!("   Postprocessing: {} steps", metadata.postprocessing.len());
@@ -96,7 +99,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if embedding.len() == 384 {
                 println!("✅ SUCCESS: Correct embedding dimension (384)!");
             } else {
-                println!("⚠️  UNEXPECTED: Got {} dimensions instead of 384", embedding.len());
+                println!(
+                    "⚠️  UNEXPECTED: Got {} dimensions instead of 384",
+                    embedding.len()
+                );
             }
         }
         EnvelopeKind::Text(text) => {

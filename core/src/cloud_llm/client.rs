@@ -96,10 +96,13 @@ impl LlmClient {
 
     /// OpenAI completion implementation.
     fn complete_openai(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        let api_key = self.config.resolve_api_key().ok_or_else(|| LlmError::ApiKeyMissing {
-            provider: "OpenAI".into(),
-            env_var: "OPENAI_API_KEY".into(),
-        })?;
+        let api_key = self
+            .config
+            .resolve_api_key()
+            .ok_or_else(|| LlmError::ApiKeyMissing {
+                provider: "OpenAI".into(),
+                env_var: "OPENAI_API_KEY".into(),
+            })?;
 
         let model = request.model.as_deref().unwrap_or(DEFAULT_OPENAI_MODEL);
         let messages = self.build_openai_messages(&request);
@@ -174,10 +177,13 @@ impl LlmClient {
 
     /// Anthropic completion implementation.
     fn complete_anthropic(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        let api_key = self.config.resolve_api_key().ok_or_else(|| LlmError::ApiKeyMissing {
-            provider: "Anthropic".into(),
-            env_var: "ANTHROPIC_API_KEY".into(),
-        })?;
+        let api_key = self
+            .config
+            .resolve_api_key()
+            .ok_or_else(|| LlmError::ApiKeyMissing {
+                provider: "Anthropic".into(),
+                env_var: "ANTHROPIC_API_KEY".into(),
+            })?;
 
         let model = request.model.as_deref().unwrap_or(DEFAULT_ANTHROPIC_MODEL);
         let messages = self.build_anthropic_messages(&request);
@@ -330,8 +336,8 @@ impl LlmClient {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::request::Message;
+    use super::*;
 
     #[test]
     fn test_client_creation_requires_key() {
@@ -380,8 +386,7 @@ mod tests {
         std::env::set_var("OPENAI_API_KEY", "test");
         let client = LlmClient::openai().unwrap();
 
-        let request = LlmRequest::prompt("Hello")
-            .with_system("Be helpful");
+        let request = LlmRequest::prompt("Hello").with_system("Be helpful");
 
         let messages = client.build_openai_messages(&request);
 
@@ -398,10 +403,7 @@ mod tests {
         let client = LlmClient::anthropic().unwrap();
 
         // System message should not be in the messages array for Anthropic
-        let request = LlmRequest::chat(vec![
-            Message::system("Be helpful"),
-            Message::user("Hello"),
-        ]);
+        let request = LlmRequest::chat(vec![Message::system("Be helpful"), Message::user("Hello")]);
 
         let messages = client.build_anthropic_messages(&request);
 

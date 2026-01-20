@@ -12,11 +12,11 @@
 
 pub mod audio;
 pub mod image;
-pub mod text;
 pub mod tensor;
+pub mod text;
 
-use crate::execution_template::PreprocessingStep;
 use super::types::{ExecutorResult, PreprocessedData};
+use crate::execution_template::PreprocessingStep;
 use crate::ir::Envelope;
 
 /// Apply a preprocessing step to data.

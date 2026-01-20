@@ -50,7 +50,7 @@
 mod audio_buffer;
 mod session;
 
-pub use audio_buffer::{AudioBuffer, AudioBufferConfig, AudioChunk, AudioBufferStats};
+pub use audio_buffer::{AudioBuffer, AudioBufferConfig, AudioBufferStats, AudioChunk};
 pub use session::{
     PartialResult, StreamConfig, StreamError, StreamResult, StreamSession, StreamState,
     StreamStats, VadStreamConfig,

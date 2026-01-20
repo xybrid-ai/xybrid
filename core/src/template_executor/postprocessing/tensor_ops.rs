@@ -7,10 +7,10 @@
 //! - `threshold_step`: Apply threshold to probabilities
 //! - `meanpool_step`: Mean pooling over sequence dimension
 
+use super::super::types::{ExecutorResult, RawOutputs};
 use crate::runtime_adapter::AdapterError;
 use ndarray::{ArrayD, IxDyn};
 use std::collections::HashMap;
-use super::super::types::{ExecutorResult, RawOutputs};
 
 /// Apply argmax to get class ID with highest probability.
 ///
@@ -28,9 +28,10 @@ pub fn argmax_step(data: RawOutputs, _dim: Option<usize>) -> ExecutorResult<RawO
     };
 
     // Get the first output tensor
-    let tensor = tensor_map.values().next().ok_or_else(|| {
-        AdapterError::InvalidInput("No outputs to apply argmax".to_string())
-    })?;
+    let tensor = tensor_map
+        .values()
+        .next()
+        .ok_or_else(|| AdapterError::InvalidInput("No outputs to apply argmax".to_string()))?;
 
     let class_id = argmax_token(tensor)?;
 
@@ -77,9 +78,10 @@ pub fn topk_step(data: RawOutputs, k: usize, dim: Option<usize>) -> ExecutorResu
     };
 
     // Get the first output tensor
-    let tensor = tensor_map.values().next().ok_or_else(|| {
-        AdapterError::InvalidInput("No outputs for TopK".to_string())
-    })?;
+    let tensor = tensor_map
+        .values()
+        .next()
+        .ok_or_else(|| AdapterError::InvalidInput("No outputs for TopK".to_string()))?;
 
     // Apply top-k
     let top_k_results = top_k_predictions(tensor, k, dim)?;
@@ -123,9 +125,10 @@ pub fn threshold_step(
     };
 
     // Get the first output tensor
-    let tensor = tensor_map.values().next().ok_or_else(|| {
-        AdapterError::InvalidInput("No outputs for Threshold".to_string())
-    })?;
+    let tensor = tensor_map
+        .values()
+        .next()
+        .ok_or_else(|| AdapterError::InvalidInput("No outputs for Threshold".to_string()))?;
 
     let values = tensor.as_slice().ok_or_else(|| {
         AdapterError::InvalidInput("Tensor is not contiguous for Threshold".to_string())
@@ -145,9 +148,10 @@ pub fn threshold_step(
             })
             .collect();
 
-        let result_tensor = ArrayD::from_shape_vec(IxDyn(&[indices.len()]), indices).map_err(
-            |e| AdapterError::InvalidInput(format!("Failed to create threshold tensor: {:?}", e)),
-        )?;
+        let result_tensor =
+            ArrayD::from_shape_vec(IxDyn(&[indices.len()]), indices).map_err(|e| {
+                AdapterError::InvalidInput(format!("Failed to create threshold tensor: {:?}", e))
+            })?;
 
         let mut result_map = HashMap::new();
         result_map.insert("threshold_indices".to_string(), result_tensor);
@@ -159,10 +163,9 @@ pub fn threshold_step(
             .map(|&val| if val > threshold { 1.0 } else { 0.0 })
             .collect();
 
-        let result_tensor =
-            ArrayD::from_shape_vec(IxDyn(tensor.shape()), binary).map_err(|e| {
-                AdapterError::InvalidInput(format!("Failed to create threshold mask: {:?}", e))
-            })?;
+        let result_tensor = ArrayD::from_shape_vec(IxDyn(tensor.shape()), binary).map_err(|e| {
+            AdapterError::InvalidInput(format!("Failed to create threshold mask: {:?}", e))
+        })?;
 
         let mut result_map = HashMap::new();
         result_map.insert("threshold_mask".to_string(), result_tensor);
@@ -186,9 +189,10 @@ pub fn meanpool_step(data: RawOutputs, dim: usize) -> ExecutorResult<RawOutputs>
     };
 
     // Get the first output tensor (usually "last_hidden_state" or similar)
-    let tensor = tensor_map.values().next().ok_or_else(|| {
-        AdapterError::InvalidInput("No outputs for MeanPool".to_string())
-    })?;
+    let tensor = tensor_map
+        .values()
+        .next()
+        .ok_or_else(|| AdapterError::InvalidInput("No outputs for MeanPool".to_string()))?;
 
     let shape = tensor.shape();
 
@@ -240,9 +244,9 @@ pub fn meanpool_step(data: RawOutputs, dim: usize) -> ExecutorResult<RawOutputs>
 /// Apply argmax to logits to get token ID.
 pub fn argmax_token(logits: &ArrayD<f32>) -> ExecutorResult<usize> {
     let shape = logits.shape();
-    let data = logits.as_slice().ok_or_else(|| {
-        AdapterError::InvalidInput("Logits tensor is not contiguous".to_string())
-    })?;
+    let data = logits
+        .as_slice()
+        .ok_or_else(|| AdapterError::InvalidInput("Logits tensor is not contiguous".to_string()))?;
 
     // Handle 3D logits [batch, seq_len, vocab_size]
     if shape.len() == 3 {

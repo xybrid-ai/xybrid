@@ -71,9 +71,7 @@ impl PipelineConfig {
 
     /// Get the effective registry URL (defaults to api.xybrid.dev)
     pub fn registry_url(&self) -> &str {
-        self.registry
-            .as_deref()
-            .unwrap_or("https://api.xybrid.dev")
+        self.registry.as_deref().unwrap_or("https://api.xybrid.dev")
     }
 
     /// Get stage configurations
@@ -118,11 +116,10 @@ impl StageConfig {
                 // Parse "model@version" -> "model"
                 s.split('@').next().unwrap_or(s).to_string()
             }
-            StageConfig::Object(obj) => {
-                obj.model.clone().unwrap_or_else(|| {
-                    obj.id.clone().unwrap_or_else(|| "unknown".to_string())
-                })
-            }
+            StageConfig::Object(obj) => obj
+                .model
+                .clone()
+                .unwrap_or_else(|| obj.id.clone().unwrap_or_else(|| "unknown".to_string())),
         }
     }
 
@@ -131,9 +128,7 @@ impl StageConfig {
     pub fn stage_id(&self) -> String {
         match self {
             StageConfig::Simple(_) => self.model_id(),
-            StageConfig::Object(obj) => {
-                obj.id.clone().unwrap_or_else(|| self.model_id())
-            }
+            StageConfig::Object(obj) => obj.id.clone().unwrap_or_else(|| self.model_id()),
         }
     }
 
@@ -174,8 +169,7 @@ impl StageConfig {
 
     /// Check if this is a cloud/integration stage.
     pub fn is_cloud_stage(&self) -> bool {
-        matches!(self.target(), Some("cloud") | Some("integration"))
-            || self.provider().is_some()
+        matches!(self.target(), Some("cloud") | Some("integration")) || self.provider().is_some()
     }
 
     /// Check if this is a device stage.
@@ -197,7 +191,10 @@ impl StageConfig {
             StageConfig::Simple(s) => {
                 let (model, version) = if s.contains('@') {
                     let parts: Vec<&str> = s.split('@').collect();
-                    (Some(parts[0].to_string()), parts.get(1).map(|v| v.to_string()))
+                    (
+                        Some(parts[0].to_string()),
+                        parts.get(1).map(|v| v.to_string()),
+                    )
                 } else {
                     (Some(s.clone()), None)
                 };

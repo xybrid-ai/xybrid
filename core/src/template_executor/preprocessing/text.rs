@@ -4,10 +4,10 @@
 //! - `tokenize_step`: Tokenize text for NLP models
 //! - `phonemize_step`: Convert text to phonemes for TTS models
 
+use super::super::types::{ExecutorResult, PreprocessedData};
 use crate::execution_template::{PhonemizerBackend, TokenizerType};
 use crate::runtime_adapter::AdapterError;
 use std::collections::HashMap;
-use super::super::types::{ExecutorResult, PreprocessedData};
 
 /// Tokenize text input for NLP models.
 ///
@@ -34,14 +34,13 @@ pub fn tokenize_step(
     };
 
     let tokenizer = match tokenizer_type {
-        TokenizerType::WordPiece | TokenizerType::BPE => {
-            Tokenizer::from_file(tokenizer_path).map_err(|e| {
+        TokenizerType::WordPiece | TokenizerType::BPE => Tokenizer::from_file(tokenizer_path)
+            .map_err(|e| {
                 AdapterError::InvalidInput(format!(
                     "Failed to load tokenizer from {}: {}",
                     tokenizer_path, e
                 ))
-            })?
-        }
+            })?,
         TokenizerType::SentencePiece => {
             return Err(AdapterError::InvalidInput(
                 "SentencePiece tokenizer not yet implemented".to_string(),
@@ -49,9 +48,9 @@ pub fn tokenize_step(
         }
     };
 
-    let encoding = tokenizer.encode(text.clone(), false).map_err(|e| {
-        AdapterError::InvalidInput(format!("Tokenization failed: {}", e))
-    })?;
+    let encoding = tokenizer
+        .encode(text.clone(), false)
+        .map_err(|e| AdapterError::InvalidInput(format!("Tokenization failed: {}", e)))?;
 
     let mut ids: Vec<usize> = encoding.get_ids().iter().map(|&id| id as usize).collect();
     let mut attention_mask: Vec<usize> = encoding
@@ -156,7 +155,11 @@ pub fn phonemize_step(
             let tokens_dir = std::path::Path::new(tokens_path)
                 .parent()
                 .unwrap_or(std::path::Path::new("."));
-            phonemize_with_misaki(&processed_text, tokens_dir.to_str().unwrap_or("."), &tokens_map)?
+            phonemize_with_misaki(
+                &processed_text,
+                tokens_dir.to_str().unwrap_or("."),
+                &tokens_map,
+            )?
         }
     };
 
@@ -351,10 +354,7 @@ fn phonemize_with_misaki(
 }
 
 /// Look up a word's phonemes in a misaki dictionary.
-fn lookup_word_phonemes(
-    word: &str,
-    dict: &HashMap<String, serde_json::Value>,
-) -> Option<String> {
+fn lookup_word_phonemes(word: &str, dict: &HashMap<String, serde_json::Value>) -> Option<String> {
     dict.get(word).and_then(|v| match v {
         serde_json::Value::String(s) => Some(s.clone()),
         serde_json::Value::Object(obj) => {

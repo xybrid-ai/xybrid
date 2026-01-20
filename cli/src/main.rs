@@ -33,7 +33,7 @@ mod tracing_viz;
 // Import utility functions from commands module
 // Note: Some functions (format_timestamp, format_system_time, truncate) are kept
 // locally due to chrono dependencies and slightly different implementations
-use commands::{display_stage_name, format_params, format_size, dir_size_bytes};
+use commands::{dir_size_bytes, display_stage_name, format_params, format_size};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -49,9 +49,9 @@ use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
-use xybrid_core::orchestrator::Orchestrator;
 use xybrid_core::orchestrator::policy_engine::PolicyEngine;
 use xybrid_core::orchestrator::routing_engine::{LocalAvailability, RoutingEngine};
+use xybrid_core::orchestrator::Orchestrator;
 use xybrid_core::pipeline_config::PipelineConfig;
 use xybrid_core::target::{Platform, TargetResolver};
 use xybrid_core::template_executor::TemplateExecutor;
@@ -67,7 +67,12 @@ struct Cli {
     api_key: Option<String>,
 
     /// Platform API endpoint for telemetry (default: https://api.xybrid.dev)
-    #[arg(long, global = true, env = "XYBRID_PLATFORM_URL", default_value = "https://api.xybrid.dev")]
+    #[arg(
+        long,
+        global = true,
+        env = "XYBRID_PLATFORM_URL",
+        default_value = "https://api.xybrid.dev"
+    )]
     platform_url: String,
 
     /// Device ID for telemetry attribution
@@ -286,15 +291,21 @@ fn run_command(cli: Cli) -> Result<()> {
         Commands::Models { command } => handle_models_command(command),
         Commands::Prepare { config } => handle_prepare_command(&config),
         Commands::Plan { config } => handle_plan_command(&config),
-        Commands::Fetch { config, model, platform } => {
+        Commands::Fetch {
+            config,
+            model,
+            platform,
+        } => {
             if let Some(config_path) = config {
                 handle_fetch_pipeline_command(&config_path, platform.as_deref())
             } else if let Some(model_id) = model {
                 handle_fetch_command(&model_id, platform.as_deref())
             } else {
-                Err(anyhow::anyhow!("Either a pipeline config file or --model <id> must be specified"))
+                Err(anyhow::anyhow!(
+                    "Either a pipeline config file or --model <id> must be specified"
+                ))
             }
-        },
+        }
         Commands::Cache { command } => handle_cache_command(command),
         Commands::Run {
             config,
@@ -315,7 +326,14 @@ fn run_command(cli: Cli) -> Result<()> {
 
             // Handle direct bundle execution
             if let Some(bundle_path) = bundle {
-                return run_bundle(&bundle_path, input_audio.as_ref(), input_text.as_deref(), dry_run, trace, trace_export.as_ref());
+                return run_bundle(
+                    &bundle_path,
+                    input_audio.as_ref(),
+                    input_text.as_deref(),
+                    dry_run,
+                    trace,
+                    trace_export.as_ref(),
+                );
             }
 
             let config_path = if let Some(path) = config {
@@ -367,7 +385,16 @@ fn run_command(cli: Cli) -> Result<()> {
                     "Either --config, --pipeline, or --bundle must be specified"
                 ));
             };
-            run_pipeline(&config_path, dry_run, policy.as_ref(), input_audio.as_ref(), input_text.as_deref(), target.as_deref(), trace, trace_export.as_ref())
+            run_pipeline(
+                &config_path,
+                dry_run,
+                policy.as_ref(),
+                input_audio.as_ref(),
+                input_text.as_deref(),
+                target.as_deref(),
+                trace,
+                trace_export.as_ref(),
+            )
         }
         Commands::Trace {
             session,
@@ -580,7 +607,6 @@ fn pack_model(name: &str, version: &str, target: &str, custom_path: Option<&Path
 
     Ok(())
 }
-
 
 /// Get the traces directory path (~/.xybrid/traces/).
 fn get_traces_directory() -> Result<PathBuf> {
@@ -1202,8 +1228,7 @@ fn run_pipeline(
     }
 
     // Initialize registry client for model resolution
-    let client = RegistryClient::from_env()
-        .context("Failed to initialize registry client")?;
+    let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
 
     // Build stage descriptors from config, resolving bundle paths
     let mut stages: Vec<StageDescriptor> = Vec::new();
@@ -1265,12 +1290,20 @@ fn run_pipeline(
                             }
                             Err(e) => {
                                 pb.abandon_with_message(format!("{} ✗", model_id));
-                                return Err(anyhow::anyhow!("Failed to download model '{}': {}", model_id, e));
+                                return Err(anyhow::anyhow!(
+                                    "Failed to download model '{}': {}",
+                                    model_id,
+                                    e
+                                ));
                             }
                         }
                     }
                     Err(e) => {
-                        return Err(anyhow::anyhow!("Failed to resolve model '{}': {}", model_id, e));
+                        return Err(anyhow::anyhow!(
+                            "Failed to resolve model '{}': {}",
+                            model_id,
+                            e
+                        ));
                     }
                 }
             } else {
@@ -1281,7 +1314,11 @@ fn run_pipeline(
                         desc.bundle_path = Some(cache_path.to_string_lossy().to_string());
                     }
                     Err(e) => {
-                        return Err(anyhow::anyhow!("Failed to resolve model '{}': {}", model_id, e));
+                        return Err(anyhow::anyhow!(
+                            "Failed to resolve model '{}': {}",
+                            model_id,
+                            e
+                        ));
                     }
                 }
             }
@@ -1355,8 +1392,10 @@ fn run_pipeline(
         println!();
 
         // Simulate routing decisions without executing
-        let mut routing_engine = xybrid_core::orchestrator::routing_engine::DefaultRoutingEngine::new();
-        let policy_engine = xybrid_core::orchestrator::policy_engine::DefaultPolicyEngine::with_default_policy();
+        let mut routing_engine =
+            xybrid_core::orchestrator::routing_engine::DefaultRoutingEngine::new();
+        let policy_engine =
+            xybrid_core::orchestrator::policy_engine::DefaultPolicyEngine::with_default_policy();
 
         let mut current_input = input.clone();
 
@@ -1474,9 +1513,13 @@ fn run_pipeline(
 
                 // Export trace if requested
                 if let Some(export_path) = trace_export {
-                    let json = tracing_viz::GLOBAL_COLLECTOR.lock().unwrap().to_chrome_trace_json();
-                    fs::write(export_path, json)
-                        .with_context(|| format!("Failed to export trace to {}", export_path.display()))?;
+                    let json = tracing_viz::GLOBAL_COLLECTOR
+                        .lock()
+                        .unwrap()
+                        .to_chrome_trace_json();
+                    fs::write(export_path, json).with_context(|| {
+                        format!("Failed to export trace to {}", export_path.display())
+                    })?;
                     println!("💾 Trace exported to: {}", export_path.display());
                 }
             }
@@ -1536,13 +1579,14 @@ fn run_bundle(
     println!();
 
     // Create temp directory for extraction
-    let temp_dir = tempfile::tempdir()
-        .context("Failed to create temp directory for bundle extraction")?;
+    let temp_dir =
+        tempfile::tempdir().context("Failed to create temp directory for bundle extraction")?;
     let extract_dir = temp_dir.path();
 
     // Extract bundle contents
     println!("📦 Extracting bundle to temp directory...");
-    bundle.extract_to(extract_dir)
+    bundle
+        .extract_to(extract_dir)
         .context("Failed to extract bundle")?;
 
     // Try to load model_metadata.json
@@ -1553,10 +1597,10 @@ fn run_bundle(
         ));
     }
 
-    let metadata_content = fs::read_to_string(&metadata_path)
-        .context("Failed to read model_metadata.json")?;
-    let metadata: ModelMetadata = serde_json::from_str(&metadata_content)
-        .context("Failed to parse model_metadata.json")?;
+    let metadata_content =
+        fs::read_to_string(&metadata_path).context("Failed to read model_metadata.json")?;
+    let metadata: ModelMetadata =
+        serde_json::from_str(&metadata_content).context("Failed to parse model_metadata.json")?;
 
     println!("📋 Model Metadata:");
     println!("   ID: {}", metadata.model_id);
@@ -1575,11 +1619,14 @@ fn run_bundle(
         target: Some("local".to_string()),
         latency_ms: None,
         error: None,
-        data: Some(serde_json::json!({
-            "model_id": metadata.model_id,
-            "version": metadata.version,
-            "bundle_path": bundle_path.display().to_string()
-        }).to_string()),
+        data: Some(
+            serde_json::json!({
+                "model_id": metadata.model_id,
+                "version": metadata.version,
+                "bundle_path": bundle_path.display().to_string()
+            })
+            .to_string(),
+        ),
         timestamp_ms: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -1616,9 +1663,9 @@ fn run_bundle(
     println!("⚙️  Running inference...");
     println!("{}", "=".repeat(60));
 
-    let base_path = extract_dir.to_str().ok_or_else(|| {
-        anyhow::anyhow!("Invalid extraction path")
-    })?;
+    let base_path = extract_dir
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid extraction path"))?;
 
     let mut executor = TemplateExecutor::with_base_path(base_path);
 
@@ -1633,7 +1680,8 @@ fn run_bundle(
     };
 
     let start_time = std::time::Instant::now();
-    let output = executor.execute(&metadata, &input)
+    let output = executor
+        .execute(&metadata, &input)
         .map_err(|e| anyhow::anyhow!("Inference failed: {:?}", e))?;
     let elapsed = start_time.elapsed();
 
@@ -1678,11 +1726,14 @@ fn run_bundle(
         target: Some("local".to_string()),
         latency_ms: Some(elapsed.as_millis() as u32),
         error: None,
-        data: Some(serde_json::json!({
-            "model_id": metadata.model_id,
-            "version": metadata.version,
-            "output_type": output.kind_str()
-        }).to_string()),
+        data: Some(
+            serde_json::json!({
+                "model_id": metadata.model_id,
+                "version": metadata.version,
+                "output_type": output.kind_str()
+            })
+            .to_string(),
+        ),
         timestamp_ms: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -1700,7 +1751,10 @@ fn run_bundle(
 
         // Export trace if requested
         if let Some(export_path) = trace_export {
-            let json = tracing_viz::GLOBAL_COLLECTOR.lock().unwrap().to_chrome_trace_json();
+            let json = tracing_viz::GLOBAL_COLLECTOR
+                .lock()
+                .unwrap()
+                .to_chrome_trace_json();
             fs::write(export_path, json)
                 .with_context(|| format!("Failed to export trace to {}", export_path.display()))?;
             println!("💾 Trace exported to: {}", export_path.display());
@@ -1716,8 +1770,7 @@ fn run_bundle(
 
 /// Handle `xybrid models` subcommands
 fn handle_models_command(command: ModelsCommand) -> Result<()> {
-    let client = RegistryClient::from_env()
-        .context("Failed to initialize registry client")?;
+    let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
 
     match command {
         ModelsCommand::List => {
@@ -1725,7 +1778,8 @@ fn handle_models_command(command: ModelsCommand) -> Result<()> {
             println!("{}", "=".repeat(60));
             println!();
 
-            let models = client.list_models()
+            let models = client
+                .list_models()
                 .context("Failed to list models from registry")?;
 
             if models.is_empty() {
@@ -1747,7 +1801,8 @@ fn handle_models_command(command: ModelsCommand) -> Result<()> {
                 for model in task_models {
                     let params_str = format_params(model.parameters);
                     println!("  {} {}", "•".bright_cyan(), model.id.cyan().bold());
-                    println!("    {} {} | {} params",
+                    println!(
+                        "    {} {} | {} params",
                         model.family.bright_black(),
                         "|".bright_black(),
                         params_str.bright_black()
@@ -1770,16 +1825,18 @@ fn handle_models_command(command: ModelsCommand) -> Result<()> {
             println!("{}", "=".repeat(60));
             println!();
 
-            let models = client.list_models()
+            let models = client
+                .list_models()
                 .context("Failed to list models from registry")?;
 
             let query_lower = query.to_lowercase();
-            let matches: Vec<_> = models.iter()
+            let matches: Vec<_> = models
+                .iter()
                 .filter(|m| {
-                    m.id.to_lowercase().contains(&query_lower) ||
-                    m.family.to_lowercase().contains(&query_lower) ||
-                    m.task.to_lowercase().contains(&query_lower) ||
-                    m.description.to_lowercase().contains(&query_lower)
+                    m.id.to_lowercase().contains(&query_lower)
+                        || m.family.to_lowercase().contains(&query_lower)
+                        || m.task.to_lowercase().contains(&query_lower)
+                        || m.description.to_lowercase().contains(&query_lower)
                 })
                 .collect();
 
@@ -1791,7 +1848,8 @@ fn handle_models_command(command: ModelsCommand) -> Result<()> {
             for model in matches.iter() {
                 let params_str = format_params(model.parameters);
                 println!("  {} {}", "•".bright_cyan(), model.id.cyan().bold());
-                println!("    {} | {} | {} params",
+                println!(
+                    "    {} | {} | {} params",
                     model.task.bright_magenta(),
                     model.family.bright_black(),
                     params_str.bright_black()
@@ -1810,7 +1868,8 @@ fn handle_models_command(command: ModelsCommand) -> Result<()> {
             println!("{}", "=".repeat(60));
             println!();
 
-            let model = client.get_model(&model_id)
+            let model = client
+                .get_model(&model_id)
                 .context(format!("Failed to get model '{}'", model_id))?;
 
             println!("  ID:          {}", model.id.cyan().bold());
@@ -1829,13 +1888,15 @@ fn handle_models_command(command: ModelsCommand) -> Result<()> {
                 println!("  {} Variants:", "📦".bright_cyan());
                 for (name, info) in &model.variants {
                     let size_str = format_size(info.size_bytes);
-                    println!("    {} {} ({}, {})",
+                    println!(
+                        "    {} {} ({}, {})",
                         "•".bright_cyan(),
                         name.bright_green(),
                         info.platform,
                         size_str.bright_black()
                     );
-                    println!("      Format: {} | Quantization: {}",
+                    println!(
+                        "      Format: {} | Quantization: {}",
                         info.format.bright_blue(),
                         info.quantization.bright_yellow()
                     );
@@ -1861,23 +1922,28 @@ fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Result<()> {
     println!("{}", "=".repeat(60));
     println!();
 
-    let client = RegistryClient::from_env()
-        .context("Failed to initialize registry client")?;
+    let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
 
     // First resolve to show what we're downloading
-    let resolved = client.resolve(model_id, platform)
+    let resolved = client
+        .resolve(model_id, platform)
         .context(format!("Failed to resolve model '{}'", model_id))?;
 
     println!("📦 Resolved variant:");
     println!("   Repository: {}", resolved.hf_repo);
     println!("   File: {}", resolved.file);
-    println!("   Size: {}", format_size(resolved.size_bytes).bright_cyan());
+    println!(
+        "   Size: {}",
+        format_size(resolved.size_bytes).bright_cyan()
+    );
     println!("   Format: {} ({})", resolved.format, resolved.quantization);
     println!();
 
     // Check if already cached
-    if client.is_cached(model_id, platform)
-        .context("Failed to check cache status")? {
+    if client
+        .is_cached(model_id, platform)
+        .context("Failed to check cache status")?
+    {
         println!("✅ Model is already cached and verified");
         let cache_path = client.get_cache_path(&resolved);
         println!("   Location: {}", cache_path.display());
@@ -1896,10 +1962,12 @@ fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Result<()> {
     );
     pb.set_message(model_id.to_string());
 
-    let bundle_path = client.fetch(model_id, platform, |progress| {
-        let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-        pb.set_position(bytes_done);
-    }).context(format!("Failed to fetch model '{}'", model_id))?;
+    let bundle_path = client
+        .fetch(model_id, platform, |progress| {
+            let bytes_done = (progress * resolved.size_bytes as f32) as u64;
+            pb.set_position(bytes_done);
+        })
+        .context(format!("Failed to fetch model '{}'", model_id))?;
 
     pb.finish_with_message(format!("✅ Downloaded {}", model_id));
     println!();
@@ -1913,8 +1981,7 @@ fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Result<()> {
 
 /// Handle `xybrid cache` subcommands
 fn handle_cache_command(command: CacheCommand) -> Result<()> {
-    let mut client = RegistryClient::from_env()
-        .context("Failed to initialize registry client")?;
+    let mut client = RegistryClient::from_env().context("Failed to initialize registry client")?;
 
     match command {
         CacheCommand::List => {
@@ -1922,8 +1989,7 @@ fn handle_cache_command(command: CacheCommand) -> Result<()> {
             println!("{}", "=".repeat(60));
             println!();
 
-            let stats = client.cache_stats()
-                .context("Failed to get cache stats")?;
+            let stats = client.cache_stats().context("Failed to get cache stats")?;
 
             println!("📂 Cache directory: {}", stats.cache_path.display());
             println!();
@@ -1946,7 +2012,8 @@ fn handle_cache_command(command: CacheCommand) -> Result<()> {
                         let model_size = dir_size_bytes(&entry.path()).unwrap_or(0);
                         let size_str = format_size(model_size);
 
-                        println!("  {} {} ({})",
+                        println!(
+                            "  {} {} ({})",
                             "•".bright_cyan(),
                             model_name.cyan().bold(),
                             size_str.bright_black()
@@ -1957,7 +2024,11 @@ fn handle_cache_command(command: CacheCommand) -> Result<()> {
 
             println!();
             println!("{}", "=".repeat(60));
-            println!("Total: {} models, {}", stats.model_count, stats.total_size_human());
+            println!(
+                "Total: {} models, {}",
+                stats.model_count,
+                stats.total_size_human()
+            );
 
             Ok(())
         }
@@ -1966,12 +2037,14 @@ fn handle_cache_command(command: CacheCommand) -> Result<()> {
             println!("{}", "=".repeat(60));
             println!();
 
-            let stats = client.cache_stats()
-                .context("Failed to get cache stats")?;
+            let stats = client.cache_stats().context("Failed to get cache stats")?;
 
             println!("  Cache Directory: {}", stats.cache_path.display());
             println!("  Cached Models:   {}", stats.model_count);
-            println!("  Total Size:      {}", stats.total_size_human().bright_cyan());
+            println!(
+                "  Total Size:      {}",
+                stats.total_size_human().bright_cyan()
+            );
 
             // Check if directory exists
             if !stats.cache_path.exists() {
@@ -1991,7 +2064,8 @@ fn handle_cache_command(command: CacheCommand) -> Result<()> {
                 println!("{}", "=".repeat(60));
                 println!();
 
-                client.clear_cache(&id)
+                client
+                    .clear_cache(&id)
                     .context(format!("Failed to clear cache for '{}'", id))?;
 
                 println!("✅ Cache cleared for model '{}'", id);
@@ -2007,8 +2081,7 @@ fn handle_cache_command(command: CacheCommand) -> Result<()> {
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input).ok();
 
-                client.clear_all_cache()
-                    .context("Failed to clear cache")?;
+                client.clear_all_cache().context("Failed to clear cache")?;
 
                 println!("✅ All cached models cleared");
             }
@@ -2089,9 +2162,18 @@ fn handle_prepare_command(config_path: &Path) -> Result<()> {
     println!("✅ Pipeline is ready for execution");
     println!();
     println!("Next steps:");
-    println!("  xybrid plan {}   # Show execution plan with model status", config_path.display());
-    println!("  xybrid fetch {}  # Pre-download all models", config_path.display());
-    println!("  xybrid run -c {} # Execute the pipeline", config_path.display());
+    println!(
+        "  xybrid plan {}   # Show execution plan with model status",
+        config_path.display()
+    );
+    println!(
+        "  xybrid fetch {}  # Pre-download all models",
+        config_path.display()
+    );
+    println!(
+        "  xybrid run -c {} # Execute the pipeline",
+        config_path.display()
+    );
 
     Ok(())
 }
@@ -2117,12 +2199,14 @@ fn handle_plan_command(config_path: &Path) -> Result<()> {
         .with_context(|| format!("Failed to parse YAML config: {}", config_path.display()))?;
 
     // Initialize registry client
-    let client = RegistryClient::from_env()
-        .context("Failed to initialize registry client")?;
+    let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
 
     // Display header
     let pipeline_name = config.name.as_deref().unwrap_or(
-        config_path.file_stem().and_then(|s| s.to_str()).unwrap_or("pipeline")
+        config_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("pipeline"),
     );
     println!("Pipeline: {}", pipeline_name.cyan().bold());
     println!("{}", "━".repeat(60));
@@ -2157,7 +2241,8 @@ fn handle_plan_command(config_path: &Path) -> Result<()> {
             match client.resolve(&model_id, None) {
                 Ok(resolved) => {
                     let size_str = format_size(resolved.size_bytes);
-                    println!("  Variant:  {} ({}, {})",
+                    println!(
+                        "  Variant:  {} ({}, {})",
                         resolved.file,
                         size_str.bright_black(),
                         format!("{}/{}", resolved.format, resolved.quantization).bright_black()
@@ -2176,7 +2261,8 @@ fn handle_plan_command(config_path: &Path) -> Result<()> {
                             println!("  Status:   {} Cached", "✅".bright_green());
                         }
                         Ok(false) => {
-                            println!("  Status:   {} Not cached ({} to download)",
+                            println!(
+                                "  Status:   {} Not cached ({} to download)",
                                 "⬇️".bright_yellow(),
                                 size_str.bright_cyan()
                             );
@@ -2184,7 +2270,11 @@ fn handle_plan_command(config_path: &Path) -> Result<()> {
                             all_cached = false;
                         }
                         Err(e) => {
-                            println!("  Status:   {} Cache check failed: {}", "❌".bright_red(), e);
+                            println!(
+                                "  Status:   {} Cache check failed: {}",
+                                "❌".bright_red(),
+                                e
+                            );
                             all_cached = false;
                         }
                     }
@@ -2203,24 +2293,39 @@ fn handle_plan_command(config_path: &Path) -> Result<()> {
     println!("{}", "━".repeat(60));
 
     if total_download_bytes > 0 {
-        println!("Total download: {}", format_size(total_download_bytes).bright_cyan());
+        println!(
+            "Total download: {}",
+            format_size(total_download_bytes).bright_cyan()
+        );
     } else if all_cached {
-        println!("Total download: {} (all models cached)", "0 bytes".bright_green());
+        println!(
+            "Total download: {} (all models cached)",
+            "0 bytes".bright_green()
+        );
     }
 
     let offline_capable = !requires_network && all_cached;
     if offline_capable {
         println!("Offline capable: {}", "Yes".bright_green());
     } else if requires_network {
-        println!("Offline capable: {} (cloud stages require network)", "No".bright_yellow());
+        println!(
+            "Offline capable: {} (cloud stages require network)",
+            "No".bright_yellow()
+        );
     } else {
-        println!("Offline capable: {} (models need downloading)", "No".bright_yellow());
+        println!(
+            "Offline capable: {} (models need downloading)",
+            "No".bright_yellow()
+        );
     }
 
     println!();
 
     if total_download_bytes > 0 {
-        println!("Run `xybrid fetch {}` to pre-download models.", config_path.display());
+        println!(
+            "Run `xybrid fetch {}` to pre-download models.",
+            config_path.display()
+        );
     }
 
     Ok(())
@@ -2247,19 +2352,23 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
         .with_context(|| format!("Failed to parse YAML config: {}", config_path.display()))?;
 
     // Initialize registry client
-    let client = RegistryClient::from_env()
-        .context("Failed to initialize registry client")?;
+    let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
 
     // Display header
     let pipeline_name = config.name.as_deref().unwrap_or(
-        config_path.file_stem().and_then(|s| s.to_str()).unwrap_or("pipeline")
+        config_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("pipeline"),
     );
     println!("Fetching models for: {}", pipeline_name.cyan().bold());
     println!("{}", "━".repeat(60));
     println!();
 
     // Collect models to fetch (skip cloud/integration stages)
-    let models_to_fetch: Vec<String> = config.stages.iter()
+    let models_to_fetch: Vec<String> = config
+        .stages
+        .iter()
         .filter(|stage| !stage.is_cloud_stage())
         .map(|stage| stage.model_id())
         .collect();
@@ -2285,7 +2394,12 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
                 // Need to download
             }
             Err(e) => {
-                println!("{} {} (cache check failed: {})", "❌".bright_red(), model_id, e);
+                println!(
+                    "{} {} (cache check failed: {})",
+                    "❌".bright_red(),
+                    model_id,
+                    e
+                );
                 error_count += 1;
                 continue;
             }
@@ -2320,7 +2434,12 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
                 }
             }
             Err(e) => {
-                println!("{} {} (resolution failed: {})", "❌".bright_red(), model_id, e);
+                println!(
+                    "{} {} (resolution failed: {})",
+                    "❌".bright_red(),
+                    model_id,
+                    e
+                );
                 error_count += 1;
             }
         }
@@ -2330,10 +2449,15 @@ fn handle_fetch_pipeline_command(config_path: &Path, platform: Option<&str>) -> 
     println!("{}", "━".repeat(60));
 
     if error_count == 0 {
-        println!("✅ All models ready ({} downloaded, {} cached)", success_count, skip_count);
+        println!(
+            "✅ All models ready ({} downloaded, {} cached)",
+            success_count, skip_count
+        );
     } else {
-        println!("⚠️  Completed with errors: {} downloaded, {} cached, {} failed",
-            success_count, skip_count, error_count);
+        println!(
+            "⚠️  Completed with errors: {} downloaded, {} cached, {} failed",
+            success_count, skip_count, error_count
+        );
     }
 
     Ok(())

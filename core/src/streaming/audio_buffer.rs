@@ -165,9 +165,12 @@ impl AudioBuffer {
 
     /// Get the number of unprocessed samples available.
     pub fn available_samples(&self) -> usize {
-        let processed_in_buffer =
-            self.samples_processed.saturating_sub(self.total_samples_received - self.samples.len() as u64);
-        self.samples.len().saturating_sub(processed_in_buffer as usize)
+        let processed_in_buffer = self
+            .samples_processed
+            .saturating_sub(self.total_samples_received - self.samples.len() as u64);
+        self.samples
+            .len()
+            .saturating_sub(processed_in_buffer as usize)
     }
 
     /// Check if a full chunk is ready for processing.
@@ -208,7 +211,8 @@ impl AudioBuffer {
         let sample_rate = self.config.sample_rate as f64;
         let start_sample = self.samples_processed;
         let start_time = Duration::from_secs_f64(start_sample as f64 / sample_rate);
-        let end_time = Duration::from_secs_f64((start_sample + extract_size as u64) as f64 / sample_rate);
+        let end_time =
+            Duration::from_secs_f64((start_sample + extract_size as u64) as f64 / sample_rate);
 
         // Extract samples (keeping overlap)
         let overlap = self.config.overlap_samples();
@@ -275,8 +279,9 @@ impl AudioBuffer {
     /// Get current buffer offset for extraction.
     fn get_buffer_offset(&self) -> usize {
         // Calculate offset into buffer for unprocessed samples
-        let buffer_start_sample =
-            self.total_samples_received.saturating_sub(self.samples.len() as u64);
+        let buffer_start_sample = self
+            .total_samples_received
+            .saturating_sub(self.samples.len() as u64);
         self.samples_processed.saturating_sub(buffer_start_sample) as usize
     }
 

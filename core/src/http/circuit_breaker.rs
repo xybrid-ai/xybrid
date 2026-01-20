@@ -182,7 +182,8 @@ impl CircuitBreaker {
                         self.half_open_requests.store(0, Ordering::SeqCst);
                     }
                     // Allow this request as the first half-open test
-                    self.half_open_requests.fetch_add(1, Ordering::SeqCst) < self.config.half_open_max
+                    self.half_open_requests.fetch_add(1, Ordering::SeqCst)
+                        < self.config.half_open_max
                 } else {
                     false
                 }

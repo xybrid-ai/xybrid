@@ -52,8 +52,7 @@ pub fn audio_to_mel_spectrogram(
         ..Default::default()
     };
 
-    compute_mel_spectrogram(audio_samples, &config)
-        .map_err(|e| AdapterError::InvalidInput(e))
+    compute_mel_spectrogram(audio_samples, &config).map_err(|e| AdapterError::InvalidInput(e))
 }
 
 /// Convert PCM audio bytes to mel spectrogram.

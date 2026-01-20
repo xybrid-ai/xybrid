@@ -60,9 +60,9 @@ pub mod candle;
 pub mod llm;
 
 // Re-exports from runtime backends
+pub use onnx::ONNXSession;
 pub use onnx::OnnxBackend;
 pub use onnx::OnnxRuntimeAdapter;
-pub use onnx::ONNXSession;
 
 #[cfg(any(target_os = "android", test))]
 pub use onnx::ONNXMobileRuntimeAdapter;
@@ -74,7 +74,7 @@ pub use coreml::CoreMLRuntimeAdapter;
 pub use candle::{CandleBackend, CandleRuntimeAdapter};
 
 #[cfg(feature = "local-llm")]
-pub use llm::{LlmRuntimeAdapter, LlmBackend, MistralBackend, LlmConfig, GenerationConfig};
+pub use llm::{GenerationConfig, LlmBackend, LlmConfig, LlmRuntimeAdapter, MistralBackend};
 
 // Re-export inference backend types
 pub use inference_backend::{BackendError, BackendResult, InferenceBackend, RuntimeType};
