@@ -125,7 +125,11 @@ impl TelemetryConfig {
     }
 
     /// Set device metadata
-    pub fn with_device(mut self, device_id: impl Into<String>, platform: impl Into<String>) -> Self {
+    pub fn with_device(
+        mut self,
+        device_id: impl Into<String>,
+        platform: impl Into<String>,
+    ) -> Self {
         self.device_id = Some(device_id.into());
         self.platform = Some(platform.into());
         self
@@ -299,13 +303,7 @@ impl HttpTelemetryExporter {
 
                 // First, try to send any failed events from the queue
                 if config.enable_retry_queue {
-                    retry_failed_events(
-                        &failed_queue,
-                        &config,
-                        &agent,
-                        &circuit,
-                        &retry_policy,
-                    );
+                    retry_failed_events(&failed_queue, &config, &agent, &circuit, &retry_policy);
                 }
 
                 // Then flush the current buffer
@@ -520,7 +518,10 @@ fn send_batch_inner(
         events: events.to_vec(),
     };
 
-    let url = format!("{}/v1/telemetry/batch", config.endpoint.trim_end_matches('/'));
+    let url = format!(
+        "{}/v1/telemetry/batch",
+        config.endpoint.trim_end_matches('/')
+    );
 
     for attempt in 0..retry_policy.max_attempts {
         // Calculate delay for this attempt
@@ -1159,7 +1160,10 @@ mod tests {
 
         assert_eq!(telemetry.event_type, "PolicyEvaluated");
         assert_eq!(telemetry.stage_name, Some("llm".to_string()));
-        assert_eq!(telemetry.error, Some("Privacy policy violation".to_string()));
+        assert_eq!(
+            telemetry.error,
+            Some("Privacy policy violation".to_string())
+        );
     }
 
     #[test]
@@ -1252,20 +1256,18 @@ mod tests {
         let queue = Arc::new(Mutex::new(VecDeque::new()));
         let dropped = Arc::new(AtomicU32::new(0));
 
-        let events = vec![
-            PlatformEvent {
-                session_id: Uuid::new_v4(),
-                event_type: "Test".to_string(),
-                payload: serde_json::json!({}),
-                device_id: None,
-                platform: None,
-                app_version: None,
-                timestamp: None,
-                pipeline_id: None,
-                trace_id: None,
-                stages: None,
-            },
-        ];
+        let events = vec![PlatformEvent {
+            session_id: Uuid::new_v4(),
+            event_type: "Test".to_string(),
+            payload: serde_json::json!({}),
+            device_id: None,
+            platform: None,
+            app_version: None,
+            timestamp: None,
+            pipeline_id: None,
+            trace_id: None,
+            stages: None,
+        }];
 
         queue_failed_events(events, &queue, &dropped);
         assert_eq!(queue.lock().unwrap().len(), 1);

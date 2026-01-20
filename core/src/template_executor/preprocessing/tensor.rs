@@ -4,9 +4,9 @@
 //! - `normalize_step`: Normalize tensor values using mean and standard deviation
 //! - `reshape_step`: Reshape tensor to target dimensions
 
+use super::super::types::{ExecutorResult, PreprocessedData};
 use crate::runtime_adapter::AdapterError;
 use ndarray::IxDyn;
-use super::super::types::{ExecutorResult, PreprocessedData};
 
 /// Normalize tensor values using mean and standard deviation.
 ///

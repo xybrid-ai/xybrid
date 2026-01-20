@@ -10,7 +10,9 @@ use std::path::PathBuf;
 
 /// Get the path to the KittenTTS test model directory
 fn get_kitten_tts_dir() -> Option<PathBuf> {
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent()?.to_path_buf();
+    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .to_path_buf();
     let model_dir = project_root.join("test_models/kitten-tts/kitten-nano-en-v0_1-fp16");
     if model_dir.exists() {
         Some(model_dir)
@@ -38,14 +40,16 @@ fn test_load_tokens_file() {
     };
 
     let tokens_path = model_dir.join("tokens.txt");
-    let tokens_content = std::fs::read_to_string(&tokens_path)
-        .expect("Failed to read tokens.txt");
+    let tokens_content = std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
 
     let tokens_map = xybrid_core::phonemizer::load_tokens_map(&tokens_content);
 
     // Verify some expected mappings
     assert!(tokens_map.contains_key(&'$'), "Should have padding token $");
-    assert!(tokens_map.contains_key(&'a'), "Should have lowercase letters");
+    assert!(
+        tokens_map.contains_key(&'a'),
+        "Should have lowercase letters"
+    );
     assert!(tokens_map.contains_key(&'ɑ'), "Should have IPA symbols");
     assert!(tokens_map.contains_key(&'ˈ'), "Should have stress markers");
 
@@ -67,21 +71,25 @@ fn test_phonemize_text() {
         return;
     };
 
-    let phonemizer = xybrid_core::phonemizer::Phonemizer::new(&dict_path)
-        .expect("Failed to create phonemizer");
+    let phonemizer =
+        xybrid_core::phonemizer::Phonemizer::new(&dict_path).expect("Failed to create phonemizer");
 
     // Test some common words
     let test_cases = [
-        ("hello", "hʌˈloʊ"),     // Should be close to /həˈloʊ/
-        ("world", "wˈɝld"),       // Should be close to /wɜːrld/
-        ("the", "ðə"),            // Should be /ðə/
+        ("hello", "hʌˈloʊ"),       // Should be close to /həˈloʊ/
+        ("world", "wˈɝld"),        // Should be close to /wɜːrld/
+        ("the", "ðə"),             // Should be /ðə/
         ("computer", "kʌmpjˈutɝ"), // /kəmˈpjuːtər/
     ];
 
     for (word, _expected_pattern) in test_cases {
         let phonemes = phonemizer.phonemize(word);
         println!("{} -> {}", word, phonemes);
-        assert!(!phonemes.is_empty(), "Phonemes should not be empty for '{}'", word);
+        assert!(
+            !phonemes.is_empty(),
+            "Phonemes should not be empty for '{}'",
+            word
+        );
     }
 
     // Test a full sentence
@@ -106,13 +114,12 @@ fn test_phonemes_to_token_ids() {
 
     // Load tokens map
     let tokens_path = model_dir.join("tokens.txt");
-    let tokens_content = std::fs::read_to_string(&tokens_path)
-        .expect("Failed to read tokens.txt");
+    let tokens_content = std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
     let tokens_map = xybrid_core::phonemizer::load_tokens_map(&tokens_content);
 
     // Create phonemizer
-    let phonemizer = xybrid_core::phonemizer::Phonemizer::new(&dict_path)
-        .expect("Failed to create phonemizer");
+    let phonemizer =
+        xybrid_core::phonemizer::Phonemizer::new(&dict_path).expect("Failed to create phonemizer");
 
     // Convert text to token IDs
     let text = "Hello world";
@@ -123,15 +130,25 @@ fn test_phonemes_to_token_ids() {
     println!("Token count: {}", token_ids.len());
 
     // Should have at least: padding + some tokens + padding
-    assert!(token_ids.len() >= 3, "Should have at least 3 tokens (with padding)");
+    assert!(
+        token_ids.len() >= 3,
+        "Should have at least 3 tokens (with padding)"
+    );
 
     // First and last should be padding (0)
     assert_eq!(token_ids[0], 0, "First token should be padding (0)");
-    assert_eq!(*token_ids.last().unwrap(), 0, "Last token should be padding (0)");
+    assert_eq!(
+        *token_ids.last().unwrap(),
+        0,
+        "Last token should be padding (0)"
+    );
 
     // Test without padding
     let token_ids_no_pad = phonemizer.text_to_token_ids(text, &tokens_map, false);
-    assert!(token_ids_no_pad.len() < token_ids.len(), "Without padding should be shorter");
+    assert!(
+        token_ids_no_pad.len() < token_ids.len(),
+        "Without padding should be shorter"
+    );
 }
 
 #[test]
@@ -142,12 +159,15 @@ fn test_load_voice_embeddings() {
     };
 
     let voices_path = model_dir.join("voices.bin");
-    let voices_data = std::fs::read(&voices_path)
-        .expect("Failed to read voices.bin");
+    let voices_data = std::fs::read(&voices_path).expect("Failed to read voices.bin");
 
     // voices.bin contains 8 voices, each with 256 float32 values
     // Total size: 8 * 256 * 4 bytes = 8192 bytes
-    assert_eq!(voices_data.len(), 8192, "voices.bin should be 8192 bytes (8 voices × 256 dims × 4 bytes)");
+    assert_eq!(
+        voices_data.len(),
+        8192,
+        "voices.bin should be 8192 bytes (8 voices × 256 dims × 4 bytes)"
+    );
 
     // Parse voice embeddings
     let num_voices = 8;
@@ -167,16 +187,22 @@ fn test_load_voice_embeddings() {
     println!("Loaded {} voice embeddings", voices.len());
     for (i, voice) in voices.iter().enumerate() {
         let voice_names = [
-            "expr-voice-2-m", "expr-voice-2-f",
-            "expr-voice-3-m", "expr-voice-3-f",
-            "expr-voice-4-m", "expr-voice-4-f",
-            "expr-voice-5-m", "expr-voice-5-f",
+            "expr-voice-2-m",
+            "expr-voice-2-f",
+            "expr-voice-3-m",
+            "expr-voice-3-f",
+            "expr-voice-4-m",
+            "expr-voice-4-f",
+            "expr-voice-5-m",
+            "expr-voice-5-f",
         ];
         let mean: f32 = voice.iter().sum::<f32>() / voice.len() as f32;
         let max = voice.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let min = voice.iter().cloned().fold(f32::INFINITY, f32::min);
-        println!("  Voice {} ({}): mean={:.4}, min={:.4}, max={:.4}",
-            i, voice_names[i], mean, min, max);
+        println!(
+            "  Voice {} ({}): mean={:.4}, min={:.4}, max={:.4}",
+            i, voice_names[i], mean, min, max
+        );
     }
 
     // Verify embeddings look reasonable (not all zeros, reasonable range)
@@ -198,11 +224,11 @@ fn test_model_metadata_loading() {
     };
 
     let metadata_path = model_dir.join("model_metadata.json");
-    let metadata_content = std::fs::read_to_string(&metadata_path)
-        .expect("Failed to read model_metadata.json");
+    let metadata_content =
+        std::fs::read_to_string(&metadata_path).expect("Failed to read model_metadata.json");
 
-    let metadata: serde_json::Value = serde_json::from_str(&metadata_content)
-        .expect("Failed to parse model_metadata.json");
+    let metadata: serde_json::Value =
+        serde_json::from_str(&metadata_content).expect("Failed to parse model_metadata.json");
 
     // Verify metadata structure
     assert_eq!(metadata["model_id"], "kitten-tts-nano");

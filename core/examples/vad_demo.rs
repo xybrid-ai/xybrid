@@ -106,7 +106,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Print periodic updates
         if i % 10 == 0 || result.is_speech {
             let time_ms = i as f32 * frame_ms;
-            let speech_indicator = if result.is_speech { "🗣️ SPEECH" } else { "   silence" };
+            let speech_indicator = if result.is_speech {
+                "🗣️ SPEECH"
+            } else {
+                "   silence"
+            };
             println!(
                 "[{:6.0}ms] prob: {:.3} | {}",
                 time_ms, result.probability, speech_indicator
@@ -133,7 +137,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Results ===");
     println!("Processing time: {:.2}ms", elapsed.as_secs_f64() * 1000.0);
     println!("Frames processed: {}", num_frames);
-    println!("Speech frames: {} ({:.1}%)", speech_frames, speech_frames as f32 / num_frames as f32 * 100.0);
+    println!(
+        "Speech frames: {} ({:.1}%)",
+        speech_frames,
+        speech_frames as f32 / num_frames as f32 * 100.0
+    );
     println!("Average probability: {:.3}", total_prob / num_frames as f32);
     println!(
         "Real-time factor: {:.1}x",
@@ -237,7 +245,8 @@ fn decode_wav(bytes: &[u8]) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
             let s = i16::from_le_bytes([bytes[pos], bytes[pos + 1]]);
             s as f32 / 32768.0
         } else if bits_per_sample == 32 {
-            let s = i32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]);
+            let s =
+                i32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]);
             s as f32 / 2147483648.0
         } else {
             return Err(format!("Unsupported bit depth: {}", bits_per_sample).into());

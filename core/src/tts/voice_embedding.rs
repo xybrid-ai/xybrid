@@ -294,7 +294,8 @@ impl VoiceEmbeddingLoader {
                 use std::fs::File;
 
                 let file = File::open(path.as_ref())?;
-                let mut npz = NpzReader::new(file).map_err(|e| VoiceError::NpzError(e.to_string()))?;
+                let mut npz =
+                    NpzReader::new(file).map_err(|e| VoiceError::NpzError(e.to_string()))?;
                 let names = npz
                     .names()
                     .map_err(|e| VoiceError::NpzError(e.to_string()))?;
@@ -310,7 +311,10 @@ impl VoiceEmbeddingLoader {
     /// List voice names from an NPZ file.
     ///
     /// Returns `None` for raw binary files (voices are unnamed).
-    pub fn list_voice_names(&self, path: impl AsRef<Path>) -> Result<Option<Vec<String>>, VoiceError> {
+    pub fn list_voice_names(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<Option<Vec<String>>, VoiceError> {
         let bytes = std::fs::read(path.as_ref())?;
 
         match Self::detect_format(&bytes) {
@@ -319,7 +323,8 @@ impl VoiceEmbeddingLoader {
                 use std::fs::File;
 
                 let file = File::open(path.as_ref())?;
-                let mut npz = NpzReader::new(file).map_err(|e| VoiceError::NpzError(e.to_string()))?;
+                let mut npz =
+                    NpzReader::new(file).map_err(|e| VoiceError::NpzError(e.to_string()))?;
                 let names = npz
                     .names()
                     .map_err(|e| VoiceError::NpzError(e.to_string()))?;
@@ -337,13 +342,19 @@ mod tests {
     #[test]
     fn test_detect_format_raw() {
         let bytes = vec![0x00, 0x00, 0x80, 0x3f]; // f32 1.0 in little endian
-        assert_eq!(VoiceEmbeddingLoader::detect_format(&bytes), VoiceFormat::Raw);
+        assert_eq!(
+            VoiceEmbeddingLoader::detect_format(&bytes),
+            VoiceFormat::Raw
+        );
     }
 
     #[test]
     fn test_detect_format_npz() {
         let bytes = vec![b'P', b'K', 0x03, 0x04]; // ZIP magic bytes
-        assert_eq!(VoiceEmbeddingLoader::detect_format(&bytes), VoiceFormat::Npz);
+        assert_eq!(
+            VoiceEmbeddingLoader::detect_format(&bytes),
+            VoiceFormat::Npz
+        );
     }
 
     #[test]

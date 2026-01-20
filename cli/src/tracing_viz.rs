@@ -143,7 +143,10 @@ impl SpanCollector {
             "═══════════════════════════════════════════════════════════════════════════════"
                 .bright_cyan()
         ));
-        output.push_str(&format!("{}\n", "                         PIPELINE EXECUTION TRACE".bold()));
+        output.push_str(&format!(
+            "{}\n",
+            "                         PIPELINE EXECUTION TRACE".bold()
+        ));
         output.push_str(&format!(
             "{}\n\n",
             "═══════════════════════════════════════════════════════════════════════════════"

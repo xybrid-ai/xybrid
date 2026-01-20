@@ -407,12 +407,8 @@ pub fn prepare_audio_samples(
     if source_rate == target_rate {
         samples
     } else {
-        resample_audio(
-            &samples,
-            source_rate,
-            target_rate,
-            ResampleMethod::Linear,
-        ).unwrap_or(samples) // Fallback to original if resampling fails (shouldn't happen)
+        resample_audio(&samples, source_rate, target_rate, ResampleMethod::Linear)
+            .unwrap_or(samples) // Fallback to original if resampling fails (shouldn't happen)
     }
 }
 
@@ -433,10 +429,9 @@ pub fn decode_wav_audio(
 
             // Read samples as f32
             let samples: Vec<f32> = match spec.sample_format {
-                hound::SampleFormat::Float => reader
-                    .samples::<f32>()
-                    .filter_map(|s| s.ok())
-                    .collect(),
+                hound::SampleFormat::Float => {
+                    reader.samples::<f32>().filter_map(|s| s.ok()).collect()
+                }
                 hound::SampleFormat::Int => {
                     let bits = spec.bits_per_sample;
                     let max_value = match (1i32).checked_shl((bits - 1) as u32) {

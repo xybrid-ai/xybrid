@@ -59,7 +59,11 @@ impl ResolutionContext {
     }
 
     /// Set integration provider availability.
-    pub fn with_integration_available(mut self, provider: IntegrationProvider, available: bool) -> Self {
+    pub fn with_integration_available(
+        mut self,
+        provider: IntegrationProvider,
+        available: bool,
+    ) -> Self {
         self.integration_available.insert(provider, available);
         self
     }
@@ -113,11 +117,7 @@ impl ResolvedTarget {
     }
 
     /// Create a resolved target for integration execution.
-    pub fn integration(
-        provider: IntegrationProvider,
-        model: &str,
-        reason: &str,
-    ) -> Self {
+    pub fn integration(provider: IntegrationProvider, model: &str, reason: &str) -> Self {
         Self {
             target: RouteTarget::Cloud,
             reason: format!("integration/{}: {}", provider, reason),
@@ -196,9 +196,8 @@ impl TargetResolver {
             ExecutionTarget::Device => Self::resolve_device(model, version, context),
             ExecutionTarget::Server => Self::resolve_server(model, version, context),
             ExecutionTarget::Cloud => {
-                let provider = provider.ok_or_else(|| {
-                    ResolutionError::MissingProvider(model.to_string())
-                })?;
+                let provider =
+                    provider.ok_or_else(|| ResolutionError::MissingProvider(model.to_string()))?;
                 Self::resolve_integration(provider, model, context)
             }
             ExecutionTarget::Auto => Self::resolve_auto(model, version, provider, prefer, context),
@@ -410,11 +409,7 @@ impl std::fmt::Display for ResolutionError {
                 )
             }
             ResolutionError::MissingProvider(model) => {
-                write!(
-                    f,
-                    "integration target for '{}' requires a provider",
-                    model
-                )
+                write!(f, "integration target for '{}' requires a provider", model)
             }
             ResolutionError::NoTargetAvailable(model) => {
                 write!(f, "no execution target available for model '{}'", model)
@@ -469,8 +464,8 @@ mod tests {
     #[test]
     fn test_resolve_device_unavailable() {
         let context = test_context().with_local_available(false);
-        let stage = StageConfig::new("asr", "wav2vec2-base-960h")
-            .with_target(ExecutionTarget::Device);
+        let stage =
+            StageConfig::new("asr", "wav2vec2-base-960h").with_target(ExecutionTarget::Device);
 
         let result = TargetResolver::resolve(&stage, &context);
         assert!(result.is_err());
@@ -494,10 +489,9 @@ mod tests {
 
     #[test]
     fn test_resolve_integration_target() {
-        let context = test_context()
-            .with_integration_available(IntegrationProvider::OpenAI, true);
-        let stage = StageConfig::new("llm", "gpt-4o-mini")
-            .with_provider(IntegrationProvider::OpenAI);
+        let context = test_context().with_integration_available(IntegrationProvider::OpenAI, true);
+        let stage =
+            StageConfig::new("llm", "gpt-4o-mini").with_provider(IntegrationProvider::OpenAI);
 
         let result = TargetResolver::resolve(&stage, &context).unwrap();
         assert_eq!(result.target, RouteTarget::Cloud);
@@ -508,8 +502,7 @@ mod tests {
     #[test]
     fn test_resolve_integration_missing_provider() {
         let context = test_context();
-        let stage = StageConfig::new("llm", "gpt-4o-mini")
-            .with_target(ExecutionTarget::Cloud);
+        let stage = StageConfig::new("llm", "gpt-4o-mini").with_target(ExecutionTarget::Cloud);
 
         let result = TargetResolver::resolve(&stage, &context);
         assert!(result.is_err());
@@ -522,21 +515,18 @@ mod tests {
     #[test]
     fn test_resolve_auto_prefers_device() {
         let context = test_context();
-        let stage = StageConfig::new("asr", "wav2vec2-base-960h")
-            .with_target(ExecutionTarget::Auto);
+        let stage =
+            StageConfig::new("asr", "wav2vec2-base-960h").with_target(ExecutionTarget::Auto);
 
         let result = TargetResolver::resolve(&stage, &context).unwrap();
         // With good battery and hardware acceleration, should prefer device
         // Note: actual result depends on capability detection
-        assert!(
-            result.target == RouteTarget::Local || result.target == RouteTarget::Cloud
-        );
+        assert!(result.target == RouteTarget::Local || result.target == RouteTarget::Cloud);
     }
 
     #[test]
     fn test_resolve_auto_with_preference() {
-        let mut stage = StageConfig::new("tts", "piper-en-us")
-            .with_target(ExecutionTarget::Auto);
+        let mut stage = StageConfig::new("tts", "piper-en-us").with_target(ExecutionTarget::Auto);
         stage.prefer = Some(ExecutionTarget::Device);
 
         let context = test_context();

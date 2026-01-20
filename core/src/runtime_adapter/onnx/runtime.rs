@@ -1,6 +1,6 @@
 use crate::ir::Envelope;
-use crate::runtime_adapter::{AdapterResult, ModelRuntime, RuntimeAdapter};
 use crate::runtime_adapter::onnx::OnnxRuntimeAdapter;
+use crate::runtime_adapter::{AdapterResult, ModelRuntime, RuntimeAdapter};
 use std::path::Path;
 
 /// ModelRuntime implementation for generic ONNX models.
@@ -15,8 +15,11 @@ impl OnnxRuntime {
             adapter: OnnxRuntimeAdapter::new(),
         }
     }
-    
-    pub fn get_session(&self, model_path: &str) -> AdapterResult<&crate::runtime_adapter::onnx::ONNXSession> {
+
+    pub fn get_session(
+        &self,
+        model_path: &str,
+    ) -> AdapterResult<&crate::runtime_adapter::onnx::ONNXSession> {
         // We rely on adapter internals usually, but adapter.sessions is private.
         // We need to extend OnnxRuntimeAdapter to expose get_session or proxy it.
         // Assuming adapter has get_session logic or we add it.

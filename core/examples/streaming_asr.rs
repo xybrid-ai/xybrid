@@ -256,7 +256,8 @@ fn decode_wav(bytes: &[u8]) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
             let s = i16::from_le_bytes([bytes[pos], bytes[pos + 1]]);
             s as f32 / 32768.0
         } else if bits_per_sample == 32 {
-            let s = i32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]);
+            let s =
+                i32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]);
             s as f32 / 2147483648.0
         } else {
             return Err(format!("Unsupported bit depth: {}", bits_per_sample).into());

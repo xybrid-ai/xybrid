@@ -298,9 +298,7 @@ pub enum RefinementSchedule {
     Cosine,
 
     /// Custom timesteps provided explicitly
-    Custom {
-        timesteps: Vec<f32>,
-    },
+    Custom { timesteps: Vec<f32> },
 }
 
 impl Default for RefinementSchedule {

@@ -3,7 +3,7 @@
 use super::completion::{CompletionRequest, CompletionResponse};
 use super::config::{CloudBackend, CloudConfig};
 use super::error::CloudError;
-use crate::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryResult, with_retry};
+use crate::http::{with_retry, CircuitBreaker, CircuitConfig, RetryPolicy, RetryResult};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -125,11 +125,10 @@ impl Cloud {
         // Clone request data needed for retry closure
         let request_clone = request.clone();
 
-        let result: RetryResult<CompletionResponse, CloudError> = with_retry(
-            &self.retry_policy,
-            Some(&self.gateway_circuit),
-            || self.call_gateway(request_clone.clone()),
-        );
+        let result: RetryResult<CompletionResponse, CloudError> =
+            with_retry(&self.retry_policy, Some(&self.gateway_circuit), || {
+                self.call_gateway(request_clone.clone())
+            });
 
         result.into_result()
     }
@@ -199,10 +198,16 @@ impl Cloud {
 
         if self.config.debug {
             eprintln!("[Cloud] Gateway request to: {}", url);
-            eprintln!("[Cloud] Body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
+            eprintln!(
+                "[Cloud] Body: {}",
+                serde_json::to_string_pretty(&body).unwrap_or_default()
+            );
         }
 
-        let mut req = self.agent.post(&url).set("Content-Type", "application/json");
+        let mut req = self
+            .agent
+            .post(&url)
+            .set("Content-Type", "application/json");
 
         if let Some(ref key) = api_key {
             req = req.set("Authorization", &format!("Bearer {}", key));
@@ -217,7 +222,10 @@ impl Cloud {
                     .map_err(|e| CloudError::ParseError(e.to_string()))?;
 
                 if self.config.debug {
-                    eprintln!("[Cloud] Response: {}", serde_json::to_string_pretty(&json_resp).unwrap_or_default());
+                    eprintln!(
+                        "[Cloud] Response: {}",
+                        serde_json::to_string_pretty(&json_resp).unwrap_or_default()
+                    );
                 }
 
                 // Parse OpenAI-format response
@@ -286,9 +294,10 @@ impl Cloud {
 
     /// Complete using direct API calls (development only).
     fn call_direct(&self, request: CompletionRequest) -> Result<CompletionResponse, CloudError> {
-        let provider = self.config.direct_provider.as_ref().ok_or_else(|| {
-            CloudError::ConfigError("Direct provider not configured".to_string())
-        })?;
+        let provider =
+            self.config.direct_provider.as_ref().ok_or_else(|| {
+                CloudError::ConfigError("Direct provider not configured".to_string())
+            })?;
 
         // Use cloud_llm for direct API calls
         let llm_provider: crate::pipeline::IntegrationProvider = provider
@@ -336,7 +345,10 @@ mod tests {
             .with_timeout(60000);
 
         let cloud = Cloud::with_config(config).unwrap();
-        assert_eq!(cloud.config().default_model, Some("gpt-4o-mini".to_string()));
+        assert_eq!(
+            cloud.config().default_model,
+            Some("gpt-4o-mini".to_string())
+        );
         assert_eq!(cloud.config().timeout_ms, 60000);
     }
 
@@ -374,10 +386,7 @@ mod tests {
     fn test_cloud_error_circuit_open() {
         let err = CloudError::CircuitOpen("test".to_string());
         assert!(matches!(err, CloudError::CircuitOpen(_)));
-        assert_eq!(
-            err.to_string(),
-            "Circuit breaker open: test"
-        );
+        assert_eq!(err.to_string(), "Circuit breaker open: test");
     }
 
     #[test]

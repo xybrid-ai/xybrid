@@ -214,8 +214,7 @@ mod tests {
 
     #[test]
     fn test_to_messages_with_system() {
-        let request = LlmRequest::prompt("Hello")
-            .with_system("Be helpful");
+        let request = LlmRequest::prompt("Hello").with_system("Be helpful");
 
         let messages = request.to_messages();
         assert_eq!(messages.len(), 2);

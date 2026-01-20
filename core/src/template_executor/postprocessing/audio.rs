@@ -3,8 +3,8 @@
 //! This module provides:
 //! - `tts_audio_encode_step`: Convert TTS waveform tensor to audio bytes
 
-use crate::runtime_adapter::AdapterError;
 use super::super::types::{ExecutorResult, RawOutputs};
+use crate::runtime_adapter::AdapterError;
 
 /// Convert TTS waveform tensor to audio bytes.
 ///

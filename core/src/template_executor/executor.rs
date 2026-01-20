@@ -112,9 +112,18 @@ impl TemplateExecutor {
                 ));
             }
             #[cfg(feature = "local-llm")]
-            ExecutionTemplate::Gguf { model_file, chat_template, context_length } => {
+            ExecutionTemplate::Gguf {
+                model_file,
+                chat_template,
+                context_length,
+            } => {
                 // LLM execution via LlmRuntimeAdapter
-                return self.execute_llm(model_file, chat_template.as_deref(), *context_length, input);
+                return self.execute_llm(
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    input,
+                );
             }
             #[cfg(not(feature = "local-llm"))]
             ExecutionTemplate::Gguf { .. } => {
@@ -140,9 +149,9 @@ impl TemplateExecutor {
         let result_envelope = if preprocessed.is_phoneme_ids() {
             debug!(target: "xybrid_core", "Detected TTS inference (phoneme IDs)");
             // TTS models need phoneme IDs + voice embedding + speed
-            let phoneme_ids = preprocessed.as_phoneme_ids().ok_or_else(|| {
-                AdapterError::InvalidInput("Expected phoneme IDs".to_string())
-            })?;
+            let phoneme_ids = preprocessed
+                .as_phoneme_ids()
+                .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
 
             // Load voice embedding from voices.bin
             let voices_path = Path::new(&self.base_path).join("voices.bin");
@@ -161,20 +170,27 @@ impl TemplateExecutor {
             let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
 
             // Convert outputs to envelope
-            crate::runtime_adapter::tensor_utils::tensors_to_envelope(&raw_outputs, session.output_names())?
+            crate::runtime_adapter::tensor_utils::tensors_to_envelope(
+                &raw_outputs,
+                session.output_names(),
+            )?
         } else if preprocessed.is_token_ids() {
             debug!(target: "xybrid_core", "Detected BERT-style inference (token IDs)");
             // BERT-style models need input_ids, attention_mask, and token_type_ids as int64
-            let (ids, attention_mask, token_type_ids) = preprocessed.as_token_ids().ok_or_else(|| {
-                AdapterError::InvalidInput("Expected token IDs".to_string())
-            })?;
+            let (ids, attention_mask, token_type_ids) = preprocessed
+                .as_token_ids()
+                .ok_or_else(|| AdapterError::InvalidInput("Expected token IDs".to_string()))?;
 
             // Create and run BERT session directly
             let session = ONNXSession::new(model_full_path.to_str().unwrap(), false, false)?;
-            let raw_outputs = execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
+            let raw_outputs =
+                execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
 
             // Convert outputs to envelope
-            crate::runtime_adapter::tensor_utils::tensors_to_envelope(&raw_outputs, session.output_names())?
+            crate::runtime_adapter::tensor_utils::tensors_to_envelope(
+                &raw_outputs,
+                session.output_names(),
+            )?
         } else {
             // Standard execution path
             debug!(target: "xybrid_core", "Using standard execution path");
@@ -446,9 +462,9 @@ impl TemplateExecutor {
             let runtime = self.runtimes.get_mut("onnx").ok_or_else(|| {
                 AdapterError::RuntimeError("ONNX runtime not configured".to_string())
             })?;
-            runtime
-                .load(&model_full_path)
-                .map_err(|e| AdapterError::RuntimeError(format!("Failed to load session: {}", e)))?;
+            runtime.load(&model_full_path).map_err(|e| {
+                AdapterError::RuntimeError(format!("Failed to load session: {}", e))
+            })?;
         }
 
         // Get session (immutable borrow)

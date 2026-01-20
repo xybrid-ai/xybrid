@@ -24,20 +24,20 @@
 //! - **Cloud/Server**: Xybrid-hosted inference (future)
 
 use crate::bundler::{BundleManifest, XyBundle};
+use crate::cloud::{Cloud, CloudBackend, CloudConfig, CompletionRequest};
 use crate::context::StageDescriptor;
-use crate::cloud::{Cloud, CloudConfig, CloudBackend, CompletionRequest};
 use crate::execution_template::ModelMetadata;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::{AdapterError, RuntimeAdapter};
 use crate::template_executor::TemplateExecutor;
 use crate::tracing as trace;
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
-use thiserror::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Instant;
 use tempfile::TempDir;
+use thiserror::Error;
 
 use tokio::task;
 
@@ -103,7 +103,7 @@ impl Clone for Executor {
             adapters: self.adapters.clone(),
             default_local_adapter: self.default_local_adapter.clone(),
             default_cloud_adapter: self.default_cloud_adapter.clone(),
-            _mock_models_dir: None, // Don't clone temp dir
+            _mock_models_dir: None,       // Don't clone temp dir
             _extracted_bundles_dir: None, // Don't clone temp dir
         }
     }
@@ -155,29 +155,36 @@ impl Executor {
     }
 
     /// Creates a mock model file for demo purposes.
-    fn resolve_stage_to_model_path_mock(&mut self, stage_name: &str, adapter_name: &str) -> ExecutorResult<PathBuf> {
+    fn resolve_stage_to_model_path_mock(
+        &mut self,
+        stage_name: &str,
+        adapter_name: &str,
+    ) -> ExecutorResult<PathBuf> {
         // Parse stage name (e.g., "whisper-tiny@1.2" -> "whisper-tiny")
         let model_name = stage_name.split('@').next().unwrap_or(stage_name);
-        
+
         // Create temp directory for mock models if not exists
         if self._mock_models_dir.is_none() {
-            self._mock_models_dir = Some(TempDir::new().map_err(|e| {
-                ExecutorError::Other(format!("Failed to create temp dir: {}", e))
-            })?);
+            self._mock_models_dir =
+                Some(TempDir::new().map_err(|e| {
+                    ExecutorError::Other(format!("Failed to create temp dir: {}", e))
+                })?);
         }
-        
+
         let temp_dir = self._mock_models_dir.as_ref().unwrap();
-        
+
         // Determine file extension based on adapter
         let extension = match adapter_name {
             "coreml" => "mlpackage",
             "onnx" | "onnx-mobile" => "onnx",
             "cloud" => "onnx", // Cloud uses ONNX format
-            _ => "onnx", // Default to ONNX
+            _ => "onnx",       // Default to ONNX
         };
-        
-        let model_path = temp_dir.path().join(format!("{}.{}", model_name, extension));
-        
+
+        let model_path = temp_dir
+            .path()
+            .join(format!("{}.{}", model_name, extension));
+
         // Create mock model file if it doesn't exist
         if !model_path.exists() {
             if extension == "mlpackage" {
@@ -197,7 +204,7 @@ impl Executor {
                 })?;
             }
         }
-        
+
         Ok(model_path)
     }
 
@@ -239,22 +246,21 @@ impl Executor {
             })?;
 
             // Load bundle
-            let bundle = XyBundle::load(bundle_path).map_err(|e| {
-                ExecutorError::Other(format!("Failed to load bundle: {}", e))
-            })?;
+            let bundle = XyBundle::load(bundle_path)
+                .map_err(|e| ExecutorError::Other(format!("Failed to load bundle: {}", e)))?;
 
             // Extract bundle contents
-            bundle.extract_to(&extract_dir).map_err(|e| {
-                ExecutorError::Other(format!("Failed to extract bundle: {}", e))
-            })?;
+            bundle
+                .extract_to(&extract_dir)
+                .map_err(|e| ExecutorError::Other(format!("Failed to extract bundle: {}", e)))?;
 
             // Write manifest.json (bundler's extract_to doesn't include manifest.json in files)
             let manifest_path = extract_dir.join("manifest.json");
-            let manifest_json = serde_json::to_string_pretty(bundle.manifest())
-                .map_err(|e| ExecutorError::Other(format!("Failed to serialize manifest: {}", e)))?;
-            fs::write(&manifest_path, manifest_json).map_err(|e| {
-                ExecutorError::Other(format!("Failed to write manifest: {}", e))
+            let manifest_json = serde_json::to_string_pretty(bundle.manifest()).map_err(|e| {
+                ExecutorError::Other(format!("Failed to serialize manifest: {}", e))
             })?;
+            fs::write(&manifest_path, manifest_json)
+                .map_err(|e| ExecutorError::Other(format!("Failed to write manifest: {}", e)))?;
         }
 
         // Find model file in extracted bundle
@@ -278,12 +284,10 @@ impl Executor {
     ) -> ExecutorResult<PathBuf> {
         // Read manifest to get file list
         let manifest_path = extract_dir.join("manifest.json");
-        let manifest_content = fs::read_to_string(&manifest_path).map_err(|e| {
-            ExecutorError::Other(format!("Failed to read manifest: {}", e))
-        })?;
-        let manifest: BundleManifest = serde_json::from_str(&manifest_content).map_err(|e| {
-            ExecutorError::Other(format!("Failed to parse manifest: {}", e))
-        })?;
+        let manifest_content = fs::read_to_string(&manifest_path)
+            .map_err(|e| ExecutorError::Other(format!("Failed to read manifest: {}", e)))?;
+        let manifest: BundleManifest = serde_json::from_str(&manifest_content)
+            .map_err(|e| ExecutorError::Other(format!("Failed to parse manifest: {}", e)))?;
 
         // Determine expected file extensions based on adapter
         let expected_extensions: Vec<&str> = match adapter_name {
@@ -307,16 +311,14 @@ impl Executor {
         }
 
         // If not found in manifest, try scanning directory
-        let entries = fs::read_dir(extract_dir).map_err(|e| {
-            ExecutorError::Other(format!("Failed to read extract dir: {}", e))
-        })?;
+        let entries = fs::read_dir(extract_dir)
+            .map_err(|e| ExecutorError::Other(format!("Failed to read extract dir: {}", e)))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| {
-                ExecutorError::Other(format!("Failed to read dir entry: {}", e))
-            })?;
+            let entry = entry
+                .map_err(|e| ExecutorError::Other(format!("Failed to read dir entry: {}", e)))?;
             let path = entry.path();
-            
+
             // Skip manifest.json
             if path.file_name().and_then(|s| s.to_str()) == Some("manifest.json") {
                 continue;
@@ -380,22 +382,21 @@ impl Executor {
             })?;
 
             // Load bundle
-            let bundle = XyBundle::load(bundle_path).map_err(|e| {
-                ExecutorError::Other(format!("Failed to load bundle: {}", e))
-            })?;
+            let bundle = XyBundle::load(bundle_path)
+                .map_err(|e| ExecutorError::Other(format!("Failed to load bundle: {}", e)))?;
 
             // Extract bundle contents
-            bundle.extract_to(&extract_dir).map_err(|e| {
-                ExecutorError::Other(format!("Failed to extract bundle: {}", e))
-            })?;
+            bundle
+                .extract_to(&extract_dir)
+                .map_err(|e| ExecutorError::Other(format!("Failed to extract bundle: {}", e)))?;
 
             // Write manifest.json
             let manifest_path = extract_dir.join("manifest.json");
-            let manifest_json = serde_json::to_string_pretty(bundle.manifest())
-                .map_err(|e| ExecutorError::Other(format!("Failed to serialize manifest: {}", e)))?;
-            fs::write(&manifest_path, manifest_json).map_err(|e| {
-                ExecutorError::Other(format!("Failed to write manifest: {}", e))
+            let manifest_json = serde_json::to_string_pretty(bundle.manifest()).map_err(|e| {
+                ExecutorError::Other(format!("Failed to serialize manifest: {}", e))
             })?;
+            fs::write(&manifest_path, manifest_json)
+                .map_err(|e| ExecutorError::Other(format!("Failed to write manifest: {}", e)))?;
         }
 
         // Try to load model_metadata.json if it exists
@@ -520,10 +521,15 @@ impl Executor {
         if let Some(bundle_path_str) = &stage.bundle_path {
             let bundle_path = PathBuf::from(bundle_path_str);
             if bundle_path.exists() {
-                let ext = bundle_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                let ext = bundle_path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
                 if ext == "xyb" || ext == "bundle" {
                     // Extract bundle and check for model_metadata.json
-                    if let Ok((extract_dir, Some(model_metadata))) = self.extract_bundle_with_metadata(&bundle_path) {
+                    if let Ok((extract_dir, Some(model_metadata))) =
+                        self.extract_bundle_with_metadata(&bundle_path)
+                    {
                         // Use TemplateExecutor for metadata-driven inference
                         let base_path = extract_dir.to_str().ok_or_else(|| {
                             ExecutorError::Other("Invalid extract dir path".to_string())
@@ -531,7 +537,8 @@ impl Executor {
 
                         let mut template_executor = TemplateExecutor::new(base_path);
 
-                        let output = template_executor.execute(&model_metadata, input)
+                        let output = template_executor
+                            .execute(&model_metadata, input)
                             .map_err(|e| ExecutorError::AdapterError(e))?;
 
                         let latency_ms = start_time.elapsed().as_millis();
@@ -549,9 +556,9 @@ impl Executor {
 
         // Fallback: Use raw adapter execution (no metadata-driven processing)
         let model_path = self.resolve_stage_to_model_path(stage, &adapter_name)?;
-        let model_path_str = model_path.to_str().ok_or_else(|| {
-            ExecutorError::Other("Invalid model path".to_string())
-        })?;
+        let model_path_str = model_path
+            .to_str()
+            .ok_or_else(|| ExecutorError::Other("Invalid model path".to_string()))?;
 
         // Try to load model if adapter is mutable
         if let Some(adapter_arc) = self.adapters.get_mut(&adapter_name) {
@@ -573,14 +580,17 @@ impl Executor {
                 // Model not loaded - return mock output for demo
                 // In production, models should be pre-loaded
                 match &input.kind {
-                    crate::ir::EnvelopeKind::Audio(_) => {
-                        Envelope::new(crate::ir::EnvelopeKind::Text(format!("mock-asr-output-{}", stage.name)))
-                    }
-                    crate::ir::EnvelopeKind::Text(t) => {
-                        Envelope::new(crate::ir::EnvelopeKind::Text(format!("mock-output-{}-{}", stage.name, t)))
-                    }
+                    crate::ir::EnvelopeKind::Audio(_) => Envelope::new(
+                        crate::ir::EnvelopeKind::Text(format!("mock-asr-output-{}", stage.name)),
+                    ),
+                    crate::ir::EnvelopeKind::Text(t) => Envelope::new(
+                        crate::ir::EnvelopeKind::Text(format!("mock-output-{}-{}", stage.name, t)),
+                    ),
                     crate::ir::EnvelopeKind::Embedding(_) => {
-                        Envelope::new(crate::ir::EnvelopeKind::Text(format!("mock-embedding-output-{}", stage.name)))
+                        Envelope::new(crate::ir::EnvelopeKind::Text(format!(
+                            "mock-embedding-output-{}",
+                            stage.name
+                        )))
                     }
                 }
             }
@@ -641,10 +651,10 @@ impl Executor {
         let stage = stage.clone();
         let input = input.clone();
         let target = target.to_string();
-        
+
         // Clone executor for blocking task (temp dir won't be cloned, but that's ok)
         let mut executor = self.clone();
-        
+
         task::spawn_blocking(move || executor.execute_stage(&stage, &input, &target))
             .await
             .map_err(|e| ExecutorError::Other(format!("Task join error: {}", e)))?
@@ -672,9 +682,7 @@ impl Executor {
     ) -> ExecutorResult<(Envelope, StageMetadata)> {
         // Extract provider from stage descriptor
         let provider = stage.provider.ok_or_else(|| {
-            ExecutorError::ProviderNotConfigured(
-                "Integration stage requires provider".to_string()
-            )
+            ExecutorError::ProviderNotConfigured("Integration stage requires provider".to_string())
         })?;
 
         // Start tracing span for cloud execution

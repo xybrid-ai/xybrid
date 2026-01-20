@@ -267,8 +267,8 @@ mod tests {
 
     #[test]
     fn test_stage_config_integration() {
-        let stage = StageConfig::new("llm", "gpt-4o-mini")
-            .with_provider(IntegrationProvider::OpenAI);
+        let stage =
+            StageConfig::new("llm", "gpt-4o-mini").with_provider(IntegrationProvider::OpenAI);
 
         assert_eq!(stage.target, ExecutionTarget::Cloud);
         assert_eq!(stage.provider, Some(IntegrationProvider::OpenAI));
@@ -352,8 +352,8 @@ fallback:
 
     #[test]
     fn test_stage_execution_provider() {
-        let stage = StageConfig::new("vision", "mobilenet-v2")
-            .with_execution_provider("coreml-ane");
+        let stage =
+            StageConfig::new("vision", "mobilenet-v2").with_execution_provider("coreml-ane");
 
         assert_eq!(stage.execution_provider, Some("coreml-ane".to_string()));
     }

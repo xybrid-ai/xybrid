@@ -108,7 +108,7 @@ impl Phonemizer {
         }
 
         Err(PhonemizeError::DictionaryLoadError(
-            "CMU dictionary not found. Please download it to ~/.xybrid/cmudict.dict".to_string()
+            "CMU dictionary not found. Please download it to ~/.xybrid/cmudict.dict".to_string(),
         ))
     }
 
@@ -262,15 +262,18 @@ pub fn normalize_loudness(samples: &[f32], target_rms: f32) -> Vec<f32> {
     let gain = target_rms / current_rms;
 
     // Apply gain with soft clipping to avoid harsh distortion
-    samples.iter().map(|s| {
-        let amplified = s * gain;
-        // Soft clip using tanh for values approaching limits
-        if amplified.abs() > 0.95 {
-            amplified.signum() * (0.95 + 0.05 * (amplified.abs() - 0.95).tanh())
-        } else {
-            amplified
-        }
-    }).collect()
+    samples
+        .iter()
+        .map(|s| {
+            let amplified = s * gain;
+            // Soft clip using tanh for values approaching limits
+            if amplified.abs() > 0.95 {
+                amplified.signum() * (0.95 + 0.05 * (amplified.abs() - 0.95).tanh())
+            } else {
+                amplified
+            }
+        })
+        .collect()
 }
 
 /// Trim silence from the beginning and end of audio
@@ -358,10 +361,7 @@ pub fn high_pass_filter(samples: &[f32], cutoff_hz: f32, sample_rate: f32) -> Ve
 /// Full audio postprocessing pipeline for TTS output
 ///
 /// Applies: high-pass filter → silence trim → loudness normalization
-pub fn postprocess_tts_audio(
-    samples: &[f32],
-    sample_rate: u32,
-) -> Vec<f32> {
+pub fn postprocess_tts_audio(samples: &[f32], sample_rate: u32) -> Vec<f32> {
     // 1. High-pass filter to remove rumble (80 Hz cutoff)
     let filtered = high_pass_filter(samples, 80.0, sample_rate as f32);
 

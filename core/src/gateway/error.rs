@@ -121,10 +121,25 @@ mod tests {
 
     #[test]
     fn test_error_status_codes() {
-        assert_eq!(GatewayError::AuthenticationError("bad key".into()).status_code(), 401);
-        assert_eq!(GatewayError::RateLimited { retry_after_secs: 60 }.status_code(), 429);
-        assert_eq!(GatewayError::ValidationError("bad param".into()).status_code(), 400);
-        assert_eq!(GatewayError::ModelNotFound("gpt-5".into()).status_code(), 404);
+        assert_eq!(
+            GatewayError::AuthenticationError("bad key".into()).status_code(),
+            401
+        );
+        assert_eq!(
+            GatewayError::RateLimited {
+                retry_after_secs: 60
+            }
+            .status_code(),
+            429
+        );
+        assert_eq!(
+            GatewayError::ValidationError("bad param".into()).status_code(),
+            400
+        );
+        assert_eq!(
+            GatewayError::ModelNotFound("gpt-5".into()).status_code(),
+            404
+        );
     }
 
     #[test]

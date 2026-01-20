@@ -152,10 +152,7 @@ fn test_gguf_metadata_parsing() {
             context_length,
             ..
         } => {
-            assert!(
-                model_file.ends_with(".gguf"),
-                "Model file should be .gguf"
-            );
+            assert!(model_file.ends_with(".gguf"), "Model file should be .gguf");
             assert_eq!(*context_length, 4096, "Context length should be 4096");
         }
         other => panic!("Expected Gguf execution template, got {:?}", other),

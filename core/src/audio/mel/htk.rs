@@ -88,11 +88,7 @@ mod tests {
         for freq in [100.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0] {
             let mel = hz_to_mel(freq);
             let freq_back = mel_to_hz(mel);
-            assert!(
-                (freq - freq_back).abs() < 0.001,
-                "Failed for freq {}",
-                freq
-            );
+            assert!((freq - freq_back).abs() < 0.001, "Failed for freq {}", freq);
         }
     }
 

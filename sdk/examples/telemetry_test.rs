@@ -20,8 +20,8 @@ use std::path::PathBuf;
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_sdk::{
-    init_platform_telemetry, flush_platform_telemetry, shutdown_platform_telemetry,
-    TelemetryConfig, publish_telemetry_event, TelemetryEvent,
+    flush_platform_telemetry, init_platform_telemetry, publish_telemetry_event,
+    shutdown_platform_telemetry, TelemetryConfig, TelemetryEvent,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = TelemetryConfig::new(&endpoint, &api_key)
         .with_device("test-device-001", "macos")
         .with_app_version("0.0.13-test")
-        .with_batch_size(1)  // Flush immediately for testing
+        .with_batch_size(1) // Flush immediately for testing
         .with_flush_interval(1);
 
     println!("Initializing platform telemetry...");
@@ -72,12 +72,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let metadata_path = model_dir.join("model_metadata.json");
         if metadata_path.exists() {
-            let metadata: ModelMetadata = serde_json::from_str(
-                &std::fs::read_to_string(&metadata_path)?
-            )?;
+            let metadata: ModelMetadata =
+                serde_json::from_str(&std::fs::read_to_string(&metadata_path)?)?;
 
             let mut executor = xybrid_core::template_executor::TemplateExecutor::with_base_path(
-                model_dir.to_str().unwrap()
+                model_dir.to_str().unwrap(),
             );
 
             let input = Envelope {
@@ -163,8 +162,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     shutdown_platform_telemetry();
 
     println!("\n=== Test Complete ===");
-    println!("Check the platform console at {}/ to verify events arrived",
-             endpoint.replace("8000", "5173"));  // Assuming console runs on 5173
+    println!(
+        "Check the platform console at {}/ to verify events arrived",
+        endpoint.replace("8000", "5173")
+    ); // Assuming console runs on 5173
 
     Ok(())
 }

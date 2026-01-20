@@ -26,10 +26,7 @@ pub enum CloudError {
 
     /// API returned an error response.
     #[error("API error ({status}): {message}")]
-    ApiError {
-        status: u16,
-        message: String,
-    },
+    ApiError { status: u16, message: String },
 
     /// Failed to parse response.
     #[error("Failed to parse response: {0}")]
@@ -37,15 +34,11 @@ pub enum CloudError {
 
     /// Rate limit exceeded.
     #[error("Rate limit exceeded. Retry after {retry_after_secs} seconds.")]
-    RateLimited {
-        retry_after_secs: u64,
-    },
+    RateLimited { retry_after_secs: u64 },
 
     /// Request timeout.
     #[error("Request timed out after {timeout_ms}ms")]
-    Timeout {
-        timeout_ms: u32,
-    },
+    Timeout { timeout_ms: u32 },
 
     /// Invalid request parameters.
     #[error("Invalid request: {0}")]
@@ -57,9 +50,7 @@ pub enum CloudError {
 
     /// Content blocked by safety filter.
     #[error("Content blocked: {reason}")]
-    ContentBlocked {
-        reason: String,
-    },
+    ContentBlocked { reason: String },
 
     /// Configuration error.
     #[error("Configuration error: {0}")]

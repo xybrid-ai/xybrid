@@ -125,7 +125,11 @@ impl ModelSource {
     /// Use `ModelSource::registry()` instead.
     #[deprecated(since = "0.0.17", note = "Use ModelSource::registry() instead")]
     #[allow(deprecated)]
-    pub fn legacy_registry(url: impl Into<String>, model_id: impl Into<String>, version: impl Into<String>) -> Self {
+    pub fn legacy_registry(
+        url: impl Into<String>,
+        model_id: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
         ModelSource::LegacyRegistry {
             url: url.into(),
             model_id: model_id.into(),
@@ -138,7 +142,10 @@ impl ModelSource {
     ///
     /// # Deprecated
     /// Use `ModelSource::registry_with_platform()` instead.
-    #[deprecated(since = "0.0.17", note = "Use ModelSource::registry_with_platform() instead")]
+    #[deprecated(
+        since = "0.0.17",
+        note = "Use ModelSource::registry_with_platform() instead"
+    )]
     #[allow(deprecated)]
     pub fn legacy_registry_with_platform(
         url: impl Into<String>,

@@ -86,7 +86,12 @@ pub struct AuthorityDecision<T> {
 
 impl<T> AuthorityDecision<T> {
     /// Create a new authority decision.
-    pub fn new(result: T, reason: impl Into<String>, source: DecisionSource, confidence: f32) -> Self {
+    pub fn new(
+        result: T,
+        reason: impl Into<String>,
+        source: DecisionSource,
+        confidence: f32,
+    ) -> Self {
         Self {
             result,
             reason: reason.into(),
@@ -253,11 +258,17 @@ mod tests {
     fn test_resolved_target_display() {
         assert_eq!(ResolvedTarget::Device.to_string(), "device");
         assert_eq!(
-            ResolvedTarget::Cloud { provider: "openai".to_string() }.to_string(),
+            ResolvedTarget::Cloud {
+                provider: "openai".to_string()
+            }
+            .to_string(),
             "cloud:openai"
         );
         assert_eq!(
-            ResolvedTarget::Server { endpoint: "http://localhost:8000".to_string() }.to_string(),
+            ResolvedTarget::Server {
+                endpoint: "http://localhost:8000".to_string()
+            }
+            .to_string(),
             "server:http://localhost:8000"
         );
     }
@@ -266,6 +277,9 @@ mod tests {
     fn test_policy_outcome_is_allowed() {
         assert!(PolicyOutcome::Allow.is_allowed());
         assert!(PolicyOutcome::Transform { transforms: vec![] }.is_allowed());
-        assert!(!PolicyOutcome::Deny { reason: "test".to_string() }.is_allowed());
+        assert!(!PolicyOutcome::Deny {
+            reason: "test".to_string()
+        }
+        .is_allowed());
     }
 }

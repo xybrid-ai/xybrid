@@ -3,13 +3,13 @@
 //! This module handles token-by-token generation with KV cache management
 //! for decoder-only language models.
 
+use super::super::types::ExecutorResult;
 use crate::execution_template::PipelineStage;
 use crate::runtime_adapter::onnx::ONNXSession;
 use crate::runtime_adapter::AdapterError;
 use ndarray::{ArrayD, IxDyn};
 use ort::value::Value;
 use std::collections::HashMap;
-use super::super::types::ExecutorResult;
 
 /// Execute an autoregressive stage (token generation loop).
 ///
@@ -65,9 +65,7 @@ pub fn execute_autoregressive_stage(
             |e| AdapterError::InvalidInput(format!("Failed to create KV cache K: {:?}", e)),
         )?;
     let mut kv_cache_v = ArrayD::<f32>::from_shape_vec(IxDyn(&kv_cache_shape), kv_cache_data)
-        .map_err(|e| {
-            AdapterError::InvalidInput(format!("Failed to create KV cache V: {:?}", e))
-        })?;
+        .map_err(|e| AdapterError::InvalidInput(format!("Failed to create KV cache V: {:?}", e)))?;
 
     // Get encoder outputs (cross-attention keys/values)
     let encoder_outputs = stage_outputs
@@ -89,14 +87,12 @@ pub fn execute_autoregressive_stage(
         let current_token_id = *token_ids.last().unwrap() as i64;
         let tokens_shape = vec![1, 1];
         let tokens_data = vec![current_token_id];
-        let tokens_i64 = ArrayD::<i64>::from_shape_vec(IxDyn(&tokens_shape), tokens_data)
-            .map_err(|e| {
+        let tokens_i64 =
+            ArrayD::<i64>::from_shape_vec(IxDyn(&tokens_shape), tokens_data).map_err(|e| {
                 AdapterError::InvalidInput(format!("Failed to create tokens tensor: {:?}", e))
             })?;
         let tokens_value: Value = Value::from_array(tokens_i64)
-            .map_err(|e| {
-                AdapterError::InvalidInput(format!("Failed to convert tokens: {:?}", e))
-            })?
+            .map_err(|e| AdapterError::InvalidInput(format!("Failed to convert tokens: {:?}", e)))?
             .into();
 
         // Convert caches to Values
@@ -112,21 +108,17 @@ pub fn execute_autoregressive_stage(
             .into();
 
         let cross_k_value: Value = Value::from_array(cross_k.clone())
-            .map_err(|e| {
-                AdapterError::InvalidInput(format!("Failed to convert cross_k: {:?}", e))
-            })?
+            .map_err(|e| AdapterError::InvalidInput(format!("Failed to convert cross_k: {:?}", e)))?
             .into();
         let cross_v_value: Value = Value::from_array(cross_v.clone())
-            .map_err(|e| {
-                AdapterError::InvalidInput(format!("Failed to convert cross_v: {:?}", e))
-            })?
+            .map_err(|e| AdapterError::InvalidInput(format!("Failed to convert cross_v: {:?}", e)))?
             .into();
 
         // Offset tensor
         let offset_shape = vec![1];
         let offset_data = vec![offset];
-        let offset_i64 = ArrayD::<i64>::from_shape_vec(IxDyn(&offset_shape), offset_data)
-            .map_err(|e| {
+        let offset_i64 =
+            ArrayD::<i64>::from_shape_vec(IxDyn(&offset_shape), offset_data).map_err(|e| {
                 AdapterError::InvalidInput(format!("Failed to create offset tensor: {:?}", e))
             })?;
         let offset_value: Value = Value::from_array(offset_i64)
@@ -162,9 +154,9 @@ pub fn execute_autoregressive_stage(
         decoder_inputs.insert(actual_input_names[5].clone(), offset_value);
 
         // Run decoder
-        let decoder_outputs = session
-            .run_with_values(decoder_inputs)
-            .map_err(|e| AdapterError::InvalidInput(format!("Decoder inference failed: {:?}", e)))?;
+        let decoder_outputs = session.run_with_values(decoder_inputs).map_err(|e| {
+            AdapterError::InvalidInput(format!("Decoder inference failed: {:?}", e))
+        })?;
 
         // Extract logits and updated KV caches using actual output names
         // Order: [logits, out_kv_k, out_kv_v]
@@ -248,9 +240,9 @@ fn extract_encoder_cross_attention(
 /// Apply argmax to logits to get token ID.
 fn argmax_token(logits: &ArrayD<f32>) -> ExecutorResult<usize> {
     let shape = logits.shape();
-    let data = logits.as_slice().ok_or_else(|| {
-        AdapterError::InvalidInput("Logits tensor is not contiguous".to_string())
-    })?;
+    let data = logits
+        .as_slice()
+        .ok_or_else(|| AdapterError::InvalidInput("Logits tensor is not contiguous".to_string()))?;
 
     // Handle 3D logits [batch, seq_len, vocab_size]
     if shape.len() == 3 {

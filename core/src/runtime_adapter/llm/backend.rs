@@ -123,11 +123,7 @@ pub trait LlmBackend: Send + Sync {
     ///
     /// Use this for completion-style inference where you provide the
     /// exact prompt without chat formatting.
-    fn generate_raw(
-        &self,
-        prompt: &str,
-        config: &GenerationConfig,
-    ) -> LlmResult<GenerationOutput>;
+    fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput>;
 
     /// Get approximate memory usage in bytes.
     ///

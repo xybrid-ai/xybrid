@@ -150,7 +150,10 @@ impl WhisperModel {
             match config.num_mel_bins {
                 80 => {
                     // Standard Whisper mel filters (80 bins)
-                    anyhow::bail!("melfilters.bytes not found at {:?}. Please download from Candle examples.", mel_filters_path)
+                    anyhow::bail!(
+                        "melfilters.bytes not found at {:?}. Please download from Candle examples.",
+                        mel_filters_path
+                    )
                 }
                 128 => {
                     anyhow::bail!("melfilters128.bytes not found at {:?}. Please download from Candle examples.", mel_filters_path)
@@ -274,18 +277,22 @@ impl WhisperModel {
             let tokens_t = Tensor::new(tokens.as_slice(), &self.device)?;
             let tokens_t = tokens_t.unsqueeze(0)?;
 
-            let ys = self.model.decoder.forward(&tokens_t, &audio_features, i == 0)?;
+            let ys = self
+                .model
+                .decoder
+                .forward(&tokens_t, &audio_features, i == 0)?;
 
             // Get logits for last position
             let (_, seq_len, _) = ys.dims3()?;
-            let logits = self.model.decoder.final_linear(
-                &ys.i((.., seq_len - 1.., ..))?
-            )?.i(0)?.i(0)?;
+            let logits = self
+                .model
+                .decoder
+                .final_linear(&ys.i((.., seq_len - 1.., ..))?)?
+                .i(0)?
+                .i(0)?;
 
             // Greedy decoding: take argmax
-            let next_token = logits
-                .argmax(candle_core::D::Minus1)?
-                .to_scalar::<u32>()?;
+            let next_token = logits.argmax(candle_core::D::Minus1)?.to_scalar::<u32>()?;
 
             if next_token == self.eot_token || tokens.len() > self.config.max_target_positions {
                 break;
@@ -295,7 +302,9 @@ impl WhisperModel {
         }
 
         // Decode tokens to text
-        let text = self.tokenizer.decode(&tokens, true)
+        let text = self
+            .tokenizer
+            .decode(&tokens, true)
             .map_err(|e| anyhow::anyhow!("Tokenizer decode error: {}", e))?;
 
         Ok(text)

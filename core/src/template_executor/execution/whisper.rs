@@ -5,14 +5,14 @@
 //! - Separate decoder and encoder KV caches
 //! - Forced decoder IDs (language, task, no_timestamps)
 
+use super::super::types::ExecutorResult;
+use super::{parse_kv_cache_name, parse_present_name_full};
 use crate::execution_template::PipelineStage;
 use crate::runtime_adapter::onnx::ONNXSession;
 use crate::runtime_adapter::AdapterError;
 use ndarray::{Array2, ArrayD, IxDyn};
 use ort::value::Value;
 use std::collections::HashMap;
-use super::super::types::ExecutorResult;
-use super::{parse_kv_cache_name, parse_present_name_full};
 
 /// Execute Whisper decoder stage (HuggingFace ONNX format).
 ///
@@ -91,14 +91,11 @@ pub fn execute_whisper_decoder_stage(
 
     // Encoder KV cache is computed once and reused
     let mut encoder_kv_cache: Vec<ArrayD<f32>> = (0..(num_layers * 2))
-        .map(|_| {
-            ArrayD::<f32>::zeros(IxDyn(&[batch_size, num_heads, encoder_seq_len, head_dim]))
-        })
+        .map(|_| ArrayD::<f32>::zeros(IxDyn(&[batch_size, num_heads, encoder_seq_len, head_dim])))
         .collect();
 
     // Track generated tokens (starts with forced tokens)
-    let mut generated_tokens: Vec<usize> =
-        forced_tokens.iter().map(|&t| t as usize).collect();
+    let mut generated_tokens: Vec<usize> = forced_tokens.iter().map(|&t| t as usize).collect();
 
     // Convert suppress_tokens to a HashSet for fast lookup
     let suppress_set: std::collections::HashSet<i64> = suppress_tokens.iter().copied().collect();
@@ -120,9 +117,7 @@ pub fn execute_whisper_decoder_stage(
                 })?;
 
         let input_ids_value: Value = Value::from_array(input_ids)
-            .map_err(|e| {
-                AdapterError::InvalidInput(format!("Failed to convert input_ids: {}", e))
-            })?
+            .map_err(|e| AdapterError::InvalidInput(format!("Failed to convert input_ids: {}", e)))?
             .into();
 
         // Build inputs map
@@ -246,12 +241,8 @@ pub fn execute_whisper_decoder_stage(
 
         // Apply repetition penalty
         if repetition_penalty != 1.0 && generated_tokens.len() > 4 {
-            let recent: std::collections::HashSet<usize> = generated_tokens
-                .iter()
-                .rev()
-                .take(10)
-                .copied()
-                .collect();
+            let recent: std::collections::HashSet<usize> =
+                generated_tokens.iter().rev().take(10).copied().collect();
 
             for token in &recent {
                 if *token < logits_vec.len() {

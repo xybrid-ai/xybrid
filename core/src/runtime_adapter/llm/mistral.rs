@@ -111,10 +111,7 @@ impl LlmBackend for MistralBackend {
                 )));
             }
 
-            let file = gguf_files[0]
-                .file_name()
-                .to_string_lossy()
-                .to_string();
+            let file = gguf_files[0].file_name().to_string_lossy().to_string();
             (config.model_path.clone(), file)
         };
 
@@ -216,9 +213,7 @@ impl LlmBackend for MistralBackend {
             .unwrap_or_else(|| "unknown".to_string());
 
         // Calculate tokens (approximate from usage if available)
-        let tokens_generated = response
-            .usage
-            .completion_tokens;
+        let tokens_generated = response.usage.completion_tokens;
 
         let tokens_per_second = if elapsed.as_secs_f32() > 0.0 {
             tokens_generated as f32 / elapsed.as_secs_f32()
@@ -235,11 +230,7 @@ impl LlmBackend for MistralBackend {
         })
     }
 
-    fn generate_raw(
-        &self,
-        prompt: &str,
-        config: &GenerationConfig,
-    ) -> LlmResult<GenerationOutput> {
+    fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput> {
         // For raw prompts, wrap as a user message
         // A more sophisticated implementation would bypass chat templating
         let messages = vec![ChatMessage::user(prompt)];

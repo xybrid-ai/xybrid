@@ -45,7 +45,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use xybrid_core::context::{StageDescriptor};
+use xybrid_core::context::StageDescriptor;
 use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
@@ -112,11 +112,7 @@ impl PipelineRef {
 
     /// Get the stage IDs (stage names/identifiers).
     pub fn stage_ids(&self) -> Vec<String> {
-        self.config
-            .stages
-            .iter()
-            .map(|s| s.stage_id())
-            .collect()
+        self.config.stages.iter().map(|s| s.stage_id()).collect()
     }
 
     /// Get the number of stages.
@@ -482,9 +478,9 @@ impl Pipeline {
         let mut stages = Vec::new();
         let mut total_download_bytes: u64 = 0;
 
-        let handle_read = handle.read().map_err(|_| {
-            SdkError::PipelineError("Failed to read pipeline handle".to_string())
-        })?;
+        let handle_read = handle
+            .read()
+            .map_err(|_| SdkError::PipelineError("Failed to read pipeline handle".to_string()))?;
 
         for stage_config in &config.stages {
             let stage_id = stage_config.stage_id();
@@ -498,37 +494,46 @@ impl Pipeline {
                 }
             } else if target_str == Some("cloud") || target_str == Some("server") {
                 StageTarget::Cloud
-            } else if target_str == Some("device") || target_str == Some("local") || target_str == Some("edge") {
+            } else if target_str == Some("device")
+                || target_str == Some("local")
+                || target_str == Some("edge")
+            {
                 StageTarget::Device // Explicit local execution
             } else {
                 StageTarget::Auto // Default: let authority decide (includes "auto" and None)
             };
 
-            let (status, download_bytes) = if matches!(stage_target, StageTarget::Device | StageTarget::Auto) {
-                // For device/auto stages, check if model is cached (might run locally)
-                let model_id = stage_config.model_id();
-                match client.resolve(&model_id, None) {
-                    Ok(resolved) => {
-                        let is_cached = client.is_cached(&model_id, None).unwrap_or(false);
-                        if is_cached {
-                            (StageStatus::Cached, None)
-                        } else {
-                            total_download_bytes += resolved.size_bytes;
-                            (StageStatus::NeedsDownload, Some(resolved.size_bytes))
+            let (status, download_bytes) =
+                if matches!(stage_target, StageTarget::Device | StageTarget::Auto) {
+                    // For device/auto stages, check if model is cached (might run locally)
+                    let model_id = stage_config.model_id();
+                    match client.resolve(&model_id, None) {
+                        Ok(resolved) => {
+                            let is_cached = client.is_cached(&model_id, None).unwrap_or(false);
+                            if is_cached {
+                                (StageStatus::Cached, None)
+                            } else {
+                                total_download_bytes += resolved.size_bytes;
+                                (StageStatus::NeedsDownload, Some(resolved.size_bytes))
+                            }
+                        }
+                        Err(e) => {
+                            // Check availability map as fallback
+                            if handle_read
+                                .availability_map
+                                .get(&model_id)
+                                .copied()
+                                .unwrap_or(false)
+                            {
+                                (StageStatus::Cached, None)
+                            } else {
+                                (StageStatus::Error(e.to_string()), None)
+                            }
                         }
                     }
-                    Err(e) => {
-                        // Check availability map as fallback
-                        if handle_read.availability_map.get(&model_id).copied().unwrap_or(false) {
-                            (StageStatus::Cached, None)
-                        } else {
-                            (StageStatus::Error(e.to_string()), None)
-                        }
-                    }
-                }
-            } else {
-                (StageStatus::Integration, None)
-            };
+                } else {
+                    (StageStatus::Integration, None)
+                };
 
             stages.push(StageInfo {
                 id: stage_id,
@@ -573,9 +578,9 @@ impl Pipeline {
 
     /// Check if all device models are cached and ready.
     pub fn is_ready(&self) -> bool {
-        self.stages.iter().all(|s| {
-            matches!(s.status, StageStatus::Cached | StageStatus::Integration)
-        })
+        self.stages
+            .iter()
+            .all(|s| matches!(s.status, StageStatus::Cached | StageStatus::Integration))
     }
 
     /// Get the total bytes that need to be downloaded.
@@ -612,7 +617,9 @@ impl Pipeline {
     where
         F: Fn(DownloadProgress),
     {
-        let registry_url = self.handle.read()
+        let registry_url = self
+            .handle
+            .read()
             .map_err(|_| SdkError::PipelineError("Failed to read handle".to_string()))?
             .registry_url
             .clone();
@@ -630,13 +637,20 @@ impl Pipeline {
         let device_adapter = LocalDeviceAdapter::new();
         let metrics = device_adapter.collect_metrics();
 
-        let stages_to_fetch: Vec<_> = self.stages
+        let stages_to_fetch: Vec<_> = self
+            .stages
             .iter()
             .enumerate()
             .filter(|(_, s)| matches!(s.status, StageStatus::NeedsDownload))
             .filter_map(|(idx, s)| {
                 s.model_id.as_ref().map(|m| {
-                    (idx, s.id.clone(), m.clone(), s.download_bytes.unwrap_or(0), s.target.clone())
+                    (
+                        idx,
+                        s.id.clone(),
+                        m.clone(),
+                        s.download_bytes.unwrap_or(0),
+                        s.target.clone(),
+                    )
                 })
             })
             .collect();
@@ -644,7 +658,9 @@ impl Pipeline {
         let total_stages = stages_to_fetch.len();
         let mut skipped_count = 0;
 
-        for (stage_idx, (_, stage_id, model_id, total_bytes, stage_target)) in stages_to_fetch.into_iter().enumerate() {
+        for (stage_idx, (_, stage_id, model_id, total_bytes, stage_target)) in
+            stages_to_fetch.into_iter().enumerate()
+        {
             // Convert StageTarget to ExecutionTarget for authority
             // - Device: user explicitly wants local, authority should respect it
             // - Auto: let authority decide based on device conditions
@@ -694,7 +710,9 @@ impl Pipeline {
                         handle.availability_map.insert(model_id.clone(), true);
                         handle.availability_map.insert(stage_id.clone(), true);
                         // Store the bundle path for this stage
-                        handle.bundle_paths.insert(stage_id.clone(), bundle_path.clone());
+                        handle
+                            .bundle_paths
+                            .insert(stage_id.clone(), bundle_path.clone());
                         handle.bundle_paths.insert(model_id.clone(), bundle_path);
                     }
                 }
@@ -730,9 +748,10 @@ impl Pipeline {
             self.load_models()?;
         }
 
-        let handle = self.handle.read().map_err(|_| {
-            SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
-        })?;
+        let handle = self
+            .handle
+            .read()
+            .map_err(|_| SdkError::PipelineError("Failed to acquire pipeline lock".to_string()))?;
 
         // Clone stage descriptors and set bundle_path on each
         let mut stage_descriptors = handle.stage_descriptors.clone();
@@ -750,9 +769,10 @@ impl Pipeline {
 
         // Set telemetry context
         let trace_id = uuid::Uuid::new_v4();
-        let pipeline_id = self.name.as_ref().map(|n| {
-            uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes())
-        });
+        let pipeline_id = self
+            .name
+            .as_ref()
+            .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
         crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
 
         let mut orchestrator = Orchestrator::new();
@@ -792,7 +812,10 @@ impl Pipeline {
             };
             (output_type, last.output.clone())
         } else {
-            (OutputType::Unknown, Envelope::new(EnvelopeKind::Text(String::new())))
+            (
+                OutputType::Unknown,
+                Envelope::new(EnvelopeKind::Text(String::new())),
+            )
         };
 
         // Emit telemetry event
@@ -802,14 +825,17 @@ impl Pipeline {
             target: None,
             latency_ms: Some(total_latency_ms),
             error: None,
-            data: Some(serde_json::json!({
-                "stages": stages.iter().map(|s| serde_json::json!({
-                    "name": s.name,
-                    "latency_ms": s.latency_ms,
-                    "target": s.target,
-                })).collect::<Vec<_>>(),
-                "output_type": format!("{:?}", output_type),
-            }).to_string()),
+            data: Some(
+                serde_json::json!({
+                    "stages": stages.iter().map(|s| serde_json::json!({
+                        "name": s.name,
+                        "latency_ms": s.latency_ms,
+                        "target": s.target,
+                    })).collect::<Vec<_>>(),
+                    "output_type": format!("{:?}", output_type),
+                })
+                .to_string(),
+            ),
             timestamp_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
@@ -845,10 +871,7 @@ impl Pipeline {
                 }
             }
 
-            (
-                descriptors,
-                handle.availability_map.clone(),
-            )
+            (descriptors, handle.availability_map.clone())
         };
 
         let envelope_clone = envelope.clone();
@@ -860,9 +883,9 @@ impl Pipeline {
             let metrics = device_adapter.collect_metrics();
 
             let trace_id = uuid::Uuid::new_v4();
-            let pipeline_id = name.as_ref().map(|n| {
-                uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes())
-            });
+            let pipeline_id = name
+                .as_ref()
+                .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
             crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
 
             let mut orchestrator = Orchestrator::new();
@@ -875,7 +898,12 @@ impl Pipeline {
 
             let start_time = std::time::Instant::now();
             let results: Vec<StageExecutionResult> = orchestrator
-                .execute_pipeline(&stage_descriptors, &envelope_clone, &metrics, &availability_fn)
+                .execute_pipeline(
+                    &stage_descriptors,
+                    &envelope_clone,
+                    &metrics,
+                    &availability_fn,
+                )
                 .map_err(|e| {
                     crate::telemetry::set_telemetry_pipeline_context(None, None);
                     SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
@@ -902,7 +930,10 @@ impl Pipeline {
                 };
                 (output_type, last.output.clone())
             } else {
-                (OutputType::Unknown, Envelope::new(EnvelopeKind::Text(String::new())))
+                (
+                    OutputType::Unknown,
+                    Envelope::new(EnvelopeKind::Text(String::new())),
+                )
             };
 
             Ok(PipelineExecutionResult {
@@ -939,7 +970,10 @@ impl Xybrid {
     /// let result = Xybrid::run_pipeline(yaml_content, &Envelope::audio(audio_bytes))?;
     /// println!("Output: {:?}", result.text());
     /// ```
-    pub fn run_pipeline(yaml: &str, envelope: &Envelope) -> PipelineResult<PipelineExecutionResult> {
+    pub fn run_pipeline(
+        yaml: &str,
+        envelope: &Envelope,
+    ) -> PipelineResult<PipelineExecutionResult> {
         let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
         pipeline.run(envelope)
     }
@@ -996,7 +1030,13 @@ stages:
         assert_eq!(StageTarget::Device.to_string(), "device");
         assert_eq!(StageTarget::Auto.to_string(), "auto");
         assert_eq!(StageTarget::Cloud.to_string(), "cloud");
-        assert_eq!(StageTarget::Integration { provider: "openai".to_string() }.to_string(), "integration:openai");
+        assert_eq!(
+            StageTarget::Integration {
+                provider: "openai".to_string()
+            }
+            .to_string(),
+            "integration:openai"
+        );
     }
 
     #[test]
@@ -1004,7 +1044,10 @@ stages:
         assert_eq!(StageStatus::Cached.to_string(), "cached");
         assert_eq!(StageStatus::NeedsDownload.to_string(), "needs_download");
         assert_eq!(StageStatus::Integration.to_string(), "integration");
-        assert_eq!(StageStatus::Error("failed".to_string()).to_string(), "error: failed");
+        assert_eq!(
+            StageStatus::Error("failed".to_string()).to_string(),
+            "error: failed"
+        );
     }
 
     #[test]
@@ -1068,15 +1111,21 @@ stages:
         assert_eq!(stage.model_id(), "wav2vec2");
 
         // Test object format with model only
-        let stage: StageConfig = serde_yaml::from_str(r#"
+        let stage: StageConfig = serde_yaml::from_str(
+            r#"
 model: gpt-4o-mini
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         assert_eq!(stage.model_id(), "gpt-4o-mini");
 
         // Test id fallback when no model specified
-        let stage: StageConfig = serde_yaml::from_str(r#"
+        let stage: StageConfig = serde_yaml::from_str(
+            r#"
 id: asr
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         assert_eq!(stage.stage_id(), "asr");
     }
 }

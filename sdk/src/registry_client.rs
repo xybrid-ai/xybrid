@@ -35,6 +35,7 @@
 use crate::cache::CacheManager;
 use crate::model::SdkError;
 use crate::source::detect_platform;
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -43,7 +44,6 @@ use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use log::{debug, info};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryableError};
 
 pub const DEFAULT_REGISTRY_URL: &str = "https://registry.xybrid.dev";
@@ -76,7 +76,9 @@ impl RegistryClient {
     /// Create a new registry client with the specified API URLs (primary first).
     pub fn new(api_urls: Vec<String>) -> Result<Self, SdkError> {
         if api_urls.is_empty() {
-            return Err(SdkError::ConfigError("No registry URLs provided".to_string()));
+            return Err(SdkError::ConfigError(
+                "No registry URLs provided".to_string(),
+            ));
         }
 
         // Create HTTP agent with timeouts
@@ -192,9 +194,7 @@ impl RegistryClient {
     /// Tries primary URL first, falls back to secondary on failure.
     /// Automatically retries on transient failures and respects circuit breaker.
     pub fn resolve(&self, mask: &str, platform: Option<&str>) -> Result<ResolvedVariant, SdkError> {
-        let platform = platform
-            .map(String::from)
-            .unwrap_or_else(detect_platform);
+        let platform = platform.map(String::from).unwrap_or_else(detect_platform);
 
         self.execute_with_fallback(|api_url| {
             let url = format!(
@@ -379,10 +379,9 @@ impl RegistryClient {
                 "Registry {} failed with status {} (client error)",
                 operation, status
             )),
-            _ => SdkError::NetworkError(format!(
-                "Registry {} returned status {}",
-                operation, status
-            )),
+            _ => {
+                SdkError::NetworkError(format!("Registry {} returned status {}", operation, status))
+            }
         }
     }
 
@@ -439,10 +438,7 @@ impl RegistryClient {
             .last()
             .unwrap_or(&resolved.hf_repo);
 
-        self.cache
-            .cache_dir()
-            .join(model_name)
-            .join(&resolved.file)
+        self.cache.cache_dir().join(model_name).join(&resolved.file)
     }
 
     /// Fetch a model bundle, downloading if not cached.
@@ -502,10 +498,7 @@ impl RegistryClient {
                 return Ok(cache_path);
             }
             // Hash mismatch - re-download
-            info!(
-                "Cache hash mismatch for '{}', re-downloading",
-                mask
-            );
+            info!("Cache hash mismatch for '{}', re-downloading", mask);
             std::fs::remove_file(&cache_path).ok();
             remove_cached_hash(&cache_path);
         } else if cache_path.exists() {
@@ -514,7 +507,11 @@ impl RegistryClient {
                 mask
             );
         } else {
-            info!("Cache miss for '{}', downloading to {}", mask, cache_path.display());
+            info!(
+                "Cache miss for '{}', downloading to {}",
+                mask,
+                cache_path.display()
+            );
         }
 
         // Create cache directory
@@ -524,7 +521,12 @@ impl RegistryClient {
 
         // Download from HuggingFace
         info!("Downloading '{}' from {}", mask, resolved.download_url);
-        self.download_with_progress(&resolved.download_url, &cache_path, resolved.size_bytes, progress_callback)?;
+        self.download_with_progress(
+            &resolved.download_url,
+            &cache_path,
+            resolved.size_bytes,
+            progress_callback,
+        )?;
 
         // Verify hash and cache it for fast future lookups
         if !resolved.sha256.is_empty() {
@@ -670,7 +672,9 @@ impl RegistryClient {
 
     /// Clear the entire model cache.
     pub fn clear_all_cache(&mut self) -> Result<(), SdkError> {
-        self.cache.clear().map_err(|e| SdkError::CacheError(e.to_string()))?;
+        self.cache
+            .clear()
+            .map_err(|e| SdkError::CacheError(e.to_string()))?;
         Ok(())
     }
 

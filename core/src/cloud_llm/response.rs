@@ -46,7 +46,10 @@ impl LlmResponse {
 
     /// Check if generation stopped due to max tokens.
     pub fn truncated(&self) -> bool {
-        matches!(self.finish_reason.as_deref(), Some("length") | Some("max_tokens"))
+        matches!(
+            self.finish_reason.as_deref(),
+            Some("length") | Some("max_tokens")
+        )
     }
 
     /// Check if generation was blocked by content filter.

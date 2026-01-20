@@ -259,10 +259,7 @@ impl ModelHints {
 
         // Extract input_shape and determine if static
         if let Some(input_shape) = metadata.get("input_shape").and_then(|v| v.as_array()) {
-            let shape: Vec<i64> = input_shape
-                .iter()
-                .filter_map(|v| v.as_i64())
-                .collect();
+            let shape: Vec<i64> = input_shape.iter().filter_map(|v| v.as_i64()).collect();
             if !shape.is_empty() {
                 // Check if all dimensions are positive (static)
                 let is_static = shape.iter().all(|&d| d > 0);

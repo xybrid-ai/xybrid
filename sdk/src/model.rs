@@ -15,7 +15,7 @@ use std::time::Instant;
 use tempfile::TempDir;
 use xybrid_core::bundler::XyBundle;
 use xybrid_core::execution_template::{ExecutionTemplate, ModelMetadata};
-use xybrid_core::ir::{Envelope};
+use xybrid_core::ir::Envelope;
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
 use xybrid_core::template_executor::TemplateExecutor;
 
@@ -45,13 +45,9 @@ pub enum SdkError {
     #[error("Circuit breaker open: {0}")]
     CircuitOpen(String),
     #[error("Rate limited, retry after {retry_after_secs} seconds")]
-    RateLimited {
-        retry_after_secs: u64,
-    },
+    RateLimited { retry_after_secs: u64 },
     #[error("Request timeout after {timeout_ms}ms")]
-    Timeout {
-        timeout_ms: u64,
-    },
+    Timeout { timeout_ms: u64 },
 }
 
 /// Result type for SDK operations.
@@ -231,7 +227,10 @@ impl ModelLoader {
     ///
     /// # Deprecated
     /// Use `from_registry_with_platform()` instead.
-    #[deprecated(since = "0.0.17", note = "Use ModelLoader::from_registry_with_platform() instead")]
+    #[deprecated(
+        since = "0.0.17",
+        note = "Use ModelLoader::from_registry_with_platform() instead"
+    )]
     #[allow(deprecated)]
     pub fn from_legacy_registry_with_platform(
         url: &str,
@@ -386,9 +385,7 @@ impl ModelLoader {
         version: &str,
         platform: Option<&str>,
     ) -> SdkResult<XybridModel> {
-        let platform = platform
-            .map(String::from)
-            .unwrap_or_else(detect_platform);
+        let platform = platform.map(String::from).unwrap_or_else(detect_platform);
 
         // Build bundle URL
         let bundle_url = format!(
@@ -401,8 +398,7 @@ impl ModelLoader {
         );
 
         // Download bundle to temp file
-        let temp_dir =
-            TempDir::new().map_err(|e| SdkError::IoError(e))?;
+        let temp_dir = TempDir::new().map_err(|e| SdkError::IoError(e))?;
         let bundle_path = temp_dir.path().join(format!("{}.xyb", model_id));
 
         // Use blocking HTTP client
@@ -616,10 +612,7 @@ impl XybridModel {
 
     /// Check if the model is currently loaded.
     pub fn is_loaded(&self) -> bool {
-        self.handle
-            .read()
-            .map(|h| h.loaded)
-            .unwrap_or(false)
+        self.handle.read().map(|h| h.loaded).unwrap_or(false)
     }
 
     /// Check if this model supports streaming.
@@ -644,9 +637,10 @@ impl XybridModel {
     pub fn run(&self, envelope: &Envelope) -> SdkResult<InferenceResult> {
         let start = Instant::now();
 
-        let mut handle = self.handle.write().map_err(|_| {
-            SdkError::InferenceError("Failed to acquire model lock".to_string())
-        })?;
+        let mut handle = self
+            .handle
+            .write()
+            .map_err(|_| SdkError::InferenceError("Failed to acquire model lock".to_string()))?;
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -668,11 +662,14 @@ impl XybridModel {
             target: Some("local".to_string()),
             latency_ms: Some(latency_ms),
             error: None,
-            data: Some(serde_json::json!({
-                "model_id": self.model_id,
-                "version": self.version,
-                "output_type": format!("{:?}", self.output_type),
-            }).to_string()),
+            data: Some(
+                serde_json::json!({
+                    "model_id": self.model_id,
+                    "version": self.version,
+                    "output_type": format!("{:?}", self.output_type),
+                })
+                .to_string(),
+            ),
             timestamp_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
@@ -718,11 +715,14 @@ impl XybridModel {
                 target: Some("local".to_string()),
                 latency_ms: Some(latency_ms),
                 error: None,
-                data: Some(serde_json::json!({
-                    "model_id": model_id,
-                    "version": version,
-                    "output_type": format!("{:?}", output_type),
-                }).to_string()),
+                data: Some(
+                    serde_json::json!({
+                        "model_id": model_id,
+                        "version": version,
+                        "output_type": format!("{:?}", output_type),
+                    })
+                    .to_string(),
+                ),
                 timestamp_ms: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as u64)
@@ -765,9 +765,10 @@ impl XybridModel {
             return Err(SdkError::StreamingNotSupported);
         }
 
-        let handle = self.handle.read().map_err(|_| {
-            SdkError::InferenceError("Failed to acquire model lock".to_string())
-        })?;
+        let handle = self
+            .handle
+            .read()
+            .map_err(|_| SdkError::InferenceError("Failed to acquire model lock".to_string()))?;
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -792,9 +793,10 @@ impl XybridModel {
     ///
     /// The model can be reloaded by creating a new ModelLoader.
     pub fn unload(&self) -> SdkResult<()> {
-        let mut handle = self.handle.write().map_err(|_| {
-            SdkError::InferenceError("Failed to acquire model lock".to_string())
-        })?;
+        let mut handle = self
+            .handle
+            .write()
+            .map_err(|_| SdkError::InferenceError("Failed to acquire model lock".to_string()))?;
 
         handle.loaded = false;
         // Clear the session cache (drop executor and recreate empty)
