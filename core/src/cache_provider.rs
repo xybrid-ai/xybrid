@@ -29,7 +29,7 @@
 //! ```
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+// use std::sync::Arc;
 
 /// Abstract interface for checking model cache availability.
 ///

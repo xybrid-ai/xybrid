@@ -1,6 +1,5 @@
 use integration_tests::fixtures;
-use xybrid_core::pipeline::{PipelineConfig, PipelineRunner, RunnerConfig};
-use xybrid_core::context::DeviceMetrics;
+use xybrid_core::pipeline::{PipelineConfig};
 
 #[test]
 fn test_downloaded_models_existence() {

@@ -33,9 +33,4 @@ mod response;
 pub use client::LlmClient;
 pub use error::LlmError;
 pub use request::{LlmRequest, Message, Role};
-pub use response::{LlmResponse, Usage};
-
-/// Re-export provider types from pipeline module for convenience.
-pub use crate::pipeline::{
-    AnthropicOptions, IntegrationProvider as LlmProvider, OpenAIOptions, ProviderConfig,
-};
+pub use response::{LlmResponse};
