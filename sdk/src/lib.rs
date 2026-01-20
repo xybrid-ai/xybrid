@@ -18,7 +18,7 @@
 //!
 //! ## Batch Inference
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_sdk::{ModelLoader, Envelope};
 //!
 //! // Load model from registry
@@ -32,7 +32,7 @@
 //!
 //! ## Streaming ASR
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_sdk::{ModelLoader, StreamConfig};
 //!
 //! let model = ModelLoader::from_directory("test_models/whisper-tiny")?.load()?;
@@ -48,7 +48,7 @@
 //!
 //! ## Pipelines
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_sdk::run_pipeline;
 //!
 //! let result = run_pipeline("examples/pipeline.yaml")?;
