@@ -5,11 +5,11 @@
 //! - Computing cosine similarity between embeddings
 //! - Comparing similar vs dissimilar sentence pairs
 
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use xybrid_core::execution_template::ModelMetadata;
-use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::testing::model_fixtures;
 
 /// Compute cosine similarity between two vectors
@@ -109,7 +109,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Compute cosine similarity
         let similarity = cosine_similarity(&embedding1, &embedding2);
-        println!("📊 Cosine Similarity: {:.4} ({:.1}%)", similarity, similarity * 100.0);
+        println!(
+            "📊 Cosine Similarity: {:.4} ({:.1}%)",
+            similarity,
+            similarity * 100.0
+        );
         println!();
 
         // Interpretation

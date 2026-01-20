@@ -23,7 +23,10 @@ fn main() {
 
     // Create a LocalAuthority (default, offline)
     let authority = LocalAuthority::new();
-    println!("Authority: {} (fully offline, no phone-home)\n", authority.name());
+    println!(
+        "Authority: {} (fully offline, no phone-home)\n",
+        authority.name()
+    );
 
     // ═══════════════════════════════════════════════════════════════════════════
     // SCENARIO 1: Single Model Execution - ASR (Speech Recognition)
@@ -38,8 +41,8 @@ fn main() {
     println!("└─────────────────────────────────────────────────────────────────┘");
 
     let low_end_metrics = DeviceMetrics {
-        network_rtt: 350, // High latency (poor connection)
-        battery: 12,      // Low battery
+        network_rtt: 350,  // High latency (poor connection)
+        battery: 12,       // Low battery
         temperature: 42.0, // Running hot
     };
 
@@ -51,8 +54,8 @@ fn main() {
     println!("└─────────────────────────────────────────────────────────────────┘");
 
     let high_end_metrics = DeviceMetrics {
-        network_rtt: 45,  // Low latency (fast connection)
-        battery: 85,      // Good battery
+        network_rtt: 45,   // Low latency (fast connection)
+        battery: 85,       // Good battery
         temperature: 32.0, // Cool
     };
 
@@ -85,8 +88,8 @@ fn main() {
     println!("└─────────────────────────────────────────────────────────────────┘");
 
     let high_end_metrics = DeviceMetrics {
-        network_rtt: 30,  // Excellent latency
-        battery: 92,      // Full battery
+        network_rtt: 30,   // Excellent latency
+        battery: 92,       // Full battery
         temperature: 28.0, // Cool
     };
 
@@ -165,8 +168,16 @@ fn demo_pipeline(authority: &LocalAuthority, metrics: &DeviceMetrics) {
 
     let stages = vec![
         ("asr", "whisper-tiny", EnvelopeKind::Audio(vec![])),
-        ("llm", "qwen2.5-0.5b", EnvelopeKind::Text("transcribed text".to_string())),
-        ("tts", "kokoro-82m", EnvelopeKind::Text("response text".to_string())),
+        (
+            "llm",
+            "qwen2.5-0.5b",
+            EnvelopeKind::Text("transcribed text".to_string()),
+        ),
+        (
+            "tts",
+            "kokoro-82m",
+            EnvelopeKind::Text("response text".to_string()),
+        ),
     ];
 
     println!("\n  Stage Routing Decisions:\n");
@@ -245,7 +256,10 @@ fn demo_explicit_target(authority: &LocalAuthority, metrics: &DeviceMetrics) {
 
     let decision_forced = authority.resolve_target(&context_forced);
     println!("\n  [FORCED] Medical ASR with target=device:");
-    println!("    → {} ({})", decision_forced.result, decision_forced.reason);
+    println!(
+        "    → {} ({})",
+        decision_forced.result, decision_forced.reason
+    );
     println!("\n  📋 HIPAA Compliance: Data never leaves the device!");
 }
 

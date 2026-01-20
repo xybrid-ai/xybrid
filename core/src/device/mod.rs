@@ -39,8 +39,8 @@ pub mod types;
 pub mod common;
 
 // Platform-specific detection
-pub mod apple;
 pub mod android;
+pub mod apple;
 
 // Main detection logic
 pub mod capabilities;

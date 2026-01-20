@@ -83,11 +83,7 @@ pub trait InferenceBackend: Send + Sync {
     /// # Returns
     ///
     /// Ok(()) on success, or BackendError on failure
-    fn load_model(
-        &mut self,
-        model_path: &Path,
-        config_path: Option<&Path>,
-    ) -> BackendResult<()>;
+    fn load_model(&mut self, model_path: &Path, config_path: Option<&Path>) -> BackendResult<()>;
 
     /// Run inference with tensor inputs
     ///

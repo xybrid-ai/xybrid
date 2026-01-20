@@ -46,16 +46,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     stage.name, stage.model_file, stage.execution_mode
                 );
             }
-            println!(
-                "   ✓ Config keys: {:?}",
-                config.keys().collect::<Vec<_>>()
-            );
+            println!("   ✓ Config keys: {:?}", config.keys().collect::<Vec<_>>());
         }
         xybrid_core::execution_template::ExecutionTemplate::Onnx { model_file } => {
             println!("   ✓ Execution: Onnx ({})", model_file);
         }
-        xybrid_core::execution_template::ExecutionTemplate::SafeTensors { model_file, architecture, .. } => {
-            println!("   ✓ Execution: SafeTensors ({}, arch: {:?})", model_file, architecture);
+        xybrid_core::execution_template::ExecutionTemplate::SafeTensors {
+            model_file,
+            architecture,
+            ..
+        } => {
+            println!(
+                "   ✓ Execution: SafeTensors ({}, arch: {:?})",
+                model_file, architecture
+            );
         }
         _ => println!("   ✓ Execution: Other template type"),
     }

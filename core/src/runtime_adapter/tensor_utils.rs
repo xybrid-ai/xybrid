@@ -40,10 +40,8 @@ pub fn envelope_to_tensors(
     let input_name = &input_names[0]; // Use first input name
 
     // Check if envelope has shape metadata (from preprocessed tensor)
-    let shape_from_metadata: Option<Vec<i64>> = envelope
-        .metadata
-        .get("tensor_shape")
-        .and_then(|s| {
+    let shape_from_metadata: Option<Vec<i64>> =
+        envelope.metadata.get("tensor_shape").and_then(|s| {
             let parts: Result<Vec<i64>, _> = s.split(',').map(|p| p.parse::<i64>()).collect();
             parts.ok()
         });
@@ -94,9 +92,9 @@ pub fn tensors_to_envelope(
 
     // Use first output for now
     let output_name = output_names.get(0).map(|s| s.as_str()).unwrap_or("output");
-    let output = outputs.get(output_name).ok_or_else(|| {
-        AdapterError::InvalidInput(format!("Output '{}' not found", output_name))
-    })?;
+    let output = outputs
+        .get(output_name)
+        .ok_or_else(|| AdapterError::InvalidInput(format!("Output '{}' not found", output_name)))?;
 
     // Convert tensor to embedding, preserving shape in metadata
     let data = output
@@ -148,7 +146,9 @@ fn audio_to_tensor(audio_data: &[u8], target_shape: &[i64]) -> AdapterResult<Arr
     let samples = decode_audio_to_samples(audio_data)?;
 
     if samples.is_empty() {
-        return Err(AdapterError::InvalidInput("Audio data is empty".to_string()));
+        return Err(AdapterError::InvalidInput(
+            "Audio data is empty".to_string(),
+        ));
     }
 
     // Determine output shape based on target_shape
@@ -156,18 +156,42 @@ fn audio_to_tensor(audio_data: &[u8], target_shape: &[i64]) -> AdapterResult<Arr
     // Models like Whisper may expect [batch, channels, samples] (3D)
     let final_shape: Vec<usize> = if target_shape.len() == 2 {
         // 2D shape [batch, samples] - most common for wav2vec2
-        let batch = if target_shape[0] == -1 { 1 } else { target_shape[0] as usize };
-        let num_samples = if target_shape[1] == -1 { samples.len() } else { target_shape[1] as usize };
+        let batch = if target_shape[0] == -1 {
+            1
+        } else {
+            target_shape[0] as usize
+        };
+        let num_samples = if target_shape[1] == -1 {
+            samples.len()
+        } else {
+            target_shape[1] as usize
+        };
         vec![batch, num_samples]
     } else if target_shape.len() == 3 {
         // 3D shape [batch, channels, samples] - for Whisper-style models
-        let batch = if target_shape[0] == -1 { 1 } else { target_shape[0] as usize };
-        let channels = if target_shape[1] == -1 { 1 } else { target_shape[1] as usize };
-        let num_samples = if target_shape[2] == -1 { samples.len() } else { target_shape[2] as usize };
+        let batch = if target_shape[0] == -1 {
+            1
+        } else {
+            target_shape[0] as usize
+        };
+        let channels = if target_shape[1] == -1 {
+            1
+        } else {
+            target_shape[1] as usize
+        };
+        let num_samples = if target_shape[2] == -1 {
+            samples.len()
+        } else {
+            target_shape[2] as usize
+        };
         vec![batch, channels, num_samples]
     } else if target_shape.len() == 1 {
         // 1D shape - add batch dimension to make 2D for model compatibility
-        let num_samples = if target_shape[0] == -1 { samples.len() } else { target_shape[0] as usize };
+        let num_samples = if target_shape[0] == -1 {
+            samples.len()
+        } else {
+            target_shape[0] as usize
+        };
         vec![1, num_samples]
     } else {
         return Err(AdapterError::InvalidInput(format!(
@@ -213,15 +237,14 @@ fn decode_audio_to_samples(audio_data: &[u8]) -> AdapterResult<Vec<f32>> {
             // Read samples as f32
             let samples: Vec<f32> = match spec.sample_format {
                 hound::SampleFormat::Float => {
-                    reader.samples::<f32>()
-                        .filter_map(|s| s.ok())
-                        .collect()
+                    reader.samples::<f32>().filter_map(|s| s.ok()).collect()
                 }
                 hound::SampleFormat::Int => {
                     // Convert int samples to f32 normalized to [-1.0, 1.0]
                     let bits = spec.bits_per_sample;
                     let max_value = (1 << (bits - 1)) as f32;
-                    reader.samples::<i32>()
+                    reader
+                        .samples::<i32>()
                         .filter_map(|s| s.ok())
                         .map(|s| s as f32 / max_value)
                         .collect()
@@ -231,7 +254,8 @@ fn decode_audio_to_samples(audio_data: &[u8]) -> AdapterResult<Vec<f32>> {
             // Convert to mono if needed
             let mono_samples = if source_channels > 1 {
                 // Average channels for mono conversion
-                samples.chunks(source_channels)
+                samples
+                    .chunks(source_channels)
                     .map(|chunk| chunk.iter().sum::<f32>() / source_channels as f32)
                     .collect()
             } else {
@@ -259,9 +283,10 @@ fn decode_audio_to_samples(audio_data: &[u8]) -> AdapterResult<Vec<f32>> {
         Err(_) => {
             // Not a WAV file, try raw PCM (16-bit little-endian)
             if audio_data.len() % 2 != 0 {
-                return Err(AdapterError::InvalidInput(
-                    format!("Audio data length ({}) must be even for 16-bit PCM", audio_data.len())
-                ));
+                return Err(AdapterError::InvalidInput(format!(
+                    "Audio data length ({}) must be even for 16-bit PCM",
+                    audio_data.len()
+                )));
             }
 
             let samples: Vec<f32> = audio_data
@@ -311,15 +336,20 @@ fn text_to_tensor(text: &str, target_shape: &[i64]) -> AdapterResult<ArrayD<f32>
         let shape: Vec<usize> = if target_shape == &[-1] {
             vec![actual_size]
         } else if target_shape.len() == 2 {
-            let batch = if target_shape[0] > 0 { target_shape[0] as usize } else { 1 };
+            let batch = if target_shape[0] > 0 {
+                target_shape[0] as usize
+            } else {
+                1
+            };
             vec![batch, actual_size]
         } else {
             vec![actual_size]
         };
 
         let tokens_f32: Vec<f32> = tokens.iter().map(|&t| t as f32).collect();
-        return Array::from_shape_vec(IxDyn(&shape), tokens_f32)
-            .map_err(|e| AdapterError::RuntimeError(format!("Failed to create text tensor: {}", e)));
+        return Array::from_shape_vec(IxDyn(&shape), tokens_f32).map_err(|e| {
+            AdapterError::RuntimeError(format!("Failed to create text tensor: {}", e))
+        });
     }
 
     // Calculate expected size from static shape
@@ -373,16 +403,25 @@ fn embedding_to_tensor(embedding: &[f32], target_shape: &[i64]) -> AdapterResult
             vec![actual_size]
         } else if target_shape.len() == 2 {
             // 2D with dynamics: [batch, features] or similar
-            let batch = if target_shape[0] > 0 { target_shape[0] as usize } else { 1 };
-            let features = if target_shape[1] > 0 { target_shape[1] as usize } else { actual_size / batch };
+            let batch = if target_shape[0] > 0 {
+                target_shape[0] as usize
+            } else {
+                1
+            };
+            let features = if target_shape[1] > 0 {
+                target_shape[1] as usize
+            } else {
+                actual_size / batch
+            };
             vec![batch, features]
         } else {
             // Fallback: treat as 1D
             vec![actual_size]
         };
 
-        return Array::from_shape_vec(IxDyn(&shape), embedding.to_vec())
-            .map_err(|e| AdapterError::RuntimeError(format!("Failed to create embedding tensor: {}", e)));
+        return Array::from_shape_vec(IxDyn(&shape), embedding.to_vec()).map_err(|e| {
+            AdapterError::RuntimeError(format!("Failed to create embedding tensor: {}", e))
+        });
     }
 
     // Calculate expected size from static shape
@@ -399,8 +438,9 @@ fn embedding_to_tensor(embedding: &[f32], target_shape: &[i64]) -> AdapterResult
     // Create tensor with specified shape
     let shape: Vec<usize> = target_shape.iter().map(|&s| s as usize).collect();
 
-    Array::from_shape_vec(IxDyn(&shape), embedding.to_vec())
-        .map_err(|e| AdapterError::RuntimeError(format!("Failed to create embedding tensor: {}", e)))
+    Array::from_shape_vec(IxDyn(&shape), embedding.to_vec()).map_err(|e| {
+        AdapterError::RuntimeError(format!("Failed to create embedding tensor: {}", e))
+    })
 }
 
 #[cfg(test)]
@@ -459,4 +499,3 @@ mod tests {
         assert!(tensors.contains_key("text_input"));
     }
 }
-

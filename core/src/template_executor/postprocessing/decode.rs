@@ -5,9 +5,9 @@
 //! - `bpe_decode_step`: BPE token decoding
 //! - `whisper_decode_step`: Whisper token decoding using HuggingFace tokenizer
 
+use super::super::types::{ExecutorResult, RawOutputs};
 use crate::runtime_adapter::AdapterError;
 use ndarray::IxDyn;
-use super::super::types::{ExecutorResult, RawOutputs};
 
 /// CTC decoding for Wav2Vec2-style models.
 ///
@@ -30,9 +30,10 @@ pub fn ctc_decode_step(
     };
 
     // Get logits tensor (usually "logits" output)
-    let logits = tensor_map.values().next().ok_or_else(|| {
-        AdapterError::InvalidInput("No outputs for CTCDecode".to_string())
-    })?;
+    let logits = tensor_map
+        .values()
+        .next()
+        .ok_or_else(|| AdapterError::InvalidInput("No outputs for CTCDecode".to_string()))?;
 
     let shape = logits.shape();
     // Expected shape: [batch, time_steps, vocab_size]
@@ -125,17 +126,16 @@ pub fn whisper_decode_step(data: RawOutputs, tokenizer_path: &str) -> ExecutorRe
 /// Decode CTC tokens to text (for Wav2Vec2-style models).
 fn decode_ctc_tokens(token_ids: &[usize], vocab_path: &str) -> ExecutorResult<String> {
     // Load vocabulary
-    let content = std::fs::read_to_string(vocab_path).map_err(|e| {
-        AdapterError::InvalidInput(format!("Failed to read vocab file: {}", e))
-    })?;
+    let content = std::fs::read_to_string(vocab_path)
+        .map_err(|e| AdapterError::InvalidInput(format!("Failed to read vocab file: {}", e)))?;
 
     // Try to parse as JSON first (Wav2Vec2 format: {"char": id, ...})
     let json_vocab = if content.trim().starts_with('{') {
         // Parse JSON vocab: {"'": 27, "A": 7, "B": 24, ...}
-        let json_vocab =
-            serde_json::from_str::<std::collections::HashMap<String, usize>>(&content).map_err(
-                |e| AdapterError::InvalidInput(format!("Failed to parse vocab JSON: {}", e)),
-            )?;
+        let json_vocab = serde_json::from_str::<std::collections::HashMap<String, usize>>(&content)
+            .map_err(|e| {
+                AdapterError::InvalidInput(format!("Failed to parse vocab JSON: {}", e))
+            })?;
 
         // Create reverse mapping: id -> char
         let max_id = json_vocab.values().max().copied().unwrap_or(0);
@@ -155,7 +155,10 @@ fn decode_ctc_tokens(token_ids: &[usize], vocab_path: &str) -> ExecutorResult<St
         jv
     } else {
         // Plain text format: one token per line
-        content.lines().map(|line| line.trim().to_string()).collect()
+        content
+            .lines()
+            .map(|line| line.trim().to_string())
+            .collect()
     };
 
     // Build text from token IDs
@@ -185,7 +188,10 @@ fn decode_bpe_tokens(token_ids: &[usize], vocab_path: &str) -> ExecutorResult<St
     let content = std::fs::read_to_string(vocab_path)
         .map_err(|e| AdapterError::InvalidInput(format!("Failed to read vocab file: {}", e)))?;
 
-    let tokens: Vec<String> = content.lines().map(|line| line.trim().to_string()).collect();
+    let tokens: Vec<String> = content
+        .lines()
+        .map(|line| line.trim().to_string())
+        .collect();
 
     // Decode tokens
     let mut decoded_bytes = Vec::new();

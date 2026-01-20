@@ -23,7 +23,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !model_dir.exists() {
         eprintln!("❌ Model directory not found: {}", model_dir.display());
         eprintln!("   Please download the model first:");
-        eprintln!("   curl -L -o test_models/qwen2.5-0.5b-instruct/qwen2.5-0.5b-instruct-q4_k_m.gguf \\");
+        eprintln!(
+            "   curl -L -o test_models/qwen2.5-0.5b-instruct/qwen2.5-0.5b-instruct-q4_k_m.gguf \\"
+        );
         eprintln!("     https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf");
         return Err("Model not found".into());
     }

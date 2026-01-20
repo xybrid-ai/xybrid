@@ -31,21 +31,27 @@
 //! For broader format support (24-bit PCM, extensible format, metadata chunks),
 //! consider the [`hound`](https://crates.io/crates/hound) crate as a future enhancement.
 
-mod format;
-mod envelope;
 mod convert;
+mod envelope;
+mod format;
 pub mod mel;
 pub mod vad;
 
-pub use format::{AudioFormat, AudioFormatError};
+pub use convert::{
+    decode_wav_audio, f32_to_pcm16, normalize_pcm16_to_f32, prepare_audio_samples, resample_audio,
+    samples_to_wav, ResampleMethod,
+};
 pub use envelope::{AudioEnvelope, AudioEnvelopeError};
-pub use convert::{resample_audio, normalize_pcm16_to_f32, f32_to_pcm16, samples_to_wav, ResampleMethod, decode_wav_audio, prepare_audio_samples};
+pub use format::{AudioFormat, AudioFormatError};
 
 // New unified mel spectrogram API
 pub use mel::{compute_mel_spectrogram, MelConfig, MelScale, PaddingMode};
 
 // Legacy re-exports for backwards compatibility
-pub use mel::whisper::{WhisperMelConfig, compute_whisper_mel};
+pub use mel::whisper::{compute_whisper_mel, WhisperMelConfig};
 
 // Voice Activity Detection
-pub use vad::{VadSession, VadConfig, VadSampleRate, VadError, VadResult, VadFrame, SpeechSegment, VadSessionState, SimpleVad};
+pub use vad::{
+    SimpleVad, SpeechSegment, VadConfig, VadError, VadFrame, VadResult, VadSampleRate, VadSession,
+    VadSessionState,
+};

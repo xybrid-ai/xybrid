@@ -85,8 +85,15 @@ pub fn format_system_time(time: std::time::SystemTime) -> String {
     let month = ((days % 365) / 30) + 1;
     let day = ((days % 365) % 30) + 1;
 
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-            year, month.min(12), day.min(31), hours, mins, secs_part)
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        year,
+        month.min(12),
+        day.min(31),
+        hours,
+        mins,
+        secs_part
+    )
 }
 
 /// Display a stage name, stripping any "@target" suffix.

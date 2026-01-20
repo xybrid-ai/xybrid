@@ -19,8 +19,5 @@
 pub mod mel_spectrogram;
 
 pub use mel_spectrogram::{
-    MelSpectrogramStep,
-    MelSpectrogramConfig,
-    audio_to_whisper_mel,
-    audio_bytes_to_whisper_mel,
+    audio_bytes_to_whisper_mel, audio_to_whisper_mel, MelSpectrogramConfig, MelSpectrogramStep,
 };

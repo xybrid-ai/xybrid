@@ -6,9 +6,9 @@
 //! Run with:
 //!   cargo run --example single_model_inference -p xybrid-sdk --features local-llm
 
-use xybrid_sdk::ir::{Envelope, EnvelopeKind};
-use xybrid_sdk::{PipelineRef, DownloadProgress};
 use std::collections::HashMap;
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::{DownloadProgress, PipelineRef};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
@@ -58,7 +58,10 @@ stages:
     println!();
 
     let mut metadata = HashMap::new();
-    metadata.insert("system_prompt".to_string(), "You are a helpful assistant.".to_string());
+    metadata.insert(
+        "system_prompt".to_string(),
+        "You are a helpful assistant.".to_string(),
+    );
     metadata.insert("max_tokens".to_string(), "128".to_string());
 
     let input = Envelope {

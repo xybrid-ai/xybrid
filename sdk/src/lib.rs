@@ -65,8 +65,8 @@ use std::fs;
 use tokio::sync::mpsc;
 use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
-use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
+use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 
 // ============================================================================
 // Module Declarations
@@ -97,26 +97,41 @@ pub use xybrid_core::template_executor;
 
 // SDK types (new API)
 pub use cache::{CacheManager, CacheStatus, SdkCacheProvider};
-pub use model::{ModelLoader, SdkResult, StreamConfig, XybridModel};
 pub use model::SdkError;
-pub use registry_client::{RegistryClient, ModelSummary, ResolvedVariant, CacheStats};
+pub use model::{ModelLoader, SdkResult, StreamConfig, XybridModel};
+pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
 // Pipeline API (PipelineRef → Pipeline)
 pub use pipeline::{
-    PipelineRef, Pipeline, StageInfo, StageStatus, StageTarget, DownloadProgress, Xybrid,
-    PipelineExecutionResult, PipelineInputType,
-    StageTiming as PipelineStageTiming,  // Alias to avoid conflict with legacy StageTiming
+    DownloadProgress,
+    Pipeline,
+    PipelineExecutionResult,
+    PipelineInputType,
+    PipelineRef,
+    StageInfo,
+    StageStatus,
+    StageTarget,
+    StageTiming as PipelineStageTiming, // Alias to avoid conflict with legacy StageTiming
+    Xybrid,
 };
 pub use result::{InferenceResult, OutputType};
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 pub use telemetry::{
-    register_telemetry_sender, publish_telemetry_event, TelemetryEvent, TelemetrySender,
-    // Platform telemetry exports
-    TelemetryConfig, HttpTelemetryExporter,
-    init_platform_telemetry, init_platform_telemetry_from_env,
-    set_telemetry_pipeline_context, flush_platform_telemetry, shutdown_platform_telemetry,
     // Orchestrator event bridge
-    bridge_orchestrator_events, convert_orchestrator_event,
+    bridge_orchestrator_events,
+    convert_orchestrator_event,
+    flush_platform_telemetry,
+    init_platform_telemetry,
+    init_platform_telemetry_from_env,
+    publish_telemetry_event,
+    register_telemetry_sender,
+    set_telemetry_pipeline_context,
+    shutdown_platform_telemetry,
+    HttpTelemetryExporter,
+    // Platform telemetry exports
+    TelemetryConfig,
+    TelemetryEvent,
+    TelemetrySender,
 };
 
 /// Re-export OrchestratorEvent for event subscriptions
@@ -182,7 +197,10 @@ pub fn get_sdk_cache_dir() -> Option<std::path::PathBuf> {
 
 /// Check if the SDK cache directory has been configured.
 pub fn is_sdk_cache_configured() -> bool {
-    SDK_CONFIG.get().and_then(|c| c.cache_dir.as_ref()).is_some()
+    SDK_CONFIG
+        .get()
+        .and_then(|c| c.cache_dir.as_ref())
+        .is_some()
 }
 
 /// Set the Xybrid API key for gateway authentication.
@@ -262,8 +280,10 @@ pub fn has_api_key() -> bool {
 pub mod prelude {
     pub use xybrid_core::context::{DeviceMetrics, StageDescriptor};
     pub use xybrid_core::ir::{Envelope, EnvelopeKind};
+    pub use xybrid_core::orchestrator::routing_engine::{
+        LocalAvailability, RouteTarget, RoutingDecision,
+    };
     pub use xybrid_core::orchestrator::{Orchestrator, OrchestratorError, StageExecutionResult};
-    pub use xybrid_core::orchestrator::routing_engine::{LocalAvailability, RouteTarget, RoutingDecision};
 }
 
 /// Async event stream for subscribing to orchestrator events.

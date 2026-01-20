@@ -206,8 +206,14 @@ impl ConditionEvaluator {
                 let result = match op {
                     "==" => Self::values_equal(&left_val, &right_val),
                     "!=" => !Self::values_equal(&left_val, &right_val),
-                    ">" => Self::compare_values(&left_val, &right_val) == Some(std::cmp::Ordering::Greater),
-                    "<" => Self::compare_values(&left_val, &right_val) == Some(std::cmp::Ordering::Less),
+                    ">" => {
+                        Self::compare_values(&left_val, &right_val)
+                            == Some(std::cmp::Ordering::Greater)
+                    }
+                    "<" => {
+                        Self::compare_values(&left_val, &right_val)
+                            == Some(std::cmp::Ordering::Less)
+                    }
                     ">=" => matches!(
                         Self::compare_values(&left_val, &right_val),
                         Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
@@ -452,13 +458,18 @@ impl ConditionEvaluator {
     fn values_equal(a: &Value, b: &Value) -> bool {
         match (a, b) {
             (Value::String(a), Value::String(b)) => a == b,
-            (Value::Number(a), Value::Number(b)) => {
-                a.as_f64().zip(b.as_f64()).map(|(a, b)| (a - b).abs() < f64::EPSILON).unwrap_or(false)
-            }
+            (Value::Number(a), Value::Number(b)) => a
+                .as_f64()
+                .zip(b.as_f64())
+                .map(|(a, b)| (a - b).abs() < f64::EPSILON)
+                .unwrap_or(false),
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Null, Value::Null) => true,
             (Value::Array(a), Value::Array(b)) => {
-                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| Self::values_equal(x, y))
+                a.len() == b.len()
+                    && a.iter()
+                        .zip(b.iter())
+                        .all(|(x, y)| Self::values_equal(x, y))
             }
             _ => false,
         }
@@ -656,8 +667,7 @@ mod tests {
     fn test_function_contains() {
         let ctx = test_context();
 
-        let result =
-            ConditionEvaluator::evaluate("contains(asr.output.text, 'weather')", &ctx);
+        let result = ConditionEvaluator::evaluate("contains(asr.output.text, 'weather')", &ctx);
         assert!(result.is_satisfied());
 
         let result = ConditionEvaluator::evaluate("contains(asr.output.text, 'music')", &ctx);

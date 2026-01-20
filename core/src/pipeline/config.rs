@@ -285,7 +285,7 @@ stages:
     fn test_pipeline_config_roundtrip() {
         let input = InputConfig::audio(AudioInputConfig::asr_default());
         let stages = vec![
-            StageConfig::new("asr", "wav2vec2-base-960h").with_target(ExecutionTarget::Device),
+            StageConfig::new("asr", "wav2vec2-base-960h").with_target(ExecutionTarget::Device)
         ];
 
         let pipeline = PipelineConfig::new(input, stages)

@@ -38,9 +38,7 @@ impl MetadataDrivenAdapter {
     pub fn with_base_path(base_path: impl Into<PathBuf>) -> Self {
         let base_path_buf = base_path.into();
         Self {
-            executor: TemplateExecutor::with_base_path(
-                &base_path_buf.to_string_lossy()
-            ),
+            executor: TemplateExecutor::with_base_path(&base_path_buf.to_string_lossy()),
             current_metadata: None,
             base_path: base_path_buf,
         }
@@ -73,19 +71,15 @@ impl MetadataDrivenAdapter {
         })?;
 
         // Parse metadata
-        let metadata: ExecutionModelMetadata = serde_json::from_str(&metadata_json).map_err(|e| {
-            AdapterError::InvalidInput(format!(
-                "Failed to parse metadata JSON: {}",
-                e
-            ))
-        })?;
+        let metadata: ExecutionModelMetadata =
+            serde_json::from_str(&metadata_json).map_err(|e| {
+                AdapterError::InvalidInput(format!("Failed to parse metadata JSON: {}", e))
+            })?;
 
         // Update base path to metadata file's directory
         if let Some(parent) = path.parent() {
             self.base_path = parent.to_path_buf();
-            self.executor = TemplateExecutor::with_base_path(
-                &parent.to_string_lossy()
-            );
+            self.executor = TemplateExecutor::with_base_path(&parent.to_string_lossy());
         }
 
         self.current_metadata = Some(metadata);
@@ -96,10 +90,7 @@ impl MetadataDrivenAdapter {
     /// Load model metadata from a JSON string
     pub fn load_metadata_from_json(&mut self, json: &str) -> AdapterResult<()> {
         let metadata: ExecutionModelMetadata = serde_json::from_str(json).map_err(|e| {
-            AdapterError::InvalidInput(format!(
-                "Failed to parse metadata JSON: {}",
-                e
-            ))
+            AdapterError::InvalidInput(format!("Failed to parse metadata JSON: {}", e))
         })?;
 
         self.current_metadata = Some(metadata);
@@ -126,7 +117,7 @@ impl MetadataDrivenAdapter {
     pub fn execute(&mut self, input: &Envelope) -> AdapterResult<Envelope> {
         let metadata = self.current_metadata.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded(
-                "No metadata loaded. Call load_metadata() first.".to_string()
+                "No metadata loaded. Call load_metadata() first.".to_string(),
             )
         })?;
 

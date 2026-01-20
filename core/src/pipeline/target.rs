@@ -77,7 +77,10 @@ impl std::str::FromStr for ExecutionTarget {
             "server" | "xybrid" => Ok(ExecutionTarget::Server),
             "cloud" | "integration" | "api" => Ok(ExecutionTarget::Cloud),
             "auto" | "default" => Ok(ExecutionTarget::Auto),
-            _ => Err(format!("Unknown execution target: '{}'. Valid values: device, server, cloud, auto", s)),
+            _ => Err(format!(
+                "Unknown execution target: '{}'. Valid values: device, server, cloud, auto",
+                s
+            )),
         }
     }
 }
@@ -88,17 +91,44 @@ mod tests {
 
     #[test]
     fn test_execution_target_from_str() {
-        assert_eq!("device".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Device);
-        assert_eq!("server".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Server);
-        assert_eq!("cloud".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Cloud);
-        assert_eq!("auto".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Auto);
+        assert_eq!(
+            "device".parse::<ExecutionTarget>().unwrap(),
+            ExecutionTarget::Device
+        );
+        assert_eq!(
+            "server".parse::<ExecutionTarget>().unwrap(),
+            ExecutionTarget::Server
+        );
+        assert_eq!(
+            "cloud".parse::<ExecutionTarget>().unwrap(),
+            ExecutionTarget::Cloud
+        );
+        assert_eq!(
+            "auto".parse::<ExecutionTarget>().unwrap(),
+            ExecutionTarget::Auto
+        );
 
         // Aliases
-        assert_eq!("local".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Device);
-        assert_eq!("xybrid".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Server);
-        assert_eq!("integration".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Cloud); // backward compat
-        assert_eq!("api".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Cloud);
-        assert_eq!("default".parse::<ExecutionTarget>().unwrap(), ExecutionTarget::Auto);
+        assert_eq!(
+            "local".parse::<ExecutionTarget>().unwrap(),
+            ExecutionTarget::Device
+        );
+        assert_eq!(
+            "xybrid".parse::<ExecutionTarget>().unwrap(),
+            ExecutionTarget::Server
+        );
+        assert_eq!(
+            "integration".parse::<ExecutionTarget>().unwrap(),
+            ExecutionTarget::Cloud
+        ); // backward compat
+        assert_eq!(
+            "api".parse::<ExecutionTarget>().unwrap(),
+            ExecutionTarget::Cloud
+        );
+        assert_eq!(
+            "default".parse::<ExecutionTarget>().unwrap(),
+            ExecutionTarget::Auto
+        );
     }
 
     #[test]

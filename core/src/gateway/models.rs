@@ -261,9 +261,18 @@ mod tests {
 
     #[test]
     fn test_provider_from_str() {
-        assert_eq!("openai".parse::<ModelProvider>().unwrap(), ModelProvider::OpenAI);
-        assert_eq!("anthropic".parse::<ModelProvider>().unwrap(), ModelProvider::Anthropic);
-        assert_eq!("groq".parse::<ModelProvider>().unwrap(), ModelProvider::Groq);
+        assert_eq!(
+            "openai".parse::<ModelProvider>().unwrap(),
+            ModelProvider::OpenAI
+        );
+        assert_eq!(
+            "anthropic".parse::<ModelProvider>().unwrap(),
+            ModelProvider::Anthropic
+        );
+        assert_eq!(
+            "groq".parse::<ModelProvider>().unwrap(),
+            ModelProvider::Groq
+        );
     }
 
     #[test]

@@ -50,13 +50,13 @@ use crate::control_sync::ControlSync;
 use crate::event_bus::{EventBus, OrchestratorEvent};
 use crate::executor::Executor;
 use crate::ir::Envelope;
+use crate::streaming::manager::{StreamManager, StreamManagerConfig as StreamConfig};
+use crate::telemetry::Telemetry;
+use crate::tracing as trace;
 use policy_engine::{DefaultPolicyEngine, PolicyEngine};
 use routing_engine::{
     DefaultRoutingEngine, LocalAvailability, RouteTarget, RoutingDecision, RoutingEngine,
 };
-use crate::streaming::manager::{StreamManager, StreamManagerConfig as StreamConfig};
-use crate::telemetry::Telemetry;
-use crate::tracing as trace;
 use std::sync::Arc;
 use tokio::task;
 
@@ -323,10 +323,8 @@ impl Orchestrator {
         let target_decision = self.authority.resolve_target(&stage_context);
 
         // Convert ResolvedTarget to RoutingDecision for backward compatibility
-        let routing_decision = self.resolved_target_to_routing_decision(
-            &stage.name,
-            &target_decision,
-        );
+        let routing_decision =
+            self.resolved_target_to_routing_decision(&stage.name, &target_decision);
 
         // Emit routing decision event
         self.event_bus.publish(OrchestratorEvent::RoutingDecided {
@@ -349,9 +347,7 @@ impl Orchestrator {
             .log_execution_start(&stage.name, &routing_decision.target.to_json_string());
 
         let target = routing_decision.target.to_json_string();
-        let execution_result = self
-            .executor
-            .execute_stage(stage, &redacted_input, &target);
+        let execution_result = self.executor.execute_stage(stage, &redacted_input, &target);
 
         let (output, stage_metadata, success, error_msg) = match execution_result {
             Ok((out, meta)) => (out, meta, true, None),
@@ -531,10 +527,8 @@ impl Orchestrator {
         let target_decision = self.authority.resolve_target(&stage_context);
 
         // Convert ResolvedTarget to RoutingDecision for backward compatibility
-        let routing_decision = self.resolved_target_to_routing_decision(
-            &stage.name,
-            &target_decision,
-        );
+        let routing_decision =
+            self.resolved_target_to_routing_decision(&stage.name, &target_decision);
 
         // Emit routing decision event
         self.event_bus.publish(OrchestratorEvent::RoutingDecided {
@@ -807,9 +801,7 @@ impl Orchestrator {
         let target = match &decision.result {
             ResolvedTarget::Device => RouteTarget::Local,
             ResolvedTarget::Cloud { .. } => RouteTarget::Cloud,
-            ResolvedTarget::Server { endpoint } => {
-                RouteTarget::Fallback(endpoint.clone())
-            }
+            ResolvedTarget::Server { endpoint } => RouteTarget::Fallback(endpoint.clone()),
         };
 
         RoutingDecision {
@@ -858,7 +850,9 @@ mod tests {
         // Register a mock adapter that returns text output
         let mut adapter = MockRuntimeAdapter::with_text_output("mock output");
         adapter.load_model("/mock/model.onnx").unwrap();
-        orchestrator.executor_mut().register_adapter(Arc::new(adapter));
+        orchestrator
+            .executor_mut()
+            .register_adapter(Arc::new(adapter));
 
         orchestrator
     }
@@ -947,7 +941,10 @@ mod tests {
         let exec_result = result.unwrap();
         // LocalAuthority routes to cloud when model is not found locally
         assert_eq!(exec_result.routing_decision.target.as_str(), "cloud");
-        assert!(exec_result.routing_decision.reason.contains("model_unavailable"));
+        assert!(exec_result
+            .routing_decision
+            .reason
+            .contains("model_unavailable"));
     }
 
     #[test]

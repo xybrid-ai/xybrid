@@ -136,8 +136,9 @@ impl CacheManager {
         // Platform-specific defaults
         #[cfg(target_os = "ios")]
         {
-            let home = std::env::var("HOME")
-                .map_err(|_| SdkError::CacheError("HOME environment variable not set".to_string()))?;
+            let home = std::env::var("HOME").map_err(|_| {
+                SdkError::CacheError("HOME environment variable not set".to_string())
+            })?;
             Ok(PathBuf::from(home)
                 .join("Library")
                 .join("Application Support")
@@ -153,7 +154,8 @@ impl CacheManager {
             Err(SdkError::CacheError(
                 "Android requires cache directory to be configured. \
                 Call init_sdk_cache_dir() with a path from path_provider before loading models. \
-                Example: initSdkCacheDir('${appDir.path}/xybrid/models')".to_string()
+                Example: initSdkCacheDir('${appDir.path}/xybrid/models')"
+                    .to_string(),
             ))
         }
 

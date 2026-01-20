@@ -23,13 +23,13 @@ pub fn parse_stage_name(stage_name: &str) -> (String, Option<String>) {
         // Split at the last '@' to handle cases like "model@1.2.3"
         let (id, version) = stage_name.split_at(at_pos);
         let version_str = &version[1..]; // Skip the '@'
-        
+
         // Validate that version is not empty
         if !version_str.is_empty() {
             return (id.to_string(), Some(version_str.to_string()));
         }
     }
-    
+
     // No version found or empty version, return entire string as ID
     (stage_name.to_string(), None)
 }
@@ -81,4 +81,3 @@ mod tests {
         assert_eq!(version, None);
     }
 }
-

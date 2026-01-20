@@ -4,12 +4,12 @@
 //! a lightweight mobile-optimized architecture. Proves the system works across
 //! different model architectures (ResNet-50 heavy, MobileNet light).
 
-use std::path::PathBuf;
+use ndarray::Array4;
 use std::collections::HashMap;
-use ndarray::{Array4};
+use std::path::PathBuf;
 use xybrid_core::execution_template::ModelMetadata;
-use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::testing::model_fixtures;
 
 // ImageNet class labels (top 10 for demo)
@@ -111,7 +111,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::Embedding(output_data) => {
             println!("📊 Top-5 Predictions:");
             println!("   Output format: [class_idx, score, ...]");
-            println!("   Length: {} values ({} predictions)", output_data.len(), output_data.len() / 2);
+            println!(
+                "   Length: {} values ({} predictions)",
+                output_data.len(),
+                output_data.len() / 2
+            );
             println!();
 
             // Parse top-k results (format: [idx1, score1, idx2, score2, ...])

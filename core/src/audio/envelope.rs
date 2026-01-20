@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
-use super::convert::{multichannel_to_mono, normalize_pcm16_to_f32, resample_audio, ResampleMethod};
+use super::convert::{
+    multichannel_to_mono, normalize_pcm16_to_f32, resample_audio, ResampleMethod,
+};
 use super::format::AudioFormat;
 
 /// Type-safe audio container with rich metadata.
@@ -132,15 +134,18 @@ impl AudioEnvelope {
 
         // WAVE_FORMAT_EXTENSIBLE constants
         const WAVE_FORMAT_EXTENSIBLE: u16 = 0xFFFE; // 65534
-        // SubFormat GUIDs (first 2 bytes identify the format)
+                                                    // SubFormat GUIDs (first 2 bytes identify the format)
         const KSDATAFORMAT_SUBTYPE_PCM: u16 = 0x0001;
         const KSDATAFORMAT_SUBTYPE_IEEE_FLOAT: u16 = 0x0003;
 
         while pos + 8 <= wav_bytes.len() {
             let chunk_id = &wav_bytes[pos..pos + 4];
-            let chunk_size =
-                u32::from_le_bytes([wav_bytes[pos + 4], wav_bytes[pos + 5], wav_bytes[pos + 6], wav_bytes[pos + 7]])
-                    as usize;
+            let chunk_size = u32::from_le_bytes([
+                wav_bytes[pos + 4],
+                wav_bytes[pos + 5],
+                wav_bytes[pos + 6],
+                wav_bytes[pos + 7],
+            ]) as usize;
 
             if chunk_id == b"fmt " {
                 if pos + 8 + 16 > wav_bytes.len() {
@@ -182,7 +187,7 @@ impl AudioEnvelope {
                         audio_format = match sub_format {
                             KSDATAFORMAT_SUBTYPE_PCM => 1,        // PCM
                             KSDATAFORMAT_SUBTYPE_IEEE_FLOAT => 3, // IEEE Float
-                            _ => sub_format, // Pass through unknown formats
+                            _ => sub_format,                      // Pass through unknown formats
                         };
                     }
                 }
@@ -373,8 +378,13 @@ impl AudioEnvelope {
             return Ok(self.clone());
         }
 
-        let resampled = resample_audio(&self.samples, self.sample_rate, target_rate, ResampleMethod::Linear)
-            .map_err(|e| AudioEnvelopeError::ConversionError(e.to_string()))?;
+        let resampled = resample_audio(
+            &self.samples,
+            self.sample_rate,
+            target_rate,
+            ResampleMethod::Linear,
+        )
+        .map_err(|e| AudioEnvelopeError::ConversionError(e.to_string()))?;
 
         Ok(Self {
             samples: resampled,
@@ -411,7 +421,10 @@ impl AudioEnvelope {
         metadata.insert("channels".to_string(), self.channels.to_string());
         metadata.insert("format".to_string(), "float32".to_string());
         metadata.insert("num_samples".to_string(), self.samples.len().to_string());
-        metadata.insert("duration_ms".to_string(), format!("{:.2}", self.duration_ms()));
+        metadata.insert(
+            "duration_ms".to_string(),
+            format!("{:.2}", self.duration_ms()),
+        );
 
         Envelope {
             kind: EnvelopeKind::Audio(bytes),
@@ -442,7 +455,10 @@ impl AudioEnvelope {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
 
-        let format_str = envelope.get_metadata("format").map(|s| s.as_str()).unwrap_or("pcm16");
+        let format_str = envelope
+            .get_metadata("format")
+            .map(|s| s.as_str())
+            .unwrap_or("pcm16");
 
         let samples = match format_str {
             "float32" => {

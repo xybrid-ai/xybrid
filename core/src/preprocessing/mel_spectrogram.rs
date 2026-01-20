@@ -97,8 +97,7 @@ pub fn audio_to_whisper_mel(audio_samples: &[f32]) -> AdapterResult<ArrayD<f32>>
     }
 
     let config = WhisperMelConfig::default();
-    compute_whisper_mel(audio_samples, &config)
-        .map_err(|e| AdapterError::InvalidInput(e))
+    compute_whisper_mel(audio_samples, &config).map_err(|e| AdapterError::InvalidInput(e))
 }
 
 /// Convert audio bytes (WAV or raw PCM) to Whisper-compatible mel spectrogram.
@@ -176,9 +175,7 @@ fn parse_wav_to_samples(wav_bytes: &[u8]) -> AdapterResult<(Vec<f32>, u32)> {
 
         if chunk_id == b"fmt " {
             if pos + 8 + 16 > wav_bytes.len() {
-                return Err(AdapterError::InvalidInput(
-                    "Invalid fmt chunk".to_string(),
-                ));
+                return Err(AdapterError::InvalidInput("Invalid fmt chunk".to_string()));
             }
 
             let fmt_start = pos + 8;
@@ -229,8 +226,7 @@ fn convert_pcm_to_f32(
                 // Mix down to mono by averaging channels
                 let mut sum = 0i32;
                 for ch in 0..num_channels as usize {
-                    let sample =
-                        i16::from_le_bytes([frame[ch * 2], frame[ch * 2 + 1]]) as i32;
+                    let sample = i16::from_le_bytes([frame[ch * 2], frame[ch * 2 + 1]]) as i32;
                     sum += sample;
                 }
                 let mono = (sum / num_channels as i32) as f32 / 32768.0;

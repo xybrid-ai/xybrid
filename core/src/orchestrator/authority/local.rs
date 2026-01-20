@@ -121,11 +121,9 @@ impl Default for LocalAuthority {
 
 impl OrchestrationAuthority for LocalAuthority {
     fn apply_policy(&self, request: &PolicyRequest) -> AuthorityDecision<PolicyOutcome> {
-        let result = self.policy_engine.evaluate(
-            &request.stage_id,
-            &request.envelope,
-            &request.metrics,
-        );
+        let result =
+            self.policy_engine
+                .evaluate(&request.stage_id, &request.envelope, &request.metrics);
 
         let outcome = if result.allowed {
             if result.transforms_applied.is_empty() {
@@ -137,7 +135,10 @@ impl OrchestrationAuthority for LocalAuthority {
             }
         } else {
             PolicyOutcome::Deny {
-                reason: result.reason.clone().unwrap_or_else(|| "Policy denied".to_string()),
+                reason: result
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "Policy denied".to_string()),
             }
         };
 
@@ -207,7 +208,10 @@ impl OrchestrationAuthority for LocalAuthority {
             reason: if is_local {
                 format!("Model '{}' found locally", request.model_id)
             } else {
-                format!("Model '{}' not found locally, will fetch from registry", request.model_id)
+                format!(
+                    "Model '{}' not found locally, will fetch from registry",
+                    request.model_id
+                )
             },
             source: DecisionSource::Local,
             confidence: 1.0,
@@ -222,7 +226,10 @@ impl OrchestrationAuthority for LocalAuthority {
 
 impl LocalAuthority {
     /// Internal: resolve target using the routing engine.
-    fn resolve_with_routing_engine(&self, context: &StageContext) -> AuthorityDecision<ResolvedTarget> {
+    fn resolve_with_routing_engine(
+        &self,
+        context: &StageContext,
+    ) -> AuthorityDecision<ResolvedTarget> {
         let availability = LocalAvailability {
             local_model_exists: self.check_model_exists(&context.model_id),
         };
@@ -230,11 +237,9 @@ impl LocalAuthority {
         // Create a minimal envelope for policy check
         let envelope = Envelope::new(context.input_kind.clone());
 
-        let policy_result = self.policy_engine.evaluate(
-            &context.stage_id,
-            &envelope,
-            &context.metrics,
-        );
+        let policy_result =
+            self.policy_engine
+                .evaluate(&context.stage_id, &envelope, &context.metrics);
 
         // Use the stored routing engine (locked for interior mutability)
         let decision = {
@@ -359,7 +364,10 @@ mod tests {
         };
 
         let decision = authority.select_model(&request);
-        assert!(matches!(decision.result.source, ModelSource::Registry { .. }));
+        assert!(matches!(
+            decision.result.source,
+            ModelSource::Registry { .. }
+        ));
         assert!(decision.reason.contains("not found locally"));
     }
 
@@ -383,7 +391,11 @@ mod tests {
         // If the model is cached, verify it's the right one
         if let Some(p) = &path {
             let p_lower = p.to_lowercase();
-            assert!(p_lower.contains("kokoro"), "Expected path to contain 'kokoro', got: {}", p);
+            assert!(
+                p_lower.contains("kokoro"),
+                "Expected path to contain 'kokoro', got: {}",
+                p
+            );
         }
         // Note: If no model is cached, the test just passes (we can't require cached models in CI)
     }
@@ -404,16 +416,19 @@ mod tests {
         };
 
         let decision = authority.select_model(&request);
-        assert!(matches!(decision.result.source, ModelSource::Registry { .. }));
+        assert!(matches!(
+            decision.result.source,
+            ModelSource::Registry { .. }
+        ));
     }
 
     #[test]
     fn test_model_matching_logic() {
         // Test the matching logic directly without relying on filesystem state
         let test_cases = [
-            ("kokoro-82m", "kokoro-82m-v1.0-onnx"),      // exact hyphenated
-            ("kokoro-82m", "kokoro82mv10onnx"),          // normalized
-            ("whisper-tiny", "whisper-tiny"),            // exact match
+            ("kokoro-82m", "kokoro-82m-v1.0-onnx"), // exact hyphenated
+            ("kokoro-82m", "kokoro82mv10onnx"),     // normalized
+            ("whisper-tiny", "whisper-tiny"),       // exact match
         ];
 
         for (query, dir_name) in test_cases {
@@ -425,7 +440,11 @@ mod tests {
             let is_match = dir_name_lower.contains(&query_lower)
                 || dir_name_normalized.contains(&query_normalized);
 
-            assert!(is_match, "Expected '{}' to match '{}' but it didn't", query, dir_name);
+            assert!(
+                is_match,
+                "Expected '{}' to match '{}' but it didn't",
+                query, dir_name
+            );
         }
     }
 }

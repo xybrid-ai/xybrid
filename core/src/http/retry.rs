@@ -79,14 +79,18 @@ impl RetryPolicy {
         }
 
         // Calculate base delay with exponential backoff
-        let base_delay_ms = self.initial_delay_ms.saturating_mul(1 << (attempt - 1).min(10));
+        let base_delay_ms = self
+            .initial_delay_ms
+            .saturating_mul(1 << (attempt - 1).min(10));
         let capped_delay_ms = base_delay_ms.min(self.max_delay_ms);
 
         // Apply jitter if configured
         let final_delay_ms = if self.jitter_factor > 0.0 {
             let jitter_range = (capped_delay_ms as f32 * self.jitter_factor) as u32;
             let jitter = random_u32() % (jitter_range * 2 + 1);
-            capped_delay_ms.saturating_sub(jitter_range).saturating_add(jitter)
+            capped_delay_ms
+                .saturating_sub(jitter_range)
+                .saturating_add(jitter)
         } else {
             capped_delay_ms
         };
@@ -205,7 +209,8 @@ where
         // Calculate delay for this attempt (0 for first attempt)
         let delay = if let Some(ref err) = last_error {
             // Use server-specified retry-after if available
-            err.retry_after().unwrap_or_else(|| policy.delay_for_attempt(attempt))
+            err.retry_after()
+                .unwrap_or_else(|| policy.delay_for_attempt(attempt))
         } else {
             policy.delay_for_attempt(attempt)
         };

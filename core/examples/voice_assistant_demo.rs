@@ -58,30 +58,47 @@ impl LatencyTracker {
         println!("├─────────────────────────────────────────────────────────────────┤");
 
         if let Some(asr) = self.asr_latency {
-            println!("│  ⏱️  Stage 1 (ASR):  {:>10.2}ms                               │",
-                     asr.as_secs_f64() * 1000.0);
+            println!(
+                "│  ⏱️  Stage 1 (ASR):  {:>10.2}ms                               │",
+                asr.as_secs_f64() * 1000.0
+            );
         } else {
-            println!("│  ⏱️  Stage 1 (ASR):  {:>10}   (skipped)                      │", "-");
+            println!(
+                "│  ⏱️  Stage 1 (ASR):  {:>10}   (skipped)                      │",
+                "-"
+            );
         }
 
         if let Some(llm) = self.llm_latency {
-            println!("│  ⏱️  Stage 2 (LLM):  {:>10.2}ms                               │",
-                     llm.as_secs_f64() * 1000.0);
+            println!(
+                "│  ⏱️  Stage 2 (LLM):  {:>10.2}ms                               │",
+                llm.as_secs_f64() * 1000.0
+            );
         } else {
-            println!("│  ⏱️  Stage 2 (LLM):  {:>10}   (simulated)                    │", "-");
+            println!(
+                "│  ⏱️  Stage 2 (LLM):  {:>10}   (simulated)                    │",
+                "-"
+            );
         }
 
         if let Some(tts) = self.tts_latency {
-            println!("│  ⏱️  Stage 3 (TTS):  {:>10.2}ms                               │",
-                     tts.as_secs_f64() * 1000.0);
+            println!(
+                "│  ⏱️  Stage 3 (TTS):  {:>10.2}ms                               │",
+                tts.as_secs_f64() * 1000.0
+            );
         } else {
-            println!("│  ⏱️  Stage 3 (TTS):  {:>10}   (skipped)                      │", "-");
+            println!(
+                "│  ⏱️  Stage 3 (TTS):  {:>10}   (skipped)                      │",
+                "-"
+            );
         }
 
         let total = self.total_start.elapsed();
         println!("├─────────────────────────────────────────────────────────────────┤");
-        println!("│  ⏱️  Total:          {:>10.2}ms                               │",
-                 total.as_secs_f64() * 1000.0);
+        println!(
+            "│  ⏱️  Total:          {:>10.2}ms                               │",
+            total.as_secs_f64() * 1000.0
+        );
         println!("└─────────────────────────────────────────────────────────────────┘");
     }
 }
@@ -145,7 +162,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let output = executor.execute(&metadata, &input_envelope)?;
 
             latency.asr_latency = Some(asr_start.elapsed());
-            println!("   ⏱️  ASR latency: {:.2}ms", latency.asr_latency.unwrap().as_secs_f64() * 1000.0);
+            println!(
+                "   ⏱️  ASR latency: {:.2}ms",
+                latency.asr_latency.unwrap().as_secs_f64() * 1000.0
+            );
 
             match output.kind {
                 EnvelopeKind::Text(text) => text,
@@ -177,8 +197,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Gateway mode - connect to local xybrid-gateway
         let gateway_url = std::env::var("XYBRID_GATEWAY_URL")
             .unwrap_or_else(|_| "http://localhost:3000/v1".to_string());
-        let api_key = std::env::var("XYBRID_API_KEY")
-            .unwrap_or_else(|_| "test-key".to_string());
+        let api_key = std::env::var("XYBRID_API_KEY").unwrap_or_else(|_| "test-key".to_string());
 
         println!("🌐 Mode: Gateway");
         println!("   URL: {}", gateway_url);
@@ -224,7 +243,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(response) => {
                     latency.llm_latency = Some(llm_start.elapsed());
                     println!("✅ Response received from {}", response.model);
-                    println!("   ⏱️  LLM latency: {:.2}ms", latency.llm_latency.unwrap().as_secs_f64() * 1000.0);
+                    println!(
+                        "   ⏱️  LLM latency: {:.2}ms",
+                        latency.llm_latency.unwrap().as_secs_f64() * 1000.0
+                    );
                     if let Some(usage) = &response.usage {
                         println!(
                             "   Tokens: {} in, {} out",
@@ -277,7 +299,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tts_metadata_content = std::fs::read_to_string(&tts_metadata_path)?;
     let tts_metadata: ModelMetadata = serde_json::from_str(&tts_metadata_content)?;
 
-    println!("🔊 TTS Model: {} v{}", tts_metadata.model_id, tts_metadata.version);
+    println!(
+        "🔊 TTS Model: {} v{}",
+        tts_metadata.model_id, tts_metadata.version
+    );
     println!("📝 Input text: \"{}\"", llm_response);
     println!();
     println!("🔄 Running TTS via Xybrid execution...");
@@ -308,8 +333,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let num_samples = audio_bytes.len() / 2;
     let duration_secs = num_samples as f32 / sample_rate as f32;
 
-    println!("✅ Generated {:.2}s of audio ({} bytes)", duration_secs, audio_bytes.len());
-    println!("   ⏱️  TTS latency: {:.2}ms", latency.tts_latency.unwrap().as_secs_f64() * 1000.0);
+    println!(
+        "✅ Generated {:.2}s of audio ({} bytes)",
+        duration_secs,
+        audio_bytes.len()
+    );
+    println!(
+        "   ⏱️  TTS latency: {:.2}ms",
+        latency.tts_latency.unwrap().as_secs_f64() * 1000.0
+    );
 
     // Save output WAV
     let output_path = PathBuf::from("temp/voice_assistant_output.wav");

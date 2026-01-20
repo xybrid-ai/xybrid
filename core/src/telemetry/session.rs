@@ -362,16 +362,19 @@ pub struct MetricsSummary {
 impl TelemetryExport {
     /// Create export from session metrics.
     pub fn from_session(session: &SessionMetrics) -> Self {
-        let hardware = session.hardware_capabilities.as_ref().map(|caps| HardwareInfo {
-            has_gpu: caps.has_gpu,
-            gpu_type: caps.gpu_type.as_str().to_string(),
-            has_npu: caps.has_npu,
-            npu_type: caps.npu_type.as_str().to_string(),
-            memory_total_mb: caps.memory_total_mb,
-            battery_level: caps.battery_level,
-            thermal_state: caps.thermal_state.as_str().to_string(),
-            platform: caps.platform.as_str().to_string(),
-        });
+        let hardware = session
+            .hardware_capabilities
+            .as_ref()
+            .map(|caps| HardwareInfo {
+                has_gpu: caps.has_gpu,
+                gpu_type: caps.gpu_type.as_str().to_string(),
+                has_npu: caps.has_npu,
+                npu_type: caps.npu_type.as_str().to_string(),
+                memory_total_mb: caps.memory_total_mb,
+                battery_level: caps.battery_level,
+                thermal_state: caps.thermal_state.as_str().to_string(),
+                platform: caps.platform.as_str().to_string(),
+            });
 
         let platform = session
             .hardware_capabilities

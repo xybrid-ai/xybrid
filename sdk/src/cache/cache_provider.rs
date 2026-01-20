@@ -75,10 +75,7 @@ impl SdkCacheProvider {
     ///
     /// The registry client allows for more precise cache validation (SHA256 checks)
     /// but requires network access.
-    pub fn with_registry(
-        cache: CacheManager,
-        registry_client: Arc<RegistryClient>,
-    ) -> Self {
+    pub fn with_registry(cache: CacheManager, registry_client: Arc<RegistryClient>) -> Self {
         Self {
             cache,
             registry_client: Some(registry_client),

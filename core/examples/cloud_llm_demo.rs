@@ -24,9 +24,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     let provider_arg = args.get(1).map(|s| s.as_str()).unwrap_or("openai");
-    let prompt = args.get(2).cloned().unwrap_or_else(|| {
-        "What is the capital of France? Answer in one sentence.".to_string()
-    });
+    let prompt = args
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "What is the capital of France? Answer in one sentence.".to_string());
 
     // Determine provider
     let provider = provider_arg;
@@ -55,7 +56,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Cloud::with_config(config)?;
     let client_latency = client_start.elapsed();
     println!("✅ Client created successfully");
-    println!("   ⏱️  Client init: {:.2}ms", client_latency.as_secs_f64() * 1000.0);
+    println!(
+        "   ⏱️  Client init: {:.2}ms",
+        client_latency.as_secs_f64() * 1000.0
+    );
     println!();
 
     // Build request
@@ -104,10 +108,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Latency Summary");
     println!("═══════════════════════════════════════════════════════");
     println!();
-    println!("⏱️  Client initialization: {:>8.2}ms", client_latency.as_secs_f64() * 1000.0);
-    println!("⏱️  API request:           {:>8.2}ms", request_latency.as_secs_f64() * 1000.0);
+    println!(
+        "⏱️  Client initialization: {:>8.2}ms",
+        client_latency.as_secs_f64() * 1000.0
+    );
+    println!(
+        "⏱️  API request:           {:>8.2}ms",
+        request_latency.as_secs_f64() * 1000.0
+    );
     println!("───────────────────────────────────────────────────────");
-    println!("⏱️  Total:                 {:>8.2}ms", total_latency.as_secs_f64() * 1000.0);
+    println!(
+        "⏱️  Total:                 {:>8.2}ms",
+        total_latency.as_secs_f64() * 1000.0
+    );
     println!();
 
     println!("═══════════════════════════════════════════════════════");

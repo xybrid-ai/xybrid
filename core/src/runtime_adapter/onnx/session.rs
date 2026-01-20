@@ -141,9 +141,7 @@ impl ONNXSession {
         // Load model
         let session = builder
             .commit_from_file(model_path)
-            .map_err(|e| {
-                AdapterError::RuntimeError(format!("Failed to load ONNX model: {}", e))
-            })?;
+            .map_err(|e| AdapterError::RuntimeError(format!("Failed to load ONNX model: {}", e)))?;
 
         // Extract input/output metadata from session
         let (input_names, input_shapes) = Self::extract_input_metadata(&session)?;
@@ -192,7 +190,9 @@ impl ONNXSession {
                     coreml = coreml.with_compute_units(match config.compute_units {
                         CoreMLComputeUnits::CpuOnly => ep::coreml::ComputeUnits::CPUOnly,
                         CoreMLComputeUnits::CpuAndGpu => ep::coreml::ComputeUnits::CPUAndGPU,
-                        CoreMLComputeUnits::CpuAndNeuralEngine => ep::coreml::ComputeUnits::CPUAndNeuralEngine,
+                        CoreMLComputeUnits::CpuAndNeuralEngine => {
+                            ep::coreml::ComputeUnits::CPUAndNeuralEngine
+                        }
                         CoreMLComputeUnits::All => ep::coreml::ComputeUnits::All,
                     });
 
@@ -201,14 +201,12 @@ impl ONNXSession {
 
                 log::debug!("Configuring CoreML execution provider: {:?}", config);
 
-                builder
-                    .with_execution_providers([coreml_ep])
-                    .map_err(|e| {
-                        AdapterError::RuntimeError(format!(
-                            "Failed to configure CoreML execution provider: {}",
-                            e
-                        ))
-                    })
+                builder.with_execution_providers([coreml_ep]).map_err(|e| {
+                    AdapterError::RuntimeError(format!(
+                        "Failed to configure CoreML execution provider: {}",
+                        e
+                    ))
+                })
             }
         }
     }
@@ -287,9 +285,14 @@ impl ONNXSession {
         let value_inputs: HashMap<String, Value> = inputs
             .into_iter()
             .map(|(k, v)| {
-                Ok((k, Value::from_array(v)
-                    .map_err(|e| AdapterError::RuntimeError(format!("Failed to convert tensor: {}", e)))?
-                    .into()))
+                Ok((
+                    k,
+                    Value::from_array(v)
+                        .map_err(|e| {
+                            AdapterError::RuntimeError(format!("Failed to convert tensor: {}", e))
+                        })?
+                        .into(),
+                ))
             })
             .collect::<AdapterResult<_>>()?;
 
@@ -321,21 +324,27 @@ impl ONNXSession {
         use ort::session::SessionInputs;
 
         // Get mutable access to session (wrapped in Mutex)
-        let mut session_guard = self.session.lock()
+        let mut session_guard = self
+            .session
+            .lock()
             .map_err(|e| AdapterError::RuntimeError(format!("Failed to lock session: {}", e)))?;
 
         // Convert HashMap to Vec of (Cow<str>, SessionInputValue)
         // This allows us to pass an arbitrary number of inputs
-        let ort_inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = inputs
+        let ort_inputs: Vec<(
+            std::borrow::Cow<'_, str>,
+            ort::session::SessionInputValue<'_>,
+        )> = inputs
             .into_iter()
             .map(|(name, value)| (std::borrow::Cow::Owned(name), value.into()))
             .collect();
 
         // Run inference with dynamic number of inputs
-        let outputs = session_guard.run(SessionInputs::from(ort_inputs))
-        .map_err(|e| {
-            AdapterError::InferenceFailed(format!("ONNX Runtime inference failed: {}", e))
-        })?;
+        let outputs = session_guard
+            .run(SessionInputs::from(ort_inputs))
+            .map_err(|e| {
+                AdapterError::InferenceFailed(format!("ONNX Runtime inference failed: {}", e))
+            })?;
 
         // Convert outputs back to HashMap<String, ArrayD<f32>>
         let mut result = HashMap::new();
@@ -353,16 +362,23 @@ impl ONNXSession {
                 let dims: Vec<usize> = shape.iter().copied().collect();
                 let owned_array = output_array.to_owned();
                 let data: Vec<f32> = owned_array.as_slice().unwrap().to_vec();
-                ArrayD::from_shape_vec(IxDyn(&dims), data)
-                    .map_err(|e| AdapterError::RuntimeError(format!("Failed to convert output to ArrayD: {}", e)))?
+                ArrayD::from_shape_vec(IxDyn(&dims), data).map_err(|e| {
+                    AdapterError::RuntimeError(format!("Failed to convert output to ArrayD: {}", e))
+                })?
             } else if let Ok(output_array) = output_value.try_extract_array::<i64>() {
                 // Convert i64 to f32 for uniform handling
                 let shape = output_array.shape();
                 let dims: Vec<usize> = shape.iter().copied().collect();
                 let owned_array = output_array.to_owned();
-                let data: Vec<f32> = owned_array.as_slice().unwrap().iter().map(|&x| x as f32).collect();
-                ArrayD::from_shape_vec(IxDyn(&dims), data)
-                    .map_err(|e| AdapterError::RuntimeError(format!("Failed to convert output to ArrayD: {}", e)))?
+                let data: Vec<f32> = owned_array
+                    .as_slice()
+                    .unwrap()
+                    .iter()
+                    .map(|&x| x as f32)
+                    .collect();
+                ArrayD::from_shape_vec(IxDyn(&dims), data).map_err(|e| {
+                    AdapterError::RuntimeError(format!("Failed to convert output to ArrayD: {}", e))
+                })?
             } else {
                 return Err(AdapterError::RuntimeError(format!(
                     "Failed to extract output '{}': unsupported type (expected f32 or i64)",
@@ -457,20 +473,25 @@ mod tests {
             PathBuf::from("../../test_models/mnist-12.onnx"),
         ];
 
-        let model_path = possible_paths.iter()
-            .find(|p| p.exists())
-            .cloned();
+        let model_path = possible_paths.iter().find(|p| p.exists()).cloned();
 
         let model_path = match model_path {
             Some(p) => p,
             None => {
-                println!("MNIST model not found, skipping test. Tried: {:?}", possible_paths);
+                println!(
+                    "MNIST model not found, skipping test. Tried: {:?}",
+                    possible_paths
+                );
                 return;
             }
         };
 
         let result = ONNXSession::new(model_path.to_str().unwrap(), false, false);
-        assert!(result.is_ok(), "Failed to load MNIST model: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to load MNIST model: {:?}",
+            result.err()
+        );
 
         let session = result.unwrap();
 
@@ -488,8 +509,14 @@ mod tests {
         assert!(!output_names.is_empty(), "Should have at least one output");
 
         // Verify input/output names are not placeholders
-        assert_ne!(input_names[0], "input", "Should have real input name, not placeholder");
-        assert_ne!(output_names[0], "output", "Should have real output name, not placeholder");
+        assert_ne!(
+            input_names[0], "input",
+            "Should have real input name, not placeholder"
+        );
+        assert_ne!(
+            output_names[0], "output",
+            "Should have real output name, not placeholder"
+        );
     }
 
     #[test]
@@ -502,14 +529,15 @@ mod tests {
             PathBuf::from("../../test_models/mnist-12.onnx"),
         ];
 
-        let model_path = possible_paths.iter()
-            .find(|p| p.exists())
-            .cloned();
+        let model_path = possible_paths.iter().find(|p| p.exists()).cloned();
 
         let model_path = match model_path {
             Some(p) => p,
             None => {
-                println!("MNIST model not found, skipping test. Tried: {:?}", possible_paths);
+                println!(
+                    "MNIST model not found, skipping test. Tried: {:?}",
+                    possible_paths
+                );
                 return;
             }
         };
@@ -527,7 +555,8 @@ mod tests {
         let input_tensor = ArrayD::<f32>::from_shape_vec(
             IxDyn(&[1, 1, 28, 28]),
             vec![0.0f32; 784], // 28*28 = 784
-        ).unwrap();
+        )
+        .unwrap();
         inputs.insert(input_name.clone(), input_tensor);
 
         // Run real inference using ONNX Runtime
@@ -540,7 +569,10 @@ mod tests {
         // Verify output structure
         let output_names = session.output_names();
         let output_name = &output_names[0];
-        assert!(outputs.contains_key(output_name), "Output should contain expected output name");
+        assert!(
+            outputs.contains_key(output_name),
+            "Output should contain expected output name"
+        );
 
         // Get output tensor
         let output_tensor = outputs.get(output_name).unwrap();
@@ -549,7 +581,15 @@ mod tests {
 
         // MNIST outputs 10 class probabilities (one for each digit 0-9)
         // Verify we got the correct output shape: [batch=1, classes=10]
-        assert_eq!(output_tensor.shape(), &[1, 10], "MNIST should output shape [1, 10]");
-        assert_eq!(output_tensor.len(), 10, "MNIST output should have 10 elements");
+        assert_eq!(
+            output_tensor.shape(),
+            &[1, 10],
+            "MNIST should output shape [1, 10]"
+        );
+        assert_eq!(
+            output_tensor.len(),
+            10,
+            "MNIST output should have 10 elements"
+        );
     }
 }

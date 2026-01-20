@@ -10,20 +10,11 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AudioFormat {
     /// 16-bit signed PCM (little-endian)
-    Pcm16 {
-        sample_rate: u32,
-        channels: u32,
-    },
+    Pcm16 { sample_rate: u32, channels: u32 },
     /// 32-bit signed PCM (little-endian)
-    Pcm32 {
-        sample_rate: u32,
-        channels: u32,
-    },
+    Pcm32 { sample_rate: u32, channels: u32 },
     /// 32-bit floating point PCM
-    Float32 {
-        sample_rate: u32,
-        channels: u32,
-    },
+    Float32 { sample_rate: u32, channels: u32 },
     /// WAV container format (format details extracted from header)
     Wav,
 }

@@ -258,9 +258,13 @@ impl VadSession {
         }
 
         let session = Session::builder()
-            .map_err(|e| VadError::ModelLoadError(format!("Failed to create session builder: {}", e)))?
+            .map_err(|e| {
+                VadError::ModelLoadError(format!("Failed to create session builder: {}", e))
+            })?
             .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| VadError::ModelLoadError(format!("Failed to set optimization level: {}", e)))?
+            .map_err(|e| {
+                VadError::ModelLoadError(format!("Failed to set optimization level: {}", e))
+            })?
             .with_intra_threads(1)
             .map_err(|e| VadError::ModelLoadError(format!("Failed to set threads: {}", e)))?
             .commit_from_file(&model_path)
@@ -338,7 +342,9 @@ impl VadSession {
         input.extend_from_slice(samples);
 
         // Update context for next frame
-        self.state.context.copy_from_slice(&samples[frame_size - context_size..]);
+        self.state
+            .context
+            .copy_from_slice(&samples[frame_size - context_size..]);
 
         // Run inference
         let probability = self.run_inference(&input)?;
@@ -404,40 +410,51 @@ impl VadSession {
         let input_size = frame_size + context_size;
 
         // Create input tensors
-        let input_tensor = Value::from_array(ndarray::Array2::from_shape_vec(
-            (1, input_size),
-            input.to_vec(),
-        ).map_err(|e| VadError::InferenceError(format!("Failed to create input array: {}", e)))?)
+        let input_tensor = Value::from_array(
+            ndarray::Array2::from_shape_vec((1, input_size), input.to_vec()).map_err(|e| {
+                VadError::InferenceError(format!("Failed to create input array: {}", e))
+            })?,
+        )
         .map_err(|e| VadError::InferenceError(format!("Failed to create input tensor: {}", e)))?;
 
-        let sr_tensor = Value::from_array(ndarray::Array::from_elem((), self.config.sample_rate.as_hz()))
-            .map_err(|e| VadError::InferenceError(format!("Failed to create sr tensor: {}", e)))?;
+        let sr_tensor = Value::from_array(ndarray::Array::from_elem(
+            (),
+            self.config.sample_rate.as_hz(),
+        ))
+        .map_err(|e| VadError::InferenceError(format!("Failed to create sr tensor: {}", e)))?;
 
-        let state_tensor = Value::from_array(ndarray::Array3::from_shape_vec(
-            (2, 1, 128),
-            self.state.state.clone(),
-        ).map_err(|e| VadError::InferenceError(format!("Failed to create state array: {}", e)))?)
+        let state_tensor = Value::from_array(
+            ndarray::Array3::from_shape_vec((2, 1, 128), self.state.state.clone()).map_err(
+                |e| VadError::InferenceError(format!("Failed to create state array: {}", e)),
+            )?,
+        )
         .map_err(|e| VadError::InferenceError(format!("Failed to create state tensor: {}", e)))?;
 
         // Run inference
-        let outputs = self.session.run(ort::inputs![
-            "input" => input_tensor,
-            "sr" => sr_tensor,
-            "state" => state_tensor,
-        ])
-        .map_err(|e| VadError::InferenceError(format!("Inference failed: {}", e)))?;
+        let outputs = self
+            .session
+            .run(ort::inputs![
+                "input" => input_tensor,
+                "sr" => sr_tensor,
+                "state" => state_tensor,
+            ])
+            .map_err(|e| VadError::InferenceError(format!("Inference failed: {}", e)))?;
 
         // Extract output probability
-        let output = outputs.get("output")
+        let output = outputs
+            .get("output")
             .ok_or_else(|| VadError::InferenceError("Missing 'output' in results".into()))?;
-        let (_, output_data) = output.try_extract_tensor::<f32>()
+        let (_, output_data) = output
+            .try_extract_tensor::<f32>()
             .map_err(|e| VadError::InferenceError(format!("Failed to extract output: {}", e)))?;
         let probability = output_data.first().copied().unwrap_or(0.0);
 
         // Update hidden state
-        let state_out = outputs.get("stateN")
+        let state_out = outputs
+            .get("stateN")
             .ok_or_else(|| VadError::InferenceError("Missing 'stateN' in results".into()))?;
-        let (_, state_data) = state_out.try_extract_tensor::<f32>()
+        let (_, state_data) = state_out
+            .try_extract_tensor::<f32>()
             .map_err(|e| VadError::InferenceError(format!("Failed to extract state: {}", e)))?;
         self.state.state = state_data.to_vec();
 
@@ -452,7 +469,10 @@ impl VadSession {
                     self.speech_frames = 1;
                     if self.config.min_speech_frames <= 1 {
                         self.session_state = VadSessionState::Speech;
-                        self.segment_start = Some(self.frame_count.saturating_sub(self.config.padding_frames as u64));
+                        self.segment_start = Some(
+                            self.frame_count
+                                .saturating_sub(self.config.padding_frames as u64),
+                        );
                         self.segment_probs.push(probability);
                     } else {
                         self.session_state = VadSessionState::SpeechPending;
@@ -465,7 +485,7 @@ impl VadSession {
                     if self.speech_frames >= self.config.min_speech_frames {
                         self.session_state = VadSessionState::Speech;
                         self.segment_start = Some(self.frame_count.saturating_sub(
-                            (self.speech_frames + self.config.padding_frames) as u64
+                            (self.speech_frames + self.config.padding_frames) as u64,
                         ));
                         self.segment_probs.push(probability);
                     }
@@ -511,7 +531,8 @@ impl VadSession {
             && !self.segment_probs.is_empty()
         {
             let segment = self.create_segment(
-                self.frame_count - self.config.min_silence_frames as u64 + self.config.padding_frames as u64
+                self.frame_count - self.config.min_silence_frames as u64
+                    + self.config.padding_frames as u64,
             );
             self.segment_start = None;
             self.segment_probs.clear();

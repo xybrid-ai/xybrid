@@ -18,7 +18,7 @@ pub trait ModelRuntime: Send + Sync {
 
     /// Downcast to concrete type
     fn as_any(&self) -> &dyn std::any::Any;
-    
+
     /// Execute inference on the input envelope
     fn execute(&mut self, input: &Envelope) -> AdapterResult<Envelope>;
 }

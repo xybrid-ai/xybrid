@@ -184,10 +184,7 @@ impl TargetResolver {
 
     /// Set the available targets.
     pub fn with_available(mut self, targets: Vec<String>) -> Self {
-        self.available = targets
-            .iter()
-            .filter_map(|s| Target::from_str(s))
-            .collect();
+        self.available = targets.iter().filter_map(|s| Target::from_str(s)).collect();
         self
     }
 
@@ -216,7 +213,9 @@ impl TargetResolver {
 
         // If no available targets specified, return preferred or default
         if self.available.is_empty() {
-            return self.requested.unwrap_or_else(|| self.platform.preferred_target());
+            return self
+                .requested
+                .unwrap_or_else(|| self.platform.preferred_target());
         }
 
         // 2. Platform-preferred target
