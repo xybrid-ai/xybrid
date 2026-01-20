@@ -188,8 +188,8 @@ impl TranscriptAccumulator {
         self.current_partial = None;
     }
 
-    fn set_partial(&mut self, text: String) {
-        self.current_partial = Some(text);
+     fn set_partial(&mut self, text: String) {
+       self.current_partial = Some(text);
     }
 
     fn get_full_text(&self) -> String {
@@ -236,7 +236,7 @@ impl TranscriptAccumulator {
 /// ```
 pub struct StreamSession {
     /// Model directory path
-    model_dir: PathBuf,
+    // model_dir: PathBuf,
     /// Loaded model metadata
     metadata: ModelMetadata,
     /// Template executor for inference
@@ -323,7 +323,7 @@ impl StreamSession {
                 None => {
                     eprintln!("[StreamSession] Warning: VAD enabled but no model_dir specified. VAD disabled.");
                     return Ok(Self {
-                        model_dir,
+                        // model_dir,
                         metadata,
                         executor,
                         config,
@@ -358,7 +358,7 @@ impl StreamSession {
         };
 
         Ok(Self {
-            model_dir,
+            // model_dir,
             metadata,
             executor,
             config,

@@ -198,7 +198,7 @@ impl SpanCollector {
     }
 }
 
-/// Thread-safe global span collector for use across the crate
+// Thread-safe global span collector for use across the crate
 lazy_static::lazy_static! {
     static ref GLOBAL_COLLECTOR: Arc<Mutex<SpanCollector>> = Arc::new(Mutex::new(SpanCollector::with_enabled(false)));
 }
