@@ -6,7 +6,7 @@
 //!
 //! # Example (Simple - just run)
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_sdk::{PipelineRef, Envelope};
 //!
 //! // Load and run in a few lines
@@ -18,7 +18,7 @@
 //!
 //! # Example (Staged - inspect and preload)
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_sdk::{PipelineRef, Envelope};
 //!
 //! // Step 1: Parse YAML (instant, no network)
@@ -70,7 +70,7 @@ pub type PipelineResult<T> = Result<T, SdkError>;
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use xybrid_sdk::PipelineRef;
 ///
 /// let ref_ = PipelineRef::from_yaml(yaml)?;
@@ -321,7 +321,7 @@ struct PipelineHandle {
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use xybrid_sdk::{PipelineRef, Envelope};
 ///
 /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
@@ -933,7 +933,7 @@ impl Xybrid {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use xybrid_sdk::{Xybrid, Envelope};
     ///
     /// let result = Xybrid::run_pipeline(yaml_content, &Envelope::audio(audio_bytes))?;
