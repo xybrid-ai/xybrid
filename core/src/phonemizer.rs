@@ -292,26 +292,26 @@ pub fn trim_silence(samples: &[f32], threshold_db: f32, min_silence_samples: usi
 
     // Find first non-silent sample
     let mut start = 0;
-    let mut silence_count = 0;
+    // let mut silence_count = 0;
     for (i, &sample) in samples.iter().enumerate() {
         if sample.abs() > threshold {
-            silence_count = 0;
+            // silence_count = 0;
             start = i.saturating_sub(min_silence_samples / 4); // Keep a bit of lead-in
             break;
         }
-        silence_count += 1;
+        // silence_count += 1;
     }
 
     // Find last non-silent sample
     let mut end = samples.len();
-    silence_count = 0;
+    // silence_count = 0;
     for (i, &sample) in samples.iter().enumerate().rev() {
         if sample.abs() > threshold {
-            silence_count = 0;
+            // silence_count = 0;
             end = (i + min_silence_samples / 4).min(samples.len()); // Keep a bit of tail
             break;
         }
-        silence_count += 1;
+        // silence_count += 1;
     }
 
     if start >= end {

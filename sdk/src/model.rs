@@ -9,14 +9,13 @@ use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
 use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use tempfile::TempDir;
 use xybrid_core::bundler::XyBundle;
 use xybrid_core::execution_template::{ExecutionTemplate, ModelMetadata};
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::ir::{Envelope};
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
 use xybrid_core::template_executor::TemplateExecutor;
 

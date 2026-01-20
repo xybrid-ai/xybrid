@@ -4,7 +4,6 @@
 //! simple MNIST classifier. It proves that the TemplateExecutor can run models via
 //! JSON metadata with full preprocessing/postprocessing pipelines.
 
-use std::path::PathBuf;
 use std::collections::HashMap;
 use ndarray::{Array4};
 use xybrid_core::execution_template::ModelMetadata;
