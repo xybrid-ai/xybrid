@@ -57,6 +57,9 @@ static TELEMETRY_SENDERS: Mutex<Vec<TelemetrySender>> = Mutex::new(Vec::new());
 // HTTP Platform Exporter
 // ============================================================================
 
+/// Default telemetry ingest URL
+pub const DEFAULT_INGEST_URL: &str = "https://ingest.xybrid.dev";
+
 /// Maximum number of events to keep in the failed queue
 const MAX_FAILED_QUEUE_SIZE: usize = 1000;
 
@@ -239,11 +242,14 @@ impl HttpTelemetryExporter {
     ///
     /// Reads:
     /// - `XYBRID_API_KEY` - Required API key
-    /// - `XYBRID_PLATFORM_URL` - Platform endpoint (default: https://api.xybrid.dev)
+    /// - `XYBRID_INGEST_URL` - Ingest endpoint (default: https://ingest.xybrid.dev)
+    /// - `XYBRID_PLATFORM_URL` - Legacy fallback (deprecated)
     pub fn from_env() -> Option<Self> {
         let api_key = std::env::var("XYBRID_API_KEY").ok()?;
-        let endpoint = std::env::var("XYBRID_PLATFORM_URL")
-            .unwrap_or_else(|_| "https://api.xybrid.dev".to_string());
+        // Try new env var first, then legacy, then default
+        let endpoint = std::env::var("XYBRID_INGEST_URL")
+            .or_else(|_| std::env::var("XYBRID_PLATFORM_URL"))
+            .unwrap_or_else(|_| DEFAULT_INGEST_URL.to_string());
 
         let config = TelemetryConfig::new(endpoint, api_key);
         Some(Self::new(config))
@@ -519,7 +525,7 @@ fn send_batch_inner(
     };
 
     let url = format!(
-        "{}/v1/telemetry/batch",
+        "{}/v1/events/batch",
         config.endpoint.trim_end_matches('/')
     );
 
@@ -727,7 +733,7 @@ static PLATFORM_EXPORTER: RwLock<Option<HttpTelemetryExporter>> = RwLock::new(No
 /// ```rust,no_run
 /// use xybrid_sdk::telemetry::{init_platform_telemetry, TelemetryConfig};
 ///
-/// let config = TelemetryConfig::new("https://api.xybrid.dev", "your-api-key")
+/// let config = TelemetryConfig::new("https://ingest.xybrid.dev", "your-api-key")
 ///     .with_device("device-123", "ios")
 ///     .with_app_version("1.0.0");
 ///
