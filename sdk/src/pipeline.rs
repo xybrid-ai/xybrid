@@ -703,9 +703,8 @@ impl Pipeline {
                     let bundle_path = client.fetch(&model_id, None, progress_for_model)?;
 
                     {
-                        let mut handle = self.handle.write().map_err(|_| {
-                            SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
-                        })?;
+                        // Recover from poisoned RwLock to prevent permanent lock errors
+                        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
                         handle.availability_map.insert(model_id.clone(), true);
                         handle.availability_map.insert(stage_id.clone(), true);
@@ -859,9 +858,8 @@ impl Pipeline {
         }
 
         let (stage_descriptors, availability_map) = {
-            let handle = self.handle.read().map_err(|_| {
-                SdkError::PipelineError("Failed to acquire pipeline lock".to_string())
-            })?;
+            // Recover from poisoned RwLock to prevent permanent lock errors
+            let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
 
             // Clone stage descriptors and set bundle_path on each
             let mut descriptors = handle.stage_descriptors.clone();

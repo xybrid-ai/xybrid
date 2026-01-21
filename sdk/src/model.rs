@@ -637,10 +637,8 @@ impl XybridModel {
     pub fn run(&self, envelope: &Envelope) -> SdkResult<InferenceResult> {
         let start = Instant::now();
 
-        let mut handle = self
-            .handle
-            .write()
-            .map_err(|_| SdkError::InferenceError("Failed to acquire model lock".to_string()))?;
+        // Recover from poisoned RwLock to prevent permanent lock errors
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -691,9 +689,8 @@ impl XybridModel {
         tokio::task::spawn_blocking(move || {
             let start = Instant::now();
 
-            let mut guard = handle.write().map_err(|_| {
-                SdkError::InferenceError("Failed to acquire model lock".to_string())
-            })?;
+            // Recover from poisoned RwLock to prevent permanent lock errors
+            let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
             if !guard.loaded {
                 return Err(SdkError::NotLoaded);
@@ -765,10 +762,8 @@ impl XybridModel {
             return Err(SdkError::StreamingNotSupported);
         }
 
-        let handle = self
-            .handle
-            .read()
-            .map_err(|_| SdkError::InferenceError("Failed to acquire model lock".to_string()))?;
+        // Recover from poisoned RwLock to prevent permanent lock errors
+        let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -793,10 +788,8 @@ impl XybridModel {
     ///
     /// The model can be reloaded by creating a new ModelLoader.
     pub fn unload(&self) -> SdkResult<()> {
-        let mut handle = self
-            .handle
-            .write()
-            .map_err(|_| SdkError::InferenceError("Failed to acquire model lock".to_string()))?;
+        // Recover from poisoned RwLock to prevent permanent lock errors
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         handle.loaded = false;
         // Clear the session cache (drop executor and recreate empty)
