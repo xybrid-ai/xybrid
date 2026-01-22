@@ -53,6 +53,40 @@ Future versions of the macro will:
 - **`xybrid-sdk`**: Main SDK crate that re-exports `xybrid-core` and provides the macro
 - **`xybrid-macros`**: Procedural macro crate implementing `#[hybrid::route]`
 
+## Telemetry
+
+The SDK includes built-in telemetry that can export events to the Xybrid Platform.
+
+### Configuration
+
+```rust
+use xybrid_sdk::telemetry::{TelemetryConfig, HttpTelemetryExporter};
+
+// From environment variables (recommended)
+let exporter = HttpTelemetryExporter::from_env()?;
+
+// Manual configuration
+let config = TelemetryConfig::new("https://ingest.xybrid.dev", "sk_live_xxx")
+    .with_batch_size(50)
+    .with_flush_interval(Duration::from_secs(5));
+let exporter = HttpTelemetryExporter::new(config);
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `XYBRID_INGEST_URL` | Telemetry ingest endpoint | `https://ingest.xybrid.dev` |
+| `XYBRID_API_KEY` | API key for authentication | (required) |
+| `XYBRID_PLATFORM_URL` | Legacy fallback URL | - |
+
+### Features
+
+- **Circuit breaker**: Prevents hammering failing endpoints
+- **Automatic retry**: Exponential backoff with jitter
+- **Batching**: Configurable batch size and flush interval
+- **Background queue**: Retries failed events automatically
+
 ## Examples
 
 See `examples/macro_demo.rs` for a complete example of using the macro.
