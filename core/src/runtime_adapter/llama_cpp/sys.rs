@@ -115,6 +115,20 @@ extern "C" {
         buf: *mut c_char,
         length: c_int,
     ) -> c_int;
+
+    // Generation loop
+    fn llama_generate_c(
+        ctx: *mut c_void,
+        model: *const c_void,
+        input_tokens: *const i32,
+        n_input: c_int,
+        output_tokens: *mut i32,
+        max_tokens: c_int,
+        temperature: c_float,
+        top_p: c_float,
+        top_k: c_int,
+        seed: u32,
+    ) -> c_int;
 }
 
 // =============================================================================
@@ -353,35 +367,71 @@ impl Default for SamplingParams {
     }
 }
 
-/// Generate tokens (simplified implementation)
+/// Generate tokens using autoregressive decoding.
 ///
-/// This is a basic implementation that performs autoregressive generation.
-/// For production use, consider using llama.cpp's sampling API for better quality.
+/// This function performs the full generation loop:
+/// 1. Processes input tokens
+/// 2. Samples from logits using temperature/top_p/top_k
+/// 3. Repeats until EOS or max_tokens
+///
+/// # Arguments
+/// * `ctx` - The llama context
+/// * `model` - The llama model (needed for EOS token)
+/// * `input_tokens` - Input token IDs
+/// * `max_tokens` - Maximum tokens to generate
+/// * `temperature` - Sampling temperature (0 = greedy)
+/// * `top_p` - Top-p (nucleus) sampling threshold
+/// * `top_k` - Top-k sampling (0 = disabled)
+///
+/// # Returns
+/// Vector of generated token IDs
 #[cfg(feature = "local-llm-llamacpp")]
 pub fn llama_generate(
-    _ctx: &LlamaContext,
-    _input_tokens: &[i32],
-    _max_tokens: usize,
-    _temperature: f32,
-    _top_p: f32,
-    _top_k: usize,
+    ctx: &LlamaContext,
+    model: &LlamaModel,
+    input_tokens: &[i32],
+    max_tokens: usize,
+    temperature: f32,
+    top_p: f32,
+    top_k: usize,
 ) -> Result<Vec<i32>, AdapterError> {
-    // TODO: Implement full generation loop
-    // This requires:
-    // 1. Create llama_batch with input tokens
-    // 2. Call llama_decode to process input
-    // 3. Sample from logits with temperature/top_p/top_k
-    // 4. Add sampled token to batch
-    // 5. Repeat until EOS or max_tokens
-    //
-    // For now, return error indicating this needs implementation
-    // The actual implementation requires careful memory management
-    // and proper batch handling.
+    if input_tokens.is_empty() {
+        return Err(AdapterError::InvalidInput("Empty input tokens".to_string()));
+    }
 
-    Err(AdapterError::RuntimeError(
-        "llama_generate not yet fully implemented - generation loop requires batch API"
-            .to_string(),
-    ))
+    // Allocate output buffer
+    let mut output_tokens = vec![0i32; max_tokens];
+
+    // Use current time as seed for sampling
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as u32)
+        .unwrap_or(42);
+
+    let result = unsafe {
+        llama_generate_c(
+            ctx.ptr,
+            model.ptr,
+            input_tokens.as_ptr(),
+            input_tokens.len() as c_int,
+            output_tokens.as_mut_ptr(),
+            max_tokens as c_int,
+            temperature,
+            top_p,
+            top_k as c_int,
+            seed,
+        )
+    };
+
+    if result < 0 {
+        return Err(AdapterError::RuntimeError(format!(
+            "Generation failed with error code {}",
+            result
+        )));
+    }
+
+    output_tokens.truncate(result as usize);
+    Ok(output_tokens)
 }
 
 // =============================================================================
@@ -457,6 +507,7 @@ pub fn llama_detokenize(_model: &LlamaModel, _tokens: &[i32]) -> Result<String, 
 #[cfg(not(feature = "local-llm-llamacpp"))]
 pub fn llama_generate(
     _ctx: &LlamaContext,
+    _model: &LlamaModel,
     _input_tokens: &[i32],
     _max_tokens: usize,
     _temperature: f32,

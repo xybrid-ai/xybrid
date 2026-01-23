@@ -9,6 +9,97 @@ fn main() {
     compile_llama_cpp();
 }
 
+/// Find the Android NDK path from various sources
+#[cfg(feature = "local-llm-llamacpp")]
+fn find_android_ndk() -> Option<String> {
+    use std::env;
+    use std::path::Path;
+
+    // Helper to expand ~ in paths
+    let expand_tilde = |path: String| -> String {
+        if path.starts_with("~") {
+            env::var("HOME")
+                .map(|home| path.replacen("~", &home, 1))
+                .unwrap_or(path)
+        } else {
+            path
+        }
+    };
+
+    // 1. Try ANDROID_NDK_HOME and NDK_HOME first
+    if let Ok(ndk) = env::var("ANDROID_NDK_HOME").or_else(|_| env::var("NDK_HOME")) {
+        let expanded = expand_tilde(ndk);
+        if Path::new(&expanded).exists() {
+            return Some(expanded);
+        }
+    }
+
+    // 2. Try to extract from CC environment variable (set by cargo/cmake)
+    // e.g., CC=/path/to/ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang
+    for var in ["CC_aarch64-linux-android", "CC_aarch64_linux_android", "TARGET_CC", "CC"] {
+        if let Ok(cc_path) = env::var(var) {
+            // Extract NDK path: go up from .../toolchains/llvm/prebuilt/.../bin/clang
+            if cc_path.contains("/ndk/") {
+                if let Some(ndk_end) = cc_path.find("/toolchains/") {
+                    let ndk = &cc_path[..ndk_end];
+                    if Path::new(ndk).exists() {
+                        return Some(ndk.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Try ANDROID_HOME/ANDROID_SDK_ROOT with common NDK locations
+    for sdk_var in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
+        if let Ok(sdk) = env::var(sdk_var) {
+            let sdk_expanded = expand_tilde(sdk);
+            let ndk_dir = Path::new(&sdk_expanded).join("ndk");
+            if ndk_dir.exists() {
+                // Find the latest NDK version
+                if let Ok(entries) = std::fs::read_dir(&ndk_dir) {
+                    let mut versions: Vec<_> = entries
+                        .filter_map(|e| e.ok())
+                        .filter(|e| e.path().is_dir())
+                        .map(|e| e.path())
+                        .collect();
+                    versions.sort();
+                    if let Some(latest) = versions.last() {
+                        return Some(latest.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Try common locations
+    let home = env::var("HOME").unwrap_or_default();
+    let common_locations = [
+        format!("{}/Library/Android/sdk/ndk", home),
+        format!("{}/Android/Sdk/ndk", home),
+        "/opt/android-sdk/ndk".to_string(),
+    ];
+
+    for location in &common_locations {
+        let ndk_dir = Path::new(location);
+        if ndk_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(ndk_dir) {
+                let mut versions: Vec<_> = entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_dir())
+                    .map(|e| e.path())
+                    .collect();
+                versions.sort();
+                if let Some(latest) = versions.last() {
+                    return Some(latest.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(feature = "local-llm-llamacpp")]
 fn compile_llama_cpp() {
     use std::env;
@@ -55,23 +146,15 @@ fn compile_llama_cpp() {
             .define("GGML_CUDA", "OFF")
             .define("GGML_VULKAN", "OFF");
 
-        // Get the Android NDK path - expand ~ if needed
-        let ndk_path = env::var("ANDROID_NDK_HOME")
-            .or_else(|_| env::var("NDK_HOME"))
-            .map(|ndk| {
-                if ndk.starts_with("~") {
-                    env::var("HOME")
-                        .map(|home| ndk.replacen("~", &home, 1))
-                        .unwrap_or(ndk)
-                } else {
-                    ndk
-                }
-            });
+        // Find NDK path from multiple sources
+        let ndk_path = find_android_ndk();
 
-        if let Ok(ref ndk) = ndk_path {
+        if let Some(ref ndk) = ndk_path {
             // Use Android NDK's CMake toolchain file for proper cross-compilation
             let toolchain_file = format!("{}/build/cmake/android.toolchain.cmake", ndk);
-            cmake_config.define("CMAKE_TOOLCHAIN_FILE", &toolchain_file);
+            if std::path::Path::new(&toolchain_file).exists() {
+                cmake_config.define("CMAKE_TOOLCHAIN_FILE", &toolchain_file);
+            }
 
             // Set Android-specific CMake variables
             let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "aarch64".to_string());
@@ -85,12 +168,16 @@ fn compile_llama_cpp() {
             cmake_config.define("ANDROID_ABI", android_abi);
             cmake_config.define("ANDROID_PLATFORM", "android-28");
             cmake_config.define("ANDROID_STL", "c++_shared");
+            cmake_config.define("ANDROID_NDK", ndk);
+        } else {
+            panic!("Android NDK not found. Set ANDROID_NDK_HOME or ANDROID_HOME environment variable.");
         }
     } else if target_os == "macos" || target_os == "ios" {
-        // Apple: Enable Metal
+        // Apple: Enable Metal and Accelerate, disable BLAS (use Accelerate directly)
         cmake_config
             .define("GGML_METAL", "ON")
-            .define("GGML_ACCELERATE", "ON");
+            .define("GGML_ACCELERATE", "ON")
+            .define("GGML_BLAS", "OFF");
     } else if target.contains("linux") {
         // Linux: CPU only (can enable CUDA later)
         cmake_config

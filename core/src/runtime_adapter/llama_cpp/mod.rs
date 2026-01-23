@@ -192,6 +192,7 @@ impl LlmBackend for LlamaCppBackend {
         // Generate
         let output_tokens = sys::llama_generate(
             context,
+            model,
             &tokens,
             config.max_tokens,
             config.temperature,
