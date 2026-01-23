@@ -1,176 +1,231 @@
 <p align="center">
-  <img src="./docs/logo.jpg" alt="Xybrid Logo" width="200"/>
+  <img src="./docs/logo.jpg" alt="Xybrid Logo" width="180"/>
 </p>
 
 <h1 align="center">Xybrid</h1>
 
 <p align="center">
-  <strong>Open Source Framework for Hybrid Cloud-Edge ML Inference</strong>
-</p>
-
-<p align="center">
-  Run ML models on-device or in the cloud with intelligent routing—no infrastructure complexity.
+  <strong>On-device AI for mobile, desktop, and edge. Run ASR, TTS, LLMs, and vision models locally—private, offline, fast.</strong>
 </p>
 
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <a href="https://github.com/xybrid-ai/xybrid/actions"><img src="https://img.shields.io/github/actions/workflow/status/xybrid-ai/xybrid/ci.yml?branch=main" alt="Build Status"></a>
-  <a href="https://crates.io/crates/xybrid-core"><img src="https://img.shields.io/crates/v/xybrid-core.svg" alt="Crates.io"></a>
+  <a href="https://pub.dev/packages/xybrid_flutter"><img src="https://img.shields.io/pub/v/xybrid_flutter.svg" alt="Pub.dev"></a>
+  <a href="https://discord.gg/xybrid"><img src="https://img.shields.io/discord/1234567890?label=Discord&logo=discord" alt="Discord"></a>
+</p>
+
+<p align="center">
+  <a href="https://docs.xybrid.dev">Documentation</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#supported-models">Models</a> •
+  <a href="https://discord.gg/xybrid">Discord</a>
 </p>
 
 ---
 
 ## Why Xybrid?
 
-Building ML-powered apps shouldn't require choosing between **on-device privacy** and **cloud scalability**. Xybrid gives you both:
+One SDK for all your on-device AI needs:
 
-- **🔒 Privacy-first**: Run models locally on user devices—no data leaves the device
-- **☁️ Cloud fallback**: Seamlessly route to cloud APIs when device resources are limited
-- **🔋 Intelligent routing**: Automatic decisions based on battery, connectivity, and device capabilities
-- **📦 One codebase**: Same API whether running on-device or in the cloud
+| Capability | Models | Use Case |
+|------------|--------|----------|
+| **Speech-to-Text** | Whisper, Wav2Vec2 | Offline transcription, voice commands |
+| **Text-to-Speech** | Kokoro, Piper | Natural voice synthesis |
+| **LLMs** | Qwen, Llama, Mistral | On-device chat, summarization |
+| **Vision** | MobileNet, ResNet | Image classification, object detection |
+| **Embeddings** | MiniLM | Semantic search, RAG |
 
-## What You Can Build
+**Plus:**
+- **Pipeline orchestration** — Chain models together (ASR → LLM → TTS)
+- **Intelligent routing** — Automatic edge/cloud decisions based on device state
+- **Hardware acceleration** — CoreML ANE, Metal, CUDA (6.8x speedup on vision)
+- **Cross-platform** — iOS, Android, macOS, Linux, Windows + CLI
 
-| Use Case | Models | Example |
-|----------|--------|---------|
-| **Voice Assistants** | ASR + LLM + TTS | On-device speech recognition with cloud LLM fallback |
-| **Real-time Transcription** | Whisper, Wav2Vec2 | Offline-capable meeting transcription |
-| **Text-to-Speech** | Kokoro, KittenTTS | Natural voice synthesis that works offline |
-| **Embeddings** | all-MiniLM-L6-v2 | Local semantic search without API costs |
-| **Vision** | ResNet, MobileNet, MNIST | On-device image classification |
+---
 
-## How It Works
+## Quick Start
 
-Xybrid abstracts ML inference into three components:
+### Flutter
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Your App                                │
-├─────────────────────────────────────────────────────────────────┤
-│                      Xybrid SDK                                 │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Pipeline   │  │   Cache     │  │   Intelligent Router    │  │
-│  │  Builder    │  │  Manager    │  │  (battery/connectivity) │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-├─────────────────────────────────────────────────────────────────┤
-│                      Xybrid Core                                │
-│  ┌─────────────────────┐    ┌─────────────────────────────────┐ │
-│  │   On-Device (ONNX)  │    │      Cloud APIs                 │ │
-│  │   • Whisper         │    │      • OpenAI                   │ │
-│  │   • Wav2Vec2        │    │      • Anthropic                │ │
-│  │   • Kokoro TTS      │    │      • ElevenLabs               │ │
-│  └─────────────────────┘    └─────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
+```yaml
+# pubspec.yaml
+dependencies:
+  xybrid_flutter: ^0.1.0
 ```
 
-**Define once, run anywhere:**
+```dart
+import 'package:xybrid_flutter/xybrid_flutter.dart';
 
-```rust
-use xybrid_sdk::prelude::*;
+// Initialize once
+await Xybrid.init();
 
-// Define your pipeline
-let pipeline = Pipeline::builder()
-    .add_stage("transcribe", asr_model("whisper-tiny"))
-    .add_stage("respond", llm_model("claude-3-haiku"))
-    .add_stage("speak", tts_model("kokoro-82m"))
-    .build()?;
+// Load a model
+final loader = Xybrid.model(modelId: 'whisper-tiny');
+final model = await loader.load();
 
-// Run it—Xybrid handles routing automatically
-let audio_response = pipeline.run(audio_input).await?;
+// Run inference
+final result = await model.run(
+  envelope: Envelope.audio(bytes: audioBytes),
+);
+print('Transcription: ${result.unwrapText()}');
 ```
 
-## Getting Started
-
-### Install the CLI
+### CLI
 
 ```bash
-# macOS (Apple Silicon)
-curl -fsSL https://xybrid.dev/install.sh | sh
+# Install
+git clone https://github.com/xybrid-ai/xybrid.git
+cargo install --path xybrid/cli
 
-# From source
-cargo install xybrid-cli
-```
+# List available models
+xybrid models list
 
-### Run Your First Model
-
-```bash
-# Download a model bundle
-xybrid pull whisper-tiny
-
-# Transcribe audio
+# Download and run
+xybrid fetch whisper-tiny
 xybrid run whisper-tiny --input recording.wav
 ```
 
-### Use in Your App
+---
 
-```toml
-# Cargo.toml
-[dependencies]
-xybrid-core = "0.1"
-```
+## Supported Models
 
-```rust
-use xybrid_core::prelude::*;
+| Model | Type | Size | Platforms | Notes |
+|-------|------|------|-----------|-------|
+| **whisper-tiny** | ASR | ~75 MB | All | English, real-time capable |
+| **wav2vec2-base-960h** | ASR | ~360 MB | All | English, CTC decoding |
+| **kokoro-82m** | TTS | ~330 MB | All | Natural voice, 24kHz |
+| **kitten-tts-nano** | TTS | ~50 MB | All | Lightweight, fast |
+| **qwen2.5-0.5b** | LLM | ~500 MB | macOS, Linux | GGUF, 4096 context |
+| **all-MiniLM-L6-v2** | Embeddings | ~90 MB | All | 384-dim vectors |
+| **mobilenet-v2** | Vision | ~14 MB | All | ImageNet classification |
 
-let result = XybridRuntime::new()
-    .load_model("whisper-tiny")?
-    .transcribe(&audio_bytes)?;
+> Models are downloaded on-demand and cached locally (~/.xybrid/cache/).
 
-println!("Transcription: {}", result.text);
-```
+---
 
 ## Platform Support
 
-| Platform | Runtime | Status |
-|----------|---------|--------|
-| macOS (ARM) | ONNX Runtime | ✅ Stable |
-| macOS (x86) | ONNX Runtime | ✅ Stable |
-| Linux (x86) | ONNX Runtime | ✅ Stable |
-| iOS | Core ML + ONNX | 🚧 In Progress |
-| Android | NNAPI + ONNX | 🚧 In Progress |
-| Windows | ONNX Runtime | 🚧 In Progress |
+| Platform | Status | Hardware Acceleration |
+|----------|--------|----------------------|
+| **macOS (ARM)** | ✅ Stable | CoreML ANE, Metal GPU |
+| **macOS (x86)** | ✅ Stable | CoreML GPU |
+| **iOS** | ✅ Stable | CoreML ANE, Metal GPU |
+| **Android** | ✅ Stable | NNAPI (planned) |
+| **Linux** | ✅ Stable | CUDA |
+| **Windows** | ✅ Stable | CUDA, DirectML |
 
-## Packages
+---
 
-| Crate | Description |
-|-------|-------------|
-| [`xybrid-core`](./core) | Core runtime—model execution, preprocessing, postprocessing |
-| [`xybrid-cli`](./cli) | Command-line interface for running models |
-| [`xybrid-sdk`](./sdk) | High-level SDK with pipelines, caching, and telemetry |
-| [`registry`](./registry) | Bundle creation and registry server |
+## Benchmarks
+
+Tested on Apple M3 MacBook Pro:
+
+| Model | CPU | CoreML ANE | Speedup |
+|-------|-----|------------|---------|
+| MobileNetV2 (224×224) | 8.1 ms | **1.2 ms** | **6.8×** |
+| Whisper Tiny (30s audio) | 2.1 s | 0.8 s | 2.6× |
+| Kokoro TTS (100 chars) | 303 ms | 356 ms | CPU faster* |
+
+*Dynamic-shape models like TTS run faster on CPU due to CoreML dispatch overhead.
+
+### When to Use CoreML ANE
+
+| Model Type | Expected Speedup | Recommendation |
+|------------|------------------|----------------|
+| Vision (CNNs) | **5-10×** | Always use ANE |
+| Embeddings | **2-4×** | Use ANE |
+| Whisper encoder | **2-5×** | Use ANE |
+| TTS / autoregressive | ~1× | Use CPU |
+
+Xybrid automatically selects the optimal execution provider based on model characteristics.
+
+---
+
+## Pipeline Orchestration
+
+Chain multiple models into a single workflow:
+
+```yaml
+# voice-assistant.yaml
+name: voice-assistant
+stages:
+  - id: transcribe
+    model: whisper-tiny
+
+  - id: think
+    model: qwen2.5-0.5b
+    target: cloud  # Optional: force cloud execution
+
+  - id: speak
+    model: kokoro-82m
+```
+
+---
+
+## Hybrid Cloud Fallback
+
+Xybrid automatically routes to cloud APIs when:
+- Device resources are constrained (low battery, memory pressure)
+- Model isn't available locally
+- You explicitly request cloud execution
+
+```yaml
+stages:
+  - model: whisper-tiny
+    fallback: openai/whisper-1  # Use OpenAI if local fails
+```
+
+```dart
+// Set API keys for cloud providers
+Xybrid.setProviderApiKey('openai', 'sk-...');
+Xybrid.setProviderApiKey('anthropic', 'sk-ant-...');
+```
+
+---
+
+## SDKs
+
+| Package | Platform | Link |
+|---------|----------|------|
+| **xybrid_flutter** | iOS, Android, macOS | [![](https://img.shields.io/pub/v/xybrid_flutter.svg)](https://pub.dev/packages/xybrid_flutter) |
+| **xybrid-cli** | macOS, Linux, Windows | [GitHub](https://github.com/xybrid-ai/xybrid) |
+
+---
 
 ## Comparison
 
-| Tool | What it does | How Xybrid differs |
-|------|--------------|-------------------|
-| **ONNX Runtime** | Low-level inference engine | Xybrid adds preprocessing, routing, and cloud fallback |
-| **MLX** | Apple-optimized ML | Xybrid is cross-platform with cloud hybrid support |
-| **Triton Server** | Cloud inference serving | Xybrid focuses on edge-first with cloud fallback |
-| **TensorFlow Lite** | Mobile ML runtime | Xybrid provides unified API across edge and cloud |
+| Feature | Xybrid | RunAnywhere | Cactus | TensorFlow Lite |
+|---------|--------|-------------|--------|-----------------|
+| **ASR** | ✅ Whisper, Wav2Vec2 | ✅ Whisper | ❌ | ✅ (manual) |
+| **TTS** | ✅ Kokoro, Piper | ✅ Piper | ❌ | ❌ |
+| **LLMs** | ✅ GGUF | ✅ GGUF | ✅ Proprietary | ❌ |
+| **Vision** | ✅ | ⏳ Coming | ❌ | ✅ |
+| **Pipeline chaining** | ✅ | ❌ | ❌ | ❌ |
+| **Flutter SDK** | ✅ | ✅ | ❌ | ❌ |
+| **CLI** | ✅ | ❌ | ❌ | ❌ |
+| **CoreML ANE** | ✅ Auto-select | ? | ❌ | ❌ |
+| **Cloud fallback** | ✅ | ✅ | ✅ | ❌ |
 
-## Community
-
-- 📖 [Documentation](https://docs.xybrid.dev)
-- 💬 [Discord](https://discord.gg/xybrid)
-- 🐛 [Issues](https://github.com/xybrid-ai/xybrid/issues)
-- 🗺️ [Roadmap](./ROADMAP.md)
+---
 
 ## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
 
-```bash
-# Clone and build
-git clone https://github.com/xybrid-ai/xybrid.git
-cd xybrid
-cargo build
+---
 
-# Run tests
-cargo test
-```
+## Community
+
+- [Documentation](https://docs.xybrid.dev)
+- [Discord](https://discord.gg/xybrid)
+- [GitHub Issues](https://github.com/xybrid-ai/xybrid/issues)
+- [Roadmap](./ROADMAP.md)
+
+---
 
 ## License
 
-Apache License 2.0 - see [LICENSE](./LICENSE) for details.
+Apache License 2.0 — see [LICENSE](./LICENSE) for details.
 
-**Open Core Model**: The core runtime, SDK, CLI, and self-hosted registry are fully open source. Commercial cloud services and enterprise features are available separately.
+The core runtime, SDK, CLI, and Flutter bindings are fully open source.
