@@ -45,6 +45,18 @@ One SDK for all your on-device AI needs:
 
 ---
 
+## SDKs
+
+| Package | Platform | Status |
+|---------|----------|--------|
+| **xybrid_flutter** | iOS, Android, macOS | [![](https://img.shields.io/pub/v/xybrid_flutter.svg)](https://pub.dev/packages/xybrid_flutter) |
+| **xybrid-cli** | macOS, Linux, Windows | [Available](https://github.com/xybrid-ai/xybrid) |
+| **xybrid-swift** | iOS, macOS | Coming Soon |
+| **xybrid-kotlin** | Android | Coming Soon |
+| **xybrid-react-native** | iOS, Android | Coming Soon |
+
+---
+
 ## Quick Start
 
 ### Flutter
@@ -182,15 +194,6 @@ stages:
 Xybrid.setProviderApiKey('openai', 'sk-...');
 Xybrid.setProviderApiKey('anthropic', 'sk-ant-...');
 ```
-
----
-
-## SDKs
-
-| Package | Platform | Link |
-|---------|----------|------|
-| **xybrid_flutter** | iOS, Android, macOS | [![](https://img.shields.io/pub/v/xybrid_flutter.svg)](https://pub.dev/packages/xybrid_flutter) |
-| **xybrid-cli** | macOS, Linux, Windows | [GitHub](https://github.com/xybrid-ai/xybrid) |
 
 ---
 
