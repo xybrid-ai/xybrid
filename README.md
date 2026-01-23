@@ -5,7 +5,8 @@
 <h1 align="center">Xybrid</h1>
 
 <p align="center">
-  <strong>On-device AI for mobile, desktop, and edge. Run ASR, TTS, LLMs, and vision models locally—private, offline, fast.</strong>
+  <strong>On-device AI for mobile, desktop, and edge.</strong><br/>
+  Run ASR, TTS, LLMs, and vision models locally—private, offline, fast.
 </p>
 
 <p align="center">
