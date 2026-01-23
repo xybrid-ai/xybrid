@@ -55,9 +55,36 @@ fn compile_llama_cpp() {
             .define("GGML_CUDA", "OFF")
             .define("GGML_VULKAN", "OFF");
 
-        // Android NDK paths from environment
-        if let Ok(ndk) = env::var("ANDROID_NDK_HOME") {
-            cmake_config.define("CMAKE_ANDROID_NDK", &ndk);
+        // Get the Android NDK path - expand ~ if needed
+        let ndk_path = env::var("ANDROID_NDK_HOME")
+            .or_else(|_| env::var("NDK_HOME"))
+            .map(|ndk| {
+                if ndk.starts_with("~") {
+                    env::var("HOME")
+                        .map(|home| ndk.replacen("~", &home, 1))
+                        .unwrap_or(ndk)
+                } else {
+                    ndk
+                }
+            });
+
+        if let Ok(ref ndk) = ndk_path {
+            // Use Android NDK's CMake toolchain file for proper cross-compilation
+            let toolchain_file = format!("{}/build/cmake/android.toolchain.cmake", ndk);
+            cmake_config.define("CMAKE_TOOLCHAIN_FILE", &toolchain_file);
+
+            // Set Android-specific CMake variables
+            let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "aarch64".to_string());
+            let android_abi = match target_arch.as_str() {
+                "aarch64" => "arm64-v8a",
+                "arm" => "armeabi-v7a",
+                "x86_64" => "x86_64",
+                "x86" => "x86",
+                _ => "arm64-v8a",
+            };
+            cmake_config.define("ANDROID_ABI", android_abi);
+            cmake_config.define("ANDROID_PLATFORM", "android-28");
+            cmake_config.define("ANDROID_STL", "c++_shared");
         }
     } else if target_os == "macos" || target_os == "ios" {
         // Apple: Enable Metal
