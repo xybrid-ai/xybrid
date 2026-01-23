@@ -168,6 +168,10 @@ impl Default for SdkConfig {
 /// On other platforms (iOS, macOS, Linux, Windows), this is optional - the SDK
 /// will use platform-specific default directories if not configured.
 ///
+/// This function also sets environment variables (`HOME`, `HF_HOME`) to ensure
+/// that third-party libraries (like mistralrs/hf-hub) can find cache directories
+/// on platforms like Android where standard Unix paths don't exist.
+///
 /// # Example (Flutter/Dart)
 ///
 /// ```dart
@@ -184,8 +188,41 @@ impl Default for SdkConfig {
 ///
 /// * `cache_dir` - Path to the directory where model bundles will be cached
 pub fn init_sdk_cache_dir(cache_dir: impl Into<std::path::PathBuf>) {
+    let cache_path = cache_dir.into();
+
+    // Set environment variables for third-party libraries (hf-hub, mistralrs, etc.)
+    // On Android, dirs::home_dir() and dirs::cache_dir() return None, causing panics.
+    // Setting these env vars provides fallback paths for those libraries.
+    if let Some(cache_str) = cache_path.to_str() {
+        // Set HOME if not already set (used by dirs::home_dir() fallback)
+        if std::env::var("HOME").is_err() {
+            // Use parent of cache dir as HOME
+            if let Some(parent) = cache_path.parent() {
+                if let Some(parent_str) = parent.to_str() {
+                    std::env::set_var("HOME", parent_str);
+                }
+            }
+        }
+
+        // Set HF_HOME for hf-hub/mistralrs (used for model tokenizer/config caching)
+        // This takes priority over XDG_CACHE_HOME
+        let hf_cache = cache_path.join("huggingface");
+        if let Some(hf_str) = hf_cache.to_str() {
+            std::env::set_var("HF_HOME", hf_str);
+        }
+
+        // Set HF_HUB_OFFLINE to prevent any download attempts
+        // We bundle all required files, so hf-hub should never need to fetch anything
+        std::env::set_var("HF_HUB_OFFLINE", "1");
+
+        // Also set XDG_CACHE_HOME as a fallback for other XDG-compliant libraries
+        if std::env::var("XDG_CACHE_HOME").is_err() {
+            std::env::set_var("XDG_CACHE_HOME", cache_str);
+        }
+    }
+
     let config = SdkConfig {
-        cache_dir: Some(cache_dir.into()),
+        cache_dir: Some(cache_path),
     };
     let _ = SDK_CONFIG.set(config);
 }
