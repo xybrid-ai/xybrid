@@ -70,7 +70,7 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 # Mistral.rs - Pure Rust LLM inference (optional, for local LLMs)
 # Enable with: cargo build --features local-llm
 # For GPU: cargo build --features local-llm,local-llm-metal (macOS) or local-llm-cuda (NVIDIA)
-mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", optional = true }
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", optional = true, default-features = false }
 
 [features]
 default = ["onnx-runtime", "ort-download"]
