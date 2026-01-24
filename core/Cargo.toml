@@ -94,6 +94,14 @@ local-llm = ["dep:mistralrs"]
 local-llm-metal = ["local-llm", "mistralrs/metal"]
 # Local LLM with CUDA acceleration (NVIDIA GPUs)
 local-llm-cuda = ["local-llm", "mistralrs/cuda"]
+# Local LLM via llama.cpp (Android-compatible, runtime SIMD detection)
+# Enable with: cargo build --features local-llm-llamacpp
+local-llm-llamacpp = []
+
+[build-dependencies]
+# For compiling llama.cpp C/C++ source (when local-llm-llamacpp feature is enabled)
+cc = "1.0"
+cmake = "0.1"
 
 [dev-dependencies]
 tempfile = "3.8"
