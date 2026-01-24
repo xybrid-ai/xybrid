@@ -89,11 +89,19 @@ pub mod telemetry;
 pub use xybrid_core::bundler;
 pub use xybrid_core::cache_provider::CacheProvider;
 pub use xybrid_core::context;
-pub use xybrid_core::execution_template;
+pub use xybrid_core::execution;
 pub use xybrid_core::ir;
 pub use xybrid_core::orchestrator;
 pub use xybrid_core::orchestrator::routing_engine;
-pub use xybrid_core::template_executor;
+
+// Re-export voice types for TTS model discovery
+pub use xybrid_core::execution::{VoiceConfig, VoiceInfo};
+
+// Backwards compatibility re-exports
+#[doc(hidden)]
+pub use xybrid_core::execution::template as execution_template;
+#[doc(hidden)]
+pub use xybrid_core::execution as template_executor;
 
 // SDK types (new API)
 pub use cache::{CacheManager, CacheStatus, SdkCacheProvider};
