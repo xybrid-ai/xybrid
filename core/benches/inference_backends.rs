@@ -2,8 +2,8 @@
 //!
 //! This benchmark compares inference performance across different backends:
 //! - CPU (default, always available)
-//! - CoreML with Neural Engine (macOS/iOS, requires `coreml-ep` feature)
-//! - CoreML with GPU (macOS/iOS, requires `coreml-ep` feature)
+//! - CoreML with Neural Engine (macOS/iOS, requires `ort-coreml` feature)
+//! - CoreML with GPU (macOS/iOS, requires `ort-coreml` feature)
 //!
 //! # Setup
 //!
@@ -22,7 +22,7 @@
 //! cargo bench -p xybrid-core
 //!
 //! # With CoreML (macOS/iOS)
-//! cargo bench -p xybrid-core --features coreml-ep
+//! cargo bench -p xybrid-core --features ort-coreml
 //!
 //! # View HTML report
 //! open target/criterion/report/index.html
@@ -306,7 +306,7 @@ fn benchmark_cpu(c: &mut Criterion) {
 }
 
 /// Benchmark CoreML execution provider with Neural Engine
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 fn benchmark_coreml_ane(c: &mut Criterion) {
     use xybrid_core::runtime_adapter::onnx::{CoreMLComputeUnits, CoreMLConfig};
 
@@ -364,7 +364,7 @@ fn benchmark_coreml_ane(c: &mut Criterion) {
 }
 
 /// Benchmark CoreML execution provider with GPU
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 fn benchmark_coreml_gpu(c: &mut Criterion) {
     use xybrid_core::runtime_adapter::onnx::{CoreMLComputeUnits, CoreMLConfig};
 
@@ -419,10 +419,10 @@ fn benchmark_coreml_gpu(c: &mut Criterion) {
 // ============================================================================
 
 // Conditional benchmark groups based on features
-#[cfg(not(feature = "coreml-ep"))]
+#[cfg(not(feature = "ort-coreml"))]
 criterion_group!(benches, benchmark_cpu);
 
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 criterion_group!(
     benches,
     benchmark_cpu,

@@ -14,8 +14,8 @@
 //! let mut adapter = OnnxRuntimeAdapter::new();
 //! adapter.load_model("/path/to/model.onnx")?;
 //!
-//! // CoreML execution (macOS/iOS, requires coreml-ep feature)
-//! #[cfg(feature = "coreml-ep")]
+//! // CoreML execution (macOS/iOS, requires ort-coreml feature)
+//! #[cfg(feature = "ort-coreml")]
 //! let mut adapter = OnnxRuntimeAdapter::with_execution_provider(
 //!     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
 //! );
@@ -39,7 +39,7 @@ use std::path::Path;
 /// # Execution Providers
 ///
 /// - **CPU**: Default, always available
-/// - **CoreML**: Apple Neural Engine/GPU acceleration (requires `coreml-ep` feature)
+/// - **CoreML**: Apple Neural Engine/GPU acceleration (requires `ort-coreml` feature)
 ///
 /// # Behavior
 ///
@@ -78,8 +78,8 @@ impl OnnxRuntimeAdapter {
     /// // CPU execution
     /// let adapter = OnnxRuntimeAdapter::with_execution_provider(ExecutionProviderKind::Cpu);
     ///
-    /// // CoreML with Neural Engine (requires coreml-ep feature)
-    /// #[cfg(feature = "coreml-ep")]
+    /// // CoreML with Neural Engine (requires ort-coreml feature)
+    /// #[cfg(feature = "ort-coreml")]
     /// let adapter = OnnxRuntimeAdapter::with_execution_provider(
     ///     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
     /// );
@@ -135,7 +135,7 @@ impl OnnxRuntimeAdapter {
     /// This is a simple platform-based selection (deprecated in favor of
     /// `with_auto_selection` which uses model hints).
     ///
-    /// On macOS/iOS with the `coreml-ep` feature enabled, this returns CoreML
+    /// On macOS/iOS with the `ort-coreml` feature enabled, this returns CoreML
     /// with Neural Engine. Otherwise, returns CPU.
     #[deprecated(
         since = "0.0.24",
@@ -143,13 +143,13 @@ impl OnnxRuntimeAdapter {
     )]
     #[allow(dead_code)]
     pub fn select_optimal_provider() -> ExecutionProviderKind {
-        #[cfg(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios")))]
+        #[cfg(all(feature = "ort-coreml", any(target_os = "macos", target_os = "ios")))]
         {
             use super::execution_provider::CoreMLConfig;
             ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
         }
 
-        #[cfg(not(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios"))))]
+        #[cfg(not(all(feature = "ort-coreml", any(target_os = "macos", target_os = "ios"))))]
         {
             ExecutionProviderKind::Cpu
         }
@@ -461,8 +461,8 @@ mod tests {
     #[test]
     fn test_select_optimal_provider() {
         let provider = OnnxRuntimeAdapter::select_optimal_provider();
-        // On non-Apple platforms without coreml-ep feature, should be CPU
-        #[cfg(not(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios"))))]
+        // On non-Apple platforms without ort-coreml feature, should be CPU
+        #[cfg(not(all(feature = "ort-coreml", any(target_os = "macos", target_os = "ios"))))]
         assert_eq!(provider, ExecutionProviderKind::Cpu);
     }
 }

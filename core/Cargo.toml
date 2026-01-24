@@ -32,13 +32,13 @@ sysinfo = "0.32"
 
 # ONNX Runtime for model inference
 # Note: Using ort crate for ONNX Runtime bindings
-# For macOS/iOS: Uses CoreML/Metal backend (enable coreml-ep feature)
-# For Android: Uses NNAPI backend (requires load-dynamic + AAR)
+# For macOS/iOS: Uses CoreML/Metal backend (enable ort-coreml feature)
+# For Android: Uses NNAPI backend (requires ort-dynamic + AAR)
 # For desktop: Uses CPU backend
 # Note: Using default-features = false for cross-platform compatibility.
-# - For Android: Use ort-load-dynamic feature (loads .so at runtime)
+# - For Android: Use ort-dynamic feature (loads .so at runtime)
 # - For other platforms: Use ort-download feature to download prebuilt binaries
-# - For CoreML acceleration: Use coreml-ep feature (macOS/iOS only)
+# - For CoreML acceleration: Use ort-coreml feature (macOS/iOS only)
 ort = { version = "2.0.0-rc.11", default-features = false, features = ["ndarray", "std"] }
 ndarray = "0.17"  # Used by ort for tensor operations (must match ort's ndarray version)
 base64 = "0.21"  # For BPE token decoding
@@ -68,38 +68,31 @@ byteorder = { version = "1.5", optional = true }  # For reading mel filter bytes
 num-traits = { version = "0.2", optional = true }  # Required by candle audio
 
 # Mistral.rs - Pure Rust LLM inference (optional, for local LLMs)
-# Enable with: cargo build --features local-llm
-# For GPU: cargo build --features local-llm,local-llm-metal (macOS) or local-llm-cuda (NVIDIA)
+# Enable with: cargo build --features llm-mistral
+# For GPU: cargo build --features llm-mistral-metal (macOS) or llm-mistral-cuda (NVIDIA)
 mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", optional = true, default-features = false }
 
 [features]
-default = ["onnx-runtime", "ort-download"]
-onnx-runtime = []
-# Desktop/iOS/macOS: Download prebuilt ONNX Runtime binaries during build
-# Note: tls-native required for ort 2.0.0-rc.11+ to download binaries
-ort-download = ["ort/download-binaries", "ort/tls-native"]
-# Android: Load ONNX Runtime dynamically at runtime (from AAR .so files)
-# Note: When using ort-load-dynamic, don't enable ort-download
-ort-load-dynamic = ["ort/load-dynamic"]
+default = ["ort-download"]
+
+# ONNX Runtime
+ort-download = ["ort/download-binaries", "ort/tls-native"]  # Desktop/macOS/iOS: download prebuilt binaries
+ort-dynamic = ["ort/load-dynamic"]                          # Android: load .so at runtime from AAR
+ort-coreml = ["ort/coreml"]                                 # Apple Neural Engine acceleration
+
+# Candle (Pure Rust ML)
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:hf-hub", "dep:byteorder", "dep:num-traits"]
-candle-metal = ["candle", "candle-core/metal", "candle-nn/metal", ]
+candle-metal = ["candle", "candle-core/metal", "candle-nn/metal"]
 candle-cuda = ["candle", "candle-core/cuda"]
-# CoreML Execution Provider for Apple Neural Engine acceleration (macOS/iOS)
-# Enable with: cargo build --features coreml-ep
-coreml-ep = ["ort/coreml"]
-# Local LLM inference via mistral.rs (CPU by default)
-# Enable with: cargo build --features local-llm
-local-llm = ["dep:mistralrs"]
-# Local LLM with Metal acceleration (macOS/iOS)
-local-llm-metal = ["local-llm", "mistralrs/metal"]
-# Local LLM with CUDA acceleration (NVIDIA GPUs)
-local-llm-cuda = ["local-llm", "mistralrs/cuda"]
-# Local LLM via llama.cpp (Android-compatible, runtime SIMD detection)
-# Enable with: cargo build --features local-llm-llamacpp
-local-llm-llamacpp = []
+
+# Local LLM inference
+llm-mistral = ["dep:mistralrs"]                             # mistral.rs (CPU)
+llm-mistral-metal = ["llm-mistral", "mistralrs/metal"]      # mistral.rs + Metal (macOS/iOS)
+llm-mistral-cuda = ["llm-mistral", "mistralrs/cuda"]        # mistral.rs + CUDA (NVIDIA)
+llm-llamacpp = []                                           # llama.cpp (Android-compatible)
 
 [build-dependencies]
-# For compiling llama.cpp C/C++ source (when local-llm-llamacpp feature is enabled)
+# For compiling llama.cpp C/C++ source (when llm-llamacpp feature is enabled)
 cc = "1.0"
 cmake = "0.1"
 

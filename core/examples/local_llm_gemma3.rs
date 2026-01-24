@@ -1,7 +1,7 @@
 //! Local LLM Inference - Gemma 3 1B (GGUF)
 //!
 //! Run with:
-//!   cargo run --example local_llm_gemma3 -p xybrid-core --features local-llm-metal
+//!   cargo run --example local_llm_gemma3 -p xybrid-core --features llm-mistral-metal
 
 use std::collections::HashMap;
 use std::path::PathBuf;

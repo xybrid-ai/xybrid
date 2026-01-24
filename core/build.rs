@@ -1,16 +1,16 @@
 //! Build script for xybrid-core
 //!
-//! Handles conditional compilation of llama.cpp when the `local-llm-llamacpp` feature is enabled.
+//! Handles conditional compilation of llama.cpp when the `llm-llamacpp` feature is enabled.
 //! Uses CMake for building llama.cpp to properly handle its complex build system.
 
 fn main() {
     // Only compile llama.cpp when the feature is enabled
-    #[cfg(feature = "local-llm-llamacpp")]
+    #[cfg(feature = "llm-llamacpp")]
     compile_llama_cpp();
 }
 
 /// Find the Android NDK path from various sources
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 fn find_android_ndk() -> Option<String> {
     use std::env;
     use std::path::Path;
@@ -100,7 +100,7 @@ fn find_android_ndk() -> Option<String> {
     None
 }
 
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 fn compile_llama_cpp() {
     use std::env;
     use std::path::PathBuf;

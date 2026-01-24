@@ -1,7 +1,7 @@
 //! MistralBackend - LLM inference using mistral.rs
 //!
 //! This module provides the mistral.rs implementation of the LlmBackend trait.
-//! It is feature-gated behind `local-llm`.
+//! It is feature-gated behind `llm-mistral`.
 //!
 //! # Note
 //!
@@ -14,7 +14,7 @@ use crate::runtime_adapter::llm::{
 };
 use crate::runtime_adapter::AdapterError;
 
-#[cfg(feature = "local-llm")]
+#[cfg(feature = "llm-mistral")]
 use mistralrs::{
     GgufModelBuilder, Model, PagedAttentionMetaBuilder, RequestBuilder, TextMessageRole,
 };
@@ -42,7 +42,7 @@ use mistralrs::{
 /// let mut backend = MistralBackend::new()?;
 /// backend.load(&LlmConfig::new("model.gguf"))?;
 /// ```
-#[cfg(feature = "local-llm")]
+#[cfg(feature = "llm-mistral")]
 pub struct MistralBackend {
     /// Loaded model (None if not loaded)
     model: Option<Model>,
@@ -50,7 +50,7 @@ pub struct MistralBackend {
     config: Option<LlmConfig>,
 }
 
-#[cfg(feature = "local-llm")]
+#[cfg(feature = "llm-mistral")]
 impl MistralBackend {
     /// Create a new MistralBackend.
     pub fn new() -> LlmResult<Self> {
@@ -70,14 +70,14 @@ impl MistralBackend {
     }
 }
 
-#[cfg(feature = "local-llm")]
+#[cfg(feature = "llm-mistral")]
 impl Default for MistralBackend {
     fn default() -> Self {
         Self::new().expect("Failed to create MistralBackend")
     }
 }
 
-#[cfg(feature = "local-llm")]
+#[cfg(feature = "llm-mistral")]
 impl LlmBackend for MistralBackend {
     fn name(&self) -> &str {
         "mistral"
@@ -254,22 +254,22 @@ impl LlmBackend for MistralBackend {
 }
 
 // =============================================================================
-// Stub implementation when local-llm feature is not enabled
+// Stub implementation when llm-mistral feature is not enabled
 // =============================================================================
 
-#[cfg(not(feature = "local-llm"))]
+#[cfg(not(feature = "llm-mistral"))]
 pub struct MistralBackend;
 
-#[cfg(not(feature = "local-llm"))]
+#[cfg(not(feature = "llm-mistral"))]
 impl MistralBackend {
     pub fn new() -> LlmResult<Self> {
         Err(AdapterError::RuntimeError(
-            "local-llm feature not enabled. Build with --features local-llm".to_string(),
+            "llm-mistral feature not enabled. Build with --features llm-mistral".to_string(),
         ))
     }
 }
 
-#[cfg(not(feature = "local-llm"))]
+#[cfg(not(feature = "llm-mistral"))]
 impl LlmBackend for MistralBackend {
     fn name(&self) -> &str {
         "mistral"
@@ -281,7 +281,7 @@ impl LlmBackend for MistralBackend {
 
     fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
         Err(AdapterError::RuntimeError(
-            "local-llm feature not enabled".to_string(),
+            "llm-mistral feature not enabled".to_string(),
         ))
     }
 
@@ -299,7 +299,7 @@ impl LlmBackend for MistralBackend {
         _config: &GenerationConfig,
     ) -> LlmResult<GenerationOutput> {
         Err(AdapterError::RuntimeError(
-            "local-llm feature not enabled".to_string(),
+            "llm-mistral feature not enabled".to_string(),
         ))
     }
 
@@ -309,7 +309,7 @@ impl LlmBackend for MistralBackend {
         _config: &GenerationConfig,
     ) -> LlmResult<GenerationOutput> {
         Err(AdapterError::RuntimeError(
-            "local-llm feature not enabled".to_string(),
+            "llm-mistral feature not enabled".to_string(),
         ))
     }
 }

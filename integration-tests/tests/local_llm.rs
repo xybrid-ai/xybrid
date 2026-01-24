@@ -1,14 +1,14 @@
 //! Local LLM Integration Tests
 //!
-//! These tests require the `local-llm` feature and the qwen2.5-0.5b-instruct model.
+//! These tests require the `llm-mistral` feature and the qwen2.5-0.5b-instruct model.
 //!
 //! Run with:
-//!   cargo test -p integration-tests --features local-llm test_local_llm
+//!   cargo test -p integration-tests --features llm-mistral test_local_llm
 //!
 //! Download model first:
 //!   ./integration-tests/download.sh qwen2.5-0.5b-instruct
 
-#![cfg(feature = "local-llm")]
+#![cfg(feature = "llm-mistral")]
 
 use integration_tests::fixtures;
 use std::collections::HashMap;

@@ -4,7 +4,7 @@
 //! execution system with a GGUF model (Qwen 2.5 0.5B Instruct).
 //!
 //! Run with:
-//!   cargo run --example local_llm_qwen -p xybrid-core --features local-llm
+//!   cargo run --example local_llm_qwen -p xybrid-core --features llm-mistral
 //!
 //! Requires model to be downloaded:
 //!   ./integration-tests/download.sh qwen2.5-0.5b-instruct

@@ -6,10 +6,12 @@ publish = false
 
 [features]
 default = []
-# Local LLM inference (GGUF models via mistral.rs)
-local-llm = ["xybrid-core/local-llm"]
-local-llm-metal = ["xybrid-core/local-llm-metal"]
-local-llm-cuda = ["xybrid-core/local-llm-cuda"]
+
+# Local LLM inference
+llm-mistral = ["xybrid-core/llm-mistral"]              # mistral.rs (CPU)
+llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]  # mistral.rs + Metal (macOS)
+llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]    # mistral.rs + CUDA (NVIDIA)
+llm-llamacpp = ["xybrid-core/llm-llamacpp"]            # llama.cpp (Android-compatible)
 
 [dependencies]
 xybrid-core = { path = "../core" }

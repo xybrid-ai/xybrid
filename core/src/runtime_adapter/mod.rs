@@ -58,17 +58,17 @@ pub mod coreml;
 pub mod candle;
 
 // LLM shared types and adapter (available when any LLM backend is enabled)
-#[cfg(any(feature = "local-llm", feature = "local-llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 pub mod llm;
 
 // MistralBackend (feature-gated, uses mistral.rs - desktop only, NOT Android)
 // Requires +fp16 on ARM which causes SIGILL on devices without ARMv8.2-A FP16
-#[cfg(feature = "local-llm")]
+#[cfg(feature = "llm-mistral")]
 pub mod mistral;
 
 // LlamaCppBackend (feature-gated, uses llama.cpp - Android compatible)
 // Has proper runtime SIMD detection via ggml
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub mod llama_cpp;
 
 // Re-exports from runtime backends
@@ -86,18 +86,18 @@ pub use coreml::CoreMLRuntimeAdapter;
 pub use candle::{CandleBackend, CandleRuntimeAdapter};
 
 // LLM exports - shared types
-#[cfg(any(feature = "local-llm", feature = "local-llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 pub use llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
     LlmRuntimeAdapter,
 };
 
 // MistralBackend export (desktop only)
-#[cfg(feature = "local-llm")]
+#[cfg(feature = "llm-mistral")]
 pub use mistral::MistralBackend;
 
 // LlamaCppBackend export (Android compatible)
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub use llama_cpp::LlamaCppBackend;
 
 // Re-export inference backend types

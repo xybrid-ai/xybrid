@@ -9,7 +9,7 @@
 //! | Provider | Platform | Hardware | Feature Flag |
 //! |----------|----------|----------|--------------|
 //! | CPU | All | CPU | (default) |
-//! | CoreML | macOS/iOS | Neural Engine, GPU, CPU | `coreml-ep` |
+//! | CoreML | macOS/iOS | Neural Engine, GPU, CPU | `ort-coreml` |
 //!
 //! # Example
 //!
@@ -44,8 +44,8 @@ pub enum ExecutionProviderKind {
     /// which can utilize the Neural Engine, GPU, or CPU depending
     /// on the configured compute units.
     ///
-    /// Requires the `coreml-ep` feature flag.
-    #[cfg(feature = "coreml-ep")]
+    /// Requires the `ort-coreml` feature flag.
+    #[cfg(feature = "ort-coreml")]
     CoreML(CoreMLConfig),
 }
 
@@ -59,7 +59,7 @@ impl fmt::Display for ExecutionProviderKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Cpu => write!(f, "cpu"),
-            #[cfg(feature = "coreml-ep")]
+            #[cfg(feature = "ort-coreml")]
             Self::CoreML(config) => write!(f, "coreml-{}", config.compute_units),
         }
     }
@@ -70,7 +70,7 @@ impl ExecutionProviderKind {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Cpu => "cpu",
-            #[cfg(feature = "coreml-ep")]
+            #[cfg(feature = "ort-coreml")]
             Self::CoreML(_) => "coreml",
         }
     }
@@ -79,7 +79,7 @@ impl ExecutionProviderKind {
     pub fn requires_hardware(&self) -> bool {
         match self {
             Self::Cpu => false,
-            #[cfg(feature = "coreml-ep")]
+            #[cfg(feature = "ort-coreml")]
             Self::CoreML(_) => true,
         }
     }
@@ -89,7 +89,7 @@ impl ExecutionProviderKind {
 ///
 /// Controls how CoreML executes model inference, including which
 /// compute units (CPU, GPU, Neural Engine) to use.
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreMLConfig {
     /// Which compute units to use for inference.
@@ -108,7 +108,7 @@ pub struct CoreMLConfig {
     pub require_static_shapes: bool,
 }
 
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 impl Default for CoreMLConfig {
     fn default() -> Self {
         Self {
@@ -119,7 +119,7 @@ impl Default for CoreMLConfig {
     }
 }
 
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 impl CoreMLConfig {
     /// Creates a new CoreML configuration with Neural Engine acceleration.
     pub fn with_neural_engine() -> Self {
@@ -151,7 +151,7 @@ impl CoreMLConfig {
 /// Determines which hardware units CoreML should use for inference.
 /// The Neural Engine provides the best performance for ML workloads
 /// on supported devices (A12+ chips, M1+ Macs).
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreMLComputeUnits {
     /// CPU only - no hardware acceleration.
@@ -178,7 +178,7 @@ pub enum CoreMLComputeUnits {
     All,
 }
 
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 impl Default for CoreMLComputeUnits {
     fn default() -> Self {
         // Default to Neural Engine for best performance on Apple Silicon
@@ -186,7 +186,7 @@ impl Default for CoreMLComputeUnits {
     }
 }
 
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 impl fmt::Display for CoreMLComputeUnits {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -198,7 +198,7 @@ impl fmt::Display for CoreMLComputeUnits {
     }
 }
 
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 impl CoreMLComputeUnits {
     /// Parses a compute unit from a string.
     ///
@@ -354,7 +354,7 @@ pub fn select_optimal_provider(hints: &ModelHints) -> ExecutionProviderKind {
     }
 
     // Only consider CoreML on Apple platforms with the feature enabled
-    #[cfg(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios")))]
+    #[cfg(all(feature = "ort-coreml", any(target_os = "macos", target_os = "ios")))]
     {
         // Rule 1: Tiny models → CPU (dispatch overhead)
         if hints.is_tiny_model() {
@@ -409,15 +409,15 @@ pub fn parse_provider_string(s: &str) -> ExecutionProviderKind {
     match s_lower.as_str() {
         "cpu" => ExecutionProviderKind::Cpu,
 
-        #[cfg(feature = "coreml-ep")]
+        #[cfg(feature = "ort-coreml")]
         "coreml" | "coreml-ane" | "ane" | "neural-engine" => {
             ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
         }
 
-        #[cfg(feature = "coreml-ep")]
+        #[cfg(feature = "ort-coreml")]
         "coreml-gpu" | "gpu" => ExecutionProviderKind::CoreML(CoreMLConfig::with_gpu()),
 
-        #[cfg(feature = "coreml-ep")]
+        #[cfg(feature = "ort-coreml")]
         "coreml-all" | "all" => ExecutionProviderKind::CoreML(CoreMLConfig {
             compute_units: CoreMLComputeUnits::All,
             ..Default::default()
@@ -446,7 +446,7 @@ mod tests {
         assert_eq!(format!("{}", provider), "cpu");
     }
 
-    #[cfg(feature = "coreml-ep")]
+    #[cfg(feature = "ort-coreml")]
     #[test]
     fn test_coreml_config_default() {
         let config = CoreMLConfig::default();
@@ -455,7 +455,7 @@ mod tests {
         assert!(!config.require_static_shapes);
     }
 
-    #[cfg(feature = "coreml-ep")]
+    #[cfg(feature = "ort-coreml")]
     #[test]
     fn test_coreml_compute_units_from_str() {
         assert_eq!(
@@ -477,7 +477,7 @@ mod tests {
         assert_eq!(CoreMLComputeUnits::from_str("invalid"), None);
     }
 
-    #[cfg(feature = "coreml-ep")]
+    #[cfg(feature = "ort-coreml")]
     #[test]
     fn test_coreml_provider_display() {
         let provider = ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine());
@@ -548,7 +548,7 @@ mod tests {
         assert_eq!(parse_provider_string("unknown"), ExecutionProviderKind::Cpu);
     }
 
-    #[cfg(feature = "coreml-ep")]
+    #[cfg(feature = "ort-coreml")]
     #[test]
     fn test_parse_provider_string_coreml() {
         match parse_provider_string("coreml-ane") {
@@ -581,7 +581,7 @@ mod tests {
         assert_eq!(provider, ExecutionProviderKind::Cpu);
     }
 
-    #[cfg(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios")))]
+    #[cfg(all(feature = "ort-coreml", any(target_os = "macos", target_os = "ios")))]
     #[test]
     fn test_select_optimal_provider_vision() {
         let hints = ModelHints {
@@ -600,7 +600,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios")))]
+    #[cfg(all(feature = "ort-coreml", any(target_os = "macos", target_os = "ios")))]
     #[test]
     fn test_select_optimal_provider_tts_returns_cpu() {
         let hints = ModelHints {
@@ -613,7 +613,7 @@ mod tests {
         assert_eq!(provider, ExecutionProviderKind::Cpu);
     }
 
-    #[cfg(all(feature = "coreml-ep", any(target_os = "macos", target_os = "ios")))]
+    #[cfg(all(feature = "ort-coreml", any(target_os = "macos", target_os = "ios")))]
     #[test]
     fn test_select_optimal_provider_tiny_model_returns_cpu() {
         let hints = ModelHints {

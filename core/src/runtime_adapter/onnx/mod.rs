@@ -23,7 +23,7 @@ pub use backend::OnnxBackend;
 pub use execution_provider::{
     parse_provider_string, select_optimal_provider, ExecutionProviderKind, ModelHints,
 };
-#[cfg(feature = "coreml-ep")]
+#[cfg(feature = "ort-coreml")]
 pub use execution_provider::{CoreMLComputeUnits, CoreMLConfig};
 pub use runtime::OnnxRuntime;
 pub use session::ONNXSession;
