@@ -3,13 +3,13 @@ set -euo pipefail
 
 # Xybrid Integration Test Model Downloader
 # Supports two download sources:
-#   - registry: Downloads from xybrid registry (api.xybrid.dev)
+#   - registry: Downloads from xybrid registry (registry.xybrid.dev)
 #   - url: Downloads directly from URLs (GitHub, HuggingFace, etc.)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODELS_DIR="$SCRIPT_DIR/fixtures/models"
 MANIFEST="$MODELS_DIR/models.json"
-REGISTRY_API="https://api.xybrid.dev"
+REGISTRY_API="https://registry.xybrid.dev"
 
 # Colors for output
 RED='\033[0;31m'
@@ -414,7 +414,7 @@ case "${1:-}" in
         echo "  --help, -h     Show this help"
         echo ""
         echo "Download sources:"
-        echo "  registry  - Downloads from xybrid registry (api.xybrid.dev)"
+        echo "  registry  - Downloads from xybrid registry (registry.xybrid.dev)"
         echo "  url       - Downloads directly from URLs"
         echo ""
         echo "Examples:"

@@ -62,28 +62,16 @@ fn find_models_dir() -> Option<PathBuf> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").ok()?;
     let manifest_path = PathBuf::from(&manifest_dir);
 
-    // Path patterns to try (relative to manifest dir)
-    let patterns = [
-        // From core: ../integration-tests/fixtures/models
-        "../integration-tests/fixtures/models",
-        // From workspace root: repos/xybrid/integration-tests/fixtures/models
-        "integration-tests/fixtures/models",
-        // From examples running in workspace: repos/xybrid/integration-tests/fixtures/models
-        "../../integration-tests/fixtures/models",
-        // Legacy: test_models at repo root (for transition period)
-        "../test_models",
-        "../../test_models",
-    ];
+    // Path is always relative to CARGO_MANIFEST_DIR (core/)
+    // core/ -> ../integration-tests/fixtures/models
+    let fixtures_path = manifest_path.join("../integration-tests/fixtures/models");
 
-    for pattern in patterns {
-        let candidate = manifest_path.join(pattern);
-        if candidate.exists() && candidate.is_dir() {
-            // Canonicalize to get absolute path
-            if let Ok(canonical) = candidate.canonicalize() {
-                return Some(canonical);
-            }
-            return Some(candidate);
+    if fixtures_path.exists() && fixtures_path.is_dir() {
+        // Canonicalize to get absolute path
+        if let Ok(canonical) = fixtures_path.canonicalize() {
+            return Some(canonical);
         }
+        return Some(fixtures_path);
     }
 
     None
@@ -241,6 +229,83 @@ pub fn list_available_models() -> Vec<String> {
         })
         .filter_map(|e| e.file_name().into_string().ok())
         .collect()
+}
+
+// ============================================================================
+// Input Fixtures (test audio, text files)
+// ============================================================================
+
+/// Get the input fixtures directory.
+///
+/// Returns the directory containing test input files (audio, text).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// if let Some(input_dir) = model_fixtures::input_dir() {
+///     let test_audio = input_dir.join("test_audio.wav");
+/// }
+/// ```
+pub fn input_dir() -> Option<PathBuf> {
+    fixtures_dir().map(|f| f.join("input"))
+}
+
+/// Get path to a test audio file.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// if let Some(audio_path) = model_fixtures::test_audio("test_audio.wav") {
+///     let audio_bytes = std::fs::read(&audio_path)?;
+/// }
+/// ```
+pub fn test_audio(filename: &str) -> Option<PathBuf> {
+    input_dir().map(|d| d.join(filename)).filter(|p| p.exists())
+}
+
+/// Get path to the default test audio file (test_audio.wav).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let audio_path = model_fixtures::default_test_audio()
+///     .expect("test_audio.wav should exist");
+/// ```
+pub fn default_test_audio() -> Option<PathBuf> {
+    test_audio("test_audio.wav")
+}
+
+/// Get path to a test text file.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// if let Some(text_path) = model_fixtures::test_text("sample.txt") {
+///     let text = std::fs::read_to_string(&text_path)?;
+/// }
+/// ```
+pub fn test_text(filename: &str) -> Option<PathBuf> {
+    input_dir().map(|d| d.join(filename)).filter(|p| p.exists())
+}
+
+/// Get the pipeline configurations directory.
+///
+/// Returns the directory containing pipeline YAML files.
+pub fn pipelines_dir() -> Option<PathBuf> {
+    fixtures_dir().map(|f| f.join("pipelines"))
+}
+
+/// Get path to a pipeline configuration file.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// if let Some(pipeline_path) = model_fixtures::pipeline("tts_pipeline.yaml") {
+///     let yaml = std::fs::read_to_string(&pipeline_path)?;
+/// }
+/// ```
+pub fn pipeline(filename: &str) -> Option<PathBuf> {
+    pipelines_dir().map(|d| d.join(filename)).filter(|p| p.exists())
 }
 
 #[cfg(test)]

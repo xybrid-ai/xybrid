@@ -5,12 +5,15 @@
 //!
 //! Run with:
 //!   cargo run --example local_llm_qwen -p xybrid-core --features local-llm
+//!
+//! Requires model to be downloaded:
+//!   ./integration-tests/download.sh qwen2.5-0.5b-instruct
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
+use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
@@ -18,17 +21,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
     println!();
 
-    // Resolve model directory
-    let model_dir = PathBuf::from("test_models/qwen2.5-0.5b-instruct");
-    if !model_dir.exists() {
-        eprintln!("❌ Model directory not found: {}", model_dir.display());
-        eprintln!("   Please download the model first:");
-        eprintln!(
-            "   curl -L -o test_models/qwen2.5-0.5b-instruct/qwen2.5-0.5b-instruct-q4_k_m.gguf \\"
-        );
-        eprintln!("     https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf");
-        return Err("Model not found".into());
-    }
+    // Resolve model directory using fixtures
+    let model_dir = model_fixtures::require_model("qwen2.5-0.5b-instruct");
 
     // Load metadata
     let metadata_path = model_dir.join("model_metadata.json");

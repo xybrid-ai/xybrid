@@ -3,10 +3,15 @@
 
 name: cloud-llm
 
+input:
+  type: text
+
 stages:
-  - model: gpt-4o-mini
+  - id: llm
+    model: gpt-4o-mini
     target: cloud
     provider: openai
-    system_prompt: "You are a helpful assistant."
-    max_tokens: 150
-    temperature: 0.7
+    options:
+      system_prompt: "You are a helpful assistant."
+      max_tokens: 150
+      temperature: 0.7

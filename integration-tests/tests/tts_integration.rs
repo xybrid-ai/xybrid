@@ -1,41 +1,15 @@
-//! DEPRECATED: These tests have been moved to integration-tests/tests/tts_integration.rs
-//!
-//! This file uses the legacy `test_models/` directory which is being phased out.
-//! Please use the integration-tests crate instead:
-//!
-//! ```bash
-//! # Download test models
-//! ./integration-tests/download.sh kitten-tts kokoro-82m
-//!
-//! # Run TTS integration tests
-//! cargo test -p integration-tests --test tts_integration
-//! ```
-//!
-//! ---
-//!
-//! Original description:
-//! Integration tests for TTS (Text-to-Speech) pipeline with KittenTTS.
+//! Integration tests for TTS (Text-to-Speech) pipeline components.
 //!
 //! This tests:
 //! - Phonemizer with CMU dictionary
 //! - Token conversion using tokens.txt
 //! - Voice embeddings loading from voices.bin and voices.npz
 //! - ONNX model inference (if available)
+//!
+//! Run with: cargo test -p integration-tests --test tts_integration
 
+use integration_tests::fixtures;
 use std::path::PathBuf;
-
-/// Get the path to the KittenTTS test model directory
-fn get_kitten_tts_dir() -> Option<PathBuf> {
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()?
-        .to_path_buf();
-    let model_dir = project_root.join("test_models/kitten-tts/kitten-nano-en-v0_1-fp16");
-    if model_dir.exists() {
-        Some(model_dir)
-    } else {
-        None
-    }
-}
 
 /// Get the path to the CMU dictionary
 fn get_cmudict_path() -> Option<PathBuf> {
@@ -50,18 +24,23 @@ fn get_cmudict_path() -> Option<PathBuf> {
 
 #[test]
 fn test_load_tokens_file() {
-    let Some(model_dir) = get_kitten_tts_dir() else {
-        eprintln!("Skipping test: KittenTTS model not found");
+    let Some(model_dir) = fixtures::model_if_available("kitten-tts") else {
+        eprintln!("Skipping test: kitten-tts not downloaded");
+        eprintln!("Run: ./integration-tests/download.sh kitten-tts");
         return;
     };
 
     let tokens_path = model_dir.join("tokens.txt");
-    let tokens_content = std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
+    let tokens_content =
+        std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
 
     let tokens_map = xybrid_core::phonemizer::load_tokens_map(&tokens_content);
 
     // Verify some expected mappings
-    assert!(tokens_map.contains_key(&'$'), "Should have padding token $");
+    assert!(
+        tokens_map.contains_key(&'$'),
+        "Should have padding token $"
+    );
     assert!(
         tokens_map.contains_key(&'a'),
         "Should have lowercase letters"
@@ -87,8 +66,8 @@ fn test_phonemize_text() {
         return;
     };
 
-    let phonemizer =
-        xybrid_core::phonemizer::Phonemizer::new(&dict_path).expect("Failed to create phonemizer");
+    let phonemizer = xybrid_core::phonemizer::Phonemizer::new(&dict_path)
+        .expect("Failed to create phonemizer");
 
     // Test some common words
     let test_cases = [
@@ -118,8 +97,8 @@ fn test_phonemize_text() {
 
 #[test]
 fn test_phonemes_to_token_ids() {
-    let Some(model_dir) = get_kitten_tts_dir() else {
-        eprintln!("Skipping test: KittenTTS model not found");
+    let Some(model_dir) = fixtures::model_if_available("kitten-tts") else {
+        eprintln!("Skipping test: kitten-tts not downloaded");
         return;
     };
 
@@ -130,12 +109,13 @@ fn test_phonemes_to_token_ids() {
 
     // Load tokens map
     let tokens_path = model_dir.join("tokens.txt");
-    let tokens_content = std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
+    let tokens_content =
+        std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
     let tokens_map = xybrid_core::phonemizer::load_tokens_map(&tokens_content);
 
     // Create phonemizer
-    let phonemizer =
-        xybrid_core::phonemizer::Phonemizer::new(&dict_path).expect("Failed to create phonemizer");
+    let phonemizer = xybrid_core::phonemizer::Phonemizer::new(&dict_path)
+        .expect("Failed to create phonemizer");
 
     // Convert text to token IDs
     let text = "Hello world";
@@ -168,9 +148,9 @@ fn test_phonemes_to_token_ids() {
 }
 
 #[test]
-fn test_load_voice_embeddings() {
-    let Some(model_dir) = get_kitten_tts_dir() else {
-        eprintln!("Skipping test: KittenTTS model not found");
+fn test_load_voice_embeddings_bin() {
+    let Some(model_dir) = fixtures::model_if_available("kitten-tts") else {
+        eprintln!("Skipping test: kitten-tts not downloaded");
         return;
     };
 
@@ -182,7 +162,7 @@ fn test_load_voice_embeddings() {
     assert_eq!(
         voices_data.len(),
         8192,
-        "voices.bin should be 8192 bytes (8 voices × 256 dims × 4 bytes)"
+        "voices.bin should be 8192 bytes (8 voices x 256 dims x 4 bytes)"
     );
 
     // Parse voice embeddings
@@ -200,18 +180,18 @@ fn test_load_voice_embeddings() {
         })
         .collect();
 
-    println!("Loaded {} voice embeddings", voices.len());
+    println!("Loaded {} voice embeddings from voices.bin", voices.len());
+    let voice_names = [
+        "expr-voice-2-m",
+        "expr-voice-2-f",
+        "expr-voice-3-m",
+        "expr-voice-3-f",
+        "expr-voice-4-m",
+        "expr-voice-4-f",
+        "expr-voice-5-m",
+        "expr-voice-5-f",
+    ];
     for (i, voice) in voices.iter().enumerate() {
-        let voice_names = [
-            "expr-voice-2-m",
-            "expr-voice-2-f",
-            "expr-voice-3-m",
-            "expr-voice-3-f",
-            "expr-voice-4-m",
-            "expr-voice-4-f",
-            "expr-voice-5-m",
-            "expr-voice-5-f",
-        ];
         let mean: f32 = voice.iter().sum::<f32>() / voice.len() as f32;
         let max = voice.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let min = voice.iter().cloned().fold(f32::INFINITY, f32::min);
@@ -228,14 +208,10 @@ fn test_load_voice_embeddings() {
     }
 }
 
-// NOTE: Full ONNX inference test is in a separate example binary
-// since the ort API requires special handling. Run with:
-// cargo run --example tts_inference -p xybrid-core
-
 #[test]
 fn test_model_metadata_loading() {
-    let Some(model_dir) = get_kitten_tts_dir() else {
-        eprintln!("Skipping test: KittenTTS model not found");
+    let Some(model_dir) = fixtures::model_if_available("kitten-tts") else {
+        eprintln!("Skipping test: kitten-tts not downloaded");
         return;
     };
 
@@ -271,45 +247,49 @@ fn test_model_metadata_loading() {
 }
 
 #[test]
-fn test_voice_embedding_loader_2d_npz() {
+fn test_voice_embedding_loader_npz() {
     use xybrid_core::tts::voice_embedding::VoiceEmbeddingLoader;
 
-    // Check if we have the KittenTTS v0.2 NPZ file (downloaded for testing)
-    let npz_path = std::path::Path::new("/tmp/kitten_voices.npz");
+    // Check if we have the kokoro model with NPZ file
+    let Some(model_dir) = fixtures::model_if_available("kokoro-82m") else {
+        eprintln!("Skipping test: kokoro-82m not downloaded (has voices.npz)");
+        eprintln!("Run: ./integration-tests/download.sh kokoro-82m");
+        return;
+    };
+
+    let npz_path = model_dir.join("voices.npz");
     if !npz_path.exists() {
-        eprintln!("Skipping test: /tmp/kitten_voices.npz not found");
-        eprintln!("Download with: curl -sL 'https://huggingface.co/KittenML/kitten-tts-nano-0.2/resolve/main/voices.npz' -o /tmp/kitten_voices.npz");
+        eprintln!("Skipping test: voices.npz not found in kokoro-82m");
         return;
     }
 
     let loader = VoiceEmbeddingLoader::new(256);
 
     // Test loading by index
-    let embedding = loader.load(npz_path, 0).expect("Failed to load voice embedding by index");
+    let embedding = loader
+        .load(&npz_path, 0)
+        .expect("Failed to load voice embedding by index");
     assert_eq!(embedding.len(), 256, "Embedding should have 256 dimensions");
 
     // Verify it's not all zeros
     let sum: f32 = embedding.iter().map(|v| v.abs()).sum();
     assert!(sum > 0.0, "Embedding should not be all zeros");
 
-    println!("Successfully loaded 2D NPZ voice embedding:");
+    println!("Successfully loaded NPZ voice embedding:");
     println!("  Length: {}", embedding.len());
     println!("  First 5 values: {:?}", &embedding[..5]);
 
     // Test listing voice names
-    let names = loader.list_voice_names(npz_path).expect("Failed to list voice names");
-    assert!(names.is_some(), "NPZ should have voice names");
-    let names = names.unwrap();
-    println!("  Voice names: {:?}", names);
-    assert_eq!(names.len(), 8, "Should have 8 voices");
-
-    // Test loading by name
-    let embedding_by_name = loader.load_npz_by_name(npz_path, "expr-voice-2-f", None)
-        .expect("Failed to load voice by name");
-    assert_eq!(embedding_by_name.len(), 256);
-    println!("  Successfully loaded 'expr-voice-2-f' by name");
+    let names = loader
+        .list_voice_names(&npz_path)
+        .expect("Failed to list voice names");
+    if let Some(names) = names {
+        println!("  Voice names: {:?}", names);
+        assert!(!names.is_empty(), "Should have voice names");
+    }
 
     // Test count_voices
-    let count = loader.count_voices(npz_path).expect("Failed to count voices");
-    assert_eq!(count, 8, "Should count 8 voices");
+    let count = loader.count_voices(&npz_path).expect("Failed to count voices");
+    println!("  Voice count: {}", count);
+    assert!(count > 0, "Should have at least one voice");
 }

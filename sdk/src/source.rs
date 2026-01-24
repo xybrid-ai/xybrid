@@ -80,7 +80,7 @@ pub enum ModelSource {
     /// # Example
     /// ```ignore
     /// ModelSource::Directory {
-    ///     path: PathBuf::from("test_models/whisper-tiny"),
+    ///     path: PathBuf::from("/path/to/whisper-model"),
     /// }
     /// ```
     Directory {
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn test_directory_source() {
-        let source = ModelSource::directory("test_models/whisper");
+        let source = ModelSource::directory("/tmp/test-model");
         assert_eq!(source.source_type(), "directory");
     }
 

@@ -1,6 +1,3 @@
-// TODO: Replace hardcoded `test_models/` paths in doc examples with user-configurable paths
-// See: https://github.com/xybrid-ai/xybrid/issues/XXX
-
 //! Streaming inference module for real-time ASR.
 //!
 //! This module provides `StreamSession` for continuous audio streaming
@@ -31,7 +28,7 @@
 //!
 //! // Create session - backend auto-detected from model_metadata.json
 //! let config = StreamConfig::default();
-//! let mut session = StreamSession::new("test_models/whisper-tiny-candle", config)?;
+//! let mut session = StreamSession::new("/path/to/whisper-model", config)?;
 //!
 //! // Feed audio chunks as they arrive
 //! session.feed(&audio_chunk_1)?;

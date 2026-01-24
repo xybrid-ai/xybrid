@@ -17,7 +17,7 @@
 //! use xybrid_core::audio::vad::{VadSession, VadConfig};
 //!
 //! let config = VadConfig::default();
-//! let mut vad = VadSession::new("test_models/silero-vad", config)?;
+//! let mut vad = VadSession::new("/path/to/silero-vad", config)?;
 //!
 //! // Process audio frames
 //! for chunk in audio_chunks {

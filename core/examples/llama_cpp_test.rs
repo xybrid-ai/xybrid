@@ -6,32 +6,29 @@
 //! Run with:
 //!   cargo run --example llama_cpp_test -p xybrid-core --features local-llm-llamacpp
 //!
-//! Requires a GGUF model. Download a small one:
-//!   mkdir -p test_models/tinyllama
-//!   curl -L -o test_models/tinyllama/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
-//!     https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+//! Requires a GGUF model:
+//!   ./integration-tests/download.sh qwen2.5-0.5b-instruct
 
 #[cfg(feature = "local-llm-llamacpp")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use xybrid_core::runtime_adapter::llama_cpp::LlamaCppBackend;
     use xybrid_core::runtime_adapter::llm::{ChatMessage, GenerationConfig, LlmBackend, LlmConfig};
+    use xybrid_core::testing::model_fixtures;
 
     println!("═══════════════════════════════════════════════════════");
     println!("  LlamaCpp Backend Test");
     println!("═══════════════════════════════════════════════════════");
     println!();
 
-    // Find a GGUF model
-    let model_paths = [
-        "test_models/tinyllama/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
-        "test_models/qwen2.5-0.5b-instruct/qwen2.5-0.5b-instruct-q4_k_m.gguf",
-        "test_models/smollm2-135m-instruct-q8_0.gguf",
-    ];
+    // Find a GGUF model from fixtures
+    let model_dir = model_fixtures::require_model("qwen2.5-0.5b-instruct");
+    let model_path = model_dir.join("qwen2.5-0.5b-instruct-q4_k_m.gguf");
 
-    let model_path = model_paths
-        .iter()
-        .find(|p| std::path::Path::new(p).exists())
-        .ok_or("No GGUF model found. Download one first (see file header).")?;
+    if !model_path.exists() {
+        return Err(format!("GGUF file not found at: {}", model_path.display()).into());
+    }
+
+    let model_path = model_path.to_str().unwrap();
 
     println!("📁 Using model: {}", model_path);
     println!();
@@ -43,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load model
     println!("📦 Loading model...");
-    let config = LlmConfig::new(*model_path)
+    let config = LlmConfig::new(model_path)
         .with_context_length(2048)
         .with_gpu_layers(0); // CPU only for testing
 

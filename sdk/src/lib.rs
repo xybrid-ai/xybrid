@@ -35,7 +35,7 @@
 //! ```rust,ignore
 //! use xybrid_sdk::{ModelLoader, StreamConfig};
 //!
-//! let model = ModelLoader::from_directory("test_models/whisper-tiny")?.load()?;
+//! let model = ModelLoader::from_directory("/path/to/whisper-model")?.load()?;
 //! let stream = model.stream(StreamConfig::with_vad())?;
 //!
 //! // Feed audio chunks
