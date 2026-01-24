@@ -1,8 +1,9 @@
 //! Voice embedding loading utilities for TTS models.
 //!
 //! This module provides utilities for loading voice embeddings from different formats:
-//! - **Raw binary format** (KittenTTS): Simple contiguous f32 arrays per voice
-//! - **NPZ format** (Kokoro): NumPy ZIP archives with shape (510, 1, 256) per voice
+//! - **Raw binary format** (KittenTTS v0.1): Simple contiguous f32 arrays per voice
+//! - **NPZ format 2D** (KittenTTS v0.2): NumPy ZIP archives with shape (1, 256) per voice
+//! - **NPZ format 3D** (Kokoro): NumPy ZIP archives with shape (510, 1, 256) per voice
 //!
 //! ## Usage
 //!
@@ -11,7 +12,8 @@
 //!
 //! // Auto-detect format and load
 //! let loader = VoiceEmbeddingLoader::new(256);
-//! let embedding = loader.load("voices.bin", 0)?;
+//! let embedding = loader.load("voices.bin", 0)?;  // Raw binary
+//! let embedding = loader.load("voices.npz", 0)?;  // NPZ (auto-detects 2D/3D)
 //!
 //! // Or load all embeddings (raw format only)
 //! let all_embeddings = loader.load_all_raw("voices.bin")?;
@@ -122,12 +124,14 @@ impl VoiceEmbeddingLoader {
 
     /// Load a voice embedding by name from an NPZ file.
     ///
-    /// This is useful for Kokoro-style voices where each voice has a name.
+    /// Supports multiple NPZ formats:
+    /// - **2D arrays** (KittenTTS v0.2): shape (1, 256) - single embedding per voice
+    /// - **3D arrays** (Kokoro): shape (510, 1, 256) - token-length-dependent embeddings
     ///
     /// # Arguments
     /// * `path` - Path to the NPZ file
-    /// * `voice_name` - Name of the voice (e.g., "af_bella")
-    /// * `token_length` - Token length index (affects embedding selection in Kokoro)
+    /// * `voice_name` - Name of the voice (e.g., "af_bella", "expr-voice-2-f")
+    /// * `token_length` - Token length index (only used for 3D Kokoro-style arrays)
     pub fn load_npz_by_name(
         &self,
         path: impl AsRef<Path>,
@@ -140,29 +144,7 @@ impl VoiceEmbeddingLoader {
         let file = File::open(path.as_ref())?;
         let mut npz = NpzReader::new(file).map_err(|e| VoiceError::NpzError(e.to_string()))?;
 
-        // Load the voice array - shape is (510, 1, 256)
-        let voice_data: ndarray::Array3<f32> = npz
-            .by_name(voice_name)
-            .map_err(|_| VoiceError::VoiceNotFound(voice_name.to_string()))?;
-
-        // Select token length index (default to 100 which is mid-range)
-        let token_len_idx = token_length.unwrap_or(100).min(voice_data.shape()[0] - 1);
-
-        // Extract embedding at token_len_idx, row 0
-        let embedding: Vec<f32> = voice_data
-            .slice(ndarray::s![token_len_idx, 0, ..])
-            .iter()
-            .copied()
-            .collect();
-
-        if embedding.len() != self.embedding_dim {
-            return Err(VoiceError::DimensionMismatch {
-                expected: self.embedding_dim,
-                actual: embedding.len(),
-            });
-        }
-
-        Ok(embedding)
+        self.load_npz_by_name_from_reader(&mut npz, voice_name, token_length)
     }
 
     /// Load a voice embedding by index from an NPZ file.
@@ -198,13 +180,38 @@ impl VoiceEmbeddingLoader {
     }
 
     /// Internal helper to load from an already-opened NPZ reader.
+    ///
+    /// Handles multiple array shapes:
+    /// - 2D (1, 256) or (N, 256): KittenTTS v0.2 style - extract row 0
+    /// - 3D (510, 1, 256): Kokoro style - extract at token_length index
     fn load_npz_by_name_from_reader<R: std::io::Read + std::io::Seek>(
         &self,
         npz: &mut ndarray_npy::NpzReader<R>,
         voice_name: &str,
         token_length: Option<usize>,
     ) -> Result<Vec<f32>, VoiceError> {
-        // Load the voice array - shape is (510, 1, 256)
+        // Try loading as 2D array first (KittenTTS v0.2 style: shape (1, 256))
+        let result_2d: Result<ndarray::Array2<f32>, _> = npz.by_name(voice_name);
+        if let Ok(voice_data) = result_2d {
+            // 2D array: shape is (1, 256) or (N, 256)
+            // Extract first row (index 0)
+            let embedding: Vec<f32> = voice_data
+                .row(0)
+                .iter()
+                .copied()
+                .collect();
+
+            if embedding.len() != self.embedding_dim {
+                return Err(VoiceError::DimensionMismatch {
+                    expected: self.embedding_dim,
+                    actual: embedding.len(),
+                });
+            }
+
+            return Ok(embedding);
+        }
+
+        // Fall back to 3D array (Kokoro style: shape (510, 1, 256))
         let voice_data: ndarray::Array3<f32> = npz
             .by_name(voice_name)
             .map_err(|_| VoiceError::VoiceNotFound(voice_name.to_string()))?;
