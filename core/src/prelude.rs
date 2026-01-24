@@ -38,15 +38,9 @@ pub use crate::ir::{Envelope, EnvelopeKind};
 // Model Metadata & Execution Templates
 // ============================================================================
 
-pub use crate::execution_template::{
-    ExecutionTemplate, ModelMetadata, PostprocessingStep, PreprocessingStep,
+pub use crate::execution::{
+    ExecutionTemplate, ModelMetadata, PostprocessingStep, PreprocessingStep, TemplateExecutor,
 };
-
-// ============================================================================
-// Template Executor
-// ============================================================================
-
-pub use crate::template_executor::TemplateExecutor;
 
 // ============================================================================
 // Error Types

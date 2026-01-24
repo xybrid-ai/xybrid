@@ -23,8 +23,8 @@
 //! TTS models should be executed via `TemplateExecutor`:
 //!
 //! ```rust,ignore
-//! use xybrid_core::template_executor::TemplateExecutor;
-//! use xybrid_core::execution_template::ModelMetadata;
+//! use xybrid_core::execution::TemplateExecutor;
+//! use xybrid_core::execution::ModelMetadata;
 //! use xybrid_core::ir::{Envelope, EnvelopeKind};
 //!
 //! let metadata: ModelMetadata = serde_json::from_str(

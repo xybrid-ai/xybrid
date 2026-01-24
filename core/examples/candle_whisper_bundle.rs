@@ -19,9 +19,9 @@ use xybrid_core::testing::model_fixtures;
 
 #[cfg(feature = "candle")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use xybrid_core::execution_template::ModelMetadata;
+    use xybrid_core::execution::ModelMetadata;
     use xybrid_core::ir::{Envelope, EnvelopeKind};
-    use xybrid_core::template_executor::TemplateExecutor;
+    use xybrid_core::execution::TemplateExecutor;
 
     println!("=== Candle Whisper Bundle Example ===\n");
 
@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Create executor and run
     println!("\n4. Running transcription via TemplateExecutor...");
-    let mut executor = xybrid_core::template_executor::TemplateExecutor::with_base_path(
+    let mut executor = xybrid_core::execution::TemplateExecutor::with_base_path(
         model_dir.to_str().unwrap(),
     );
 

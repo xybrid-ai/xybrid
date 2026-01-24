@@ -16,7 +16,7 @@ pub mod tensor;
 pub mod text;
 
 use super::types::{ExecutorResult, PreprocessedData};
-use crate::execution_template::PreprocessingStep;
+use crate::execution::template::PreprocessingStep;
 use crate::ir::Envelope;
 
 /// Apply a preprocessing step to data.

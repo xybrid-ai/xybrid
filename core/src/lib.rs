@@ -69,8 +69,21 @@ pub mod orchestrator;
 /// Stage execution with adapter selection
 pub mod executor;
 
-/// Metadata-driven model inference (preprocessing → ONNX → postprocessing)
-pub mod template_executor;
+/// Unified execution module (template schema + executor)
+///
+/// This module contains:
+/// - [`execution::template`] - Model metadata schema (model_metadata.json)
+/// - [`execution::TemplateExecutor`] - Metadata-driven inference engine
+/// - [`execution::modes`] - Execution modes (SingleShot, Autoregressive, Whisper, TTS)
+pub mod execution;
+
+// Backwards compatibility: re-export old module paths
+// TODO: Deprecate these in a future version
+/// Deprecated: use `execution` module instead
+#[doc(hidden)]
+pub mod template_executor {
+    pub use crate::execution::*;
+}
 
 /// Cache provider abstraction for model availability checks.
 /// Allows Core to check cache without depending on SDK.
@@ -86,8 +99,12 @@ pub mod ir;
 /// Device metrics and stage descriptors
 pub mod context;
 
-/// Model metadata schema (model_metadata.json)
-pub mod execution_template;
+// Backwards compatibility: re-export execution::template as execution_template
+/// Deprecated: use `execution::template` instead
+#[doc(hidden)]
+pub mod execution_template {
+    pub use crate::execution::template::*;
+}
 
 // ============================================================================
 // Runtime & Pipeline Execution

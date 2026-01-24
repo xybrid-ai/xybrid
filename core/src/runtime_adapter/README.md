@@ -126,8 +126,8 @@ let outputs = backend.run_inference(inputs)?;
 For bundle-based execution, use `TemplateExecutor` instead:
 
 ```rust
-use xybrid_core::template_executor::TemplateExecutor;
-use xybrid_core::execution_template::ModelMetadata;
+use xybrid_core::execution::TemplateExecutor;
+use xybrid_core::execution::ModelMetadata;
 
 let metadata: ModelMetadata = serde_json::from_str(&metadata_json)?;
 let mut executor = TemplateExecutor::with_base_path("path/to/model");

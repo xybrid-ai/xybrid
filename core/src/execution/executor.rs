@@ -6,7 +6,7 @@
 
 use log::{debug, info};
 
-use crate::execution_template::{ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage};
+use super::template::{ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage};
 use crate::ir::Envelope;
 use crate::runtime_adapter::onnx::{ONNXSession, OnnxRuntime};
 use crate::runtime_adapter::{AdapterError, ModelRuntime};
@@ -23,7 +23,7 @@ use crate::runtime_adapter::llm::{LlmConfig, LlmRuntimeAdapter};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::runtime_adapter::RuntimeAdapter;
 
-use super::execution::{
+use super::modes::{
     execute_autoregressive_stage, execute_bert_inference, execute_single_shot_stage,
     execute_tts_inference, execute_whisper_decoder_stage,
 };
@@ -160,23 +160,8 @@ impl TemplateExecutor {
                 .as_phoneme_ids()
                 .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
 
-            // Load voice embedding from voices.bin or voices.npz
-            let voices_bin_path = Path::new(&self.base_path).join("voices.bin");
-            let voices_npz_path = Path::new(&self.base_path).join("voices.npz");
-            let voice_embedding = if voices_bin_path.exists() {
-                let loader = crate::tts::voice_embedding::VoiceEmbeddingLoader::new(256);
-                loader.load(&voices_bin_path, 0).map_err(|e| {
-                    AdapterError::RuntimeError(format!("Failed to load voice embedding: {}", e))
-                })?
-            } else if voices_npz_path.exists() {
-                let loader = crate::tts::voice_embedding::VoiceEmbeddingLoader::new(256);
-                loader.load(&voices_npz_path, 0).map_err(|e| {
-                    AdapterError::RuntimeError(format!("Failed to load voice embedding: {}", e))
-                })?
-            } else {
-                // Default voice embedding (zeros)
-                vec![0.0f32; 256]
-            };
+            // Load voice embedding based on metadata and envelope
+            let voice_embedding = self.load_voice_embedding(metadata, input)?;
 
             // Create and run TTS session directly
             let session = ONNXSession::new(model_full_path.to_str().unwrap(), false, false)?;
@@ -506,6 +491,128 @@ impl TemplateExecutor {
                 .join(file)
                 .to_string_lossy()
                 .to_string()
+        }
+    }
+
+    /// Load voice embedding based on metadata and input envelope.
+    ///
+    /// Resolution order:
+    /// 1. `voice_id` from Envelope.metadata (if present)
+    /// 2. Default voice from ModelMetadata.voices.default
+    /// 3. Index 0 (legacy fallback for models without voice config)
+    fn load_voice_embedding(
+        &self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+    ) -> ExecutorResult<Vec<f32>> {
+        let loader = crate::tts::voice_embedding::VoiceEmbeddingLoader::new(256);
+
+        // Determine voice file path based on voice config or legacy detection
+        let voice_path = if let Some(voice_config) = &metadata.voices {
+            // Use path from voice config
+            match &voice_config.format {
+                super::template::VoiceFormat::Embedded { file, .. } => {
+                    Path::new(&self.base_path).join(file)
+                }
+                _ => {
+                    // For non-embedded formats, return error for now
+                    return Err(AdapterError::InvalidInput(
+                        "Only embedded voice format is currently supported".to_string(),
+                    ));
+                }
+            }
+        } else {
+            // Legacy: auto-detect voices.bin or voices.npz
+            let voices_bin_path = Path::new(&self.base_path).join("voices.bin");
+            let voices_npz_path = Path::new(&self.base_path).join("voices.npz");
+
+            if voices_bin_path.exists() {
+                voices_bin_path
+            } else if voices_npz_path.exists() {
+                voices_npz_path
+            } else {
+                // No voice file - return default embedding
+                debug!(target: "xybrid_core", "No voice file found, using zero embedding");
+                return Ok(vec![0.0f32; 256]);
+            }
+        };
+
+        // Check if voice file exists
+        if !voice_path.exists() {
+            debug!(target: "xybrid_core", "Voice file not found: {:?}, using zero embedding", voice_path);
+            return Ok(vec![0.0f32; 256]);
+        }
+
+        // Get voice_id from envelope metadata (priority 1)
+        let voice_id = input.metadata.get("voice_id");
+
+        // If we have structured voice config, use it for resolution
+        if let Some(voice_config) = &metadata.voices {
+            let voice_info = if let Some(vid) = voice_id {
+                // Look up requested voice
+                metadata.get_voice(vid).ok_or_else(|| {
+                    let available: Vec<_> = voice_config.catalog.iter().map(|v| v.id.as_str()).collect();
+                    AdapterError::InvalidInput(format!(
+                        "Voice '{}' not found. Available voices: {:?}",
+                        vid, available
+                    ))
+                })?
+            } else {
+                // Use default voice
+                metadata.default_voice().ok_or_else(|| {
+                    AdapterError::RuntimeError(format!(
+                        "Default voice '{}' not found in catalog",
+                        voice_config.default
+                    ))
+                })?
+            };
+
+            debug!(
+                target: "xybrid_core",
+                "Loading voice: {} (index: {:?})",
+                voice_info.id,
+                voice_info.index
+            );
+
+            // Load by index if available
+            if let Some(index) = voice_info.index {
+                loader.load(&voice_path, index).map_err(|e| {
+                    AdapterError::RuntimeError(format!(
+                        "Failed to load voice '{}' (index {}): {}",
+                        voice_info.id, index, e
+                    ))
+                })
+            } else {
+                // For NPZ format, try to load by name
+                loader
+                    .load_npz_by_name(&voice_path, &voice_info.id, None)
+                    .map_err(|e| {
+                        AdapterError::RuntimeError(format!(
+                            "Failed to load voice '{}' by name: {}",
+                            voice_info.id, e
+                        ))
+                    })
+            }
+        } else {
+            // Legacy path: no structured voice config
+            if let Some(vid) = voice_id {
+                // Try parsing as index first
+                if let Ok(index) = vid.parse::<usize>() {
+                    debug!(target: "xybrid_core", "Loading voice by index: {}", index);
+                    loader.load(&voice_path, index)
+                } else {
+                    // Try as name (NPZ only)
+                    debug!(target: "xybrid_core", "Loading voice by name: {}", vid);
+                    loader.load_npz_by_name(&voice_path, vid, None)
+                }
+            } else {
+                // Default to index 0
+                debug!(target: "xybrid_core", "Loading default voice (index 0)");
+                loader.load(&voice_path, 0)
+            }
+            .map_err(|e| {
+                AdapterError::RuntimeError(format!("Failed to load voice embedding: {}", e))
+            })
         }
     }
 }

@@ -10,9 +10,9 @@
 //!   ./integration-tests/download.sh qwen2.5-0.5b-instruct
 
 use std::collections::HashMap;
-use xybrid_core::execution_template::ModelMetadata;
+use xybrid_core::execution::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
-use xybrid_core::template_executor::TemplateExecutor;
+use xybrid_core::execution::TemplateExecutor;
 use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

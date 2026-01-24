@@ -7,9 +7,9 @@
 use ndarray::Array4;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use xybrid_core::execution_template::ModelMetadata;
+use xybrid_core::execution::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
-use xybrid_core::template_executor::TemplateExecutor;
+use xybrid_core::execution::TemplateExecutor;
 use xybrid_core::testing::model_fixtures;
 
 // ImageNet class labels (top 10 for demo)

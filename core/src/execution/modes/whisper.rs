@@ -7,7 +7,7 @@
 
 use super::super::types::ExecutorResult;
 use super::{parse_kv_cache_name, parse_present_name_full};
-use crate::execution_template::PipelineStage;
+use crate::execution::template::PipelineStage;
 use crate::runtime_adapter::onnx::ONNXSession;
 use crate::runtime_adapter::AdapterError;
 use ndarray::{Array2, ArrayD, IxDyn};

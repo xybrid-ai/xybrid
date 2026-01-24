@@ -18,7 +18,7 @@ const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 10_000;
 /// - Direct: Direct API calls (development only)
 ///
 /// For local/on-device inference, use `target: device` in your pipeline YAML,
-/// which routes to [`crate::template_executor::TemplateExecutor`] instead.
+/// which routes to [`crate::execution::TemplateExecutor`] instead.
 ///
 /// # Resilience Features
 ///

@@ -7,7 +7,7 @@
 use super::super::types::{ExecutorResult, PreprocessedData};
 use crate::audio::mel::{compute_mel_spectrogram, MelConfig, MelScale, PaddingMode};
 use crate::audio::{decode_wav_audio, prepare_audio_samples};
-use crate::execution_template::MelScaleType;
+use crate::execution::template::MelScaleType;
 use crate::ir::Envelope;
 use crate::preprocessing::mel_spectrogram::audio_bytes_to_whisper_mel;
 use crate::runtime_adapter::AdapterError;

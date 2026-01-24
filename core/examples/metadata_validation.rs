@@ -4,7 +4,7 @@
 //! for different execution templates (Onnx, SafeTensors, and ModelGraph).
 
 use std::fs;
-use xybrid_core::execution_template::ModelMetadata;
+use xybrid_core::execution::ModelMetadata;
 use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     match &whisper_metadata.execution_template {
-        xybrid_core::execution_template::ExecutionTemplate::ModelGraph { stages, config } => {
+        xybrid_core::execution::ExecutionTemplate::ModelGraph { stages, config } => {
             println!("   ✓ Execution: ModelGraph with {} stages", stages.len());
             for stage in stages {
                 println!(
@@ -48,10 +48,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("   ✓ Config keys: {:?}", config.keys().collect::<Vec<_>>());
         }
-        xybrid_core::execution_template::ExecutionTemplate::Onnx { model_file } => {
+        xybrid_core::execution::ExecutionTemplate::Onnx { model_file } => {
             println!("   ✓ Execution: Onnx ({})", model_file);
         }
-        xybrid_core::execution_template::ExecutionTemplate::SafeTensors {
+        xybrid_core::execution::ExecutionTemplate::SafeTensors {
             model_file,
             architecture,
             ..
@@ -93,7 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     match &mnist_metadata.execution_template {
-        xybrid_core::execution_template::ExecutionTemplate::Onnx { model_file } => {
+        xybrid_core::execution::ExecutionTemplate::Onnx { model_file } => {
             println!("   ✓ Execution: Onnx ({})", model_file);
         }
         _ => println!("   ✗ Unexpected execution template type!"),
