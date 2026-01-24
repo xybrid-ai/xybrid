@@ -3,7 +3,7 @@
 //! This tests:
 //! - Phonemizer with CMU dictionary
 //! - Token conversion using tokens.txt
-//! - Voice embeddings loading from voices.bin
+//! - Voice embeddings loading from voices.bin and voices.npz
 //! - ONNX model inference (if available)
 
 use std::path::PathBuf;
