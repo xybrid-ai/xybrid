@@ -16,9 +16,9 @@
 //! ```
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::testing::model_fixtures;
 use xybrid_sdk::{
     flush_platform_telemetry, init_platform_telemetry, publish_telemetry_event,
     shutdown_platform_telemetry, TelemetryConfig, TelemetryEvent,
@@ -66,8 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     publish_telemetry_event(test_event);
 
     // Try to run a simple TTS inference (if model is available)
-    let model_dir = PathBuf::from("test_models/kitten-tts-nano");
-    if model_dir.exists() {
+    if let Some(model_dir) = model_fixtures::model_or_skip("kitten-tts") {
         println!("\nRunning TTS inference with telemetry...");
 
         let metadata_path = model_dir.join("model_metadata.json");
@@ -147,7 +146,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Model metadata not found at {:?}", metadata_path);
         }
     } else {
-        println!("\nNote: kitten-tts-nano model not found, skipping TTS test");
+        println!("\nNote: kitten-tts model not found, skipping TTS test");
+        println!("Download with: ./integration-tests/download.sh kitten-tts");
         println!("Only the test event will be sent.");
     }
 

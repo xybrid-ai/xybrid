@@ -44,7 +44,7 @@ pub trait CacheProvider: Send + Sync {
     ///
     /// # Returns
     ///
-    /// `true` if the model is available locally (cached or in test_models)
+    /// `true` if the model is available locally (cached or in fixtures)
     fn is_model_cached(&self, model_id: &str) -> bool;
 
     /// Get the local path for a cached model.
@@ -69,14 +69,14 @@ pub trait CacheProvider: Send + Sync {
 ///
 /// This implementation searches the standard cache locations:
 /// - `~/.xybrid/cache/models/{model_dir}/` (SDK cache)
-/// - `test_models/{model_id}/` (development)
+/// - `integration-tests/fixtures/models/{model_id}/` (development fixtures)
 ///
 /// It handles the mismatch between model masks (e.g., "kokoro-82m") and
 /// HuggingFace repo names (e.g., "Kokoro-82M-v1.0-ONNX") via fuzzy matching.
 #[derive(Debug, Clone)]
 pub struct FilesystemCacheProvider {
     cache_dir: PathBuf,
-    test_models_dir: PathBuf,
+    fixtures_models_dir: Option<PathBuf>,
 }
 
 impl Default for FilesystemCacheProvider {
@@ -92,17 +92,20 @@ impl FilesystemCacheProvider {
             .map(|h| h.join(".xybrid").join("cache").join("models"))
             .unwrap_or_else(|| PathBuf::from(".xybrid/cache/models"));
 
+        // Try to find fixtures models directory
+        let fixtures_models_dir = crate::testing::model_fixtures::models_dir().cloned();
+
         Self {
             cache_dir,
-            test_models_dir: PathBuf::from("test_models"),
+            fixtures_models_dir,
         }
     }
 
     /// Create with custom paths (for testing).
-    pub fn with_paths(cache_dir: PathBuf, test_models_dir: PathBuf) -> Self {
+    pub fn with_paths(cache_dir: PathBuf, fixtures_models_dir: Option<PathBuf>) -> Self {
         Self {
             cache_dir,
-            test_models_dir,
+            fixtures_models_dir,
         }
     }
 
@@ -116,10 +119,12 @@ impl FilesystemCacheProvider {
         let model_id_lower = model_id.to_lowercase();
         let model_id_normalized = normalize_name(&model_id_lower);
 
-        // Check test_models first (exact match only for simplicity)
-        let test_path = self.test_models_dir.join(model_id);
-        if test_path.exists() && has_model_files(&test_path) {
-            return Some(test_path);
+        // Check fixtures models first (exact match only for simplicity)
+        if let Some(fixtures_dir) = &self.fixtures_models_dir {
+            let fixtures_path = fixtures_dir.join(model_id);
+            if fixtures_path.exists() && has_model_files(&fixtures_path) {
+                return Some(fixtures_path);
+            }
         }
 
         // Search SDK cache with fuzzy matching
@@ -237,11 +242,11 @@ mod tests {
     }
 
     #[test]
-    fn test_filesystem_provider_test_models() {
-        // This test will only work if test_models exists
+    fn test_filesystem_provider_fixtures() {
+        // This test will only work if fixtures models exist
         let provider = FilesystemCacheProvider::new();
 
-        // If test_models/kokoro-82m exists, it should be found
+        // If fixtures/models/kokoro-82m exists, it should be found
         let path = provider.get_model_path("kokoro-82m");
         if let Some(p) = path {
             assert!(p.exists());

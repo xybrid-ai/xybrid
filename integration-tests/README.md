@@ -62,9 +62,57 @@ cargo test -p xybrid-core
 # Run all integration tests
 cargo test -p integration-tests
 
-# Run specific test
-cargo test -p integration-tests test_tts_inference
+# Run specific test file
+cargo test -p integration-tests --test tts_integration
+cargo test -p integration-tests --test local_llm --features local-llm
+
+# Run specific test function
+cargo test -p integration-tests --test tts_integration test_phonemize_text
 ```
+
+## Available Tests
+
+| Test File | Description | Required Models |
+|-----------|-------------|-----------------|
+| `integration_check.rs` | Verifies downloaded models exist | wav2vec2, kitten-tts |
+| `asr_integration.rs` | ASR pipeline: audio decode, inference, CTC decode | wav2vec2, whisper-tiny |
+| `tts_integration.rs` | TTS pipeline: phonemizer, tokens, voice embeddings | kitten-tts, kokoro-82m |
+| `local_llm.rs` | Local LLM inference (GGUF) | qwen2.5-0.5b-instruct |
+
+### ASR Integration Tests
+
+```bash
+# Download required models
+./integration-tests/download.sh wav2vec2-base-960h whisper-tiny
+
+# Run ASR tests
+cargo test -p integration-tests --test asr_integration
+```
+
+Tests included:
+- `test_wav2vec2_model_metadata` - Validate ASR model metadata
+- `test_wav2vec2_model_files_exist` - Check required files present
+- `test_wav2vec2_vocab_loading` - Load and validate vocab.json
+- `test_wav2vec2_inference_with_audio` - End-to-end ASR inference
+- `test_whisper_model_available` - Check whisper-tiny availability
+
+### TTS Integration Tests
+
+```bash
+# Download required models
+./integration-tests/download.sh kitten-tts kokoro-82m
+
+# Run TTS tests
+cargo test -p integration-tests --test tts_integration
+```
+
+Tests included:
+- `test_load_tokens_file` - Load and validate tokens.txt
+- `test_phonemize_text` - CMU dictionary phonemization
+- `test_phonemes_to_token_ids` - Token ID conversion
+- `test_load_voice_embeddings_bin` - voices.bin parsing
+- `test_model_metadata_loading` - model_metadata.json validation
+- `test_voice_embedding_loader_npz` - NPZ voice file support (kokoro)
 
 ## Model Sources
 
@@ -90,6 +138,17 @@ jobs:
       - name: Run integration tests
         run: cargo test -p integration-tests
 ```
+
+## Migration from core/tests/
+
+Tests that require model fixtures are being migrated from `core/tests/` to this crate.
+The legacy `test_models/` directory is deprecated in favor of `integration-tests/fixtures/models/`.
+
+| Old Location | New Location | Status |
+|--------------|--------------|--------|
+| `core/tests/tts_integration.rs` | `integration-tests/tests/tts_integration.rs` | Migrated |
+| `core/tests/system_validation.rs` | (stays in core - uses mocks) | No change |
+| `core/tests/pipeline_yaml_integration.rs` | (stays in core - uses mocks) | No change |
 
 ## Adding New Models
 

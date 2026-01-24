@@ -226,7 +226,7 @@ impl TranscriptAccumulator {
 ///
 /// // Create session from model directory (backend auto-detected)
 /// let config = StreamConfig::default();
-/// let mut session = StreamSession::new("test_models/whisper-tiny-candle", config)?;
+/// let mut session = StreamSession::new("/path/to/whisper-model", config)?;
 ///
 /// // Feed audio chunks
 /// session.feed(&audio_samples)?;
@@ -277,10 +277,10 @@ impl StreamSession {
     ///
     /// ```ignore
     /// // Whisper model (Candle backend, auto-detected)
-    /// let session = StreamSession::new("test_models/whisper-tiny-candle", config)?;
+    /// let session = StreamSession::new("/path/to/whisper-model", config)?;
     ///
     /// // Wav2Vec2 model (ONNX backend, auto-detected)
-    /// let session = StreamSession::new("test_models/wav2vec2-base-960h", config)?;
+    /// let session = StreamSession::new("/path/to/wav2vec2-model", config)?;
     /// ```
     pub fn new<P: AsRef<Path>>(model_dir: P, config: StreamConfig) -> StreamResult<Self> {
         let model_dir = model_dir.as_ref().to_path_buf();

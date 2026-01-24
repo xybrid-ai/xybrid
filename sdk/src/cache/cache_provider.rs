@@ -119,10 +119,12 @@ impl SdkCacheProvider {
             }
         }
 
-        // Also check test_models directory for development
-        let test_models = Path::new("test_models").join(model_id);
-        if test_models.exists() && has_model_files(&test_models) {
-            return Some(test_models);
+        // Also check integration-tests fixtures for development
+        if let Some(fixtures_dir) = xybrid_core::testing::model_fixtures::models_dir() {
+            let fixtures_path = fixtures_dir.join(model_id);
+            if fixtures_path.exists() && has_model_files(&fixtures_path) {
+                return Some(fixtures_path);
+            }
         }
 
         None

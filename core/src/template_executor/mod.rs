@@ -44,7 +44,7 @@
 //! use xybrid_core::ir::{Envelope, EnvelopeKind};
 //!
 //! let metadata: ModelMetadata = serde_json::from_str(&config_json)?;
-//! let mut executor = TemplateExecutor::with_base_path("test_models/whisper");
+//! let mut executor = TemplateExecutor::with_base_path("/path/to/model-dir");
 //!
 //! let input = Envelope::new(EnvelopeKind::Audio(audio_bytes));
 //! let output = executor.execute(&metadata, &input)?;
