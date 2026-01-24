@@ -117,12 +117,19 @@ impl TemplateExecutor {
                 chat_template,
                 context_length,
             } => {
+                // Extract backend hint from metadata (e.g., "llamacpp" for Gemma 3)
+                let backend_hint = metadata
+                    .metadata
+                    .get("backend")
+                    .and_then(|v| v.as_str());
+
                 // LLM execution via LlmRuntimeAdapter
                 return self.execute_llm(
                     model_file,
                     chat_template.as_deref(),
                     *context_length,
                     input,
+                    backend_hint,
                 );
             }
             #[cfg(not(any(feature = "local-llm", feature = "local-llm-llamacpp")))]
@@ -242,15 +249,20 @@ impl TemplateExecutor {
         chat_template: Option<&str>,
         context_length: usize,
         input: &Envelope,
+        backend_hint: Option<&str>,
     ) -> ExecutorResult<Envelope> {
         info!(
             target: "xybrid_core",
-            "Executing LLM inference: {}",
-            model_file
+            "Executing LLM inference: {} (backend: {:?})",
+            model_file,
+            backend_hint.unwrap_or("default")
         );
 
         let _llm_span = xybrid_trace::SpanGuard::new("llm_inference");
         xybrid_trace::add_metadata("model", model_file);
+        if let Some(hint) = backend_hint {
+            xybrid_trace::add_metadata("backend", hint);
+        }
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
@@ -264,8 +276,8 @@ impl TemplateExecutor {
             config = config.with_chat_template(template_path.to_string_lossy().to_string());
         }
 
-        // Create and load the adapter
-        let mut adapter = LlmRuntimeAdapter::new()?;
+        // Create adapter with the appropriate backend based on hint
+        let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
         adapter.load_model(&config.model_path)?;
 
         // Execute inference
