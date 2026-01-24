@@ -15,7 +15,9 @@
 //! - `onnx/` - ONNX Runtime backend (cross-platform)
 //! - `coreml/` - CoreML backend (iOS/macOS)
 //! - `candle/` - Candle backend (pure Rust, feature-gated)
-//! - `llm/` - Local LLM backend (GGUF models via mistral.rs, feature-gated)
+//! - `mistral/` - MistralBackend (mistral.rs, desktop only)
+//! - `llama_cpp/` - LlamaCppBackend (llama.cpp, Android + fallback)
+//! - `llm.rs` - Shared LLM types (LlmBackend trait, configs)
 //!
 //! # Example
 //!
@@ -55,9 +57,19 @@ pub mod coreml;
 #[cfg(feature = "candle")]
 pub mod candle;
 
-// LLM backend (feature-gated, local LLM inference via mistral.rs)
-#[cfg(feature = "local-llm")]
+// LLM shared types and adapter (available when any LLM backend is enabled)
+#[cfg(any(feature = "local-llm", feature = "local-llm-llamacpp"))]
 pub mod llm;
+
+// MistralBackend (feature-gated, uses mistral.rs - desktop only, NOT Android)
+// Requires +fp16 on ARM which causes SIGILL on devices without ARMv8.2-A FP16
+#[cfg(feature = "local-llm")]
+pub mod mistral;
+
+// LlamaCppBackend (feature-gated, uses llama.cpp - Android compatible)
+// Has proper runtime SIMD detection via ggml
+#[cfg(feature = "local-llm-llamacpp")]
+pub mod llama_cpp;
 
 // Re-exports from runtime backends
 pub use onnx::ONNXSession;
@@ -73,8 +85,20 @@ pub use coreml::CoreMLRuntimeAdapter;
 #[cfg(feature = "candle")]
 pub use candle::{CandleBackend, CandleRuntimeAdapter};
 
+// LLM exports - shared types
+#[cfg(any(feature = "local-llm", feature = "local-llm-llamacpp"))]
+pub use llm::{
+    ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
+    LlmRuntimeAdapter,
+};
+
+// MistralBackend export (desktop only)
 #[cfg(feature = "local-llm")]
-pub use llm::{GenerationConfig, LlmBackend, LlmConfig, LlmRuntimeAdapter, MistralBackend};
+pub use mistral::MistralBackend;
+
+// LlamaCppBackend export (Android compatible)
+#[cfg(feature = "local-llm-llamacpp")]
+pub use llama_cpp::LlamaCppBackend;
 
 // Re-export inference backend types
 pub use inference_backend::{BackendError, BackendResult, InferenceBackend, RuntimeType};

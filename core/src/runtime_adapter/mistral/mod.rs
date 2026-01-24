@@ -2,9 +2,16 @@
 //!
 //! This module provides the mistral.rs implementation of the LlmBackend trait.
 //! It is feature-gated behind `local-llm`.
+//!
+//! # Note
+//!
+//! mistral.rs uses candle + gemm which requires `+fp16` on ARM64.
+//! This causes SIGILL on Android devices without ARMv8.2-A FP16 extension.
+//! For Android, use `llama_cpp` backend instead.
 
-use super::backend::{ChatMessage, GenerationOutput, LlmBackend, LlmResult};
-use super::config::{GenerationConfig, LlmConfig};
+use crate::runtime_adapter::llm::{
+    ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
+};
 use crate::runtime_adapter::AdapterError;
 
 #[cfg(feature = "local-llm")]
@@ -20,10 +27,17 @@ use mistralrs::{
 /// - Metal/CUDA acceleration (via feature flags)
 /// - Streaming generation (future)
 ///
+/// # Platform Support
+///
+/// - **macOS/iOS**: Works with Metal acceleration
+/// - **Linux/Windows**: Works with CUDA or CPU
+/// - **Android**: NOT SUPPORTED - use `LlamaCppBackend` instead
+///
 /// # Example
 ///
 /// ```rust,ignore
-/// use xybrid_core::runtime_adapter::llm::{MistralBackend, LlmBackend, LlmConfig};
+/// use xybrid_core::runtime_adapter::mistral::MistralBackend;
+/// use xybrid_core::runtime_adapter::llm::{LlmBackend, LlmConfig};
 ///
 /// let mut backend = MistralBackend::new()?;
 /// backend.load(&LlmConfig::new("model.gguf"))?;
@@ -94,7 +108,7 @@ impl LlmBackend for MistralBackend {
         } else {
             // Directory provided - look for .gguf files
             let gguf_files: Vec<_> = std::fs::read_dir(model_path)
-                .map_err(|e| AdapterError::IOError(e))?
+                .map_err(AdapterError::IOError)?
                 .filter_map(|e| e.ok())
                 .filter(|e| {
                     e.path()
@@ -166,7 +180,7 @@ impl LlmBackend for MistralBackend {
     fn generate(
         &self,
         messages: &[ChatMessage],
-        config: &GenerationConfig,
+        _config: &GenerationConfig,
     ) -> LlmResult<GenerationOutput> {
         let model = self.model.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
@@ -178,10 +192,6 @@ impl LlmBackend for MistralBackend {
         for msg in messages {
             request = request.add_message(Self::convert_role(&msg.role), &msg.content);
         }
-
-        // Apply generation config
-        // Note: mistral.rs request builder API varies - adjust as needed
-        // For now, we use defaults and measure performance
 
         let start = std::time::Instant::now();
 
@@ -212,7 +222,6 @@ impl LlmBackend for MistralBackend {
             .map(|c| c.finish_reason.to_string())
             .unwrap_or_else(|| "unknown".to_string());
 
-        // Calculate tokens (approximate from usage if available)
         let tokens_generated = response.usage.completion_tokens;
 
         let tokens_per_second = if elapsed.as_secs_f32() > 0.0 {
@@ -231,14 +240,11 @@ impl LlmBackend for MistralBackend {
     }
 
     fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput> {
-        // For raw prompts, wrap as a user message
-        // A more sophisticated implementation would bypass chat templating
         let messages = vec![ChatMessage::user(prompt)];
         self.generate(&messages, config)
     }
 
     fn memory_usage(&self) -> Option<u64> {
-        // TODO: Implement memory tracking if mistral.rs exposes it
         None
     }
 
@@ -247,7 +253,10 @@ impl LlmBackend for MistralBackend {
     }
 }
 
+// =============================================================================
 // Stub implementation when local-llm feature is not enabled
+// =============================================================================
+
 #[cfg(not(feature = "local-llm"))]
 pub struct MistralBackend;
 
