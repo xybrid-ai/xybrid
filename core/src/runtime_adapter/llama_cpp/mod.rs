@@ -1,7 +1,7 @@
 //! LlamaCppBackend - LLM inference using llama.cpp
 //!
 //! This module provides llama.cpp bindings for LLM inference.
-//! It is feature-gated behind `local-llm-llamacpp`.
+//! It is feature-gated behind `llm-llamacpp`.
 //!
 //! # Why llama.cpp?
 //!
@@ -49,7 +49,7 @@ use crate::runtime_adapter::AdapterError;
 /// let mut backend = LlamaCppBackend::new()?;
 /// backend.load(&LlmConfig::new("model.gguf"))?;
 /// ```
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub struct LlamaCppBackend {
     /// Pointer to loaded model (llama_model*)
     model: Option<sys::LlamaModel>,
@@ -59,7 +59,7 @@ pub struct LlamaCppBackend {
     config: Option<LlmConfig>,
 }
 
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 impl LlamaCppBackend {
     /// Create a new LlamaCppBackend.
     pub fn new() -> LlmResult<Self> {
@@ -74,7 +74,7 @@ impl LlamaCppBackend {
     }
 }
 
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 impl Drop for LlamaCppBackend {
     fn drop(&mut self) {
         // Free context first, then model
@@ -88,14 +88,14 @@ impl Drop for LlamaCppBackend {
     }
 }
 
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 impl Default for LlamaCppBackend {
     fn default() -> Self {
         Self::new().expect("Failed to create LlamaCppBackend")
     }
 }
 
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 impl LlmBackend for LlamaCppBackend {
     fn name(&self) -> &str {
         "llama-cpp"
@@ -237,23 +237,23 @@ impl LlmBackend for LlamaCppBackend {
 }
 
 // =============================================================================
-// Stub implementation when local-llm-llamacpp feature is not enabled
+// Stub implementation when llm-llamacpp feature is not enabled
 // =============================================================================
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub struct LlamaCppBackend;
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 impl LlamaCppBackend {
     pub fn new() -> LlmResult<Self> {
         Err(AdapterError::RuntimeError(
-            "local-llm-llamacpp feature not enabled. Build with --features local-llm-llamacpp"
+            "llm-llamacpp feature not enabled. Build with --features llm-llamacpp"
                 .to_string(),
         ))
     }
 }
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 impl LlmBackend for LlamaCppBackend {
     fn name(&self) -> &str {
         "llama-cpp"
@@ -265,7 +265,7 @@ impl LlmBackend for LlamaCppBackend {
 
     fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
         Err(AdapterError::RuntimeError(
-            "local-llm-llamacpp feature not enabled".to_string(),
+            "llm-llamacpp feature not enabled".to_string(),
         ))
     }
 
@@ -283,7 +283,7 @@ impl LlmBackend for LlamaCppBackend {
         _config: &GenerationConfig,
     ) -> LlmResult<GenerationOutput> {
         Err(AdapterError::RuntimeError(
-            "local-llm-llamacpp feature not enabled".to_string(),
+            "llm-llamacpp feature not enabled".to_string(),
         ))
     }
 
@@ -293,7 +293,7 @@ impl LlmBackend for LlamaCppBackend {
         _config: &GenerationConfig,
     ) -> LlmResult<GenerationOutput> {
         Err(AdapterError::RuntimeError(
-            "local-llm-llamacpp feature not enabled".to_string(),
+            "llm-llamacpp feature not enabled".to_string(),
         ))
     }
 }

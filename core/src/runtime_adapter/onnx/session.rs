@@ -14,8 +14,8 @@
 //! // CPU execution (default)
 //! let session = ONNXSession::with_provider("/path/to/model.onnx", ExecutionProviderKind::Cpu)?;
 //!
-//! // CoreML execution (requires coreml-ep feature)
-//! #[cfg(feature = "coreml-ep")]
+//! // CoreML execution (requires ort-coreml feature)
+//! #[cfg(feature = "ort-coreml")]
 //! let session = ONNXSession::with_provider(
 //!     "/path/to/model.onnx",
 //!     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
@@ -103,8 +103,8 @@ impl ONNXSession {
     /// // CPU execution
     /// let session = ONNXSession::with_provider("model.onnx", ExecutionProviderKind::Cpu)?;
     ///
-    /// // CoreML with Neural Engine (requires coreml-ep feature)
-    /// #[cfg(feature = "coreml-ep")]
+    /// // CoreML with Neural Engine (requires ort-coreml feature)
+    /// #[cfg(feature = "ort-coreml")]
     /// let session = ONNXSession::with_provider(
     ///     "model.onnx",
     ///     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
@@ -174,7 +174,7 @@ impl ONNXSession {
                 Ok(builder)
             }
 
-            #[cfg(feature = "coreml-ep")]
+            #[cfg(feature = "ort-coreml")]
             ExecutionProviderKind::CoreML(config) => {
                 use super::execution_provider::CoreMLComputeUnits;
                 use ort::ep;

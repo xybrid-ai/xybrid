@@ -7,7 +7,7 @@
 //! Both stages run fully on-device, no network required after model download.
 //!
 //! Run with:
-//!   cargo run --example llm_to_tts_pipeline -p xybrid-sdk --features local-llm
+//!   cargo run --example llm_to_tts_pipeline -p xybrid-sdk --features llm-mistral
 
 use std::collections::HashMap;
 use std::path::PathBuf;

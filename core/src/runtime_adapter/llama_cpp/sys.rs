@@ -17,11 +17,11 @@
 //! - Lifetime management via Drop
 //! - Error conversion to AdapterError
 
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 use std::ffi::CString;
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 use std::os::raw::{c_char, c_float, c_int, c_void};
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 use std::ptr;
 
 use crate::runtime_adapter::llm::ChatMessage;
@@ -32,32 +32,32 @@ use crate::runtime_adapter::AdapterError;
 // =============================================================================
 
 /// Opaque handle to a loaded llama model
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub struct LlamaModel {
     ptr: *mut c_void,
 }
 
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 unsafe impl Send for LlamaModel {}
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 unsafe impl Sync for LlamaModel {}
 
 /// Opaque handle to a llama context
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub struct LlamaContext {
     ptr: *mut c_void,
 }
 
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 unsafe impl Send for LlamaContext {}
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 unsafe impl Sync for LlamaContext {}
 
 // =============================================================================
 // FFI Declarations
 // =============================================================================
 
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 extern "C" {
     // Backend initialization
     fn llama_backend_init_c();
@@ -136,7 +136,7 @@ extern "C" {
 // =============================================================================
 
 /// Initialize the llama.cpp backend (call once at startup)
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_backend_init() {
     unsafe {
         llama_backend_init_c();
@@ -144,7 +144,7 @@ pub fn llama_backend_init() {
 }
 
 /// Free the llama.cpp backend (call once at shutdown)
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_backend_free() {
     unsafe {
         llama_backend_free_c();
@@ -152,7 +152,7 @@ pub fn llama_backend_free() {
 }
 
 /// Load a model from a GGUF file
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_load_model_from_file(
     path: &str,
     n_gpu_layers: i32,
@@ -173,7 +173,7 @@ pub fn llama_load_model_from_file(
 }
 
 /// Free a loaded model
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_free_model(model: LlamaModel) {
     unsafe {
         llama_free_model_c(model.ptr);
@@ -181,7 +181,7 @@ pub fn llama_free_model(model: LlamaModel) {
 }
 
 /// Create a new context for a model
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_new_context_with_model(
     model: &LlamaModel,
     n_ctx: usize,
@@ -198,7 +198,7 @@ pub fn llama_new_context_with_model(
 }
 
 /// Free a context
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_free(ctx: LlamaContext) {
     unsafe {
         llama_free_c(ctx.ptr);
@@ -206,31 +206,31 @@ pub fn llama_free(ctx: LlamaContext) {
 }
 
 /// Get the BOS (beginning of sequence) token
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_token_bos(model: &LlamaModel) -> i32 {
     unsafe { llama_token_bos_c(model.ptr) }
 }
 
 /// Get the EOS (end of sequence) token
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_token_eos(model: &LlamaModel) -> i32 {
     unsafe { llama_token_eos_c(model.ptr) }
 }
 
 /// Get vocabulary size
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_n_vocab(model: &LlamaModel) -> usize {
     unsafe { llama_n_vocab_c(model.ptr) as usize }
 }
 
 /// Get context length
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_n_ctx(ctx: &LlamaContext) -> usize {
     unsafe { llama_n_ctx_c(ctx.ptr) as usize }
 }
 
 /// Format chat messages using the model's chat template
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_format_chat(
     _model: &LlamaModel,
     messages: &[ChatMessage],
@@ -266,7 +266,7 @@ pub fn llama_format_chat(
 }
 
 /// Tokenize text
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_tokenize(
     model: &LlamaModel,
     text: &str,
@@ -318,7 +318,7 @@ pub fn llama_tokenize(
 }
 
 /// Detokenize tokens to text
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_detokenize(model: &LlamaModel, tokens: &[i32]) -> Result<String, AdapterError> {
     let mut result = String::new();
     let mut buf = vec![0u8; 256];
@@ -346,7 +346,7 @@ pub fn llama_detokenize(model: &LlamaModel, tokens: &[i32]) -> Result<String, Ad
 }
 
 /// Sampling parameters for generation
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 #[derive(Clone)]
 pub struct SamplingParams {
     pub temperature: f32,
@@ -355,7 +355,7 @@ pub struct SamplingParams {
     pub repeat_penalty: f32,
 }
 
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 impl Default for SamplingParams {
     fn default() -> Self {
         Self {
@@ -385,7 +385,7 @@ impl Default for SamplingParams {
 ///
 /// # Returns
 /// Vector of generated token IDs
-#[cfg(feature = "local-llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp")]
 pub fn llama_generate(
     ctx: &LlamaContext,
     model: &LlamaModel,
@@ -438,73 +438,73 @@ pub fn llama_generate(
 // Stub implementations when feature is disabled
 // =============================================================================
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub struct LlamaModel;
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub struct LlamaContext;
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_backend_init() {}
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_backend_free() {}
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_load_model_from_file(
     _path: &str,
     _n_gpu_layers: i32,
 ) -> Result<LlamaModel, AdapterError> {
     Err(AdapterError::RuntimeError(
-        "local-llm-llamacpp feature not enabled".to_string(),
+        "llm-llamacpp feature not enabled".to_string(),
     ))
 }
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_free_model(_model: LlamaModel) {}
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_new_context_with_model(
     _model: &LlamaModel,
     _n_ctx: usize,
 ) -> Result<LlamaContext, AdapterError> {
     Err(AdapterError::RuntimeError(
-        "local-llm-llamacpp feature not enabled".to_string(),
+        "llm-llamacpp feature not enabled".to_string(),
     ))
 }
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_free(_ctx: LlamaContext) {}
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_format_chat(
     _model: &LlamaModel,
     _messages: &[ChatMessage],
 ) -> Result<String, AdapterError> {
     Err(AdapterError::RuntimeError(
-        "local-llm-llamacpp feature not enabled".to_string(),
+        "llm-llamacpp feature not enabled".to_string(),
     ))
 }
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_tokenize(
     _model: &LlamaModel,
     _text: &str,
     _add_special: bool,
 ) -> Result<Vec<i32>, AdapterError> {
     Err(AdapterError::RuntimeError(
-        "local-llm-llamacpp feature not enabled".to_string(),
+        "llm-llamacpp feature not enabled".to_string(),
     ))
 }
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_detokenize(_model: &LlamaModel, _tokens: &[i32]) -> Result<String, AdapterError> {
     Err(AdapterError::RuntimeError(
-        "local-llm-llamacpp feature not enabled".to_string(),
+        "llm-llamacpp feature not enabled".to_string(),
     ))
 }
 
-#[cfg(not(feature = "local-llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_generate(
     _ctx: &LlamaContext,
     _model: &LlamaModel,
@@ -515,6 +515,6 @@ pub fn llama_generate(
     _top_k: usize,
 ) -> Result<Vec<i32>, AdapterError> {
     Err(AdapterError::RuntimeError(
-        "local-llm-llamacpp feature not enabled".to_string(),
+        "llm-llamacpp feature not enabled".to_string(),
     ))
 }

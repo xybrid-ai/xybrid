@@ -4,7 +4,7 @@
 //! PipelineRef API. This is the simplest way to run inference.
 //!
 //! Run with:
-//!   cargo run --example single_model_inference -p xybrid-sdk --features local-llm
+//!   cargo run --example single_model_inference -p xybrid-sdk --features llm-mistral
 
 use std::collections::HashMap;
 use xybrid_sdk::ir::{Envelope, EnvelopeKind};

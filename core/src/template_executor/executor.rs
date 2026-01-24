@@ -18,9 +18,9 @@ use std::path::Path;
 #[cfg(feature = "candle")]
 use crate::runtime_adapter::candle::CandleRuntime;
 
-#[cfg(any(feature = "local-llm", feature = "local-llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::runtime_adapter::llm::{LlmConfig, LlmRuntimeAdapter};
-#[cfg(any(feature = "local-llm", feature = "local-llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::runtime_adapter::RuntimeAdapter;
 
 use super::execution::{
@@ -111,7 +111,7 @@ impl TemplateExecutor {
                     "ModelGraph execution should not reach single model path".to_string(),
                 ));
             }
-            #[cfg(any(feature = "local-llm", feature = "local-llm-llamacpp"))]
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             ExecutionTemplate::Gguf {
                 model_file,
                 chat_template,
@@ -132,10 +132,10 @@ impl TemplateExecutor {
                     backend_hint,
                 );
             }
-            #[cfg(not(any(feature = "local-llm", feature = "local-llm-llamacpp")))]
+            #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
             ExecutionTemplate::Gguf { .. } => {
                 return Err(AdapterError::RuntimeError(
-                    "GGUF/LLM execution requires the 'local-llm' or 'local-llm-llamacpp' feature".to_string(),
+                    "GGUF/LLM execution requires the 'llm-mistral' or 'llm-llamacpp' feature".to_string(),
                 ));
             }
         };
@@ -242,7 +242,7 @@ impl TemplateExecutor {
     ///
     /// This is a separate execution path for GGUF-based LLMs that bypasses
     /// the standard preprocessing/inference/postprocessing pipeline.
-    #[cfg(any(feature = "local-llm", feature = "local-llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_llm(
         &self,
         model_file: &str,

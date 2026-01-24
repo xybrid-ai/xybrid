@@ -154,7 +154,7 @@ pub enum ExecutionTemplate {
     /// Use for: Local LLM inference (Qwen, Llama, Mistral, Phi, etc.)
     ///
     /// GGUF is the standard format for quantized LLMs (from llama.cpp ecosystem).
-    /// Requires the `local-llm` feature flag.
+    /// Requires the `llm-mistral` or `llm-llamacpp` feature flag.
     ///
     /// Example:
     /// ```json

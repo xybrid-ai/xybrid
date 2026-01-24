@@ -352,12 +352,12 @@ impl LlmRuntimeAdapter {
     /// Create a new LLM Runtime Adapter with the default backend.
     ///
     /// The default backend depends on feature flags:
-    /// - `local-llm`: Uses MistralBackend (desktop, not Android)
-    /// - `local-llm-llamacpp`: Uses LlamaCppBackend (Android compatible)
+    /// - `llm-mistral`: Uses MistralBackend (desktop, not Android)
+    /// - `llm-llamacpp`: Uses LlamaCppBackend (Android compatible)
     ///
     /// If both are enabled, prefers MistralBackend on non-Android platforms
     /// and LlamaCppBackend on Android.
-    #[cfg(feature = "local-llm")]
+    #[cfg(feature = "llm-mistral")]
     pub fn new() -> AdapterResult<Self> {
         use crate::runtime_adapter::mistral::MistralBackend;
         let backend = MistralBackend::new()?;
@@ -365,7 +365,7 @@ impl LlmRuntimeAdapter {
     }
 
     /// Create a new LLM Runtime Adapter with LlamaCppBackend.
-    #[cfg(all(feature = "local-llm-llamacpp", not(feature = "local-llm")))]
+    #[cfg(all(feature = "llm-llamacpp", not(feature = "llm-mistral")))]
     pub fn new() -> AdapterResult<Self> {
         use crate::runtime_adapter::llama_cpp::LlamaCppBackend;
         let backend = LlamaCppBackend::new()?;
@@ -375,7 +375,7 @@ impl LlmRuntimeAdapter {
     /// Create a new LLM Runtime Adapter with MistralBackend explicitly.
     ///
     /// Use this when you need to force MistralBackend regardless of metadata hints.
-    #[cfg(feature = "local-llm")]
+    #[cfg(feature = "llm-mistral")]
     pub fn with_mistral() -> AdapterResult<Self> {
         use crate::runtime_adapter::mistral::MistralBackend;
         let backend = MistralBackend::new()?;
@@ -386,7 +386,7 @@ impl LlmRuntimeAdapter {
     ///
     /// Use this when you need to force LlamaCppBackend (e.g., for models that
     /// require it like Gemma 3 which isn't supported by mistral.rs GGUF).
-    #[cfg(feature = "local-llm-llamacpp")]
+    #[cfg(feature = "llm-llamacpp")]
     pub fn with_llamacpp() -> AdapterResult<Self> {
         use crate::runtime_adapter::llama_cpp::LlamaCppBackend;
         let backend = LlamaCppBackend::new()?;
@@ -397,12 +397,12 @@ impl LlmRuntimeAdapter {
     ///
     /// If the hint is "llamacpp" and the feature is available, uses LlamaCppBackend.
     /// Otherwise falls back to the default backend for the platform.
-    #[cfg(any(feature = "local-llm", feature = "local-llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     pub fn with_backend_hint(hint: Option<&str>) -> AdapterResult<Self> {
         match hint {
-            #[cfg(feature = "local-llm-llamacpp")]
+            #[cfg(feature = "llm-llamacpp")]
             Some("llamacpp") => Self::with_llamacpp(),
-            #[cfg(feature = "local-llm")]
+            #[cfg(feature = "llm-mistral")]
             Some("mistral") => Self::with_mistral(),
             _ => Self::new(),
         }
