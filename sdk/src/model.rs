@@ -14,10 +14,11 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use tempfile::TempDir;
 use xybrid_core::bundler::XyBundle;
-use xybrid_core::execution_template::{ExecutionTemplate, ModelMetadata};
+use xybrid_core::execution::{
+    ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
+};
 use xybrid_core::ir::Envelope;
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
-use xybrid_core::template_executor::TemplateExecutor;
 
 /// SDK-level error type.
 #[derive(Debug, thiserror::Error)]
@@ -623,6 +624,66 @@ impl XybridModel {
     /// Get the expected output type for this model.
     pub fn output_type(&self) -> OutputType {
         self.output_type
+    }
+
+    // =========================================================================
+    // Voice Discovery (TTS models only)
+    // =========================================================================
+
+    /// Get the voice configuration for this model, if available.
+    ///
+    /// Returns `None` for non-TTS models or TTS models without voice configuration.
+    pub fn voice_config(&self) -> Option<VoiceConfig> {
+        self.handle
+            .read()
+            .ok()
+            .and_then(|h| h.metadata.voices.clone())
+    }
+
+    /// Get all available voices for this TTS model.
+    ///
+    /// Returns `None` for non-TTS models or TTS models without voice configuration.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some(voices) = model.voices() {
+    ///     for voice in voices {
+    ///         println!("{}: {} ({})", voice.id, voice.name, voice.language.unwrap_or_default());
+    ///     }
+    /// }
+    /// ```
+    pub fn voices(&self) -> Option<Vec<VoiceInfo>> {
+        self.voice_config().map(|vc| vc.catalog)
+    }
+
+    /// Get the default voice for this TTS model.
+    ///
+    /// Returns `None` for non-TTS models or if no default is configured.
+    pub fn default_voice(&self) -> Option<VoiceInfo> {
+        self.voice_config().and_then(|vc| {
+            let default_id = &vc.default;
+            vc.catalog.into_iter().find(|v| &v.id == default_id)
+        })
+    }
+
+    /// Check if this model has voice configuration.
+    ///
+    /// Returns `true` for TTS models with voice support.
+    pub fn has_voices(&self) -> bool {
+        self.voice_config().is_some()
+    }
+
+    /// Get a specific voice by ID.
+    ///
+    /// Returns `None` if the voice is not found or the model has no voice support.
+    ///
+    /// # Arguments
+    ///
+    /// * `voice_id` - The voice identifier (e.g., "af_bella")
+    pub fn voice(&self, voice_id: &str) -> Option<VoiceInfo> {
+        self.voice_config()
+            .and_then(|vc| vc.catalog.into_iter().find(|v| v.id == voice_id))
     }
 
     /// Run batch inference with an Envelope.
