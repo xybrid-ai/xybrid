@@ -153,11 +153,17 @@ impl TemplateExecutor {
                 .as_phoneme_ids()
                 .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
 
-            // Load voice embedding from voices.bin
-            let voices_path = Path::new(&self.base_path).join("voices.bin");
-            let voice_embedding = if voices_path.exists() {
+            // Load voice embedding from voices.bin or voices.npz
+            let voices_bin_path = Path::new(&self.base_path).join("voices.bin");
+            let voices_npz_path = Path::new(&self.base_path).join("voices.npz");
+            let voice_embedding = if voices_bin_path.exists() {
                 let loader = crate::tts::voice_embedding::VoiceEmbeddingLoader::new(256);
-                loader.load(&voices_path, 0).map_err(|e| {
+                loader.load(&voices_bin_path, 0).map_err(|e| {
+                    AdapterError::RuntimeError(format!("Failed to load voice embedding: {}", e))
+                })?
+            } else if voices_npz_path.exists() {
+                let loader = crate::tts::voice_embedding::VoiceEmbeddingLoader::new(256);
+                loader.load(&voices_npz_path, 0).map_err(|e| {
                     AdapterError::RuntimeError(format!("Failed to load voice embedding: {}", e))
                 })?
             } else {
