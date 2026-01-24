@@ -14,7 +14,7 @@ pub mod decode;
 pub mod tensor_ops;
 
 use super::types::{ExecutorResult, RawOutputs};
-use crate::execution_template::PostprocessingStep;
+use crate::execution::template::PostprocessingStep;
 
 /// Apply a postprocessing step to data.
 ///

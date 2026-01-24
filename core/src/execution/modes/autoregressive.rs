@@ -4,7 +4,7 @@
 //! for decoder-only language models.
 
 use super::super::types::ExecutorResult;
-use crate::execution_template::PipelineStage;
+use crate::execution::template::PipelineStage;
 use crate::runtime_adapter::onnx::ONNXSession;
 use crate::runtime_adapter::AdapterError;
 use ndarray::{ArrayD, IxDyn};

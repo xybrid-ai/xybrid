@@ -49,7 +49,7 @@
 //! ## Note
 //!
 //! For local/on-device inference, use `target: device` in your pipeline YAML,
-//! which routes to [`crate::template_executor::TemplateExecutor`] instead.
+//! which routes to [`crate::execution::TemplateExecutor`] instead.
 
 mod client;
 mod completion;

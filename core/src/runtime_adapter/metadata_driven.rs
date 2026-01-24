@@ -3,10 +3,9 @@
 //! This module provides functionality to execute models based on ModelMetadata
 //! (from execution_template) rather than hard-coded logic.
 
-use crate::execution_template::ModelMetadata as ExecutionModelMetadata;
+use crate::execution::{ModelMetadata as ExecutionModelMetadata, TemplateExecutor};
 use crate::ir::Envelope;
 use crate::runtime_adapter::{AdapterError, AdapterResult};
-use crate::template_executor::TemplateExecutor;
 use std::path::{Path, PathBuf};
 
 /// Metadata-driven executor wrapper for runtime adapters.

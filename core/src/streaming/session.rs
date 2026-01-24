@@ -7,9 +7,8 @@
 use super::audio_buffer::{AudioBuffer, AudioBufferConfig, AudioChunk};
 use crate::audio::samples_to_wav;
 use crate::audio::vad::{VadConfig, VadSession};
-use crate::execution_template::{ExecutionTemplate, ModelMetadata};
+use crate::execution::{ExecutionTemplate, ModelMetadata, TemplateExecutor};
 use crate::ir::{Envelope, EnvelopeKind};
-use crate::template_executor::TemplateExecutor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;

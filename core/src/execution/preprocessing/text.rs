@@ -5,7 +5,7 @@
 //! - `phonemize_step`: Convert text to phonemes for TTS models
 
 use super::super::types::{ExecutorResult, PreprocessedData};
-use crate::execution_template::{PhonemizerBackend, TokenizerType};
+use crate::execution::template::{PhonemizerBackend, TokenizerType};
 use crate::runtime_adapter::AdapterError;
 use std::collections::HashMap;
 

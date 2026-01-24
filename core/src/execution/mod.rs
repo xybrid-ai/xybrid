@@ -1,19 +1,20 @@
-//! Template Executor - Metadata-driven model execution engine.
+//! Execution module - Metadata-driven model execution engine.
 //!
 //! This module implements the core execution logic that interprets ModelMetadata
 //! and runs inference without hard-coding model-specific logic.
 //!
 //! ## Module Organization
 //!
-//! The template executor is organized into focused submodules:
+//! The execution module is organized into focused submodules:
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`types`] | Data types (PreprocessedData, RawOutputs) |
+//! | [`template`] | Model metadata schema (model_metadata.json types) |
 //! | [`executor`] | Main TemplateExecutor struct and execute method |
+//! | [`types`] | Data types (PreprocessedData, RawOutputs) |
 //! | [`preprocessing`] | Preprocessing step implementations |
 //! | [`postprocessing`] | Postprocessing step implementations |
-//! | [`execution`] | Execution mode implementations (SingleShot, Autoregressive, Whisper) |
+//! | [`modes`] | Execution mode implementations (SingleShot, Autoregressive, Whisper, TTS, BERT) |
 //!
 //! ## Execution Flow
 //!
@@ -39,8 +40,7 @@
 //! ## Usage
 //!
 //! ```rust,ignore
-//! use xybrid_core::template_executor::TemplateExecutor;
-//! use xybrid_core::execution_template::ModelMetadata;
+//! use xybrid_core::execution::{TemplateExecutor, template::ModelMetadata};
 //! use xybrid_core::ir::{Envelope, EnvelopeKind};
 //!
 //! let metadata: ModelMetadata = serde_json::from_str(&config_json)?;
@@ -49,6 +49,15 @@
 //! let input = Envelope::new(EnvelopeKind::Audio(audio_bytes));
 //! let output = executor.execute(&metadata, &input)?;
 //! ```
+
+// Template types (model_metadata.json schema)
+pub mod template;
+
+// Re-export commonly used template types at execution:: level
+pub use template::{
+    ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage, PostprocessingStep,
+    PreprocessingStep, VoiceConfig, VoiceFormat, VoiceInfo, VoiceLoader,
+};
 
 // Data types
 mod types;
@@ -64,5 +73,5 @@ pub mod preprocessing;
 // Postprocessing steps
 pub mod postprocessing;
 
-// Execution modes
-pub mod execution;
+// Execution modes (SingleShot, Autoregressive, Whisper, TTS, BERT)
+pub mod modes;

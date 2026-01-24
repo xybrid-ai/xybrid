@@ -26,10 +26,9 @@
 use crate::bundler::{BundleManifest, XyBundle};
 use crate::cloud::{Cloud, CloudBackend, CloudConfig, CompletionRequest};
 use crate::context::StageDescriptor;
-use crate::execution_template::ModelMetadata;
+use crate::execution::{ModelMetadata, TemplateExecutor};
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::{AdapterError, RuntimeAdapter};
-use crate::template_executor::TemplateExecutor;
 use crate::tracing as trace;
 use std::collections::HashMap;
 use std::fs;

@@ -5,7 +5,7 @@
 //! - `resize_step`: Resize image tensor using interpolation
 
 use super::super::types::{ExecutorResult, PreprocessedData};
-use crate::execution_template::InterpolationMethod;
+use crate::execution::template::InterpolationMethod;
 use crate::runtime_adapter::AdapterError;
 use ndarray::{ArrayD, IxDyn};
 
