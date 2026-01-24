@@ -372,6 +372,42 @@ impl LlmRuntimeAdapter {
         Ok(Self::with_backend(Box::new(backend)))
     }
 
+    /// Create a new LLM Runtime Adapter with MistralBackend explicitly.
+    ///
+    /// Use this when you need to force MistralBackend regardless of metadata hints.
+    #[cfg(feature = "local-llm")]
+    pub fn with_mistral() -> AdapterResult<Self> {
+        use crate::runtime_adapter::mistral::MistralBackend;
+        let backend = MistralBackend::new()?;
+        Ok(Self::with_backend(Box::new(backend)))
+    }
+
+    /// Create a new LLM Runtime Adapter with LlamaCppBackend explicitly.
+    ///
+    /// Use this when you need to force LlamaCppBackend (e.g., for models that
+    /// require it like Gemma 3 which isn't supported by mistral.rs GGUF).
+    #[cfg(feature = "local-llm-llamacpp")]
+    pub fn with_llamacpp() -> AdapterResult<Self> {
+        use crate::runtime_adapter::llama_cpp::LlamaCppBackend;
+        let backend = LlamaCppBackend::new()?;
+        Ok(Self::with_backend(Box::new(backend)))
+    }
+
+    /// Create a new LLM Runtime Adapter based on a backend hint.
+    ///
+    /// If the hint is "llamacpp" and the feature is available, uses LlamaCppBackend.
+    /// Otherwise falls back to the default backend for the platform.
+    #[cfg(any(feature = "local-llm", feature = "local-llm-llamacpp"))]
+    pub fn with_backend_hint(hint: Option<&str>) -> AdapterResult<Self> {
+        match hint {
+            #[cfg(feature = "local-llm-llamacpp")]
+            Some("llamacpp") => Self::with_llamacpp(),
+            #[cfg(feature = "local-llm")]
+            Some("mistral") => Self::with_mistral(),
+            _ => Self::new(),
+        }
+    }
+
     /// Create a new adapter with a custom backend.
     pub fn with_backend(backend: Box<dyn LlmBackend>) -> Self {
         Self {
