@@ -253,3 +253,47 @@ fn test_model_metadata_loading() {
     println!("  sample_rate: {}", task_metadata["sample_rate"]);
     println!("  voices: {}", task_metadata["num_voices"]);
 }
+
+#[test]
+fn test_voice_embedding_loader_2d_npz() {
+    use xybrid_core::tts::voice_embedding::VoiceEmbeddingLoader;
+
+    // Check if we have the KittenTTS v0.2 NPZ file (downloaded for testing)
+    let npz_path = std::path::Path::new("/tmp/kitten_voices.npz");
+    if !npz_path.exists() {
+        eprintln!("Skipping test: /tmp/kitten_voices.npz not found");
+        eprintln!("Download with: curl -sL 'https://huggingface.co/KittenML/kitten-tts-nano-0.2/resolve/main/voices.npz' -o /tmp/kitten_voices.npz");
+        return;
+    }
+
+    let loader = VoiceEmbeddingLoader::new(256);
+
+    // Test loading by index
+    let embedding = loader.load(npz_path, 0).expect("Failed to load voice embedding by index");
+    assert_eq!(embedding.len(), 256, "Embedding should have 256 dimensions");
+
+    // Verify it's not all zeros
+    let sum: f32 = embedding.iter().map(|v| v.abs()).sum();
+    assert!(sum > 0.0, "Embedding should not be all zeros");
+
+    println!("Successfully loaded 2D NPZ voice embedding:");
+    println!("  Length: {}", embedding.len());
+    println!("  First 5 values: {:?}", &embedding[..5]);
+
+    // Test listing voice names
+    let names = loader.list_voice_names(npz_path).expect("Failed to list voice names");
+    assert!(names.is_some(), "NPZ should have voice names");
+    let names = names.unwrap();
+    println!("  Voice names: {:?}", names);
+    assert_eq!(names.len(), 8, "Should have 8 voices");
+
+    // Test loading by name
+    let embedding_by_name = loader.load_npz_by_name(npz_path, "expr-voice-2-f", None)
+        .expect("Failed to load voice by name");
+    assert_eq!(embedding_by_name.len(), 256);
+    println!("  Successfully loaded 'expr-voice-2-f' by name");
+
+    // Test count_voices
+    let count = loader.count_voices(npz_path).expect("Failed to count voices");
+    assert_eq!(count, 8, "Should count 8 voices");
+}
