@@ -70,7 +70,7 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 # Mistral.rs - Pure Rust LLM inference (optional, for local LLMs)
 # Enable with: cargo build --features llm-mistral
 # For GPU: cargo build --features llm-mistral-metal (macOS) or llm-mistral-cuda (NVIDIA)
-mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", optional = true, default-features = false }
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", optional = true }
 
 [features]
 default = ["ort-download"]
@@ -89,10 +89,15 @@ candle-cuda = ["candle", "candle-core/cuda"]
 llm-mistral = ["dep:mistralrs"]                             # mistral.rs (CPU)
 llm-mistral-metal = ["llm-mistral", "mistralrs/metal"]      # mistral.rs + Metal (macOS/iOS)
 llm-mistral-cuda = ["llm-mistral", "mistralrs/cuda"]        # mistral.rs + CUDA (NVIDIA)
-llm-llamacpp = []                                           # llama.cpp (Android-compatible)
+
+# llama.cpp backend (Android-compatible, runtime SIMD detection)
+# Note: This is a marker feature - it gates build.rs (compiles llama.cpp via cmake)
+# and source code (#[cfg(feature = "llm-llamacpp")] blocks), not external dependencies.
+# Requires: vendor/llama.cpp directory with cloned llama.cpp source.
+llm-llamacpp = []
 
 [build-dependencies]
-# For compiling llama.cpp C/C++ source (when llm-llamacpp feature is enabled)
+# For compiling llama.cpp C/C++ source (used by build.rs when llm-llamacpp is enabled)
 cc = "1.0"
 cmake = "0.1"
 

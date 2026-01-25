@@ -20,15 +20,14 @@
 //!
 //! The executor supports cross-layer pipelines where different stages run on different targets:
 //! - **Device/Local**: On-device inference using .xyb bundles (delegates to [`TemplateExecutor`])
-//! - **Integration**: Third-party API calls (OpenAI, Anthropic, etc.) via [`Cloud`]
+//! - **Integration**: Third-party API calls (OpenAI, Anthropic, etc.) via [`CloudRuntimeAdapter`]
 //! - **Cloud/Server**: Xybrid-hosted inference (future)
 
 use crate::bundler::{BundleManifest, XyBundle};
-use crate::cloud::{Cloud, CloudBackend, CloudConfig, CompletionRequest};
 use crate::context::StageDescriptor;
 use crate::execution::{ModelMetadata, TemplateExecutor};
-use crate::ir::{Envelope, EnvelopeKind};
-use crate::runtime_adapter::{AdapterError, RuntimeAdapter};
+use crate::ir::Envelope;
+use crate::runtime_adapter::{AdapterError, CloudRuntimeAdapter, RuntimeAdapter};
 use crate::tracing as trace;
 use std::collections::HashMap;
 use std::fs;
@@ -664,6 +663,9 @@ impl Executor {
     /// This method handles cross-layer pipeline execution where a stage runs on
     /// a remote cloud provider rather than locally on-device.
     ///
+    /// Delegates to [`CloudRuntimeAdapter`] after enriching the envelope with
+    /// stage configuration metadata.
+    ///
     /// # Arguments
     ///
     /// * `stage` - Stage descriptor with provider info
@@ -693,109 +695,84 @@ impl Executor {
             trace::add_metadata("model", model);
         }
 
-        // Build cloud configuration
-        // Default: Gateway (recommended for production)
-        // Direct: Only if explicitly requested via options.backend = "direct"
-        let mut cloud_config = CloudConfig::default(); // Gateway by default
+        // Enrich envelope with stage configuration for CloudRuntimeAdapter
+        let mut enriched_input = input.clone();
+        enriched_input
+            .metadata
+            .insert("provider".to_string(), provider.as_str().to_string());
 
-        // Apply stage options if available
-        if let Some(ref options) = stage.options {
-            // Check for backend override (gateway is default, direct for dev/testing)
-            if let Some(backend) = options.get::<String>("backend") {
-                match backend.to_lowercase().as_str() {
-                    "direct" => {
-                        // Use direct API calls (requires provider API key)
-                        cloud_config.backend = CloudBackend::Direct;
-                        cloud_config.direct_provider = Some(provider.as_str().to_string());
-                    }
-                    _ => {
-                        // Default to gateway
-                        cloud_config.backend = CloudBackend::Gateway;
-                    }
-                }
-            }
-
-            // Custom gateway URL (for self-hosted gateway)
-            if let Some(gateway_url) = options.get::<String>("gateway_url") {
-                cloud_config.gateway_url = gateway_url;
-            }
-
-            // Explicit API key (for gateway or direct)
-            if let Some(api_key) = options.get::<String>("api_key") {
-                cloud_config.api_key = Some(api_key);
-            }
-
-            // Timeout override
-            if let Some(timeout) = options.timeout_ms() {
-                cloud_config.timeout_ms = timeout;
-            }
-
-            // Debug mode
-            if let Some(debug) = options.get::<bool>("debug") {
-                cloud_config.debug = debug;
-            }
-        }
-
-        // Capture backend string for tracing before config is consumed
-        let backend_str = match cloud_config.backend {
-            CloudBackend::Gateway => "gateway",
-            CloudBackend::Direct => "direct",
-        };
-
-        // Create cloud client (gateway-aware)
-        let client = Cloud::with_config(cloud_config).map_err(|e| {
-            ExecutorError::IntegrationError(format!("Failed to create cloud client: {}", e))
-        })?;
-
-        // Extract text input
-        let input_text = match &input.kind {
-            EnvelopeKind::Text(text) => text.clone(),
-            other => {
-                return Err(ExecutorError::IntegrationError(format!(
-                    "Integration stages expect Text input, got: {:?}",
-                    other
-                )));
-            }
-        };
-
-        // Build LLM request
-        let mut request = CompletionRequest::new(&input_text);
-
-        // Set model if specified in stage
         if let Some(ref model) = stage.model {
-            request = request.with_model(model);
+            enriched_input
+                .metadata
+                .insert("model".to_string(), model.clone());
         }
 
-        // Apply stage options to request
+        // Apply stage options to metadata
         if let Some(ref options) = stage.options {
+            if let Some(backend) = options.get::<String>("backend") {
+                enriched_input
+                    .metadata
+                    .insert("backend".to_string(), backend);
+            }
+            if let Some(gateway_url) = options.get::<String>("gateway_url") {
+                enriched_input
+                    .metadata
+                    .insert("gateway_url".to_string(), gateway_url);
+            }
+            if let Some(api_key) = options.get::<String>("api_key") {
+                enriched_input
+                    .metadata
+                    .insert("api_key".to_string(), api_key);
+            }
+            if let Some(timeout) = options.timeout_ms() {
+                enriched_input
+                    .metadata
+                    .insert("timeout_ms".to_string(), timeout.to_string());
+            }
+            if let Some(debug) = options.get::<bool>("debug") {
+                enriched_input
+                    .metadata
+                    .insert("debug".to_string(), debug.to_string());
+            }
             if let Some(system) = options.system_prompt() {
-                request = request.with_system(&system);
+                enriched_input
+                    .metadata
+                    .insert("system_prompt".to_string(), system);
             }
             if let Some(temp) = options.temperature() {
-                request = request.with_temperature(temp);
+                enriched_input
+                    .metadata
+                    .insert("temperature".to_string(), temp.to_string());
             }
             if let Some(max) = options.max_tokens() {
-                request = request.with_max_tokens(max);
+                enriched_input
+                    .metadata
+                    .insert("max_tokens".to_string(), max.to_string());
             }
         }
 
-        // Execute LLM request (via gateway by default)
-        let response = {
-            let _llm_span = trace::SpanGuard::new("llm_inference");
-            trace::add_metadata("backend", backend_str);
-            client.complete(request).map_err(|e| {
-                ExecutorError::IntegrationError(format!("LLM request failed: {}", e))
-            })?
+        // Use registered cloud adapter or create a new one
+        let output = if let Some(adapter) = self.get_adapter("cloud") {
+            adapter
+                .execute(&enriched_input)
+                .map_err(ExecutorError::AdapterError)?
+        } else {
+            // Create a temporary adapter if none registered
+            let adapter = CloudRuntimeAdapter::new();
+            adapter
+                .execute(&enriched_input)
+                .map_err(ExecutorError::AdapterError)?
         };
-
-        // Build output envelope
-        let output = Envelope::new(EnvelopeKind::Text(response.text));
 
         // Calculate latency
         let latency_ms = start_time.elapsed().as_millis();
 
-        // Build metadata (include backend info)
-        let backend_info = response.backend.unwrap_or_else(|| "gateway".to_string());
+        // Build metadata (include backend info from output)
+        let backend_info = output
+            .metadata
+            .get("backend")
+            .cloned()
+            .unwrap_or_else(|| "gateway".to_string());
         let metadata = StageMetadata {
             adapter: format!("cloud:{}:{}", provider, backend_info),
             target: "cloud".to_string(),

@@ -58,45 +58,25 @@ use routing_engine::{
     DefaultRoutingEngine, LocalAvailability, RouteTarget, RoutingDecision, RoutingEngine,
 };
 use std::sync::Arc;
+use thiserror::Error;
 use tokio::task;
 
 /// Error type for orchestrator operations.
-#[derive(Debug, Clone)]
+#[derive(Error, Debug, Clone)]
 pub enum OrchestratorError {
+    #[error("Policy evaluation failed: {0}")]
     PolicyEvaluationFailed(String),
+    #[error("Routing failed: {0}")]
     RoutingFailed(String),
+    #[error("Execution failed: {0}")]
     ExecutionFailed(String),
+    #[error("Invalid stage: {0}")]
     InvalidStage(String),
+    #[error("Stream error: {0}")]
     StreamError(String),
+    #[error("Orchestrator error: {0}")]
     Other(String),
 }
-
-impl std::fmt::Display for OrchestratorError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OrchestratorError::PolicyEvaluationFailed(msg) => {
-                write!(f, "Policy evaluation failed: {}", msg)
-            }
-            OrchestratorError::RoutingFailed(msg) => {
-                write!(f, "Routing failed: {}", msg)
-            }
-            OrchestratorError::ExecutionFailed(msg) => {
-                write!(f, "Execution failed: {}", msg)
-            }
-            OrchestratorError::InvalidStage(msg) => {
-                write!(f, "Invalid stage: {}", msg)
-            }
-            OrchestratorError::StreamError(msg) => {
-                write!(f, "Stream error: {}", msg)
-            }
-            OrchestratorError::Other(msg) => {
-                write!(f, "Orchestrator error: {}", msg)
-            }
-        }
-    }
-}
-
-impl std::error::Error for OrchestratorError {}
 
 /// Result type for orchestrator operations.
 pub type OrchestratorResult<T> = Result<T, OrchestratorError>;

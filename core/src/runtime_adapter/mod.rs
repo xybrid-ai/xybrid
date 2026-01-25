@@ -15,6 +15,7 @@
 //! - `onnx/` - ONNX Runtime backend (cross-platform)
 //! - `coreml/` - CoreML backend (iOS/macOS)
 //! - `candle/` - Candle backend (pure Rust, feature-gated)
+//! - `cloud/` - Cloud LLM backend (OpenAI, Anthropic, etc.)
 //! - `mistral/` - MistralBackend (mistral.rs, desktop only)
 //! - `llama_cpp/` - LlamaCppBackend (llama.cpp, Android + fallback)
 //! - `llm.rs` - Shared LLM types (LlmBackend trait, configs)
@@ -50,6 +51,9 @@ pub mod traits;
 // Runtime backends (organized in subdirectories)
 pub mod onnx;
 
+// Cloud LLM backend (OpenAI, Anthropic, etc.) - always available
+pub mod cloud;
+
 #[cfg(any(target_os = "macos", target_os = "ios", test))]
 pub mod coreml;
 
@@ -72,6 +76,7 @@ pub mod mistral;
 pub mod llama_cpp;
 
 // Re-exports from runtime backends
+pub use cloud::CloudRuntimeAdapter;
 pub use onnx::ONNXSession;
 pub use onnx::OnnxBackend;
 pub use onnx::OnnxRuntimeAdapter;
