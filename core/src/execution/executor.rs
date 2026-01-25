@@ -574,8 +574,29 @@ impl TemplateExecutor {
                 voice_info.index
             );
 
-            // Load by index if available
-            if let Some(index) = voice_info.index {
+            // Determine loader type from voice config
+            let is_npz_format = matches!(
+                &voice_config.format,
+                super::template::VoiceFormat::Embedded {
+                    loader: super::template::VoiceLoader::NumpyNpz,
+                    ..
+                }
+            );
+
+            if is_npz_format {
+                // For NPZ format, always load by voice ID (name) for reliability.
+                // The index field is for documentation/UI; NPZ arrays may not be stored
+                // in the same order as catalog indices.
+                loader
+                    .load_npz_by_name(&voice_path, &voice_info.id, None)
+                    .map_err(|e| {
+                        AdapterError::RuntimeError(format!(
+                            "Failed to load voice '{}' by name: {}",
+                            voice_info.id, e
+                        ))
+                    })
+            } else if let Some(index) = voice_info.index {
+                // For raw binary format, use index
                 loader.load(&voice_path, index).map_err(|e| {
                     AdapterError::RuntimeError(format!(
                         "Failed to load voice '{}' (index {}): {}",
@@ -583,7 +604,7 @@ impl TemplateExecutor {
                     ))
                 })
             } else {
-                // For NPZ format, try to load by name
+                // Fallback: try loading by name (for edge cases)
                 loader
                     .load_npz_by_name(&voice_path, &voice_info.id, None)
                     .map_err(|e| {
