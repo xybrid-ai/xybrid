@@ -3,7 +3,7 @@
   "version": "v2-7",
   "description": "ResNet-50 v2 image classification model trained on ImageNet. Input: [1, 3, 224, 224] RGB image with ImageNet normalization. Output: [1, 1000] probabilities for ImageNet classes.",
   "execution_template": {
-    "type": "Onnx",
+    "type": "SimpleMode",
     "model_file": "resnet50-v2-7.onnx"
   },
   "preprocessing": [

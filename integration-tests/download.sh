@@ -135,13 +135,48 @@ download_from_registry() {
     echo "  Platform: $platform"
 
     # Resolve model from registry
-    local resolve_url="$REGISTRY_API/v1/models/registry/$model_name/resolve?platform=$platform"
+    local resolve_url="$REGISTRY_API/v1/models/$model_name/resolve?platform=$platform"
     local resolve_response
+    local http_code
+    local temp_file
+    temp_file=$(mktemp)
 
-    if ! resolve_response=$(curl -sf "$resolve_url" 2>/dev/null); then
+    # Capture both response body and HTTP status code
+    http_code=$(curl -s -w "%{http_code}" -o "$temp_file" "$resolve_url" 2>/dev/null)
+    resolve_response=$(cat "$temp_file")
+    rm -f "$temp_file"
+
+    if [ "$http_code" != "200" ]; then
         echo -e "${RED}✗ Failed to resolve $model_name from registry${NC}"
-        echo "  Registry may be unavailable or model not found"
-        echo "  Tried: $resolve_url"
+        echo "  HTTP Status: $http_code"
+        case "$http_code" in
+            000)
+                echo "  Error: Could not connect to registry (network error or DNS failure)"
+                ;;
+            404)
+                echo "  Error: Model '$model_name' not found in registry"
+                ;;
+            401|403)
+                echo "  Error: Unauthorized - check authentication"
+                ;;
+            500|502|503)
+                echo "  Error: Registry server error"
+                ;;
+            *)
+                echo "  Error: Unexpected status code"
+                ;;
+        esac
+        if [ -n "$resolve_response" ]; then
+            # Try to extract error message from JSON response
+            local error_msg
+            error_msg=$(echo "$resolve_response" | jq -r '.error // .message // empty' 2>/dev/null)
+            if [ -n "$error_msg" ]; then
+                echo "  Message: $error_msg"
+            else
+                echo "  Response: $resolve_response"
+            fi
+        fi
+        echo "  URL: $resolve_url"
         return 1
     fi
 
@@ -326,12 +361,25 @@ download_from_url() {
         return 1
     fi
 
-    # Check we have at least model.onnx
-    if [ -f "$model_dir/model.onnx" ]; then
+    # Check we have at least one model file (onnx, gguf, safetensors, etc.)
+    local model_file_found=false
+    for ext in onnx gguf safetensors bin; do
+        if ls "$model_dir"/*."$ext" 1>/dev/null 2>&1; then
+            model_file_found=true
+            break
+        fi
+    done
+
+    if $model_file_found; then
         echo -e "${GREEN}✓ $model_name downloaded successfully${NC}"
         return 0
+    elif [ -f "$model_dir/model_metadata.json" ]; then
+        # Some models might only have metadata + other files
+        echo -e "${GREEN}✓ $model_name downloaded successfully (metadata only)${NC}"
+        return 0
     else
-        echo -e "${RED}✗ $model_name missing model.onnx${NC}"
+        echo -e "${RED}✗ $model_name missing model file (no .onnx, .gguf, .safetensors, or .bin found)${NC}"
+        ls -la "$model_dir" 2>/dev/null || true
         return 1
     fi
 }

@@ -3,7 +3,7 @@
   "version": "12",
   "description": "MNIST handwritten digit recognition model (opset 12). Input: [1, 1, 28, 28] grayscale image normalized to [0.0, 1.0]. Output: [1, 10] probabilities for digits 0-9.",
   "execution_template": {
-    "type": "Onnx",
+    "type": "SimpleMode",
     "model_file": "model.onnx"
   },
   "preprocessing": [
