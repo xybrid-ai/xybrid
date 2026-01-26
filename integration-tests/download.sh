@@ -214,6 +214,9 @@ download_from_registry() {
         rm -f "$bundle_file"
 
         if $extract_success; then
+            # Fix permissions (some archives have restrictive permissions)
+            chmod -R u+rw "$model_dir" 2>/dev/null || true
+
             # Verify extraction
             if [ -f "$model_dir/model_metadata.json" ] || [ -f "$model_dir/model.onnx" ]; then
                 echo -e "${GREEN}✓ $model_name downloaded successfully${NC}"
@@ -376,7 +379,11 @@ download_all() {
     local succeeded=0
 
     for model in $models; do
-        download_model "$model" && ((succeeded++)) || ((failed++))
+        if download_model "$model"; then
+            succeeded=$((succeeded + 1))
+        else
+            failed=$((failed + 1))
+        fi
         echo ""
     done
 

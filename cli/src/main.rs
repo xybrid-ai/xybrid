@@ -33,7 +33,7 @@ mod tracing_viz;
 // Import utility functions from commands module
 // Note: Some functions (format_timestamp, format_system_time, truncate) are kept
 // locally due to chrono dependencies and slightly different implementations
-use commands::{dir_size_bytes, display_stage_name, format_params, format_size};
+use commands::{dir_size_bytes, display_stage_name, format_params, format_size, save_wav_file};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -121,19 +121,24 @@ enum Commands {
         #[command(subcommand)]
         command: CacheCommand,
     },
-    /// Run a pipeline from a configuration file or predefined pipeline name
+    /// Run a pipeline from a configuration file, predefined pipeline name, or model ID
     Run {
         /// Path to the pipeline configuration file (YAML)
-        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["pipeline", "bundle"])]
+        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["pipeline", "bundle", "model"])]
         config: Option<PathBuf>,
 
         /// Predefined pipeline name (e.g., "hiiipe")
-        #[arg(short, long, value_name = "NAME", conflicts_with_all = ["config", "bundle"])]
+        #[arg(short, long, value_name = "NAME", conflicts_with_all = ["config", "bundle", "model"])]
         pipeline: Option<String>,
 
         /// Path to a .xyb bundle file for direct execution
-        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["config", "pipeline"])]
+        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["config", "pipeline", "model"])]
         bundle: Option<PathBuf>,
+
+        /// Model ID to run directly from registry (e.g., "kokoro-82m")
+        /// Downloads the model if not cached, then runs inference
+        #[arg(short, long, value_name = "ID", conflicts_with_all = ["config", "pipeline", "bundle"])]
+        model: Option<String>,
 
         /// Dry run the pipeline without executing it
         #[arg(long, default_value = "false")]
@@ -150,6 +155,14 @@ enum Commands {
         /// Input text for text-based models
         #[arg(long, value_name = "TEXT")]
         input_text: Option<String>,
+
+        /// Voice ID for TTS models (e.g., "af_bella", "am_adam")
+        #[arg(long, value_name = "VOICE")]
+        voice: Option<String>,
+
+        /// Output file path for saving results (audio: .wav, text: .txt)
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
 
         /// Target format for model resolution (onnx, coreml, tflite)
         /// If not specified, auto-detects based on platform
@@ -211,6 +224,12 @@ enum ModelsCommand {
     },
     /// Show details about a specific model
     Info {
+        /// Model ID (e.g., "kokoro-82m")
+        #[arg(value_name = "ID")]
+        model_id: String,
+    },
+    /// List available voices for a TTS model
+    Voices {
         /// Model ID (e.g., "kokoro-82m")
         #[arg(value_name = "ID")]
         model_id: String,
@@ -311,10 +330,13 @@ fn run_command(cli: Cli) -> Result<()> {
             config,
             pipeline,
             bundle,
+            model,
             dry_run,
             policy,
             input_audio,
             input_text,
+            voice,
+            output,
             target,
             trace,
             trace_export,
@@ -324,12 +346,29 @@ fn run_command(cli: Cli) -> Result<()> {
                 tracing_viz::reset_collector();
             }
 
+            // Handle direct model execution from registry
+            if let Some(model_id) = model {
+                return run_model(
+                    &model_id,
+                    input_audio.as_ref(),
+                    input_text.as_deref(),
+                    voice.as_deref(),
+                    output.as_ref(),
+                    target.as_deref(),
+                    dry_run,
+                    trace,
+                    trace_export.as_ref(),
+                );
+            }
+
             // Handle direct bundle execution
             if let Some(bundle_path) = bundle {
                 return run_bundle(
                     &bundle_path,
                     input_audio.as_ref(),
                     input_text.as_deref(),
+                    voice.as_deref(),
+                    output.as_ref(),
                     dry_run,
                     trace,
                     trace_export.as_ref(),
@@ -382,7 +421,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 p
             } else {
                 return Err(anyhow::anyhow!(
-                    "Either --config, --pipeline, or --bundle must be specified"
+                    "Either --config, --pipeline, --bundle, or --model must be specified"
                 ));
             };
             run_pipeline(
@@ -391,6 +430,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 policy.as_ref(),
                 input_audio.as_ref(),
                 input_text.as_deref(),
+                voice.as_deref(),
+                output.as_ref(),
                 target.as_deref(),
                 trace,
                 trace_export.as_ref(),
@@ -1205,6 +1246,8 @@ fn run_pipeline(
     policy_path: Option<&PathBuf>,
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
+    voice: Option<&str>,
+    output_path: Option<&PathBuf>,
     target: Option<&str>,
     trace_enabled: bool,
     trace_export: Option<&PathBuf>,
@@ -1328,7 +1371,7 @@ fn run_pipeline(
     }
 
     // Create input envelope based on CLI args
-    let input = if let Some(audio_path) = input_audio {
+    let mut input = if let Some(audio_path) = input_audio {
         println!("📂 Loading audio file: {}", audio_path.display());
         let audio_bytes = fs::read(audio_path)
             .with_context(|| format!("Failed to read audio file: {}", audio_path.display()))?;
@@ -1341,6 +1384,14 @@ fn run_pipeline(
         // Default to empty text envelope
         Envelope::new(EnvelopeKind::Text(String::new()))
     };
+
+    // Add voice_id to envelope metadata if provided
+    if let Some(voice_id) = voice {
+        println!("🎙️  Voice: {}", voice_id);
+        input
+            .metadata
+            .insert("voice_id".to_string(), voice_id.to_string());
+    }
 
     // Collect device metrics at runtime (not from YAML)
     let device_adapter = LocalDeviceAdapter::new();
@@ -1503,6 +1554,41 @@ fn run_pipeline(
                 }
             }
 
+            // Save final output if path provided
+            if let Some(path) = output_path {
+                if let Some(last_result) = results.last() {
+                    match &last_result.output.kind {
+                        EnvelopeKind::Text(text) => {
+                            fs::write(path, text)
+                                .with_context(|| format!("Failed to write output to {}", path.display()))?;
+                            println!();
+                            println!("💾 Output saved to: {}", path.display());
+                        }
+                        EnvelopeKind::Audio(data) => {
+                            // Save as WAV file with proper headers
+                            // Default to 24kHz mono (common TTS sample rate)
+                            save_wav_file(path, data, 24000, 1)
+                                .with_context(|| format!("Failed to write audio to {}", path.display()))?;
+                            println!();
+                            println!("💾 Audio saved to: {}", path.display());
+                        }
+                        EnvelopeKind::Embedding(vec) => {
+                            let json = serde_json::to_string_pretty(vec)
+                                .context("Failed to serialize embedding")?;
+                            fs::write(path, json)
+                                .with_context(|| format!("Failed to write embedding to {}", path.display()))?;
+                            println!();
+                            println!("💾 Embedding saved to: {}", path.display());
+                        }
+                    }
+                }
+            } else if let Some(last_result) = results.last() {
+                if matches!(last_result.output.kind, EnvelopeKind::Audio(_)) {
+                    println!();
+                    println!("💡 Tip: Use --output <file.wav> to save the audio");
+                }
+            }
+
             println!();
             println!("{}", "=".repeat(60));
             println!("✨ Pipeline completed successfully!");
@@ -1538,6 +1624,8 @@ fn run_bundle(
     bundle_path: &Path,
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
+    voice: Option<&str>,
+    output_path: Option<&PathBuf>,
     dry_run: bool,
     trace_enabled: bool,
     trace_export: Option<&PathBuf>,
@@ -1643,7 +1731,7 @@ fn run_bundle(
     }
 
     // Create input envelope based on provided input
-    let input = if let Some(audio_path) = input_audio {
+    let mut input = if let Some(audio_path) = input_audio {
         println!("🎤 Loading audio file: {}", audio_path.display());
         let audio_bytes = fs::read(audio_path)
             .with_context(|| format!("Failed to read audio file: {}", audio_path.display()))?;
@@ -1657,6 +1745,14 @@ fn run_bundle(
             "No input provided. Use --input-audio <file> or --input-text <text>"
         ));
     };
+
+    // Add voice_id to envelope metadata if provided
+    if let Some(voice_id) = voice {
+        println!("🎙️  Voice: {}", voice_id);
+        input
+            .metadata
+            .insert("voice_id".to_string(), voice_id.to_string());
+    }
     println!();
 
     // Create TemplateExecutor with the extracted bundle directory
@@ -1693,7 +1789,7 @@ fn run_bundle(
     println!("  Latency: {:.2}ms", elapsed.as_millis());
     println!("  Output Type: {}", output.kind_str());
 
-    // Display output content
+    // Display and save output content
     match &output.kind {
         EnvelopeKind::Text(text) => {
             if !text.is_empty() {
@@ -1701,9 +1797,28 @@ fn run_bundle(
                 println!("  Output:");
                 println!("    \"{}\"", text);
             }
+            // Save text output if path provided
+            if let Some(path) = output_path {
+                fs::write(path, text)
+                    .with_context(|| format!("Failed to write output to {}", path.display()))?;
+                println!();
+                println!("💾 Output saved to: {}", path.display());
+            }
         }
         EnvelopeKind::Audio(data) => {
             println!("  Output Size: {} bytes", data.len());
+            // Save audio output if path provided
+            if let Some(path) = output_path {
+                // Save as WAV file with proper headers
+                // Default to 24kHz mono (common TTS sample rate)
+                save_wav_file(path, data, 24000, 1)
+                    .with_context(|| format!("Failed to write audio to {}", path.display()))?;
+                println!();
+                println!("💾 Audio saved to: {}", path.display());
+            } else {
+                println!();
+                println!("💡 Tip: Use --output <file.wav> to save the audio");
+            }
         }
         EnvelopeKind::Embedding(vec) => {
             println!("  Output Dimensions: {} elements", vec.len());
@@ -1711,6 +1826,15 @@ fn run_bundle(
                 println!("  Values: {:?}", vec);
             } else {
                 println!("  First 5: {:?}", &vec[..5]);
+            }
+            // Save embedding as JSON if path provided
+            if let Some(path) = output_path {
+                let json = serde_json::to_string_pretty(vec)
+                    .context("Failed to serialize embedding")?;
+                fs::write(path, json)
+                    .with_context(|| format!("Failed to write embedding to {}", path.display()))?;
+                println!();
+                println!("💾 Embedding saved to: {}", path.display());
             }
         }
     }
@@ -1746,6 +1870,355 @@ fn run_bundle(
         drop(_inference_span);
         // Explicitly end the bundle span
         drop(_bundle_span);
+
+        println!("{}", tracing_viz::render_trace());
+
+        // Export trace if requested
+        if let Some(export_path) = trace_export {
+            let json = tracing_viz::GLOBAL_COLLECTOR
+                .lock()
+                .unwrap()
+                .to_chrome_trace_json();
+            fs::write(export_path, json)
+                .with_context(|| format!("Failed to export trace to {}", export_path.display()))?;
+            println!("💾 Trace exported to: {}", export_path.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// Run inference on a model directly from the registry.
+///
+/// This fetches the model from the registry (if not cached), extracts it,
+/// and runs inference using the TemplateExecutor.
+///
+/// # Arguments
+/// * `model_id` - Registry model ID (e.g., "kokoro-82m", "whisper-tiny")
+/// * `input_audio` - Optional path to WAV audio file for ASR models
+/// * `input_text` - Optional text input for TTS/NLP models
+/// * `voice` - Optional voice ID for TTS models (e.g., "af_bella", "0", "5")
+/// * `output_path` - Optional path to save output (audio: .wav, text: .txt)
+/// * `platform` - Optional target platform for variant selection
+/// * `dry_run` - If true, only show model info without running inference
+/// * `trace_enabled` - If true, enable detailed execution tracing
+/// * `trace_export` - Optional path to export trace JSON
+///
+/// # Examples
+/// ```bash
+/// # Run TTS model and save audio output
+/// xybrid run --model kokoro-82m --input-text "Hello world" --output speech.wav
+///
+/// # Run TTS model with specific voice
+/// xybrid run --model kokoro-82m --input-text "Hello world" --voice 5 -o output.wav
+///
+/// # Run ASR model and save transcription
+/// xybrid run --model whisper-tiny --input-audio recording.wav --output transcript.txt
+///
+/// # Dry run to check model info
+/// xybrid run --model kokoro-82m --input-text "Test" --dry-run
+/// ```
+fn run_model(
+    model_id: &str,
+    input_audio: Option<&PathBuf>,
+    input_text: Option<&str>,
+    voice: Option<&str>,
+    output_path: Option<&PathBuf>,
+    platform: Option<&str>,
+    dry_run: bool,
+    trace_enabled: bool,
+    trace_export: Option<&PathBuf>,
+) -> Result<()> {
+    // Reset and start model trace span
+    if trace_enabled {
+        tracing_viz::reset_collector();
+    }
+    let _model_span = if trace_enabled {
+        Some(tracing_viz::SpanGuard::new("model_execution"))
+    } else {
+        None
+    };
+
+    // Generate trace ID for this execution
+    let trace_id = uuid::Uuid::new_v4();
+    xybrid_sdk::set_telemetry_pipeline_context(None, Some(trace_id));
+
+    println!("🚀 Xybrid Model Runner");
+    println!("🔖 Model: {}\n", model_id.cyan().bold());
+
+    // Initialize registry client
+    let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
+
+    // Resolve the model to get variant info
+    let _fetch_span = if trace_enabled {
+        Some(tracing_viz::SpanGuard::new("registry_fetch"))
+    } else {
+        None
+    };
+
+    let resolved = client
+        .resolve(model_id, platform)
+        .context(format!("Failed to resolve model '{}' from registry", model_id))?;
+
+    println!("📦 Resolved variant:");
+    println!("   Repository: {}", resolved.hf_repo);
+    println!("   File: {}", resolved.file);
+    println!(
+        "   Size: {}",
+        format_size(resolved.size_bytes).bright_cyan()
+    );
+    println!("   Format: {} ({})", resolved.format, resolved.quantization);
+    println!();
+
+    // Fetch the model (downloads if not cached)
+    let bundle_path = if client
+        .is_cached(model_id, platform)
+        .context("Failed to check cache status")?
+    {
+        println!("✅ Model is cached");
+        client.get_cache_path(&resolved)
+    } else {
+        println!("📥 Downloading model...");
+
+        use indicatif::{ProgressBar, ProgressStyle};
+        let pb = ProgressBar::new(resolved.size_bytes);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} Downloading {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+                .unwrap()
+                .progress_chars("█▓▒░  ")
+        );
+        pb.set_message(model_id.to_string());
+
+        let path = client
+            .fetch(model_id, platform, |progress| {
+                let bytes_done = (progress * resolved.size_bytes as f32) as u64;
+                pb.set_position(bytes_done);
+            })
+            .context(format!("Failed to fetch model '{}' from registry", model_id))?;
+
+        pb.finish_with_message(format!("✅ Downloaded {}", model_id));
+        path
+    };
+    println!("   Location: {}", bundle_path.display());
+    println!();
+
+    drop(_fetch_span);
+
+    // Load and extract bundle
+    println!("📂 Loading bundle...");
+    let bundle = XyBundle::load(&bundle_path)
+        .with_context(|| format!("Failed to load bundle: {}", bundle_path.display()))?;
+
+    let manifest = bundle.manifest();
+    println!("   Model ID: {}", manifest.model_id);
+    println!("   Version: {}", manifest.version);
+    println!();
+
+    // Create temp directory for extraction
+    let temp_dir =
+        tempfile::tempdir().context("Failed to create temp directory for bundle extraction")?;
+    let extract_dir = temp_dir.path();
+
+    // Extract bundle contents
+    println!("📦 Extracting bundle...");
+    bundle
+        .extract_to(extract_dir)
+        .context("Failed to extract bundle")?;
+
+    // Load model_metadata.json
+    let metadata_path = extract_dir.join("model_metadata.json");
+    if !metadata_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Bundle does not contain model_metadata.json. Cannot execute without metadata."
+        ));
+    }
+
+    let metadata_content =
+        fs::read_to_string(&metadata_path).context("Failed to read model_metadata.json")?;
+    let metadata: ModelMetadata =
+        serde_json::from_str(&metadata_content).context("Failed to parse model_metadata.json")?;
+
+    println!("📋 Model Metadata:");
+    println!("   ID: {}", metadata.model_id);
+    println!("   Version: {}", metadata.version);
+    if let Some(desc) = &metadata.description {
+        println!("   Description: {}", desc);
+    }
+    println!("   Preprocessing: {} steps", metadata.preprocessing.len());
+    println!("   Postprocessing: {} steps", metadata.postprocessing.len());
+    println!();
+
+    // Emit PipelineStart telemetry event
+    xybrid_sdk::publish_telemetry_event(xybrid_sdk::TelemetryEvent {
+        event_type: "PipelineStart".to_string(),
+        stage_name: Some(metadata.model_id.clone()),
+        target: Some("local".to_string()),
+        latency_ms: None,
+        error: None,
+        data: Some(
+            serde_json::json!({
+                "model_id": metadata.model_id,
+                "version": metadata.version,
+                "source": "registry"
+            })
+            .to_string(),
+        ),
+        timestamp_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+    });
+
+    if dry_run {
+        println!("🔎 Dry Run: Model inspection only");
+        println!("{}", "=".repeat(60));
+        println!();
+        println!("Model is valid and ready for execution.");
+        println!("Use without --dry-run to run inference.");
+        return Ok(());
+    }
+
+    // Create input envelope based on provided input
+    let mut input = if let Some(audio_path) = input_audio {
+        println!("🎤 Loading audio file: {}", audio_path.display());
+        let audio_bytes = fs::read(audio_path)
+            .with_context(|| format!("Failed to read audio file: {}", audio_path.display()))?;
+        println!("   Loaded {} bytes", audio_bytes.len());
+        Envelope::new(EnvelopeKind::Audio(audio_bytes))
+    } else if let Some(text) = input_text {
+        println!("📝 Input text: \"{}\"", text);
+        Envelope::new(EnvelopeKind::Text(text.to_string()))
+    } else {
+        return Err(anyhow::anyhow!(
+            "No input provided. Use --input-audio <file> or --input-text <text>"
+        ));
+    };
+
+    // Add voice_id to envelope metadata if provided
+    if let Some(voice_id) = voice {
+        println!("🎙️  Voice: {}", voice_id);
+        input
+            .metadata
+            .insert("voice_id".to_string(), voice_id.to_string());
+    }
+    println!();
+
+    // Create TemplateExecutor with the extracted bundle directory
+    println!("⚙️  Running inference...");
+    println!("{}", "=".repeat(60));
+
+    let base_path = extract_dir
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid extraction path"))?;
+
+    let mut executor = TemplateExecutor::with_base_path(base_path);
+
+    // Trace inference execution
+    let _inference_span = if trace_enabled {
+        let span = tracing_viz::SpanGuard::new(format!("inference:{}", metadata.model_id));
+        tracing_viz::add_metadata("model_id", &metadata.model_id);
+        tracing_viz::add_metadata("version", &metadata.version);
+        Some(span)
+    } else {
+        None
+    };
+
+    let start_time = std::time::Instant::now();
+    let output = executor
+        .execute(&metadata, &input)
+        .map_err(|e| anyhow::anyhow!("Inference failed: {:?}", e))?;
+    let elapsed = start_time.elapsed();
+
+    println!();
+    println!("📊 Results:");
+    println!("{}", "=".repeat(60));
+    println!();
+    println!("  Model: {} v{}", metadata.model_id, metadata.version);
+    println!("  Latency: {:.2}ms", elapsed.as_millis());
+    println!("  Output Type: {}", output.kind_str());
+
+    // Display and save output content
+    match &output.kind {
+        EnvelopeKind::Text(text) => {
+            if !text.is_empty() {
+                println!();
+                println!("  Output:");
+                println!("    \"{}\"", text);
+            }
+            // Save text output if path provided
+            if let Some(path) = output_path {
+                fs::write(path, text)
+                    .with_context(|| format!("Failed to write output to {}", path.display()))?;
+                println!();
+                println!("💾 Output saved to: {}", path.display());
+            }
+        }
+        EnvelopeKind::Audio(data) => {
+            println!("  Output Size: {} bytes", data.len());
+            // Save audio output if path provided
+            if let Some(path) = output_path {
+                // Save as WAV file with proper headers
+                // Default to 24kHz mono (common TTS sample rate)
+                save_wav_file(path, data, 24000, 1)
+                    .with_context(|| format!("Failed to write audio to {}", path.display()))?;
+                println!();
+                println!("💾 Audio saved to: {}", path.display());
+            } else {
+                println!();
+                println!("💡 Tip: Use --output <file.wav> to save the audio");
+            }
+        }
+        EnvelopeKind::Embedding(vec) => {
+            println!("  Output Dimensions: {} elements", vec.len());
+            if vec.len() <= 10 {
+                println!("  Values: {:?}", vec);
+            } else {
+                println!("  First 5: {:?}", &vec[..5]);
+            }
+            // Save embedding as JSON if path provided
+            if let Some(path) = output_path {
+                let json = serde_json::to_string_pretty(vec)
+                    .context("Failed to serialize embedding")?;
+                fs::write(path, json)
+                    .with_context(|| format!("Failed to write embedding to {}", path.display()))?;
+                println!();
+                println!("💾 Embedding saved to: {}", path.display());
+            }
+        }
+    }
+
+    println!();
+    println!("{}", "=".repeat(60));
+    println!("✨ Inference completed successfully!");
+
+    // Emit PipelineComplete telemetry event
+    xybrid_sdk::publish_telemetry_event(xybrid_sdk::TelemetryEvent {
+        event_type: "PipelineComplete".to_string(),
+        stage_name: Some(metadata.model_id.clone()),
+        target: Some("local".to_string()),
+        latency_ms: Some(elapsed.as_millis() as u32),
+        error: None,
+        data: Some(
+            serde_json::json!({
+                "model_id": metadata.model_id,
+                "version": metadata.version,
+                "output_type": output.kind_str()
+            })
+            .to_string(),
+        ),
+        timestamp_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+    });
+
+    // End spans and output trace visualization if enabled
+    if trace_enabled {
+        // Explicitly end the inference span
+        drop(_inference_span);
+        // Explicitly end the model span
+        drop(_model_span);
 
         println!("{}", tracing_viz::render_trace());
 
@@ -1903,12 +2376,260 @@ fn handle_models_command(command: ModelsCommand) -> Result<()> {
                 }
             }
 
+            // Show voice info hint for TTS models
+            if model.task.to_lowercase().contains("tts")
+                || model.task.to_lowercase().contains("text-to-speech")
+            {
+                println!();
+                println!(
+                    "  💡 This is a TTS model. Use '{}' to see available voices.",
+                    format!("xybrid models voices {}", model_id).bright_cyan()
+                );
+            }
+
             println!();
             println!("{}", "=".repeat(60));
 
             Ok(())
         }
+        ModelsCommand::Voices { model_id } => {
+            handle_voices_command(&client, &model_id)
+        }
     }
+}
+
+/// Handle `xybrid models voices <model-id>` command
+fn handle_voices_command(client: &RegistryClient, model_id: &str) -> Result<()> {
+    println!("🎤 Voices for: {}", model_id.cyan().bold());
+    println!("{}", "=".repeat(60));
+    println!();
+
+    // First check if model exists
+    let model = client
+        .get_model(model_id)
+        .context(format!("Failed to get model '{}'", model_id))?;
+
+    // Check if it's a TTS model
+    if !model.task.to_lowercase().contains("tts")
+        && !model.task.to_lowercase().contains("text-to-speech")
+    {
+        println!(
+            "ℹ️  Model '{}' is not a TTS model (task: {}).",
+            model_id, model.task
+        );
+        println!("   Voice selection is only available for text-to-speech models.");
+        return Ok(());
+    }
+
+    // Resolve the model first to get cache path
+    let resolved = client
+        .resolve(model_id, None)
+        .context(format!("Failed to resolve model '{}'", model_id))?;
+
+    // Check if cached, otherwise download
+    let bundle_path = if client.is_cached(model_id, None).unwrap_or(false) {
+        client.get_cache_path(&resolved)
+    } else {
+        println!("📥 Downloading model to read voice catalog...");
+        println!();
+
+        use indicatif::{ProgressBar, ProgressStyle};
+
+        let pb = ProgressBar::new(resolved.size_bytes);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{bar:40.cyan/blue}] {bytes}/{total_bytes}")
+                .unwrap()
+                .progress_chars("█▓▒░  "),
+        );
+
+        let path = client.fetch(model_id, None, |progress| {
+            let bytes_done = (progress * resolved.size_bytes as f32) as u64;
+            pb.set_position(bytes_done);
+        })?;
+
+        pb.finish_and_clear();
+        path
+    };
+
+    // Load the metadata from the bundle
+    let mut metadata = match load_metadata_from_bundle(&bundle_path) {
+        Ok(m) => m,
+        Err(e) => {
+            // Try local fixtures as fallback (for development)
+            let fixtures_path = PathBuf::from("integration-tests/fixtures/models")
+                .join(model_id)
+                .join("model_metadata.json");
+            if fixtures_path.exists() {
+                let content = fs::read_to_string(&fixtures_path)?;
+                serde_json::from_str(&content)?
+            } else {
+                return Err(e);
+            }
+        }
+    };
+
+    // If bundle metadata doesn't have voices, try local fixtures (for development)
+    if !metadata.has_voices() {
+        let fixtures_path = PathBuf::from("integration-tests/fixtures/models")
+            .join(model_id)
+            .join("model_metadata.json");
+        if fixtures_path.exists() {
+            if let Ok(content) = fs::read_to_string(&fixtures_path) {
+                if let Ok(local_metadata) = serde_json::from_str::<ModelMetadata>(&content) {
+                    if local_metadata.has_voices() {
+                        println!("📂 Using voice catalog from local fixtures");
+                        println!("   (Registry bundle may need updating)");
+                        println!();
+                        metadata = local_metadata;
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if model has voices
+    if !metadata.has_voices() {
+        println!("ℹ️  Model '{}' does not have a voice catalog.", model_id);
+        println!();
+        println!("   This TTS model may use a single default voice, or the");
+        println!("   registry bundle needs to be updated with voice info.");
+        println!();
+        println!("   For local development with Kokoro, run:");
+        println!("     ./integration-tests/download.sh kokoro-82m");
+        println!("     cargo run -p xybrid-core --example tts_kokoro -- --list-voices");
+        return Ok(());
+    }
+
+    let voices = metadata.list_voices();
+    println!(
+        "Found {} voices for {}",
+        voices.len().to_string().bright_green(),
+        model_id.cyan()
+    );
+    println!();
+
+    // Group by language
+    use std::collections::BTreeMap;
+    let mut by_language: BTreeMap<String, Vec<_>> = BTreeMap::new();
+    for voice in &voices {
+        let lang = voice.language.as_deref().unwrap_or("unknown").to_string();
+        by_language.entry(lang).or_default().push(voice);
+    }
+
+    for (language, lang_voices) in by_language {
+        let flag = match language.as_str() {
+            "en-US" => "🇺🇸",
+            "en-GB" => "🇬🇧",
+            "ja-JP" => "🇯🇵",
+            "zh-CN" => "🇨🇳",
+            "de-DE" => "🇩🇪",
+            "fr-FR" => "🇫🇷",
+            "es-ES" => "🇪🇸",
+            _ => "🌐",
+        };
+
+        println!(
+            "{} {} ({} voices)",
+            flag,
+            language.bright_cyan().bold(),
+            lang_voices.len()
+        );
+        println!("{}", "─".repeat(55));
+        println!(
+            "  {:<15} {:<12} {:<8} {}",
+            "ID".bright_black(),
+            "Name".bright_black(),
+            "Gender".bright_black(),
+            "Style".bright_black()
+        );
+        println!("{}", "─".repeat(55));
+
+        for voice in lang_voices {
+            let gender_icon = match voice.gender.as_deref() {
+                Some("female") => "♀",
+                Some("male") => "♂",
+                _ => " ",
+            };
+            println!(
+                "  {:<15} {:<12} {} {:<6} {}",
+                voice.id.cyan(),
+                voice.name,
+                gender_icon,
+                voice.gender.as_deref().unwrap_or("-"),
+                voice.style.as_deref().unwrap_or("neutral").bright_black()
+            );
+        }
+        println!();
+    }
+
+    // Show default voice
+    if let Some(default) = metadata.default_voice() {
+        println!(
+            "Default voice: {} ({})",
+            default.name.bright_green(),
+            default.id
+        );
+    }
+
+    println!();
+    println!("{}", "=".repeat(60));
+    println!();
+    println!("Usage:");
+    println!(
+        "  {} --model {} --input-text \"Hello\" --voice {}",
+        "xybrid run".bright_cyan(),
+        model_id,
+        "<voice-id>".bright_yellow()
+    );
+    println!();
+
+    Ok(())
+}
+
+/// Load ModelMetadata from a bundle path (extracted directory or .xyb file)
+fn load_metadata_from_bundle(bundle_path: &Path) -> Result<ModelMetadata> {
+    // If it's a directory, look for model_metadata.json directly
+    if bundle_path.is_dir() {
+        let metadata_path = bundle_path.join("model_metadata.json");
+        if !metadata_path.exists() {
+            anyhow::bail!(
+                "model_metadata.json not found at {}",
+                metadata_path.display()
+            );
+        }
+        let content = fs::read_to_string(&metadata_path)?;
+        let metadata: ModelMetadata = serde_json::from_str(&content)?;
+        return Ok(metadata);
+    }
+
+    // Handle .xyb bundle - read directly from bundle
+    if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
+        let bundle = XyBundle::load(bundle_path)?;
+
+        // Use the bundle's get_metadata_json method
+        let metadata_json = bundle
+            .get_metadata_json()?
+            .ok_or_else(|| anyhow::anyhow!(
+                "model_metadata.json not found in bundle at {}",
+                bundle_path.display()
+            ))?;
+
+        let metadata: ModelMetadata = serde_json::from_str(&metadata_json)?;
+        return Ok(metadata);
+    }
+
+    // Fallback: try as a directory
+    let metadata_path = bundle_path.join("model_metadata.json");
+    if !metadata_path.exists() {
+        anyhow::bail!(
+            "model_metadata.json not found at {}",
+            metadata_path.display()
+        );
+    }
+    let content = fs::read_to_string(&metadata_path)?;
+    let metadata: ModelMetadata = serde_json::from_str(&content)?;
+    Ok(metadata)
 }
 
 /// Handle `xybrid fetch` command
