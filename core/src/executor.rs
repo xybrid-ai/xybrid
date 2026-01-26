@@ -29,6 +29,7 @@ use crate::execution::{ModelMetadata, TemplateExecutor};
 use crate::ir::Envelope;
 use crate::runtime_adapter::{AdapterError, CloudRuntimeAdapter, RuntimeAdapter};
 use crate::tracing as trace;
+use log::{debug, warn};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -231,11 +232,19 @@ impl Executor {
         let extract_base_dir = self._extracted_bundles_dir.as_ref().unwrap();
 
         // Create unique extraction directory for this bundle
+        // Use parent directory name + bundle stem to avoid collisions
+        // (e.g., whisper-tiny/universal.xyb vs qwen/universal.xyb both named "universal")
+        let parent_name = bundle_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
         let bundle_stem = bundle_path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("bundle");
-        let extract_dir = extract_base_dir.path().join(bundle_stem);
+        let unique_name = format!("{}_{}", parent_name, bundle_stem);
+        let extract_dir = extract_base_dir.path().join(&unique_name);
 
         // Extract bundle if not already extracted
         if !extract_dir.exists() {
@@ -367,11 +376,19 @@ impl Executor {
         let extract_base_dir = self._extracted_bundles_dir.as_ref().unwrap();
 
         // Create unique extraction directory for this bundle
+        // Use parent directory name + bundle stem to avoid collisions
+        // (e.g., whisper-tiny/universal.xyb vs qwen/universal.xyb both named "universal")
+        let parent_name = bundle_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
         let bundle_stem = bundle_path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("bundle");
-        let extract_dir = extract_base_dir.path().join(bundle_stem);
+        let unique_name = format!("{}_{}", parent_name, bundle_stem);
+        let extract_dir = extract_base_dir.path().join(&unique_name);
 
         // Extract bundle if not already extracted
         if !extract_dir.exists() {
@@ -518,41 +535,84 @@ impl Executor {
         // Try bundle_path for metadata-driven execution (bundles are pre-downloaded by SDK)
         if let Some(bundle_path_str) = &stage.bundle_path {
             let bundle_path = PathBuf::from(bundle_path_str);
+            eprintln!(
+                "[DEBUG Executor] Stage '{}' has bundle_path: {:?}",
+                stage.name,
+                bundle_path
+            );
+
             if bundle_path.exists() {
                 let ext = bundle_path
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("");
+                eprintln!(
+                    "[DEBUG Executor] Bundle extension: '{}'",
+                    ext
+                );
+
                 if ext == "xyb" || ext == "bundle" {
                     // Extract bundle and check for model_metadata.json
-                    if let Ok((extract_dir, Some(model_metadata))) =
-                        self.extract_bundle_with_metadata(&bundle_path)
-                    {
-                        // Use TemplateExecutor for metadata-driven inference
-                        let base_path = extract_dir.to_str().ok_or_else(|| {
-                            ExecutorError::Other("Invalid extract dir path".to_string())
-                        })?;
+                    match self.extract_bundle_with_metadata(&bundle_path) {
+                        Ok((extract_dir, Some(model_metadata))) => {
+                            eprintln!(
+                                "[DEBUG Executor] Successfully extracted bundle, found model_metadata.json. Template: {:?}",
+                                model_metadata.execution_template
+                            );
 
-                        let mut template_executor = TemplateExecutor::new(base_path);
+                            // Use TemplateExecutor for metadata-driven inference
+                            let base_path = extract_dir.to_str().ok_or_else(|| {
+                                ExecutorError::Other("Invalid extract dir path".to_string())
+                            })?;
 
-                        let output = template_executor
-                            .execute(&model_metadata, input)
-                            .map_err(|e| ExecutorError::AdapterError(e))?;
+                            let mut template_executor = TemplateExecutor::new(base_path);
 
-                        let latency_ms = start_time.elapsed().as_millis();
-                        let metadata = StageMetadata {
-                            adapter: "template-executor".to_string(),
-                            target: target.to_string(),
-                            latency_ms,
-                        };
+                            let output = template_executor
+                                .execute(&model_metadata, input)
+                                .map_err(|e| ExecutorError::AdapterError(e))?;
 
-                        return Ok((output, metadata));
+                            let latency_ms = start_time.elapsed().as_millis();
+                            let metadata = StageMetadata {
+                                adapter: "template-executor".to_string(),
+                                target: target.to_string(),
+                                latency_ms,
+                            };
+
+                            return Ok((output, metadata));
+                        }
+                        Ok((extract_dir, None)) => {
+                            eprintln!(
+                                "[DEBUG Executor] Bundle extracted to {:?} but NO model_metadata.json found! Falling back to raw adapter.",
+                                extract_dir
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[DEBUG Executor] Failed to extract bundle: {}. Falling back to raw adapter.",
+                                e
+                            );
+                        }
                     }
                 }
+            } else {
+                eprintln!(
+                    "[DEBUG Executor] Bundle path does not exist: {:?}",
+                    bundle_path
+                );
             }
+        } else {
+            eprintln!(
+                "[DEBUG Executor] Stage '{}' has no bundle_path set",
+                stage.name
+            );
         }
 
         // Fallback: Use raw adapter execution (no metadata-driven processing)
+        eprintln!(
+            "[DEBUG Executor] FALLBACK: Using raw adapter '{}' for stage '{}'. This bypasses metadata-driven execution!",
+            adapter_name,
+            stage.name
+        );
         let model_path = self.resolve_stage_to_model_path(stage, &adapter_name)?;
         let model_path_str = model_path
             .to_str()

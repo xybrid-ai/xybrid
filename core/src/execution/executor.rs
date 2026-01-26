@@ -117,6 +117,16 @@ impl TemplateExecutor {
                 chat_template,
                 context_length,
             } => {
+                eprintln!(
+                    "[DEBUG TemplateExecutor] Detected GGUF template, routing to execute_llm()"
+                );
+                eprintln!(
+                    "[DEBUG TemplateExecutor] GGUF model_file: {}, chat_template: {:?}, context_length: {}",
+                    model_file,
+                    chat_template,
+                    context_length
+                );
+
                 // Extract backend hint from metadata (e.g., "llamacpp" for Gemma 3)
                 let backend_hint = metadata
                     .metadata
@@ -159,6 +169,19 @@ impl TemplateExecutor {
             let phoneme_ids = preprocessed
                 .as_phoneme_ids()
                 .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
+
+            eprintln!(
+                "[DEBUG TTS] Input text: {:?}",
+                match &input.kind {
+                    crate::ir::EnvelopeKind::Text(t) => t.chars().take(100).collect::<String>(),
+                    _ => "(not text)".to_string(),
+                }
+            );
+            eprintln!(
+                "[DEBUG TTS] Phoneme IDs count: {}, first 20: {:?}",
+                phoneme_ids.len(),
+                &phoneme_ids[..phoneme_ids.len().min(20)]
+            );
 
             // Load voice embedding based on metadata and envelope
             let voice_embedding = self.load_voice_embedding(metadata, input)?;
