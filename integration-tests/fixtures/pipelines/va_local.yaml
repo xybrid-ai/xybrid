@@ -1,0 +1,12 @@
+# Voice Assistant: Whisper + Qwen + Kokoro
+# ASR (device) -> LLM (device) -> TTS (device)
+
+name: Local Voice Assistant
+
+stages:
+  - whisper-tiny
+
+  - model: qwen2.5-0.5b-instruct
+    target: device
+
+  - kokoro-82m
