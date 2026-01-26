@@ -32,12 +32,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let model_path = model_fixtures::require_model("whisper-tiny");
 
-    // 2. Select device
+    // 1. Select device
     println!("1. Selecting device...");
     let device = select_device(DeviceSelection::Auto)?;
     println!("   Using device: {:?}", device);
 
-    // 3. Load model
+    // 2. Load model
     println!("\n2. Loading Whisper model...");
     let config = WhisperConfig {
         model_size: WhisperSize::Tiny,
@@ -49,13 +49,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   Model loaded successfully!");
     println!("   Config: {:?}", model.config());
 
-    // 4. Load test audio file
-    let audio_path = model_path.join("jfk.wav");
+    // 3. Get audio file path from args or use default
+    let args: Vec<String> = std::env::args().collect();
+    let audio_path = if args.len() > 1 {
+        std::path::PathBuf::from(&args[1])
+    } else {
+        model_path.join("jfk.wav")
+    };
+
     if !audio_path.exists() {
-        println!("\n3. No test audio file found at {:?}", audio_path);
-        println!("   Skipping transcription test.");
-        println!("\n=== Example complete (model load only) ===");
-        return Ok(());
+        eprintln!("Error: Audio file not found at {:?}", audio_path);
+        eprintln!("\nUsage: cargo run --example candle_whisper --features candle -- <audio.wav>");
+        std::process::exit(1);
     }
 
     println!("\n3. Loading audio file: {:?}", audio_path);
