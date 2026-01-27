@@ -320,6 +320,58 @@ pub fn llama_tokenize(
     Ok(tokens)
 }
 
+/// Tokenize text with special token parsing enabled.
+///
+/// This is used for stop sequences like `<|im_end|>` which should be
+/// recognized as special tokens, not literal character sequences.
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_tokenize_special(
+    model: &LlamaModel,
+    text: &str,
+) -> Result<Vec<i32>, AdapterError> {
+    let c_text = CString::new(text)
+        .map_err(|_| AdapterError::InvalidInput("Invalid text encoding".to_string()))?;
+
+    // First call to get required size
+    let n_tokens = unsafe {
+        llama_tokenize_c(
+            model.ptr,
+            c_text.as_ptr(),
+            text.len() as c_int,
+            ptr::null_mut(),
+            0,
+            false,  // don't add BOS/EOS
+            true,   // parse_special = true for <|im_end|> etc.
+        )
+    };
+
+    let required_size = if n_tokens < 0 { -n_tokens } else { n_tokens };
+
+    if required_size <= 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut tokens = vec![0i32; required_size as usize + 16];
+    let result = unsafe {
+        llama_tokenize_c(
+            model.ptr,
+            c_text.as_ptr(),
+            text.len() as c_int,
+            tokens.as_mut_ptr(),
+            tokens.len() as c_int,
+            false,  // don't add BOS/EOS
+            true,   // parse_special = true
+        )
+    };
+
+    if result < 0 {
+        return Err(AdapterError::RuntimeError("Tokenization failed".to_string()));
+    }
+
+    tokens.truncate(result as usize);
+    Ok(tokens)
+}
+
 /// Detokenize tokens to text
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_detokenize(model: &LlamaModel, tokens: &[i32]) -> Result<String, AdapterError> {
@@ -409,10 +461,12 @@ pub fn llama_generate_with_stops(
     let mut stop_lens: Vec<c_int> = Vec::new();
 
     for seq in stop_sequences {
-        // Tokenize without special tokens - we want the raw token representation
-        let tokens = llama_tokenize(model, seq, false)?;
-        stop_lens.push(tokens.len() as c_int);
-        stop_tokens.extend(tokens);
+        // Tokenize WITH special token parsing - stop sequences like <|im_end|> are special tokens
+        let tokens = llama_tokenize_special(model, seq)?;
+        if !tokens.is_empty() {
+            stop_lens.push(tokens.len() as c_int);
+            stop_tokens.extend(tokens);
+        }
     }
 
     // Allocate output buffer
@@ -537,6 +591,16 @@ pub fn llama_tokenize(
     _model: &LlamaModel,
     _text: &str,
     _add_special: bool,
+) -> Result<Vec<i32>, AdapterError> {
+    Err(AdapterError::RuntimeError(
+        "llm-llamacpp feature not enabled".to_string(),
+    ))
+}
+
+#[cfg(not(feature = "llm-llamacpp"))]
+pub fn llama_tokenize_special(
+    _model: &LlamaModel,
+    _text: &str,
 ) -> Result<Vec<i32>, AdapterError> {
     Err(AdapterError::RuntimeError(
         "llm-llamacpp feature not enabled".to_string(),
