@@ -70,9 +70,8 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 # Mistral.rs - Pure Rust LLM inference (optional, for local LLMs)
 # Enable with: cargo build --features llm-mistral
 # For GPU: cargo build --features llm-mistral-metal (macOS) or llm-mistral-cuda (NVIDIA)
-# Pinned to last known working commit before Metal 2.3 breaking change (2025-01-23)
-# See: https://github.com/EricLBuehler/mistral.rs/issues/XXX (TODO: file upstream issue)
-mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", rev = "fc7b0d835df8b52e439e2113d71654fce48da6d2", optional = true }
+# Xcode 26 Metal fix merged: https://github.com/EricLBuehler/mistral.rs/pull/1846
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", branch = "master", optional = true }
 
 [features]
 default = ["ort-download"]
