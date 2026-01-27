@@ -19,7 +19,6 @@ runtime_adapter/
 ├── inference_backend.rs   # InferenceBackend trait (tensor-level)
 ├── metadata_driven.rs     # MetadataDrivenAdapter (bundle execution)
 ├── tensor_utils.rs        # Tensor conversion utilities
-├── mel_spectrogram.rs     # Audio feature extraction
 │
 ├── onnx/                  # ONNX Runtime backend
 │   ├── README.md

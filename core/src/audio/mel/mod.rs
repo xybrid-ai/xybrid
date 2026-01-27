@@ -45,11 +45,6 @@
 //! let mel = compute_mel_spectrogram(&samples, &config)?;
 //! ```
 //!
-//! ## Deprecated Paths
-//!
-//! The following are deprecated and will be removed:
-//! - `runtime_adapter::mel_spectrogram` - Use this module instead
-
 pub mod common;
 pub mod config;
 pub mod htk;
