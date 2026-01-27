@@ -76,6 +76,7 @@ pub mod llama_cpp;
 
 // Re-exports from runtime backends
 pub use cloud::CloudRuntimeAdapter;
+pub use metadata_driven::MetadataDrivenAdapter;
 pub use onnx::ONNXSession;
 pub use onnx::OnnxBackend;
 pub use onnx::OnnxRuntimeAdapter;
