@@ -30,6 +30,7 @@ use super::modes::{
 use super::postprocessing;
 use super::preprocessing;
 use super::types::{ExecutorResult, PreprocessedData, RawOutputs};
+use super::voice_loader::TtsVoiceLoader;
 
 /// Template Executor implementation.
 ///
@@ -66,6 +67,11 @@ impl TemplateExecutor {
         metadata: &ModelMetadata,
         input: &Envelope,
     ) -> ExecutorResult<Envelope> {
+        eprintln!(
+            "[DEBUG TemplateExecutor.execute] START: model_id={}, template={:?}",
+            metadata.model_id,
+            std::mem::discriminant(&metadata.execution_template)
+        );
         info!(
             target: "xybrid_core",
             "Executing model: {} v{}",
@@ -157,45 +163,25 @@ impl TemplateExecutor {
             model_file
         );
 
-        // Run Preprocessing
-        let preprocessed = self.run_preprocessing(metadata, input)?;
-
         let model_full_path = Path::new(&self.base_path).join(&model_file);
 
-        // Check if this is TTS with phoneme IDs - needs special handling
-        let result_envelope = if preprocessed.is_phoneme_ids() {
-            debug!(target: "xybrid_core", "Detected TTS inference (phoneme IDs)");
-            // TTS models need phoneme IDs + voice embedding + speed
-            let phoneme_ids = preprocessed
-                .as_phoneme_ids()
-                .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
+        // Check if this is a TTS model - use chunked execution for long text
+        let is_tts = Self::is_tts_model(metadata);
+        eprintln!(
+            "[DEBUG TemplateExecutor] Checking TTS: is_tts_model={}, preprocessing steps: {:?}",
+            is_tts,
+            metadata.preprocessing.iter().map(|s| s.step_name()).collect::<Vec<_>>()
+        );
+        if is_tts {
+            eprintln!("[DEBUG TemplateExecutor] TTS detected, calling execute_tts_chunked");
+            return self.execute_tts_chunked(metadata, input, &model_full_path);
+        }
 
-            eprintln!(
-                "[DEBUG TTS] Input text: {:?}",
-                match &input.kind {
-                    crate::ir::EnvelopeKind::Text(t) => t.chars().take(100).collect::<String>(),
-                    _ => "(not text)".to_string(),
-                }
-            );
-            eprintln!(
-                "[DEBUG TTS] Phoneme IDs count: {}, first 20: {:?}",
-                phoneme_ids.len(),
-                &phoneme_ids[..phoneme_ids.len().min(20)]
-            );
+        // Run Preprocessing for non-TTS models
+        let preprocessed = self.run_preprocessing(metadata, input)?;
 
-            // Load voice embedding based on metadata and envelope
-            let voice_embedding = self.load_voice_embedding(metadata, input)?;
-
-            // Create and run TTS session directly
-            let session = ONNXSession::new(model_full_path.to_str().unwrap(), false, false)?;
-            let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
-
-            // Convert outputs to envelope
-            crate::runtime_adapter::tensor_utils::tensors_to_envelope(
-                &raw_outputs,
-                session.output_names(),
-            )?
-        } else if preprocessed.is_token_ids() {
+        // Check if this is BERT-style inference with token IDs
+        let result_envelope = if preprocessed.is_token_ids() {
             debug!(target: "xybrid_core", "Detected BERT-style inference (token IDs)");
             // BERT-style models need input_ids, attention_mask, and token_type_ids as int64
             let (ids, attention_mask, token_type_ids) = preprocessed
@@ -517,147 +503,220 @@ impl TemplateExecutor {
         }
     }
 
-    /// Load voice embedding based on metadata and input envelope.
+    /// Split text into chunks at sentence boundaries for TTS.
     ///
-    /// Resolution order:
-    /// 1. `voice_id` from Envelope.metadata (if present)
-    /// 2. Default voice from ModelMetadata.voices.default
-    /// 3. Index 0 (legacy fallback for models without voice config)
-    fn load_voice_embedding(
-        &self,
+    /// This ensures each chunk is within the model's token limit while
+    /// preserving natural speech breaks.
+    fn chunk_text_for_tts(text: &str, max_chars: usize) -> Vec<String> {
+        if text.len() <= max_chars {
+            return vec![text.to_string()];
+        }
+
+        let mut chunks = Vec::new();
+        let mut current_chunk = String::new();
+
+        // Split into sentences (keep delimiter)
+        let sentences: Vec<&str> = text
+            .split_inclusive(|c| c == '.' || c == '!' || c == '?')
+            .collect();
+
+        for sentence in sentences {
+            let sentence = sentence.trim();
+            if sentence.is_empty() {
+                continue;
+            }
+
+            // If single sentence is too long, split at commas or spaces
+            if sentence.len() > max_chars {
+                // Flush current chunk first
+                if !current_chunk.is_empty() {
+                    chunks.push(current_chunk.trim().to_string());
+                    current_chunk = String::new();
+                }
+
+                // Split long sentence at commas or spaces
+                let mut remaining = sentence;
+                while remaining.len() > max_chars {
+                    let split_at = remaining[..max_chars]
+                        .rfind(|c: char| c == ',' || c.is_whitespace())
+                        .unwrap_or(max_chars);
+                    chunks.push(remaining[..split_at].trim().to_string());
+                    remaining = remaining[split_at..].trim_start_matches(',').trim();
+                }
+                if !remaining.is_empty() {
+                    current_chunk = remaining.to_string();
+                }
+            } else if current_chunk.len() + sentence.len() + 1 > max_chars {
+                // Current chunk would exceed limit, start new chunk
+                if !current_chunk.is_empty() {
+                    chunks.push(current_chunk.trim().to_string());
+                }
+                current_chunk = sentence.to_string();
+            } else {
+                // Add to current chunk
+                if !current_chunk.is_empty() {
+                    current_chunk.push(' ');
+                }
+                current_chunk.push_str(sentence);
+            }
+        }
+
+        // Don't forget the last chunk
+        if !current_chunk.is_empty() {
+            chunks.push(current_chunk.trim().to_string());
+        }
+
+        chunks
+    }
+
+    /// Execute TTS with automatic chunking for long text.
+    ///
+    /// Splits input text into chunks, processes each through preprocessing + TTS,
+    /// and concatenates the audio output.
+    fn execute_tts_chunked(
+        &mut self,
         metadata: &ModelMetadata,
         input: &Envelope,
-    ) -> ExecutorResult<Vec<f32>> {
-        let loader = crate::tts::voice_embedding::VoiceEmbeddingLoader::new(256);
+        model_path: &Path,
+    ) -> ExecutorResult<Envelope> {
+        use crate::ir::EnvelopeKind;
 
-        // Determine voice file path based on voice config or legacy detection
-        let voice_path = if let Some(voice_config) = &metadata.voices {
-            // Use path from voice config
-            match &voice_config.format {
-                super::template::VoiceFormat::Embedded { file, .. } => {
-                    Path::new(&self.base_path).join(file)
-                }
-                _ => {
-                    // For non-embedded formats, return error for now
-                    return Err(AdapterError::InvalidInput(
-                        "Only embedded voice format is currently supported".to_string(),
-                    ));
-                }
-            }
-        } else {
-            // Legacy: auto-detect voices.bin or voices.npz
-            let voices_bin_path = Path::new(&self.base_path).join("voices.bin");
-            let voices_npz_path = Path::new(&self.base_path).join("voices.npz");
+        // Maximum chars per chunk (Kokoro's BERT encoder has ~512 token limit)
+        const MAX_TTS_CHARS: usize = 350;
 
-            if voices_bin_path.exists() {
-                voices_bin_path
-            } else if voices_npz_path.exists() {
-                voices_npz_path
-            } else {
-                // No voice file - return default embedding
-                debug!(target: "xybrid_core", "No voice file found, using zero embedding");
-                return Ok(vec![0.0f32; 256]);
+        let text = match &input.kind {
+            EnvelopeKind::Text(t) => t.clone(),
+            _ => {
+                return Err(AdapterError::InvalidInput(
+                    "TTS requires text input".to_string(),
+                ))
             }
         };
 
-        // Check if voice file exists
-        if !voice_path.exists() {
-            debug!(target: "xybrid_core", "Voice file not found: {:?}, using zero embedding", voice_path);
-            return Ok(vec![0.0f32; 256]);
+        eprintln!(
+            "[DEBUG TTS Chunked] Input text length: {} chars (MAX_TTS_CHARS={})",
+            text.len(),
+            MAX_TTS_CHARS
+        );
+
+        // Check if chunking is needed
+        if text.len() <= MAX_TTS_CHARS {
+            eprintln!("[DEBUG TTS Chunked] Text is short enough, using single execution");
+            // Single chunk - use normal path
+            return self.execute_tts_single(metadata, input, model_path);
         }
 
-        // Get voice_id from envelope metadata (priority 1)
-        let voice_id = input.metadata.get("voice_id");
+        eprintln!(
+            "[DEBUG TTS] Text too long ({} chars), splitting into chunks",
+            text.len()
+        );
 
-        // If we have structured voice config, use it for resolution
-        if let Some(voice_config) = &metadata.voices {
-            let voice_info = if let Some(vid) = voice_id {
-                // Look up requested voice
-                metadata.get_voice(vid).ok_or_else(|| {
-                    let available: Vec<_> = voice_config.catalog.iter().map(|v| v.id.as_str()).collect();
-                    AdapterError::InvalidInput(format!(
-                        "Voice '{}' not found. Available voices: {:?}",
-                        vid, available
-                    ))
-                })?
-            } else {
-                // Use default voice
-                metadata.default_voice().ok_or_else(|| {
-                    AdapterError::RuntimeError(format!(
-                        "Default voice '{}' not found in catalog",
-                        voice_config.default
-                    ))
-                })?
+        // Split text into chunks
+        let chunks = Self::chunk_text_for_tts(&text, MAX_TTS_CHARS);
+        eprintln!("[DEBUG TTS] Split into {} chunks", chunks.len());
+
+        // Process each chunk and collect audio
+        let mut all_audio: Vec<f32> = Vec::new();
+        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            eprintln!("[DEBUG TTS] Processing chunk {}/{}: {} chars", i + 1, chunks.len(), chunk.len());
+
+            // Create envelope for this chunk
+            let chunk_input = Envelope {
+                kind: EnvelopeKind::Text(chunk.clone()),
+                metadata: input.metadata.clone(),
             };
 
-            debug!(
-                target: "xybrid_core",
-                "Loading voice: {} (index: {:?})",
-                voice_info.id,
-                voice_info.index
-            );
+            // Run preprocessing on chunk
+            let preprocessed = self.run_preprocessing(metadata, &chunk_input)?;
 
-            // Determine loader type from voice config
-            let is_npz_format = matches!(
-                &voice_config.format,
-                super::template::VoiceFormat::Embedded {
-                    loader: super::template::VoiceLoader::NumpyNpz,
-                    ..
-                }
-            );
+            // Get phoneme IDs
+            let phoneme_ids = preprocessed
+                .as_phoneme_ids()
+                .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
 
-            if is_npz_format {
-                // For NPZ format, always load by voice ID (name) for reliability.
-                // The index field is for documentation/UI; NPZ arrays may not be stored
-                // in the same order as catalog indices.
-                loader
-                    .load_npz_by_name(&voice_path, &voice_info.id, None)
-                    .map_err(|e| {
-                        AdapterError::RuntimeError(format!(
-                            "Failed to load voice '{}' by name: {}",
-                            voice_info.id, e
-                        ))
-                    })
-            } else if let Some(index) = voice_info.index {
-                // For raw binary format, use index
-                loader.load(&voice_path, index).map_err(|e| {
-                    AdapterError::RuntimeError(format!(
-                        "Failed to load voice '{}' (index {}): {}",
-                        voice_info.id, index, e
-                    ))
-                })
-            } else {
-                // Fallback: try loading by name (for edge cases)
-                loader
-                    .load_npz_by_name(&voice_path, &voice_info.id, None)
-                    .map_err(|e| {
-                        AdapterError::RuntimeError(format!(
-                            "Failed to load voice '{}' by name: {}",
-                            voice_info.id, e
-                        ))
-                    })
+            eprintln!("[DEBUG TTS] Chunk {} has {} phoneme IDs", i + 1, phoneme_ids.len());
+
+            // Load voice embedding (same for all chunks)
+            let voice_loader = TtsVoiceLoader::new(&self.base_path);
+            let voice_embedding = voice_loader.load(metadata, input)?;
+
+            // Run TTS inference
+            let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
+
+            // Extract audio from outputs
+            if let Some(audio_tensor) = raw_outputs.values().next() {
+                let chunk_audio: Vec<f32> = audio_tensor.iter().cloned().collect();
+                all_audio.extend(chunk_audio);
             }
-        } else {
-            // Legacy path: no structured voice config
-            if let Some(vid) = voice_id {
-                // Try parsing as index first
-                if let Ok(index) = vid.parse::<usize>() {
-                    debug!(target: "xybrid_core", "Loading voice by index: {}", index);
-                    loader.load(&voice_path, index)
-                } else {
-                    // Try as name (NPZ only)
-                    debug!(target: "xybrid_core", "Loading voice by name: {}", vid);
-                    loader.load_npz_by_name(&voice_path, vid, None)
-                }
-            } else {
-                // Default to index 0
-                debug!(target: "xybrid_core", "Loading default voice (index 0)");
-                loader.load(&voice_path, 0)
-            }
-            .map_err(|e| {
-                AdapterError::RuntimeError(format!("Failed to load voice embedding: {}", e))
-            })
         }
+
+        eprintln!("[DEBUG TTS] Total audio samples: {}", all_audio.len());
+
+        // Convert concatenated audio to envelope
+        // The postprocessing will handle conversion to bytes
+        let output_names = session.output_names();
+        let output_name = output_names.first().map(|s| s.as_str()).unwrap_or("audio");
+
+        let mut combined_outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
+        let audio_array = ndarray::Array1::from_vec(all_audio).into_dyn();
+        combined_outputs.insert(output_name.to_string(), audio_array);
+
+        // Run postprocessing on combined audio
+        self.run_postprocessing(metadata, RawOutputs::TensorMap(combined_outputs))
+    }
+
+    /// Execute TTS for a single (short) text input.
+    fn execute_tts_single(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        model_path: &Path,
+    ) -> ExecutorResult<Envelope> {
+        // Run preprocessing
+        let preprocessed = self.run_preprocessing(metadata, input)?;
+
+        let phoneme_ids = preprocessed
+            .as_phoneme_ids()
+            .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
+
+        eprintln!(
+            "[DEBUG TTS Single] Input text length: {} chars, first 100: {:?}",
+            match &input.kind {
+                crate::ir::EnvelopeKind::Text(t) => t.len(),
+                _ => 0,
+            },
+            match &input.kind {
+                crate::ir::EnvelopeKind::Text(t) => t.chars().take(100).collect::<String>(),
+                _ => "(not text)".to_string(),
+            }
+        );
+        eprintln!(
+            "[DEBUG TTS] Phoneme IDs count: {}, first 20: {:?}",
+            phoneme_ids.len(),
+            &phoneme_ids[..phoneme_ids.len().min(20)]
+        );
+
+        // Load voice embedding
+        let voice_loader = TtsVoiceLoader::new(&self.base_path);
+        let voice_embedding = voice_loader.load(metadata, input)?;
+
+        // Create and run TTS session
+        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
+
+        // Run postprocessing
+        self.run_postprocessing(metadata, RawOutputs::TensorMap(raw_outputs))
+    }
+
+    /// Check if this model is a TTS model (has Phonemize preprocessing).
+    fn is_tts_model(metadata: &ModelMetadata) -> bool {
+        use super::template::PreprocessingStep;
+        metadata
+            .preprocessing
+            .iter()
+            .any(|step| matches!(step, PreprocessingStep::Phonemize { .. }))
     }
 }
 
@@ -670,6 +729,11 @@ impl Default for TemplateExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::template::PreprocessingStep;
+
+    // ============================================================================
+    // Constructor Tests
+    // ============================================================================
 
     #[test]
     fn test_executor_creation() {
@@ -688,5 +752,167 @@ mod tests {
         let executor = TemplateExecutor::with_base_path("/models");
         let resolved = executor.resolve_file_path("encoder.onnx");
         assert!(resolved.contains("encoder.onnx"));
+    }
+
+    #[test]
+    fn test_resolve_file_path_empty_base() {
+        let executor = TemplateExecutor::with_base_path("");
+        let resolved = executor.resolve_file_path("encoder.onnx");
+        assert_eq!(resolved, "encoder.onnx");
+    }
+
+    // ============================================================================
+    // chunk_text_for_tts Tests
+    // ============================================================================
+
+    #[test]
+    fn test_chunk_text_short_input_unchanged() {
+        let text = "Hello world.";
+        let chunks = TemplateExecutor::chunk_text_for_tts(text, 350);
+        assert_eq!(chunks, vec!["Hello world."]);
+    }
+
+    #[test]
+    fn test_chunk_text_exactly_at_limit() {
+        let text = "A".repeat(350);
+        let chunks = TemplateExecutor::chunk_text_for_tts(&text, 350);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].len(), 350);
+    }
+
+    #[test]
+    fn test_chunk_text_splits_at_sentence_boundaries() {
+        let text = "First sentence. Second sentence. Third sentence.";
+        let chunks = TemplateExecutor::chunk_text_for_tts(text, 20);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0], "First sentence.");
+        assert_eq!(chunks[1], "Second sentence.");
+        assert_eq!(chunks[2], "Third sentence.");
+    }
+
+    #[test]
+    fn test_chunk_text_combines_short_sentences() {
+        let text = "Hi. Hello. Hey there.";
+        let chunks = TemplateExecutor::chunk_text_for_tts(text, 50);
+        // All sentences fit in one chunk
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "Hi. Hello. Hey there.");
+    }
+
+    #[test]
+    fn test_chunk_text_handles_exclamation_and_question() {
+        let text = "What? Really! Yes.";
+        let chunks = TemplateExecutor::chunk_text_for_tts(text, 10);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0], "What?");
+        assert_eq!(chunks[1], "Really!");
+        assert_eq!(chunks[2], "Yes.");
+    }
+
+    #[test]
+    fn test_chunk_text_splits_long_sentence_at_comma() {
+        let text = "This is a very long sentence, with a comma in the middle, that exceeds the limit.";
+        let chunks = TemplateExecutor::chunk_text_for_tts(text, 40);
+        // Should split at commas when sentence exceeds limit
+        assert!(chunks.len() >= 2);
+        assert!(chunks.iter().all(|c| c.len() <= 40));
+    }
+
+    #[test]
+    fn test_chunk_text_splits_long_sentence_at_space() {
+        let text = "Thisisaverylongwordwithoutspaces but then some normal words follow here.";
+        let chunks = TemplateExecutor::chunk_text_for_tts(text, 30);
+        assert!(chunks.len() >= 2);
+    }
+
+    #[test]
+    fn test_chunk_text_empty_input() {
+        let chunks = TemplateExecutor::chunk_text_for_tts("", 350);
+        assert!(chunks.is_empty() || chunks == vec![""]);
+    }
+
+    #[test]
+    fn test_chunk_text_whitespace_only() {
+        let chunks = TemplateExecutor::chunk_text_for_tts("   ", 350);
+        // Should handle gracefully - either empty or trimmed
+        assert!(chunks.is_empty() || chunks.iter().all(|c| c.trim().is_empty()));
+    }
+
+    #[test]
+    fn test_chunk_text_preserves_content() {
+        let text = "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.";
+        let chunks = TemplateExecutor::chunk_text_for_tts(text, 50);
+        let rejoined: String = chunks.join(" ");
+        // All words should be preserved (though spacing might differ slightly)
+        assert!(rejoined.contains("quick"));
+        assert!(rejoined.contains("fox"));
+        assert!(rejoined.contains("liquor"));
+    }
+
+    // ============================================================================
+    // is_tts_model Tests
+    // ============================================================================
+
+    #[test]
+    fn test_is_tts_model_with_phonemize_step() {
+        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx")
+            .with_preprocessing(PreprocessingStep::Phonemize {
+                tokens_file: "tokens.txt".to_string(),
+                backend: Default::default(),
+                dict_file: None,
+                language: None,
+                add_padding: true,
+                normalize_text: false,
+            });
+        assert!(TemplateExecutor::is_tts_model(&metadata));
+    }
+
+    #[test]
+    fn test_is_tts_model_without_phonemize() {
+        let metadata = ModelMetadata::onnx("test-asr", "1.0", "model.onnx")
+            .with_preprocessing(PreprocessingStep::AudioDecode {
+                sample_rate: 16000,
+                channels: 1,
+            });
+        assert!(!TemplateExecutor::is_tts_model(&metadata));
+    }
+
+    #[test]
+    fn test_is_tts_model_no_preprocessing() {
+        let metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+        assert!(!TemplateExecutor::is_tts_model(&metadata));
+    }
+
+    #[test]
+    fn test_is_tts_model_phonemize_among_other_steps() {
+        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx")
+            .with_preprocessing(PreprocessingStep::Normalize {
+                mean: vec![0.0],
+                std: vec![1.0],
+            })
+            .with_preprocessing(PreprocessingStep::Phonemize {
+                tokens_file: "tokens.txt".to_string(),
+                backend: Default::default(),
+                dict_file: None,
+                language: None,
+                add_padding: true,
+                normalize_text: false,
+            });
+        assert!(TemplateExecutor::is_tts_model(&metadata));
+    }
+
+    #[test]
+    fn test_is_tts_model_with_mel_spectrogram_is_not_tts() {
+        let metadata = ModelMetadata::onnx("test-asr", "1.0", "model.onnx")
+            .with_preprocessing(PreprocessingStep::MelSpectrogram {
+                preset: Some("whisper".to_string()),
+                n_mels: 80,
+                sample_rate: 16000,
+                fft_size: 400,
+                hop_length: 160,
+                mel_scale: Default::default(),
+                max_frames: Some(3000),
+            });
+        assert!(!TemplateExecutor::is_tts_model(&metadata));
     }
 }
