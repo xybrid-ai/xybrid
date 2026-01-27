@@ -386,7 +386,7 @@ pub fn llama_detokenize(model: &LlamaModel, tokens: &[i32]) -> Result<String, Ad
                 buf.as_mut_ptr() as *mut c_char,
                 buf.len() as c_int,
                 0,
-                false,
+                true,  // special = true: render special tokens like <|im_end|> as text
             )
         };
 
@@ -463,11 +463,22 @@ pub fn llama_generate_with_stops(
     for seq in stop_sequences {
         // Tokenize WITH special token parsing - stop sequences like <|im_end|> are special tokens
         let tokens = llama_tokenize_special(model, seq)?;
+        log::debug!(
+            target: "xybrid_core",
+            "Tokenized stop sequence '{}' -> {:?} ({} tokens)",
+            seq, tokens, tokens.len()
+        );
         if !tokens.is_empty() {
             stop_lens.push(tokens.len() as c_int);
             stop_tokens.extend(tokens);
         }
     }
+
+    log::debug!(
+        target: "xybrid_core",
+        "Total stop tokens: {:?}, lengths: {:?}",
+        stop_tokens, stop_lens
+    );
 
     // Allocate output buffer
     let mut output_tokens = vec![0i32; max_tokens];

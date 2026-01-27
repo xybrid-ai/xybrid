@@ -203,27 +203,54 @@ impl LlmBackend for LlamaCppBackend {
 
         let elapsed = start.elapsed();
 
+        // Log generated token count and last few tokens for debugging
+        log::debug!(
+            target: "xybrid_core",
+            "Generated {} tokens. Last 10: {:?}",
+            output_tokens.len(),
+            output_tokens.iter().rev().take(10).collect::<Vec<_>>()
+        );
+
         // Decode tokens to text
         let mut text = sys::llama_detokenize(model, &output_tokens)?;
+
+        // Debug: log the raw text and its bytes to understand encoding
+        log::debug!(target: "xybrid_core", "LLM raw output ({} chars): {:?}", text.len(), &text[..text.len().min(200)]);
+        log::debug!(target: "xybrid_core", "First 100 bytes: {:?}", text.as_bytes().iter().take(100).collect::<Vec<_>>());
 
         // Apply stop sequence truncation
         // Find the earliest occurrence of any stop sequence and truncate there
         let mut finish_reason = "length".to_string();
-        if !config.stop_sequences.is_empty() {
-            let mut earliest_pos: Option<usize> = None;
-            for stop_seq in &config.stop_sequences {
-                if let Some(pos) = text.find(stop_seq) {
-                    match earliest_pos {
-                        None => earliest_pos = Some(pos),
-                        Some(current) if pos < current => earliest_pos = Some(pos),
-                        _ => {}
-                    }
+
+        // Build list of patterns to check - include config stop sequences plus common ChatML markers
+        let mut stop_patterns: Vec<&str> = config.stop_sequences.iter().map(|s| s.as_str()).collect();
+        // Always check for these common markers even if not in config
+        let extra_patterns = ["<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>"];
+        for p in &extra_patterns {
+            if !stop_patterns.contains(p) {
+                stop_patterns.push(p);
+            }
+        }
+
+        log::debug!(target: "xybrid_core", "Searching for stop patterns: {:?}", stop_patterns);
+
+        let mut earliest_pos: Option<usize> = None;
+        for stop_seq in &stop_patterns {
+            if let Some(pos) = text.find(stop_seq) {
+                log::debug!(target: "xybrid_core", "Found '{}' at position {}", stop_seq, pos);
+                match earliest_pos {
+                    None => earliest_pos = Some(pos),
+                    Some(current) if pos < current => earliest_pos = Some(pos),
+                    _ => {}
                 }
             }
-            if let Some(pos) = earliest_pos {
-                text.truncate(pos);
-                finish_reason = "stop".to_string();
-            }
+        }
+        if let Some(pos) = earliest_pos {
+            log::debug!(target: "xybrid_core", "Truncating at position {}", pos);
+            text.truncate(pos);
+            finish_reason = "stop".to_string();
+        } else {
+            log::debug!(target: "xybrid_core", "No stop pattern found in text");
         }
 
         // Trim any trailing whitespace from the response
