@@ -123,8 +123,9 @@ impl TtsStrategy {
             .as_phoneme_ids()
             .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
 
-        eprintln!(
-            "[DEBUG TTS Single] Phoneme IDs count: {}, first 20: {:?}",
+        debug!(
+            target: "xybrid_core",
+            "TTS Single: Phoneme IDs count: {}, first 20: {:?}",
             phoneme_ids.len(),
             &phoneme_ids[..phoneme_ids.len().min(20)]
         );
@@ -158,8 +159,9 @@ impl TtsStrategy {
             }
         };
 
-        eprintln!(
-            "[DEBUG TTS Chunked] Input text length: {} chars (max={})",
+        debug!(
+            target: "xybrid_core",
+            "TTS Chunked: Input text length: {} chars (max={})",
             text.len(),
             self.max_chars
         );
@@ -177,15 +179,16 @@ impl TtsStrategy {
 
         // Split text into chunks
         let chunks = Self::chunk_text(&text, self.max_chars);
-        eprintln!("[DEBUG TTS] Split into {} chunks", chunks.len());
+        debug!(target: "xybrid_core", "TTS: Split into {} chunks", chunks.len());
 
         // Process each chunk and collect audio
         let mut all_audio: Vec<f32> = Vec::new();
         let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
 
         for (i, chunk) in chunks.iter().enumerate() {
-            eprintln!(
-                "[DEBUG TTS] Processing chunk {}/{}: {} chars",
+            debug!(
+                target: "xybrid_core",
+                "TTS: Processing chunk {}/{}: {} chars",
                 i + 1,
                 chunks.len(),
                 chunk.len()
@@ -205,8 +208,9 @@ impl TtsStrategy {
                 .as_phoneme_ids()
                 .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
 
-            eprintln!(
-                "[DEBUG TTS] Chunk {} has {} phoneme IDs",
+            debug!(
+                target: "xybrid_core",
+                "TTS: Chunk {} has {} phoneme IDs",
                 i + 1,
                 phoneme_ids.len()
             );
@@ -225,7 +229,7 @@ impl TtsStrategy {
             }
         }
 
-        eprintln!("[DEBUG TTS] Total audio samples: {}", all_audio.len());
+        debug!(target: "xybrid_core", "TTS: Total audio samples: {}", all_audio.len());
 
         // Convert concatenated audio to envelope
         let output_names = session.output_names();

@@ -67,8 +67,9 @@ impl TemplateExecutor {
         metadata: &ModelMetadata,
         input: &Envelope,
     ) -> ExecutorResult<Envelope> {
-        eprintln!(
-            "[DEBUG TemplateExecutor.execute] START: model_id={}, template={:?}",
+        debug!(
+            target: "xybrid_core",
+            "TemplateExecutor.execute START: model_id={}, template={:?}",
             metadata.model_id,
             std::mem::discriminant(&metadata.execution_template)
         );
@@ -123,11 +124,13 @@ impl TemplateExecutor {
                 chat_template,
                 context_length,
             } => {
-                eprintln!(
-                    "[DEBUG TemplateExecutor] Detected GGUF template, routing to execute_llm()"
+                debug!(
+                    target: "xybrid_core",
+                    "Detected GGUF template, routing to execute_llm()"
                 );
-                eprintln!(
-                    "[DEBUG TemplateExecutor] GGUF model_file: {}, chat_template: {:?}, context_length: {}",
+                debug!(
+                    target: "xybrid_core",
+                    "GGUF model_file: {}, chat_template: {:?}, context_length: {}",
                     model_file,
                     chat_template,
                     context_length
@@ -167,13 +170,14 @@ impl TemplateExecutor {
 
         // Check if this is a TTS model - use chunked execution for long text
         let is_tts = Self::is_tts_model(metadata);
-        eprintln!(
-            "[DEBUG TemplateExecutor] Checking TTS: is_tts_model={}, preprocessing steps: {:?}",
+        debug!(
+            target: "xybrid_core",
+            "Checking TTS: is_tts_model={}, preprocessing steps: {:?}",
             is_tts,
             metadata.preprocessing.iter().map(|s| s.step_name()).collect::<Vec<_>>()
         );
         if is_tts {
-            eprintln!("[DEBUG TemplateExecutor] TTS detected, calling execute_tts_chunked");
+            debug!(target: "xybrid_core", "TTS detected, calling execute_tts_chunked");
             return self.execute_tts_chunked(metadata, input, &model_full_path);
         }
 
@@ -593,34 +597,36 @@ impl TemplateExecutor {
             }
         };
 
-        eprintln!(
-            "[DEBUG TTS Chunked] Input text length: {} chars (MAX_TTS_CHARS={})",
+        debug!(
+            target: "xybrid_core",
+            "TTS Chunked: Input text length: {} chars (MAX_TTS_CHARS={})",
             text.len(),
             MAX_TTS_CHARS
         );
 
         // Check if chunking is needed
         if text.len() <= MAX_TTS_CHARS {
-            eprintln!("[DEBUG TTS Chunked] Text is short enough, using single execution");
+            debug!(target: "xybrid_core", "TTS: Text is short enough, using single execution");
             // Single chunk - use normal path
             return self.execute_tts_single(metadata, input, model_path);
         }
 
-        eprintln!(
-            "[DEBUG TTS] Text too long ({} chars), splitting into chunks",
+        debug!(
+            target: "xybrid_core",
+            "TTS: Text too long ({} chars), splitting into chunks",
             text.len()
         );
 
         // Split text into chunks
         let chunks = Self::chunk_text_for_tts(&text, MAX_TTS_CHARS);
-        eprintln!("[DEBUG TTS] Split into {} chunks", chunks.len());
+        debug!(target: "xybrid_core", "TTS: Split into {} chunks", chunks.len());
 
         // Process each chunk and collect audio
         let mut all_audio: Vec<f32> = Vec::new();
         let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
 
         for (i, chunk) in chunks.iter().enumerate() {
-            eprintln!("[DEBUG TTS] Processing chunk {}/{}: {} chars", i + 1, chunks.len(), chunk.len());
+            debug!(target: "xybrid_core", "TTS: Processing chunk {}/{}: {} chars", i + 1, chunks.len(), chunk.len());
 
             // Create envelope for this chunk
             let chunk_input = Envelope {
@@ -636,7 +642,7 @@ impl TemplateExecutor {
                 .as_phoneme_ids()
                 .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
 
-            eprintln!("[DEBUG TTS] Chunk {} has {} phoneme IDs", i + 1, phoneme_ids.len());
+            debug!(target: "xybrid_core", "TTS: Chunk {} has {} phoneme IDs", i + 1, phoneme_ids.len());
 
             // Load voice embedding (same for all chunks)
             let voice_loader = TtsVoiceLoader::new(&self.base_path);
@@ -652,7 +658,7 @@ impl TemplateExecutor {
             }
         }
 
-        eprintln!("[DEBUG TTS] Total audio samples: {}", all_audio.len());
+        debug!(target: "xybrid_core", "TTS: Total audio samples: {}", all_audio.len());
 
         // Convert concatenated audio to envelope
         // The postprocessing will handle conversion to bytes
@@ -681,8 +687,9 @@ impl TemplateExecutor {
             .as_phoneme_ids()
             .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
 
-        eprintln!(
-            "[DEBUG TTS Single] Input text length: {} chars, first 100: {:?}",
+        debug!(
+            target: "xybrid_core",
+            "TTS Single: Input text length: {} chars, first 100: {:?}",
             match &input.kind {
                 crate::ir::EnvelopeKind::Text(t) => t.len(),
                 _ => 0,
@@ -692,8 +699,9 @@ impl TemplateExecutor {
                 _ => "(not text)".to_string(),
             }
         );
-        eprintln!(
-            "[DEBUG TTS] Phoneme IDs count: {}, first 20: {:?}",
+        debug!(
+            target: "xybrid_core",
+            "TTS: Phoneme IDs count: {}, first 20: {:?}",
             phoneme_ids.len(),
             &phoneme_ids[..phoneme_ids.len().min(20)]
         );

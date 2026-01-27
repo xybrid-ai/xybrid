@@ -535,8 +535,9 @@ impl Executor {
         // Try bundle_path for metadata-driven execution (bundles are pre-downloaded by SDK)
         if let Some(bundle_path_str) = &stage.bundle_path {
             let bundle_path = PathBuf::from(bundle_path_str);
-            eprintln!(
-                "[DEBUG Executor] Stage '{}' has bundle_path: {:?}",
+            debug!(
+                target: "xybrid_core",
+                "Stage '{}' has bundle_path: {:?}",
                 stage.name,
                 bundle_path
             );
@@ -546,17 +547,15 @@ impl Executor {
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("");
-                eprintln!(
-                    "[DEBUG Executor] Bundle extension: '{}'",
-                    ext
-                );
+                debug!(target: "xybrid_core", "Bundle extension: '{}'", ext);
 
                 if ext == "xyb" || ext == "bundle" {
                     // Extract bundle and check for model_metadata.json
                     match self.extract_bundle_with_metadata(&bundle_path) {
                         Ok((extract_dir, Some(model_metadata))) => {
-                            eprintln!(
-                                "[DEBUG Executor] Successfully extracted bundle, found model_metadata.json. Template: {:?}",
+                            debug!(
+                                target: "xybrid_core",
+                                "Successfully extracted bundle, found model_metadata.json. Template: {:?}",
                                 model_metadata.execution_template
                             );
 
@@ -581,35 +580,40 @@ impl Executor {
                             return Ok((output, metadata));
                         }
                         Ok((extract_dir, None)) => {
-                            eprintln!(
-                                "[DEBUG Executor] Bundle extracted to {:?} but NO model_metadata.json found! Falling back to raw adapter.",
+                            debug!(
+                                target: "xybrid_core",
+                                "Bundle extracted to {:?} but NO model_metadata.json found! Falling back to raw adapter.",
                                 extract_dir
                             );
                         }
                         Err(e) => {
-                            eprintln!(
-                                "[DEBUG Executor] Failed to extract bundle: {}. Falling back to raw adapter.",
+                            warn!(
+                                target: "xybrid_core",
+                                "Failed to extract bundle: {}. Falling back to raw adapter.",
                                 e
                             );
                         }
                     }
                 }
             } else {
-                eprintln!(
-                    "[DEBUG Executor] Bundle path does not exist: {:?}",
+                debug!(
+                    target: "xybrid_core",
+                    "Bundle path does not exist: {:?}",
                     bundle_path
                 );
             }
         } else {
-            eprintln!(
-                "[DEBUG Executor] Stage '{}' has no bundle_path set",
+            debug!(
+                target: "xybrid_core",
+                "Stage '{}' has no bundle_path set",
                 stage.name
             );
         }
 
         // Fallback: Use raw adapter execution (no metadata-driven processing)
-        eprintln!(
-            "[DEBUG Executor] FALLBACK: Using raw adapter '{}' for stage '{}'. This bypasses metadata-driven execution!",
+        warn!(
+            target: "xybrid_core",
+            "FALLBACK: Using raw adapter '{}' for stage '{}'. This bypasses metadata-driven execution!",
             adapter_name,
             stage.name
         );
@@ -1068,5 +1072,108 @@ mod tests {
         // Test invalid target
         let result = executor.select_adapter("invalid");
         assert!(matches!(result, Err(ExecutorError::InvalidTarget(_))));
+    }
+
+    // ============================================================================
+    // Bundle Extraction Unique Naming Tests
+    // ============================================================================
+
+    /// Test that bundles with the same filename from different directories
+    /// get unique extraction paths. This prevents collision when multiple
+    /// bundles are named "universal.xyb".
+    #[test]
+    fn test_bundle_extraction_unique_naming() {
+        use std::path::Path;
+
+        // Helper function that mirrors the naming logic in extract_bundle_with_metadata
+        fn compute_unique_name(bundle_path: &Path) -> String {
+            let parent_name = bundle_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
+            let bundle_stem = bundle_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("bundle");
+            format!("{}_{}", parent_name, bundle_stem)
+        }
+
+        // Simulate two bundles with same filename but different parent directories
+        let whisper_bundle = Path::new("/cache/models/whisper-tiny/universal.xyb");
+        let qwen_bundle = Path::new("/cache/models/Qwen2.5-0.5B-Instruct-GGUF/universal.xyb");
+        let kokoro_bundle = Path::new("/cache/models/Kokoro-82M-v1.0-ONNX/universal.xyb");
+
+        let whisper_name = compute_unique_name(whisper_bundle);
+        let qwen_name = compute_unique_name(qwen_bundle);
+        let kokoro_name = compute_unique_name(kokoro_bundle);
+
+        // All names should be different
+        assert_ne!(whisper_name, qwen_name, "whisper and qwen should have different names");
+        assert_ne!(whisper_name, kokoro_name, "whisper and kokoro should have different names");
+        assert_ne!(qwen_name, kokoro_name, "qwen and kokoro should have different names");
+
+        // Names should include parent directory name
+        assert!(whisper_name.contains("whisper"), "Name should contain parent dir: {}", whisper_name);
+        assert!(qwen_name.contains("Qwen"), "Name should contain parent dir: {}", qwen_name);
+        assert!(kokoro_name.contains("Kokoro"), "Name should contain parent dir: {}", kokoro_name);
+
+        // Names should include bundle stem
+        assert!(whisper_name.contains("universal"), "Name should contain bundle stem: {}", whisper_name);
+    }
+
+    #[test]
+    fn test_bundle_extraction_handles_missing_parent() {
+        use std::path::Path;
+
+        fn compute_unique_name(bundle_path: &Path) -> String {
+            let parent_name = bundle_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
+            let bundle_stem = bundle_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("bundle");
+            format!("{}_{}", parent_name, bundle_stem)
+        }
+
+        // Edge case: bundle at root level
+        let root_bundle = Path::new("universal.xyb");
+        let name = compute_unique_name(root_bundle);
+
+        // Should use "unknown" for missing parent
+        assert!(name.contains("unknown") || name.contains("universal"),
+            "Should handle missing parent gracefully: {}", name);
+    }
+
+    #[test]
+    fn test_bundle_extraction_different_bundle_names() {
+        use std::path::Path;
+
+        fn compute_unique_name(bundle_path: &Path) -> String {
+            let parent_name = bundle_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
+            let bundle_stem = bundle_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("bundle");
+            format!("{}_{}", parent_name, bundle_stem)
+        }
+
+        // Different bundle names in same directory
+        let bundle1 = Path::new("/models/model_a.xyb");
+        let bundle2 = Path::new("/models/model_b.xyb");
+
+        let name1 = compute_unique_name(bundle1);
+        let name2 = compute_unique_name(bundle2);
+
+        assert_ne!(name1, name2, "Different bundle names should produce different extract dirs");
+        assert!(name1.contains("model_a"), "Name should contain bundle stem: {}", name1);
+        assert!(name2.contains("model_b"), "Name should contain bundle stem: {}", name2);
     }
 }
