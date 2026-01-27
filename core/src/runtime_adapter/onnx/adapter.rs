@@ -260,6 +260,51 @@ impl RuntimeAdapter for OnnxRuntimeAdapter {
         vec!["onnx", "onnx.gz"]
     }
 
+    fn warmup(&mut self) -> AdapterResult<()> {
+        use ndarray::{ArrayD, IxDyn};
+
+        // Get current model session
+        let model_id = self.current_model.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No model loaded. Call load_model() first.".to_string())
+        })?;
+
+        let session = self.sessions.get(model_id).ok_or_else(|| {
+            AdapterError::ModelNotLoaded(format!("Session for model '{}' not found", model_id))
+        })?;
+
+        // Create dummy tensors matching input shapes
+        // This triggers GPU initialization (shader compilation, memory allocation)
+        let input_shapes = session.input_shapes();
+        let input_names = session.input_names();
+
+        let mut dummy_inputs: HashMap<String, ArrayD<f32>> = HashMap::new();
+        for (i, name) in input_names.iter().enumerate() {
+            if let Some(shape) = input_shapes.get(i) {
+                // Resolve dynamic dimensions (-1) to 1 for warmup
+                let resolved_shape: Vec<usize> = shape
+                    .iter()
+                    .map(|&d| if d < 0 { 1 } else { d as usize })
+                    .collect();
+
+                // Create zeros tensor with resolved shape
+                let dummy_tensor = ArrayD::<f32>::zeros(IxDyn(&resolved_shape));
+                dummy_inputs.insert(name.clone(), dummy_tensor);
+            }
+        }
+
+        // Run dummy inference to warm up GPU kernels
+        // Ignore the result - we just want to trigger initialization
+        let _ = session.run(dummy_inputs);
+
+        log::info!(
+            "Warmed up model '{}' with {} provider",
+            model_id,
+            self.execution_provider
+        );
+
+        Ok(())
+    }
+
     fn load_model(&mut self, path: &str) -> AdapterResult<()> {
         // Validate model file exists
         self.validate_model_file(path)?;
@@ -464,5 +509,12 @@ mod tests {
         // On non-Apple platforms without ort-coreml feature, should be CPU
         #[cfg(not(all(feature = "ort-coreml", any(target_os = "macos", target_os = "ios"))))]
         assert_eq!(provider, ExecutionProviderKind::Cpu);
+    }
+
+    #[test]
+    fn test_warmup_no_model_loaded() {
+        let mut adapter = OnnxRuntimeAdapter::new();
+        let result = adapter.warmup();
+        assert!(matches!(result, Err(AdapterError::ModelNotLoaded(_))));
     }
 }

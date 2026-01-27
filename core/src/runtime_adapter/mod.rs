@@ -185,6 +185,33 @@ pub trait RuntimeAdapter: Send + Sync {
     ///
     /// Output envelope with inference results
     fn execute(&self, input: &Envelope) -> AdapterResult<Envelope>;
+
+    /// Performs warm-up operations for GPU backends.
+    ///
+    /// GPU runtimes (CUDA, CoreML/Metal, TensorRT) often have "cold start"
+    /// latency on first inference due to:
+    /// - Shader compilation (Metal, CUDA)
+    /// - Memory allocation and pinning
+    /// - Execution graph optimization
+    ///
+    /// Calling `warmup()` after `load_model()` triggers these operations
+    /// ahead of time, ensuring the first real inference is fast.
+    ///
+    /// # Default Implementation
+    ///
+    /// Returns `Ok(())` for CPU backends that don't need warm-up.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut adapter = OnnxRuntimeAdapter::new();
+    /// adapter.load_model("model.onnx")?;
+    /// adapter.warmup()?;  // Optional: trigger GPU initialization
+    /// let output = adapter.execute(&input)?;  // First inference is now fast
+    /// ```
+    fn warmup(&mut self) -> AdapterResult<()> {
+        Ok(())
+    }
 }
 
 /// Extension trait for runtime adapters that support multiple models.
