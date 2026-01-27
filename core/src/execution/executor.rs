@@ -3,17 +3,34 @@
 //! This module contains the `TemplateExecutor` struct and its core execution logic.
 //! Preprocessing, postprocessing, and execution mode implementations are delegated
 //! to their respective submodules.
+//!
+//! # Runtime Injection
+//!
+//! The executor supports dependency injection for testability:
+//!
+//! ```rust,ignore
+//! // Default: uses ONNX (and Candle if feature-enabled)
+//! let executor = TemplateExecutor::new("models/");
+//!
+//! // Custom runtime injection for testing:
+//! let runtimes = HashMap::new();
+//! runtimes.insert("mock".to_string(), Box::new(MockRuntime::new()));
+//! let executor = TemplateExecutor::with_runtimes("models/", runtimes);
+//! ```
 
 use log::{debug, info};
 
 use super::template::{ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage};
 use crate::ir::Envelope;
-use crate::runtime_adapter::onnx::{ONNXSession, OnnxRuntime};
 use crate::runtime_adapter::{AdapterError, ModelRuntime};
 use crate::tracing as xybrid_trace;
 use ndarray::ArrayD;
 use std::collections::HashMap;
 use std::path::Path;
+
+// Internal: ONNX-specific types needed for optimized execution paths
+// These are implementation details, not part of the public API
+use crate::runtime_adapter::onnx::{ONNXSession, OnnxRuntime};
 
 #[cfg(feature = "candle")]
 use crate::runtime_adapter::candle::CandleRuntime;
@@ -35,6 +52,27 @@ use super::voice_loader::TtsVoiceLoader;
 /// Template Executor implementation.
 ///
 /// Handles execution of models via pluggable runtimes.
+///
+/// # Runtime Configuration
+///
+/// The executor can be created with default runtimes or with custom injected runtimes:
+///
+/// - [`new()`](Self::new) / [`with_base_path()`](Self::with_base_path) - Uses default runtimes (ONNX, Candle if enabled)
+/// - [`with_runtimes()`](Self::with_runtimes) - Inject custom runtimes for testing or custom backends
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Default usage (recommended)
+/// let mut executor = TemplateExecutor::new("models/whisper");
+/// let output = executor.execute(&metadata, &input)?;
+///
+/// // Testing with mock runtime
+/// use std::collections::HashMap;
+/// let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
+/// runtimes.insert("mock".to_string(), Box::new(MockRuntime::new()));
+/// let executor = TemplateExecutor::with_runtimes("models/", runtimes);
+/// ```
 pub struct TemplateExecutor {
     /// Configured runtimes (e.g., "onnx", "candle")
     runtimes: HashMap<String, Box<dyn ModelRuntime>>,
@@ -43,22 +81,86 @@ pub struct TemplateExecutor {
 }
 
 impl TemplateExecutor {
-    /// Create a new TemplateExecutor with a base path for resolving relative model paths.
+    /// Create a new TemplateExecutor with default runtimes.
+    ///
+    /// Default runtimes:
+    /// - `"onnx"` - ONNX Runtime (always available)
+    /// - `"candle"` - Candle runtime (when `candle` feature is enabled)
+    ///
+    /// # Arguments
+    ///
+    /// * `base_path` - Base path for resolving relative model file paths
     pub fn new(base_path: &str) -> Self {
-        let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
-        runtimes.insert("onnx".to_string(), Box::new(OnnxRuntime::new()));
-        #[cfg(feature = "candle")]
-        runtimes.insert("candle".to_string(), Box::new(CandleRuntime::new()));
+        Self::with_runtimes(base_path, Self::default_runtimes())
+    }
 
+    /// Alias for `new` - creates executor with specified base path.
+    pub fn with_base_path(base_path: &str) -> Self {
+        Self::new(base_path)
+    }
+
+    /// Create a TemplateExecutor with custom runtimes.
+    ///
+    /// Use this for dependency injection in tests or to provide custom runtime implementations.
+    ///
+    /// # Arguments
+    ///
+    /// * `base_path` - Base path for resolving relative model file paths
+    /// * `runtimes` - Map of runtime name to runtime implementation
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use std::collections::HashMap;
+    /// use xybrid_core::runtime_adapter::ModelRuntime;
+    ///
+    /// // Inject a mock runtime for testing
+    /// let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
+    /// runtimes.insert("onnx".to_string(), Box::new(MockRuntime::new()));
+    /// let executor = TemplateExecutor::with_runtimes("models/", runtimes);
+    /// ```
+    pub fn with_runtimes(
+        base_path: &str,
+        runtimes: HashMap<String, Box<dyn ModelRuntime>>,
+    ) -> Self {
         Self {
             runtimes,
             base_path: base_path.into(),
         }
     }
 
-    /// Alias for `new` - creates executor with specified base path.
-    pub fn with_base_path(base_path: &str) -> Self {
-        Self::new(base_path)
+    /// Create the default set of runtimes based on enabled features.
+    ///
+    /// This is used by [`new()`](Self::new) and can be called directly
+    /// if you want to extend the defaults with additional runtimes.
+    pub fn default_runtimes() -> HashMap<String, Box<dyn ModelRuntime>> {
+        let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
+        runtimes.insert("onnx".to_string(), Box::new(OnnxRuntime::new()));
+        #[cfg(feature = "candle")]
+        runtimes.insert("candle".to_string(), Box::new(CandleRuntime::new()));
+        runtimes
+    }
+
+    /// Register an additional runtime.
+    ///
+    /// Use this to add custom runtimes after construction.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Runtime identifier (e.g., "custom", "mock")
+    /// * `runtime` - Runtime implementation
+    pub fn register_runtime(&mut self, name: impl Into<String>, runtime: Box<dyn ModelRuntime>) {
+        self.runtimes.insert(name.into(), runtime);
+    }
+
+    /// Get a reference to a registered runtime.
+    pub fn get_runtime(&self, name: &str) -> Option<&dyn ModelRuntime> {
+        self.runtimes.get(name).map(|r| r.as_ref())
+    }
+
+    /// List registered runtime names.
+    pub fn list_runtimes(&self) -> Vec<&str> {
+        self.runtimes.keys().map(|s| s.as_str()).collect()
     }
 
     /// Execute a model based on its metadata.
@@ -767,6 +869,45 @@ mod tests {
         let executor = TemplateExecutor::with_base_path("");
         let resolved = executor.resolve_file_path("encoder.onnx");
         assert_eq!(resolved, "encoder.onnx");
+    }
+
+    #[test]
+    fn test_default_runtimes_contains_onnx() {
+        let runtimes = TemplateExecutor::default_runtimes();
+        assert!(runtimes.contains_key("onnx"));
+    }
+
+    #[test]
+    fn test_with_runtimes_custom_injection() {
+        // Create executor with empty runtimes (for testing)
+        let runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
+        let executor = TemplateExecutor::with_runtimes("/test", runtimes);
+        assert_eq!(executor.base_path, "/test");
+        assert!(executor.list_runtimes().is_empty());
+    }
+
+    #[test]
+    fn test_register_runtime() {
+        let mut executor = TemplateExecutor::with_runtimes("/test", HashMap::new());
+        assert!(executor.list_runtimes().is_empty());
+
+        // Register a runtime
+        executor.register_runtime("onnx", Box::new(OnnxRuntime::new()));
+        assert!(executor.list_runtimes().contains(&"onnx"));
+        assert!(executor.get_runtime("onnx").is_some());
+    }
+
+    #[test]
+    fn test_list_runtimes() {
+        let executor = TemplateExecutor::new("/test");
+        let runtimes = executor.list_runtimes();
+        assert!(runtimes.contains(&"onnx"));
+    }
+
+    #[test]
+    fn test_get_runtime_not_found() {
+        let executor = TemplateExecutor::new("/test");
+        assert!(executor.get_runtime("nonexistent").is_none());
     }
 
     // ============================================================================
