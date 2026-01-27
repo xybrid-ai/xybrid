@@ -22,8 +22,20 @@
 mod standard;
 mod tts;
 
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+mod llm;
+
 pub use standard::StandardStrategy;
 pub use tts::TtsStrategy;
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig, LlmStrategy};
+
+// Always export the types (needed for tests and type references)
+#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+mod llm;
+#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig, LlmStrategy};
 
 use super::template::ModelMetadata;
 use super::types::ExecutorResult;
@@ -95,18 +107,19 @@ pub struct StrategyResolver {
 impl StrategyResolver {
     /// Create a new resolver with the default strategies.
     pub fn new() -> Self {
-        let mut strategies: Vec<Box<dyn ExecutionStrategy>> = vec![
-            // TTS must be checked before Standard (both handle ONNX)
-            Box::new(TtsStrategy::new()),
-            // Standard handles generic ONNX/Candle models
-            Box::new(StandardStrategy::new()),
-        ];
+        let mut strategies: Vec<Box<dyn ExecutionStrategy>> = vec![];
 
-        // Add feature-gated strategies
+        // LLM strategy must be checked first (GGUF templates)
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
-            // LLM strategy would go here when implemented
+            strategies.push(Box::new(LlmStrategy::new()));
         }
+
+        // TTS must be checked before Standard (both handle ONNX)
+        strategies.push(Box::new(TtsStrategy::new()));
+
+        // Standard handles generic ONNX/Candle models
+        strategies.push(Box::new(StandardStrategy::new()));
 
         Self { strategies }
     }
@@ -129,7 +142,7 @@ impl Default for StrategyResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::template::PreprocessingStep;
+    use crate::execution::template::{ExecutionTemplate, PreprocessingStep};
 
     #[test]
     fn test_resolver_selects_tts_for_phonemize() {
@@ -157,5 +170,30 @@ mod tests {
         let strategy = resolver.resolve(&metadata);
         assert!(strategy.is_some());
         assert_eq!(strategy.unwrap().name(), "standard");
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn test_resolver_selects_llm_for_gguf() {
+        let resolver = StrategyResolver::new();
+        let metadata = ModelMetadata {
+            model_id: "test-llm".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 4096,
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec!["model.gguf".to_string()],
+            description: None,
+            metadata: std::collections::HashMap::new(),
+            voices: None,
+        };
+
+        let strategy = resolver.resolve(&metadata);
+        assert!(strategy.is_some());
+        assert_eq!(strategy.unwrap().name(), "llm");
     }
 }
