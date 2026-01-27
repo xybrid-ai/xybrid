@@ -225,7 +225,6 @@ pub mod cache {
 
 | Module | Current Public | Should Be |
 |--------|---------------|-----------|
-| `runtime_adapter::mel_spectrogram` | `pub mod` | `pub(crate)` |
 | `runtime_adapter::tensor_utils` | `pub mod` | `pub(crate)` |
 | `runtime_adapter::metadata_driven` | `pub mod` | `pub(crate)` |
 | `audio::mel::*` | Various `pub fn` | `pub(crate)` |

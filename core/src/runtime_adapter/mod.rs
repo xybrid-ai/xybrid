@@ -43,7 +43,6 @@ use thiserror::Error;
 
 // Shared utilities (stay at root level)
 pub mod inference_backend;
-pub mod mel_spectrogram;
 pub mod metadata_driven;
 pub mod tensor_utils;
 pub mod traits;
