@@ -73,6 +73,7 @@ extern "C" {
     // Context management
     fn llama_new_context_with_model_c(model: *mut c_void, n_ctx: c_int) -> *mut c_void;
     fn llama_free_c(ctx: *mut c_void);
+    fn llama_kv_cache_clear_c(ctx: *mut c_void);
 
     // Tokenization
     fn llama_tokenize_c(
@@ -206,6 +207,14 @@ pub fn llama_new_context_with_model(
 pub fn llama_free(ctx: LlamaContext) {
     unsafe {
         llama_free_c(ctx.ptr);
+    }
+}
+
+/// Clear the KV cache (reset context state for new conversation)
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_kv_cache_clear(ctx: &LlamaContext) {
+    unsafe {
+        llama_kv_cache_clear_c(ctx.ptr);
     }
 }
 
@@ -590,6 +599,9 @@ pub fn llama_new_context_with_model(
 
 #[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_free(_ctx: LlamaContext) {}
+
+#[cfg(not(feature = "llm-llamacpp"))]
+pub fn llama_kv_cache_clear(_ctx: &LlamaContext) {}
 
 #[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_format_chat(
