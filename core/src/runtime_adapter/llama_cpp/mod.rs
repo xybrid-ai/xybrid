@@ -198,6 +198,7 @@ impl LlmBackend for LlamaCppBackend {
             config.temperature,
             config.top_p,
             config.top_k,
+            config.repetition_penalty,
             &config.stop_sequences,
         )?;
 

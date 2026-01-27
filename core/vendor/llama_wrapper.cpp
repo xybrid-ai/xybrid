@@ -185,13 +185,25 @@ llama_sampler* llama_sampler_chain_create_c(
     float temperature,
     float top_p,
     int top_k,
+    float repeat_penalty,
+    int penalty_last_n,
     uint32_t seed
 ) {
     // Create sampler chain with default params
     llama_sampler_chain_params chain_params = llama_sampler_chain_default_params();
     llama_sampler* chain = llama_sampler_chain_init(chain_params);
 
-    // Add samplers in order: top_k -> top_p -> temp -> dist
+    // Add samplers in order: penalties -> top_k -> top_p -> temp -> dist
+    // Repetition penalty must come first to modify logits before sampling
+    if (repeat_penalty != 1.0f && penalty_last_n > 0) {
+        llama_sampler_chain_add(chain, llama_sampler_init_penalties(
+            penalty_last_n,    // penalty_last_n: how many tokens to consider
+            repeat_penalty,    // penalty_repeat: > 1.0 penalizes repetition
+            0.0f,              // penalty_freq: frequency penalty (disabled)
+            0.0f               // penalty_present: presence penalty (disabled)
+        ));
+    }
+
     if (top_k > 0) {
         llama_sampler_chain_add(chain, llama_sampler_init_top_k(top_k));
     }
@@ -278,6 +290,7 @@ static bool check_stop_sequences(
  * @param temperature Sampling temperature (0 = greedy)
  * @param top_p       Top-p (nucleus) sampling threshold
  * @param top_k       Top-k sampling (0 = disabled)
+ * @param repeat_penalty Repetition penalty (1.0 = disabled, > 1.0 = penalize)
  * @param seed        Random seed for sampling
  * @param stop_seqs   Flattened array of stop sequence token IDs (can be NULL)
  * @param stop_lens   Length of each stop sequence (can be NULL)
@@ -294,6 +307,7 @@ int llama_generate_c(
     float temperature,
     float top_p,
     int top_k,
+    float repeat_penalty,
     uint32_t seed,
     const int32_t* stop_seqs,
     const int* stop_lens,
@@ -307,8 +321,11 @@ int llama_generate_c(
     const llama_token eos_token = llama_vocab_eos(vocab);
     const int n_vocab = llama_vocab_n_tokens(vocab);
 
-    // Create sampler chain
-    llama_sampler* sampler = llama_sampler_chain_create_c(temperature, top_p, top_k, seed);
+    // Create sampler chain with repetition penalty
+    // penalty_last_n = 64 is a reasonable default (consider last 64 tokens for penalty)
+    llama_sampler* sampler = llama_sampler_chain_create_c(
+        temperature, top_p, top_k, repeat_penalty, 64, seed
+    );
     if (!sampler) {
         return -2;
     }
