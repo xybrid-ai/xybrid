@@ -337,8 +337,12 @@ impl ExecutionStrategy for TtsStrategy {
 mod tests {
     use super::*;
 
+    // ============================================================================
+    // TTS Model Detection Tests
+    // ============================================================================
+
     #[test]
-    fn test_is_tts_model_true() {
+    fn test_is_tts_model_with_phonemize() {
         let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx")
             .with_preprocessing(PreprocessingStep::Phonemize {
                 tokens_file: "tokens.txt".to_string(),
@@ -353,26 +357,13 @@ mod tests {
     }
 
     #[test]
-    fn test_is_tts_model_false() {
+    fn test_is_tts_model_without_phonemize() {
         let metadata = ModelMetadata::onnx("test-asr", "1.0", "model.onnx");
         assert!(!TtsStrategy::is_tts_model(&metadata));
     }
 
     #[test]
-    fn test_chunk_text_short() {
-        let chunks = TtsStrategy::chunk_text("Hello world.", 350);
-        assert_eq!(chunks, vec!["Hello world."]);
-    }
-
-    #[test]
-    fn test_chunk_text_sentences() {
-        let text = "First sentence. Second sentence. Third sentence.";
-        let chunks = TtsStrategy::chunk_text(text, 20);
-        assert_eq!(chunks.len(), 3);
-    }
-
-    #[test]
-    fn test_can_handle() {
+    fn test_can_handle_tts() {
         let strategy = TtsStrategy::new();
 
         let tts_metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx")
@@ -385,9 +376,231 @@ mod tests {
                 normalize_text: false,
             });
 
-        let other_metadata = ModelMetadata::onnx("test-other", "1.0", "model.onnx");
-
         assert!(strategy.can_handle(&tts_metadata));
+    }
+
+    #[test]
+    fn test_cannot_handle_non_tts() {
+        let strategy = TtsStrategy::new();
+        let other_metadata = ModelMetadata::onnx("test-other", "1.0", "model.onnx");
         assert!(!strategy.can_handle(&other_metadata));
+    }
+
+    // ============================================================================
+    // Text Chunking Tests - Core Logic (These test what we implemented!)
+    // ============================================================================
+
+    #[test]
+    fn test_chunk_text_under_limit_returns_single() {
+        let chunks = TtsStrategy::chunk_text("Hello world.", 350);
+        assert_eq!(chunks, vec!["Hello world."]);
+    }
+
+    #[test]
+    fn test_chunk_text_empty_string() {
+        let chunks = TtsStrategy::chunk_text("", 350);
+        // Empty input should return either empty vec or vec with empty string
+        assert!(chunks.is_empty() || (chunks.len() == 1 && chunks[0].is_empty()));
+    }
+
+    #[test]
+    fn test_chunk_text_splits_at_sentence_boundaries() {
+        let text = "First sentence. Second sentence. Third sentence.";
+        let chunks = TtsStrategy::chunk_text(text, 20);
+
+        // Each sentence is ~16 chars, so should split into 3 chunks
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0], "First sentence.");
+        assert_eq!(chunks[1], "Second sentence.");
+        assert_eq!(chunks[2], "Third sentence.");
+    }
+
+    #[test]
+    fn test_chunk_text_combines_short_sentences() {
+        let text = "Hi. Hello. Hey there.";
+        // Each sentence is short, they should combine until max_chars
+        let chunks = TtsStrategy::chunk_text(text, 50);
+        // All fit in one chunk
+        assert_eq!(chunks.len(), 1);
+    }
+
+    #[test]
+    fn test_chunk_text_respects_max_chars() {
+        let text = "This is a test sentence. Here is another one. And a third.";
+        let max_chars = 30;
+        let chunks = TtsStrategy::chunk_text(text, max_chars);
+
+        // Most chunks should be under max_chars (some tolerance for not breaking mid-sentence)
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert!(
+                chunk.len() <= max_chars + 15, // Allow tolerance for sentence boundaries
+                "Chunk {} too long: {} chars (max {}): '{}'",
+                i,
+                chunk.len(),
+                max_chars,
+                chunk
+            );
+        }
+    }
+
+    #[test]
+    fn test_chunk_text_long_sentence_splits_at_comma() {
+        let text = "This is a very long sentence with many words, and it has a comma here, which should be a split point.";
+        let chunks = TtsStrategy::chunk_text(text, 50);
+
+        // Should split at commas
+        assert!(chunks.len() >= 2, "Long sentence should be split");
+    }
+
+    #[test]
+    fn test_chunk_text_long_sentence_splits_at_space() {
+        // Sentence without commas
+        let text = "This is a sentence without any commas that should still be split somewhere at a word boundary.";
+        let chunks = TtsStrategy::chunk_text(text, 40);
+
+        // Should split at word boundaries
+        assert!(chunks.len() >= 2, "Should split at spaces");
+        for chunk in &chunks {
+            // No partial words - check chunk starts with valid char
+            if let Some(c) = chunk.chars().next() {
+                assert!(
+                    c.is_alphabetic() || c == '"',
+                    "Chunk starts unexpectedly: '{}'",
+                    chunk
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_chunk_text_preserves_content() {
+        let text = "First sentence. Second sentence. Third sentence.";
+        let chunks = TtsStrategy::chunk_text(text, 20);
+
+        // All words should be in the output
+        let rejoined = chunks.join(" ");
+        assert!(rejoined.contains("First"));
+        assert!(rejoined.contains("Second"));
+        assert!(rejoined.contains("Third"));
+    }
+
+    #[test]
+    fn test_chunk_text_handles_question_marks() {
+        let text = "Is this a question? Yes it is! And here is a statement.";
+        let chunks = TtsStrategy::chunk_text(text, 25);
+
+        assert!(chunks.len() >= 2, "Should split at ? and !");
+    }
+
+    #[test]
+    fn test_chunk_text_handles_exclamation_marks() {
+        let text = "Wow! Amazing! Incredible!";
+        let chunks = TtsStrategy::chunk_text(text, 10);
+
+        assert!(chunks.len() >= 2);
+    }
+
+    #[test]
+    fn test_chunk_text_real_llm_output() {
+        // This is the actual use case - LLM generating long responses
+        let text = "Paris is the capital of France. France is a country in Western Europe. \
+            It is known for its art, culture, and cuisine. The Eiffel Tower is a famous landmark. \
+            Paris has a population of over 2 million people.";
+
+        let chunks = TtsStrategy::chunk_text(text, 100);
+
+        assert!(
+            chunks.len() >= 2,
+            "LLM output of {} chars should split with max=100",
+            text.len()
+        );
+
+        // Verify no content is lost
+        let total_chars: usize = chunks.iter().map(|c| c.len()).sum();
+        assert!(
+            total_chars >= text.len() - 30, // Allow for whitespace trimming
+            "Content lost: {} vs {}",
+            total_chars,
+            text.len()
+        );
+    }
+
+    #[test]
+    fn test_chunk_text_with_llm_special_tokens() {
+        // LLM outputs often contain special tokens that shouldn't break chunking
+        let text = "Paris.<|im_end|><|im_start|>user\nWhat else?<|im_end|><|im_start|>assistant\n\
+            France has many cities.";
+
+        let chunks = TtsStrategy::chunk_text(text, 80);
+
+        // Should not panic on special characters
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn test_chunk_text_very_long_input() {
+        // Test with ~1000 chars (like the original failing case)
+        let text = "Paris is the capital. ".repeat(50); // ~1100 chars
+        let chunks = TtsStrategy::chunk_text(&text, 350);
+
+        assert!(chunks.len() >= 3, "Should split into multiple chunks");
+
+        // All chunks should be under limit
+        for chunk in &chunks {
+            assert!(
+                chunk.len() <= 400, // Some tolerance
+                "Chunk too long: {} chars",
+                chunk.len()
+            );
+        }
+    }
+
+    // ============================================================================
+    // Strategy Configuration Tests
+    // ============================================================================
+
+    #[test]
+    fn test_custom_max_chars() {
+        let strategy = TtsStrategy::with_max_chars(100);
+        assert_eq!(strategy.max_chars, 100);
+    }
+
+    #[test]
+    fn test_default_max_chars_is_350() {
+        let strategy = TtsStrategy::new();
+        assert_eq!(strategy.max_chars, MAX_TTS_CHARS);
+        assert_eq!(strategy.max_chars, 350);
+    }
+
+    #[test]
+    fn test_strategy_name() {
+        let strategy = TtsStrategy::new();
+        assert_eq!(strategy.name(), "tts");
+    }
+
+    // ============================================================================
+    // Model File Extraction Tests
+    // ============================================================================
+
+    #[test]
+    fn test_get_model_file_onnx() {
+        let metadata = ModelMetadata::onnx("test", "1.0", "custom_model.onnx");
+        let result = TtsStrategy::get_model_file(&metadata);
+        assert_eq!(result.unwrap(), "custom_model.onnx");
+    }
+
+    #[test]
+    fn test_get_model_file_safetensors() {
+        let metadata = ModelMetadata::safetensors("test", "1.0", "model.safetensors", "whisper");
+        let result = TtsStrategy::get_model_file(&metadata);
+        assert_eq!(result.unwrap(), "model.safetensors");
+    }
+
+    #[test]
+    fn test_get_model_file_model_graph_unsupported() {
+        // ModelGraph templates should not be handled by TTS strategy
+        let metadata = ModelMetadata::model_graph("test", "1.0", vec![], vec![]);
+        let result = TtsStrategy::get_model_file(&metadata);
+        assert!(result.is_err(), "ModelGraph should not be supported for TTS");
     }
 }
