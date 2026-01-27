@@ -12,6 +12,8 @@
 //! | [`template`] | Model metadata schema (model_metadata.json types) |
 //! | [`executor`] | Main TemplateExecutor struct and execute method |
 //! | [`types`] | Data types (PreprocessedData, RawOutputs) |
+//! | [`voice_loader`] | Voice embedding loading for TTS (mockable) |
+//! | [`session_factory`] | Inference session creation (mockable) |
 //! | [`preprocessing`] | Preprocessing step implementations |
 //! | [`postprocessing`] | Postprocessing step implementations |
 //! | [`modes`] | Execution mode implementations (SingleShot, Autoregressive, Whisper, TTS, BERT) |
@@ -63,6 +65,14 @@ pub use template::{
 mod types;
 pub use types::{ExecutorResult, PreprocessedData, RawOutputs};
 
+// Voice loader (mockable)
+mod voice_loader;
+pub use voice_loader::{TtsVoiceLoader, VoiceEmbeddingSource};
+
+// Session factory (mockable)
+mod session_factory;
+pub use session_factory::{InferenceSession, OnnxSessionFactory, SessionFactory};
+
 // Main executor
 mod executor;
 pub use executor::TemplateExecutor;
@@ -75,3 +85,7 @@ pub mod postprocessing;
 
 // Execution modes (SingleShot, Autoregressive, Whisper, TTS, BERT)
 pub mod modes;
+
+// Execution strategies (modular execution paths)
+pub mod strategies;
+pub use strategies::{ExecutionContext, ExecutionStrategy, StrategyResolver};
