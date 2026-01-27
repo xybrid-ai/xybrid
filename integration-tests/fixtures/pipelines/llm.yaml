@@ -1,0 +1,6 @@
+# Single LLM Pipeline
+
+name: Single LLM Pipeline
+
+stages:
+  - qwen2.5-0.5b-instruct
