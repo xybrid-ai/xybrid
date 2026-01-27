@@ -127,6 +127,7 @@ extern "C" {
         temperature: c_float,
         top_p: c_float,
         top_k: c_int,
+        repeat_penalty: c_float,
         seed: u32,
         stop_seqs: *const i32,
         stop_lens: *const c_int,
@@ -437,6 +438,7 @@ impl Default for SamplingParams {
 /// * `temperature` - Sampling temperature (0 = greedy)
 /// * `top_p` - Top-p (nucleus) sampling threshold
 /// * `top_k` - Top-k sampling (0 = disabled)
+/// * `repeat_penalty` - Repetition penalty (1.0 = disabled, > 1.0 = penalize)
 /// * `stop_sequences` - Optional stop sequences (as strings)
 ///
 /// # Returns
@@ -450,6 +452,7 @@ pub fn llama_generate_with_stops(
     temperature: f32,
     top_p: f32,
     top_k: usize,
+    repeat_penalty: f32,
     stop_sequences: &[String],
 ) -> Result<Vec<i32>, AdapterError> {
     if input_tokens.is_empty() {
@@ -510,6 +513,7 @@ pub fn llama_generate_with_stops(
             temperature,
             top_p,
             top_k as c_int,
+            repeat_penalty,
             seed,
             stop_seqs_ptr,
             stop_lens_ptr,
@@ -531,7 +535,7 @@ pub fn llama_generate_with_stops(
 /// Generate tokens using autoregressive decoding (without stop sequences).
 ///
 /// This is a convenience wrapper around `llama_generate_with_stops` for
-/// backwards compatibility.
+/// backwards compatibility. Uses default repetition penalty of 1.1.
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_generate(
     ctx: &LlamaContext,
@@ -542,7 +546,7 @@ pub fn llama_generate(
     top_p: f32,
     top_k: usize,
 ) -> Result<Vec<i32>, AdapterError> {
-    llama_generate_with_stops(ctx, model, input_tokens, max_tokens, temperature, top_p, top_k, &[])
+    llama_generate_with_stops(ctx, model, input_tokens, max_tokens, temperature, top_p, top_k, 1.1, &[])
 }
 
 // =============================================================================
@@ -634,6 +638,7 @@ pub fn llama_generate_with_stops(
     _temperature: f32,
     _top_p: f32,
     _top_k: usize,
+    _repeat_penalty: f32,
     _stop_sequences: &[String],
 ) -> Result<Vec<i32>, AdapterError> {
     Err(AdapterError::RuntimeError(
