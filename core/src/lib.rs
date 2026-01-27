@@ -58,6 +58,25 @@
 /// ```
 pub mod prelude;
 
+/// Unified error types for xybrid-core public API.
+///
+/// This module provides the canonical error hierarchy:
+/// - [`XybridError`](error::XybridError) - Top-level error type
+/// - [`InferenceError`](error::InferenceError) - Model inference failures
+/// - [`PipelineError`](error::PipelineError) - Pipeline execution failures
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use xybrid_core::error::{XybridError, XybridResult};
+///
+/// fn run_model() -> XybridResult<String> {
+///     // ...
+/// }
+/// ```
+pub mod error;
+pub use error::{InferenceError, PipelineError, XybridError, XybridResult};
+
 // ============================================================================
 // Core Execution Layer (Orchestrator → Executor → TemplateExecutor)
 // See EXECUTION_LAYERS.md for architecture documentation
