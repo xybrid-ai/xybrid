@@ -177,6 +177,24 @@ enum Commands {
         #[arg(long, value_name = "FILE")]
         trace_export: Option<PathBuf>,
     },
+    /// Interactive REPL mode - keeps models loaded for fast repeated inference
+    Repl {
+        /// Path to the pipeline configuration file (YAML)
+        #[arg(short, long, value_name = "FILE", conflicts_with = "model")]
+        config: Option<PathBuf>,
+
+        /// Model ID to run directly from registry (e.g., "qwen2.5-0.5b-instruct")
+        #[arg(short, long, value_name = "ID", conflicts_with = "config")]
+        model: Option<String>,
+
+        /// Voice ID for TTS models (e.g., "af_bella", "am_adam")
+        #[arg(long, value_name = "VOICE")]
+        voice: Option<String>,
+
+        /// Target format for model resolution (onnx, coreml, tflite)
+        #[arg(long, value_name = "TARGET")]
+        target: Option<String>,
+    },
     /// Trace and analyze telemetry logs from a session
     Trace {
         /// Session ID to load telemetry logs for
@@ -437,6 +455,12 @@ fn run_command(cli: Cli) -> Result<()> {
                 trace_export.as_ref(),
             )
         }
+        Commands::Repl {
+            config,
+            model,
+            voice,
+            target,
+        } => handle_repl_command(config, model, voice, target),
         Commands::Trace {
             session,
             latest,
@@ -509,6 +533,197 @@ fn trace_session(session: Option<String>, export_path: Option<&Path>) -> Result<
     } else {
         // List available sessions
         list_sessions(&traces_dir)?;
+    }
+
+    Ok(())
+}
+
+/// Interactive REPL mode - keeps models loaded for fast repeated inference
+fn handle_repl_command(
+    config: Option<PathBuf>,
+    model: Option<String>,
+    voice: Option<String>,
+    _target: Option<String>,
+) -> Result<()> {
+    use std::io::{self, Write};
+
+    println!("🚀 Xybrid REPL Mode");
+    println!("{}", "=".repeat(60));
+    println!("Models will be loaded once and kept warm for fast inference.");
+    println!("Type 'quit' or 'exit' to exit. Type 'help' for commands.\n");
+
+    // Initialize registry client
+    let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
+
+    // Determine the pipeline/model to use
+    let (config_path, model_id) = if let Some(config) = config {
+        (Some(config), None)
+    } else if let Some(model) = model {
+        (None, Some(model))
+    } else {
+        return Err(anyhow::anyhow!(
+            "Either --config or --model must be specified"
+        ));
+    };
+
+    // If using a pipeline config, load it
+    let pipeline_config = if let Some(ref path) = config_path {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config: {}", path.display()))?;
+        Some(PipelineConfig::from_yaml(&content)?)
+    } else {
+        None
+    };
+
+    // Pre-load models and build stage descriptors
+    let mut stages: Vec<StageDescriptor> = Vec::new();
+
+    if let Some(ref config) = pipeline_config {
+        println!("📋 Pipeline: {}", config.name.as_deref().unwrap_or("unnamed"));
+        for stage_config in &config.stages {
+            let model_id = stage_config.model_id();
+            let mut desc = StageDescriptor::new(&model_id);
+
+            if !stage_config.is_cloud_stage() {
+                // Ensure model is downloaded
+                if !client.is_cached(&model_id, None).unwrap_or(false) {
+                    println!("📥 Downloading model: {}", model_id);
+                    use indicatif::{ProgressBar, ProgressStyle};
+                    let resolved = client.resolve(&model_id, None)?;
+                    let pb = ProgressBar::new(resolved.size_bytes);
+                    pb.set_style(
+                        ProgressStyle::default_bar()
+                            .template("{spinner:.green} {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes}")
+                            .unwrap()
+                    );
+                    pb.set_message(model_id.clone());
+                    client.fetch(&model_id, None, |p| {
+                        pb.set_position((p * resolved.size_bytes as f32) as u64);
+                    })?;
+                    pb.finish_with_message(format!("{} ✓", model_id));
+                }
+
+                let resolved = client.resolve(&model_id, None)?;
+                desc.bundle_path = Some(client.get_cache_path(&resolved).to_string_lossy().to_string());
+            }
+            stages.push(desc);
+        }
+    } else if let Some(ref model_id) = model_id {
+        // Single model mode
+        println!("📦 Model: {}", model_id);
+        let mut desc = StageDescriptor::new(model_id);
+
+        if !client.is_cached(model_id, None).unwrap_or(false) {
+            println!("📥 Downloading model: {}", model_id);
+            use indicatif::{ProgressBar, ProgressStyle};
+            let resolved = client.resolve(model_id, None)?;
+            let pb = ProgressBar::new(resolved.size_bytes);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("{spinner:.green} {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes}")
+                    .unwrap()
+            );
+            pb.set_message(model_id.clone());
+            client.fetch(model_id, None, |p| {
+                pb.set_position((p * resolved.size_bytes as f32) as u64);
+            })?;
+            pb.finish_with_message(format!("{} ✓", model_id));
+        }
+
+        let resolved = client.resolve(model_id, None)?;
+        desc.bundle_path = Some(client.get_cache_path(&resolved).to_string_lossy().to_string());
+        stages.push(desc);
+    }
+
+    // Collect device metrics
+    let device_adapter = LocalDeviceAdapter::new();
+    let metrics = device_adapter.collect_metrics();
+
+    // Create availability function
+    let stage_bundle_paths: std::collections::HashMap<String, bool> = stages
+        .iter()
+        .map(|s| (s.name.clone(), s.bundle_path.is_some()))
+        .collect();
+    let availability_fn = move |stage: &str| -> LocalAvailability {
+        LocalAvailability::new(stage_bundle_paths.get(stage).copied().unwrap_or(false))
+    };
+
+    // Create orchestrator (keeps models loaded)
+    let mut orchestrator = Orchestrator::new();
+    xybrid_sdk::bridge_orchestrator_events(&orchestrator);
+
+    println!("\n🔥 Models loaded and warm. Ready for input!\n");
+    println!("Enter text and press Enter to run inference.");
+    println!("{}", "=".repeat(60));
+
+    // REPL loop
+    let stdin = io::stdin();
+    loop {
+        print!("\n> ");
+        io::stdout().flush()?;
+
+        let mut input_line = String::new();
+        if stdin.read_line(&mut input_line)? == 0 {
+            // EOF
+            break;
+        }
+
+        let input_line = input_line.trim();
+
+        // Handle special commands
+        match input_line.to_lowercase().as_str() {
+            "quit" | "exit" | "q" => {
+                println!("👋 Goodbye!");
+                break;
+            }
+            "help" | "?" => {
+                println!("Commands:");
+                println!("  quit, exit, q  - Exit REPL");
+                println!("  help, ?        - Show this help");
+                println!("  <text>         - Run inference with the given text");
+                continue;
+            }
+            "" => continue,
+            _ => {}
+        }
+
+        // Create input envelope
+        let mut input = Envelope::new(EnvelopeKind::Text(input_line.to_string()));
+
+        // Add voice_id if provided
+        if let Some(ref voice_id) = voice {
+            input.metadata.insert("voice_id".to_string(), voice_id.clone());
+        }
+
+        // Execute pipeline
+        let start = std::time::Instant::now();
+        match orchestrator.execute_pipeline(&stages, &input, &metrics, &availability_fn) {
+            Ok(results) => {
+                let elapsed = start.elapsed();
+                println!();
+
+                // Display results
+                for result in &results {
+                    match &result.output.kind {
+                        EnvelopeKind::Text(text) => {
+                            println!("{}", text);
+                        }
+                        EnvelopeKind::Audio(data) => {
+                            println!("🔊 Audio output: {} bytes", data.len());
+                            println!("   Use the 'run' command with --output to save audio.");
+                        }
+                        EnvelopeKind::Embedding(vec) => {
+                            println!("📊 Embedding: {} dimensions", vec.len());
+                        }
+                    }
+                }
+
+                println!("\n⏱️  Inference time: {:.2}s", elapsed.as_secs_f32());
+            }
+            Err(e) => {
+                eprintln!("❌ Error: {}", e);
+            }
+        }
     }
 
     Ok(())
