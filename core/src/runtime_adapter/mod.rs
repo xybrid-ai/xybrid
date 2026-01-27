@@ -43,8 +43,8 @@ use thiserror::Error;
 
 // Shared utilities (stay at root level)
 pub mod inference_backend;
-pub mod metadata_driven;
-pub mod tensor_utils;
+pub(crate) mod metadata_driven;
+pub(crate) mod tensor_utils;
 pub mod traits;
 
 // Runtime backends (organized in subdirectories)
