@@ -189,8 +189,8 @@ impl LlmBackend for LlamaCppBackend {
 
         let start = std::time::Instant::now();
 
-        // Generate
-        let output_tokens = sys::llama_generate(
+        // Generate with stop sequences for early termination
+        let output_tokens = sys::llama_generate_with_stops(
             context,
             model,
             &tokens,
@@ -198,12 +198,36 @@ impl LlmBackend for LlamaCppBackend {
             config.temperature,
             config.top_p,
             config.top_k,
+            &config.stop_sequences,
         )?;
 
         let elapsed = start.elapsed();
 
         // Decode tokens to text
-        let text = sys::llama_detokenize(model, &output_tokens)?;
+        let mut text = sys::llama_detokenize(model, &output_tokens)?;
+
+        // Apply stop sequence truncation
+        // Find the earliest occurrence of any stop sequence and truncate there
+        let mut finish_reason = "length".to_string();
+        if !config.stop_sequences.is_empty() {
+            let mut earliest_pos: Option<usize> = None;
+            for stop_seq in &config.stop_sequences {
+                if let Some(pos) = text.find(stop_seq) {
+                    match earliest_pos {
+                        None => earliest_pos = Some(pos),
+                        Some(current) if pos < current => earliest_pos = Some(pos),
+                        _ => {}
+                    }
+                }
+            }
+            if let Some(pos) = earliest_pos {
+                text.truncate(pos);
+                finish_reason = "stop".to_string();
+            }
+        }
+
+        // Trim any trailing whitespace from the response
+        let text = text.trim().to_string();
 
         let tokens_generated = output_tokens.len();
         let tokens_per_second = if elapsed.as_secs_f32() > 0.0 {
@@ -217,7 +241,7 @@ impl LlmBackend for LlamaCppBackend {
             tokens_generated,
             generation_time_ms: elapsed.as_millis() as u64,
             tokens_per_second,
-            finish_reason: "stop".to_string(),
+            finish_reason,
         })
     }
 

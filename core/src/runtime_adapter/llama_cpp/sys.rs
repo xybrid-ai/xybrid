@@ -116,7 +116,7 @@ extern "C" {
         length: c_int,
     ) -> c_int;
 
-    // Generation loop
+    // Generation loop with stop sequence support
     fn llama_generate_c(
         ctx: *mut c_void,
         model: *const c_void,
@@ -128,6 +128,9 @@ extern "C" {
         top_p: c_float,
         top_k: c_int,
         seed: u32,
+        stop_seqs: *const i32,
+        stop_lens: *const c_int,
+        n_stop_seqs: c_int,
     ) -> c_int;
 }
 
@@ -367,26 +370,27 @@ impl Default for SamplingParams {
     }
 }
 
-/// Generate tokens using autoregressive decoding.
+/// Generate tokens using autoregressive decoding with stop sequence support.
 ///
 /// This function performs the full generation loop:
 /// 1. Processes input tokens
 /// 2. Samples from logits using temperature/top_p/top_k
-/// 3. Repeats until EOS or max_tokens
+/// 3. Repeats until EOS, stop sequence, or max_tokens
 ///
 /// # Arguments
 /// * `ctx` - The llama context
-/// * `model` - The llama model (needed for EOS token)
+/// * `model` - The llama model (needed for EOS token and tokenization)
 /// * `input_tokens` - Input token IDs
 /// * `max_tokens` - Maximum tokens to generate
 /// * `temperature` - Sampling temperature (0 = greedy)
 /// * `top_p` - Top-p (nucleus) sampling threshold
 /// * `top_k` - Top-k sampling (0 = disabled)
+/// * `stop_sequences` - Optional stop sequences (as strings)
 ///
 /// # Returns
 /// Vector of generated token IDs
 #[cfg(feature = "llm-llamacpp")]
-pub fn llama_generate(
+pub fn llama_generate_with_stops(
     ctx: &LlamaContext,
     model: &LlamaModel,
     input_tokens: &[i32],
@@ -394,9 +398,21 @@ pub fn llama_generate(
     temperature: f32,
     top_p: f32,
     top_k: usize,
+    stop_sequences: &[String],
 ) -> Result<Vec<i32>, AdapterError> {
     if input_tokens.is_empty() {
         return Err(AdapterError::InvalidInput("Empty input tokens".to_string()));
+    }
+
+    // Tokenize stop sequences
+    let mut stop_tokens: Vec<i32> = Vec::new();
+    let mut stop_lens: Vec<c_int> = Vec::new();
+
+    for seq in stop_sequences {
+        // Tokenize without special tokens - we want the raw token representation
+        let tokens = llama_tokenize(model, seq, false)?;
+        stop_lens.push(tokens.len() as c_int);
+        stop_tokens.extend(tokens);
     }
 
     // Allocate output buffer
@@ -407,6 +423,16 @@ pub fn llama_generate(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as u32)
         .unwrap_or(42);
+
+    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = if stop_sequences.is_empty() {
+        (ptr::null(), ptr::null(), 0)
+    } else {
+        (
+            stop_tokens.as_ptr(),
+            stop_lens.as_ptr(),
+            stop_sequences.len() as c_int,
+        )
+    };
 
     let result = unsafe {
         llama_generate_c(
@@ -420,6 +446,9 @@ pub fn llama_generate(
             top_p,
             top_k as c_int,
             seed,
+            stop_seqs_ptr,
+            stop_lens_ptr,
+            n_stop_seqs,
         )
     };
 
@@ -432,6 +461,23 @@ pub fn llama_generate(
 
     output_tokens.truncate(result as usize);
     Ok(output_tokens)
+}
+
+/// Generate tokens using autoregressive decoding (without stop sequences).
+///
+/// This is a convenience wrapper around `llama_generate_with_stops` for
+/// backwards compatibility.
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_generate(
+    ctx: &LlamaContext,
+    model: &LlamaModel,
+    input_tokens: &[i32],
+    max_tokens: usize,
+    temperature: f32,
+    top_p: f32,
+    top_k: usize,
+) -> Result<Vec<i32>, AdapterError> {
+    llama_generate_with_stops(ctx, model, input_tokens, max_tokens, temperature, top_p, top_k, &[])
 }
 
 // =============================================================================
@@ -499,6 +545,22 @@ pub fn llama_tokenize(
 
 #[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_detokenize(_model: &LlamaModel, _tokens: &[i32]) -> Result<String, AdapterError> {
+    Err(AdapterError::RuntimeError(
+        "llm-llamacpp feature not enabled".to_string(),
+    ))
+}
+
+#[cfg(not(feature = "llm-llamacpp"))]
+pub fn llama_generate_with_stops(
+    _ctx: &LlamaContext,
+    _model: &LlamaModel,
+    _input_tokens: &[i32],
+    _max_tokens: usize,
+    _temperature: f32,
+    _top_p: f32,
+    _top_k: usize,
+    _stop_sequences: &[String],
+) -> Result<Vec<i32>, AdapterError> {
     Err(AdapterError::RuntimeError(
         "llm-llamacpp feature not enabled".to_string(),
     ))

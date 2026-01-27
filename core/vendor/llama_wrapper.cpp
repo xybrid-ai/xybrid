@@ -216,6 +216,53 @@ void llama_sampler_free_c(llama_sampler* smpl) {
 }
 
 // =============================================================================
+// Stop Sequence Checking
+// =============================================================================
+
+/**
+ * Check if the generated tokens end with any of the stop sequences.
+ *
+ * @param output_tokens Generated tokens so far
+ * @param n_generated   Number of generated tokens
+ * @param stop_seqs     Array of stop sequences (flattened token IDs)
+ * @param stop_lens     Length of each stop sequence
+ * @param n_stop_seqs   Number of stop sequences
+ * @return true if a stop sequence was matched
+ */
+static bool check_stop_sequences(
+    const int32_t* output_tokens,
+    int n_generated,
+    const int32_t* stop_seqs,
+    const int* stop_lens,
+    int n_stop_seqs
+) {
+    if (!stop_seqs || !stop_lens || n_stop_seqs <= 0 || n_generated <= 0) {
+        return false;
+    }
+
+    int seq_offset = 0;
+    for (int s = 0; s < n_stop_seqs; s++) {
+        int seq_len = stop_lens[s];
+
+        // Check if we have enough tokens to match this stop sequence
+        if (seq_len > 0 && n_generated >= seq_len) {
+            bool match = true;
+            for (int i = 0; i < seq_len; i++) {
+                if (output_tokens[n_generated - seq_len + i] != stop_seqs[seq_offset + i]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                return true;
+            }
+        }
+        seq_offset += seq_len;
+    }
+    return false;
+}
+
+// =============================================================================
 // Generation Loop
 // =============================================================================
 
@@ -232,6 +279,9 @@ void llama_sampler_free_c(llama_sampler* smpl) {
  * @param top_p       Top-p (nucleus) sampling threshold
  * @param top_k       Top-k sampling (0 = disabled)
  * @param seed        Random seed for sampling
+ * @param stop_seqs   Flattened array of stop sequence token IDs (can be NULL)
+ * @param stop_lens   Length of each stop sequence (can be NULL)
+ * @param n_stop_seqs Number of stop sequences (0 if none)
  * @return Number of tokens generated, or negative on error
  */
 int llama_generate_c(
@@ -244,7 +294,10 @@ int llama_generate_c(
     float temperature,
     float top_p,
     int top_k,
-    uint32_t seed
+    uint32_t seed,
+    const int32_t* stop_seqs,
+    const int* stop_lens,
+    int n_stop_seqs
 ) {
     if (!ctx || !model || !input_tokens || !output_tokens || n_input <= 0 || max_tokens <= 0) {
         return -1;
@@ -324,6 +377,11 @@ int llama_generate_c(
 
         // Check for EOS
         if (new_token == eos_token) {
+            break;
+        }
+
+        // Check for stop sequences
+        if (check_stop_sequences(output_tokens, n_generated, stop_seqs, stop_lens, n_stop_seqs)) {
             break;
         }
 
