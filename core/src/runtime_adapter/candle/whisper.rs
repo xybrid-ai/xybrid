@@ -8,7 +8,47 @@ use candle_core::{Device, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::whisper::{self as m, audio, Config};
 use std::path::Path;
+use thiserror::Error;
 use tokenizers::Tokenizer;
+
+/// Errors that can occur during Whisper model operations.
+#[derive(Error, Debug)]
+pub enum WhisperError {
+    /// Failed to load model configuration
+    #[error("Config error: {0}")]
+    Config(String),
+
+    /// Failed to load tokenizer
+    #[error("Tokenizer error: {0}")]
+    Tokenizer(String),
+
+    /// Failed to load mel filters
+    #[error("Mel filters error: {0}")]
+    MelFilters(String),
+
+    /// Failed to load model weights
+    #[error("Model weights error: {0}")]
+    Weights(String),
+
+    /// Token not found in vocabulary
+    #[error("Token '{0}' not found in vocabulary")]
+    TokenNotFound(String),
+
+    /// Candle tensor/model error
+    #[error("Candle error: {0}")]
+    Candle(#[from] candle_core::Error),
+
+    /// I/O error
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// JSON parsing error
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+/// Result type for Whisper operations.
+pub type WhisperResult<T> = Result<T, WhisperError>;
 
 /// Whisper model configuration
 #[derive(Debug, Clone)]
@@ -119,7 +159,7 @@ impl WhisperModel {
     ///
     /// * `model_dir` - Path to model directory
     /// * `device` - Device for inference
-    pub fn load(model_dir: &Path, device: &Device) -> anyhow::Result<Self> {
+    pub fn load(model_dir: &Path, device: &Device) -> WhisperResult<Self> {
         Self::load_with_config(model_dir, device, WhisperConfig::default())
     }
 
@@ -128,7 +168,7 @@ impl WhisperModel {
         model_dir: &Path,
         device: &Device,
         user_config: WhisperConfig,
-    ) -> anyhow::Result<Self> {
+    ) -> WhisperResult<Self> {
         // Load configuration
         let config_path = model_dir.join("config.json");
         let config: Config = serde_json::from_str(&std::fs::read_to_string(&config_path)?)?;
@@ -136,7 +176,7 @@ impl WhisperModel {
         // Load tokenizer
         let tokenizer_path = model_dir.join("tokenizer.json");
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
+            .map_err(|e| WhisperError::Tokenizer(format!("Failed to load tokenizer: {}", e)))?;
 
         // Load mel filters
         let mel_filters_path = model_dir.join("melfilters.bytes");
@@ -150,15 +190,23 @@ impl WhisperModel {
             match config.num_mel_bins {
                 80 => {
                     // Standard Whisper mel filters (80 bins)
-                    anyhow::bail!(
+                    return Err(WhisperError::MelFilters(format!(
                         "melfilters.bytes not found at {:?}. Please download from Candle examples.",
                         mel_filters_path
-                    )
+                    )));
                 }
                 128 => {
-                    anyhow::bail!("melfilters128.bytes not found at {:?}. Please download from Candle examples.", mel_filters_path)
+                    return Err(WhisperError::MelFilters(format!(
+                        "melfilters128.bytes not found at {:?}. Please download from Candle examples.",
+                        mel_filters_path
+                    )));
                 }
-                n => anyhow::bail!("Unsupported num_mel_bins: {}", n),
+                n => {
+                    return Err(WhisperError::MelFilters(format!(
+                        "Unsupported num_mel_bins: {}",
+                        n
+                    )));
+                }
             }
         };
 
@@ -208,16 +256,22 @@ impl WhisperModel {
     /// * `size` - Whisper model size
     /// * `device` - Device for inference
     #[cfg(feature = "hf-hub")]
-    pub fn from_hf(size: WhisperSize, device: &Device) -> anyhow::Result<Self> {
+    pub fn from_hf(size: WhisperSize, device: &Device) -> WhisperResult<Self> {
         use hf_hub::{api::sync::Api, Repo, RepoType};
 
-        let api = Api::new()?;
+        let api = Api::new().map_err(|e| WhisperError::Config(format!("HF API error: {}", e)))?;
         let repo = api.repo(Repo::new(size.hf_model_id().to_string(), RepoType::Model));
 
         // Download required files
-        let config_path = repo.get("config.json")?;
-        let tokenizer_path = repo.get("tokenizer.json")?;
-        let weights_path = repo.get("model.safetensors")?;
+        let config_path = repo
+            .get("config.json")
+            .map_err(|e| WhisperError::Config(format!("Failed to download config: {}", e)))?;
+        let _tokenizer_path = repo
+            .get("tokenizer.json")
+            .map_err(|e| WhisperError::Tokenizer(format!("Failed to download tokenizer: {}", e)))?;
+        let weights_path = repo
+            .get("model.safetensors")
+            .map_err(|e| WhisperError::Weights(format!("Failed to download weights: {}", e)))?;
 
         // Create a temporary directory structure
         let model_dir = weights_path.parent().unwrap();
@@ -254,7 +308,7 @@ impl WhisperModel {
     /// # Returns
     ///
     /// Transcribed text
-    pub fn transcribe(&mut self, mel: &Tensor) -> anyhow::Result<String> {
+    pub fn transcribe(&mut self, mel: &Tensor) -> WhisperResult<String> {
         // Run encoder
         let audio_features = self.model.encoder.forward(mel, true)?;
 
@@ -305,7 +359,7 @@ impl WhisperModel {
         let text = self
             .tokenizer
             .decode(&tokens, true)
-            .map_err(|e| anyhow::anyhow!("Tokenizer decode error: {}", e))?;
+            .map_err(|e| WhisperError::Tokenizer(format!("Tokenizer decode error: {}", e)))?;
 
         Ok(text)
     }
@@ -337,7 +391,7 @@ impl WhisperModel {
     ///
     /// Note: Audio is automatically truncated to 30 seconds (480,000 samples @ 16kHz)
     /// to fit within Whisper's encoder context window (1500 mel frames).
-    pub fn pcm_to_mel_tensor(&self, pcm_data: &[f32]) -> anyhow::Result<Tensor> {
+    pub fn pcm_to_mel_tensor(&self, pcm_data: &[f32]) -> WhisperResult<Tensor> {
         // Whisper's encoder has a fixed context of 1500 mel frames (30 seconds @ 16kHz)
         // Truncate audio to 30 seconds max to avoid encoder overflow
         const MAX_SAMPLES_30S: usize = 16000 * 30; // 480,000 samples
@@ -352,7 +406,7 @@ impl WhisperModel {
         let n_mels = self.config.num_mel_bins;
 
         Tensor::from_vec(mel, (1, n_mels, mel_len / n_mels), &self.device)
-            .map_err(|e| anyhow::anyhow!("Failed to create mel tensor: {}", e))
+            .map_err(WhisperError::from)
     }
 
     /// Transcribe audio from PCM samples.
@@ -364,17 +418,17 @@ impl WhisperModel {
     /// # Returns
     ///
     /// Transcribed text
-    pub fn transcribe_pcm(&mut self, pcm_data: &[f32]) -> anyhow::Result<String> {
+    pub fn transcribe_pcm(&mut self, pcm_data: &[f32]) -> WhisperResult<String> {
         let mel = self.pcm_to_mel_tensor(pcm_data)?;
         self.transcribe(&mel)
     }
 }
 
 /// Helper to get token ID from tokenizer
-fn token_id(tokenizer: &Tokenizer, token: &str) -> anyhow::Result<u32> {
+fn token_id(tokenizer: &Tokenizer, token: &str) -> WhisperResult<u32> {
     tokenizer
         .token_to_id(token)
-        .ok_or_else(|| anyhow::anyhow!("Token '{}' not found in vocabulary", token))
+        .ok_or_else(|| WhisperError::TokenNotFound(token.to_string()))
 }
 
 #[cfg(test)]

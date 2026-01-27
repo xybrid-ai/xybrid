@@ -34,7 +34,6 @@ use crate::runtime_adapter::ONNXMobileRuntimeAdapter;
 use crate::runtime_adapter::{OnnxRuntimeAdapter, RuntimeAdapter};
 use crate::streaming::manager::StreamManager;
 use crate::telemetry::{Severity, Telemetry};
-use anyhow::{Context, Result};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
@@ -123,8 +122,7 @@ impl Orchestrator {
 
         // Load configuration if provided
         let config = if let Some(path) = config_path {
-            load_config(path)
-                .map_err(|e| OrchestratorError::Other(format!("Failed to load config: {}", e)))?
+            load_config(path)?
         } else {
             None
         };
@@ -328,16 +326,26 @@ impl Orchestrator {
 }
 
 /// Load bootstrap configuration from file.
-fn load_config(path: &Path) -> Result<Option<BootstrapConfig>> {
+fn load_config(path: &Path) -> Result<Option<BootstrapConfig>, OrchestratorError> {
     if !path.exists() {
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        OrchestratorError::Other(format!(
+            "Failed to read config file '{}': {}",
+            path.display(),
+            e
+        ))
+    })?;
 
-    let config: BootstrapConfig = serde_yaml::from_str(&content)
-        .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+    let config: BootstrapConfig = serde_yaml::from_str(&content).map_err(|e| {
+        OrchestratorError::Other(format!(
+            "Failed to parse config file '{}': {}",
+            path.display(),
+            e
+        ))
+    })?;
 
     Ok(Some(config))
 }

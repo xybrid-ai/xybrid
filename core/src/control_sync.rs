@@ -4,7 +4,6 @@
 //! runtime parameters between the control plane and the orchestrator runtime.
 
 use crate::telemetry::{Severity, Telemetry};
-use anyhow::Result as AnyResult;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::any::Any;
@@ -125,10 +124,10 @@ impl ControlMessage {
 /// Provider abstraction for fetching messages from a control plane.
 pub trait ControlSyncProvider: Send + Sync {
     /// Fetch pending messages from the control plane.
-    fn fetch_updates(&self) -> AnyResult<Vec<ControlMessage>>;
+    fn fetch_updates(&self) -> ControlSyncResult<Vec<ControlMessage>>;
 
     /// Acknowledge that a message has been applied successfully.
-    fn acknowledge(&self, _message_id: &str) -> AnyResult<()> {
+    fn acknowledge(&self, _message_id: &str) -> ControlSyncResult<()> {
         Ok(())
     }
 }
@@ -136,14 +135,14 @@ pub trait ControlSyncProvider: Send + Sync {
 /// Handler abstraction for applying control plane messages.
 pub trait ControlSyncHandler: Send + Sync {
     /// Apply a single control message.
-    fn handle(&self, message: &ControlMessage) -> AnyResult<()>;
+    fn handle(&self, message: &ControlMessage) -> ControlSyncResult<()>;
 }
 
 /// No-op provider that always returns an empty update set.
 pub struct NoopControlSyncProvider;
 
 impl ControlSyncProvider for NoopControlSyncProvider {
-    fn fetch_updates(&self) -> AnyResult<Vec<ControlMessage>> {
+    fn fetch_updates(&self) -> ControlSyncResult<Vec<ControlMessage>> {
         Ok(vec![])
     }
 }
@@ -152,7 +151,7 @@ impl ControlSyncProvider for NoopControlSyncProvider {
 pub struct NoopControlSyncHandler;
 
 impl ControlSyncHandler for NoopControlSyncHandler {
-    fn handle(&self, _message: &ControlMessage) -> AnyResult<()> {
+    fn handle(&self, _message: &ControlMessage) -> ControlSyncResult<()> {
         Ok(())
     }
 }
@@ -414,7 +413,7 @@ mod tests {
     }
 
     impl ControlSyncProvider for MockProvider {
-        fn fetch_updates(&self) -> AnyResult<Vec<ControlMessage>> {
+        fn fetch_updates(&self) -> ControlSyncResult<Vec<ControlMessage>> {
             let mut guard = self.batches.lock().unwrap();
             if guard.is_empty() {
                 Ok(vec![])
@@ -423,7 +422,7 @@ mod tests {
             }
         }
 
-        fn acknowledge(&self, message_id: &str) -> AnyResult<()> {
+        fn acknowledge(&self, message_id: &str) -> ControlSyncResult<()> {
             self.acknowledgements
                 .lock()
                 .unwrap()
@@ -452,9 +451,9 @@ mod tests {
     }
 
     impl ControlSyncHandler for MockHandler {
-        fn handle(&self, message: &ControlMessage) -> AnyResult<()> {
+        fn handle(&self, message: &ControlMessage) -> ControlSyncResult<()> {
             if self.should_fail.swap(false, Ordering::SeqCst) {
-                anyhow::bail!("forced failure");
+                return Err(ControlSyncError::Handler("forced failure".to_string()));
             }
 
             self.applied.lock().unwrap().push(message.id.clone());
