@@ -94,6 +94,9 @@ pub struct Executor {
     _mock_models_dir: Option<TempDir>,
     /// Temporary directory for extracted bundles
     _extracted_bundles_dir: Option<TempDir>,
+    /// Cached TemplateExecutor instances keyed by base_path.
+    /// This avoids recreating executors (and reloading models) on every call.
+    template_executor_cache: HashMap<String, TemplateExecutor>,
 }
 
 impl Clone for Executor {
@@ -104,6 +107,7 @@ impl Clone for Executor {
             default_cloud_adapter: self.default_cloud_adapter.clone(),
             _mock_models_dir: None,       // Don't clone temp dir
             _extracted_bundles_dir: None, // Don't clone temp dir
+            template_executor_cache: HashMap::new(), // Don't clone cache (stateful)
         }
     }
 }
@@ -117,6 +121,7 @@ impl Executor {
             default_cloud_adapter: None,
             _mock_models_dir: None,
             _extracted_bundles_dir: None,
+            template_executor_cache: HashMap::new(),
         }
     }
 
@@ -564,7 +569,28 @@ impl Executor {
                                 ExecutorError::Other("Invalid extract dir path".to_string())
                             })?;
 
-                            let mut template_executor = TemplateExecutor::new(base_path);
+                            // Get or create cached TemplateExecutor for this base_path
+                            let base_path_key = base_path.to_string();
+                            if !self.template_executor_cache.contains_key(&base_path_key) {
+                                debug!(
+                                    target: "xybrid_core",
+                                    "Creating new TemplateExecutor for base_path: {}",
+                                    base_path
+                                );
+                                self.template_executor_cache
+                                    .insert(base_path_key.clone(), TemplateExecutor::new(base_path));
+                            } else {
+                                debug!(
+                                    target: "xybrid_core",
+                                    "Reusing cached TemplateExecutor for base_path: {}",
+                                    base_path
+                                );
+                            }
+
+                            let template_executor = self
+                                .template_executor_cache
+                                .get_mut(&base_path_key)
+                                .expect("TemplateExecutor was just inserted");
 
                             let output = template_executor
                                 .execute(&model_metadata, input)

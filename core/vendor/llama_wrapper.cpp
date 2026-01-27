@@ -66,6 +66,16 @@ void llama_free_c(llama_context* ctx) {
     }
 }
 
+void llama_kv_cache_clear_c(llama_context* ctx) {
+    if (ctx) {
+        // Use the new memory API: get memory and clear it
+        llama_memory_t mem = llama_get_memory(ctx);
+        if (mem) {
+            llama_memory_clear(mem, true);  // Clear data buffers too
+        }
+    }
+}
+
 // =============================================================================
 // Tokenization (using new vocab API)
 // =============================================================================

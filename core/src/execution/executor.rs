@@ -78,6 +78,10 @@ pub struct TemplateExecutor {
     runtimes: HashMap<String, Box<dyn ModelRuntime>>,
     /// Base path for resolving relative model paths
     base_path: String,
+    /// Cached LLM adapter to avoid reloading models between executions.
+    /// Stores (model_path, adapter) tuple - reused if model_path matches.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    llm_adapter_cache: Option<(String, LlmRuntimeAdapter)>,
 }
 
 impl TemplateExecutor {
@@ -126,6 +130,8 @@ impl TemplateExecutor {
         Self {
             runtimes,
             base_path: base_path.into(),
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            llm_adapter_cache: None,
         }
     }
 
@@ -342,9 +348,13 @@ impl TemplateExecutor {
     ///
     /// This is a separate execution path for GGUF-based LLMs that bypasses
     /// the standard preprocessing/inference/postprocessing pipeline.
+    ///
+    /// The adapter is cached to avoid reloading the model on subsequent calls
+    /// with the same model path. This provides significant speedup for REPL
+    /// and interactive use cases.
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_llm(
-        &self,
+        &mut self,
         model_file: &str,
         chat_template: Option<&str>,
         context_length: usize,
@@ -366,22 +376,55 @@ impl TemplateExecutor {
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
+        let model_path_str = model_path.to_string_lossy().to_string();
 
-        // Create LLM config
-        let mut config = LlmConfig::new(model_path.to_string_lossy().to_string())
-            .with_context_length(context_length);
+        // Check if we have a cached adapter for this model path
+        let need_load = match &self.llm_adapter_cache {
+            Some((cached_path, _)) if cached_path == &model_path_str => {
+                info!(target: "xybrid_core", "Reusing cached LLM adapter for: {}", model_path_str);
+                false
+            }
+            Some((cached_path, _)) => {
+                info!(
+                    target: "xybrid_core",
+                    "Model path changed ({} -> {}), loading new model",
+                    cached_path,
+                    model_path_str
+                );
+                true
+            }
+            None => {
+                info!(target: "xybrid_core", "No cached adapter, loading model: {}", model_path_str);
+                true
+            }
+        };
 
-        if let Some(template) = chat_template {
-            let template_path = Path::new(&self.base_path).join(template);
-            config = config.with_chat_template(template_path.to_string_lossy().to_string());
+        // Load model if needed (cache miss or different model)
+        if need_load {
+            // Create LLM config
+            let mut config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length);
+
+            if let Some(template) = chat_template {
+                let template_path = Path::new(&self.base_path).join(template);
+                config = config.with_chat_template(template_path.to_string_lossy().to_string());
+            }
+
+            // Create adapter with the appropriate backend based on hint
+            let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
+            adapter.load_model(&config.model_path)?;
+
+            // Cache the adapter
+            self.llm_adapter_cache = Some((model_path_str.clone(), adapter));
         }
 
-        // Create adapter with the appropriate backend based on hint
-        let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-        adapter.load_model(&config.model_path)?;
-
-        // Execute inference
-        let result = adapter.execute(input)?;
+        // Execute inference using cached adapter
+        let result = if let Some((_, adapter)) = &self.llm_adapter_cache {
+            adapter.execute(input)?
+        } else {
+            // This should never happen, but handle gracefully
+            return Err(AdapterError::RuntimeError("LLM adapter cache unexpectedly empty".to_string()));
+        };
 
         info!(
             target: "xybrid_core",

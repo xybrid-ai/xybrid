@@ -181,6 +181,10 @@ impl LlmBackend for LlamaCppBackend {
             AdapterError::ModelNotLoaded("No context. Call load() first.".to_string())
         })?;
 
+        // Clear KV cache to reset context state for new conversation
+        // This is essential when reusing the context across multiple queries
+        sys::llama_kv_cache_clear(context);
+
         // Format messages into prompt using chat template
         let prompt = sys::llama_format_chat(model, messages)?;
 
