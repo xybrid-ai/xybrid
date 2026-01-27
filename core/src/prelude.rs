@@ -22,7 +22,9 @@
 //! - [`TemplateExecutor`] - Metadata-driven model inference
 //!
 //! ## Error Types
-//! - [`AdapterError`], [`AdapterResult`] - Runtime adapter errors
+//! - [`XybridError`], [`XybridResult`] - Unified public API errors (preferred)
+//! - [`InferenceError`], [`PipelineError`] - Specific error categories
+//! - [`AdapterError`], [`AdapterResult`] - Legacy adapter errors
 //!
 //! ## Execution
 //! - [`ExecutionTemplate`] - Execution mode configuration
@@ -46,6 +48,10 @@ pub use crate::execution::{
 // Error Types
 // ============================================================================
 
+// Unified error types (preferred for public API)
+pub use crate::error::{InferenceError, PipelineError, XybridError, XybridResult};
+
+// Legacy error types (still used internally by adapters)
 pub use crate::runtime_adapter::{AdapterError, AdapterResult};
 
 // ============================================================================
