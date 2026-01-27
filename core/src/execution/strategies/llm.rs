@@ -58,6 +58,12 @@ impl LlmModelConfig {
     }
 }
 
+/// Default stop sequences for ChatML format (Qwen, Phi, etc.)
+pub const CHATML_STOP_SEQUENCES: &[&str] = &["<|im_end|>", "<|im_start|>"];
+
+/// Default stop sequences for Llama format
+pub const LLAMA_STOP_SEQUENCES: &[&str] = &["</s>", "[/INST]"];
+
 /// Generation parameters for LLM inference.
 #[derive(Debug, Clone)]
 pub struct LlmGenerationParams {
@@ -71,6 +77,8 @@ pub struct LlmGenerationParams {
     pub top_k: usize,
     /// System prompt (optional)
     pub system_prompt: Option<String>,
+    /// Stop sequences - generation stops when any of these are encountered
+    pub stop_sequences: Vec<String>,
 }
 
 impl Default for LlmGenerationParams {
@@ -81,12 +89,74 @@ impl Default for LlmGenerationParams {
             top_p: 0.9,
             top_k: 40,
             system_prompt: None,
+            stop_sequences: Vec::new(),
         }
     }
 }
 
 impl LlmGenerationParams {
+    /// Create params with ChatML stop sequences (for Qwen, Phi, etc.)
+    pub fn with_chatml_stops() -> Self {
+        Self {
+            stop_sequences: CHATML_STOP_SEQUENCES.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Create params with Llama stop sequences
+    pub fn with_llama_stops() -> Self {
+        Self {
+            stop_sequences: LLAMA_STOP_SEQUENCES.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Add stop sequences to existing params
+    pub fn with_stop_sequences(mut self, sequences: Vec<String>) -> Self {
+        self.stop_sequences = sequences;
+        self
+    }
+
+    /// Detect appropriate stop sequences based on model name.
+    ///
+    /// Returns ChatML stops for Qwen/Phi models, Llama stops for Llama/Mistral models.
+    pub fn default_stops_for_model(model_id: &str) -> Vec<String> {
+        let model_lower = model_id.to_lowercase();
+
+        // ChatML format models
+        if model_lower.contains("qwen")
+            || model_lower.contains("phi")
+            || model_lower.contains("yi-")
+            || model_lower.contains("deepseek")
+        {
+            return CHATML_STOP_SEQUENCES.iter().map(|s| s.to_string()).collect();
+        }
+
+        // Llama format models
+        if model_lower.contains("llama")
+            || model_lower.contains("mistral")
+            || model_lower.contains("mixtral")
+            || model_lower.contains("gemma")
+        {
+            return LLAMA_STOP_SEQUENCES.iter().map(|s| s.to_string()).collect();
+        }
+
+        // Default: use ChatML as it's most common
+        CHATML_STOP_SEQUENCES.iter().map(|s| s.to_string()).collect()
+    }
+}
+
+impl LlmGenerationParams {
     /// Parse generation params from envelope metadata.
+    ///
+    /// Supports parsing:
+    /// - `max_tokens`: Maximum tokens to generate
+    /// - `temperature`: Sampling temperature
+    /// - `top_p`: Nucleus sampling threshold
+    /// - `top_k`: Top-k sampling
+    /// - `system_prompt`: System prompt text
+    /// - `stop_sequences`: Comma-separated list of stop sequences
+    /// - `model_id`: Used to auto-detect stop sequences if not explicitly provided
     pub fn from_envelope_metadata(metadata: &std::collections::HashMap<String, String>) -> Self {
         let mut params = Self::default();
 
@@ -104,6 +174,33 @@ impl LlmGenerationParams {
         }
         if let Some(val) = metadata.get("system_prompt") {
             params.system_prompt = Some(val.clone());
+        }
+
+        // Parse stop sequences from comma-separated string
+        if let Some(val) = metadata.get("stop_sequences") {
+            params.stop_sequences = val
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+
+        params
+    }
+
+    /// Parse generation params with auto-detected stop sequences based on model ID.
+    ///
+    /// If no explicit stop sequences are provided in metadata, auto-detects
+    /// appropriate stops based on the model ID (ChatML for Qwen/Phi, Llama for others).
+    pub fn from_envelope_metadata_with_model(
+        metadata: &std::collections::HashMap<String, String>,
+        model_id: &str,
+    ) -> Self {
+        let mut params = Self::from_envelope_metadata(metadata);
+
+        // If no stop sequences were explicitly provided, auto-detect from model
+        if params.stop_sequences.is_empty() {
+            params.stop_sequences = Self::default_stops_for_model(model_id);
         }
 
         params
@@ -206,8 +303,15 @@ impl LlmInference for DefaultLlmInference {
             top_p: params.top_p,
             top_k: params.top_k,
             repetition_penalty: 1.1,
-            stop_sequences: Vec::new(),
+            stop_sequences: params.stop_sequences.clone(),
         };
+
+        debug!(
+            target: "xybrid_core",
+            "LLM generation with {} stop sequences: {:?}",
+            gen_config.stop_sequences.len(),
+            gen_config.stop_sequences
+        );
 
         let output = adapter.generate_with_config(
             prompt,
@@ -403,15 +507,19 @@ impl<I: LlmInference + 'static> ExecutionStrategy for LlmStrategy<I> {
         // Extract prompt
         let prompt = Self::extract_prompt(input)?;
 
-        // Parse generation params from envelope metadata
-        let params = LlmGenerationParams::from_envelope_metadata(&input.metadata);
+        // Parse generation params from envelope metadata with auto-detected stop sequences
+        let params = LlmGenerationParams::from_envelope_metadata_with_model(
+            &input.metadata,
+            &metadata.model_id,
+        );
 
         debug!(
             target: "xybrid_core",
-            "LLM generation: max_tokens={}, temp={}, prompt_len={}",
+            "LLM generation: max_tokens={}, temp={}, prompt_len={}, stop_sequences={:?}",
             params.max_tokens,
             params.temperature,
-            prompt.len()
+            prompt.len(),
+            params.stop_sequences
         );
 
         // Generate
@@ -569,6 +677,147 @@ mod tests {
         assert!((params.top_p - 0.9).abs() < 0.001);
         assert_eq!(params.top_k, 40);
         assert!(params.system_prompt.is_none());
+        assert!(params.stop_sequences.is_empty());
+    }
+
+    // ========================================================================
+    // Stop Sequences Tests
+    // ========================================================================
+
+    #[test]
+    fn test_chatml_stop_sequences() {
+        let params = LlmGenerationParams::with_chatml_stops();
+
+        assert!(params.stop_sequences.contains(&"<|im_end|>".to_string()));
+        assert!(params.stop_sequences.contains(&"<|im_start|>".to_string()));
+    }
+
+    #[test]
+    fn test_llama_stop_sequences() {
+        let params = LlmGenerationParams::with_llama_stops();
+
+        assert!(params.stop_sequences.contains(&"</s>".to_string()));
+        assert!(params.stop_sequences.contains(&"[/INST]".to_string()));
+    }
+
+    #[test]
+    fn test_with_stop_sequences() {
+        let params = LlmGenerationParams::default()
+            .with_stop_sequences(vec!["STOP".to_string(), "END".to_string()]);
+
+        assert_eq!(params.stop_sequences.len(), 2);
+        assert!(params.stop_sequences.contains(&"STOP".to_string()));
+        assert!(params.stop_sequences.contains(&"END".to_string()));
+    }
+
+    #[test]
+    fn test_default_stops_for_qwen() {
+        let stops = LlmGenerationParams::default_stops_for_model("qwen2.5-0.5b-instruct");
+
+        assert!(stops.contains(&"<|im_end|>".to_string()));
+        assert!(stops.contains(&"<|im_start|>".to_string()));
+    }
+
+    #[test]
+    fn test_default_stops_for_phi() {
+        let stops = LlmGenerationParams::default_stops_for_model("phi-3-mini-4k");
+
+        assert!(stops.contains(&"<|im_end|>".to_string()));
+    }
+
+    #[test]
+    fn test_default_stops_for_llama() {
+        let stops = LlmGenerationParams::default_stops_for_model("llama-3.2-1b");
+
+        assert!(stops.contains(&"</s>".to_string()));
+        assert!(stops.contains(&"[/INST]".to_string()));
+    }
+
+    #[test]
+    fn test_default_stops_for_mistral() {
+        let stops = LlmGenerationParams::default_stops_for_model("mistral-7b");
+
+        assert!(stops.contains(&"</s>".to_string()));
+    }
+
+    #[test]
+    fn test_default_stops_for_unknown_model() {
+        // Unknown models should default to ChatML (most common)
+        let stops = LlmGenerationParams::default_stops_for_model("some-unknown-model");
+
+        assert!(stops.contains(&"<|im_end|>".to_string()));
+    }
+
+    #[test]
+    fn test_default_stops_case_insensitive() {
+        let stops_lower = LlmGenerationParams::default_stops_for_model("qwen2.5");
+        let stops_upper = LlmGenerationParams::default_stops_for_model("QWEN2.5");
+
+        assert_eq!(stops_lower, stops_upper);
+    }
+
+    #[test]
+    fn test_parse_stop_sequences_from_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert("stop_sequences".to_string(), "<|im_end|>,<|im_start|>".to_string());
+
+        let params = LlmGenerationParams::from_envelope_metadata(&metadata);
+
+        assert_eq!(params.stop_sequences.len(), 2);
+        assert!(params.stop_sequences.contains(&"<|im_end|>".to_string()));
+        assert!(params.stop_sequences.contains(&"<|im_start|>".to_string()));
+    }
+
+    #[test]
+    fn test_parse_stop_sequences_with_spaces() {
+        let mut metadata = HashMap::new();
+        metadata.insert("stop_sequences".to_string(), " STOP , END , HALT ".to_string());
+
+        let params = LlmGenerationParams::from_envelope_metadata(&metadata);
+
+        assert_eq!(params.stop_sequences.len(), 3);
+        assert!(params.stop_sequences.contains(&"STOP".to_string()));
+        assert!(params.stop_sequences.contains(&"END".to_string()));
+        assert!(params.stop_sequences.contains(&"HALT".to_string()));
+    }
+
+    #[test]
+    fn test_parse_empty_stop_sequences() {
+        let mut metadata = HashMap::new();
+        metadata.insert("stop_sequences".to_string(), "".to_string());
+
+        let params = LlmGenerationParams::from_envelope_metadata(&metadata);
+
+        assert!(params.stop_sequences.is_empty());
+    }
+
+    #[test]
+    fn test_auto_detect_stops_for_qwen_model() {
+        let metadata = HashMap::new();
+
+        let params = LlmGenerationParams::from_envelope_metadata_with_model(
+            &metadata,
+            "qwen2.5-0.5b-instruct",
+        );
+
+        assert!(!params.stop_sequences.is_empty());
+        assert!(params.stop_sequences.contains(&"<|im_end|>".to_string()));
+    }
+
+    #[test]
+    fn test_explicit_stops_override_auto_detect() {
+        let mut metadata = HashMap::new();
+        metadata.insert("stop_sequences".to_string(), "CUSTOM_STOP".to_string());
+
+        let params = LlmGenerationParams::from_envelope_metadata_with_model(
+            &metadata,
+            "qwen2.5-0.5b-instruct",
+        );
+
+        // Should use explicit stops, not auto-detected
+        assert_eq!(params.stop_sequences.len(), 1);
+        assert!(params.stop_sequences.contains(&"CUSTOM_STOP".to_string()));
+        assert!(!params.stop_sequences.contains(&"<|im_end|>".to_string()));
     }
 
     #[test]
@@ -831,5 +1080,74 @@ mod tests {
 
         assert_eq!(params.max_tokens, 100);
         assert!((params.temperature - 0.3).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_strategy_auto_detects_stop_sequences() {
+        use crate::runtime_adapter::ModelRuntime;
+
+        let mock = MockLlmInference::new();
+        let strategy = LlmStrategy::with_inference(mock);
+
+        // Create metadata with a Qwen model ID
+        let mut metadata = create_gguf_metadata();
+        metadata.model_id = "qwen2.5-0.5b-instruct".to_string();
+
+        let input = Envelope::new(EnvelopeKind::Text("Test prompt".to_string()));
+
+        let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
+        let mut ctx = ExecutionContext {
+            base_path: "/models",
+            runtimes: &mut runtimes,
+        };
+
+        let _ = strategy.execute(&mut ctx, &metadata, &input);
+
+        // Verify stop sequences were auto-detected
+        let inference = strategy.inference.lock().unwrap();
+        let last_params = inference.last_params.lock().unwrap();
+        let params = last_params.as_ref().unwrap();
+
+        assert!(!params.stop_sequences.is_empty(), "Stop sequences should be auto-detected for Qwen");
+        assert!(
+            params.stop_sequences.contains(&"<|im_end|>".to_string()),
+            "Should contain ChatML stop token"
+        );
+    }
+
+    #[test]
+    fn test_strategy_uses_explicit_stop_sequences() {
+        use crate::runtime_adapter::ModelRuntime;
+
+        let mock = MockLlmInference::new();
+        let strategy = LlmStrategy::with_inference(mock);
+
+        let metadata = create_gguf_metadata();
+
+        // Provide explicit stop sequences
+        let mut input_metadata = HashMap::new();
+        input_metadata.insert("stop_sequences".to_string(), "STOP,END".to_string());
+
+        let input = Envelope::with_metadata(
+            EnvelopeKind::Text("Test prompt".to_string()),
+            input_metadata,
+        );
+
+        let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
+        let mut ctx = ExecutionContext {
+            base_path: "/models",
+            runtimes: &mut runtimes,
+        };
+
+        let _ = strategy.execute(&mut ctx, &metadata, &input);
+
+        // Verify explicit stop sequences were used
+        let inference = strategy.inference.lock().unwrap();
+        let last_params = inference.last_params.lock().unwrap();
+        let params = last_params.as_ref().unwrap();
+
+        assert_eq!(params.stop_sequences.len(), 2);
+        assert!(params.stop_sequences.contains(&"STOP".to_string()));
+        assert!(params.stop_sequences.contains(&"END".to_string()));
     }
 }
