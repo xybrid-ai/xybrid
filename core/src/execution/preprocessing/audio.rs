@@ -4,6 +4,8 @@
 //! - `mel_spectrogram_step`: Convert audio samples to mel spectrogram
 //! - `decode_audio_step`: Decode audio from various formats to float32 samples
 
+use log::warn;
+
 use super::super::types::{ExecutorResult, PreprocessedData};
 use crate::audio::mel::{compute_mel_spectrogram, MelConfig, MelScale, PaddingMode};
 use crate::audio::{decode_wav_audio, prepare_audio_samples};
@@ -40,8 +42,9 @@ pub fn mel_spectrogram_step(
     // Build MelConfig from preset or individual parameters
     let config = if let Some(preset_name) = preset {
         MelConfig::from_preset(preset_name).unwrap_or_else(|| {
-            eprintln!(
-                "[WARN] Unknown mel spectrogram preset '{}', using parameters",
+            warn!(
+                target: "xybrid_core",
+                "Unknown mel spectrogram preset '{}', using parameters",
                 preset_name
             );
             build_mel_config(
