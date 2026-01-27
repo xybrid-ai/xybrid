@@ -61,31 +61,31 @@ pub use template::{
     PreprocessingStep, VoiceConfig, VoiceFormat, VoiceInfo, VoiceLoader,
 };
 
-// Data types
-mod types;
-pub use types::{ExecutorResult, PreprocessedData, RawOutputs};
+// Data types (internal)
+pub(crate) mod types;
+pub(crate) use types::{ExecutorResult, PreprocessedData, RawOutputs};
 
-// Voice loader (mockable)
-mod voice_loader;
-pub use voice_loader::{TtsVoiceLoader, VoiceEmbeddingSource};
+// Voice loader (mockable, internal)
+pub(crate) mod voice_loader;
+pub(crate) use voice_loader::{TtsVoiceLoader, VoiceEmbeddingSource};
 
-// Session factory (mockable)
-mod session_factory;
-pub use session_factory::{InferenceSession, OnnxSessionFactory, SessionFactory};
+// Session factory (mockable, internal)
+pub(crate) mod session_factory;
+pub(crate) use session_factory::{InferenceSession, OnnxSessionFactory, SessionFactory};
 
 // Main executor
 mod executor;
 pub use executor::TemplateExecutor;
 
-// Preprocessing steps
-pub mod preprocessing;
+// Preprocessing steps (internal implementation details)
+pub(crate) mod preprocessing;
 
-// Postprocessing steps
-pub mod postprocessing;
+// Postprocessing steps (internal implementation details)
+pub(crate) mod postprocessing;
 
 // Execution modes (SingleShot, Autoregressive, Whisper, TTS, BERT)
-pub mod modes;
+pub(crate) mod modes;
 
-// Execution strategies (modular execution paths)
-pub mod strategies;
-pub use strategies::{ExecutionContext, ExecutionStrategy, StrategyResolver};
+// Execution strategies (modular execution paths, internal)
+pub(crate) mod strategies;
+pub(crate) use strategies::{ExecutionContext, ExecutionStrategy, StrategyResolver};
