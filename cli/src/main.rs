@@ -652,8 +652,20 @@ fn handle_repl_command(
     let mut orchestrator = Orchestrator::new();
     xybrid_sdk::bridge_orchestrator_events(&orchestrator);
 
-    println!("\n🔥 Models loaded and warm. Ready for input!\n");
-    println!("Enter text and press Enter to run inference.");
+    // Pre-warm models by running a warmup query
+    // This loads the model, compiles Metal shaders, and allocates KV cache
+    // so subsequent queries are fast
+    println!("\n⏳ Warming up models (this may take a moment)...");
+    let warmup_input = Envelope {
+        kind: EnvelopeKind::Text("Hi".to_string()),
+        metadata: std::collections::HashMap::new(),
+    };
+    match orchestrator.execute_pipeline(&stages, &warmup_input, &metrics, &availability_fn) {
+        Ok(_) => println!("🔥 Models loaded and warm. Ready for input!"),
+        Err(e) => println!("⚠️  Warmup failed ({}), first query may be slow", e),
+    }
+
+    println!("\nEnter text and press Enter to run inference.");
     println!("{}", "=".repeat(60));
 
     // REPL loop
