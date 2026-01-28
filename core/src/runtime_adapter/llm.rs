@@ -106,8 +106,9 @@ pub struct LlmConfig {
     #[serde(default = "default_context_length")]
     pub context_length: usize,
 
-    /// Number of GPU layers to offload. 0 = CPU only, -1 = all layers on GPU.
-    #[serde(default)]
+    /// Number of GPU layers to offload. 0 = CPU only, 99 = all layers on GPU (default).
+    /// Use 99 as default to enable GPU acceleration when available.
+    #[serde(default = "default_gpu_layers")]
     pub gpu_layers: i32,
 
     /// Enable paged attention for memory efficiency. Default: true
@@ -117,6 +118,14 @@ pub struct LlmConfig {
     /// Enable logging during inference. Default: false
     #[serde(default)]
     pub logging: bool,
+
+    /// Number of threads for inference. 0 = auto-detect (uses all available cores).
+    #[serde(default)]
+    pub n_threads: usize,
+
+    /// Batch size for prompt processing. 0 = default (512).
+    #[serde(default)]
+    pub n_batch: usize,
 }
 
 fn default_context_length() -> usize {
@@ -127,15 +136,24 @@ fn default_paged_attention() -> bool {
     true
 }
 
+fn default_gpu_layers() -> i32 {
+    // Default to 99 layers on GPU for maximum performance
+    // llama.cpp will automatically use fewer if the model has fewer layers
+    // or fall back to CPU if no GPU is available
+    99
+}
+
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
             model_path: String::new(),
             chat_template: None,
             context_length: default_context_length(),
-            gpu_layers: 0,
+            gpu_layers: default_gpu_layers(),
             paged_attention: default_paged_attention(),
             logging: false,
+            n_threads: 0, // 0 = auto-detect
+            n_batch: 0,   // 0 = default (512)
         }
     }
 }
@@ -176,6 +194,18 @@ impl LlmConfig {
     /// Enable or disable logging.
     pub fn with_logging(mut self, enabled: bool) -> Self {
         self.logging = enabled;
+        self
+    }
+
+    /// Set the number of threads for inference. 0 = auto-detect.
+    pub fn with_threads(mut self, n_threads: usize) -> Self {
+        self.n_threads = n_threads;
+        self
+    }
+
+    /// Set the batch size for prompt processing. 0 = default (512).
+    pub fn with_batch_size(mut self, n_batch: usize) -> Self {
+        self.n_batch = n_batch;
         self
     }
 }

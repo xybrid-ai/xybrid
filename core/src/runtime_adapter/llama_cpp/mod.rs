@@ -143,9 +143,16 @@ impl LlmBackend for LlamaCppBackend {
         let model = sys::llama_load_model_from_file(&gguf_path, config.gpu_layers)
             .map_err(|e| AdapterError::RuntimeError(format!("Failed to load model: {}", e)))?;
 
-        // Create context
-        let context = sys::llama_new_context_with_model(&model, config.context_length)
-            .map_err(|e| AdapterError::RuntimeError(format!("Failed to create context: {}", e)))?;
+        // Create context with thread and batch configuration
+        // n_threads=0 means auto-detect in the C++ layer
+        // n_batch=0 means use default (512)
+        let context = sys::llama_new_context_with_model(
+            &model,
+            config.context_length,
+            config.n_threads,
+            config.n_batch,
+        )
+        .map_err(|e| AdapterError::RuntimeError(format!("Failed to create context: {}", e)))?;
 
         self.model = Some(model);
         self.context = Some(context);

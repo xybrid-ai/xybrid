@@ -8,6 +8,8 @@
 #include "llama.h"
 #include <stdlib.h>
 #include <string.h>
+#include <thread>
+#include <vector>
 
 extern "C" {
 
@@ -49,13 +51,19 @@ void llama_free_model_c(llama_model* model) {
 
 llama_context* llama_new_context_with_model_c(
     llama_model* model,
-    int n_ctx
+    int n_ctx,
+    int n_threads,
+    int n_batch
+    
 ) {
     llama_context_params params = llama_context_default_params();
     params.n_ctx = static_cast<uint32_t>(n_ctx);
-    params.n_batch = 512;  // Default batch size
-    params.n_threads = 4;  // Reasonable default for mobile
-    params.n_threads_batch = 4;
+    params.n_batch = static_cast<uint32_t>(n_batch > 0 ? n_batch : 512);
+    // Use provided thread count, or fall back to hardware concurrency
+    int actual_threads = n_threads > 0 ? n_threads : std::thread::hardware_concurrency();
+    if (actual_threads == 0) actual_threads = 4;  // Fallback if detection fails
+    params.n_threads = static_cast<uint32_t>(actual_threads);
+    params.n_threads_batch = static_cast<uint32_t>(actual_threads);
 
     return llama_init_from_model(model, params);
 }
@@ -173,6 +181,50 @@ int llama_chat_apply_template_c(
         buf,
         length
     );
+}
+
+/**
+ * Format chat messages using the model's built-in chat template.
+ *
+ * @param model     The llama model (for extracting chat template metadata)
+ * @param roles     Array of role strings ("user", "assistant", "system")
+ * @param contents  Array of content strings
+ * @param n_msg     Number of messages
+ * @param buf       Output buffer for formatted prompt
+ * @param buf_size  Size of output buffer
+ * @return          Length of formatted prompt, or negative on error
+ */
+int llama_format_chat_with_model_c(
+    const llama_model* model,
+    const char** roles,
+    const char** contents,
+    size_t n_msg,
+    char* buf,
+    int buf_size
+) {
+    if (!model || !roles || !contents || n_msg == 0) {
+        return -1;
+    }
+
+    // Build llama_chat_message array
+    std::vector<llama_chat_message> messages(n_msg);
+    for (size_t i = 0; i < n_msg; i++) {
+        messages[i].role = roles[i];
+        messages[i].content = contents[i];
+    }
+
+    // Get model's chat template from metadata
+    // Pass nullptr to use model's built-in template
+    int result = llama_chat_apply_template(
+        nullptr,  // Use model's default template
+        messages.data(),
+        n_msg,
+        true,     // add_ass: add assistant start tag
+        buf,
+        buf_size
+    );
+
+    return result;
 }
 
 // =============================================================================
