@@ -739,6 +739,105 @@ impl Pipeline {
         Ok(())
     }
 
+    // =========================================================================
+    // Warmup Methods (for pre-loading models)
+    // =========================================================================
+
+    /// Warm up the pipeline by running a minimal inference through all stages.
+    ///
+    /// This pre-loads all models into memory, ensuring that the first real inference
+    /// is fast. For LLM pipelines, this loads model weights and creates contexts.
+    ///
+    /// Call this after `load_models()` to eliminate cold-start latency.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
+    /// pipeline.load_models()?;  // Download models
+    /// pipeline.warmup()?;       // Pre-load into memory
+    ///
+    /// // First inference is now fast
+    /// let result = pipeline.run(&Envelope::text("Hello"))?;
+    /// ```
+    pub fn warmup(&self) -> PipelineResult<()> {
+        log::info!(target: "xybrid_sdk", "Warming up pipeline: {:?}", self.name);
+
+        // Ensure models are downloaded first
+        if !self.is_ready() {
+            self.load_models()?;
+        }
+
+        // Create a minimal warmup input
+        // Use text as it works for most model types
+        let warmup_input = Envelope {
+            kind: EnvelopeKind::Text("Hi".to_string()),
+            metadata: std::collections::HashMap::new(),
+        };
+
+        let start = std::time::Instant::now();
+        let _ = self.run(&warmup_input)?;
+        let elapsed = start.elapsed();
+
+        log::info!(
+            target: "xybrid_sdk",
+            "Pipeline {:?} warmed up in {:?}",
+            self.name,
+            elapsed
+        );
+
+        Ok(())
+    }
+
+    /// Warm up the pipeline asynchronously.
+    ///
+    /// This is useful for background pre-loading at app startup without blocking the UI.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
+    /// pipeline.load_models()?;
+    ///
+    /// // Start warmup in background
+    /// let pipeline_clone = pipeline.clone();
+    /// let warmup_handle = tokio::spawn(async move {
+    ///     pipeline_clone.warmup_async().await
+    /// });
+    ///
+    /// // Do other initialization...
+    ///
+    /// // Wait for warmup if needed
+    /// warmup_handle.await??;
+    /// ```
+    pub async fn warmup_async(&self) -> PipelineResult<()> {
+        log::info!(target: "xybrid_sdk", "Warming up pipeline (async): {:?}", self.name);
+
+        // Ensure models are downloaded first
+        if !self.is_ready() {
+            self.load_models()?;
+        }
+
+        // Create a minimal warmup input
+        let warmup_input = Envelope {
+            kind: EnvelopeKind::Text("Hi".to_string()),
+            metadata: std::collections::HashMap::new(),
+        };
+
+        let start = std::time::Instant::now();
+        let _ = self.run_async(&warmup_input).await?;
+        let elapsed = start.elapsed();
+
+        log::info!(
+            target: "xybrid_sdk",
+            "Pipeline {:?} warmed up (async) in {:?}",
+            self.name,
+            elapsed
+        );
+
+        Ok(())
+    }
+
     /// Run inference on the pipeline.
     ///
     /// If models aren't loaded yet, this will automatically download them first.
@@ -944,6 +1043,18 @@ impl Pipeline {
         })
         .await
         .map_err(|e| SdkError::PipelineError(format!("Task join error: {}", e)))?
+    }
+}
+
+// Make Pipeline cloneable (shares the handle via Arc)
+impl Clone for Pipeline {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            handle: self.handle.clone(),
+            stages: self.stages.clone(),
+            total_download_bytes: self.total_download_bytes,
+        }
     }
 }
 

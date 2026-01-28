@@ -57,6 +57,31 @@
 //!     println!("  {}: {}ms ({})", stage.name, stage.latency_ms, stage.target);
 //! }
 //! ```
+//!
+//! ## Model Warmup (for LLM and other large models)
+//!
+//! Pre-load models at app startup for fast first inference:
+//!
+//! ```rust,ignore
+//! use xybrid_sdk::{ModelLoader, PipelineRef, Envelope};
+//!
+//! // Option 1: Warmup a single model
+//! let model = ModelLoader::from_registry("gemma-3-1b").load()?;
+//! model.warmup()?;  // Pre-loads model weights, compiles shaders
+//! let result = model.run(&Envelope::text("Hello"))?;  // Fast!
+//!
+//! // Option 2: Warmup a pipeline
+//! let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
+//! pipeline.load_models()?;  // Download models
+//! pipeline.warmup()?;       // Pre-load into memory
+//! let result = pipeline.run(&Envelope::text("Hello"))?;  // Fast!
+//!
+//! // Option 3: Async warmup for background loading
+//! let model = loader.load()?;
+//! tokio::spawn(async move {
+//!     model.warmup_async().await
+//! });
+//! ```
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
