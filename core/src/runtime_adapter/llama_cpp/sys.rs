@@ -71,7 +71,12 @@ extern "C" {
     fn llama_free_model_c(model: *mut c_void);
 
     // Context management
-    fn llama_new_context_with_model_c(model: *mut c_void, n_ctx: c_int) -> *mut c_void;
+    fn llama_new_context_with_model_c(
+        model: *mut c_void,
+        n_ctx: c_int,
+        n_threads: c_int,
+        n_batch: c_int,
+    ) -> *mut c_void;
     fn llama_free_c(ctx: *mut c_void);
     fn llama_kv_cache_clear_c(ctx: *mut c_void);
 
@@ -115,6 +120,16 @@ extern "C" {
         add_ass: bool,
         buf: *mut c_char,
         length: c_int,
+    ) -> c_int;
+
+    // Format chat using model's built-in template
+    fn llama_format_chat_with_model_c(
+        model: *const c_void,
+        roles: *const *const c_char,
+        contents: *const *const c_char,
+        n_msg: usize,
+        buf: *mut c_char,
+        buf_size: c_int,
     ) -> c_int;
 
     // Generation loop with stop sequence support
@@ -186,12 +201,27 @@ pub fn llama_free_model(model: LlamaModel) {
 }
 
 /// Create a new context for a model
+///
+/// # Arguments
+/// * `model` - The loaded model
+/// * `n_ctx` - Context length (tokens)
+/// * `n_threads` - Number of threads for inference (0 = auto-detect)
+/// * `n_batch` - Batch size for prompt processing (0 = default 512)
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_new_context_with_model(
     model: &LlamaModel,
     n_ctx: usize,
+    n_threads: usize,
+    n_batch: usize,
 ) -> Result<LlamaContext, AdapterError> {
-    let ptr = unsafe { llama_new_context_with_model_c(model.ptr, n_ctx as c_int) };
+    let ptr = unsafe {
+        llama_new_context_with_model_c(
+            model.ptr,
+            n_ctx as c_int,
+            n_threads as c_int,
+            n_batch as c_int,
+        )
+    };
 
     if ptr.is_null() {
         return Err(AdapterError::RuntimeError(
@@ -242,14 +272,86 @@ pub fn llama_n_ctx(ctx: &LlamaContext) -> usize {
     unsafe { llama_n_ctx_c(ctx.ptr) as usize }
 }
 
-/// Format chat messages using the model's chat template
+/// Format chat messages using the model's native chat template.
+///
+/// This uses llama.cpp's built-in template system which automatically
+/// uses the correct format for each model (ChatML for Qwen, Gemma format for Gemma, etc.)
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_format_chat(
-    _model: &LlamaModel,
+    model: &LlamaModel,
     messages: &[ChatMessage],
 ) -> Result<String, AdapterError> {
-    // Simple chat template formatting (ChatML-style)
-    // TODO: Use llama_chat_apply_template for model-specific templates
+    if messages.is_empty() {
+        return Err(AdapterError::InvalidInput("Empty messages".to_string()));
+    }
+
+    // Convert messages to C strings
+    let roles: Vec<CString> = messages
+        .iter()
+        .map(|m| CString::new(m.role.as_str()).unwrap_or_else(|_| CString::new("user").unwrap()))
+        .collect();
+    let contents: Vec<CString> = messages
+        .iter()
+        .map(|m| CString::new(m.content.as_str()).unwrap_or_else(|_| CString::new("").unwrap()))
+        .collect();
+
+    let role_ptrs: Vec<*const c_char> = roles.iter().map(|s| s.as_ptr()).collect();
+    let content_ptrs: Vec<*const c_char> = contents.iter().map(|s| s.as_ptr()).collect();
+
+    // Allocate output buffer (start with 4KB, should be enough for most prompts)
+    let mut buf = vec![0u8; 4096];
+
+    let result = unsafe {
+        llama_format_chat_with_model_c(
+            model.ptr,
+            role_ptrs.as_ptr(),
+            content_ptrs.as_ptr(),
+            messages.len(),
+            buf.as_mut_ptr() as *mut c_char,
+            buf.len() as c_int,
+        )
+    };
+
+    if result < 0 {
+        // Fall back to ChatML format if model template fails
+        log::warn!(
+            target: "xybrid_core",
+            "Model chat template failed (code {}), falling back to ChatML format",
+            result
+        );
+        return llama_format_chat_chatml(messages);
+    }
+
+    // If buffer was too small, resize and retry
+    if result as usize >= buf.len() {
+        buf.resize((result as usize) + 1, 0);
+        let retry_result = unsafe {
+            llama_format_chat_with_model_c(
+                model.ptr,
+                role_ptrs.as_ptr(),
+                content_ptrs.as_ptr(),
+                messages.len(),
+                buf.as_mut_ptr() as *mut c_char,
+                buf.len() as c_int,
+            )
+        };
+        if retry_result < 0 {
+            return llama_format_chat_chatml(messages);
+        }
+    }
+
+    // Convert result to string
+    let len = result as usize;
+    if let Ok(prompt) = std::str::from_utf8(&buf[..len]) {
+        Ok(prompt.to_string())
+    } else {
+        llama_format_chat_chatml(messages)
+    }
+}
+
+/// Fallback ChatML format for models without built-in templates.
+#[cfg(feature = "llm-llamacpp")]
+fn llama_format_chat_chatml(messages: &[ChatMessage]) -> Result<String, AdapterError> {
     let mut prompt = String::new();
 
     for msg in messages {
@@ -591,6 +693,8 @@ pub fn llama_free_model(_model: LlamaModel) {}
 pub fn llama_new_context_with_model(
     _model: &LlamaModel,
     _n_ctx: usize,
+    _n_threads: usize,
+    _n_batch: usize,
 ) -> Result<LlamaContext, AdapterError> {
     Err(AdapterError::RuntimeError(
         "llm-llamacpp feature not enabled".to_string(),
