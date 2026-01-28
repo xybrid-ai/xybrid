@@ -686,6 +686,179 @@ impl XybridModel {
             .and_then(|vc| vc.catalog.into_iter().find(|v| v.id == voice_id))
     }
 
+    // =========================================================================
+    // Warmup Methods (for pre-loading models)
+    // =========================================================================
+
+    /// Warm up the model by running a minimal inference.
+    ///
+    /// This pre-loads the model into memory, ensuring that the first real inference
+    /// is fast. For LLM models, this loads the model weights and creates the context.
+    ///
+    /// Call this at app startup or after `load()` to eliminate cold-start latency.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let model = loader.load()?;
+    /// model.warmup()?;  // Pre-load model
+    ///
+    /// // First inference is now fast
+    /// let result = model.run(&envelope)?;
+    /// ```
+    pub fn warmup(&self) -> SdkResult<()> {
+        use xybrid_core::ir::EnvelopeKind;
+
+        log::info!(target: "xybrid_sdk", "Warming up model: {}", self.model_id);
+
+        // Create a minimal input based on expected input type
+        let warmup_input = match self.output_type {
+            // For TTS models, use a short text
+            OutputType::Audio => Envelope {
+                kind: EnvelopeKind::Text("Hi".to_string()),
+                metadata: std::collections::HashMap::new(),
+            },
+            // For ASR models, use minimal audio (1 second of silence at 16kHz)
+            OutputType::Text if self.supports_streaming => {
+                // Create a minimal WAV file with silence
+                let silence_samples = vec![0i16; 16000]; // 1 second at 16kHz
+                let audio_bytes = Self::create_wav_bytes(&silence_samples, 16000);
+                Envelope {
+                    kind: EnvelopeKind::Audio(audio_bytes),
+                    metadata: std::collections::HashMap::new(),
+                }
+            }
+            // For LLM/text models, use a short prompt
+            OutputType::Text | OutputType::Embedding | OutputType::Unknown => Envelope {
+                kind: EnvelopeKind::Text("Hi".to_string()),
+                metadata: std::collections::HashMap::new(),
+            },
+        };
+
+        // Run inference (this loads the model)
+        let start = Instant::now();
+        let _ = self.run(&warmup_input)?;
+        let elapsed = start.elapsed();
+
+        log::info!(
+            target: "xybrid_sdk",
+            "Model {} warmed up in {:?}",
+            self.model_id,
+            elapsed
+        );
+
+        Ok(())
+    }
+
+    /// Warm up the model asynchronously.
+    ///
+    /// This is useful for background pre-loading at app startup without blocking the UI.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let model = loader.load()?;
+    ///
+    /// // Start warmup in background
+    /// let warmup_handle = tokio::spawn(async move {
+    ///     model.warmup_async().await
+    /// });
+    ///
+    /// // Do other initialization...
+    ///
+    /// // Wait for warmup if needed
+    /// warmup_handle.await??;
+    /// ```
+    pub async fn warmup_async(&self) -> SdkResult<()> {
+        let handle = self.handle.clone();
+        let model_id = self.model_id.clone();
+        let output_type = self.output_type;
+        let supports_streaming = self.supports_streaming;
+
+        tokio::task::spawn_blocking(move || {
+            use xybrid_core::ir::EnvelopeKind;
+
+            log::info!(target: "xybrid_sdk", "Warming up model (async): {}", model_id);
+
+            // Create a minimal input based on expected input type
+            let warmup_input = match output_type {
+                OutputType::Audio => Envelope {
+                    kind: EnvelopeKind::Text("Hi".to_string()),
+                    metadata: std::collections::HashMap::new(),
+                },
+                OutputType::Text if supports_streaming => {
+                    let silence_samples = vec![0i16; 16000];
+                    let audio_bytes = Self::create_wav_bytes(&silence_samples, 16000);
+                    Envelope {
+                        kind: EnvelopeKind::Audio(audio_bytes),
+                        metadata: std::collections::HashMap::new(),
+                    }
+                }
+                OutputType::Text | OutputType::Embedding | OutputType::Unknown => Envelope {
+                    kind: EnvelopeKind::Text("Hi".to_string()),
+                    metadata: std::collections::HashMap::new(),
+                },
+            };
+
+            let start = Instant::now();
+
+            // Run inference
+            let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+            if !guard.loaded {
+                return Err(SdkError::NotLoaded);
+            }
+
+            let metadata = guard.metadata.clone();
+            let _ = guard.executor.execute(&metadata, &warmup_input).map_err(|e| {
+                SdkError::InferenceError(format!("Warmup failed: {}", e))
+            })?;
+
+            let elapsed = start.elapsed();
+            log::info!(
+                target: "xybrid_sdk",
+                "Model {} warmed up (async) in {:?}",
+                model_id,
+                elapsed
+            );
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| SdkError::InferenceError(format!("Task join error: {}", e)))?
+    }
+
+    /// Create a minimal WAV file bytes from samples for warmup.
+    fn create_wav_bytes(samples: &[i16], sample_rate: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let num_samples = samples.len();
+        let data_size = (num_samples * 2) as u32;
+        let file_size = 36 + data_size;
+
+        // RIFF header
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&file_size.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+
+        // fmt chunk
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes()); // Chunk size
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // Audio format (PCM)
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // Num channels
+        bytes.extend_from_slice(&sample_rate.to_le_bytes()); // Sample rate
+        bytes.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // Byte rate
+        bytes.extend_from_slice(&2u16.to_le_bytes()); // Block align
+        bytes.extend_from_slice(&16u16.to_le_bytes()); // Bits per sample
+
+        // data chunk
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_size.to_le_bytes());
+        for sample in samples {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+
+        bytes
+    }
+
     /// Run batch inference with an Envelope.
     ///
     /// # Arguments
