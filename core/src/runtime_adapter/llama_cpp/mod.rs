@@ -237,10 +237,11 @@ impl LlmBackend for LlamaCppBackend {
         // Find the earliest occurrence of any stop sequence and truncate there
         let mut finish_reason = "length".to_string();
 
-        // Build list of patterns to check - include config stop sequences plus common ChatML markers
+        // Build list of patterns to check - include config stop sequences plus common markers
         let mut stop_patterns: Vec<&str> = config.stop_sequences.iter().map(|s| s.as_str()).collect();
         // Always check for these common markers even if not in config
-        let extra_patterns = ["<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>"];
+        // Note: <end_of_turn> is Gemma's stop token, <|im_end|> is ChatML (Qwen, Phi)
+        let extra_patterns = ["<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>", "<end_of_turn>"];
         for p in &extra_patterns {
             if !stop_patterns.contains(p) {
                 stop_patterns.push(p);
@@ -319,9 +320,38 @@ impl LlmBackend for LlamaCppBackend {
 
         let start = std::time::Instant::now();
 
-        // Track cumulative text and token index
+        // Track cumulative text and what we've safely emitted
         let mut cumulative_text = String::new();
+        let mut last_emitted_len = 0usize;
         let mut token_index = 0usize;
+        let mut hit_stop_pattern = false;
+
+        // Build stop patterns list for early detection during streaming
+        // Note: <end_of_turn> is Gemma's stop token, <|im_end|> is ChatML (Qwen, Phi)
+        let streaming_stop_patterns: Vec<String> = {
+            let mut patterns: Vec<String> = config.stop_sequences.clone();
+            for p in ["<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>", "<end_of_turn>"] {
+                if !patterns.iter().any(|s| s == p) {
+                    patterns.push(p.to_string());
+                }
+            }
+            patterns
+        };
+
+        // Helper: find if text ends with a PREFIX of any stop pattern
+        // Returns the position where the potential stop sequence starts, or None
+        let find_potential_stop_start = |text: &str| -> Option<usize> {
+            for pattern in &streaming_stop_patterns {
+                // Check if text ends with any prefix of this pattern
+                for prefix_len in 1..=pattern.len() {
+                    let prefix = &pattern[..prefix_len];
+                    if text.ends_with(prefix) {
+                        return Some(text.len() - prefix_len);
+                    }
+                }
+            }
+            None
+        };
 
         // Generate with streaming callback
         let (output_tokens, _stopped_by_callback) = sys::llama_generate_streaming(
@@ -333,18 +363,47 @@ impl LlmBackend for LlamaCppBackend {
             config.top_p,
             config.top_k,
             config.repetition_penalty,
-            &config.stop_sequences,
+            &streaming_stop_patterns, // Pass full stop patterns to C layer
             |token_id, token_text| {
+                // Once we hit a stop pattern, don't emit any more tokens
+                if hit_stop_pattern {
+                    return Ok(());
+                }
+
                 cumulative_text.push_str(token_text);
 
-                let partial = PartialToken::new(
-                    token_text.to_string(),
-                    token_index,
-                    cumulative_text.clone(),
-                ).with_token_id(token_id as i64);
+                // Check if any COMPLETE stop pattern is now in the cumulative text
+                for pattern in &streaming_stop_patterns {
+                    if cumulative_text.contains(pattern.as_str()) {
+                        log::debug!(target: "xybrid_core", "Streaming: detected stop pattern '{}', stopping token emission", pattern);
+                        hit_stop_pattern = true;
+                        // Truncate the cumulative text at the stop pattern
+                        if let Some(pos) = cumulative_text.find(pattern.as_str()) {
+                            cumulative_text.truncate(pos);
+                        }
+                        return Ok(());
+                    }
+                }
 
-                token_index += 1;
-                on_token(partial)
+                // Find the safe portion to emit (excluding potential stop sequence starts)
+                let safe_end = find_potential_stop_start(&cumulative_text)
+                    .unwrap_or(cumulative_text.len());
+
+                // Only emit if we have new safe content
+                if safe_end > last_emitted_len {
+                    let safe_text = &cumulative_text[last_emitted_len..safe_end];
+                    let partial = PartialToken::new(
+                        safe_text.to_string(),
+                        token_index,
+                        cumulative_text[..safe_end].to_string(),
+                    ).with_token_id(token_id as i64);
+
+                    last_emitted_len = safe_end;
+                    token_index += 1;
+                    on_token(partial)?;
+                }
+
+                Ok(())
             },
         )?;
 
@@ -353,20 +412,13 @@ impl LlmBackend for LlamaCppBackend {
         // Decode tokens to text (for final output)
         let mut text = sys::llama_detokenize(model, &output_tokens)?;
 
-        // Apply stop sequence truncation
-        let mut finish_reason = "length".to_string();
+        // Apply stop sequence truncation (safety net - streaming callback already truncated)
+        let mut finish_reason = if hit_stop_pattern { "stop".to_string() } else { "length".to_string() };
 
-        let mut stop_patterns: Vec<&str> = config.stop_sequences.iter().map(|s| s.as_str()).collect();
-        let extra_patterns = ["<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>"];
-        for p in &extra_patterns {
-            if !stop_patterns.contains(p) {
-                stop_patterns.push(p);
-            }
-        }
-
+        // Use streaming_stop_patterns (already built above) for final text cleanup
         let mut earliest_pos: Option<usize> = None;
-        for stop_seq in &stop_patterns {
-            if let Some(pos) = text.find(stop_seq) {
+        for pattern in &streaming_stop_patterns {
+            if let Some(pos) = text.find(pattern.as_str()) {
                 match earliest_pos {
                     None => earliest_pos = Some(pos),
                     Some(current) if pos < current => earliest_pos = Some(pos),
@@ -374,10 +426,8 @@ impl LlmBackend for LlamaCppBackend {
                 }
             }
         }
-        if earliest_pos.is_some() {
-            if let Some(pos) = earliest_pos {
-                text.truncate(pos);
-            }
+        if let Some(pos) = earliest_pos {
+            text.truncate(pos);
             finish_reason = "stop".to_string();
         }
 
