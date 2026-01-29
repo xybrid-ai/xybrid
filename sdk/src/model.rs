@@ -13,7 +13,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use tempfile::TempDir;
-use xybrid_core::bundler::XyBundle;
 use xybrid_core::execution::{
     ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
 };
@@ -138,9 +137,7 @@ struct ModelHandle {
     executor: TemplateExecutor,
     /// Model metadata
     metadata: ModelMetadata,
-    /// Temporary directory for extracted bundles (kept alive while model is loaded)
-    _temp_dir: Option<TempDir>,
-    /// Model directory path
+    /// Model directory path (permanent extraction in cache)
     model_dir: PathBuf,
     /// Whether model is currently loaded
     loaded: bool,
@@ -419,61 +416,18 @@ impl ModelLoader {
         let mut file = std::fs::File::create(&bundle_path)?;
         std::io::copy(&mut response.into_reader(), &mut file)?;
 
-        // Extract and load
-        self.load_from_bundle_with_temp(&bundle_path, Some(temp_dir))
+        // Extract using CacheManager (extracts to permanent cache location)
+        // The temp_dir will be dropped after this, but extracted files persist
+        self.load_from_bundle(&bundle_path)
     }
 
     fn load_from_bundle(&self, path: &PathBuf) -> SdkResult<XybridModel> {
-        self.load_from_bundle_with_temp(path, None)
-    }
+        // Use CacheManager for unified extraction (single source of truth)
+        let cache = crate::cache::CacheManager::new()?;
+        let extract_dir = cache.ensure_extracted(path)?;
 
-    fn load_from_bundle_with_temp(
-        &self,
-        path: &PathBuf,
-        existing_temp: Option<TempDir>,
-    ) -> SdkResult<XybridModel> {
-        // Load the bundle
-        let bundle = XyBundle::load(path)
-            .map_err(|e| SdkError::LoadError(format!("Failed to load bundle: {}", e)))?;
-
-        // Create temp directory for extraction (or use existing)
-        let temp_dir = match existing_temp {
-            Some(t) => t,
-            None => TempDir::new()?,
-        };
-        let extract_dir = temp_dir.path().join("model");
-        std::fs::create_dir_all(&extract_dir)?;
-
-        // Extract bundle
-        bundle
-            .extract_to(&extract_dir)
-            .map_err(|e| SdkError::LoadError(format!("Failed to extract bundle: {}", e)))?;
-
-        // Get model ID from manifest
-        let manifest = bundle.manifest();
-        let model_id = manifest.model_id.clone();
-        let version = manifest.version.clone();
-
-        // Load from extracted directory
-        let handle = Self::create_model_handle(&extract_dir, Some(temp_dir))?;
-
-        // Determine if streaming is supported
-        let supports_streaming = Self::check_streaming_support(&handle.metadata);
-
-        // Determine output type
-        let output_type = Self::infer_output_type(&handle.metadata);
-
-        Ok(XybridModel {
-            handle: Arc::new(RwLock::new(handle)),
-            model_id,
-            version,
-            output_type,
-            supports_streaming,
-        })
-    }
-
-    fn load_from_directory(&self, path: &PathBuf) -> SdkResult<XybridModel> {
-        let handle = Self::create_model_handle(path, None)?;
+        // Load from extracted directory (extraction is permanent in cache)
+        let handle = Self::create_model_handle(&extract_dir)?;
 
         let model_id = handle.metadata.model_id.clone();
         let version = handle.metadata.version.clone();
@@ -489,10 +443,24 @@ impl ModelLoader {
         })
     }
 
-    fn create_model_handle(
-        model_dir: &PathBuf,
-        temp_dir: Option<TempDir>,
-    ) -> SdkResult<ModelHandle> {
+    fn load_from_directory(&self, path: &PathBuf) -> SdkResult<XybridModel> {
+        let handle = Self::create_model_handle(path)?;
+
+        let model_id = handle.metadata.model_id.clone();
+        let version = handle.metadata.version.clone();
+        let supports_streaming = Self::check_streaming_support(&handle.metadata);
+        let output_type = Self::infer_output_type(&handle.metadata);
+
+        Ok(XybridModel {
+            handle: Arc::new(RwLock::new(handle)),
+            model_id,
+            version,
+            output_type,
+            supports_streaming,
+        })
+    }
+
+    fn create_model_handle(model_dir: &PathBuf) -> SdkResult<ModelHandle> {
         // Load metadata
         let metadata_path = model_dir.join("model_metadata.json");
         let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
@@ -507,7 +475,6 @@ impl ModelLoader {
         Ok(ModelHandle {
             executor,
             metadata,
-            _temp_dir: temp_dir,
             model_dir: model_dir.clone(),
             loaded: true,
         })

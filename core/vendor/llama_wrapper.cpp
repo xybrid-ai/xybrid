@@ -486,4 +486,193 @@ int llama_generate_c(
     return n_generated;
 }
 
+// =============================================================================
+// Streaming Generation
+// =============================================================================
+
+/**
+ * Callback type for streaming token generation.
+ *
+ * @param token_id   The raw token ID
+ * @param token_text The decoded token text (null-terminated)
+ * @param user_data  User-provided context pointer
+ * @return 0 to continue, non-zero to stop generation
+ */
+typedef int (*token_callback_t)(int32_t token_id, const char* token_text, void* user_data);
+
+/**
+ * Generate tokens with streaming callback.
+ *
+ * Same as llama_generate_c but calls the callback for each generated token.
+ * If the callback returns non-zero, generation stops early.
+ *
+ * @param ctx         The llama context
+ * @param model       The llama model
+ * @param input_tokens Input token array
+ * @param n_input     Number of input tokens
+ * @param output_tokens Output buffer for generated tokens
+ * @param max_tokens  Maximum tokens to generate
+ * @param temperature Sampling temperature (0 = greedy)
+ * @param top_p       Top-p (nucleus) sampling threshold
+ * @param top_k       Top-k sampling (0 = disabled)
+ * @param repeat_penalty Repetition penalty (1.0 = disabled)
+ * @param seed        Random seed for sampling
+ * @param stop_seqs   Flattened array of stop sequence token IDs (can be NULL)
+ * @param stop_lens   Length of each stop sequence (can be NULL)
+ * @param n_stop_seqs Number of stop sequences (0 if none)
+ * @param callback    Callback function called for each token (can be NULL)
+ * @param user_data   User data passed to callback
+ * @return Number of tokens generated, or negative on error
+ */
+int llama_generate_streaming_c(
+    llama_context* ctx,
+    const llama_model* model,
+    const int32_t* input_tokens,
+    int n_input,
+    int32_t* output_tokens,
+    int max_tokens,
+    float temperature,
+    float top_p,
+    int top_k,
+    float repeat_penalty,
+    uint32_t seed,
+    const int32_t* stop_seqs,
+    const int* stop_lens,
+    int n_stop_seqs,
+    token_callback_t callback,
+    void* user_data
+) {
+    if (!ctx || !model || !input_tokens || !output_tokens || n_input <= 0 || max_tokens <= 0) {
+        return -1;
+    }
+
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+    const llama_token eos_token = llama_vocab_eos(vocab);
+    const int n_vocab = llama_vocab_n_tokens(vocab);
+
+    // Create sampler chain with repetition penalty
+    llama_sampler* sampler = llama_sampler_chain_create_c(
+        temperature, top_p, top_k, repeat_penalty, 64, seed
+    );
+    if (!sampler) {
+        return -2;
+    }
+
+    // Create batch for decoding
+    llama_batch batch = llama_batch_init(512, 0, 1);
+
+    int n_generated = 0;
+    int n_cur = 0;  // Current position in context
+    bool stopped_by_callback = false;
+
+    // First, process all input tokens
+    batch.n_tokens = 0;
+    for (int i = 0; i < n_input; i++) {
+        batch.token[batch.n_tokens] = input_tokens[i];
+        batch.pos[batch.n_tokens] = n_cur;
+        batch.n_seq_id[batch.n_tokens] = 1;
+        batch.seq_id[batch.n_tokens][0] = 0;
+        batch.logits[batch.n_tokens] = (i == n_input - 1) ? 1 : 0;
+        batch.n_tokens++;
+        n_cur++;
+    }
+
+    // Decode input tokens
+    if (llama_decode(ctx, batch) != 0) {
+        llama_batch_free(batch);
+        llama_sampler_free(sampler);
+        return -3;
+    }
+
+    // Buffer for token text conversion
+    char token_buf[256];
+
+    // Generation loop
+    while (n_generated < max_tokens) {
+        // Get logits for the last token
+        float* logits = llama_get_logits_ith(ctx, batch.n_tokens - 1);
+        if (!logits) {
+            break;
+        }
+
+        // Create token data array for sampling
+        llama_token_data_array candidates;
+        llama_token_data* candidates_data = new llama_token_data[n_vocab];
+
+        for (int i = 0; i < n_vocab; i++) {
+            candidates_data[i].id = i;
+            candidates_data[i].logit = logits[i];
+            candidates_data[i].p = 0.0f;
+        }
+
+        candidates.data = candidates_data;
+        candidates.size = n_vocab;
+        candidates.selected = -1;
+        candidates.sorted = false;
+
+        // Apply sampler chain to get next token
+        llama_sampler_apply(sampler, &candidates);
+
+        llama_token new_token = candidates.data[candidates.selected].id;
+        delete[] candidates_data;
+
+        // Accept token in sampler (for repetition penalty etc)
+        llama_sampler_accept(sampler, new_token);
+
+        // Store generated token
+        output_tokens[n_generated] = new_token;
+        n_generated++;
+
+        // Call streaming callback if provided
+        if (callback) {
+            // Convert token to text
+            int len = llama_token_to_piece_c(model, new_token, token_buf, sizeof(token_buf) - 1, 0, true);
+            if (len > 0) {
+                token_buf[len] = '\0';
+            } else {
+                token_buf[0] = '\0';
+            }
+
+            // Call callback - if it returns non-zero, stop generation
+            int cb_result = callback(new_token, token_buf, user_data);
+            if (cb_result != 0) {
+                stopped_by_callback = true;
+                break;
+            }
+        }
+
+        // Check for EOS
+        if (new_token == eos_token) {
+            break;
+        }
+
+        // Check for stop sequences
+        if (check_stop_sequences(output_tokens, n_generated, stop_seqs, stop_lens, n_stop_seqs)) {
+            break;
+        }
+
+        // Prepare batch for next token
+        batch.n_tokens = 0;
+        batch.token[0] = new_token;
+        batch.pos[0] = n_cur;
+        batch.n_seq_id[0] = 1;
+        batch.seq_id[0][0] = 0;
+        batch.logits[0] = 1;
+        batch.n_tokens = 1;
+        n_cur++;
+
+        // Decode the new token
+        if (llama_decode(ctx, batch) != 0) {
+            break;
+        }
+    }
+
+    llama_batch_free(batch);
+    llama_sampler_free(sampler);
+
+    // Return negative if stopped by callback (to distinguish from normal completion)
+    // The absolute value is still the number of tokens generated
+    return stopped_by_callback ? -n_generated : n_generated;
+}
+
 } // extern "C"

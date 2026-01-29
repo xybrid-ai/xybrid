@@ -7,6 +7,12 @@ edition = "2021"
 name = "xybrid"
 path = "src/main.rs"
 
+[features]
+default = []
+# LLM backend features (forwarded to xybrid-core)
+llm-llamacpp = ["xybrid-core/llm-llamacpp", "xybrid-sdk/llm-llamacpp"]
+llm-mistral = ["xybrid-core/llm-mistral", "xybrid-sdk/llm-mistral"]
+
 [dependencies]
 xybrid-core = { path = "../core" }
 xybrid-sdk = { path = "../sdk" }

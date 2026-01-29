@@ -244,6 +244,16 @@ impl LlmBackend for MistralBackend {
         self.generate(&messages, config)
     }
 
+    // TODO: Implement true streaming for mistral.rs once we verify the streaming API
+    // For now, uses the default implementation which falls back to non-streaming.
+    // The mistral.rs streaming API (stream_chat_request) has a different response
+    // structure that needs investigation.
+
+    fn supports_streaming(&self) -> bool {
+        // Return false until true streaming is implemented
+        false
+    }
+
     fn memory_usage(&self) -> Option<u64> {
         None
     }

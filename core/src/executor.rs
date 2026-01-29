@@ -10,20 +10,31 @@
 //! The executor handles:
 //! - **Adapter registry**: Maintain available runtime adapters
 //! - **Target selection**: Choose adapter based on execution target
-//! - **Model loading**: Load models from .xyb bundles (already downloaded)
+//! - **Model execution**: Execute models from DIRECTORIES (pre-extracted)
 //! - **LLM integration**: Handle cloud API calls (OpenAI, Anthropic)
 //!
-//! Note: Model downloading is NOT the executor's responsibility. Models should be
-//! downloaded via the SDK's `RegistryClient` before invoking the executor.
+//! ## Architectural Boundary
+//!
+//! **IMPORTANT**: Core only accepts directories, NOT `.xyb` bundle files.
+//! Bundle extraction must be done by SDK's `CacheManager.ensure_extracted()` before calling Core.
+//!
+//! ```text
+//! SDK Layer                          Core Layer
+//! ┌─────────────────────────┐        ┌─────────────────────────┐
+//! │ CacheManager            │        │ Executor                │
+//! │ - ensure_extracted()    │───────►│ - Only accepts dirs     │
+//! │ - Returns directory     │        │ - Rejects .xyb files    │
+//! └─────────────────────────┘        └─────────────────────────┘
+//! ```
 //!
 //! ## Cross-Layer Execution
 //!
 //! The executor supports cross-layer pipelines where different stages run on different targets:
-//! - **Device/Local**: On-device inference using .xyb bundles (delegates to [`TemplateExecutor`])
+//! - **Device/Local**: On-device inference from extracted directories (via [`TemplateExecutor`])
 //! - **Integration**: Third-party API calls (OpenAI, Anthropic, etc.) via [`CloudRuntimeAdapter`]
 //! - **Cloud/Server**: Xybrid-hosted inference (future)
 
-use crate::bundler::{BundleManifest, XyBundle};
+use crate::bundler::BundleManifest;
 use crate::context::StageDescriptor;
 use crate::execution::{ModelMetadata, TemplateExecutor};
 use crate::ir::Envelope;
@@ -57,6 +68,8 @@ pub enum ExecutorError {
     IntegrationError(String),
     #[error("Provider not configured: {0}")]
     ProviderNotConfigured(String),
+    #[error("Bundle must be extracted first: {0}. Use SDK's CacheManager.ensure_extracted() before calling Core.")]
+    BundleNotExtracted(String),
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -81,8 +94,8 @@ pub struct StageMetadata {
 /// appropriate adapter based on the target. It handles model loading,
 /// inference execution, and metadata collection.
 ///
-/// **Note**: The executor works with already-downloaded models. Model downloading
-/// is handled by the SDK's `RegistryClient` before invoking the executor.
+/// **Note**: The executor works with pre-extracted model directories.
+/// Bundle download and extraction is handled by SDK's `CacheManager` before invoking the executor.
 pub struct Executor {
     /// Registry of runtime adapters by name
     adapters: HashMap<String, Arc<dyn RuntimeAdapter>>,
@@ -92,8 +105,6 @@ pub struct Executor {
     default_cloud_adapter: Option<String>,
     /// Temporary directory for mock model files (demo only)
     _mock_models_dir: Option<TempDir>,
-    /// Temporary directory for extracted bundles
-    _extracted_bundles_dir: Option<TempDir>,
     /// Cached TemplateExecutor instances keyed by base_path.
     /// This avoids recreating executors (and reloading models) on every call.
     template_executor_cache: HashMap<String, TemplateExecutor>,
@@ -105,8 +116,7 @@ impl Clone for Executor {
             adapters: self.adapters.clone(),
             default_local_adapter: self.default_local_adapter.clone(),
             default_cloud_adapter: self.default_cloud_adapter.clone(),
-            _mock_models_dir: None,       // Don't clone temp dir
-            _extracted_bundles_dir: None, // Don't clone temp dir
+            _mock_models_dir: None, // Don't clone temp dir
             template_executor_cache: HashMap::new(), // Don't clone cache (stateful)
         }
     }
@@ -120,37 +130,43 @@ impl Executor {
             default_local_adapter: None,
             default_cloud_adapter: None,
             _mock_models_dir: None,
-            _extracted_bundles_dir: None,
             template_executor_cache: HashMap::new(),
         }
     }
 
     /// Resolves a stage to a model file path.
     ///
-    /// If the stage has a bundle_path set, extracts and uses that bundle.
-    /// Otherwise, falls back to mock model creation (for demo/testing).
+    /// IMPORTANT: Core only accepts directories or direct model files, not .xyb bundles.
+    /// Bundle extraction must be done by SDK's CacheManager.ensure_extracted() first.
     ///
-    /// **Note**: Model downloading is handled by the SDK's `RegistryClient`.
-    /// The executor expects models to already be downloaded.
+    /// If the stage has no bundle_path, falls back to mock model creation (for demo/testing).
     fn resolve_stage_to_model_path(
         &mut self,
         stage: &StageDescriptor,
         adapter_name: &str,
     ) -> ExecutorResult<PathBuf> {
-        // Check if stage has a bundle_path (set by SDK after downloading)
+        // Check if stage has a bundle_path (set by SDK after downloading/extracting)
         if let Some(bundle_path) = &stage.bundle_path {
             let path = PathBuf::from(bundle_path);
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+
+            // BOUNDARY ENFORCEMENT: Reject .xyb files - check extension BEFORE checking existence
+            if ext == "xyb" || ext == "bundle" {
+                return Err(ExecutorError::BundleNotExtracted(format!(
+                    "Received .xyb bundle path '{}'. Core only accepts extracted directories. \
+                     Use SDK's CacheManager.ensure_extracted() to extract the bundle first.",
+                    path.display()
+                )));
+            }
+
             if path.exists() {
-                // Check if it's a bundle file (.xyb) or direct model file
-                if path.extension().and_then(|s| s.to_str()) == Some("xyb")
-                    || path.extension().and_then(|s| s.to_str()) == Some("bundle")
-                {
-                    // Extract bundle and get model path
-                    return self.extract_bundle_and_get_model_path(&path, adapter_name);
-                } else {
-                    // Direct model file path (not a bundle)
-                    return Ok(path);
+                // If it's a directory, find the model file in it
+                if path.is_dir() {
+                    return self.find_model_file_in_extracted_bundle(&path, adapter_name);
                 }
+
+                // Direct model file path
+                return Ok(path);
             }
         }
 
@@ -210,73 +226,6 @@ impl Executor {
         }
 
         Ok(model_path)
-    }
-
-    /// Extracts a bundle and returns the path to the model file.
-    ///
-    /// # Arguments
-    ///
-    /// * `bundle_path` - Path to the .xyb bundle file
-    /// * `adapter_name` - Name of the adapter (to determine model file type)
-    ///
-    /// # Returns
-    ///
-    /// Path to the extracted model file
-    fn extract_bundle_and_get_model_path(
-        &mut self,
-        bundle_path: &Path,
-        adapter_name: &str,
-    ) -> ExecutorResult<PathBuf> {
-        // Create temp directory for extracted bundles if not exists
-        if self._extracted_bundles_dir.is_none() {
-            self._extracted_bundles_dir = Some(TempDir::new().map_err(|e| {
-                ExecutorError::Other(format!("Failed to create extracted bundles dir: {}", e))
-            })?);
-        }
-
-        let extract_base_dir = self._extracted_bundles_dir.as_ref().unwrap();
-
-        // Create unique extraction directory for this bundle
-        // Use parent directory name + bundle stem to avoid collisions
-        // (e.g., whisper-tiny/universal.xyb vs qwen/universal.xyb both named "universal")
-        let parent_name = bundle_path
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
-        let bundle_stem = bundle_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("bundle");
-        let unique_name = format!("{}_{}", parent_name, bundle_stem);
-        let extract_dir = extract_base_dir.path().join(&unique_name);
-
-        // Extract bundle if not already extracted
-        if !extract_dir.exists() {
-            fs::create_dir_all(&extract_dir).map_err(|e| {
-                ExecutorError::Other(format!("Failed to create extract dir: {}", e))
-            })?;
-
-            // Load bundle
-            let bundle = XyBundle::load(bundle_path)
-                .map_err(|e| ExecutorError::Other(format!("Failed to load bundle: {}", e)))?;
-
-            // Extract bundle contents
-            bundle
-                .extract_to(&extract_dir)
-                .map_err(|e| ExecutorError::Other(format!("Failed to extract bundle: {}", e)))?;
-
-            // Write manifest.json (bundler's extract_to doesn't include manifest.json in files)
-            let manifest_path = extract_dir.join("manifest.json");
-            let manifest_json = serde_json::to_string_pretty(bundle.manifest()).map_err(|e| {
-                ExecutorError::Other(format!("Failed to serialize manifest: {}", e))
-            })?;
-            fs::write(&manifest_path, manifest_json)
-                .map_err(|e| ExecutorError::Other(format!("Failed to write manifest: {}", e)))?;
-        }
-
-        // Find model file in extracted bundle
-        self.find_model_file_in_extracted_bundle(&extract_dir, adapter_name)
     }
 
     /// Finds the model file in an extracted bundle directory.
@@ -356,84 +305,6 @@ impl Executor {
             "Model file not found in bundle for adapter: {}",
             adapter_name
         )))
-    }
-
-    /// Extracts a bundle and returns the directory path and optional metadata.
-    ///
-    /// # Arguments
-    ///
-    /// * `bundle_path` - Path to the .xyb bundle file
-    ///
-    /// # Returns
-    ///
-    /// Tuple of (extract_dir, Optional<ModelMetadata>)
-    fn extract_bundle_with_metadata(
-        &mut self,
-        bundle_path: &Path,
-    ) -> ExecutorResult<(PathBuf, Option<ModelMetadata>)> {
-        // Create temp directory for extracted bundles if not exists
-        if self._extracted_bundles_dir.is_none() {
-            self._extracted_bundles_dir = Some(TempDir::new().map_err(|e| {
-                ExecutorError::Other(format!("Failed to create extracted bundles dir: {}", e))
-            })?);
-        }
-
-        let extract_base_dir = self._extracted_bundles_dir.as_ref().unwrap();
-
-        // Create unique extraction directory for this bundle
-        // Use parent directory name + bundle stem to avoid collisions
-        // (e.g., whisper-tiny/universal.xyb vs qwen/universal.xyb both named "universal")
-        let parent_name = bundle_path
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
-        let bundle_stem = bundle_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("bundle");
-        let unique_name = format!("{}_{}", parent_name, bundle_stem);
-        let extract_dir = extract_base_dir.path().join(&unique_name);
-
-        // Extract bundle if not already extracted
-        if !extract_dir.exists() {
-            fs::create_dir_all(&extract_dir).map_err(|e| {
-                ExecutorError::Other(format!("Failed to create extract dir: {}", e))
-            })?;
-
-            // Load bundle
-            let bundle = XyBundle::load(bundle_path)
-                .map_err(|e| ExecutorError::Other(format!("Failed to load bundle: {}", e)))?;
-
-            // Extract bundle contents
-            bundle
-                .extract_to(&extract_dir)
-                .map_err(|e| ExecutorError::Other(format!("Failed to extract bundle: {}", e)))?;
-
-            // Write manifest.json
-            let manifest_path = extract_dir.join("manifest.json");
-            let manifest_json = serde_json::to_string_pretty(bundle.manifest()).map_err(|e| {
-                ExecutorError::Other(format!("Failed to serialize manifest: {}", e))
-            })?;
-            fs::write(&manifest_path, manifest_json)
-                .map_err(|e| ExecutorError::Other(format!("Failed to write manifest: {}", e)))?;
-        }
-
-        // Try to load model_metadata.json if it exists
-        let metadata_path = extract_dir.join("model_metadata.json");
-        let metadata = if metadata_path.exists() {
-            let metadata_content = fs::read_to_string(&metadata_path).map_err(|e| {
-                ExecutorError::Other(format!("Failed to read model_metadata.json: {}", e))
-            })?;
-            let meta: ModelMetadata = serde_json::from_str(&metadata_content).map_err(|e| {
-                ExecutorError::Other(format!("Failed to parse model_metadata.json: {}", e))
-            })?;
-            Some(meta)
-        } else {
-            None
-        };
-
-        Ok((extract_dir, metadata))
     }
 
     /// Registers a runtime adapter with the executor.
@@ -537,7 +408,9 @@ impl Executor {
             return Ok((output, metadata));
         }
 
-        // Try bundle_path for metadata-driven execution (bundles are pre-downloaded by SDK)
+        // Try bundle_path for metadata-driven execution
+        // IMPORTANT: Core only accepts directories, not .xyb files.
+        // Bundle extraction must be done by SDK's CacheManager.ensure_extracted() before calling Core.
         if let Some(bundle_path_str) = &stage.bundle_path {
             let bundle_path = PathBuf::from(bundle_path_str);
             debug!(
@@ -547,78 +420,91 @@ impl Executor {
                 bundle_path
             );
 
+            // BOUNDARY ENFORCEMENT: Reject .xyb files - check extension BEFORE checking existence
+            // This catches the error early even if the file doesn't exist yet
+            let ext = bundle_path
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
+            if ext == "xyb" || ext == "bundle" {
+                return Err(ExecutorError::BundleNotExtracted(format!(
+                    "Received .xyb bundle path '{}'. Core only accepts extracted directories. \
+                     Use SDK's CacheManager.ensure_extracted() to extract the bundle first.",
+                    bundle_path.display()
+                )));
+            }
+
             if bundle_path.exists() {
-                let ext = bundle_path
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("");
-                debug!(target: "xybrid_core", "Bundle extension: '{}'", ext);
+                debug!(target: "xybrid_core", "Path extension: '{}'", ext);
 
-                if ext == "xyb" || ext == "bundle" {
-                    // Extract bundle and check for model_metadata.json
-                    match self.extract_bundle_with_metadata(&bundle_path) {
-                        Ok((extract_dir, Some(model_metadata))) => {
-                            debug!(
-                                target: "xybrid_core",
-                                "Successfully extracted bundle, found model_metadata.json. Template: {:?}",
-                                model_metadata.execution_template
-                            );
-
-                            // Use TemplateExecutor for metadata-driven inference
-                            let base_path = extract_dir.to_str().ok_or_else(|| {
-                                ExecutorError::Other("Invalid extract dir path".to_string())
+                // bundle_path is a directory - check for model_metadata.json
+                if bundle_path.is_dir() {
+                    let metadata_path = bundle_path.join("model_metadata.json");
+                    if metadata_path.exists() {
+                        // Load metadata from directory
+                        let metadata_content = fs::read_to_string(&metadata_path).map_err(|e| {
+                            ExecutorError::Other(format!("Failed to read model_metadata.json: {}", e))
+                        })?;
+                        let model_metadata: ModelMetadata =
+                            serde_json::from_str(&metadata_content).map_err(|e| {
+                                ExecutorError::Other(format!(
+                                    "Failed to parse model_metadata.json: {}",
+                                    e
+                                ))
                             })?;
 
-                            // Get or create cached TemplateExecutor for this base_path
-                            let base_path_key = base_path.to_string();
-                            if !self.template_executor_cache.contains_key(&base_path_key) {
-                                debug!(
-                                    target: "xybrid_core",
-                                    "Creating new TemplateExecutor for base_path: {}",
-                                    base_path
-                                );
-                                self.template_executor_cache
-                                    .insert(base_path_key.clone(), TemplateExecutor::new(base_path));
-                            } else {
-                                debug!(
-                                    target: "xybrid_core",
-                                    "Reusing cached TemplateExecutor for base_path: {}",
-                                    base_path
-                                );
-                            }
+                        debug!(
+                            target: "xybrid_core",
+                            "Found model_metadata.json in directory. Template: {:?}",
+                            model_metadata.execution_template
+                        );
 
-                            let template_executor = self
-                                .template_executor_cache
-                                .get_mut(&base_path_key)
-                                .expect("TemplateExecutor was just inserted");
+                        // Use TemplateExecutor for metadata-driven inference
+                        let base_path = bundle_path.to_str().ok_or_else(|| {
+                            ExecutorError::Other("Invalid bundle dir path".to_string())
+                        })?;
 
-                            let output = template_executor
-                                .execute(&model_metadata, input)
-                                .map_err(|e| ExecutorError::AdapterError(e))?;
-
-                            let latency_ms = start_time.elapsed().as_millis();
-                            let metadata = StageMetadata {
-                                adapter: "template-executor".to_string(),
-                                target: target.to_string(),
-                                latency_ms,
-                            };
-
-                            return Ok((output, metadata));
-                        }
-                        Ok((extract_dir, None)) => {
+                        // Get or create cached TemplateExecutor for this base_path
+                        let base_path_key = base_path.to_string();
+                        if !self.template_executor_cache.contains_key(&base_path_key) {
                             debug!(
                                 target: "xybrid_core",
-                                "Bundle extracted to {:?} but NO model_metadata.json found! Falling back to raw adapter.",
-                                extract_dir
+                                "Creating new TemplateExecutor for base_path: {}",
+                                base_path
                             );
-                        }
-                        Err(e) => {
-                            warn!(
+                            self.template_executor_cache
+                                .insert(base_path_key.clone(), TemplateExecutor::new(base_path));
+                        } else {
+                            debug!(
                                 target: "xybrid_core",
-                                "Failed to extract bundle: {}. Falling back to raw adapter.",
-                                e
+                                "Reusing cached TemplateExecutor for base_path: {}",
+                                base_path
                             );
                         }
+
+                        let template_executor = self
+                            .template_executor_cache
+                            .get_mut(&base_path_key)
+                            .expect("TemplateExecutor was just inserted");
+
+                        let output = template_executor
+                            .execute(&model_metadata, input)
+                            .map_err(|e| ExecutorError::AdapterError(e))?;
+
+                        let latency_ms = start_time.elapsed().as_millis();
+                        let metadata = StageMetadata {
+                            adapter: "template-executor".to_string(),
+                            target: target.to_string(),
+                            latency_ms,
+                        };
+
+                        return Ok((output, metadata));
+                    } else {
+                        debug!(
+                            target: "xybrid_core",
+                            "Directory exists but NO model_metadata.json found at {:?}. Falling back to raw adapter.",
+                            metadata_path
+                        );
                     }
                 }
             } else {
@@ -1201,5 +1087,114 @@ mod tests {
         assert_ne!(name1, name2, "Different bundle names should produce different extract dirs");
         assert!(name1.contains("model_a"), "Name should contain bundle stem: {}", name1);
         assert!(name2.contains("model_b"), "Name should contain bundle stem: {}", name2);
+    }
+
+    // ============================================================================
+    // Boundary Enforcement Tests
+    // ============================================================================
+    // These tests enforce the architectural boundary:
+    // - Core only accepts DIRECTORIES (extracted bundles)
+    // - SDK is responsible for extracting .xyb bundles via CacheManager
+    // ============================================================================
+
+    #[test]
+    fn test_boundary_rejects_xyb_bundle_file() {
+        let mut executor = create_test_executor();
+
+        // Create a stage with a .xyb bundle path (should be rejected)
+        let mut stage = StageDescriptor::new("test-model");
+        stage.bundle_path = Some("/path/to/model.xyb".to_string());
+
+        let input = Envelope::new(EnvelopeKind::Text("test".to_string()));
+
+        let result = executor.execute_stage(&stage, &input, "local");
+
+        // Should fail with BundleNotExtracted error
+        assert!(
+            matches!(result, Err(ExecutorError::BundleNotExtracted(_))),
+            "Expected BundleNotExtracted error for .xyb file, got: {:?}",
+            result
+        );
+
+        // Error message should mention SDK's CacheManager
+        if let Err(ExecutorError::BundleNotExtracted(msg)) = result {
+            assert!(
+                msg.contains("CacheManager"),
+                "Error should mention CacheManager: {}",
+                msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_boundary_rejects_bundle_extension() {
+        let mut executor = create_test_executor();
+
+        // Test with .bundle extension too
+        let mut stage = StageDescriptor::new("test-model");
+        stage.bundle_path = Some("/path/to/model.bundle".to_string());
+
+        let input = Envelope::new(EnvelopeKind::Text("test".to_string()));
+
+        let result = executor.execute_stage(&stage, &input, "local");
+
+        assert!(
+            matches!(result, Err(ExecutorError::BundleNotExtracted(_))),
+            "Expected BundleNotExtracted error for .bundle file, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_boundary_accepts_directory_path() {
+        use tempfile::TempDir;
+
+        let mut executor = create_test_executor();
+
+        // Create a temp directory with model_metadata.json
+        let temp_dir = TempDir::new().unwrap();
+        let model_dir = temp_dir.path();
+
+        // Create a minimal model_metadata.json
+        let metadata = r#"{
+            "model_id": "test-model",
+            "version": "1.0",
+            "execution_template": { "type": "Onnx", "model_file": "model.onnx" },
+            "preprocessing": [],
+            "postprocessing": [],
+            "files": ["model.onnx"],
+            "metadata": {}
+        }"#;
+        std::fs::write(model_dir.join("model_metadata.json"), metadata).unwrap();
+        std::fs::write(model_dir.join("model.onnx"), b"fake onnx").unwrap();
+
+        // Create a stage with a directory path (should be accepted)
+        let mut stage = StageDescriptor::new("test-model");
+        stage.bundle_path = Some(model_dir.to_str().unwrap().to_string());
+
+        let input = Envelope::new(EnvelopeKind::Text("test".to_string()));
+
+        // This will fail during actual execution (no real model), but it should NOT
+        // fail with BundleNotExtracted - that boundary check should pass
+        let result = executor.execute_stage(&stage, &input, "local");
+
+        // Should NOT be a BundleNotExtracted error
+        assert!(
+            !matches!(result, Err(ExecutorError::BundleNotExtracted(_))),
+            "Directory paths should be accepted, not rejected as bundles: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_boundary_error_message_is_actionable() {
+        // Verify the error message tells developers exactly what to do
+        let error = ExecutorError::BundleNotExtracted("/path/to/bundle.xyb".to_string());
+        let msg = error.to_string();
+
+        // Should contain actionable guidance
+        assert!(msg.contains("CacheManager"), "Should mention CacheManager");
+        assert!(msg.contains("ensure_extracted"), "Should mention ensure_extracted()");
+        assert!(msg.contains("SDK"), "Should mention SDK layer");
     }
 }

@@ -149,7 +149,33 @@ extern "C" {
         stop_lens: *const c_int,
         n_stop_seqs: c_int,
     ) -> c_int;
+
+    // Streaming generation with callback
+    fn llama_generate_streaming_c(
+        ctx: *mut c_void,
+        model: *const c_void,
+        input_tokens: *const i32,
+        n_input: c_int,
+        output_tokens: *mut i32,
+        max_tokens: c_int,
+        temperature: c_float,
+        top_p: c_float,
+        top_k: c_int,
+        repeat_penalty: c_float,
+        seed: u32,
+        stop_seqs: *const i32,
+        stop_lens: *const c_int,
+        n_stop_seqs: c_int,
+        callback: Option<TokenCallback>,
+        user_data: *mut c_void,
+    ) -> c_int;
 }
+
+/// Callback type for streaming token generation.
+///
+/// Return 0 to continue generation, non-zero to stop.
+#[cfg(feature = "llm-llamacpp")]
+pub type TokenCallback = extern "C" fn(token_id: i32, token_text: *const c_char, user_data: *mut c_void) -> c_int;
 
 // =============================================================================
 // Safe Wrapper Functions
@@ -660,6 +686,170 @@ pub fn llama_generate(
     llama_generate_with_stops(ctx, model, input_tokens, max_tokens, temperature, top_p, top_k, 1.1, &[])
 }
 
+/// Context passed through the C callback to the Rust closure.
+#[cfg(feature = "llm-llamacpp")]
+struct StreamingContext<'a, F>
+where
+    F: FnMut(i32, &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+{
+    callback: &'a mut F,
+    error: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+/// C-compatible trampoline function that calls the Rust closure.
+#[cfg(feature = "llm-llamacpp")]
+extern "C" fn streaming_trampoline<F>(
+    token_id: i32,
+    token_text: *const c_char,
+    user_data: *mut c_void,
+) -> c_int
+where
+    F: FnMut(i32, &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+{
+    let ctx = unsafe { &mut *(user_data as *mut StreamingContext<F>) };
+
+    // Convert C string to Rust string
+    let text = if token_text.is_null() {
+        ""
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(token_text) }
+            .to_str()
+            .unwrap_or("")
+    };
+
+    // Call the Rust closure
+    match (ctx.callback)(token_id, text) {
+        Ok(()) => 0,  // Continue
+        Err(e) => {
+            ctx.error = Some(e);
+            1  // Stop
+        }
+    }
+}
+
+/// Generate tokens with streaming callback.
+///
+/// This function calls the provided callback for each generated token.
+/// The callback receives the token ID and decoded text.
+///
+/// # Arguments
+/// * `ctx` - The llama context
+/// * `model` - The llama model
+/// * `input_tokens` - Input token IDs
+/// * `max_tokens` - Maximum tokens to generate
+/// * `temperature` - Sampling temperature (0 = greedy)
+/// * `top_p` - Top-p (nucleus) sampling threshold
+/// * `top_k` - Top-k sampling (0 = disabled)
+/// * `repeat_penalty` - Repetition penalty (1.0 = disabled)
+/// * `stop_sequences` - Optional stop sequences (as strings)
+/// * `on_token` - Callback called for each generated token
+///
+/// # Returns
+/// Vector of generated token IDs and whether generation was stopped by callback.
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_generate_streaming<F>(
+    ctx: &LlamaContext,
+    model: &LlamaModel,
+    input_tokens: &[i32],
+    max_tokens: usize,
+    temperature: f32,
+    top_p: f32,
+    top_k: usize,
+    repeat_penalty: f32,
+    stop_sequences: &[String],
+    mut on_token: F,
+) -> Result<(Vec<i32>, bool), AdapterError>
+where
+    F: FnMut(i32, &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+{
+    if input_tokens.is_empty() {
+        return Err(AdapterError::InvalidInput("Empty input tokens".to_string()));
+    }
+
+    // Tokenize stop sequences
+    let mut stop_tokens: Vec<i32> = Vec::new();
+    let mut stop_lens: Vec<c_int> = Vec::new();
+
+    for seq in stop_sequences {
+        let tokens = llama_tokenize_special(model, seq)?;
+        if !tokens.is_empty() {
+            stop_lens.push(tokens.len() as c_int);
+            stop_tokens.extend(tokens);
+        }
+    }
+
+    // Allocate output buffer
+    let mut output_tokens = vec![0i32; max_tokens];
+
+    // Use current time as seed for sampling
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as u32)
+        .unwrap_or(42);
+
+    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = if stop_sequences.is_empty() {
+        (ptr::null(), ptr::null(), 0)
+    } else {
+        (
+            stop_tokens.as_ptr(),
+            stop_lens.as_ptr(),
+            stop_sequences.len() as c_int,
+        )
+    };
+
+    // Set up the streaming context
+    let mut streaming_ctx = StreamingContext {
+        callback: &mut on_token,
+        error: None,
+    };
+
+    let result = unsafe {
+        llama_generate_streaming_c(
+            ctx.ptr,
+            model.ptr,
+            input_tokens.as_ptr(),
+            input_tokens.len() as c_int,
+            output_tokens.as_mut_ptr(),
+            max_tokens as c_int,
+            temperature,
+            top_p,
+            top_k as c_int,
+            repeat_penalty,
+            seed,
+            stop_seqs_ptr,
+            stop_lens_ptr,
+            n_stop_seqs,
+            Some(streaming_trampoline::<F>),
+            &mut streaming_ctx as *mut StreamingContext<F> as *mut c_void,
+        )
+    };
+
+    // Check for callback error
+    if let Some(err) = streaming_ctx.error {
+        return Err(AdapterError::RuntimeError(format!(
+            "Streaming callback error: {}",
+            err
+        )));
+    }
+
+    // Negative result means stopped by callback, but absolute value is token count
+    let (n_generated, stopped_by_callback) = if result < 0 {
+        ((-result) as usize, true)
+    } else {
+        (result as usize, false)
+    };
+
+    if result == -1 || result == -2 || result == -3 {
+        return Err(AdapterError::RuntimeError(format!(
+            "Generation failed with error code {}",
+            result
+        )));
+    }
+
+    output_tokens.truncate(n_generated);
+    Ok((output_tokens, stopped_by_callback))
+}
+
 // =============================================================================
 // Stub implementations when feature is disabled
 // =============================================================================
@@ -772,6 +962,27 @@ pub fn llama_generate(
     _top_p: f32,
     _top_k: usize,
 ) -> Result<Vec<i32>, AdapterError> {
+    Err(AdapterError::RuntimeError(
+        "llm-llamacpp feature not enabled".to_string(),
+    ))
+}
+
+#[cfg(not(feature = "llm-llamacpp"))]
+pub fn llama_generate_streaming<F>(
+    _ctx: &LlamaContext,
+    _model: &LlamaModel,
+    _input_tokens: &[i32],
+    _max_tokens: usize,
+    _temperature: f32,
+    _top_p: f32,
+    _top_k: usize,
+    _repeat_penalty: f32,
+    _stop_sequences: &[String],
+    _on_token: F,
+) -> Result<(Vec<i32>, bool), AdapterError>
+where
+    F: FnMut(i32, &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+{
     Err(AdapterError::RuntimeError(
         "llm-llamacpp feature not enabled".to_string(),
     ))

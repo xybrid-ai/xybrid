@@ -194,6 +194,10 @@ enum Commands {
         /// Target format for model resolution (onnx, coreml, tflite)
         #[arg(long, value_name = "TARGET")]
         target: Option<String>,
+
+        /// Stream tokens as they are generated (LLM models only)
+        #[arg(long)]
+        stream: bool,
     },
     /// Trace and analyze telemetry logs from a session
     Trace {
@@ -460,7 +464,8 @@ fn run_command(cli: Cli) -> Result<()> {
             model,
             voice,
             target,
-        } => handle_repl_command(config, model, voice, target),
+            stream,
+        } => handle_repl_command(config, model, voice, target, stream),
         Commands::Trace {
             session,
             latest,
@@ -544,13 +549,25 @@ fn handle_repl_command(
     model: Option<String>,
     voice: Option<String>,
     _target: Option<String>,
+    stream: bool,
 ) -> Result<()> {
     use std::io::{self, Write};
 
     println!("🚀 Xybrid REPL Mode");
     println!("{}", "=".repeat(60));
     println!("Models will be loaded once and kept warm for fast inference.");
-    println!("Type 'quit' or 'exit' to exit. Type 'help' for commands.\n");
+    println!("Type 'quit' or 'exit' to exit. Type 'help' for commands.");
+
+    // Show streaming status
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    if stream {
+        println!("📡 Token streaming: ENABLED");
+    }
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    if stream {
+        println!("⚠️  Token streaming: NOT AVAILABLE (LLM features not compiled)");
+    }
+    println!();
 
     // Initialize registry client
     let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
@@ -597,14 +614,19 @@ fn handle_repl_command(
                             .unwrap()
                     );
                     pb.set_message(model_id.clone());
-                    client.fetch(&model_id, None, |p| {
+                    // Use fetch_extracted to download AND extract (single source of truth)
+                    let model_dir = client.fetch_extracted(&model_id, None, |p| {
                         pb.set_position((p * resolved.size_bytes as f32) as u64);
                     })?;
                     pb.finish_with_message(format!("{} ✓", model_id));
+                    desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
+                } else {
+                    // Already cached - ensure it's extracted
+                    let cache = xybrid_sdk::cache::CacheManager::new()?;
+                    let xyb_path = client.get_cache_path(&client.resolve(&model_id, None)?);
+                    let model_dir = cache.ensure_extracted(&xyb_path)?;
+                    desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
                 }
-
-                let resolved = client.resolve(&model_id, None)?;
-                desc.bundle_path = Some(client.get_cache_path(&resolved).to_string_lossy().to_string());
             }
             stages.push(desc);
         }
@@ -624,14 +646,19 @@ fn handle_repl_command(
                     .unwrap()
             );
             pb.set_message(model_id.clone());
-            client.fetch(model_id, None, |p| {
+            // Use fetch_extracted to download AND extract (single source of truth)
+            let model_dir = client.fetch_extracted(model_id, None, |p| {
                 pb.set_position((p * resolved.size_bytes as f32) as u64);
             })?;
             pb.finish_with_message(format!("{} ✓", model_id));
+            desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
+        } else {
+            // Already cached - ensure it's extracted
+            let cache = xybrid_sdk::cache::CacheManager::new()?;
+            let xyb_path = client.get_cache_path(&client.resolve(model_id, None)?);
+            let model_dir = cache.ensure_extracted(&xyb_path)?;
+            desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
         }
-
-        let resolved = client.resolve(model_id, None)?;
-        desc.bundle_path = Some(client.get_cache_path(&resolved).to_string_lossy().to_string());
         stages.push(desc);
     }
 
@@ -709,6 +736,144 @@ fn handle_repl_command(
 
         // Execute pipeline
         let start = std::time::Instant::now();
+
+        // Try streaming execution if enabled and we have a single-stage LLM pipeline
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        let use_streaming = {
+            let can_stream = stream && stages.len() == 1 && stages[0].bundle_path.is_some();
+            if stream && !can_stream {
+                eprintln!("⚠️  Streaming conditions not met:");
+                eprintln!("   - stages.len() = {} (need 1)", stages.len());
+                eprintln!("   - bundle_path = {:?}", stages.get(0).map(|s| &s.bundle_path));
+            }
+            can_stream
+        };
+
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        let use_streaming = {
+            if stream {
+                eprintln!("⚠️  Streaming requested but LLM features not enabled.");
+                eprintln!("   Build with: --features llm-llamacpp (or llm-mistral)");
+            }
+            false
+        };
+
+        if use_streaming {
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            {
+                use xybrid_sdk::cache::CacheManager;
+
+                let bundle_path_str = stages[0].bundle_path.as_ref().unwrap();
+                let bundle_path = PathBuf::from(bundle_path_str);
+
+                // Get model directory and metadata using unified extraction via CacheManager
+                let (model_dir, metadata) = if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
+                    // .xyb bundle file - use CacheManager for unified extraction
+                    match CacheManager::new() {
+                        Ok(cache) => {
+                            match cache.ensure_extracted(&bundle_path) {
+                                Ok(extract_dir) => {
+                                    // Load metadata from extracted directory
+                                    let metadata_path = extract_dir.join("model_metadata.json");
+                                    match fs::read_to_string(&metadata_path) {
+                                        Ok(metadata_str) => {
+                                            match serde_json::from_str::<ModelMetadata>(&metadata_str) {
+                                                Ok(metadata) => (Some(extract_dir), Some(metadata)),
+                                                Err(e) => {
+                                                    eprintln!("⚠️  Failed to parse metadata: {}, falling back to batch mode", e);
+                                                    (None, None)
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!("⚠️  Failed to read metadata: {}, falling back to batch mode", e);
+                                            (None, None)
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("⚠️  Failed to extract bundle: {}, falling back to batch mode", e);
+                                    (None, None)
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("⚠️  Failed to create cache manager: {}, falling back to batch mode", e);
+                            (None, None)
+                        }
+                    }
+                } else {
+                    // Direct directory path - just read metadata
+                    let metadata_path = bundle_path.join("model_metadata.json");
+                    if metadata_path.exists() {
+                        match fs::read_to_string(&metadata_path) {
+                            Ok(metadata_str) => {
+                                match serde_json::from_str::<ModelMetadata>(&metadata_str) {
+                                    Ok(metadata) => (Some(bundle_path.clone()), Some(metadata)),
+                                    Err(e) => {
+                                        eprintln!("⚠️  Failed to parse metadata: {}, falling back to batch mode", e);
+                                        (None, None)
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("⚠️  Failed to read metadata: {}, falling back to batch mode", e);
+                                (None, None)
+                            }
+                        }
+                    } else {
+                        eprintln!("⚠️  No model_metadata.json found at {}, falling back to batch mode", metadata_path.display());
+                        (None, None)
+                    }
+                };
+
+                // Execute streaming if we have valid model dir and metadata
+                if let (Some(model_dir), Some(metadata)) = (model_dir, metadata) {
+                    // Check if this is an LLM model (GGUF)
+                    if matches!(
+                        metadata.execution_template,
+                        xybrid_core::execution::ExecutionTemplate::Gguf { .. }
+                    ) {
+                        let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+
+                        // Execute with streaming callback
+                        match executor.execute_streaming(
+                            &metadata,
+                            &input,
+                            Box::new(|token| {
+                                print!("{}", token.token);
+                                io::stdout().flush()?;
+                                Ok(())
+                            }),
+                        ) {
+                            Ok(output) => {
+                                let elapsed = start.elapsed();
+                                println!(); // Newline after streamed output
+
+                                // Show timing info
+                                if let Some(tps) = output.metadata.get("tokens_per_second") {
+                                    println!(
+                                        "\n⏱️  Inference time: {:.2}s ({} tokens/sec)",
+                                        elapsed.as_secs_f32(),
+                                        tps
+                                    );
+                                } else {
+                                    println!("\n⏱️  Inference time: {:.2}s", elapsed.as_secs_f32());
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("\n❌ Error: {}", e);
+                            }
+                        }
+                        continue;
+                    } else if stream {
+                        eprintln!("⚠️  Streaming only supported for GGUF models, falling back to batch mode");
+                    }
+                }
+            }
+        }
+
+        // Non-streaming execution path (default)
         match orchestrator.execute_pipeline(&stages, &input, &metrics, &availability_fn) {
             Ok(results) => {
                 let elapsed = start.elapsed();
@@ -1882,36 +2047,16 @@ fn run_bundle(
         ));
     }
 
-    // Load and extract bundle
-    println!("📂 Loading bundle...");
-    let bundle = XyBundle::load(bundle_path)
-        .with_context(|| format!("Failed to load bundle: {}", bundle_path.display()))?;
-
-    let manifest = bundle.manifest();
-    println!("   Model ID: {}", manifest.model_id);
-    println!("   Version: {}", manifest.version);
-    println!("   Files: {:?}", manifest.files);
-    println!();
-
-    // Create temp directory for extraction
-    let temp_dir =
-        tempfile::tempdir().context("Failed to create temp directory for bundle extraction")?;
-    let extract_dir = temp_dir.path();
-
-    // Extract bundle contents
-    println!("📦 Extracting bundle to temp directory...");
-    bundle
-        .extract_to(extract_dir)
+    // Extract bundle using unified CacheManager (single source of truth for extraction)
+    println!("📂 Loading and extracting bundle...");
+    let cache = xybrid_sdk::cache::CacheManager::new()
+        .context("Failed to create cache manager")?;
+    let extract_dir = cache
+        .ensure_extracted(bundle_path)
         .context("Failed to extract bundle")?;
 
-    // Try to load model_metadata.json
+    // Load model_metadata.json from extracted directory
     let metadata_path = extract_dir.join("model_metadata.json");
-    if !metadata_path.exists() {
-        return Err(anyhow::anyhow!(
-            "Bundle does not contain model_metadata.json. Cannot execute without metadata."
-        ));
-    }
-
     let metadata_content =
         fs::read_to_string(&metadata_path).context("Failed to read model_metadata.json")?;
     let metadata: ModelMetadata =
@@ -2232,35 +2377,16 @@ fn run_model(
 
     drop(_fetch_span);
 
-    // Load and extract bundle
-    println!("📂 Loading bundle...");
-    let bundle = XyBundle::load(&bundle_path)
-        .with_context(|| format!("Failed to load bundle: {}", bundle_path.display()))?;
-
-    let manifest = bundle.manifest();
-    println!("   Model ID: {}", manifest.model_id);
-    println!("   Version: {}", manifest.version);
-    println!();
-
-    // Create temp directory for extraction
-    let temp_dir =
-        tempfile::tempdir().context("Failed to create temp directory for bundle extraction")?;
-    let extract_dir = temp_dir.path();
-
-    // Extract bundle contents
-    println!("📦 Extracting bundle...");
-    bundle
-        .extract_to(extract_dir)
+    // Extract bundle using unified CacheManager (single source of truth for extraction)
+    println!("📂 Loading and extracting bundle...");
+    let cache = xybrid_sdk::cache::CacheManager::new()
+        .context("Failed to create cache manager")?;
+    let extract_dir = cache
+        .ensure_extracted(&bundle_path)
         .context("Failed to extract bundle")?;
 
-    // Load model_metadata.json
+    // Load model_metadata.json from extracted directory
     let metadata_path = extract_dir.join("model_metadata.json");
-    if !metadata_path.exists() {
-        return Err(anyhow::anyhow!(
-            "Bundle does not contain model_metadata.json. Cannot execute without metadata."
-        ));
-    }
-
     let metadata_content =
         fs::read_to_string(&metadata_path).context("Failed to read model_metadata.json")?;
     let metadata: ModelMetadata =

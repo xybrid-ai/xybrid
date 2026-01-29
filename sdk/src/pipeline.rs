@@ -699,8 +699,9 @@ impl Pipeline {
                         });
                     };
 
-                    // Fetch model and get the bundle path
-                    let bundle_path = client.fetch(&model_id, None, progress_for_model)?;
+                    // Fetch model and extract to permanent cache directory
+                    // Uses CacheManager.ensure_extracted() as single source of truth
+                    let model_dir = client.fetch_extracted(&model_id, None, progress_for_model)?;
 
                     {
                         // Recover from poisoned RwLock to prevent permanent lock errors
@@ -708,11 +709,11 @@ impl Pipeline {
 
                         handle.availability_map.insert(model_id.clone(), true);
                         handle.availability_map.insert(stage_id.clone(), true);
-                        // Store the bundle path for this stage
+                        // Store the extracted directory path for this stage
                         handle
                             .bundle_paths
-                            .insert(stage_id.clone(), bundle_path.clone());
-                        handle.bundle_paths.insert(model_id.clone(), bundle_path);
+                            .insert(stage_id.clone(), model_dir.clone());
+                        handle.bundle_paths.insert(model_id.clone(), model_dir);
                     }
                 }
                 ResolvedTarget::Cloud { .. } | ResolvedTarget::Server { .. } => {
@@ -1092,6 +1093,135 @@ impl Xybrid {
     /// This is equivalent to `PipelineRef::from_yaml()`.
     pub fn pipeline(yaml: &str) -> PipelineResult<PipelineRef> {
         PipelineRef::from_yaml(yaml)
+    }
+
+    /// Run a pipeline with streaming output for LLM stages.
+    ///
+    /// This method is similar to `run_pipeline` but calls the provided callback
+    /// for each generated token during LLM inference. This enables real-time
+    /// display of generated text.
+    ///
+    /// # Arguments
+    ///
+    /// * `yaml` - Pipeline YAML content
+    /// * `envelope` - Input envelope
+    /// * `on_token` - Callback invoked for each generated token
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use xybrid_sdk::{Xybrid, Envelope, PartialToken};
+    /// use std::io::Write;
+    ///
+    /// let result = Xybrid::run_pipeline_streaming(
+    ///     yaml_content,
+    ///     &Envelope::text("Hello, how are you?"),
+    ///     Box::new(|token: PartialToken| {
+    ///         print!("{}", token.token);
+    ///         std::io::stdout().flush()?;
+    ///         Ok(())
+    ///     }),
+    /// )?;
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// Streaming is only supported for LLM stages (GGUF models). For other
+    /// model types, this behaves identically to `run_pipeline`.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    pub fn run_pipeline_streaming<'a>(
+        yaml: &str,
+        envelope: &Envelope,
+        on_token: xybrid_core::runtime_adapter::llm::StreamingCallback<'a>,
+    ) -> PipelineResult<PipelineExecutionResult> {
+        use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
+
+        let pipeline_ref = PipelineRef::from_yaml(yaml)?;
+        let pipeline = pipeline_ref.load()?;
+
+        // Load models if needed
+        if !pipeline.is_ready() {
+            pipeline.load_models()?;
+        }
+
+        let handle = pipeline
+            .handle
+            .read()
+            .map_err(|_| SdkError::PipelineError("Failed to acquire pipeline lock".to_string()))?;
+
+        // For streaming, we need to identify if there's an LLM stage and execute it with streaming
+        // For now, support single-stage LLM pipelines
+        if handle.stage_descriptors.len() == 1 {
+            let stage_name = handle.stage_descriptors[0].name.clone();
+            if let Some(bundle_path) = handle.bundle_paths.get(&stage_name) {
+                let bundle_path = bundle_path.clone();  // Clone to avoid borrow issues
+                let metadata_path = bundle_path.join("model_metadata.json");
+                if metadata_path.exists() {
+                    let metadata_str = std::fs::read_to_string(&metadata_path)
+                        .map_err(|e| SdkError::PipelineError(format!("Failed to read metadata: {}", e)))?;
+                    let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
+                        .map_err(|e| SdkError::PipelineError(format!("Failed to parse metadata: {}", e)))?;
+
+                    // Check if this is an LLM model
+                    if matches!(
+                        metadata.execution_template,
+                        xybrid_core::execution::ExecutionTemplate::Gguf { .. }
+                    ) {
+                        drop(handle);  // Release lock before executor call
+
+                        let mut executor = TemplateExecutor::with_base_path(
+                            bundle_path.to_str().unwrap_or("")
+                        );
+
+                        let start_time = std::time::Instant::now();
+                        let output = executor
+                            .execute_streaming(&metadata, envelope, on_token)
+                            .map_err(|e| SdkError::InferenceError(format!("{}", e)))?;
+                        let total_latency_ms = start_time.elapsed().as_millis() as u32;
+
+                        let output_type = match &output.kind {
+                            EnvelopeKind::Text(_) => OutputType::Text,
+                            EnvelopeKind::Audio(_) => OutputType::Audio,
+                            EnvelopeKind::Embedding(_) => OutputType::Embedding,
+                        };
+
+                        return Ok(PipelineExecutionResult {
+                            name: pipeline.name.clone(),
+                            stages: vec![StageTiming {
+                                name: pipeline_ref.config.stages[0].model_id(),
+                                latency_ms: total_latency_ms,
+                                target: "local".to_string(),
+                                reason: "streaming".to_string(),
+                            }],
+                            total_latency_ms,
+                            output_type,
+                            output,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Fall back to non-streaming execution for multi-stage or non-LLM pipelines
+        drop(handle);
+        pipeline.run(envelope)
+    }
+
+    /// Stub for when LLM features are disabled.
+    ///
+    /// Without LLM features, streaming is not available and this falls back
+    /// to regular pipeline execution.
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    pub fn run_pipeline_streaming<F>(
+        yaml: &str,
+        envelope: &Envelope,
+        _on_token: F,
+    ) -> PipelineResult<PipelineExecutionResult>
+    where
+        F: FnMut(()) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    {
+        // Without LLM features, just run normally
+        Self::run_pipeline(yaml, envelope)
     }
 }
 

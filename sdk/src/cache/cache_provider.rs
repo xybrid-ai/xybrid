@@ -18,12 +18,12 @@
 //! ```
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+// use std::sync::Arc;
 use xybrid_core::cache_provider::CacheProvider;
 
 use super::cache_manager::CacheManager;
 use crate::model::SdkError;
-use crate::registry_client::RegistryClient;
+// use crate::registry_client::RegistryClient;
 
 /// SDK Cache Provider - Unified cache interface for the SDK.
 ///
@@ -48,29 +48,31 @@ use crate::registry_client::RegistryClient;
 /// ```
 pub struct SdkCacheProvider {
     cache: CacheManager,
-    /// Optional registry client for online resolution
-    registry_client: Option<Arc<RegistryClient>>,
+    // /TO REVIEW: Optional registry client for online resolution
+    // registry_client: Option<Arc<RegistryClient>>,
 }
 
 impl SdkCacheProvider {
-    /// Creates a new SDK cache provider with default cache location.
+    
+    /*/// Creates a new SDK cache provider with default cache location.
     pub fn new() -> Result<Self, SdkError> {
         let cache = CacheManager::new()?;
         Ok(Self {
             cache,
-            registry_client: None,
+            // registry_client: None,
         })
-    }
+    }*/
 
     /// Creates an SDK cache provider with a custom cache directory.
     pub fn with_dir(cache_dir: PathBuf) -> Result<Self, SdkError> {
         let cache = CacheManager::with_dir(cache_dir)?;
         Ok(Self {
             cache,
-            registry_client: None,
+            // registry_client: None,
         })
     }
 
+    /*
     /// Creates an SDK cache provider with an optional registry client.
     ///
     /// The registry client allows for more precise cache validation (SHA256 checks)
@@ -80,7 +82,7 @@ impl SdkCacheProvider {
             cache,
             registry_client: Some(registry_client),
         }
-    }
+    }*/
 
     /// Find a model directory that matches the given model ID.
     ///
