@@ -105,6 +105,10 @@ pub use mistral::MistralBackend;
 #[cfg(feature = "llm-llamacpp")]
 pub use llama_cpp::LlamaCppBackend;
 
+// llama.cpp log control exports
+#[cfg(feature = "llm-llamacpp")]
+pub use llama_cpp::{llama_log_get_verbosity, llama_log_set_verbosity};
+
 // Re-export inference backend types
 pub use inference_backend::{BackendError, BackendResult, InferenceBackend, RuntimeType};
 pub use traits::ModelRuntime;

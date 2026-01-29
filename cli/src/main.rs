@@ -79,6 +79,14 @@ struct Cli {
     #[arg(long, global = true, env = "XYBRID_DEVICE_ID")]
     device_id: Option<String>,
 
+    /// Increase verbosity (-v for verbose, -vv for very verbose with library logs)
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    verbose: u8,
+
+    /// Quiet mode - suppress most output, show errors only
+    #[arg(short, long, global = true)]
+    quiet: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -283,9 +291,12 @@ enum CacheCommand {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Configure log verbosity based on CLI flags
+    configure_log_level(&cli);
+
     // Initialize platform telemetry if API key is provided
     let telemetry_enabled = init_telemetry(&cli);
-    if telemetry_enabled {
+    if telemetry_enabled && !cli.quiet {
         println!("📡 Telemetry enabled ({})", cli.platform_url);
     }
 
@@ -299,6 +310,28 @@ fn main() -> Result<()> {
     }
 
     result
+}
+
+/// Configure the global log level based on CLI verbosity flags.
+///
+/// - `--quiet` / `-q`: Errors only
+/// - Default: Info level (JSON telemetry, no library logs)
+/// - `-v`: Verbose (debug telemetry, library warnings)
+/// - `-vv`: Very verbose (all telemetry + library debug logs)
+fn configure_log_level(cli: &Cli) {
+    use xybrid_core::telemetry::{set_global_log_level, LogLevel};
+
+    let level = if cli.quiet {
+        LogLevel::Quiet
+    } else {
+        match cli.verbose {
+            0 => LogLevel::Normal,
+            1 => LogLevel::Verbose,
+            _ => LogLevel::VeryVerbose,
+        }
+    };
+
+    set_global_log_level(level);
 }
 
 /// Initialize platform telemetry from CLI args

@@ -6,18 +6,84 @@
  */
 
 #include "llama.h"
+#include "ggml.h"
 #include <stdlib.h>
 #include <string.h>
 #include <thread>
 #include <vector>
+#include <atomic>
+
+// =============================================================================
+// Log Verbosity Control
+// =============================================================================
+
+// Log levels matching Rust's Severity enum
+// 0 = Silent (no logs), 1 = Error, 2 = Warn, 3 = Info, 4 = Debug
+static std::atomic<int> g_log_verbosity{0};  // Default: silent (suppress all library logs)
+
+// Custom log callback that filters based on verbosity level
+static void xybrid_log_callback(enum ggml_log_level level, const char* text, void* user_data) {
+    (void)user_data;  // unused
+
+    int verbosity = g_log_verbosity.load(std::memory_order_relaxed);
+
+    // Map ggml log levels to our verbosity levels
+    // GGML_LOG_LEVEL_NONE = 0, DEBUG = 1, INFO = 2, WARN = 3, ERROR = 4
+    int required_verbosity;
+    switch (level) {
+        case GGML_LOG_LEVEL_ERROR:
+            required_verbosity = 1;  // Errors need verbosity >= 1
+            break;
+        case GGML_LOG_LEVEL_WARN:
+            required_verbosity = 2;  // Warnings need verbosity >= 2
+            break;
+        case GGML_LOG_LEVEL_INFO:
+            required_verbosity = 3;  // Info needs verbosity >= 3
+            break;
+        case GGML_LOG_LEVEL_DEBUG:
+        default:
+            required_verbosity = 4;  // Debug needs verbosity >= 4
+            break;
+    }
+
+    // Only print if verbosity is high enough
+    if (verbosity >= required_verbosity) {
+        fputs(text, stderr);
+    }
+}
 
 extern "C" {
+
+// =============================================================================
+// Log Control
+// =============================================================================
+
+/**
+ * Set the verbosity level for llama.cpp/ggml logging.
+ *
+ * @param level 0 = silent, 1 = errors only, 2 = +warnings, 3 = +info, 4 = +debug
+ */
+void llama_log_set_verbosity_c(int level) {
+    g_log_verbosity.store(level, std::memory_order_relaxed);
+}
+
+/**
+ * Get the current verbosity level.
+ */
+int llama_log_get_verbosity_c(void) {
+    return g_log_verbosity.load(std::memory_order_relaxed);
+}
 
 // =============================================================================
 // Backend Management
 // =============================================================================
 
 void llama_backend_init_c(void) {
+    // Install our custom log callback BEFORE backend init
+    // This suppresses the verbose Metal/tensor loading logs
+    // Use llama_log_set which internally sets ggml_log_set as well
+    llama_log_set(xybrid_log_callback, nullptr);
+
     llama_backend_init();
 }
 

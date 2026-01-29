@@ -6,6 +6,7 @@
 use crate::context::DeviceMetrics;
 use crate::device::capabilities::detect_capabilities;
 use crate::orchestrator::policy_engine::PolicyResult;
+use crate::telemetry::{should_log, Severity};
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -127,9 +128,10 @@ impl DefaultRoutingEngine {
 
     /// Log routing decision to telemetry (MVP: stdout JSON).
     fn log_decision(&self, decision: &RoutingDecision) {
-        // MVP: Log to stdout as JSON
-        // TODO: Integrate with proper telemetry system
-        println!("{}", decision.to_json());
+        // Only log if verbosity is high enough (Info level for routing decisions)
+        if should_log(Severity::Info) {
+            println!("{}", decision.to_json());
+        }
     }
 }
 

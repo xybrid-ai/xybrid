@@ -6,9 +6,115 @@
 //! For MVP, this implements simple structured JSON logging to stdout following
 //! OpenTelemetry JSON format. Future versions will integrate with full OpenTelemetry
 //! SDK for distributed tracing and metrics export.
+//!
+//! # Log Levels
+//!
+//! Use `set_global_log_level()` to control both telemetry and library logging:
+//! - `LogLevel::Quiet`: Errors only, minimal output
+//! - `LogLevel::Normal`: Clean output - no telemetry JSON, no library logs (default)
+//! - `LogLevel::Verbose`: Show telemetry events (INFO+), library warnings
+//! - `LogLevel::VeryVerbose`: All telemetry (DEBUG+), all library logs
 
 use serde_json::json;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+// =============================================================================
+// Global Log Level Configuration
+// =============================================================================
+
+/// Global log level for controlling verbosity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    /// Errors only, suppress most output
+    Quiet = 0,
+    /// Info level and above (default)
+    Normal = 1,
+    /// All telemetry including debug
+    Verbose = 2,
+    /// All telemetry + library debug logs (very noisy)
+    VeryVerbose = 3,
+}
+
+impl LogLevel {
+    /// Convert to telemetry Severity threshold.
+    ///
+    /// By default (Normal), all telemetry JSON is suppressed to keep CLI output clean.
+    /// Use -v to see telemetry events, -vv for everything including library debug logs.
+    pub fn to_min_severity(&self) -> Severity {
+        match self {
+            // Quiet and Normal: Suppress all telemetry JSON for clean CLI output
+            // Only actual errors (not telemetry) will be shown
+            LogLevel::Quiet | LogLevel::Normal => Severity::Error,
+            // Verbose: Show INFO and above telemetry
+            LogLevel::Verbose => Severity::Info,
+            // VeryVerbose: Show all telemetry including DEBUG
+            LogLevel::VeryVerbose => Severity::Debug,
+        }
+    }
+
+    /// Convert to llama.cpp verbosity level.
+    /// 0 = silent, 1 = errors, 2 = warnings, 3 = info, 4 = debug
+    pub fn to_llamacpp_verbosity(&self) -> i32 {
+        match self {
+            LogLevel::Quiet => 0,
+            LogLevel::Normal => 0,           // Suppress library logs at normal level
+            LogLevel::Verbose => 2,          // Show warnings and errors
+            LogLevel::VeryVerbose => 4,      // Show all library logs
+        }
+    }
+
+    /// Create from integer value.
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            0 => LogLevel::Quiet,
+            1 => LogLevel::Normal,
+            2 => LogLevel::Verbose,
+            _ => LogLevel::VeryVerbose,
+        }
+    }
+}
+
+// Global log level storage
+static GLOBAL_LOG_LEVEL: AtomicU8 = AtomicU8::new(1); // Default: Normal
+
+/// Set the global log level for all xybrid logging.
+///
+/// This affects:
+/// - Telemetry event filtering (JSON logs)
+/// - llama.cpp/ggml library logging
+///
+/// # Example
+///
+/// ```rust
+/// use xybrid_core::telemetry::{set_global_log_level, LogLevel};
+///
+/// // Quiet mode - errors only
+/// set_global_log_level(LogLevel::Quiet);
+///
+/// // Verbose mode - all debug logs
+/// set_global_log_level(LogLevel::Verbose);
+/// ```
+pub fn set_global_log_level(level: LogLevel) {
+    GLOBAL_LOG_LEVEL.store(level as u8, Ordering::SeqCst);
+
+    // Also update llama.cpp verbosity if available
+    #[cfg(feature = "llm-llamacpp")]
+    {
+        crate::runtime_adapter::llama_cpp::llama_log_set_verbosity(level.to_llamacpp_verbosity());
+    }
+}
+
+/// Get the current global log level.
+pub fn get_global_log_level() -> LogLevel {
+    LogLevel::from_u8(GLOBAL_LOG_LEVEL.load(Ordering::SeqCst))
+}
+
+/// Check if the given severity should be logged at the current global level.
+pub fn should_log(severity: Severity) -> bool {
+    let level = get_global_log_level();
+    severity >= level.to_min_severity()
+}
 
 /// Telemetry event types.
 #[derive(Debug, Clone, PartialEq)]
@@ -41,12 +147,15 @@ impl TelemetryEvent {
 }
 
 /// Telemetry severity level.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Levels are ordered from most verbose (Debug) to least verbose (Error).
+/// When filtering, a min_severity of Info means Debug logs are excluded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
-    Debug,
-    Info,
-    Warn,
-    Error,
+    Debug = 0,
+    Info = 1,
+    Warn = 2,
+    Error = 3,
 }
 
 impl Severity {
@@ -57,6 +166,22 @@ impl Severity {
             Severity::Warn => "WARN",
             Severity::Error => "ERROR",
         }
+    }
+
+    /// Convert from integer level (for FFI compatibility).
+    /// 0 = Debug, 1 = Info, 2 = Warn, 3 = Error
+    pub fn from_level(level: u8) -> Self {
+        match level {
+            0 => Severity::Debug,
+            1 => Severity::Info,
+            2 => Severity::Warn,
+            _ => Severity::Error,
+        }
+    }
+
+    /// Convert to integer level.
+    pub fn to_level(&self) -> u8 {
+        *self as u8
     }
 }
 
@@ -109,24 +234,73 @@ impl TelemetryEntry {
 ///
 /// For MVP, this emits structured JSON logs to stdout.
 /// Future versions will support multiple exporters (file, network, etc.).
+///
+/// # Filtering
+///
+/// The `min_severity` field controls which events are emitted:
+/// - `Severity::Debug`: All events (most verbose)
+/// - `Severity::Info`: Info, Warn, Error (default)
+/// - `Severity::Warn`: Warn and Error only
+/// - `Severity::Error`: Errors only (least verbose)
 pub struct Telemetry {
     enabled: bool,
+    min_severity: Severity,
 }
 
 impl Telemetry {
-    /// Creates a new telemetry instance.
+    /// Creates a new telemetry instance with default settings (Info level).
     pub fn new() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            min_severity: Severity::Info,
+        }
     }
 
     /// Creates a new telemetry instance with enabled/disabled state.
     pub fn with_enabled(enabled: bool) -> Self {
-        Self { enabled }
+        Self {
+            enabled,
+            min_severity: Severity::Info,
+        }
     }
 
-    /// Emit a telemetry entry.
+    /// Creates a new telemetry instance with custom minimum severity.
+    pub fn with_min_severity(min_severity: Severity) -> Self {
+        Self {
+            enabled: true,
+            min_severity,
+        }
+    }
+
+    /// Set the minimum severity level for emitting events.
+    pub fn set_min_severity(&mut self, min_severity: Severity) {
+        self.min_severity = min_severity;
+    }
+
+    /// Get the current minimum severity level.
+    pub fn min_severity(&self) -> Severity {
+        self.min_severity
+    }
+
+    /// Emit a telemetry entry if it meets the minimum severity threshold.
+    ///
+    /// The effective threshold is the stricter of:
+    /// - The instance's `min_severity`
+    /// - The global log level's severity threshold
     pub fn emit(&self, entry: TelemetryEntry) {
-        if self.enabled {
+        if !self.enabled {
+            return;
+        }
+
+        // Use the stricter of instance min_severity and global log level
+        let global_min = get_global_log_level().to_min_severity();
+        let effective_min = if self.min_severity > global_min {
+            self.min_severity
+        } else {
+            global_min
+        };
+
+        if entry.severity >= effective_min {
             println!("{}", entry.to_json());
         }
     }

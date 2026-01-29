@@ -23,6 +23,9 @@
 
 mod sys;
 
+// Re-export log control functions for external use
+pub use sys::{llama_log_get_verbosity, llama_log_set_verbosity};
+
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
 };

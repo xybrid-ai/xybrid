@@ -9,7 +9,10 @@
 mod events;
 mod session;
 
-pub use events::{Severity, Telemetry, TelemetryEntry, TelemetryEvent};
+pub use events::{
+    get_global_log_level, set_global_log_level, should_log, LogLevel, Severity, Telemetry,
+    TelemetryEntry, TelemetryEvent,
+};
 pub use session::{
     ApiCallMetric, ErrorCategory, ErrorSummary, InferenceStats, SessionManager, SessionMetrics,
     TelemetryExport,

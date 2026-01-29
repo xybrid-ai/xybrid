@@ -63,6 +63,10 @@ extern "C" {
     fn llama_backend_init_c();
     fn llama_backend_free_c();
 
+    // Log verbosity control
+    fn llama_log_set_verbosity_c(level: c_int);
+    fn llama_log_get_verbosity_c() -> c_int;
+
     // Model loading
     fn llama_load_model_from_file_c(
         path_model: *const c_char,
@@ -195,6 +199,27 @@ pub fn llama_backend_free() {
     unsafe {
         llama_backend_free_c();
     }
+}
+
+/// Set the verbosity level for llama.cpp/ggml logging.
+///
+/// # Levels
+/// - 0: Silent (suppress all library logs) - default
+/// - 1: Errors only
+/// - 2: Errors + Warnings
+/// - 3: Errors + Warnings + Info
+/// - 4: All logs including Debug
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_log_set_verbosity(level: i32) {
+    unsafe {
+        llama_log_set_verbosity_c(level as c_int);
+    }
+}
+
+/// Get the current verbosity level for llama.cpp/ggml logging.
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_log_get_verbosity() -> i32 {
+    unsafe { llama_log_get_verbosity_c() as i32 }
 }
 
 /// Load a model from a GGUF file
@@ -865,6 +890,14 @@ pub fn llama_backend_init() {}
 
 #[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_backend_free() {}
+
+#[cfg(not(feature = "llm-llamacpp"))]
+pub fn llama_log_set_verbosity(_level: i32) {}
+
+#[cfg(not(feature = "llm-llamacpp"))]
+pub fn llama_log_get_verbosity() -> i32 {
+    0
+}
 
 #[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_load_model_from_file(
