@@ -2037,36 +2037,16 @@ fn run_bundle(
         ));
     }
 
-    // Load and extract bundle
-    println!("📂 Loading bundle...");
-    let bundle = XyBundle::load(bundle_path)
-        .with_context(|| format!("Failed to load bundle: {}", bundle_path.display()))?;
-
-    let manifest = bundle.manifest();
-    println!("   Model ID: {}", manifest.model_id);
-    println!("   Version: {}", manifest.version);
-    println!("   Files: {:?}", manifest.files);
-    println!();
-
-    // Create temp directory for extraction
-    let temp_dir =
-        tempfile::tempdir().context("Failed to create temp directory for bundle extraction")?;
-    let extract_dir = temp_dir.path();
-
-    // Extract bundle contents
-    println!("📦 Extracting bundle to temp directory...");
-    bundle
-        .extract_to(extract_dir)
+    // Extract bundle using unified CacheManager (single source of truth for extraction)
+    println!("📂 Loading and extracting bundle...");
+    let cache = xybrid_sdk::cache::CacheManager::new()
+        .context("Failed to create cache manager")?;
+    let extract_dir = cache
+        .ensure_extracted(bundle_path)
         .context("Failed to extract bundle")?;
 
-    // Try to load model_metadata.json
+    // Load model_metadata.json from extracted directory
     let metadata_path = extract_dir.join("model_metadata.json");
-    if !metadata_path.exists() {
-        return Err(anyhow::anyhow!(
-            "Bundle does not contain model_metadata.json. Cannot execute without metadata."
-        ));
-    }
-
     let metadata_content =
         fs::read_to_string(&metadata_path).context("Failed to read model_metadata.json")?;
     let metadata: ModelMetadata =
@@ -2387,35 +2367,16 @@ fn run_model(
 
     drop(_fetch_span);
 
-    // Load and extract bundle
-    println!("📂 Loading bundle...");
-    let bundle = XyBundle::load(&bundle_path)
-        .with_context(|| format!("Failed to load bundle: {}", bundle_path.display()))?;
-
-    let manifest = bundle.manifest();
-    println!("   Model ID: {}", manifest.model_id);
-    println!("   Version: {}", manifest.version);
-    println!();
-
-    // Create temp directory for extraction
-    let temp_dir =
-        tempfile::tempdir().context("Failed to create temp directory for bundle extraction")?;
-    let extract_dir = temp_dir.path();
-
-    // Extract bundle contents
-    println!("📦 Extracting bundle...");
-    bundle
-        .extract_to(extract_dir)
+    // Extract bundle using unified CacheManager (single source of truth for extraction)
+    println!("📂 Loading and extracting bundle...");
+    let cache = xybrid_sdk::cache::CacheManager::new()
+        .context("Failed to create cache manager")?;
+    let extract_dir = cache
+        .ensure_extracted(&bundle_path)
         .context("Failed to extract bundle")?;
 
-    // Load model_metadata.json
+    // Load model_metadata.json from extracted directory
     let metadata_path = extract_dir.join("model_metadata.json");
-    if !metadata_path.exists() {
-        return Err(anyhow::anyhow!(
-            "Bundle does not contain model_metadata.json. Cannot execute without metadata."
-        ));
-    }
-
     let metadata_content =
         fs::read_to_string(&metadata_path).context("Failed to read model_metadata.json")?;
     let metadata: ModelMetadata =
