@@ -729,7 +729,15 @@ fn handle_repl_command(
 
         // Try streaming execution if enabled and we have a single-stage LLM pipeline
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-        let use_streaming = stream && stages.len() == 1 && stages[0].bundle_path.is_some();
+        let use_streaming = {
+            let can_stream = stream && stages.len() == 1 && stages[0].bundle_path.is_some();
+            if stream && !can_stream {
+                eprintln!("⚠️  Streaming conditions not met:");
+                eprintln!("   - stages.len() = {} (need 1)", stages.len());
+                eprintln!("   - bundle_path = {:?}", stages.get(0).map(|s| &s.bundle_path));
+            }
+            can_stream
+        };
 
         #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
         let use_streaming = {
@@ -743,21 +751,95 @@ fn handle_repl_command(
         if use_streaming {
             #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             {
-                let bundle_path = stages[0].bundle_path.as_ref().unwrap();
-                let metadata_path = PathBuf::from(bundle_path).join("model_metadata.json");
+                use xybrid_core::bundler::XyBundle;
 
-                if metadata_path.exists() {
-                    let metadata_str = fs::read_to_string(&metadata_path)
-                        .context("Failed to read model metadata")?;
-                    let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
-                        .context("Failed to parse model metadata")?;
+                let bundle_path_str = stages[0].bundle_path.as_ref().unwrap();
+                let bundle_path = PathBuf::from(bundle_path_str);
 
+                // Check if this is a .xyb bundle file or a directory
+                let (model_dir, metadata) = if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
+                    // Load from .xyb bundle - extract to temp directory
+                    match XyBundle::load(&bundle_path) {
+                        Ok(bundle) => {
+                            // Get metadata from bundle
+                            match bundle.get_metadata_json() {
+                                Ok(Some(metadata_json)) => {
+                                    match serde_json::from_str::<ModelMetadata>(&metadata_json) {
+                                        Ok(metadata) => {
+                                            // Extract bundle to temp directory for streaming
+                                            // Use a deterministic path based on model ID to reuse extractions
+                                            let extract_dir = dirs::cache_dir()
+                                                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                                                .join("xybrid")
+                                                .join("extracted")
+                                                .join(&metadata.model_id);
+
+                                            if !extract_dir.exists() {
+                                                if let Err(e) = bundle.extract_to(&extract_dir) {
+                                                    eprintln!("⚠️  Failed to extract bundle: {}, falling back to batch mode", e);
+                                                    (None, None)
+                                                } else {
+                                                    (Some(extract_dir), Some(metadata))
+                                                }
+                                            } else {
+                                                // Already extracted
+                                                (Some(extract_dir), Some(metadata))
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!("⚠️  Failed to parse bundle metadata: {}, falling back to batch mode", e);
+                                            (None, None)
+                                        }
+                                    }
+                                }
+                                Ok(None) => {
+                                    eprintln!("⚠️  Bundle has no model_metadata.json, falling back to batch mode");
+                                    (None, None)
+                                }
+                                Err(e) => {
+                                    eprintln!("⚠️  Failed to read bundle metadata: {}, falling back to batch mode", e);
+                                    (None, None)
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("⚠️  Failed to load bundle: {}, falling back to batch mode", e);
+                            (None, None)
+                        }
+                    }
+                } else {
+                    // Direct directory path
+                    let metadata_path = bundle_path.join("model_metadata.json");
+                    if metadata_path.exists() {
+                        match fs::read_to_string(&metadata_path) {
+                            Ok(metadata_str) => {
+                                match serde_json::from_str::<ModelMetadata>(&metadata_str) {
+                                    Ok(metadata) => (Some(bundle_path.clone()), Some(metadata)),
+                                    Err(e) => {
+                                        eprintln!("⚠️  Failed to parse metadata: {}, falling back to batch mode", e);
+                                        (None, None)
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("⚠️  Failed to read metadata: {}, falling back to batch mode", e);
+                                (None, None)
+                            }
+                        }
+                    } else {
+                        eprintln!("⚠️  No model_metadata.json found at {}, falling back to batch mode", metadata_path.display());
+                        (None, None)
+                    }
+                };
+
+                // Execute streaming if we have valid model dir and metadata
+                if let (Some(model_dir), Some(metadata)) = (model_dir, metadata) {
                     // Check if this is an LLM model (GGUF)
                     if matches!(
                         metadata.execution_template,
                         xybrid_core::execution::ExecutionTemplate::Gguf { .. }
                     ) {
-                        let mut executor = TemplateExecutor::with_base_path(bundle_path);
+                        let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
 
                         // Execute with streaming callback
                         match executor.execute_streaming(
@@ -792,8 +874,6 @@ fn handle_repl_command(
                     } else if stream {
                         eprintln!("⚠️  Streaming only supported for GGUF models, falling back to batch mode");
                     }
-                } else if stream {
-                    eprintln!("⚠️  No model_metadata.json found at {}, falling back to batch mode", metadata_path.display());
                 }
             }
         }
