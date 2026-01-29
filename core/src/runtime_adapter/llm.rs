@@ -90,6 +90,67 @@ pub struct GenerationOutput {
 }
 
 // =============================================================================
+// Streaming Types
+// =============================================================================
+
+/// Partial token emitted during streaming generation.
+///
+/// This is passed to the callback function during `generate_streaming()` calls.
+#[derive(Debug, Clone)]
+pub struct PartialToken {
+    /// The decoded token text (may be partial UTF-8 for some tokenizers)
+    pub token: String,
+    /// Raw token ID if available (backend-specific)
+    pub token_id: Option<i64>,
+    /// Zero-based index of this token in the generation sequence
+    pub index: usize,
+    /// Cumulative text generated so far (all tokens concatenated)
+    pub cumulative_text: String,
+    /// Finish reason if this is the final token, None otherwise.
+    /// Values: "stop" (hit stop sequence/EOS), "length" (hit max_tokens)
+    pub finish_reason: Option<String>,
+}
+
+impl PartialToken {
+    /// Create a new partial token.
+    pub fn new(token: String, index: usize, cumulative_text: String) -> Self {
+        Self {
+            token,
+            token_id: None,
+            index,
+            cumulative_text,
+            finish_reason: None,
+        }
+    }
+
+    /// Set the token ID.
+    pub fn with_token_id(mut self, id: i64) -> Self {
+        self.token_id = Some(id);
+        self
+    }
+
+    /// Mark this as the final token with the given finish reason.
+    pub fn with_finish_reason(mut self, reason: impl Into<String>) -> Self {
+        self.finish_reason = Some(reason.into());
+        self
+    }
+
+    /// Check if this is the final token.
+    pub fn is_final(&self) -> bool {
+        self.finish_reason.is_some()
+    }
+}
+
+/// Error type for streaming callback failures.
+pub type StreamingError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Callback type for streaming token generation.
+///
+/// This is a boxed function that receives partial tokens during streaming generation.
+/// Return `Ok(())` to continue generation, or `Err(...)` to stop.
+pub type StreamingCallback<'a> = Box<dyn FnMut(PartialToken) -> Result<(), StreamingError> + Send + 'a>;
+
+// =============================================================================
 // LLM Configuration
 // =============================================================================
 
@@ -345,6 +406,58 @@ pub trait LlmBackend: Send + Sync {
     /// Generate text from a raw prompt (no chat template).
     fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput>;
 
+    /// Generate text with streaming, calling the callback for each token.
+    ///
+    /// The callback receives a `PartialToken` for each generated token.
+    /// If the callback returns an error, generation stops and the error is propagated.
+    ///
+    /// # Default Implementation
+    ///
+    /// The default implementation falls back to non-streaming `generate()` and
+    /// emits all tokens at once. Override this for true streaming support.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// backend.generate_streaming(&messages, &config, Box::new(|token| {
+    ///     print!("{}", token.token);
+    ///     std::io::stdout().flush()?;
+    ///     Ok(())
+    /// }))?;
+    /// ```
+    fn generate_streaming(
+        &self,
+        messages: &[ChatMessage],
+        config: &GenerationConfig,
+        on_token: StreamingCallback<'_>,
+    ) -> LlmResult<GenerationOutput> {
+        // Default implementation: fall back to non-streaming and emit all at once
+        let output = self.generate(messages, config)?;
+
+        // Emit the entire output as a single "token"
+        let partial = PartialToken {
+            token: output.text.clone(),
+            token_id: None,
+            index: 0,
+            cumulative_text: output.text.clone(),
+            finish_reason: Some(output.finish_reason.clone()),
+        };
+
+        let mut callback = on_token;
+        callback(partial).map_err(|e| {
+            AdapterError::RuntimeError(format!("Streaming callback error: {}", e))
+        })?;
+
+        Ok(output)
+    }
+
+    /// Check if this backend supports true streaming.
+    ///
+    /// Backends that override `generate_streaming` should return `true`.
+    fn supports_streaming(&self) -> bool {
+        false
+    }
+
     /// Get approximate memory usage in bytes.
     fn memory_usage(&self) -> Option<u64> {
         None
@@ -466,6 +579,13 @@ impl LlmRuntimeAdapter {
     /// Get the context length of the loaded model.
     pub fn context_length(&self) -> Option<usize> {
         self.backend.context_length()
+    }
+
+    /// Get a reference to the underlying backend.
+    ///
+    /// This is useful for accessing backend-specific features like streaming.
+    pub fn backend(&self) -> &dyn LlmBackend {
+        self.backend.as_ref()
     }
 
     /// Generate with custom configuration.
@@ -638,5 +758,232 @@ impl RuntimeAdapterExt for LlmRuntimeAdapter {
         } else {
             Vec::new()
         }
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_partial_token_new() {
+        let token = PartialToken::new("hello".to_string(), 0, "hello".to_string());
+        assert_eq!(token.token, "hello");
+        assert_eq!(token.index, 0);
+        assert_eq!(token.cumulative_text, "hello");
+        assert!(token.token_id.is_none());
+        assert!(token.finish_reason.is_none());
+        assert!(!token.is_final());
+    }
+
+    #[test]
+    fn test_partial_token_with_token_id() {
+        let token = PartialToken::new("world".to_string(), 1, "hello world".to_string())
+            .with_token_id(42);
+        assert_eq!(token.token_id, Some(42));
+    }
+
+    #[test]
+    fn test_partial_token_with_finish_reason() {
+        let token = PartialToken::new("".to_string(), 5, "final text".to_string())
+            .with_finish_reason("stop");
+        assert_eq!(token.finish_reason, Some("stop".to_string()));
+        assert!(token.is_final());
+    }
+
+    #[test]
+    fn test_partial_token_chained_builders() {
+        let token = PartialToken::new("token".to_string(), 3, "all tokens".to_string())
+            .with_token_id(100)
+            .with_finish_reason("length");
+        assert_eq!(token.token, "token");
+        assert_eq!(token.index, 3);
+        assert_eq!(token.token_id, Some(100));
+        assert_eq!(token.finish_reason, Some("length".to_string()));
+        assert!(token.is_final());
+    }
+
+    #[test]
+    fn test_chat_message_constructors() {
+        let user = ChatMessage::user("hello");
+        assert_eq!(user.role, "user");
+        assert_eq!(user.content, "hello");
+
+        let system = ChatMessage::system("you are helpful");
+        assert_eq!(system.role, "system");
+        assert_eq!(system.content, "you are helpful");
+
+        let assistant = ChatMessage::assistant("hi there");
+        assert_eq!(assistant.role, "assistant");
+        assert_eq!(assistant.content, "hi there");
+    }
+
+    #[test]
+    fn test_generation_config_defaults() {
+        let config = GenerationConfig::default();
+        assert_eq!(config.max_tokens, 256);
+        assert!((config.temperature - 0.7).abs() < f32::EPSILON);
+        assert!((config.top_p - 0.9).abs() < f32::EPSILON);
+        assert_eq!(config.top_k, 40);
+        assert!((config.repetition_penalty - 1.1).abs() < f32::EPSILON);
+        assert!(config.stop_sequences.is_empty());
+    }
+
+    #[test]
+    fn test_generation_config_with_max_tokens() {
+        let config = GenerationConfig::default().with_max_tokens(1024);
+        assert_eq!(config.max_tokens, 1024);
+    }
+
+    #[test]
+    fn test_generation_config_with_stop_sequences() {
+        let config = GenerationConfig::default()
+            .with_stop("<|end|>")
+            .with_stop("STOP");
+        assert_eq!(config.stop_sequences.len(), 2);
+        assert_eq!(config.stop_sequences[0], "<|end|>");
+        assert_eq!(config.stop_sequences[1], "STOP");
+    }
+
+    #[test]
+    fn test_llm_config_defaults() {
+        let config = LlmConfig::new("/path/to/model.gguf");
+        assert_eq!(config.model_path, "/path/to/model.gguf");
+        assert_eq!(config.context_length, 4096);
+        assert_eq!(config.gpu_layers, 99);
+        assert!(config.chat_template.is_none());
+        assert!(!config.logging);
+        assert!(config.paged_attention); // Default is true for better memory efficiency
+    }
+
+    #[test]
+    fn test_llm_config_with_context_length() {
+        let config = LlmConfig::new("/path/to/model.gguf").with_context_length(8192);
+        assert_eq!(config.context_length, 8192);
+    }
+
+    #[test]
+    fn test_llm_config_with_chat_template() {
+        let config = LlmConfig::new("/path/to/model.gguf")
+            .with_chat_template("chatml".to_string());
+        assert_eq!(config.chat_template, Some("chatml".to_string()));
+    }
+
+    #[test]
+    fn test_generation_output_structure() {
+        let output = GenerationOutput {
+            text: "Hello world".to_string(),
+            tokens_generated: 3,
+            generation_time_ms: 100,
+            tokens_per_second: 30.0,
+            finish_reason: "stop".to_string(),
+        };
+        assert_eq!(output.text, "Hello world");
+        assert_eq!(output.tokens_generated, 3);
+        assert_eq!(output.generation_time_ms, 100);
+        assert!((output.tokens_per_second - 30.0).abs() < f32::EPSILON);
+        assert_eq!(output.finish_reason, "stop");
+    }
+
+    /// Test that the default streaming implementation emits all text as one token
+    #[test]
+    fn test_default_streaming_implementation() {
+        // Create a mock backend that implements LlmBackend with default streaming
+        struct MockBackend;
+
+        impl LlmBackend for MockBackend {
+            fn name(&self) -> &str { "mock" }
+            fn supported_formats(&self) -> Vec<&'static str> { vec!["test"] }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> { Ok(()) }
+            fn is_loaded(&self) -> bool { true }
+            fn unload(&mut self) -> LlmResult<()> { Ok(()) }
+            fn generate(&self, _messages: &[ChatMessage], _config: &GenerationConfig) -> LlmResult<GenerationOutput> {
+                Ok(GenerationOutput {
+                    text: "Test response".to_string(),
+                    tokens_generated: 2,
+                    generation_time_ms: 50,
+                    tokens_per_second: 40.0,
+                    finish_reason: "stop".to_string(),
+                })
+            }
+            fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput> {
+                self.generate(&[ChatMessage::user(prompt)], config)
+            }
+            // Uses default generate_streaming implementation
+        }
+
+        let backend = MockBackend;
+        assert!(!backend.supports_streaming()); // Default is false
+
+        let messages = vec![ChatMessage::user("test")];
+        let config = GenerationConfig::default();
+
+        let mut received_tokens: Vec<PartialToken> = Vec::new();
+        let result = backend.generate_streaming(
+            &messages,
+            &config,
+            Box::new(|token| {
+                received_tokens.push(token);
+                Ok(())
+            }),
+        );
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.text, "Test response");
+
+        // Default implementation emits entire text as single "token"
+        assert_eq!(received_tokens.len(), 1);
+        assert_eq!(received_tokens[0].token, "Test response");
+        assert_eq!(received_tokens[0].cumulative_text, "Test response");
+        assert_eq!(received_tokens[0].finish_reason, Some("stop".to_string()));
+        assert!(received_tokens[0].is_final());
+    }
+
+    /// Test that callback errors propagate correctly in default streaming
+    #[test]
+    fn test_default_streaming_callback_error() {
+        struct MockBackend;
+
+        impl LlmBackend for MockBackend {
+            fn name(&self) -> &str { "mock" }
+            fn supported_formats(&self) -> Vec<&'static str> { vec!["test"] }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> { Ok(()) }
+            fn is_loaded(&self) -> bool { true }
+            fn unload(&mut self) -> LlmResult<()> { Ok(()) }
+            fn generate(&self, _messages: &[ChatMessage], _config: &GenerationConfig) -> LlmResult<GenerationOutput> {
+                Ok(GenerationOutput {
+                    text: "Test".to_string(),
+                    tokens_generated: 1,
+                    generation_time_ms: 10,
+                    tokens_per_second: 100.0,
+                    finish_reason: "stop".to_string(),
+                })
+            }
+            fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput> {
+                self.generate(&[ChatMessage::user(prompt)], config)
+            }
+        }
+
+        let backend = MockBackend;
+        let messages = vec![ChatMessage::user("test")];
+        let config = GenerationConfig::default();
+
+        // Callback that returns an error
+        let result = backend.generate_streaming(
+            &messages,
+            &config,
+            Box::new(|_token| {
+                Err("User cancelled".into())
+            }),
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("callback error") || err_msg.contains("User cancelled"));
     }
 }

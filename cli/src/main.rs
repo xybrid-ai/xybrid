@@ -194,6 +194,10 @@ enum Commands {
         /// Target format for model resolution (onnx, coreml, tflite)
         #[arg(long, value_name = "TARGET")]
         target: Option<String>,
+
+        /// Stream tokens as they are generated (LLM models only)
+        #[arg(long)]
+        stream: bool,
     },
     /// Trace and analyze telemetry logs from a session
     Trace {
@@ -460,7 +464,8 @@ fn run_command(cli: Cli) -> Result<()> {
             model,
             voice,
             target,
-        } => handle_repl_command(config, model, voice, target),
+            stream,
+        } => handle_repl_command(config, model, voice, target, stream),
         Commands::Trace {
             session,
             latest,
@@ -544,13 +549,25 @@ fn handle_repl_command(
     model: Option<String>,
     voice: Option<String>,
     _target: Option<String>,
+    stream: bool,
 ) -> Result<()> {
     use std::io::{self, Write};
 
     println!("🚀 Xybrid REPL Mode");
     println!("{}", "=".repeat(60));
     println!("Models will be loaded once and kept warm for fast inference.");
-    println!("Type 'quit' or 'exit' to exit. Type 'help' for commands.\n");
+    println!("Type 'quit' or 'exit' to exit. Type 'help' for commands.");
+
+    // Show streaming status
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    if stream {
+        println!("📡 Token streaming: ENABLED");
+    }
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    if stream {
+        println!("⚠️  Token streaming: NOT AVAILABLE (LLM features not compiled)");
+    }
+    println!();
 
     // Initialize registry client
     let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
@@ -709,6 +726,79 @@ fn handle_repl_command(
 
         // Execute pipeline
         let start = std::time::Instant::now();
+
+        // Try streaming execution if enabled and we have a single-stage LLM pipeline
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        let use_streaming = stream && stages.len() == 1 && stages[0].bundle_path.is_some();
+
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        let use_streaming = {
+            if stream {
+                eprintln!("⚠️  Streaming requested but LLM features not enabled.");
+                eprintln!("   Build with: --features llm-llamacpp (or llm-mistral)");
+            }
+            false
+        };
+
+        if use_streaming {
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            {
+                let bundle_path = stages[0].bundle_path.as_ref().unwrap();
+                let metadata_path = PathBuf::from(bundle_path).join("model_metadata.json");
+
+                if metadata_path.exists() {
+                    let metadata_str = fs::read_to_string(&metadata_path)
+                        .context("Failed to read model metadata")?;
+                    let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
+                        .context("Failed to parse model metadata")?;
+
+                    // Check if this is an LLM model (GGUF)
+                    if matches!(
+                        metadata.execution_template,
+                        xybrid_core::execution::ExecutionTemplate::Gguf { .. }
+                    ) {
+                        let mut executor = TemplateExecutor::with_base_path(bundle_path);
+
+                        // Execute with streaming callback
+                        match executor.execute_streaming(
+                            &metadata,
+                            &input,
+                            Box::new(|token| {
+                                print!("{}", token.token);
+                                io::stdout().flush()?;
+                                Ok(())
+                            }),
+                        ) {
+                            Ok(output) => {
+                                let elapsed = start.elapsed();
+                                println!(); // Newline after streamed output
+
+                                // Show timing info
+                                if let Some(tps) = output.metadata.get("tokens_per_second") {
+                                    println!(
+                                        "\n⏱️  Inference time: {:.2}s ({} tokens/sec)",
+                                        elapsed.as_secs_f32(),
+                                        tps
+                                    );
+                                } else {
+                                    println!("\n⏱️  Inference time: {:.2}s", elapsed.as_secs_f32());
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("\n❌ Error: {}", e);
+                            }
+                        }
+                        continue;
+                    } else if stream {
+                        eprintln!("⚠️  Streaming only supported for GGUF models, falling back to batch mode");
+                    }
+                } else if stream {
+                    eprintln!("⚠️  No model_metadata.json found at {}, falling back to batch mode", metadata_path.display());
+                }
+            }
+        }
+
+        // Non-streaming execution path (default)
         match orchestrator.execute_pipeline(&stages, &input, &metrics, &availability_fn) {
             Ok(results) => {
                 let elapsed = start.elapsed();

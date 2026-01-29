@@ -289,6 +289,129 @@ impl LlmBackend for LlamaCppBackend {
         self.generate(&messages, config)
     }
 
+    fn generate_streaming(
+        &self,
+        messages: &[ChatMessage],
+        config: &GenerationConfig,
+        on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+    ) -> LlmResult<GenerationOutput> {
+        use crate::runtime_adapter::llm::PartialToken;
+        let mut on_token = on_token;
+
+        let model = self.model.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
+        })?;
+        let context = self.context.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No context. Call load() first.".to_string())
+        })?;
+
+        // Clear KV cache to reset context state for new conversation
+        sys::llama_kv_cache_clear(context);
+
+        // Format messages into prompt using chat template
+        let prompt = sys::llama_format_chat(model, messages)?;
+
+        // Tokenize
+        let tokens = sys::llama_tokenize(model, &prompt, true)?;
+
+        let start = std::time::Instant::now();
+
+        // Track cumulative text and token index
+        let mut cumulative_text = String::new();
+        let mut token_index = 0usize;
+
+        // Generate with streaming callback
+        let (output_tokens, _stopped_by_callback) = sys::llama_generate_streaming(
+            context,
+            model,
+            &tokens,
+            config.max_tokens,
+            config.temperature,
+            config.top_p,
+            config.top_k,
+            config.repetition_penalty,
+            &config.stop_sequences,
+            |token_id, token_text| {
+                cumulative_text.push_str(token_text);
+
+                let partial = PartialToken::new(
+                    token_text.to_string(),
+                    token_index,
+                    cumulative_text.clone(),
+                ).with_token_id(token_id as i64);
+
+                token_index += 1;
+                on_token(partial)
+            },
+        )?;
+
+        let elapsed = start.elapsed();
+
+        // Decode tokens to text (for final output)
+        let mut text = sys::llama_detokenize(model, &output_tokens)?;
+
+        // Apply stop sequence truncation
+        let mut finish_reason = "length".to_string();
+
+        let mut stop_patterns: Vec<&str> = config.stop_sequences.iter().map(|s| s.as_str()).collect();
+        let extra_patterns = ["<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>"];
+        for p in &extra_patterns {
+            if !stop_patterns.contains(p) {
+                stop_patterns.push(p);
+            }
+        }
+
+        let mut earliest_pos: Option<usize> = None;
+        for stop_seq in &stop_patterns {
+            if let Some(pos) = text.find(stop_seq) {
+                match earliest_pos {
+                    None => earliest_pos = Some(pos),
+                    Some(current) if pos < current => earliest_pos = Some(pos),
+                    _ => {}
+                }
+            }
+        }
+        if earliest_pos.is_some() {
+            if let Some(pos) = earliest_pos {
+                text.truncate(pos);
+            }
+            finish_reason = "stop".to_string();
+        }
+
+        let text = text.trim().to_string();
+
+        let tokens_generated = output_tokens.len();
+        let tokens_per_second = if elapsed.as_secs_f32() > 0.0 {
+            tokens_generated as f32 / elapsed.as_secs_f32()
+        } else {
+            0.0
+        };
+
+        // Send final token with finish reason
+        if token_index > 0 {
+            let final_partial = PartialToken::new(
+                String::new(),
+                token_index,
+                text.clone(),
+            ).with_finish_reason(&finish_reason);
+
+            // Ignore error on final notification - generation is complete
+            let _ = on_token(final_partial);
+        }
+
+        Ok(GenerationOutput {
+            text,
+            tokens_generated,
+            generation_time_ms: elapsed.as_millis() as u64,
+            tokens_per_second,
+            finish_reason,
+        })
+    }
+
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+
     fn memory_usage(&self) -> Option<u64> {
         // TODO: Implement via llama_get_state_size or similar
         None

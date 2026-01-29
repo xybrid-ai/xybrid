@@ -344,6 +344,190 @@ impl TemplateExecutor {
         Ok(result)
     }
 
+    /// Execute a model with streaming support.
+    ///
+    /// This is similar to `execute()` but calls the provided callback for each
+    /// generated token during LLM inference. For non-LLM models, falls back to
+    /// regular execution without streaming.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Model metadata with execution configuration
+    /// * `input` - Input envelope
+    /// * `on_token` - Callback invoked for each generated token
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// executor.execute_streaming(&metadata, &input, Box::new(|token| {
+    ///     print!("{}", token.token);
+    ///     std::io::stdout().flush()?;
+    ///     Ok(())
+    /// }))?;
+    /// ```
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    pub fn execute_streaming(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+    ) -> ExecutorResult<Envelope> {
+        // Only GGUF (LLM) templates support streaming
+        if let super::template::ExecutionTemplate::Gguf {
+            model_file,
+            chat_template,
+            context_length,
+        } = &metadata.execution_template
+        {
+            let backend_hint = metadata
+                .metadata
+                .get("backend")
+                .and_then(|v| v.as_str());
+
+            return self.execute_llm_streaming(
+                model_file,
+                chat_template.as_deref(),
+                *context_length,
+                input,
+                backend_hint,
+                on_token,
+            );
+        }
+
+        // Non-LLM models: fall back to regular execution
+        debug!(
+            target: "xybrid_core",
+            "execute_streaming: Non-LLM model, falling back to regular execute()"
+        );
+        self.execute(metadata, input)
+    }
+
+    /// Execute a model with streaming support (stub when LLM features disabled).
+    ///
+    /// Without LLM features, streaming is not available. This stub falls back
+    /// to regular execution.
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    pub fn execute_streaming<F>(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        _on_token: F,
+    ) -> ExecutorResult<Envelope>
+    where
+        F: FnMut(()) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    {
+        // No LLM support - just use regular execution
+        self.execute(metadata, input)
+    }
+
+    /// Execute LLM inference with streaming.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn execute_llm_streaming(
+        &mut self,
+        model_file: &str,
+        chat_template: Option<&str>,
+        context_length: usize,
+        input: &Envelope,
+        backend_hint: Option<&str>,
+        on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+    ) -> ExecutorResult<Envelope> {
+        use crate::ir::EnvelopeKind;
+        use crate::runtime_adapter::llm::{ChatMessage, GenerationConfig};
+
+        info!(
+            target: "xybrid_core",
+            "Executing LLM inference with streaming: {} (backend: {:?})",
+            model_file,
+            backend_hint.unwrap_or("default")
+        );
+
+        let _llm_span = xybrid_trace::SpanGuard::new("llm_inference_streaming");
+        xybrid_trace::add_metadata("model", model_file);
+        xybrid_trace::add_metadata("streaming", "true");
+
+        // Build full model path
+        let model_path = Path::new(&self.base_path).join(model_file);
+        let model_path_str = model_path.to_string_lossy().to_string();
+
+        // Check if we have a cached adapter for this model path
+        let need_load = match &self.llm_adapter_cache {
+            Some((cached_path, _)) if cached_path == &model_path_str => false,
+            _ => true,
+        };
+
+        // Load model if needed
+        if need_load {
+            let mut config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length);
+
+            if let Some(template) = chat_template {
+                let template_path = Path::new(&self.base_path).join(template);
+                config = config.with_chat_template(template_path.to_string_lossy().to_string());
+            }
+
+            let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
+            adapter.load_model(&config.model_path)?;
+            self.llm_adapter_cache = Some((model_path_str.clone(), adapter));
+        }
+
+        // Extract prompt from input
+        let prompt = match &input.kind {
+            EnvelopeKind::Text(text) => text.clone(),
+            _ => {
+                return Err(AdapterError::InvalidInput(
+                    "LLM streaming requires text input".to_string(),
+                ))
+            }
+        };
+
+        // Build messages
+        let system_prompt = input.metadata.get("system_prompt").map(|s| s.as_str());
+        let mut messages = Vec::new();
+        if let Some(sys) = system_prompt {
+            messages.push(ChatMessage::system(sys));
+        }
+        messages.push(ChatMessage::user(&prompt));
+
+        // Parse generation config from metadata
+        let mut gen_config = GenerationConfig::default();
+        if let Some(max_tokens) = input.metadata.get("max_tokens").and_then(|s| s.parse().ok()) {
+            gen_config.max_tokens = max_tokens;
+        }
+        if let Some(temperature) = input.metadata.get("temperature").and_then(|s| s.parse().ok()) {
+            gen_config.temperature = temperature;
+        }
+
+        // Execute with streaming
+        let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
+            adapter.backend().generate_streaming(&messages, &gen_config, on_token)?
+        } else {
+            return Err(AdapterError::RuntimeError(
+                "LLM adapter cache unexpectedly empty".to_string(),
+            ));
+        };
+
+        // Build response envelope
+        let mut response_metadata = std::collections::HashMap::new();
+        response_metadata.insert(
+            "tokens_generated".to_string(),
+            output.tokens_generated.to_string(),
+        );
+        response_metadata.insert(
+            "generation_time_ms".to_string(),
+            output.generation_time_ms.to_string(),
+        );
+        response_metadata.insert(
+            "tokens_per_second".to_string(),
+            format!("{:.2}", output.tokens_per_second),
+        );
+        response_metadata.insert("finish_reason".to_string(), output.finish_reason);
+
+        Ok(Envelope {
+            kind: EnvelopeKind::Text(output.text),
+            metadata: response_metadata,
+        })
+    }
+
     /// Execute LLM inference via LlmRuntimeAdapter.
     ///
     /// This is a separate execution path for GGUF-based LLMs that bypasses

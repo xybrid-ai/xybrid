@@ -122,6 +122,10 @@ pub use xybrid_core::orchestrator::routing_engine;
 // Re-export voice types for TTS model discovery
 pub use xybrid_core::execution::{VoiceConfig, VoiceInfo};
 
+// Re-export streaming types for LLM token streaming (when LLM features enabled)
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+pub use xybrid_core::runtime_adapter::llm::{PartialToken, StreamingCallback, StreamingError};
+
 // Backwards compatibility re-exports
 #[doc(hidden)]
 pub use xybrid_core::execution::template as execution_template;
