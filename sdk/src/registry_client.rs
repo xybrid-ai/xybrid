@@ -556,6 +556,64 @@ impl RegistryClient {
         Ok(cache_path)
     }
 
+    /// Fetch a model bundle and extract it, returning the extracted directory path.
+    ///
+    /// This is the **preferred method** for fetching models, as it returns a ready-to-use
+    /// directory containing the model files and `model_metadata.json`.
+    ///
+    /// Extraction is idempotent: if the bundle was already extracted, returns immediately.
+    ///
+    /// # Arguments
+    ///
+    /// * `mask` - Model mask (e.g., "kokoro-82m")
+    /// * `platform` - Target platform (None for auto-detect)
+    /// * `progress_callback` - Optional callback for download progress (0.0 to 1.0)
+    ///
+    /// # Returns
+    ///
+    /// Path to the extracted directory containing `model_metadata.json` and model files.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let client = RegistryClient::default_client()?;
+    /// let model_dir = client.fetch_extracted("kokoro-82m", None, |p| {
+    ///     println!("Downloaded: {:.1}%", p * 100.0);
+    /// })?;
+    ///
+    /// // model_dir now contains model_metadata.json and all model files
+    /// let metadata_path = model_dir.join("model_metadata.json");
+    /// ```
+    pub fn fetch_extracted<F>(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        progress_callback: F,
+    ) -> Result<PathBuf, SdkError>
+    where
+        F: Fn(f32),
+    {
+        // First, ensure the bundle is downloaded
+        let xyb_path = self.fetch(mask, platform, progress_callback)?;
+
+        // Then ensure it's extracted (idempotent - returns immediately if already done)
+        self.cache.ensure_extracted(&xyb_path)
+    }
+
+    /// Check if a model is already extracted and ready to use.
+    ///
+    /// Returns true if the model has been fetched AND extracted.
+    pub fn is_extracted(&self, model_id: &str) -> bool {
+        self.cache.is_extracted(model_id)
+    }
+
+    /// Get the extraction directory for a model.
+    ///
+    /// Note: This returns the path even if not yet extracted. Use `is_extracted()` to check.
+    pub fn extraction_dir(&self, model_id: &str) -> PathBuf {
+        self.cache.extraction_dir(model_id)
+    }
+
     /// Download a file with progress tracking and retry on connection failures.
     ///
     /// Note: Downloads use a separate retry mechanism because:
@@ -944,5 +1002,20 @@ mod tests {
         let path = client.get_cache_path(&resolved);
         assert!(path.to_string_lossy().contains("kokoro-82m"));
         assert!(path.to_string_lossy().contains("universal.xyb"));
+    }
+
+    #[test]
+    fn test_extraction_dir() {
+        let client = RegistryClient::default_client().unwrap();
+        let dir = client.extraction_dir("test-model");
+        assert!(dir.to_string_lossy().contains("extracted"));
+        assert!(dir.to_string_lossy().contains("test-model"));
+    }
+
+    #[test]
+    fn test_is_extracted_false_for_nonexistent() {
+        let client = RegistryClient::default_client().unwrap();
+        // A random model ID should not be extracted
+        assert!(!client.is_extracted("nonexistent-model-12345"));
     }
 }

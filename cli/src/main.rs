@@ -751,64 +751,49 @@ fn handle_repl_command(
         if use_streaming {
             #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             {
-                use xybrid_core::bundler::XyBundle;
+                use xybrid_sdk::cache::CacheManager;
 
                 let bundle_path_str = stages[0].bundle_path.as_ref().unwrap();
                 let bundle_path = PathBuf::from(bundle_path_str);
 
-                // Check if this is a .xyb bundle file or a directory
+                // Get model directory and metadata using unified extraction via CacheManager
                 let (model_dir, metadata) = if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
-                    // Load from .xyb bundle - extract to temp directory
-                    match XyBundle::load(&bundle_path) {
-                        Ok(bundle) => {
-                            // Get metadata from bundle
-                            match bundle.get_metadata_json() {
-                                Ok(Some(metadata_json)) => {
-                                    match serde_json::from_str::<ModelMetadata>(&metadata_json) {
-                                        Ok(metadata) => {
-                                            // Extract bundle to temp directory for streaming
-                                            // Use a deterministic path based on model ID to reuse extractions
-                                            let extract_dir = dirs::cache_dir()
-                                                .unwrap_or_else(|| PathBuf::from("/tmp"))
-                                                .join("xybrid")
-                                                .join("extracted")
-                                                .join(&metadata.model_id);
-
-                                            if !extract_dir.exists() {
-                                                if let Err(e) = bundle.extract_to(&extract_dir) {
-                                                    eprintln!("⚠️  Failed to extract bundle: {}, falling back to batch mode", e);
+                    // .xyb bundle file - use CacheManager for unified extraction
+                    match CacheManager::new() {
+                        Ok(cache) => {
+                            match cache.ensure_extracted(&bundle_path) {
+                                Ok(extract_dir) => {
+                                    // Load metadata from extracted directory
+                                    let metadata_path = extract_dir.join("model_metadata.json");
+                                    match fs::read_to_string(&metadata_path) {
+                                        Ok(metadata_str) => {
+                                            match serde_json::from_str::<ModelMetadata>(&metadata_str) {
+                                                Ok(metadata) => (Some(extract_dir), Some(metadata)),
+                                                Err(e) => {
+                                                    eprintln!("⚠️  Failed to parse metadata: {}, falling back to batch mode", e);
                                                     (None, None)
-                                                } else {
-                                                    (Some(extract_dir), Some(metadata))
                                                 }
-                                            } else {
-                                                // Already extracted
-                                                (Some(extract_dir), Some(metadata))
                                             }
                                         }
                                         Err(e) => {
-                                            eprintln!("⚠️  Failed to parse bundle metadata: {}, falling back to batch mode", e);
+                                            eprintln!("⚠️  Failed to read metadata: {}, falling back to batch mode", e);
                                             (None, None)
                                         }
                                     }
                                 }
-                                Ok(None) => {
-                                    eprintln!("⚠️  Bundle has no model_metadata.json, falling back to batch mode");
-                                    (None, None)
-                                }
                                 Err(e) => {
-                                    eprintln!("⚠️  Failed to read bundle metadata: {}, falling back to batch mode", e);
+                                    eprintln!("⚠️  Failed to extract bundle: {}, falling back to batch mode", e);
                                     (None, None)
                                 }
                             }
                         }
                         Err(e) => {
-                            eprintln!("⚠️  Failed to load bundle: {}, falling back to batch mode", e);
+                            eprintln!("⚠️  Failed to create cache manager: {}, falling back to batch mode", e);
                             (None, None)
                         }
                     }
                 } else {
-                    // Direct directory path
+                    // Direct directory path - just read metadata
                     let metadata_path = bundle_path.join("model_metadata.json");
                     if metadata_path.exists() {
                         match fs::read_to_string(&metadata_path) {

@@ -367,6 +367,184 @@ impl CacheManager {
         Ok(decompressed_dir)
     }
 
+    // =========================================================================
+    // Bundle Extraction (Unified API)
+    // =========================================================================
+
+    /// Returns the extraction directory for a given model ID.
+    ///
+    /// This is a deterministic path based on the model ID, located at:
+    /// `{cache_dir}/../extracted/{model_id}/`
+    ///
+    /// # Arguments
+    ///
+    /// * `model_id` - The model identifier from model_metadata.json
+    pub fn extraction_dir(&self, model_id: &str) -> PathBuf {
+        // Go up from models/ to cache/, then into extracted/
+        self.cache_dir
+            .parent()
+            .unwrap_or(&self.cache_dir)
+            .join("extracted")
+            .join(model_id)
+    }
+
+    /// Checks if a bundle has already been extracted.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_id` - The model identifier
+    ///
+    /// # Returns
+    ///
+    /// True if the extraction directory exists and contains model_metadata.json
+    pub fn is_extracted(&self, model_id: &str) -> bool {
+        let extract_dir = self.extraction_dir(model_id);
+        extract_dir.join("model_metadata.json").exists()
+    }
+
+    /// Ensures a `.xyb` bundle is extracted and returns the directory path.
+    ///
+    /// This is the **single source of truth** for bundle extraction.
+    /// All code that needs to access extracted bundle contents should use this method.
+    ///
+    /// The extraction is idempotent:
+    /// - If already extracted, returns the existing directory immediately
+    /// - If not extracted, extracts and returns the new directory
+    ///
+    /// # Arguments
+    ///
+    /// * `xyb_path` - Path to the `.xyb` bundle file
+    ///
+    /// # Returns
+    ///
+    /// Path to the extracted directory containing model files
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let cache = CacheManager::new()?;
+    /// let model_dir = cache.ensure_extracted(&xyb_path)?;
+    /// // model_dir now contains: model_metadata.json, model.gguf, etc.
+    /// ```
+    pub fn ensure_extracted(&self, xyb_path: &Path) -> Result<PathBuf, SdkError> {
+        use xybrid_core::execution::ModelMetadata;
+
+        // Validate bundle exists
+        if !xyb_path.exists() {
+            return Err(SdkError::CacheError(format!(
+                "Bundle not found: {}",
+                xyb_path.display()
+            )));
+        }
+
+        // Load bundle to get metadata
+        let bundle = XyBundle::load(xyb_path)
+            .map_err(|e| SdkError::CacheError(format!("Failed to load bundle: {}", e)))?;
+
+        // Get model_id from metadata
+        let metadata_json = bundle
+            .get_metadata_json()
+            .map_err(|e| SdkError::CacheError(format!("Failed to read bundle metadata: {}", e)))?
+            .ok_or_else(|| {
+                SdkError::CacheError("Bundle has no model_metadata.json".to_string())
+            })?;
+
+        let metadata: ModelMetadata = serde_json::from_str(&metadata_json)
+            .map_err(|e| SdkError::CacheError(format!("Failed to parse model metadata: {}", e)))?;
+
+        let extract_dir = self.extraction_dir(&metadata.model_id);
+
+        // Check if already extracted (model_metadata.json exists)
+        if extract_dir.join("model_metadata.json").exists() {
+            log::debug!(
+                "Bundle already extracted for '{}' at {}",
+                metadata.model_id,
+                extract_dir.display()
+            );
+            return Ok(extract_dir);
+        }
+
+        // Create extraction directory
+        std::fs::create_dir_all(&extract_dir).map_err(|e| {
+            SdkError::CacheError(format!("Failed to create extraction directory: {}", e))
+        })?;
+
+        // Extract bundle contents
+        log::info!(
+            "Extracting bundle '{}' to {}",
+            metadata.model_id,
+            extract_dir.display()
+        );
+        bundle.extract_to(&extract_dir).map_err(|e| {
+            SdkError::CacheError(format!("Failed to extract bundle: {}", e))
+        })?;
+
+        Ok(extract_dir)
+    }
+
+    /// Ensures a bundle is extracted, with a preloaded model_id.
+    ///
+    /// This is an optimization when you already know the model_id (e.g., from
+    /// registry metadata) and want to avoid loading the bundle just to read it.
+    ///
+    /// # Arguments
+    ///
+    /// * `xyb_path` - Path to the `.xyb` bundle file
+    /// * `model_id` - Known model identifier
+    ///
+    /// # Returns
+    ///
+    /// Path to the extracted directory
+    pub fn ensure_extracted_with_id(
+        &self,
+        xyb_path: &Path,
+        model_id: &str,
+    ) -> Result<PathBuf, SdkError> {
+        let extract_dir = self.extraction_dir(model_id);
+
+        // Check if already extracted
+        if extract_dir.join("model_metadata.json").exists() {
+            log::debug!(
+                "Bundle already extracted for '{}' at {}",
+                model_id,
+                extract_dir.display()
+            );
+            return Ok(extract_dir);
+        }
+
+        // Need to extract - load bundle
+        if !xyb_path.exists() {
+            return Err(SdkError::CacheError(format!(
+                "Bundle not found: {}",
+                xyb_path.display()
+            )));
+        }
+
+        let bundle = XyBundle::load(xyb_path)
+            .map_err(|e| SdkError::CacheError(format!("Failed to load bundle: {}", e)))?;
+
+        // Create extraction directory
+        std::fs::create_dir_all(&extract_dir).map_err(|e| {
+            SdkError::CacheError(format!("Failed to create extraction directory: {}", e))
+        })?;
+
+        // Extract bundle contents
+        log::info!(
+            "Extracting bundle '{}' to {}",
+            model_id,
+            extract_dir.display()
+        );
+        bundle.extract_to(&extract_dir).map_err(|e| {
+            SdkError::CacheError(format!("Failed to extract bundle: {}", e))
+        })?;
+
+        Ok(extract_dir)
+    }
+
+    // =========================================================================
+    // Cache Maintenance
+    // =========================================================================
+
     /// Cleans expired cache entries.
     ///
     /// Removes cloud models that have exceeded their TTL.
@@ -428,7 +606,9 @@ impl CacheManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::TempDir;
+    use xybrid_core::bundler::XyBundle;
 
     #[test]
     fn test_cache_status_empty() {
@@ -451,5 +631,164 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let manager = CacheManager::with_dir(temp_dir.path().to_path_buf()).unwrap();
         assert!(manager.get_cached_path("test-model").is_none());
+    }
+
+    // =========================================================================
+    // Bundle Extraction Tests
+    // =========================================================================
+
+    /// Creates a test bundle with model_metadata.json
+    fn create_test_bundle(temp_dir: &TempDir, model_id: &str) -> PathBuf {
+        // Create model files
+        let model_dir = temp_dir.path().join("model_files");
+        fs::create_dir_all(&model_dir).unwrap();
+
+        // Create model_metadata.json with valid Onnx execution template (internally tagged)
+        let metadata = format!(
+            r#"{{
+                "model_id": "{}",
+                "version": "1.0",
+                "execution_template": {{ "type": "Onnx", "model_file": "model.onnx" }},
+                "preprocessing": [],
+                "postprocessing": [],
+                "files": ["model.onnx"],
+                "metadata": {{}}
+            }}"#,
+            model_id
+        );
+        fs::write(model_dir.join("model_metadata.json"), &metadata).unwrap();
+
+        // Create fake model file
+        fs::write(model_dir.join("model.onnx"), b"fake model data").unwrap();
+
+        // Create bundle
+        let mut bundle = XyBundle::new(model_id, "1.0", "universal");
+        bundle
+            .add_file(model_dir.join("model_metadata.json"))
+            .unwrap();
+        bundle.add_file(model_dir.join("model.onnx")).unwrap();
+
+        // Write bundle
+        let bundle_path = temp_dir.path().join(format!("{}.xyb", model_id));
+        bundle.write(&bundle_path).unwrap();
+
+        bundle_path
+    }
+
+    #[test]
+    fn test_extraction_dir_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let manager = CacheManager::with_dir(cache_dir).unwrap();
+        let extract_dir = manager.extraction_dir("test-model");
+
+        // Should be at cache/extracted/test-model (sibling to models/)
+        assert!(extract_dir.to_string_lossy().contains("extracted"));
+        assert!(extract_dir.to_string_lossy().contains("test-model"));
+    }
+
+    #[test]
+    fn test_is_extracted_false_when_not_extracted() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = CacheManager::with_dir(temp_dir.path().to_path_buf()).unwrap();
+
+        assert!(!manager.is_extracted("nonexistent-model"));
+    }
+
+    #[test]
+    fn test_ensure_extracted_creates_directory() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create cache structure: temp/cache/models/
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let manager = CacheManager::with_dir(cache_dir).unwrap();
+
+        // Create test bundle
+        let bundle_path = create_test_bundle(&temp_dir, "test-extraction-model");
+
+        // Extract bundle
+        let extract_dir = manager.ensure_extracted(&bundle_path).unwrap();
+
+        // Verify extraction
+        assert!(extract_dir.exists());
+        assert!(extract_dir.join("model_metadata.json").exists());
+        assert!(extract_dir.join("model.onnx").exists());
+    }
+
+    #[test]
+    fn test_ensure_extracted_is_idempotent() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let manager = CacheManager::with_dir(cache_dir).unwrap();
+        let bundle_path = create_test_bundle(&temp_dir, "idempotent-model");
+
+        // Extract twice
+        let dir1 = manager.ensure_extracted(&bundle_path).unwrap();
+        let dir2 = manager.ensure_extracted(&bundle_path).unwrap();
+
+        // Should return same directory
+        assert_eq!(dir1, dir2);
+
+        // Should still have valid contents
+        assert!(dir1.join("model_metadata.json").exists());
+    }
+
+    #[test]
+    fn test_ensure_extracted_with_id_skips_when_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let manager = CacheManager::with_dir(cache_dir).unwrap();
+        let bundle_path = create_test_bundle(&temp_dir, "known-id-model");
+
+        // Extract first time
+        let dir1 = manager
+            .ensure_extracted_with_id(&bundle_path, "known-id-model")
+            .unwrap();
+        assert!(dir1.join("model_metadata.json").exists());
+
+        // Second call should skip extraction (even with wrong bundle path)
+        let fake_path = temp_dir.path().join("nonexistent.xyb");
+        let dir2 = manager
+            .ensure_extracted_with_id(&fake_path, "known-id-model")
+            .unwrap();
+
+        assert_eq!(dir1, dir2);
+    }
+
+    #[test]
+    fn test_ensure_extracted_error_on_missing_bundle() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = CacheManager::with_dir(temp_dir.path().to_path_buf()).unwrap();
+
+        let result = manager.ensure_extracted(Path::new("/nonexistent/bundle.xyb"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_is_extracted_true_after_extraction() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let manager = CacheManager::with_dir(cache_dir).unwrap();
+        let bundle_path = create_test_bundle(&temp_dir, "check-extracted-model");
+
+        // Before extraction
+        assert!(!manager.is_extracted("check-extracted-model"));
+
+        // Extract
+        manager.ensure_extracted(&bundle_path).unwrap();
+
+        // After extraction
+        assert!(manager.is_extracted("check-extracted-model"));
     }
 }
