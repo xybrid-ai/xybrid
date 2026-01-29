@@ -699,8 +699,9 @@ impl Pipeline {
                         });
                     };
 
-                    // Fetch model and get the bundle path
-                    let bundle_path = client.fetch(&model_id, None, progress_for_model)?;
+                    // Fetch model and extract to permanent cache directory
+                    // Uses CacheManager.ensure_extracted() as single source of truth
+                    let model_dir = client.fetch_extracted(&model_id, None, progress_for_model)?;
 
                     {
                         // Recover from poisoned RwLock to prevent permanent lock errors
@@ -708,11 +709,11 @@ impl Pipeline {
 
                         handle.availability_map.insert(model_id.clone(), true);
                         handle.availability_map.insert(stage_id.clone(), true);
-                        // Store the bundle path for this stage
+                        // Store the extracted directory path for this stage
                         handle
                             .bundle_paths
-                            .insert(stage_id.clone(), bundle_path.clone());
-                        handle.bundle_paths.insert(model_id.clone(), bundle_path);
+                            .insert(stage_id.clone(), model_dir.clone());
+                        handle.bundle_paths.insert(model_id.clone(), model_dir);
                     }
                 }
                 ResolvedTarget::Cloud { .. } | ResolvedTarget::Server { .. } => {
