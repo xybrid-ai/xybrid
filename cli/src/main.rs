@@ -614,14 +614,19 @@ fn handle_repl_command(
                             .unwrap()
                     );
                     pb.set_message(model_id.clone());
-                    client.fetch(&model_id, None, |p| {
+                    // Use fetch_extracted to download AND extract (single source of truth)
+                    let model_dir = client.fetch_extracted(&model_id, None, |p| {
                         pb.set_position((p * resolved.size_bytes as f32) as u64);
                     })?;
                     pb.finish_with_message(format!("{} ✓", model_id));
+                    desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
+                } else {
+                    // Already cached - ensure it's extracted
+                    let cache = xybrid_sdk::cache::CacheManager::new()?;
+                    let xyb_path = client.get_cache_path(&client.resolve(&model_id, None)?);
+                    let model_dir = cache.ensure_extracted(&xyb_path)?;
+                    desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
                 }
-
-                let resolved = client.resolve(&model_id, None)?;
-                desc.bundle_path = Some(client.get_cache_path(&resolved).to_string_lossy().to_string());
             }
             stages.push(desc);
         }
@@ -641,14 +646,19 @@ fn handle_repl_command(
                     .unwrap()
             );
             pb.set_message(model_id.clone());
-            client.fetch(model_id, None, |p| {
+            // Use fetch_extracted to download AND extract (single source of truth)
+            let model_dir = client.fetch_extracted(model_id, None, |p| {
                 pb.set_position((p * resolved.size_bytes as f32) as u64);
             })?;
             pb.finish_with_message(format!("{} ✓", model_id));
+            desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
+        } else {
+            // Already cached - ensure it's extracted
+            let cache = xybrid_sdk::cache::CacheManager::new()?;
+            let xyb_path = client.get_cache_path(&client.resolve(model_id, None)?);
+            let model_dir = cache.ensure_extracted(&xyb_path)?;
+            desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
         }
-
-        let resolved = client.resolve(model_id, None)?;
-        desc.bundle_path = Some(client.get_cache_path(&resolved).to_string_lossy().to_string());
         stages.push(desc);
     }
 
