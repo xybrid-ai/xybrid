@@ -1,0 +1,16 @@
+[package]
+name = "xybrid-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C ABI FFI bindings for xybrid-sdk (Unity, C/C++ consumers)"
+
+[lib]
+name = "xybrid_ffi"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+libc = "0.2"
+xybrid-sdk = { path = "../xybrid-sdk" }
+
+[build-dependencies]
+cbindgen = "0.26"

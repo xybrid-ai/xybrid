@@ -4,6 +4,8 @@ members = [
     "crates/xybrid-core",
     "crates/xybrid-sdk",
     "crates/xybrid-cli",
+    "crates/xybrid-uniffi",
+    "crates/xybrid-ffi",
     "macros",
     "xtask",
     "integration-tests",
