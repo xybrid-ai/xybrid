@@ -8146,7 +8146,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-cli"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8172,7 +8172,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
@@ -8225,7 +8225,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-macros"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8234,7 +8234,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-sdk"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",

@@ -1,7 +1,7 @@
 [package]
 name = "xybrid-sdk"
-version = "0.0.1"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [lib]
 name = "xybrid_sdk"
@@ -9,7 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # xybrid-core is defined per-target below to support Android's ort-load-dynamic requirement
-xybrid-macros = { path = "../macros" }
+xybrid-macros = { path = "../../macros" }
 anyhow = "1.0"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
@@ -31,17 +31,17 @@ sha2 = "0.10"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # Android: ort-dynamic + llama.cpp for LLM (mistral.rs has +fp16 SIGILL issues on Android)
-xybrid-core = { path = "../core", default-features = false, features = ["ort-dynamic", "llm-llamacpp"] }
+xybrid-core = { path = "../xybrid-core", default-features = false, features = ["ort-dynamic", "llm-llamacpp"] }
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 # Force rustls to use ring crypto backend instead of aws-lc-rs (uses getentropy unavailable on API 24)
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
-xybrid-core = { path = "../core", default-features = false, features = ["candle-metal"] }
+xybrid-core = { path = "../xybrid-core", default-features = false, features = ["candle-metal"] }
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 
 [target.'cfg(all(not(target_os = "android"), not(target_os = "ios")))'.dependencies]
-xybrid-core = { path = "../core" }
+xybrid-core = { path = "../xybrid-core" }
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 
 # Feature flags

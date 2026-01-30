@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "core",
-    "cli",
-    "sdk",
+    "crates/xybrid-core",
+    "crates/xybrid-sdk",
+    "crates/xybrid-cli",
     "macros",
     "xtask",
     "integration-tests",
@@ -19,9 +19,9 @@ documentation = "https://docs.rs/xybrid-core"
 
 [workspace.dependencies]
 # Internal crates
-xybrid-core = { path = "core" }
-xybrid-cli = { path = "cli" }
-xybrid-sdk = { path = "sdk" }
+xybrid-core = { path = "crates/xybrid-core" }
+xybrid-cli = { path = "crates/xybrid-cli" }
+xybrid-sdk = { path = "crates/xybrid-sdk" }
 xybrid-macros = { path = "macros" }
 
 # Common dependencies

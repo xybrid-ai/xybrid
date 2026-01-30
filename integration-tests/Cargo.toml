@@ -14,7 +14,7 @@ llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]    # mistral.rs + CUDA (NVID
 llm-llamacpp = ["xybrid-core/llm-llamacpp"]            # llama.cpp (Android-compatible)
 
 [dependencies]
-xybrid-core = { path = "../core" }
+xybrid-core = { path = "../crates/xybrid-core" }
 tokio = { version = "1.0", features = ["full"] }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
