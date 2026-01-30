@@ -1,0 +1,22 @@
+{
+  "name": "ai.xybrid.sdk",
+  "version": "0.1.0",
+  "displayName": "Xybrid SDK",
+  "description": "On-device ML inference SDK for Unity - hybrid cloud-edge orchestration",
+  "unity": "2021.3",
+  "unityRelease": "0f1",
+  "documentationUrl": "https://github.com/xybrid-ai/xybrid",
+  "keywords": [
+    "ml",
+    "inference",
+    "edge",
+    "tts",
+    "asr",
+    "on-device"
+  ],
+  "author": {
+    "name": "Xybrid AI",
+    "url": "https://xybrid.ai"
+  },
+  "dependencies": {}
+}

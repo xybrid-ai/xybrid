@@ -213,7 +213,12 @@ fn generate_bindings(language: BindingsLanguage, out_dir: Option<PathBuf>) -> Re
     };
 
     for lang in languages {
-        let default_out = PathBuf::from(format!("bindings/{}", lang));
+        // Default output directories for platform-specific bindings
+        let default_out = match lang {
+            "swift" => PathBuf::from("bindings/apple/Sources/Xybrid"),
+            "kotlin" => PathBuf::from("bindings/kotlin/src/main/kotlin/ai/xybrid"),
+            _ => PathBuf::from(format!("bindings/{}", lang)),
+        };
         let output = out_dir.clone().unwrap_or(default_out);
 
         // Create output directory
@@ -241,6 +246,33 @@ fn generate_bindings(language: BindingsLanguage, out_dir: Option<PathBuf>) -> Re
 
         if !status.success() {
             anyhow::bail!("uniffi-bindgen failed for {}", lang);
+        }
+
+        // For Swift, move FFI files to XybridFFI target directory
+        if lang == "swift" && out_dir.is_none() {
+            let ffi_include_dir = PathBuf::from("bindings/apple/Sources/xybrid_uniffiFFI/include");
+            let ffi_dir = PathBuf::from("bindings/apple/Sources/xybrid_uniffiFFI");
+
+            std::fs::create_dir_all(&ffi_include_dir)
+                .context("Failed to create XybridFFI include directory")?;
+
+            // Move header to include directory
+            let header_src = output.join("xybrid_uniffiFFI.h");
+            let header_dst = ffi_include_dir.join("xybrid_uniffiFFI.h");
+            if header_src.exists() {
+                std::fs::rename(&header_src, &header_dst)
+                    .with_context(|| format!("Failed to move {:?} to {:?}", header_src, header_dst))?;
+                println!("  Moved header to {:?}", header_dst);
+            }
+
+            // Move modulemap to FFI directory
+            let modulemap_src = output.join("xybrid_uniffiFFI.modulemap");
+            let modulemap_dst = ffi_dir.join("xybrid_uniffiFFI.modulemap");
+            if modulemap_src.exists() {
+                std::fs::rename(&modulemap_src, &modulemap_dst)
+                    .with_context(|| format!("Failed to move {:?} to {:?}", modulemap_src, modulemap_dst))?;
+                println!("  Moved modulemap to {:?}", modulemap_dst);
+            }
         }
 
         println!("✓ {} bindings generated to {:?}", lang, output);

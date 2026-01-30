@@ -1,0 +1,13 @@
+[package]
+name = "xybrid-flutter-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "xybrid_flutter_ffi"
+path = "src/lib.rs"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+xybrid-sdk = { path = "../../../crates/xybrid-sdk" }
+flutter_rust_bridge = "2"

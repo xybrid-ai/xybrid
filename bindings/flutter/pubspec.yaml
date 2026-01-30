@@ -1,0 +1,33 @@
+name: xybrid
+description: Xybrid SDK for Flutter - Hybrid cloud-edge ML inference orchestrator.
+version: 0.1.0
+homepage: https://github.com/xybrid-ai/xybrid
+repository: https://github.com/xybrid-ai/xybrid-flutter
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_rust_bridge: ^2.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        ffiPlugin: true
+      ios:
+        ffiPlugin: true
+      macos:
+        ffiPlugin: true
+      windows:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true
