@@ -97,13 +97,17 @@ use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 // Module Declarations
 // ============================================================================
 
+pub mod benchmark;
 pub mod cache;
+pub mod llm;
 pub mod model;
 pub mod pipeline;
+pub mod platform;
 pub mod registry_client;
 pub mod result;
 pub mod source;
 pub mod stream;
+pub mod streaming;
 pub mod telemetry;
 
 // ============================================================================
@@ -133,8 +137,14 @@ pub use xybrid_core::execution::template as execution_template;
 pub use xybrid_core::execution as template_executor;
 
 // SDK types (new API)
+pub use benchmark::{compare_benchmarks, BenchmarkResult, ExecutionProviderInfo};
 pub use cache::{CacheManager, CacheStatus, SdkCacheProvider};
+pub use llm::{
+    default_gateway_url, ChatMessage, CompletionRequest, CompletionResponse, LlmBackend,
+    LlmClientConfig, MessageRole, TokenUsage,
+};
 pub use model::SdkError;
+pub use platform::current_platform;
 pub use model::{ModelLoader, SdkResult, StreamConfig, XybridModel};
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
 // Pipeline API (PipelineRef → Pipeline)
@@ -149,10 +159,23 @@ pub use pipeline::{
     StageTarget,
     StageTiming as PipelineStageTiming, // Alias to avoid conflict with legacy StageTiming
     Xybrid,
+    // Config types for FFI bindings (Flutter, Kotlin, Swift)
+    AudioInputConfig,
+    AudioSampleFormat,
+    ConfigOutputType,
+    InputConfig,
+    InputType,
+    PipelineSource,
+    TextInputConfig,
+    // FFI result types for platform bindings (Flutter, Kotlin, Swift)
+    FfiPipelineExecutionResult,
+    FfiStageExecutionResult,
 };
 pub use result::{InferenceResult, OutputType};
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
+// FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
+pub use streaming::{FfiPartialResult, FfiStreamState, FfiStreamStats, FfiStreamingConfig};
 pub use telemetry::{
     // Orchestrator event bridge
     bridge_orchestrator_events,
@@ -426,25 +449,25 @@ pub mod hybrid {
     pub use xybrid_macros::route;
 }
 
-/// Pipeline configuration loaded from YAML.
+/// Pipeline configuration loaded from YAML (legacy format).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PipelineConfig {
+struct LegacyPipelineConfig {
     /// Pipeline name/description
     #[serde(default)]
     name: Option<String>,
     /// List of stage names to execute in order
     stages: Vec<String>,
     /// Input envelope configuration
-    input: InputConfig,
+    input: LegacyInputConfig,
     /// Device metrics configuration
     metrics: MetricsConfig,
     /// Model availability mapping (stage name -> available locally)
     availability: HashMap<String, bool>,
 }
 
-/// Input envelope configuration.
+/// Input envelope configuration (legacy format).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct InputConfig {
+struct LegacyInputConfig {
     /// Envelope kind (e.g., "AudioRaw", "Text", etc.)
     kind: String,
 }
@@ -529,7 +552,7 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
     let config_content = fs::read_to_string(config_path)
         .map_err(|e| PipelineConfigError::ConfigReadError(format!("{}: {}", config_path, e)))?;
 
-    let config: PipelineConfig = serde_yaml::from_str(&config_content)
+    let config: LegacyPipelineConfig = serde_yaml::from_str(&config_content)
         .map_err(|e| PipelineConfigError::ConfigParseError(format!("{}: {}", config_path, e)))?;
 
     // Log pipeline start
@@ -639,7 +662,7 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
         .await
         .map_err(|e| PipelineConfigError::ConfigReadError(format!("{}: {}", config_path, e)))?;
 
-    let config: PipelineConfig = serde_yaml::from_str(&config_content)
+    let config: LegacyPipelineConfig = serde_yaml::from_str(&config_content)
         .map_err(|e| PipelineConfigError::ConfigParseError(format!("{}: {}", config_path, e)))?;
 
     // Log pipeline start

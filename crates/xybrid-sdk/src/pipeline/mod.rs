@@ -38,6 +38,22 @@
 //! let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 //! ```
 
+// ============================================================================
+// Submodules
+// ============================================================================
+
+pub mod config;
+pub mod result;
+
+// Re-export config types for convenience
+pub use config::{
+    AudioInputConfig, AudioSampleFormat, InputConfig, InputType, OutputType as ConfigOutputType,
+    PipelineSource, TextInputConfig,
+};
+
+// Re-export FFI result types for platform bindings
+pub use result::{FfiPipelineExecutionResult, FfiStageExecutionResult};
+
 use crate::model::SdkError;
 use crate::registry_client::RegistryClient;
 use crate::result::OutputType;
