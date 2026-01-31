@@ -1,8 +1,8 @@
 //! Inference result FFI wrappers for Flutter.
-use flutter_rust_bridge::frb;
 use xybrid_sdk::InferenceResult;
 
 /// FFI wrapper for inference results.
+/// Fields are public and accessible directly via FRB-generated bindings.
 pub struct FfiResult {
     pub success: bool,
     pub text: Option<String>,
@@ -20,30 +20,5 @@ impl FfiResult {
             embedding: r.embedding().map(|e| e.to_vec()),
             latency_ms: r.latency_ms(),
         }
-    }
-
-    #[frb(sync)]
-    pub fn success(&self) -> bool {
-        self.success
-    }
-
-    #[frb(sync)]
-    pub fn text(&self) -> Option<String> {
-        self.text.clone()
-    }
-
-    #[frb(sync)]
-    pub fn audio_bytes(&self) -> Option<Vec<u8>> {
-        self.audio_bytes.clone()
-    }
-
-    #[frb(sync)]
-    pub fn embedding(&self) -> Option<Vec<f32>> {
-        self.embedding.clone()
-    }
-
-    #[frb(sync)]
-    pub fn latency_ms(&self) -> u32 {
-        self.latency_ms
     }
 }

@@ -27,6 +27,7 @@
 
 use crate::api::envelope::*;
 use crate::api::model::*;
+use crate::api::pipeline::*;
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
 use flutter_rust_bridge::{Handler, IntoIntoDart};
@@ -39,7 +40,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueNom,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1406243181;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 846635947;
 
 // Section: executor
 
@@ -240,96 +241,202 @@ fn wire__crate__api__model__FfiModel_run_impl(
         },
     )
 }
-fn wire__crate__api__result__ffi_result_audio_bytes_impl(
-    that: impl CstDecode<crate::api::result::FfiResult>,
+fn wire__crate__api__pipeline__FfiPipeline_from_bundle_impl(
+    path: impl CstDecode<String>,
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::DcoCodec, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "ffi_result_audio_bytes",
+            debug_name: "FfiPipeline_from_bundle",
             port: None,
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
         },
         move || {
-            let api_that = that.cst_decode();
-            transform_result_dco::<_, _, ()>((move || {
-                let output_ok =
-                    Result::<_, ()>::Ok(crate::api::result::FfiResult::audio_bytes(&api_that))?;
+            let api_path = path.cst_decode();
+            transform_result_dco::<_, _, String>((move || {
+                let output_ok = crate::api::pipeline::FfiPipeline::from_bundle(api_path)?;
                 Ok(output_ok)
             })())
         },
     )
 }
-fn wire__crate__api__result__ffi_result_embedding_impl(
-    that: impl CstDecode<crate::api::result::FfiResult>,
+fn wire__crate__api__pipeline__FfiPipeline_from_file_impl(
+    path: impl CstDecode<String>,
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::DcoCodec, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "ffi_result_embedding",
+            debug_name: "FfiPipeline_from_file",
             port: None,
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
         },
         move || {
-            let api_that = that.cst_decode();
-            transform_result_dco::<_, _, ()>((move || {
-                let output_ok =
-                    Result::<_, ()>::Ok(crate::api::result::FfiResult::embedding(&api_that))?;
+            let api_path = path.cst_decode();
+            transform_result_dco::<_, _, String>((move || {
+                let output_ok = crate::api::pipeline::FfiPipeline::from_file(api_path)?;
                 Ok(output_ok)
             })())
         },
     )
 }
-fn wire__crate__api__result__ffi_result_latency_ms_impl(
-    that: impl CstDecode<crate::api::result::FfiResult>,
+fn wire__crate__api__pipeline__FfiPipeline_from_yaml_impl(
+    yaml: impl CstDecode<String>,
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::DcoCodec, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "ffi_result_latency_ms",
+            debug_name: "FfiPipeline_from_yaml",
             port: None,
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
         },
         move || {
-            let api_that = that.cst_decode();
-            transform_result_dco::<_, _, ()>((move || {
-                let output_ok =
-                    Result::<_, ()>::Ok(crate::api::result::FfiResult::latency_ms(&api_that))?;
+            let api_yaml = yaml.cst_decode();
+            transform_result_dco::<_, _, String>((move || {
+                let output_ok = crate::api::pipeline::FfiPipeline::from_yaml(api_yaml)?;
                 Ok(output_ok)
             })())
         },
     )
 }
-fn wire__crate__api__result__ffi_result_success_impl(
-    that: impl CstDecode<crate::api::result::FfiResult>,
+fn wire__crate__api__pipeline__FfiPipeline_name_impl(
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>,
+    >,
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::DcoCodec, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "ffi_result_success",
+            debug_name: "FfiPipeline_name",
             port: None,
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
         },
         move || {
             let api_that = that.cst_decode();
             transform_result_dco::<_, _, ()>((move || {
+                let mut api_that_guard = None;
+                let decode_indices_ =
+                    flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                        flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                            &api_that, 0, false,
+                        ),
+                    ]);
+                for i in decode_indices_ {
+                    match i {
+                        0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                        _ => unreachable!(),
+                    }
+                }
+                let api_that_guard = api_that_guard.unwrap();
                 let output_ok =
-                    Result::<_, ()>::Ok(crate::api::result::FfiResult::success(&api_that))?;
+                    Result::<_, ()>::Ok(crate::api::pipeline::FfiPipeline::name(&*api_that_guard))?;
                 Ok(output_ok)
             })())
         },
     )
 }
-fn wire__crate__api__result__ffi_result_text_impl(
-    that: impl CstDecode<crate::api::result::FfiResult>,
+fn wire__crate__api__pipeline__FfiPipeline_run_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>,
+    >,
+    envelope: impl CstDecode<FfiEnvelope>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiPipeline_run",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_envelope = envelope.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok =
+                        crate::api::pipeline::FfiPipeline::run(&*api_that_guard, api_envelope)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__pipeline__FfiPipeline_stage_count_impl(
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>,
+    >,
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::DcoCodec, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "ffi_result_text",
+            debug_name: "FfiPipeline_stage_count",
             port: None,
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
         },
         move || {
             let api_that = that.cst_decode();
             transform_result_dco::<_, _, ()>((move || {
-                let output_ok =
-                    Result::<_, ()>::Ok(crate::api::result::FfiResult::text(&api_that))?;
+                let mut api_that_guard = None;
+                let decode_indices_ =
+                    flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                        flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                            &api_that, 0, false,
+                        ),
+                    ]);
+                for i in decode_indices_ {
+                    match i {
+                        0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                        _ => unreachable!(),
+                    }
+                }
+                let api_that_guard = api_that_guard.unwrap();
+                let output_ok = Result::<_, ()>::Ok(
+                    crate::api::pipeline::FfiPipeline::stage_count(&*api_that_guard),
+                )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__pipeline__FfiPipeline_stage_names_impl(
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>,
+    >,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::DcoCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiPipeline_stage_names",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            transform_result_dco::<_, _, ()>((move || {
+                let mut api_that_guard = None;
+                let decode_indices_ =
+                    flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                        flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                            &api_that, 0, false,
+                        ),
+                    ]);
+                for i in decode_indices_ {
+                    match i {
+                        0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                        _ => unreachable!(),
+                    }
+                }
+                let api_that_guard = api_that_guard.unwrap();
+                let output_ok = Result::<_, ()>::Ok(
+                    crate::api::pipeline::FfiPipeline::stage_names(&*api_that_guard),
+                )?;
                 Ok(output_ok)
             })())
         },
@@ -404,6 +511,16 @@ impl SseDecode for FfiModelLoader {
     }
 }
 
+impl SseDecode for FfiPipeline {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <RustOpaqueNom<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>,
+        >>::sse_decode(deserializer);
+        return flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(inner);
+    }
+}
+
 impl SseDecode
     for RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>>
 {
@@ -426,6 +543,16 @@ impl SseDecode
 
 impl SseDecode
     for RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <usize>::sse_decode(deserializer);
+        return unsafe { decode_rust_opaque_nom(inner) };
+    }
+}
+
+impl SseDecode
+    for RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>
 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -478,6 +605,18 @@ impl SseDecode for crate::api::result::FfiResult {
             embedding: var_embedding,
             latency_ms: var_latencyMs,
         };
+    }
+}
+
+impl SseDecode for Vec<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<String>::sse_decode(deserializer));
+        }
+        return ans_;
     }
 }
 
@@ -655,6 +794,21 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<FfiModelLoader>> for FfiModelL
 }
 
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<FfiPipeline> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, StdArc<_>>(self.0)
+            .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<FfiPipeline> {}
+
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<FfiPipeline>> for FfiPipeline {
+    fn into_into_dart(self) -> FrbWrapper<FfiPipeline> {
+        self.into()
+    }
+}
+
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::result::FfiResult {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -697,6 +851,13 @@ impl SseEncode for FfiModelLoader {
     }
 }
 
+impl SseEncode for FfiPipeline {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>>::sse_encode(flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, StdArc<_>>(self), serializer);
+    }
+}
+
 impl SseEncode
     for RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>>
 {
@@ -721,6 +882,17 @@ impl SseEncode
 
 impl SseEncode
     for RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        let (ptr, size) = self.sse_encode_raw();
+        <usize>::sse_encode(ptr, serializer);
+        <i32>::sse_encode(size, serializer);
+    }
+}
+
+impl SseEncode
+    for RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>
 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -766,6 +938,16 @@ impl SseEncode for crate::api::result::FfiResult {
         <Option<Vec<u8>>>::sse_encode(self.audio_bytes, serializer);
         <Option<Vec<f32>>>::sse_encode(self.embedding, serializer);
         <u32>::sse_encode(self.latency_ms, serializer);
+    }
+}
+
+impl SseEncode for Vec<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <String>::sse_encode(item, serializer);
+        }
     }
 }
 
@@ -875,6 +1057,7 @@ mod io {
     use super::*;
     use crate::api::envelope::*;
     use crate::api::model::*;
+    use crate::api::pipeline::*;
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
     };
@@ -919,6 +1102,16 @@ mod io {
             ))
         }
     }
+    impl CstDecode<FfiPipeline> for usize {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> FfiPipeline {
+            flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(CstDecode::<
+                RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>,
+            >::cst_decode(
+                self
+            ))
+        }
+    }
     impl
         CstDecode<
             RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>>,
@@ -956,6 +1149,19 @@ mod io {
             unsafe { decode_rust_opaque_nom(self as _) }
         }
     }
+    impl
+        CstDecode<
+            RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>,
+        > for usize
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(
+            self,
+        ) -> RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>
+        {
+            unsafe { decode_rust_opaque_nom(self as _) }
+        }
+    }
     impl CstDecode<String> for *mut wire_cst_list_prim_u_8_strict {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> String {
@@ -969,13 +1175,6 @@ mod io {
             unsafe { *flutter_rust_bridge::for_generated::box_from_leak_ptr(self) }
         }
     }
-    impl CstDecode<crate::api::result::FfiResult> for *mut wire_cst_ffi_result {
-        // Codec=Cst (C-struct based), see doc to use other codecs
-        fn cst_decode(self) -> crate::api::result::FfiResult {
-            let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
-            CstDecode::<crate::api::result::FfiResult>::cst_decode(*wrap).into()
-        }
-    }
     impl CstDecode<crate::api::result::FfiResult> for wire_cst_ffi_result {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> crate::api::result::FfiResult {
@@ -986,6 +1185,16 @@ mod io {
                 embedding: self.embedding.cst_decode(),
                 latency_ms: self.latency_ms.cst_decode(),
             }
+        }
+    }
+    impl CstDecode<Vec<String>> for *mut wire_cst_list_String {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> Vec<String> {
+            let vec = unsafe {
+                let wrap = flutter_rust_bridge::for_generated::box_from_leak_ptr(self);
+                flutter_rust_bridge::for_generated::vec_from_leak_ptr(wrap.ptr, wrap.len)
+            };
+            vec.into_iter().map(CstDecode::cst_decode).collect()
         }
     }
     impl CstDecode<Vec<f32>> for *mut wire_cst_list_prim_f_32_loose {
@@ -1098,38 +1307,54 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn frbgen_xybrid_wire__crate__api__result__ffi_result_audio_bytes(
-        that: *mut wire_cst_ffi_result,
+    pub extern "C" fn frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_from_bundle(
+        path: *mut wire_cst_list_prim_u_8_strict,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
-        wire__crate__api__result__ffi_result_audio_bytes_impl(that)
+        wire__crate__api__pipeline__FfiPipeline_from_bundle_impl(path)
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn frbgen_xybrid_wire__crate__api__result__ffi_result_embedding(
-        that: *mut wire_cst_ffi_result,
+    pub extern "C" fn frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_from_file(
+        path: *mut wire_cst_list_prim_u_8_strict,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
-        wire__crate__api__result__ffi_result_embedding_impl(that)
+        wire__crate__api__pipeline__FfiPipeline_from_file_impl(path)
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn frbgen_xybrid_wire__crate__api__result__ffi_result_latency_ms(
-        that: *mut wire_cst_ffi_result,
+    pub extern "C" fn frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_from_yaml(
+        yaml: *mut wire_cst_list_prim_u_8_strict,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
-        wire__crate__api__result__ffi_result_latency_ms_impl(that)
+        wire__crate__api__pipeline__FfiPipeline_from_yaml_impl(yaml)
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn frbgen_xybrid_wire__crate__api__result__ffi_result_success(
-        that: *mut wire_cst_ffi_result,
+    pub extern "C" fn frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_name(
+        that: usize,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
-        wire__crate__api__result__ffi_result_success_impl(that)
+        wire__crate__api__pipeline__FfiPipeline_name_impl(that)
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn frbgen_xybrid_wire__crate__api__result__ffi_result_text(
-        that: *mut wire_cst_ffi_result,
+    pub extern "C" fn frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_run(
+        port_: i64,
+        that: usize,
+        envelope: usize,
+    ) {
+        wire__crate__api__pipeline__FfiPipeline_run_impl(port_, that, envelope)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_stage_count(
+        that: usize,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
-        wire__crate__api__result__ffi_result_text_impl(that)
+        wire__crate__api__pipeline__FfiPipeline_stage_count_impl(that)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_stage_names(
+        that: usize,
+    ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
+        wire__crate__api__pipeline__FfiPipeline_stage_names_impl(that)
     }
 
     #[unsafe(no_mangle)]
@@ -1187,15 +1412,38 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+        ptr: *const std::ffi::c_void,
+    ) {
+        unsafe {
+            StdArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>::increment_strong_count(ptr as _);
+        }
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+        ptr: *const std::ffi::c_void,
+    ) {
+        unsafe {
+            StdArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>::decrement_strong_count(ptr as _);
+        }
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_xybrid_cst_new_box_autoadd_f_64(value: f64) -> *mut f64 {
         flutter_rust_bridge::for_generated::new_leak_box_ptr(value)
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn frbgen_xybrid_cst_new_box_autoadd_ffi_result() -> *mut wire_cst_ffi_result {
-        flutter_rust_bridge::for_generated::new_leak_box_ptr(
-            wire_cst_ffi_result::new_with_null_ptr(),
-        )
+    pub extern "C" fn frbgen_xybrid_cst_new_list_String(len: i32) -> *mut wire_cst_list_String {
+        let wrap = wire_cst_list_String {
+            ptr: flutter_rust_bridge::for_generated::new_leak_vec_ptr(
+                <*mut wire_cst_list_prim_u_8_strict>::new_with_null_ptr(),
+                len,
+            ),
+            len,
+        };
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(wrap)
     }
 
     #[unsafe(no_mangle)]
@@ -1253,6 +1501,12 @@ mod io {
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
+    pub struct wire_cst_list_String {
+        ptr: *mut *mut wire_cst_list_prim_u_8_strict,
+        len: i32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
     pub struct wire_cst_list_prim_f_32_loose {
         ptr: *mut f32,
         len: i32,
@@ -1290,6 +1544,7 @@ mod web {
     use super::*;
     use crate::api::envelope::*;
     use crate::api::model::*;
+    use crate::api::pipeline::*;
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
     };
@@ -1331,6 +1586,16 @@ mod web {
                 embedding: self_.get(3).cst_decode(),
                 latency_ms: self_.get(4).cst_decode(),
             }
+        }
+    }
+    impl CstDecode<Vec<String>> for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> Vec<String> {
+            self.dyn_into::<flutter_rust_bridge::for_generated::js_sys::Array>()
+                .unwrap()
+                .iter()
+                .map(CstDecode::cst_decode)
+                .collect()
         }
     }
     impl CstDecode<Vec<f32>> for Box<[f32]> {
@@ -1395,6 +1660,16 @@ mod web {
             ))
         }
     }
+    impl CstDecode<FfiPipeline> for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> FfiPipeline {
+            flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(CstDecode::<
+                RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>,
+            >::cst_decode(
+                self
+            ))
+        }
+    }
     impl
         CstDecode<
             RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>>,
@@ -1436,6 +1711,23 @@ mod web {
         fn cst_decode(
             self,
         ) -> RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>>
+        {
+            #[cfg(target_pointer_width = "64")]
+            {
+                compile_error!("64-bit pointers are not supported.");
+            }
+            unsafe { decode_rust_opaque_nom((self.as_f64().unwrap() as usize) as _) }
+        }
+    }
+    impl
+        CstDecode<
+            RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>,
+        > for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(
+            self,
+        ) -> RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>
         {
             #[cfg(target_pointer_width = "64")]
             {
@@ -1560,38 +1852,54 @@ mod web {
     }
 
     #[wasm_bindgen]
-    pub fn wire__crate__api__result__ffi_result_audio_bytes(
-        that: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
+    pub fn wire__crate__api__pipeline__FfiPipeline_from_bundle(
+        path: String,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
-        wire__crate__api__result__ffi_result_audio_bytes_impl(that)
+        wire__crate__api__pipeline__FfiPipeline_from_bundle_impl(path)
     }
 
     #[wasm_bindgen]
-    pub fn wire__crate__api__result__ffi_result_embedding(
-        that: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
+    pub fn wire__crate__api__pipeline__FfiPipeline_from_file(
+        path: String,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
-        wire__crate__api__result__ffi_result_embedding_impl(that)
+        wire__crate__api__pipeline__FfiPipeline_from_file_impl(path)
     }
 
     #[wasm_bindgen]
-    pub fn wire__crate__api__result__ffi_result_latency_ms(
-        that: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
+    pub fn wire__crate__api__pipeline__FfiPipeline_from_yaml(
+        yaml: String,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
-        wire__crate__api__result__ffi_result_latency_ms_impl(that)
+        wire__crate__api__pipeline__FfiPipeline_from_yaml_impl(yaml)
     }
 
     #[wasm_bindgen]
-    pub fn wire__crate__api__result__ffi_result_success(
+    pub fn wire__crate__api__pipeline__FfiPipeline_name(
         that: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
-        wire__crate__api__result__ffi_result_success_impl(that)
+        wire__crate__api__pipeline__FfiPipeline_name_impl(that)
     }
 
     #[wasm_bindgen]
-    pub fn wire__crate__api__result__ffi_result_text(
+    pub fn wire__crate__api__pipeline__FfiPipeline_run(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        that: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
+        envelope: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
+    ) {
+        wire__crate__api__pipeline__FfiPipeline_run_impl(port_, that, envelope)
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__api__pipeline__FfiPipeline_stage_count(
         that: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
-        wire__crate__api__result__ffi_result_text_impl(that)
+        wire__crate__api__pipeline__FfiPipeline_stage_count_impl(that)
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__api__pipeline__FfiPipeline_stage_names(
+        that: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
+    ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
+        wire__crate__api__pipeline__FfiPipeline_stage_names_impl(that)
     }
 
     #[wasm_bindgen]
@@ -1645,6 +1953,24 @@ mod web {
     ) {
         unsafe {
             StdArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>>::decrement_strong_count(ptr as _);
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+        ptr: *const std::ffi::c_void,
+    ) {
+        unsafe {
+            StdArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>::increment_strong_count(ptr as _);
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+        ptr: *const std::ffi::c_void,
+    ) {
+        unsafe {
+            StdArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>::decrement_strong_count(ptr as _);
         }
     }
 }

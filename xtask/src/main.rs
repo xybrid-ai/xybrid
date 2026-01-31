@@ -1268,6 +1268,13 @@ fn build_flutter_android(target: &str, release: bool) -> Result<()> {
         cmd.arg("ndk")
             .arg("--target")
             .arg(target)
+            // Use API level 28 for Android builds
+            // Required because:
+            // - POSIX_MADV_* constants (used by llama.cpp) require API 23+
+            // - aws-lc-sys (used for TLS) requires API 28+ for getentropy()
+            // This doesn't affect app minSdkVersion - only the NDK headers used during compilation
+            .arg("--platform")
+            .arg("28")
             .arg("build")
             .arg("-p")
             .arg("xybrid-flutter-ffi");
@@ -1289,10 +1296,13 @@ fn build_flutter_android(target: &str, release: bool) -> Result<()> {
         )?;
 
         // Determine the linker name based on target
+        // Use API level 28 for Android builds because:
+        // - POSIX_MADV_* constants (used by llama.cpp) require API 23+
+        // - aws-lc-sys (used for TLS) requires API 28+ for getentropy()
         let (clang_target, api_level) = match target {
-            "armv7-linux-androideabi" => ("armv7a-linux-androideabi", "21"),
-            "aarch64-linux-android" => ("aarch64-linux-android", "21"),
-            "x86_64-linux-android" => ("x86_64-linux-android", "21"),
+            "armv7-linux-androideabi" => ("armv7a-linux-androideabi", "28"),
+            "aarch64-linux-android" => ("aarch64-linux-android", "28"),
+            "x86_64-linux-android" => ("x86_64-linux-android", "28"),
             _ => anyhow::bail!("Unsupported Android target: {}", target),
         };
 

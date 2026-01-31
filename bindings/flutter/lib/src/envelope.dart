@@ -4,8 +4,7 @@
 /// idiomatic Dart API.
 library;
 
-// TODO: Import FRB-generated bindings when available
-// import '../src/rust/api/envelope.dart';
+import 'rust/api/envelope.dart';
 
 /// Envelope containing input data for model inference.
 ///
@@ -14,10 +13,10 @@ library;
 /// - [XybridEnvelope.text] for text-to-speech
 /// - [XybridEnvelope.embedding] for embedding models
 class XybridEnvelope {
-  // TODO: Replace with actual FRB type when generated
-  // final FfiEnvelope _inner;
+  /// The underlying FRB envelope.
+  final FfiEnvelope inner;
 
-  XybridEnvelope._();
+  XybridEnvelope._(this.inner);
 
   /// Create an audio envelope for speech recognition.
   ///
@@ -29,8 +28,13 @@ class XybridEnvelope {
     required int sampleRate,
     int channels = 1,
   }) {
-    // TODO: return XybridEnvelope._()..._inner = FfiEnvelope.audio(bytes, sampleRate, channels);
-    return XybridEnvelope._();
+    return XybridEnvelope._(
+      FfiEnvelope.audio(
+        bytes: bytes,
+        sampleRate: sampleRate,
+        channels: channels,
+      ),
+    );
   }
 
   /// Create a text envelope for text-to-speech.
@@ -43,15 +47,21 @@ class XybridEnvelope {
     String? voiceId,
     double? speed,
   }) {
-    // TODO: return XybridEnvelope._()..._inner = FfiEnvelope.text(text, voiceId, speed);
-    return XybridEnvelope._();
+    return XybridEnvelope._(
+      FfiEnvelope.text(
+        text: text,
+        voiceId: voiceId,
+        speed: speed,
+      ),
+    );
   }
 
   /// Create an embedding envelope from float vector.
   ///
   /// [data] - The embedding vector
   factory XybridEnvelope.embedding(List<double> data) {
-    // TODO: return XybridEnvelope._()..._inner = FfiEnvelope.embedding(data.cast<double>());
-    return XybridEnvelope._();
+    return XybridEnvelope._(
+      FfiEnvelope.embedding(data: data),
+    );
   }
 }

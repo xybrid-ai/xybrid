@@ -4,8 +4,9 @@
 /// idiomatic Dart API.
 library;
 
-// TODO: Import FRB-generated bindings when available
-// import '../src/rust/api/result.dart';
+import 'dart:typed_data';
+
+import 'rust/api/result.dart';
 
 /// Result of a model inference operation.
 ///
@@ -14,46 +15,31 @@ library;
 /// - [audioBytes] for TTS (text-to-speech) results
 /// - [embedding] for embedding model results
 class XybridResult {
-  // TODO: Replace with actual FRB type when generated
-  // final FfiResult _inner;
+  /// The underlying FRB result.
+  final FfiResult _inner;
 
-  /// Internal constructor - not for public use.
+  /// Internal constructor from FRB result.
   /// @nodoc
-  XybridResult.internal();
+  XybridResult.fromFfi(this._inner);
 
   /// Whether the inference completed successfully.
-  bool get success {
-    // TODO: return _inner.success();
-    return false;
-  }
+  bool get success => _inner.success;
 
   /// Text output (for ASR models).
   ///
   /// Returns null if the model doesn't produce text output.
-  String? get text {
-    // TODO: return _inner.text();
-    return null;
-  }
+  String? get text => _inner.text;
 
   /// Audio bytes output (for TTS models).
   ///
   /// Returns null if the model doesn't produce audio output.
-  List<int>? get audioBytes {
-    // TODO: return _inner.audioBytes();
-    return null;
-  }
+  Uint8List? get audioBytes => _inner.audioBytes;
 
   /// Embedding vector output (for embedding models).
   ///
   /// Returns null if the model doesn't produce embeddings.
-  List<double>? get embedding {
-    // TODO: return _inner.embedding()?.cast<double>();
-    return null;
-  }
+  List<double>? get embedding => _inner.embedding?.toList();
 
   /// Inference latency in milliseconds.
-  int get latencyMs {
-    // TODO: return _inner.latencyMs();
-    return 0;
-  }
+  int get latencyMs => _inner.latencyMs;
 }

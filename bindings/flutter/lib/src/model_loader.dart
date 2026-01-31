@@ -6,23 +6,34 @@ library;
 
 import 'envelope.dart';
 import 'result.dart';
+import 'rust/api/model.dart';
 
-// TODO: Import FRB-generated bindings when available
-// import '../src/rust/api/model.dart';
+/// Exception thrown when Xybrid operations fail.
+class XybridException implements Exception {
+  /// The error message.
+  final String message;
+
+  /// Creates a new [XybridException] with the given [message].
+  XybridException(this.message);
+
+  @override
+  String toString() => 'XybridException: $message';
+}
 
 /// Prepares a model for loading from registry or local bundle.
 class XybridModelLoader {
-  // TODO: Replace with actual FRB type when generated
-  // final FfiModelLoader _inner;
+  /// The underlying FRB model loader.
+  final FfiModelLoader _inner;
 
-  XybridModelLoader._();
+  XybridModelLoader._(this._inner);
 
   /// Create a loader for a model from the Xybrid registry.
   ///
   /// The [modelId] should match a model ID in the registry (e.g., "kokoro-82m").
   factory XybridModelLoader.fromRegistry(String modelId) {
-    // TODO: return XybridModelLoader._()..._inner = FfiModelLoader.fromRegistry(modelId);
-    return XybridModelLoader._();
+    return XybridModelLoader._(
+      FfiModelLoader.fromRegistry(modelId: modelId),
+    );
   }
 
   /// Create a loader for a model from a local bundle path.
@@ -30,8 +41,9 @@ class XybridModelLoader {
   /// The [path] should point to a directory containing model_metadata.json.
   /// Throws if the bundle is invalid.
   factory XybridModelLoader.fromBundle(String path) {
-    // TODO: Call FfiModelLoader.fromBundle(path) and handle errors
-    return XybridModelLoader._();
+    return XybridModelLoader._(
+      FfiModelLoader.fromBundle(path: path),
+    );
   }
 
   /// Load the model asynchronously.
@@ -39,24 +51,30 @@ class XybridModelLoader {
   /// Downloads the model if loading from registry and not cached.
   /// Returns a ready-to-use [XybridModel] instance.
   Future<XybridModel> load() async {
-    // TODO: Call _inner.load() and wrap result
-    return XybridModel._();
+    final ffiModel = await _inner.load();
+    return XybridModel._(ffiModel);
   }
 }
 
 /// A loaded model ready for inference.
 class XybridModel {
-  // TODO: Replace with actual FRB type when generated
-  // final FfiModel _inner;
+  /// The underlying FRB model.
+  final FfiModel inner;
 
-  XybridModel._();
+  XybridModel._(this.inner);
 
   /// Run inference with the given envelope.
   ///
   /// Returns [XybridResult] containing output text, audio, or embeddings
   /// depending on the model type.
-  XybridResult run(XybridEnvelope envelope) {
-    // TODO: Call _inner.run(envelope._inner) and wrap result
-    return XybridResult.internal();
+  ///
+  /// Throws [XybridException] if inference fails.
+  Future<XybridResult> run(XybridEnvelope envelope) async {
+    try {
+      final ffiResult = await inner.run(envelope: envelope.inner);
+      return XybridResult.fromFfi(ffiResult);
+    } catch (e) {
+      throw XybridException('Inference failed: $e');
+    }
   }
 }

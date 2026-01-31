@@ -1,8 +1,224 @@
-# Xybrid Flutter Binding
+# Xybrid Flutter SDK
 
-> **Status**: Placeholder
+Flutter/Dart bindings for [Xybrid](https://github.com/xybrid-ai/xybrid), the hybrid cloud-edge ML inference orchestrator.
 
-This directory contains the Flutter plugin for Xybrid, providing Dart bindings via flutter_rust_bridge (FRB).
+This SDK provides a clean Dart API for running ML models on-device or in the cloud, with intelligent routing based on device capabilities.
+
+## Installation
+
+Add the dependency to your `pubspec.yaml`:
+
+```yaml
+dependencies:
+  xybrid:
+    git:
+      url: https://github.com/xybrid-ai/xybrid.git
+      path: repos/xybrid/bindings/flutter
+```
+
+Then run:
+
+```bash
+flutter pub get
+```
+
+## Quick Start
+
+### Initialization
+
+**Important:** You must initialize the Xybrid SDK before using any other functionality.
+
+```dart
+import 'package:xybrid/xybrid.dart';
+
+void main() async {
+  // Initialize the Xybrid runtime
+  await Xybrid.init();
+
+  runApp(MyApp());
+}
+```
+
+Initialization is idempotent - calling `Xybrid.init()` multiple times is safe and subsequent calls are no-ops. The SDK handles concurrent initialization attempts gracefully.
+
+You can check if the SDK is initialized using:
+
+```dart
+if (Xybrid.isInitialized) {
+  // SDK is ready
+}
+```
+
+### Basic Usage
+
+Load a model and run inference:
+
+```dart
+import 'package:xybrid/xybrid.dart';
+
+Future<void> textToSpeech() async {
+  // Initialize once at app startup
+  await Xybrid.init();
+
+  // Load a model from the registry
+  final loader = XybridModelLoader.fromRegistry('kokoro-82m');
+  final model = await loader.load();
+
+  // Create input envelope
+  final envelope = XybridEnvelope.text('Hello, world!');
+
+  // Run inference
+  final result = await model.run(envelope);
+
+  // Access output
+  if (result.success) {
+    final audioBytes = result.audioBytes; // Uint8List for TTS output
+    print('Generated ${audioBytes?.length} bytes of audio');
+    print('Inference took ${result.latencyMs}ms');
+  }
+}
+```
+
+### Speech-to-Text (ASR)
+
+```dart
+Future<void> speechToText() async {
+  await Xybrid.init();
+
+  final loader = XybridModelLoader.fromRegistry('whisper-small');
+  final model = await loader.load();
+
+  // Create audio envelope from raw bytes
+  final envelope = XybridEnvelope.audio(
+    bytes: audioData,       // List<int> of audio bytes
+    sampleRate: 16000,      // Sample rate in Hz
+    channels: 1,            // Mono audio
+  );
+
+  final result = await model.run(envelope);
+  print('Transcription: ${result.text}');
+}
+```
+
+### Text-to-Speech (TTS)
+
+```dart
+Future<void> textToSpeechWithOptions() async {
+  await Xybrid.init();
+
+  final loader = XybridModelLoader.fromRegistry('kokoro-82m');
+  final model = await loader.load();
+
+  // Create text envelope with optional parameters
+  final envelope = XybridEnvelope.text(
+    'Hello, world!',
+    voiceId: 'af_heart',   // Optional voice selection
+    speed: 1.0,            // Optional speed multiplier
+  );
+
+  final result = await model.run(envelope);
+  final audioBytes = result.audioBytes; // Uint8List of synthesized audio
+}
+```
+
+### Loading from Local Bundle
+
+```dart
+Future<void> loadLocalModel() async {
+  await Xybrid.init();
+
+  // Load from a local bundle directory
+  final loader = XybridModelLoader.fromBundle('/path/to/model-bundle');
+  final model = await loader.load();
+
+  final envelope = XybridEnvelope.text('Test');
+  final result = await model.run(envelope);
+}
+```
+
+### Using Pipelines
+
+Pipelines chain multiple models together for complex workflows:
+
+```dart
+Future<void> runPipeline() async {
+  await Xybrid.init();
+
+  // Load pipeline from YAML string
+  final pipeline = XybridPipeline.fromYaml('''
+name: speech-to-text
+stages:
+  - model: whisper-small
+    input: audio
+''');
+
+  print('Pipeline: ${pipeline.name}');
+  print('Stages: ${pipeline.stageNames}');
+
+  // Run the pipeline
+  final envelope = XybridEnvelope.audio(
+    bytes: audioData,
+    sampleRate: 16000,
+  );
+  final result = await pipeline.run(envelope);
+  print('Transcription: ${result.text}');
+}
+```
+
+**Loading pipelines from files:**
+
+```dart
+// From a YAML file path
+final pipeline = XybridPipeline.fromFile('/path/to/pipeline.yaml');
+
+// From a bundle directory
+final pipeline = XybridPipeline.fromBundle('/path/to/pipeline-bundle');
+```
+
+### Error Handling
+
+All Xybrid operations throw `XybridException` on failure:
+
+```dart
+try {
+  final loader = XybridModelLoader.fromRegistry('nonexistent-model');
+  final model = await loader.load();
+} on XybridException catch (e) {
+  print('Failed to load model: $e');
+}
+```
+
+## API Reference
+
+### Classes
+
+| Class | Description |
+|-------|-------------|
+| `Xybrid` | Static class for SDK initialization |
+| `XybridModelLoader` | Prepares and loads models from registry or bundles |
+| `XybridModel` | A loaded model ready for inference |
+| `XybridEnvelope` | Input data wrapper for different modalities |
+| `XybridResult` | Inference output containing text, audio, or embeddings |
+| `XybridPipeline` | Multi-stage inference pipeline |
+| `XybridException` | Exception thrown on operation failure |
+
+### XybridEnvelope Factory Constructors
+
+| Constructor | Use Case |
+|-------------|----------|
+| `XybridEnvelope.audio(bytes, sampleRate, channels)` | Speech recognition (ASR) |
+| `XybridEnvelope.text(text, voiceId?, speed?)` | Text-to-speech (TTS) |
+| `XybridEnvelope.embedding(data)` | Embedding models |
+
+### XybridResult Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `success` | `bool` | Whether inference completed successfully |
+| `text` | `String?` | Text output (ASR models) |
+| `audioBytes` | `Uint8List?` | Audio output (TTS models) |
+| `embedding` | `List<double>?` | Embedding vector output |
+| `latencyMs` | `int` | Inference latency in milliseconds |
 
 ## Prerequisites
 
@@ -266,7 +482,72 @@ dependencies:
 
 **Cause**: Android NDK not configured.
 
-**Fix**: See [Kotlin README](../kotlin/README.md#installing-android-ndk) for NDK setup.
+**Fix**: See [Android Build Requirements](#android-build-requirements) section below.
+
+## Android Build Requirements
+
+Android builds require the following setup:
+
+### 1. Install Android NDK
+
+**Option A: Using Android Studio (Recommended)**
+
+1. Open Android Studio → Tools → SDK Manager
+2. Go to SDK Tools tab
+3. Check "NDK (Side by side)" and install
+4. Set environment variable:
+   ```bash
+   export ANDROID_NDK_HOME="$HOME/Library/Android/sdk/ndk/{version}"
+   ```
+
+**Option B: Manual Download**
+
+Download from https://developer.android.com/ndk/downloads and set `ANDROID_NDK_HOME`.
+
+### 2. Install cargo-ndk
+
+```bash
+cargo install cargo-ndk
+```
+
+### 3. Install Rust Targets
+
+```bash
+rustup target add aarch64-linux-android x86_64-linux-android
+```
+
+### 4. Build
+
+```bash
+cargo xtask build-flutter --platform android
+```
+
+### Supported Android ABIs
+
+| ABI | Rust Target | Description |
+|-----|-------------|-------------|
+| arm64-v8a | `aarch64-linux-android` | 64-bit ARM (most modern devices) |
+| x86_64 | `x86_64-linux-android` | 64-bit x86 (emulators, some Chromebooks) |
+
+**Note**: armeabi-v7a (32-bit ARM) is not currently supported due to build constraints.
+
+### API Level
+
+The build uses **API level 28** (Android 9.0 Pie) for compilation headers. This is required because:
+- `POSIX_MADV_*` constants (used by llama.cpp) require API 23+
+- `aws-lc-sys` (used for TLS) requires API 28+ for `getentropy()`
+
+This does **not** affect your app's `minSdkVersion` - it only determines which NDK headers are used during native library compilation. Your Flutter app can still target older Android versions.
+
+### Build Output
+
+After a successful build, `.so` files are located at:
+```
+target/aarch64-linux-android/release/libxybrid_flutter_ffi.so  # arm64-v8a
+target/x86_64-linux-android/release/libxybrid_flutter_ffi.so   # x86_64
+```
+
+These are ELF shared libraries that Flutter will automatically bundle into your APK/AAB.
 
 ### iOS build fails with "target not installed"
 
@@ -289,17 +570,72 @@ rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 
 **Fix**: Check the skipped types and add appropriate annotations or exclude them from the API.
 
-## Current Location
+## Migration from xybrid-flutter
 
-The Flutter SDK currently lives in a separate repository:
-- **Repository**: [xybrid-flutter](https://github.com/xybrid-ai/xybrid-flutter)
+If you were previously using the standalone [xybrid-flutter](https://github.com/xybrid-ai/xybrid-flutter) package, here are the key changes:
 
-## Migration Plan
+### Breaking Changes
 
-As part of the monorepo restructure, the Flutter binding will be migrated here with:
-1. Rust business logic moved to `crates/xybrid-sdk/`
-2. Flutter-specific code kept thin (FRB wrappers only)
-3. Platform-specific code in respective directories
+1. **Package location**: The Flutter SDK now lives in the monorepo at `repos/xybrid/bindings/flutter/` instead of a separate repository.
+
+2. **Initialization required**: You must now call `await Xybrid.init()` before using any SDK functionality:
+   ```dart
+   // Before: No initialization needed
+   // After:
+   await Xybrid.init();
+   ```
+
+3. **Async inference**: `model.run()` and `pipeline.run()` now return `Future<XybridResult>`:
+   ```dart
+   // Before: final result = model.run(envelope);
+   // After:
+   final result = await model.run(envelope);
+   ```
+
+### Dependency Update
+
+Update your `pubspec.yaml` from:
+
+```yaml
+dependencies:
+  xybrid_flutter: ^0.x.x
+```
+
+To:
+
+```yaml
+dependencies:
+  xybrid:
+    git:
+      url: https://github.com/xybrid-ai/xybrid.git
+      path: repos/xybrid/bindings/flutter
+```
+
+### Import Changes
+
+```dart
+// Before:
+import 'package:xybrid_flutter/xybrid_flutter.dart';
+
+// After:
+import 'package:xybrid/xybrid.dart';
+```
+
+### API Compatibility
+
+The core API remains similar:
+- `XybridModelLoader.fromRegistry(modelId)` - unchanged
+- `XybridModelLoader.fromBundle(path)` - unchanged
+- `XybridEnvelope.text(text)` - unchanged
+- `XybridEnvelope.audio(bytes, sampleRate, channels)` - unchanged
+- `XybridResult` properties - unchanged
+
+### New Features
+
+This version adds:
+- **Pipeline support**: Chain multiple models with `XybridPipeline`
+- **Better error handling**: All errors wrapped in `XybridException`
+- **Initialization state**: Check `Xybrid.isInitialized` before operations
 
 ## Full Plan
 
