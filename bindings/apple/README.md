@@ -116,17 +116,111 @@ apple/
 
 ## Building the XCFramework
 
-The XCFramework containing the compiled Rust library must be built separately:
+The XCFramework containing the compiled Rust library must be built before using the Swift package.
+
+### Prerequisites
+
+| Tool | Required Version | Installation |
+|------|------------------|--------------|
+| Xcode | 14.0+ | Mac App Store |
+| Rust | 1.70+ | [rustup.rs](https://rustup.rs) |
+| Xcode Command Line Tools | Latest | `xcode-select --install` |
+
+### Installing Rust Targets
+
+Install the required cross-compilation targets:
+
+```bash
+# From the xybrid repo root
+cargo xtask setup-targets
+
+# Or manually:
+rustup target add aarch64-apple-ios        # iOS device (arm64)
+rustup target add aarch64-apple-ios-sim    # iOS simulator (arm64)
+rustup target add x86_64-apple-ios         # iOS simulator (x86_64)
+rustup target add aarch64-apple-darwin     # macOS (arm64)
+rustup target add x86_64-apple-darwin      # macOS (x86_64)
+```
+
+### Building
 
 ```bash
 # From the xybrid repo root
 cargo xtask build-xcframework
+
+# With debug symbols (slower, larger binaries)
+cargo xtask build-xcframework --debug
+
+# With explicit version
+cargo xtask build-xcframework --version 0.2.0
 ```
 
-This will produce `XCFrameworks/XybridFFI.xcframework` containing:
+This produces `XCFrameworks/XybridFFI.xcframework` containing:
 - iOS device (arm64)
-- iOS simulator (arm64, x86_64)
-- macOS (arm64, x86_64)
+- iOS simulator (arm64, x86_64 universal)
+- macOS (arm64, x86_64 universal)
+
+### Build Output
+
+After a successful build:
+
+```
+bindings/apple/XCFrameworks/
+├── XybridFFI.xcframework/
+│   ├── ios-arm64/
+│   │   └── libxybrid_uniffi.a
+│   ├── ios-arm64_x86_64-simulator/
+│   │   └── libxybrid_uniffi.a
+│   └── macos-arm64_x86_64/
+│       └── libxybrid_uniffi.a
+└── XybridFFI-{version}.xcframework/    # Versioned copy
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DEVELOPER_DIR` | Path to Xcode.app | Auto-detected |
+
+### Troubleshooting
+
+#### "error: linker 'cc' not found"
+
+**Cause**: Xcode Command Line Tools not installed.
+
+**Fix**: Run `xcode-select --install`
+
+#### "error: target 'aarch64-apple-ios' not installed"
+
+**Cause**: Missing Rust target.
+
+**Fix**: Run `cargo xtask setup-targets` or `rustup target add aarch64-apple-ios`
+
+#### "xcodebuild: error: cannot be used together with -create-xcframework"
+
+**Cause**: Conflicting xcodebuild options or incompatible library format.
+
+**Fix**: Ensure you're using static libraries (.a files), not dynamic (.dylib).
+
+#### Build works but Swift can't find the module
+
+**Cause**: XCFramework not in expected location or not linked.
+
+**Fix**: Ensure `XCFrameworks/XybridFFI.xcframework` exists and is listed in your Xcode project's "Frameworks, Libraries, and Embedded Content".
+
+#### "Undefined symbols for architecture arm64"
+
+**Cause**: XCFramework built for different architecture than target.
+
+**Fix**: Rebuild with `cargo xtask build-xcframework` ensuring all targets are installed.
+
+### Non-macOS Developers
+
+XCFramework builds require macOS with Xcode. If you're developing on Linux or Windows:
+
+1. **Use prebuilt XCFrameworks**: Download from [GitHub Releases](https://github.com/xybrid-ai/xybrid/releases)
+2. **Use CI**: Push your changes and let GitHub Actions build the XCFramework
+3. **Use a macOS VM or CI service**: If you need local builds
 
 ## FFI Strategy
 

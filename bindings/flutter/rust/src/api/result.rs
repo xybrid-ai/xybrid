@@ -4,11 +4,11 @@ use xybrid_sdk::InferenceResult;
 
 /// FFI wrapper for inference results.
 pub struct FfiResult {
-    success: bool,
-    text: Option<String>,
-    audio_bytes: Option<Vec<u8>>,
-    embedding: Option<Vec<f32>>,
-    latency_ms: u32,
+    pub success: bool,
+    pub text: Option<String>,
+    pub audio_bytes: Option<Vec<u8>>,
+    pub embedding: Option<Vec<f32>>,
+    pub latency_ms: u32,
 }
 
 impl FfiResult {

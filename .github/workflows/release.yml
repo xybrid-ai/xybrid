@@ -7,13 +7,211 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # NDK version - r26b is stable and widely supported
+  NDK_VERSION: "26.1.10909125"
+  FLUTTER_VERSION: "3.24.0"
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build (${{ matrix.name }})
+  #
+  # Apple XCFramework build (macOS only)
+  #
+  build-apple:
+    name: Build Apple XCFramework
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            aarch64-apple-ios,
+            aarch64-apple-ios-sim,
+            x86_64-apple-ios,
+            aarch64-apple-darwin,
+            x86_64-apple-darwin
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-apple
+
+      - name: Build XCFramework
+        run: cargo xtask build-xcframework --release
+
+      - name: Prepare artifact with version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          mkdir -p dist
+          cd bindings/apple/XCFrameworks
+          zip -r ../../../dist/XybridFFI-${VERSION}.xcframework.zip XybridFFI.xcframework
+
+      - name: Upload XCFramework artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcframework
+          path: dist/XybridFFI-*.xcframework.zip
+          if-no-files-found: error
+
+  #
+  # Android .so files build (Linux with NDK)
+  #
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-android
+
+      - name: Setup Android NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Build Android .so files
+        run: cargo xtask build-android --release
+
+      - name: Prepare artifact with version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          mkdir -p dist
+          cd bindings/kotlin/libs
+          zip -r ../../../dist/xybrid-android-${VERSION}.zip .
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-libs
+          path: dist/xybrid-android-*.zip
+          if-no-files-found: error
+
+  #
+  # Flutter native libraries build (matrix for multiple platforms)
+  #
+  build-flutter:
+    name: Build Flutter (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-latest
+            rust_targets: x86_64-unknown-linux-gnu
+          - platform: macos
+            os: macos-14
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - platform: windows
+            os: windows-latest
+            rust_targets: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-flutter-${{ matrix.platform }}
+
+      - name: Install Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install LLVM (Linux)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+
+      - name: Install LLVM (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install llvm
+
+      - name: Install LLVM (Windows)
+        if: matrix.platform == 'windows'
+        run: choco install llvm
+
+      - name: Install flutter_rust_bridge_codegen
+        run: dart pub global activate flutter_rust_bridge_codegen
+
+      - name: Add Dart pub cache to PATH (Unix)
+        if: runner.os != 'Windows'
+        run: echo "$HOME/.pub-cache/bin" >> $GITHUB_PATH
+
+      - name: Add Dart pub cache to PATH (Windows)
+        if: runner.os == 'Windows'
+        run: echo "$env:LOCALAPPDATA\Pub\Cache\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build Flutter native library
+        run: cargo xtask build-flutter --platform ${{ matrix.platform }} --release
+
+      - name: Prepare artifact with version (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          mkdir -p dist
+          # Find and package the native library
+          if [ -d "bindings/flutter/rust/target" ]; then
+            cd bindings/flutter/rust/target
+          else
+            cd target
+          fi
+          find . -name "*xybrid_flutter_ffi*" -type f | head -20 | tar -czvf ../../../../dist/xybrid-flutter-${{ matrix.platform }}-${VERSION}.tar.gz -T -
+
+      - name: Prepare artifact with version (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF -replace 'refs/tags/', ''
+          New-Item -ItemType Directory -Force -Path dist
+          $files = Get-ChildItem -Path . -Recurse -Filter "*xybrid_flutter_ffi*" -File | Select-Object -First 20
+          if ($files) {
+            Compress-Archive -Path $files.FullName -DestinationPath "dist/xybrid-flutter-windows-$version.zip"
+          }
+
+      - name: Upload Flutter artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-${{ matrix.platform }}
+          path: dist/xybrid-flutter-*
+          if-no-files-found: warn
+
+  #
+  # CLI builds (cross-platform matrix)
+  #
+  build-cli:
+    name: Build CLI (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -48,7 +246,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release-${{ matrix.name }}
+          key: release-cli-${{ matrix.name }}
 
       - name: Build CLI
         run: cargo build --release -p xybrid-cli --target ${{ matrix.target }}
@@ -72,13 +270,16 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xybrid-${{ matrix.name }}
+          name: cli-${{ matrix.name }}
           path: dist/*
 
+  #
+  # Create GitHub Release after all builds complete
+  #
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build-apple, build-android, build-flutter, build-cli]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,6 +290,11 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: List all artifacts
+        run: |
+          echo "All release artifacts:"
+          find artifacts -type f | sort
 
       - name: Generate changelog
         id: changelog
@@ -107,6 +313,22 @@ jobs:
           fi
 
           echo "" >> CHANGELOG_RELEASE.md
+          echo "" >> CHANGELOG_RELEASE.md
+          echo "### Artifacts" >> CHANGELOG_RELEASE.md
+          echo "" >> CHANGELOG_RELEASE.md
+          echo "**Apple (XCFramework)**" >> CHANGELOG_RELEASE.md
+          echo "- \`XybridFFI-${CURRENT_TAG}.xcframework.zip\` - iOS + macOS universal framework" >> CHANGELOG_RELEASE.md
+          echo "" >> CHANGELOG_RELEASE.md
+          echo "**Android**" >> CHANGELOG_RELEASE.md
+          echo "- \`xybrid-android-${CURRENT_TAG}.zip\` - Native .so files for all ABIs" >> CHANGELOG_RELEASE.md
+          echo "" >> CHANGELOG_RELEASE.md
+          echo "**Flutter**" >> CHANGELOG_RELEASE.md
+          echo "- \`xybrid-flutter-linux-${CURRENT_TAG}.tar.gz\` - Linux native library" >> CHANGELOG_RELEASE.md
+          echo "- \`xybrid-flutter-macos-${CURRENT_TAG}.tar.gz\` - macOS native library" >> CHANGELOG_RELEASE.md
+          echo "- \`xybrid-flutter-windows-${CURRENT_TAG}.zip\` - Windows native library" >> CHANGELOG_RELEASE.md
+          echo "" >> CHANGELOG_RELEASE.md
+          echo "**CLI**" >> CHANGELOG_RELEASE.md
+          echo "- Cross-platform binaries for macOS (arm64, x86_64), Linux (x86_64), and Windows (x86_64)" >> CHANGELOG_RELEASE.md
           echo "" >> CHANGELOG_RELEASE.md
           echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${CURRENT_TAG}" >> CHANGELOG_RELEASE.md
 

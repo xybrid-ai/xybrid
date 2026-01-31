@@ -8732,6 +8732,8 @@ dependencies = [
  "dunce",
  "fs_extra",
  "reqwest 0.11.27",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

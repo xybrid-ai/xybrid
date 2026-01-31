@@ -1,0 +1,72 @@
+name: Build Apple
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-xcframework:
+    name: Build XCFramework
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            aarch64-apple-ios,
+            aarch64-apple-ios-sim,
+            x86_64-apple-ios,
+            aarch64-apple-darwin,
+            x86_64-apple-darwin
+
+      # Rust caching with Swatinem/rust-cache
+      # Cache key is based on Cargo.lock hash (automatic) + workflow-specific prefix
+      # Expected cache hit rate: ~80-90% on incremental changes
+      # Cache includes: ~/.cargo/registry, ~/.cargo/git, target/
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Prefix cache key with workflow name to avoid collisions with other workflows
+          prefix-key: "v1-rust"
+          # Shared cache key for Apple builds - all targets use same dependencies
+          shared-key: "apple-xcframework"
+          # Cache all target directories (default includes release/debug)
+          cache-all-crates: "true"
+          # Save cache even on build failure for faster subsequent runs
+          save-if: "true"
+
+      - name: Build XCFramework
+        run: cargo xtask build-xcframework --release
+
+      - name: Verify XCFramework
+        run: |
+          XCFW_PATH="bindings/apple/XCFrameworks/XybridFFI.xcframework"
+          if [ ! -d "$XCFW_PATH" ]; then
+            echo "Error: XCFramework not found at $XCFW_PATH"
+            exit 1
+          fi
+          echo "XCFramework contents:"
+          ls -la "$XCFW_PATH"
+          echo ""
+          echo "Verifying architectures..."
+          # Check iOS device library
+          file "$XCFW_PATH/ios-arm64/libxybrid_uniffi.a" || true
+          # Check iOS simulator library (universal)
+          file "$XCFW_PATH/ios-arm64_x86_64-simulator/libxybrid_uniffi.a" || true
+          # Check macOS library (universal)
+          file "$XCFW_PATH/macos-arm64_x86_64/libxybrid_uniffi.a" || true
+
+      - name: Upload XCFramework artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: XybridFFI-xcframework
+          path: bindings/apple/XCFrameworks/XybridFFI.xcframework
+          if-no-files-found: error

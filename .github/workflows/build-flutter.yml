@@ -1,0 +1,133 @@
+name: Build Flutter
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  FLUTTER_VERSION: "3.24.0"
+  FRB_VERSION: "2.0.0"
+
+jobs:
+  build-flutter:
+    name: Build Flutter (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-latest
+            rust_targets: x86_64-unknown-linux-gnu
+          - platform: macos
+            os: macos-14
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - platform: windows
+            os: windows-latest
+            rust_targets: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      # Rust caching with Swatinem/rust-cache
+      # Cache key is based on Cargo.lock hash (automatic) + platform-specific prefix
+      # Expected cache hit rate: ~80-90% on incremental changes
+      # Cache includes: ~/.cargo/registry, ~/.cargo/git, target/
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "flutter-${{ matrix.platform }}"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      # Flutter SDK caching via subosito/flutter-action
+      # Expected cache hit rate: ~99% (Flutter version changes rarely)
+      # Cache includes: Flutter SDK (~1GB), pub cache
+      - name: Install Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install LLVM (Linux)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+
+      - name: Install LLVM (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install llvm
+
+      - name: Install LLVM (Windows)
+        if: matrix.platform == 'windows'
+        run: choco install llvm
+
+      # Cache Dart pub cache for flutter_rust_bridge_codegen
+      # Expected cache hit rate: ~95% (FRB version changes rarely)
+      # Cache includes: ~/.pub-cache (Unix) or %LOCALAPPDATA%\Pub\Cache (Windows)
+      - name: Cache Dart pub cache (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-frb-${{ env.FRB_VERSION }}
+          restore-keys: |
+            pub-cache-${{ runner.os }}-frb-
+            pub-cache-${{ runner.os }}-
+
+      - name: Cache Dart pub cache (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.LOCALAPPDATA }}\Pub\Cache
+          key: pub-cache-${{ runner.os }}-frb-${{ env.FRB_VERSION }}
+          restore-keys: |
+            pub-cache-${{ runner.os }}-frb-
+            pub-cache-${{ runner.os }}-
+
+      - name: Install flutter_rust_bridge_codegen
+        run: dart pub global activate flutter_rust_bridge_codegen
+
+      - name: Add Dart pub cache to PATH (Unix)
+        if: runner.os != 'Windows'
+        run: echo "$HOME/.pub-cache/bin" >> $GITHUB_PATH
+
+      - name: Add Dart pub cache to PATH (Windows)
+        if: runner.os == 'Windows'
+        run: echo "$env:LOCALAPPDATA\Pub\Cache\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build Flutter native library
+        run: cargo xtask build-flutter --platform ${{ matrix.platform }} --release
+
+      - name: Verify build output (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          echo "Build output for ${{ matrix.platform }}:"
+          find bindings/flutter/rust/target -name "libxybrid_flutter_ffi*" -type f 2>/dev/null || \
+          find target -name "libxybrid_flutter_ffi*" -type f 2>/dev/null || \
+          echo "Note: Library may have been built to different location"
+
+      - name: Verify build output (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Write-Output "Build output for ${{ matrix.platform }}:"
+          Get-ChildItem -Path . -Recurse -Filter "xybrid_flutter_ffi*" -ErrorAction SilentlyContinue | Select-Object FullName
+
+      - name: Upload Flutter native library artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-native-${{ matrix.platform }}
+          path: |
+            bindings/flutter/rust/target/**/release/*xybrid_flutter_ffi*
+            target/**/release/*xybrid_flutter_ffi*
+          if-no-files-found: warn

@@ -1,0 +1,105 @@
+name: Build Android
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # NDK version - r26b is stable and widely supported
+  NDK_VERSION: "26.1.10909125"
+
+jobs:
+  build-android:
+    name: Build Android .so files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
+
+      # Rust caching with Swatinem/rust-cache
+      # Cache key is based on Cargo.lock hash (automatic) + workflow-specific prefix
+      # Expected cache hit rate: ~80-90% on incremental changes
+      # Cache includes: ~/.cargo/registry, ~/.cargo/git, target/
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "android-ndk"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      # Cache Android NDK to avoid ~1.5GB download on every build
+      # Expected cache hit rate: ~99% (NDK version changes rarely)
+      # Cache size: ~1.5GB compressed
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          key: android-ndk-${{ env.NDK_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: |
+          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Set NDK environment
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      # Cache cargo-ndk binary to avoid compilation on every build
+      # Expected cache hit rate: ~95% (cargo-ndk version changes rarely)
+      - name: Cache cargo-ndk
+        id: cache-cargo-ndk
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-ndk-${{ runner.os }}-
+
+      - name: Install cargo-ndk
+        if: steps.cache-cargo-ndk.outputs.cache-hit != 'true'
+        run: cargo install cargo-ndk
+
+      - name: Build Android .so files
+        run: cargo xtask build-android --release
+
+      - name: Verify .so files
+        run: |
+          SO_BASE_PATH="bindings/kotlin/libs"
+          ABIS=("armeabi-v7a" "arm64-v8a" "x86_64")
+
+          for abi in "${ABIS[@]}"; do
+            SO_PATH="$SO_BASE_PATH/$abi/libxybrid_uniffi.so"
+            if [ ! -f "$SO_PATH" ]; then
+              echo "Error: .so file not found at $SO_PATH"
+              exit 1
+            fi
+            echo "Verifying $SO_PATH..."
+            file "$SO_PATH"
+          done
+
+          echo ""
+          echo "All .so files verified:"
+          find "$SO_BASE_PATH" -name "*.so" -exec ls -la {} \;
+
+      - name: Upload Android .so artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-so-files
+          path: bindings/kotlin/libs/
+          if-no-files-found: error

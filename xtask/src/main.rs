@@ -1,9 +1,61 @@
 mod setup_env;
 
-use clap::{Parser, Subcommand, ValueEnum};
 use anyhow::{Context, Result};
+use clap::{Parser, Subcommand, ValueEnum};
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::path::PathBuf;
+
+/// Get the version from Cargo.toml workspace or git tag
+fn get_version(override_version: Option<&str>) -> String {
+    // If explicit version provided, use it
+    if let Some(v) = override_version {
+        return v.to_string();
+    }
+
+    // Try to get version from git tag first (e.g., "v0.1.0" -> "0.1.0")
+    if let Ok(output) = Command::new("git")
+        .args(["describe", "--tags", "--exact-match"])
+        .output()
+    {
+        if output.status.success() {
+            let tag = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Some(version) = tag.strip_prefix('v') {
+                return version.to_string();
+            }
+            return tag;
+        }
+    }
+
+    // Fall back to reading from Cargo.toml
+    let cargo_toml_path = PathBuf::from("Cargo.toml");
+    if cargo_toml_path.exists() {
+        if let Ok(contents) = std::fs::read_to_string(&cargo_toml_path) {
+            // Simple parsing to find version in [workspace.package] section
+            let mut in_workspace_package = false;
+            for line in contents.lines() {
+                let trimmed = line.trim();
+                if trimmed == "[workspace.package]" {
+                    in_workspace_package = true;
+                    continue;
+                }
+                if trimmed.starts_with('[') {
+                    in_workspace_package = false;
+                }
+                if in_workspace_package && trimmed.starts_with("version") {
+                    if let Some(pos) = trimmed.find('=') {
+                        let value = trimmed[pos + 1..].trim();
+                        // Remove quotes
+                        let version = value.trim_matches('"').trim_matches('\'');
+                        return version.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    // Default fallback
+    "0.0.0".to_string()
+}
 
 #[derive(Parser)]
 #[command(name = "xtask")]
@@ -54,6 +106,104 @@ enum Commands {
         #[arg(long)]
         out_dir: Option<PathBuf>,
     },
+
+    /// Build Apple XCFramework for iOS and macOS platforms
+    BuildXcframework {
+        /// Build in release mode (default: true)
+        #[arg(long, default_value = "true")]
+        release: bool,
+
+        /// Build in debug mode (overrides --release)
+        #[arg(long)]
+        debug: bool,
+
+        /// Override the version (defaults to Cargo.toml version or git tag)
+        #[arg(long)]
+        version: Option<String>,
+    },
+
+    /// Build Android .so files for all ABIs (armeabi-v7a, arm64-v8a, x86_64)
+    BuildAndroid {
+        /// Build in release mode (default: true)
+        #[arg(long, default_value = "true")]
+        release: bool,
+
+        /// Build in debug mode (overrides --release)
+        #[arg(long)]
+        debug: bool,
+
+        /// Build only specific ABI(s). Can be specified multiple times.
+        #[arg(long, value_enum)]
+        abi: Vec<AndroidAbi>,
+
+        /// Override the version (defaults to Cargo.toml version or git tag)
+        #[arg(long)]
+        version: Option<String>,
+    },
+
+    /// Build Flutter native libraries for a specific platform
+    BuildFlutter {
+        /// Target platform to build for
+        #[arg(long, value_enum)]
+        platform: FlutterPlatform,
+
+        /// Build in release mode (default: true)
+        #[arg(long, default_value = "true")]
+        release: bool,
+
+        /// Build in debug mode (overrides --release)
+        #[arg(long)]
+        debug: bool,
+
+        /// Override the version (defaults to Cargo.toml version or git tag)
+        #[arg(long)]
+        version: Option<String>,
+    },
+
+    /// Install required Rust cross-compilation targets for iOS, macOS, and Android
+    SetupTargets,
+
+    /// Build all platforms with one command
+    BuildAll {
+        /// Build in release mode (default: true)
+        #[arg(long, default_value = "true")]
+        release: bool,
+
+        /// Build in debug mode (overrides --release)
+        #[arg(long)]
+        debug: bool,
+
+        /// Run builds concurrently where possible (experimental)
+        #[arg(long)]
+        parallel: bool,
+
+        /// Override the version (defaults to Cargo.toml version or git tag)
+        #[arg(long)]
+        version: Option<String>,
+    },
+
+    /// Package build artifacts for distribution (creates dist/ with .zip files and checksums)
+    Package {
+        /// Override the version (defaults to Cargo.toml version or git tag)
+        #[arg(long)]
+        version: Option<String>,
+
+        /// Output directory for packages (default: dist/)
+        #[arg(long, default_value = "dist")]
+        output_dir: PathBuf,
+
+        /// Skip packaging XCFramework (Apple artifacts)
+        #[arg(long)]
+        skip_apple: bool,
+
+        /// Skip packaging Android .so files
+        #[arg(long)]
+        skip_android: bool,
+
+        /// Skip packaging Flutter plugin
+        #[arg(long)]
+        skip_flutter: bool,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -61,6 +211,102 @@ enum BindingsLanguage {
     Swift,
     Kotlin,
     All,
+}
+
+#[derive(Clone, Copy, ValueEnum, Debug, PartialEq, Eq)]
+enum AndroidAbi {
+    /// ARM 32-bit (armeabi-v7a)
+    #[value(name = "armeabi-v7a")]
+    ArmeabiV7a,
+    /// ARM 64-bit (arm64-v8a)
+    #[value(name = "arm64-v8a")]
+    Arm64V8a,
+    /// x86_64 (x86_64)
+    #[value(name = "x86_64")]
+    X86_64,
+}
+
+impl AndroidAbi {
+    fn rust_target(&self) -> &'static str {
+        match self {
+            AndroidAbi::ArmeabiV7a => "armv7-linux-androideabi",
+            AndroidAbi::Arm64V8a => "aarch64-linux-android",
+            AndroidAbi::X86_64 => "x86_64-linux-android",
+        }
+    }
+
+    fn ndk_arch(&self) -> &'static str {
+        match self {
+            AndroidAbi::ArmeabiV7a => "armeabi-v7a",
+            AndroidAbi::Arm64V8a => "arm64-v8a",
+            AndroidAbi::X86_64 => "x86_64",
+        }
+    }
+
+    fn all() -> Vec<AndroidAbi> {
+        vec![
+            AndroidAbi::ArmeabiV7a,
+            AndroidAbi::Arm64V8a,
+            AndroidAbi::X86_64,
+        ]
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum, Debug, PartialEq, Eq)]
+enum FlutterPlatform {
+    /// iOS (requires macOS)
+    #[value(name = "ios")]
+    Ios,
+    /// Android (requires Android NDK)
+    #[value(name = "android")]
+    Android,
+    /// macOS (requires macOS)
+    #[value(name = "macos")]
+    Macos,
+    /// Windows
+    #[value(name = "windows")]
+    Windows,
+    /// Linux
+    #[value(name = "linux")]
+    Linux,
+}
+
+impl FlutterPlatform {
+    /// Returns the Rust targets to build for this platform
+    fn rust_targets(&self) -> Vec<&'static str> {
+        match self {
+            FlutterPlatform::Ios => vec!["aarch64-apple-ios", "aarch64-apple-ios-sim"],
+            FlutterPlatform::Android => vec![
+                "aarch64-linux-android",
+                "armv7-linux-androideabi",
+                "x86_64-linux-android",
+            ],
+            FlutterPlatform::Macos => vec!["aarch64-apple-darwin", "x86_64-apple-darwin"],
+            FlutterPlatform::Windows => vec!["x86_64-pc-windows-msvc"],
+            FlutterPlatform::Linux => vec!["x86_64-unknown-linux-gnu"],
+        }
+    }
+
+    /// Returns the platform name as a string
+    fn name(&self) -> &'static str {
+        match self {
+            FlutterPlatform::Ios => "ios",
+            FlutterPlatform::Android => "android",
+            FlutterPlatform::Macos => "macos",
+            FlutterPlatform::Windows => "windows",
+            FlutterPlatform::Linux => "linux",
+        }
+    }
+
+    /// Check if the platform can be built on the current OS
+    fn can_build_on_current_os(&self) -> bool {
+        match self {
+            FlutterPlatform::Ios | FlutterPlatform::Macos => cfg!(target_os = "macos"),
+            FlutterPlatform::Windows => cfg!(target_os = "windows"),
+            FlutterPlatform::Linux => cfg!(target_os = "linux"),
+            FlutterPlatform::Android => true, // Android can be cross-compiled from any OS
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -79,6 +325,58 @@ fn main() -> Result<()> {
         Commands::GenerateBindings { language, out_dir } => {
             generate_bindings(language, out_dir)?;
         }
+        Commands::BuildXcframework {
+            release,
+            debug,
+            version,
+        } => {
+            let is_release = !debug && release;
+            let ver = get_version(version.as_deref());
+            build_xcframework(is_release, &ver)?;
+        }
+        Commands::BuildAndroid {
+            release,
+            debug,
+            abi,
+            version,
+        } => {
+            let is_release = !debug && release;
+            let ver = get_version(version.as_deref());
+            build_android(is_release, abi, &ver)?;
+        }
+        Commands::BuildFlutter {
+            platform,
+            release,
+            debug,
+            version,
+        } => {
+            let is_release = !debug && release;
+            let ver = get_version(version.as_deref());
+            build_flutter(platform, is_release, &ver)?;
+        }
+        Commands::SetupTargets => {
+            setup_targets()?;
+        }
+        Commands::BuildAll {
+            release,
+            debug,
+            parallel,
+            version,
+        } => {
+            let is_release = !debug && release;
+            let ver = get_version(version.as_deref());
+            build_all(is_release, parallel, &ver)?;
+        }
+        Commands::Package {
+            version,
+            output_dir,
+            skip_apple,
+            skip_android,
+            skip_flutter,
+        } => {
+            let ver = get_version(version.as_deref());
+            package_artifacts(&ver, &output_dir, skip_apple, skip_android, skip_flutter)?;
+        }
     }
 
     Ok(())
@@ -89,9 +387,7 @@ fn build_uniffi(target: Option<String>, release: bool) -> Result<()> {
     println!("Building xybrid-uniffi...");
 
     let mut cmd = Command::new("cargo");
-    cmd.arg("build")
-        .arg("-p")
-        .arg("xybrid-uniffi");
+    cmd.arg("build").arg("-p").arg("xybrid-uniffi");
 
     if release {
         cmd.arg("--release");
@@ -134,9 +430,7 @@ fn build_ffi(target: Option<String>, release: bool) -> Result<()> {
     println!("Building xybrid-ffi...");
 
     let mut cmd = Command::new("cargo");
-    cmd.arg("build")
-        .arg("-p")
-        .arg("xybrid-ffi");
+    cmd.arg("build").arg("-p").arg("xybrid-ffi");
 
     if release {
         cmd.arg("--release");
@@ -260,8 +554,9 @@ fn generate_bindings(language: BindingsLanguage, out_dir: Option<PathBuf>) -> Re
             let header_src = output.join("xybrid_uniffiFFI.h");
             let header_dst = ffi_include_dir.join("xybrid_uniffiFFI.h");
             if header_src.exists() {
-                std::fs::rename(&header_src, &header_dst)
-                    .with_context(|| format!("Failed to move {:?} to {:?}", header_src, header_dst))?;
+                std::fs::rename(&header_src, &header_dst).with_context(|| {
+                    format!("Failed to move {:?} to {:?}", header_src, header_dst)
+                })?;
                 println!("  Moved header to {:?}", header_dst);
             }
 
@@ -269,8 +564,9 @@ fn generate_bindings(language: BindingsLanguage, out_dir: Option<PathBuf>) -> Re
             let modulemap_src = output.join("xybrid_uniffiFFI.modulemap");
             let modulemap_dst = ffi_dir.join("xybrid_uniffiFFI.modulemap");
             if modulemap_src.exists() {
-                std::fs::rename(&modulemap_src, &modulemap_dst)
-                    .with_context(|| format!("Failed to move {:?} to {:?}", modulemap_src, modulemap_dst))?;
+                std::fs::rename(&modulemap_src, &modulemap_dst).with_context(|| {
+                    format!("Failed to move {:?} to {:?}", modulemap_src, modulemap_dst)
+                })?;
                 println!("  Moved modulemap to {:?}", modulemap_dst);
             }
         }
@@ -279,4 +575,1591 @@ fn generate_bindings(language: BindingsLanguage, out_dir: Option<PathBuf>) -> Re
     }
 
     Ok(())
+}
+
+/// Apple target architectures for XCFramework
+const IOS_ARM64: &str = "aarch64-apple-ios";
+const IOS_SIM_ARM64: &str = "aarch64-apple-ios-sim";
+const IOS_SIM_X86_64: &str = "x86_64-apple-ios";
+const MACOS_ARM64: &str = "aarch64-apple-darwin";
+const MACOS_X86_64: &str = "x86_64-apple-darwin";
+
+/// Build Apple XCFramework for iOS and macOS platforms
+fn build_xcframework(release: bool, version: &str) -> Result<()> {
+    if !cfg!(target_os = "macos") {
+        anyhow::bail!("XCFramework builds are only supported on macOS");
+    }
+
+    let profile = if release { "release" } else { "debug" };
+
+    println!("Building XCFramework ({} mode, version {})...", profile, version);
+    println!();
+
+    // Check for ONNX Runtime iOS XCFramework requirement
+    // iOS builds need ORT_IOS_XCFWK_LOCATION pointing to onnxruntime.xcframework
+    let ort_ios_xcfwk = std::env::var("ORT_IOS_XCFWK_LOCATION").ok();
+    if ort_ios_xcfwk.is_none() {
+        println!("⚠️  Warning: ORT_IOS_XCFWK_LOCATION is not set");
+        println!();
+        println!("   iOS builds require ONNX Runtime iOS XCFramework. Options:");
+        println!();
+        println!("   1. Download prebuilt XCFramework:");
+        println!("      - From VOICEVOX: https://github.com/VOICEVOX/onnxruntime-builder/releases");
+        println!("      - From HuggingFace: https://huggingface.co/csukuangfj/ios-onnxruntime");
+        println!();
+        println!("   2. Build from source:");
+        println!("      - See: https://onnxruntime.ai/docs/build/ios.html");
+        println!();
+        println!("   3. Set environment variable:");
+        println!("      export ORT_IOS_XCFWK_LOCATION=/path/to/onnxruntime.xcframework");
+        println!();
+        println!("   Building macOS-only (skipping iOS targets)...");
+        println!();
+
+        return build_xcframework_macos_only(release, version);
+    }
+
+    println!("Using ONNX Runtime iOS XCFramework: {}", ort_ios_xcfwk.as_ref().unwrap());
+    println!();
+
+    // Define targets
+    let targets = [
+        (IOS_ARM64, "iOS arm64"),
+        (IOS_SIM_ARM64, "iOS Simulator arm64"),
+        (IOS_SIM_X86_64, "iOS Simulator x86_64"),
+        (MACOS_ARM64, "macOS arm64"),
+        (MACOS_X86_64, "macOS x86_64"),
+    ];
+
+    // Build for each target
+    for (target, description) in targets.iter() {
+        println!("Building for {}...", description);
+
+        let mut cmd = Command::new("cargo");
+        cmd.arg("build")
+            .arg("-p")
+            .arg("xybrid-uniffi")
+            .arg("--target")
+            .arg(target);
+
+        if release {
+            cmd.arg("--release");
+        }
+
+        let status = cmd
+            .status()
+            .with_context(|| format!("Failed to run cargo build for {}", target))?;
+
+        if !status.success() {
+            anyhow::bail!("cargo build failed for {}", target);
+        }
+
+        println!("  ✓ {}", description);
+    }
+
+    println!();
+    println!("Creating XCFramework...");
+
+    // Create output directory
+    let xcframework_dir = PathBuf::from("bindings/apple/XCFrameworks");
+    // Use versioned filename (e.g., XybridFFI-0.1.0.xcframework)
+    let xcframework_name = format!("XybridFFI-{}.xcframework", version);
+    let xcframework_path = xcframework_dir.join(&xcframework_name);
+    // Also create a symlink/copy without version for backwards compatibility
+    let xcframework_latest = xcframework_dir.join("XybridFFI.xcframework");
+
+    // Remove existing XCFramework if present
+    if xcframework_path.exists() {
+        std::fs::remove_dir_all(&xcframework_path)
+            .context("Failed to remove existing XCFramework")?;
+    }
+    if xcframework_latest.exists() {
+        std::fs::remove_dir_all(&xcframework_latest)
+            .context("Failed to remove existing XCFramework symlink")?;
+    }
+
+    // Create lipo'd iOS Simulator library (combine arm64 and x86_64)
+    let ios_sim_dir = PathBuf::from(format!("target/ios-simulator-universal/{}", profile));
+    std::fs::create_dir_all(&ios_sim_dir)
+        .context("Failed to create iOS Simulator universal directory")?;
+
+    let ios_sim_lib = ios_sim_dir.join("libxybrid_uniffi.a");
+    let sim_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_SIM_ARM64, profile);
+    let sim_x86_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_SIM_X86_64, profile);
+
+    println!("  Creating universal iOS Simulator library...");
+    let lipo_status = Command::new("lipo")
+        .args(["-create", "-output"])
+        .arg(&ios_sim_lib)
+        .arg(&sim_arm64_lib)
+        .arg(&sim_x86_lib)
+        .status()
+        .context("Failed to run lipo for iOS Simulator")?;
+
+    if !lipo_status.success() {
+        anyhow::bail!("lipo failed for iOS Simulator libraries");
+    }
+
+    // Create lipo'd macOS library (combine arm64 and x86_64)
+    let macos_dir = PathBuf::from(format!("target/macos-universal/{}", profile));
+    std::fs::create_dir_all(&macos_dir).context("Failed to create macOS universal directory")?;
+
+    let macos_lib = macos_dir.join("libxybrid_uniffi.a");
+    let macos_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", MACOS_ARM64, profile);
+    let macos_x86_lib = format!("target/{}/{}/libxybrid_uniffi.a", MACOS_X86_64, profile);
+
+    println!("  Creating universal macOS library...");
+    let lipo_status = Command::new("lipo")
+        .args(["-create", "-output"])
+        .arg(&macos_lib)
+        .arg(&macos_arm64_lib)
+        .arg(&macos_x86_lib)
+        .status()
+        .context("Failed to run lipo for macOS")?;
+
+    if !lipo_status.success() {
+        anyhow::bail!("lipo failed for macOS libraries");
+    }
+
+    // Get iOS device library path
+    let ios_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_ARM64, profile);
+
+    // Create XCFramework using xcodebuild
+    println!("  Packaging XCFramework...");
+    let xcbuild_status = Command::new("xcodebuild")
+        .arg("-create-xcframework")
+        .arg("-library")
+        .arg(&ios_arm64_lib)
+        .arg("-library")
+        .arg(&ios_sim_lib)
+        .arg("-library")
+        .arg(&macos_lib)
+        .arg("-output")
+        .arg(&xcframework_path)
+        .status()
+        .context("Failed to run xcodebuild -create-xcframework")?;
+
+    if !xcbuild_status.success() {
+        anyhow::bail!("xcodebuild -create-xcframework failed");
+    }
+
+    // Create a copy at XybridFFI.xcframework for backwards compatibility
+    println!("  Creating unversioned copy for compatibility...");
+    copy_dir_recursive(&xcframework_path, &xcframework_latest)
+        .context("Failed to create unversioned XCFramework copy")?;
+
+    println!();
+    println!("✓ XCFramework build successful!");
+    println!("  Version: {}", version);
+    println!("  Output: {}", xcframework_path.display());
+    println!("  Also:   {}", xcframework_latest.display());
+    println!();
+    println!("Architectures included:");
+    println!("  - iOS arm64");
+    println!("  - iOS Simulator arm64 + x86_64 (universal)");
+    println!("  - macOS arm64 + x86_64 (universal)");
+
+    Ok(())
+}
+
+/// Build macOS-only XCFramework (fallback when ORT_IOS_XCFWK_LOCATION is not set)
+fn build_xcframework_macos_only(release: bool, version: &str) -> Result<()> {
+    let profile = if release { "release" } else { "debug" };
+
+    // Build for macOS targets only
+    let targets = [(MACOS_ARM64, "macOS arm64"), (MACOS_X86_64, "macOS x86_64")];
+
+    for (target, description) in targets.iter() {
+        println!("Building for {}...", description);
+
+        let mut cmd = Command::new("cargo");
+        cmd.arg("build")
+            .arg("-p")
+            .arg("xybrid-uniffi")
+            .arg("--target")
+            .arg(target);
+
+        if release {
+            cmd.arg("--release");
+        }
+
+        let status = cmd
+            .status()
+            .with_context(|| format!("Failed to run cargo build for {}", target))?;
+
+        if !status.success() {
+            anyhow::bail!("cargo build failed for {}", target);
+        }
+
+        println!("  ✓ {}", description);
+    }
+
+    println!();
+    println!("Creating XCFramework (macOS only)...");
+
+    // Create output directory
+    let xcframework_dir = PathBuf::from("bindings/apple/XCFrameworks");
+    let xcframework_name = format!("XybridFFI-{}.xcframework", version);
+    let xcframework_path = xcframework_dir.join(&xcframework_name);
+    let xcframework_latest = xcframework_dir.join("XybridFFI.xcframework");
+
+    // Remove existing XCFramework if present
+    if xcframework_path.exists() {
+        std::fs::remove_dir_all(&xcframework_path)
+            .context("Failed to remove existing XCFramework")?;
+    }
+    if xcframework_latest.exists() {
+        std::fs::remove_dir_all(&xcframework_latest)
+            .context("Failed to remove existing XCFramework symlink")?;
+    }
+
+    // Create lipo'd macOS library (combine arm64 and x86_64)
+    let macos_dir = PathBuf::from(format!("target/macos-universal/{}", profile));
+    std::fs::create_dir_all(&macos_dir).context("Failed to create macOS universal directory")?;
+
+    let macos_lib = macos_dir.join("libxybrid_uniffi.a");
+    let macos_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", MACOS_ARM64, profile);
+    let macos_x86_lib = format!("target/{}/{}/libxybrid_uniffi.a", MACOS_X86_64, profile);
+
+    println!("  Creating universal macOS library...");
+    let lipo_status = Command::new("lipo")
+        .args(["-create", "-output"])
+        .arg(&macos_lib)
+        .arg(&macos_arm64_lib)
+        .arg(&macos_x86_lib)
+        .status()
+        .context("Failed to run lipo for macOS")?;
+
+    if !lipo_status.success() {
+        anyhow::bail!("lipo failed for macOS libraries");
+    }
+
+    // Create XCFramework with macOS only
+    println!("  Packaging XCFramework...");
+    let xcbuild_status = Command::new("xcodebuild")
+        .arg("-create-xcframework")
+        .arg("-library")
+        .arg(&macos_lib)
+        .arg("-output")
+        .arg(&xcframework_path)
+        .status()
+        .context("Failed to run xcodebuild -create-xcframework")?;
+
+    if !xcbuild_status.success() {
+        anyhow::bail!("xcodebuild -create-xcframework failed");
+    }
+
+    // Create a copy at XybridFFI.xcframework for backwards compatibility
+    println!("  Creating unversioned copy for compatibility...");
+    copy_dir_recursive(&xcframework_path, &xcframework_latest)
+        .context("Failed to create unversioned XCFramework copy")?;
+
+    println!();
+    println!("✓ XCFramework build successful (macOS only)!");
+    println!("  Version: {}", version);
+    println!("  Output: {}", xcframework_path.display());
+    println!("  Also:   {}", xcframework_latest.display());
+    println!();
+    println!("Architectures included:");
+    println!("  - macOS arm64 + x86_64 (universal)");
+    println!();
+    println!("⚠️  Note: iOS targets were skipped because ORT_IOS_XCFWK_LOCATION is not set.");
+    println!("   To include iOS, set ORT_IOS_XCFWK_LOCATION to your ONNX Runtime iOS XCFramework path.");
+
+    Ok(())
+}
+
+/// Recursively copy a directory
+fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Build Android .so files for specified ABIs
+fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<()> {
+    let profile = if release { "release" } else { "debug" };
+
+    // Determine which ABIs to build
+    let target_abis = if abis.is_empty() {
+        AndroidAbi::all()
+    } else {
+        abis
+    };
+
+    println!("Building Android .so files ({} mode, version {})...", profile, version);
+    println!();
+
+    // Check for ANDROID_NDK_HOME or try to detect cargo-ndk
+    let ndk_home = std::env::var("ANDROID_NDK_HOME").ok();
+    let has_cargo_ndk = Command::new("cargo")
+        .args(["ndk", "--version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if ndk_home.is_none() && !has_cargo_ndk {
+        eprintln!("Warning: ANDROID_NDK_HOME not set and cargo-ndk not found.");
+        eprintln!("  Install cargo-ndk: cargo install cargo-ndk");
+        eprintln!("  Or set ANDROID_NDK_HOME to your Android NDK path.");
+        eprintln!();
+    }
+
+    // Build for each ABI
+    let mut built_abis = Vec::new();
+    for abi in &target_abis {
+        let target = abi.rust_target();
+        let ndk_arch = abi.ndk_arch();
+
+        println!("Building for {} ({})...", ndk_arch, target);
+
+        let build_result = if has_cargo_ndk {
+            // Use cargo-ndk for building
+            build_android_with_cargo_ndk(target, release)
+        } else if ndk_home.is_some() {
+            // Use manual cross-compilation with NDK
+            build_android_with_ndk(target, release)
+        } else {
+            // Try plain cargo build (may fail without proper linker setup)
+            build_android_plain(target, release)
+        };
+
+        if let Err(e) = build_result {
+            eprintln!("  ✗ Failed to build for {}: {}", ndk_arch, e);
+            continue;
+        }
+
+        // Copy the .so file to bindings/kotlin/libs/{version}/{abi}/
+        let profile_dir = if release { "release" } else { "debug" };
+        let src_path = PathBuf::from(format!(
+            "target/{}/{}/libxybrid_uniffi.so",
+            target, profile_dir
+        ));
+
+        // Versioned output path: bindings/kotlin/libs/{version}/{abi}/
+        let versioned_dir = PathBuf::from(format!("bindings/kotlin/libs/{}/{}", version, ndk_arch));
+        std::fs::create_dir_all(&versioned_dir)
+            .with_context(|| format!("Failed to create directory: {:?}", versioned_dir))?;
+
+        let versioned_path = versioned_dir.join("libxybrid_uniffi.so");
+
+        // Also maintain backwards-compatible path: bindings/kotlin/libs/{abi}/
+        let compat_dir = PathBuf::from(format!("bindings/kotlin/libs/{}", ndk_arch));
+        std::fs::create_dir_all(&compat_dir)
+            .with_context(|| format!("Failed to create directory: {:?}", compat_dir))?;
+
+        let compat_path = compat_dir.join("libxybrid_uniffi.so");
+
+        if src_path.exists() {
+            std::fs::copy(&src_path, &versioned_path)
+                .with_context(|| format!("Failed to copy {:?} to {:?}", src_path, versioned_path))?;
+            std::fs::copy(&src_path, &compat_path)
+                .with_context(|| format!("Failed to copy {:?} to {:?}", src_path, compat_path))?;
+            println!("  ✓ {} -> {:?}", ndk_arch, versioned_path);
+            built_abis.push(ndk_arch.to_string());
+        } else {
+            eprintln!("  ✗ Library not found at {:?}", src_path);
+        }
+    }
+
+    println!();
+
+    if built_abis.is_empty() {
+        anyhow::bail!("No ABIs were built successfully");
+    }
+
+    println!("✓ Android build successful!");
+    println!("  Version: {}", version);
+    println!("  Versioned output: bindings/kotlin/libs/{}/", version);
+    println!("  Compat output:    bindings/kotlin/libs/");
+    println!();
+    println!("ABIs built:");
+    for abi in &built_abis {
+        println!("  - {}", abi);
+    }
+
+    Ok(())
+}
+
+/// Build using cargo-ndk
+fn build_android_with_cargo_ndk(target: &str, release: bool) -> Result<()> {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("ndk")
+        .arg("--target")
+        .arg(target)
+        // Use API level 28 for Android builds
+        // Required because:
+        // - POSIX_MADV_* constants (used by llama.cpp) require API 23+
+        // - aws-lc-sys (used for TLS) requires API 28+ for getentropy()
+        // This doesn't affect app minSdkVersion - only the NDK headers used during compilation
+        .arg("--platform")
+        .arg("28")
+        .arg("build")
+        .arg("-p")
+        .arg("xybrid-uniffi");
+
+    if release {
+        cmd.arg("--release");
+    }
+
+    let status = cmd.status().context("Failed to run cargo ndk build")?;
+
+    if !status.success() {
+        anyhow::bail!("cargo ndk build failed");
+    }
+
+    Ok(())
+}
+
+/// Build using ANDROID_NDK_HOME for cross-compilation
+fn build_android_with_ndk(target: &str, release: bool) -> Result<()> {
+    let ndk_home = std::env::var("ANDROID_NDK_HOME").context("ANDROID_NDK_HOME not set")?;
+
+    // Determine the linker name based on target
+    // Use API level 28 for all targets because:
+    // - POSIX_MADV_* constants (used by llama.cpp) require API 23+
+    // - aws-lc-sys (used for TLS) requires API 28+ for getentropy()
+    let (clang_target, api_level) = match target {
+        "armv7-linux-androideabi" => ("armv7a-linux-androideabi", "28"),
+        "aarch64-linux-android" => ("aarch64-linux-android", "28"),
+        "x86_64-linux-android" => ("x86_64-linux-android", "28"),
+        _ => anyhow::bail!("Unsupported Android target: {}", target),
+    };
+
+    // Find the NDK toolchain bin directory
+    let toolchain_bin = PathBuf::from(&ndk_home)
+        .join("toolchains/llvm/prebuilt")
+        .join(if cfg!(target_os = "macos") {
+            "darwin-x86_64"
+        } else if cfg!(target_os = "linux") {
+            "linux-x86_64"
+        } else {
+            "windows-x86_64"
+        })
+        .join("bin");
+
+    let clang_path = toolchain_bin.join(format!("{}{}-clang", clang_target, api_level));
+
+    // Set up environment for cross-compilation
+    let linker_env = format!(
+        "CARGO_TARGET_{}_LINKER",
+        target.to_uppercase().replace('-', "_")
+    );
+
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("-p")
+        .arg("xybrid-uniffi")
+        .arg("--target")
+        .arg(target)
+        .env(&linker_env, &clang_path);
+
+    if release {
+        cmd.arg("--release");
+    }
+
+    let status = cmd.status().context("Failed to run cargo build with NDK")?;
+
+    if !status.success() {
+        anyhow::bail!("cargo build with NDK failed");
+    }
+
+    Ok(())
+}
+
+/// Attempt plain cargo build (requires manual toolchain setup)
+fn build_android_plain(target: &str, release: bool) -> Result<()> {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("-p")
+        .arg("xybrid-uniffi")
+        .arg("--target")
+        .arg(target);
+
+    if release {
+        cmd.arg("--release");
+    }
+
+    let status = cmd.status().context("Failed to run cargo build")?;
+
+    if !status.success() {
+        anyhow::bail!("cargo build failed for target {}", target);
+    }
+
+    Ok(())
+}
+
+/// Run flutter_rust_bridge_codegen to generate Dart bindings
+fn run_frb_codegen() -> Result<()> {
+    let flutter_dir = PathBuf::from("bindings/flutter");
+    let config_file = flutter_dir.join("flutter_rust_bridge.yaml");
+
+    // Check if config file exists
+    if !config_file.exists() {
+        anyhow::bail!(
+            "FRB config not found at {:?}. Please create flutter_rust_bridge.yaml",
+            config_file
+        );
+    }
+
+    println!("Running flutter_rust_bridge_codegen...");
+
+    // Check if flutter_rust_bridge_codegen is available
+    let frb_available = Command::new("flutter_rust_bridge_codegen")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !frb_available {
+        eprintln!("Warning: flutter_rust_bridge_codegen not found.");
+        eprintln!("  Install with: cargo install flutter_rust_bridge_codegen");
+        eprintln!("  Or: dart pub global activate flutter_rust_bridge");
+        eprintln!();
+        eprintln!("Skipping codegen - Dart bindings may be out of date.");
+        return Ok(());
+    }
+
+    // Run codegen from the flutter directory
+    let status = Command::new("flutter_rust_bridge_codegen")
+        .arg("generate")
+        .current_dir(&flutter_dir)
+        .status()
+        .context("Failed to run flutter_rust_bridge_codegen")?;
+
+    if !status.success() {
+        anyhow::bail!("flutter_rust_bridge_codegen failed");
+    }
+
+    println!("  ✓ FRB codegen complete");
+    println!();
+
+    Ok(())
+}
+
+/// Build Flutter native libraries for a specific platform
+fn build_flutter(platform: FlutterPlatform, release: bool, version: &str) -> Result<()> {
+    let profile = if release { "release" } else { "debug" };
+
+    println!(
+        "Building Flutter native libraries for {} ({} mode, version {})...",
+        platform.name(),
+        profile,
+        version
+    );
+    println!();
+
+    // Check if the platform can be built on the current OS
+    if !platform.can_build_on_current_os() {
+        anyhow::bail!(
+            "Platform '{}' cannot be built on the current operating system.\n\
+             iOS and macOS builds require macOS.\n\
+             Windows builds require Windows.\n\
+             Linux builds require Linux.",
+            platform.name()
+        );
+    }
+
+    // Run FRB codegen first
+    run_frb_codegen()?;
+
+    // Get the targets to build
+    let targets = platform.rust_targets();
+    let flutter_rust_dir = PathBuf::from("bindings/flutter/rust");
+
+    // Build for each target
+    let mut built_targets = Vec::new();
+    for target in &targets {
+        println!("Building for {}...", target);
+
+        let build_result = match platform {
+            FlutterPlatform::Android => {
+                // Android requires cargo-ndk or manual NDK setup
+                build_flutter_android(target, release)
+            }
+            _ => {
+                // Other platforms use regular cargo build
+                build_flutter_native(target, release)
+            }
+        };
+
+        match build_result {
+            Ok(()) => {
+                println!("  ✓ {}", target);
+                built_targets.push(*target);
+            }
+            Err(e) => {
+                eprintln!("  ✗ Failed to build for {}: {}", target, e);
+            }
+        }
+    }
+
+    println!();
+
+    if built_targets.is_empty() {
+        anyhow::bail!(
+            "No targets were built successfully for platform '{}'",
+            platform.name()
+        );
+    }
+
+    // Print output location
+    let output_dir = flutter_rust_dir.join("target");
+
+    println!("✓ Flutter {} build successful!", platform.name());
+    println!("  Version: {}", version);
+    println!("  Output: {}", output_dir.display());
+    println!();
+    println!("Targets built:");
+    for target in &built_targets {
+        let profile_dir = if release { "release" } else { "debug" };
+        let lib_name = get_flutter_lib_name(target);
+        println!(
+            "  - {} -> target/{}/{}/{}",
+            target, target, profile_dir, lib_name
+        );
+    }
+
+    Ok(())
+}
+
+/// Build Flutter FFI for a native platform (not Android)
+fn build_flutter_native(target: &str, release: bool) -> Result<()> {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("-p")
+        .arg("xybrid-flutter-ffi")
+        .arg("--target")
+        .arg(target);
+
+    if release {
+        cmd.arg("--release");
+    }
+
+    let status = cmd.status().context("Failed to run cargo build")?;
+
+    if !status.success() {
+        anyhow::bail!("cargo build failed for target {}", target);
+    }
+
+    Ok(())
+}
+
+/// Build Flutter FFI for Android using cargo-ndk or manual NDK setup
+fn build_flutter_android(target: &str, release: bool) -> Result<()> {
+    // Check for cargo-ndk first
+    let has_cargo_ndk = Command::new("cargo")
+        .args(["ndk", "--version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if has_cargo_ndk {
+        let mut cmd = Command::new("cargo");
+        cmd.arg("ndk")
+            .arg("--target")
+            .arg(target)
+            .arg("build")
+            .arg("-p")
+            .arg("xybrid-flutter-ffi");
+
+        if release {
+            cmd.arg("--release");
+        }
+
+        let status = cmd.status().context("Failed to run cargo ndk build")?;
+
+        if !status.success() {
+            anyhow::bail!("cargo ndk build failed for target {}", target);
+        }
+    } else {
+        // Try using ANDROID_NDK_HOME
+        let ndk_home = std::env::var("ANDROID_NDK_HOME").context(
+            "ANDROID_NDK_HOME not set and cargo-ndk not found. \
+                      Install cargo-ndk: cargo install cargo-ndk",
+        )?;
+
+        // Determine the linker name based on target
+        let (clang_target, api_level) = match target {
+            "armv7-linux-androideabi" => ("armv7a-linux-androideabi", "21"),
+            "aarch64-linux-android" => ("aarch64-linux-android", "21"),
+            "x86_64-linux-android" => ("x86_64-linux-android", "21"),
+            _ => anyhow::bail!("Unsupported Android target: {}", target),
+        };
+
+        // Find the NDK toolchain bin directory
+        let toolchain_bin = PathBuf::from(&ndk_home)
+            .join("toolchains/llvm/prebuilt")
+            .join(if cfg!(target_os = "macos") {
+                "darwin-x86_64"
+            } else if cfg!(target_os = "linux") {
+                "linux-x86_64"
+            } else {
+                "windows-x86_64"
+            })
+            .join("bin");
+
+        let clang_path = toolchain_bin.join(format!("{}{}-clang", clang_target, api_level));
+
+        // Set up environment for cross-compilation
+        let linker_env = format!(
+            "CARGO_TARGET_{}_LINKER",
+            target.to_uppercase().replace('-', "_")
+        );
+
+        let mut cmd = Command::new("cargo");
+        cmd.arg("build")
+            .arg("-p")
+            .arg("xybrid-flutter-ffi")
+            .arg("--target")
+            .arg(target)
+            .env(&linker_env, &clang_path);
+
+        if release {
+            cmd.arg("--release");
+        }
+
+        let status = cmd.status().context("Failed to run cargo build with NDK")?;
+
+        if !status.success() {
+            anyhow::bail!("cargo build with NDK failed for target {}", target);
+        }
+    }
+
+    Ok(())
+}
+
+/// Get the library file name for a given target
+fn get_flutter_lib_name(target: &str) -> &'static str {
+    if target.contains("apple") {
+        "libxybrid_flutter_ffi.a"
+    } else if target.contains("windows") {
+        "xybrid_flutter_ffi.dll"
+    } else if target.contains("android") || target.contains("linux") {
+        "libxybrid_flutter_ffi.so"
+    } else {
+        "libxybrid_flutter_ffi.a"
+    }
+}
+
+/// All required targets for cross-compilation
+const ALL_TARGETS: &[(&str, &str)] = &[
+    // iOS targets
+    ("aarch64-apple-ios", "iOS arm64"),
+    ("x86_64-apple-ios", "iOS Simulator x86_64"),
+    ("aarch64-apple-ios-sim", "iOS Simulator arm64"),
+    // macOS targets
+    ("aarch64-apple-darwin", "macOS arm64"),
+    ("x86_64-apple-darwin", "macOS x86_64"),
+    // Android targets
+    ("aarch64-linux-android", "Android arm64-v8a"),
+    ("armv7-linux-androideabi", "Android armeabi-v7a"),
+    ("x86_64-linux-android", "Android x86_64"),
+];
+
+/// Install required Rust cross-compilation targets
+fn setup_targets() -> Result<()> {
+    println!("Setting up Rust cross-compilation targets...");
+    println!();
+
+    // Get currently installed targets
+    let output = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .context("Failed to run rustup target list")?;
+
+    if !output.status.success() {
+        anyhow::bail!("rustup target list failed");
+    }
+
+    let installed_targets: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|s| s.trim().to_string())
+        .collect();
+
+    let mut installed_count = 0;
+    let mut skipped_count = 0;
+
+    // Check and install each target
+    for (target, description) in ALL_TARGETS {
+        if installed_targets.contains(&target.to_string()) {
+            println!("  ✓ {} ({}) - already installed", target, description);
+            skipped_count += 1;
+            continue;
+        }
+
+        print!("  Installing {} ({})...", target, description);
+
+        let status = Command::new("rustup")
+            .args(["target", "add", target])
+            .output()
+            .with_context(|| format!("Failed to run rustup target add {}", target))?;
+
+        if status.status.success() {
+            println!(" ✓");
+            installed_count += 1;
+        } else {
+            let stderr = String::from_utf8_lossy(&status.stderr);
+            println!(" ✗");
+            eprintln!("    Error: {}", stderr.trim());
+        }
+    }
+
+    println!();
+    println!("✓ Setup complete!");
+    println!();
+    println!("Summary:");
+    println!("  - {} targets newly installed", installed_count);
+    println!("  - {} targets already installed", skipped_count);
+    println!();
+    println!("Installed targets:");
+
+    // List all targets grouped by platform
+    println!();
+    println!("  iOS:");
+    println!("    - aarch64-apple-ios (device)");
+    println!("    - x86_64-apple-ios (simulator x86_64)");
+    println!("    - aarch64-apple-ios-sim (simulator arm64)");
+    println!();
+    println!("  macOS:");
+    println!("    - aarch64-apple-darwin (arm64)");
+    println!("    - x86_64-apple-darwin (x86_64)");
+    println!();
+    println!("  Android:");
+    println!("    - aarch64-linux-android (arm64-v8a)");
+    println!("    - armv7-linux-androideabi (armeabi-v7a)");
+    println!("    - x86_64-linux-android (x86_64)");
+
+    Ok(())
+}
+
+/// Represents a platform build task
+#[derive(Debug, Clone, Copy)]
+enum BuildPlatform {
+    XCFramework,
+    Android,
+    FlutterIos,
+    FlutterAndroid,
+    FlutterMacos,
+    FlutterWindows,
+    FlutterLinux,
+}
+
+impl BuildPlatform {
+    /// Returns the name of the platform
+    fn name(&self) -> &'static str {
+        match self {
+            BuildPlatform::XCFramework => "XCFramework (iOS/macOS)",
+            BuildPlatform::Android => "Android",
+            BuildPlatform::FlutterIos => "Flutter iOS",
+            BuildPlatform::FlutterAndroid => "Flutter Android",
+            BuildPlatform::FlutterMacos => "Flutter macOS",
+            BuildPlatform::FlutterWindows => "Flutter Windows",
+            BuildPlatform::FlutterLinux => "Flutter Linux",
+        }
+    }
+
+    /// Check if this platform can be built on the current OS
+    fn can_build_on_current_os(&self) -> bool {
+        match self {
+            BuildPlatform::XCFramework => cfg!(target_os = "macos"),
+            BuildPlatform::Android | BuildPlatform::FlutterAndroid => true, // Cross-compile from any OS
+            BuildPlatform::FlutterIos | BuildPlatform::FlutterMacos => cfg!(target_os = "macos"),
+            BuildPlatform::FlutterWindows => cfg!(target_os = "windows"),
+            BuildPlatform::FlutterLinux => cfg!(target_os = "linux"),
+        }
+    }
+
+    /// Returns the skip reason if this platform cannot be built
+    fn skip_reason(&self) -> &'static str {
+        match self {
+            BuildPlatform::XCFramework => "XCFramework builds require macOS",
+            BuildPlatform::Android | BuildPlatform::FlutterAndroid => {
+                "Android builds require Android NDK"
+            }
+            BuildPlatform::FlutterIos => "iOS builds require macOS",
+            BuildPlatform::FlutterMacos => "macOS builds require macOS",
+            BuildPlatform::FlutterWindows => "Windows builds require Windows",
+            BuildPlatform::FlutterLinux => "Linux builds require Linux",
+        }
+    }
+
+    /// Get all platforms
+    fn all() -> Vec<BuildPlatform> {
+        vec![
+            BuildPlatform::XCFramework,
+            BuildPlatform::Android,
+            BuildPlatform::FlutterIos,
+            BuildPlatform::FlutterAndroid,
+            BuildPlatform::FlutterMacos,
+            BuildPlatform::FlutterWindows,
+            BuildPlatform::FlutterLinux,
+        ]
+    }
+}
+
+/// Build all platforms with one command
+fn build_all(release: bool, parallel: bool, version: &str) -> Result<()> {
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    let profile = if release { "release" } else { "debug" };
+
+    println!("Building all platforms ({} mode, version {})...", profile, version);
+    println!();
+
+    // Categorize platforms into buildable and skipped
+    let all_platforms = BuildPlatform::all();
+    let (buildable, skipped): (Vec<_>, Vec<_>) = all_platforms
+        .into_iter()
+        .partition(|p| p.can_build_on_current_os());
+
+    // Report skipped platforms upfront
+    if !skipped.is_empty() {
+        println!("Skipping (not supported on this OS):");
+        for platform in &skipped {
+            println!("  • {} - {}", platform.name(), platform.skip_reason());
+        }
+        println!();
+    }
+
+    if buildable.is_empty() {
+        println!("No platforms can be built on the current OS.");
+        return Ok(());
+    }
+
+    println!("Building:");
+    for platform in &buildable {
+        println!("  • {}", platform.name());
+    }
+    println!();
+
+    // Track results
+    let built: Arc<Mutex<Vec<BuildPlatform>>> = Arc::new(Mutex::new(Vec::new()));
+    let failed: Arc<Mutex<Vec<(BuildPlatform, String)>>> = Arc::new(Mutex::new(Vec::new()));
+
+    if parallel {
+        // Parallel builds (experimental)
+        println!("Running builds in parallel (experimental)...");
+        println!();
+
+        let version_owned = version.to_string();
+        let handles: Vec<_> = buildable
+            .iter()
+            .map(|&platform| {
+                let built = Arc::clone(&built);
+                let failed = Arc::clone(&failed);
+                let ver = version_owned.clone();
+
+                thread::spawn(move || {
+                    let result = run_platform_build(platform, release, &ver);
+                    match result {
+                        Ok(()) => {
+                            built.lock().unwrap().push(platform);
+                        }
+                        Err(e) => {
+                            failed.lock().unwrap().push((platform, e.to_string()));
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all builds to complete
+        for handle in handles {
+            handle.join().expect("Thread panicked");
+        }
+    } else {
+        // Sequential builds
+        for platform in &buildable {
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("Building {}...", platform.name());
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!();
+
+            match run_platform_build(*platform, release, version) {
+                Ok(()) => {
+                    built.lock().unwrap().push(*platform);
+                    println!();
+                    println!("✓ {} build complete", platform.name());
+                    println!();
+                }
+                Err(e) => {
+                    failed.lock().unwrap().push((*platform, e.to_string()));
+                    println!();
+                    eprintln!("✗ {} build failed: {}", platform.name(), e);
+                    println!();
+                }
+            }
+        }
+    }
+
+    // Print summary
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("Build Summary");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!();
+
+    let built_list = built.lock().unwrap();
+    let failed_list = failed.lock().unwrap();
+
+    if !built_list.is_empty() {
+        println!("✓ Successfully built ({}):", built_list.len());
+        for platform in built_list.iter() {
+            println!("    • {}", platform.name());
+        }
+        println!();
+    }
+
+    if !failed_list.is_empty() {
+        println!("✗ Failed ({}):", failed_list.len());
+        for (platform, error) in failed_list.iter() {
+            println!("    • {}: {}", platform.name(), error);
+        }
+        println!();
+    }
+
+    if !skipped.is_empty() {
+        println!("⊘ Skipped ({}):", skipped.len());
+        for platform in &skipped {
+            println!("    • {}", platform.name());
+        }
+        println!();
+    }
+
+    // Summary line
+    let total = buildable.len();
+    let success = built_list.len();
+    let fail = failed_list.len();
+    let skip = skipped.len();
+
+    println!(
+        "Total: {} built, {} failed, {} skipped",
+        success, fail, skip
+    );
+
+    if fail > 0 {
+        anyhow::bail!("{} of {} builds failed", fail, total);
+    }
+
+    Ok(())
+}
+
+/// Execute the build for a specific platform
+fn run_platform_build(platform: BuildPlatform, release: bool, version: &str) -> Result<()> {
+    match platform {
+        BuildPlatform::XCFramework => build_xcframework(release, version),
+        BuildPlatform::Android => build_android(release, vec![], version),
+        BuildPlatform::FlutterIos => build_flutter(FlutterPlatform::Ios, release, version),
+        BuildPlatform::FlutterAndroid => build_flutter(FlutterPlatform::Android, release, version),
+        BuildPlatform::FlutterMacos => build_flutter(FlutterPlatform::Macos, release, version),
+        BuildPlatform::FlutterWindows => build_flutter(FlutterPlatform::Windows, release, version),
+        BuildPlatform::FlutterLinux => build_flutter(FlutterPlatform::Linux, release, version),
+    }
+}
+
+/// Package info for manifest.json
+#[derive(serde::Serialize)]
+struct PackageInfo {
+    name: String,
+    version: String,
+    filename: String,
+    size: u64,
+    sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    platform: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    architectures: Option<Vec<String>>,
+}
+
+/// Manifest containing all packages
+#[derive(serde::Serialize)]
+struct Manifest {
+    version: String,
+    created_at: String,
+    packages: Vec<PackageInfo>,
+}
+
+/// Calculate SHA256 checksum of a file
+fn calculate_sha256(path: &PathBuf) -> Result<String> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)
+        .with_context(|| format!("Failed to open file for checksum: {:?}", path))?;
+
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    let hash = hasher.finalize();
+    Ok(hash.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+/// Simple SHA256 implementation (no external dependencies)
+struct Sha256 {
+    state: [u32; 8],
+    buffer: Vec<u8>,
+    total_len: u64,
+}
+
+impl Sha256 {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+
+    fn new() -> Self {
+        Self {
+            state: [
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+            ],
+            buffer: Vec::new(),
+            total_len: 0,
+        }
+    }
+
+    fn update(&mut self, data: &[u8]) {
+        self.buffer.extend_from_slice(data);
+        self.total_len += data.len() as u64;
+
+        while self.buffer.len() >= 64 {
+            let chunk: [u8; 64] = self.buffer[..64].try_into().unwrap();
+            self.process_block(&chunk);
+            self.buffer.drain(..64);
+        }
+    }
+
+    fn process_block(&mut self, block: &[u8; 64]) {
+        let mut w = [0u32; 64];
+
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes([
+                block[i * 4],
+                block[i * 4 + 1],
+                block[i * 4 + 2],
+                block[i * 4 + 3],
+            ]);
+        }
+
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+        }
+
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = self.state;
+
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let temp1 = h.wrapping_add(s1).wrapping_add(ch).wrapping_add(Self::K[i]).wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+
+        self.state[0] = self.state[0].wrapping_add(a);
+        self.state[1] = self.state[1].wrapping_add(b);
+        self.state[2] = self.state[2].wrapping_add(c);
+        self.state[3] = self.state[3].wrapping_add(d);
+        self.state[4] = self.state[4].wrapping_add(e);
+        self.state[5] = self.state[5].wrapping_add(f);
+        self.state[6] = self.state[6].wrapping_add(g);
+        self.state[7] = self.state[7].wrapping_add(h);
+    }
+
+    fn finalize(mut self) -> [u8; 32] {
+        let bit_len = self.total_len * 8;
+
+        // Append padding
+        self.buffer.push(0x80);
+        while (self.buffer.len() % 64) != 56 {
+            self.buffer.push(0);
+        }
+
+        // Append length
+        self.buffer.extend_from_slice(&bit_len.to_be_bytes());
+
+        // Process remaining blocks
+        while self.buffer.len() >= 64 {
+            let chunk: [u8; 64] = self.buffer[..64].try_into().unwrap();
+            self.process_block(&chunk);
+            self.buffer.drain(..64);
+        }
+
+        let mut result = [0u8; 32];
+        for (i, &val) in self.state.iter().enumerate() {
+            result[i * 4..i * 4 + 4].copy_from_slice(&val.to_be_bytes());
+        }
+        result
+    }
+}
+
+/// Create a zip archive from a directory
+fn create_zip(source_dir: &Path, output_path: &Path) -> Result<()> {
+    // Use the zip command (available on macOS, Linux, and most CI environments)
+    let status = Command::new("zip")
+        .arg("-r")
+        .arg("-q")
+        .arg(output_path)
+        .arg(".")
+        .current_dir(source_dir)
+        .status()
+        .context("Failed to run zip command")?;
+
+    if !status.success() {
+        anyhow::bail!("zip command failed");
+    }
+
+    Ok(())
+}
+
+/// Package build artifacts for distribution
+fn package_artifacts(
+    version: &str,
+    output_dir: &Path,
+    skip_apple: bool,
+    skip_android: bool,
+    skip_flutter: bool,
+) -> Result<()> {
+    println!("Packaging artifacts (version {})...", version);
+    println!();
+
+    // Create output directory
+    std::fs::create_dir_all(output_dir)
+        .with_context(|| format!("Failed to create output directory: {:?}", output_dir))?;
+
+    let mut packages: Vec<PackageInfo> = Vec::new();
+
+    // Package XCFramework (Apple)
+    if !skip_apple {
+        if let Some(pkg) = package_xcframework(version, output_dir)? {
+            packages.push(pkg);
+        }
+    } else {
+        println!("Skipping Apple artifacts (--skip-apple)");
+    }
+
+    // Package Android .so files
+    if !skip_android {
+        if let Some(pkg) = package_android(version, output_dir)? {
+            packages.push(pkg);
+        }
+    } else {
+        println!("Skipping Android artifacts (--skip-android)");
+    }
+
+    // Package Flutter plugin
+    if !skip_flutter {
+        if let Some(pkg) = package_flutter(version, output_dir)? {
+            packages.push(pkg);
+        }
+    } else {
+        println!("Skipping Flutter artifacts (--skip-flutter)");
+    }
+
+    if packages.is_empty() {
+        println!();
+        println!("No artifacts were packaged.");
+        println!("Run build commands first to generate artifacts:");
+        println!("  cargo xtask build-xcframework");
+        println!("  cargo xtask build-android");
+        println!("  cargo xtask build-flutter --platform <platform>");
+        return Ok(());
+    }
+
+    // Generate checksums file
+    println!();
+    println!("Generating checksums...");
+    let checksums_path = output_dir.join("checksums.sha256");
+    let mut checksums_content = String::new();
+    for pkg in &packages {
+        checksums_content.push_str(&format!("{}  {}\n", pkg.sha256, pkg.filename));
+    }
+    std::fs::write(&checksums_path, &checksums_content)
+        .context("Failed to write checksums file")?;
+    println!("  ✓ {}", checksums_path.display());
+
+    // Generate manifest.json
+    println!();
+    println!("Generating manifest.json...");
+    let manifest = Manifest {
+        version: version.to_string(),
+        created_at: chrono_now(),
+        packages,
+    };
+    let manifest_path = output_dir.join("manifest.json");
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .context("Failed to serialize manifest")?;
+    std::fs::write(&manifest_path, &manifest_json)
+        .context("Failed to write manifest.json")?;
+    println!("  ✓ {}", manifest_path.display());
+
+    // Print summary
+    println!();
+    println!("✓ Packaging complete!");
+    println!();
+    println!("Output directory: {}", output_dir.display());
+    println!();
+    println!("Packages:");
+    for pkg in &manifest.packages {
+        let size_kb = pkg.size / 1024;
+        let size_str = if size_kb > 1024 {
+            format!("{:.1} MB", size_kb as f64 / 1024.0)
+        } else {
+            format!("{} KB", size_kb)
+        };
+        println!("  • {} ({})", pkg.filename, size_str);
+    }
+    println!();
+    println!("Files:");
+    println!("  • manifest.json");
+    println!("  • checksums.sha256");
+
+    Ok(())
+}
+
+/// Get current timestamp in ISO 8601 format (simplified, no external dependencies)
+fn chrono_now() -> String {
+    // Use the date command to get ISO 8601 timestamp
+    if let Ok(output) = Command::new("date")
+        .arg("-u")
+        .arg("+%Y-%m-%dT%H:%M:%SZ")
+        .output()
+    {
+        if output.status.success() {
+            return String::from_utf8_lossy(&output.stdout).trim().to_string();
+        }
+    }
+    // Fallback
+    "unknown".to_string()
+}
+
+/// Package XCFramework as a .zip file
+fn package_xcframework(version: &str, output_dir: &Path) -> Result<Option<PackageInfo>> {
+    let xcframework_dir = PathBuf::from("bindings/apple/XCFrameworks");
+    let xcframework_path = xcframework_dir.join("XybridFFI.xcframework");
+
+    if !xcframework_path.exists() {
+        println!("Skipping XCFramework - not found at {:?}", xcframework_path);
+        println!("  Run 'cargo xtask build-xcframework' first");
+        return Ok(None);
+    }
+
+    println!("Packaging XCFramework...");
+
+    let filename = format!("XybridFFI-{}.xcframework.zip", version);
+    let output_path = output_dir.join(&filename);
+
+    // Remove existing file
+    if output_path.exists() {
+        std::fs::remove_file(&output_path)?;
+    }
+
+    // Create zip from XCFramework directory
+    let status = Command::new("zip")
+        .arg("-r")
+        .arg("-q")
+        .arg(&output_path)
+        .arg("XybridFFI.xcframework")
+        .current_dir(&xcframework_dir)
+        .status()
+        .context("Failed to run zip command")?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to create XCFramework zip");
+    }
+
+    let size = std::fs::metadata(&output_path)?.len();
+    let sha256 = calculate_sha256(&output_path)?;
+
+    println!("  ✓ {} ({} bytes, sha256: {}...)", filename, size, &sha256[..16]);
+
+    Ok(Some(PackageInfo {
+        name: "XybridFFI.xcframework".to_string(),
+        version: version.to_string(),
+        filename,
+        size,
+        sha256,
+        platform: Some("apple".to_string()),
+        architectures: Some(vec![
+            "ios-arm64".to_string(),
+            "ios-arm64_x86_64-simulator".to_string(),
+            "macos-arm64_x86_64".to_string(),
+        ]),
+    }))
+}
+
+/// Package Android .so files as a .zip file
+fn package_android(version: &str, output_dir: &Path) -> Result<Option<PackageInfo>> {
+    let libs_dir = PathBuf::from("bindings/kotlin/libs");
+
+    if !libs_dir.exists() {
+        println!("Skipping Android libs - not found at {:?}", libs_dir);
+        println!("  Run 'cargo xtask build-android' first");
+        return Ok(None);
+    }
+
+    // Check for at least one ABI directory with .so files
+    let abis = ["arm64-v8a", "armeabi-v7a", "x86_64"];
+    let mut found_abis = Vec::new();
+
+    for abi in &abis {
+        let so_path = libs_dir.join(abi).join("libxybrid_uniffi.so");
+        if so_path.exists() {
+            found_abis.push(abi.to_string());
+        }
+    }
+
+    if found_abis.is_empty() {
+        println!("Skipping Android libs - no .so files found");
+        println!("  Run 'cargo xtask build-android' first");
+        return Ok(None);
+    }
+
+    println!("Packaging Android libs...");
+
+    let filename = format!("xybrid-android-{}.zip", version);
+    let output_path = output_dir.join(&filename);
+
+    // Remove existing file
+    if output_path.exists() {
+        std::fs::remove_file(&output_path)?;
+    }
+
+    // Create a temporary directory structure for zipping
+    let temp_dir = output_dir.join(".android-package-temp");
+    if temp_dir.exists() {
+        std::fs::remove_dir_all(&temp_dir)?;
+    }
+    std::fs::create_dir_all(&temp_dir)?;
+
+    // Copy .so files to temp directory
+    for abi in &found_abis {
+        let src_dir = libs_dir.join(abi);
+        let dst_dir = temp_dir.join(abi);
+        std::fs::create_dir_all(&dst_dir)?;
+
+        let so_src = src_dir.join("libxybrid_uniffi.so");
+        let so_dst = dst_dir.join("libxybrid_uniffi.so");
+        std::fs::copy(&so_src, &so_dst)?;
+    }
+
+    // Create zip
+    create_zip(&temp_dir, &output_path)?;
+
+    // Cleanup temp directory
+    std::fs::remove_dir_all(&temp_dir)?;
+
+    let size = std::fs::metadata(&output_path)?.len();
+    let sha256 = calculate_sha256(&output_path)?;
+
+    println!("  ✓ {} ({} bytes, sha256: {}...)", filename, size, &sha256[..16]);
+
+    Ok(Some(PackageInfo {
+        name: "xybrid-android".to_string(),
+        version: version.to_string(),
+        filename,
+        size,
+        sha256,
+        platform: Some("android".to_string()),
+        architectures: Some(found_abis),
+    }))
+}
+
+/// Package Flutter plugin as a tarball
+fn package_flutter(version: &str, output_dir: &Path) -> Result<Option<PackageInfo>> {
+    let flutter_dir = PathBuf::from("bindings/flutter");
+
+    if !flutter_dir.exists() {
+        println!("Skipping Flutter plugin - not found at {:?}", flutter_dir);
+        return Ok(None);
+    }
+
+    // Check for pubspec.yaml to verify it's a Flutter plugin
+    let pubspec_path = flutter_dir.join("pubspec.yaml");
+    if !pubspec_path.exists() {
+        println!("Skipping Flutter plugin - pubspec.yaml not found");
+        return Ok(None);
+    }
+
+    println!("Packaging Flutter plugin...");
+
+    let filename = format!("xybrid-flutter-{}.tar.gz", version);
+    let output_path = output_dir.join(&filename);
+
+    // Remove existing file
+    if output_path.exists() {
+        std::fs::remove_file(&output_path)?;
+    }
+
+    // Create tarball, excluding build artifacts and generated code
+    let parent = flutter_dir.parent().unwrap_or(&flutter_dir);
+
+    let status = Command::new("tar")
+        .arg("-czf")
+        .arg(&output_path)
+        .arg("--exclude=.dart_tool")
+        .arg("--exclude=build")
+        .arg("--exclude=.packages")
+        .arg("--exclude=pubspec.lock")
+        .arg("--exclude=lib/src/rust")  // Exclude FRB-generated code
+        .arg("--exclude=rust/target")   // Exclude Rust build artifacts
+        .arg("-C")
+        .arg(parent)
+        .arg("flutter")
+        .status()
+        .context("Failed to run tar command")?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to create Flutter plugin tarball");
+    }
+
+    let size = std::fs::metadata(&output_path)?.len();
+    let sha256 = calculate_sha256(&output_path)?;
+
+    println!("  ✓ {} ({} bytes, sha256: {}...)", filename, size, &sha256[..16]);
+
+    Ok(Some(PackageInfo {
+        name: "xybrid-flutter".to_string(),
+        version: version.to_string(),
+        filename,
+        size,
+        sha256,
+        platform: Some("flutter".to_string()),
+        architectures: None,
+    }))
 }

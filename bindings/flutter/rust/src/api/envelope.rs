@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 
 /// FFI wrapper for input envelopes.
+#[frb(opaque)]
 pub struct FfiEnvelope(pub(crate) Envelope);
 
 impl FfiEnvelope {
@@ -32,5 +33,5 @@ impl FfiEnvelope {
     }
 
     /// Convert to inner Envelope for SDK calls.
-    pub fn into_envelope(self) -> Envelope { self.0 }
+    pub(crate) fn into_envelope(self) -> Envelope { self.0 }
 }
