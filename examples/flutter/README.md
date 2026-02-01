@@ -77,7 +77,7 @@ flutter/
 ### Initialize SDK
 
 ```dart
-import 'package:xybrid/xybrid.dart';
+import 'package:xybrid_flutter/xybrid.dart';
 
 try {
   await Xybrid.init();

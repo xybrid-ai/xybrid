@@ -1,0 +1,71 @@
+[package]
+name = "xybrid_flutter"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/xybrid-ai/xybrid-flutter"
+
+[lib]
+name = "xybrid_flutter_ffi"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+flutter_rust_bridge = "=2.11.1"
+# xybrid-sdk provides all the SDK functionality
+# xybrid-core is configured per-platform in target-specific sections below
+# (Android needs ort-dynamic, iOS/macOS need ort-coreml, etc.)
+xybrid-sdk = { path = "../../../crates/xybrid-sdk" }
+
+# Logging (optional - for debugging)
+log = "0.4"
+
+# Platform-specific dependencies
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.14"
+# Android: Use ort-dynamic to load ONNX Runtime from .so at runtime
+# The .so files come from Microsoft's ONNX Runtime AAR
+# IMPORTANT: Must disable default-features to prevent download-binaries from being enabled
+# llm-llamacpp: llama.cpp for LLM inference (mistral.rs has +fp16 SIGILL issues on Android)
+xybrid-core = { path = "../../../crates/xybrid-core", default-features = false, features = ["ort-dynamic", "llm-llamacpp"] }
+# Direct ort dependency for initialization
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["load-dynamic"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+oslog = "0.2"
+# iOS: Use custom ONNX Runtime 1.23.2 with CoreML EP + Candle Metal
+# The xcframework is located at ios/Frameworks/onnxruntime.xcframework
+# Built from source to match ort 2.0.0-rc.11 (CocoaPod was stuck at 1.20.0)
+# ORT_LIB_LOCATION is set by cargokit build script to point to the xcframework
+# CoreML EP enabled for Apple Neural Engine acceleration
+# Candle Metal enabled for Whisper GPU acceleration (requires +fp16 rustflag)
+xybrid-core = { path = "../../../crates/xybrid-core", default-features = false, features = ["ort-download", "candle-metal", "ort-coreml", "llm-llamacpp"] }
+# Direct ort dependency - links statically against custom xcframework with CoreML
+ort = { version = "2.0.0-rc.11", default-features = false, features = ["ndarray", "std", "coreml"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS: Enable Metal GPU acceleration for Candle + CoreML EP for Apple Neural Engine
+# llm-llamacpp: llama.cpp for LLM inference (works on all platforms)
+xybrid-core = { path = "../../../crates/xybrid-core", features = ["candle-metal", "ort-coreml", "llm-llamacpp"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Linux: Default ort with download-binaries + both LLM backends
+xybrid-core = { path = "../../../crates/xybrid-core", features = ["llm-mistral", "llm-llamacpp"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Windows: Default ort with download-binaries + both LLM backends
+xybrid-core = { path = "../../../crates/xybrid-core", features = ["llm-mistral", "llm-llamacpp"] }
+
+# Feature flags for local LLM inference
+[features]
+default = []
+# Local LLM via mistral.rs (desktop only - NOT for Android due to +fp16 SIGILL)
+llm-mistral = ["xybrid-core/llm-mistral", "xybrid-sdk/llm-mistral"]
+# Metal acceleration for mistral.rs (macOS)
+llm-mistral-metal = ["xybrid-core/llm-mistral-metal", "xybrid-sdk/llm-mistral-metal"]
+# CUDA acceleration for mistral.rs (Linux/Windows)
+llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda", "xybrid-sdk/llm-mistral-cuda"]
+# Local LLM via llama.cpp (Android compatible - runtime SIMD detection)
+llm-llamacpp = ["xybrid-core/llm-llamacpp", "xybrid-sdk/llm-llamacpp"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

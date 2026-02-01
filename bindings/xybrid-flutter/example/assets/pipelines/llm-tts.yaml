@@ -1,0 +1,18 @@
+# LLM to TTS Pipeline - Fully On-Device
+# Text Input -> Local LLM -> TTS -> Audio Output
+#
+# Both stages run locally, no network required.
+
+name: llm-to-speech
+
+stages:
+  # Stage 1: Local LLM for text generation
+  - id: llm
+    model: qwen2.5-0.5b-instruct
+    target: device
+    max_tokens: 100
+
+  # Stage 2: Local TTS for speech synthesis
+  - id: tts
+    model: kokoro-82m
+    target: device

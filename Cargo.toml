@@ -6,7 +6,7 @@ members = [
     "crates/xybrid-cli",
     "crates/xybrid-uniffi",
     "crates/xybrid-ffi",
-    "bindings/flutter/rust",
+    "bindings/xybrid-flutter/rust",
     "macros",
     "xtask",
     "integration-tests",

@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+        package="com.flutter_rust_bridge.xybrid_flutter">
+
+    <!-- Network permissions for cloud inference and model downloads -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Audio recording for ASR (speech recognition) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Optional: Wake lock for long-running inference tasks -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+</manifest>

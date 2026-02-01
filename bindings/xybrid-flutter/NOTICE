@@ -1,0 +1,32 @@
+Xybrid Flutter SDK
+Copyright 2024 Xybrid AI
+
+This product includes software developed at Xybrid AI (https://xybrid.dev/).
+
+================================================================================
+
+This Flutter plugin provides bindings to the Xybrid ML inference runtime.
+
+For the full list of dependencies and attributions, see the NOTICE file in:
+https://github.com/xybrid-ai/xybrid
+
+================================================================================
+
+Open Core Model
+---------------
+
+Xybrid uses an open-core licensing model:
+
+OPEN SOURCE (Apache-2.0):
+- xybrid-core: Core runtime library
+- xybrid-sdk: High-level Rust SDK
+- xybrid-cli: Command-line interface
+- xybrid-flutter: Flutter plugin (this package)
+- registry: Self-hosted bundle registry
+
+COMMERCIAL (Proprietary):
+- Xybrid Cloud Gateway: Managed LLM routing service
+- Xybrid Cloud Registry: Hosted model distribution
+- Xybrid Enterprise: RBAC, audit logs, SSO, SLA
+
+For commercial licensing inquiries, contact: licensing@xybrid.dev

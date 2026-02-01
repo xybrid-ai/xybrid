@@ -1,0 +1,12 @@
+# Speech-to-Text Pipeline
+# Simple ASR demo
+
+name: speech-to-text
+
+stages:
+  - wav2vec2-base-960h
+    # Complete version:
+    # id: asr
+    # model: wav2vec2-base-960h
+    # version: "1.0"
+    # target: device

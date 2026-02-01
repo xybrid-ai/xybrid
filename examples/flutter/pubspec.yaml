@@ -32,24 +32,24 @@ dependencies:
     sdk: flutter
 
   # Xybrid SDK - Hybrid cloud-edge ML inference orchestrator
-  xybrid:
-    path: ../../bindings/flutter
+  xybrid_flutter:
+    path: ../../bindings/xybrid-flutter
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-
-  # Audio playback for TTS demo
-  just_audio: ^0.9.43
-
-  # Audio recording for ASR demo
-  record: ^5.2.1
-
   # Permission handling for microphone access
   permission_handler: ^11.4.0
 
   # File system utilities for temp directory access
   path_provider: ^2.1.5
+
+  # Audio playback for TTS demo
+  just_audio: ^0.9.43
+
+  # Audio recording and playback (for XybridRecorder)
+  record: ^6.2.0
+  audioplayers: ^6.5.1
 
 dev_dependencies:
   flutter_test:

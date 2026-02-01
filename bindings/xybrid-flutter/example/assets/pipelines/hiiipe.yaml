@@ -1,0 +1,19 @@
+# Hiiipe Pipeline (ASR -> TTS)
+# Demo showing on-device speech processing
+
+name: hiiipe-demo
+
+stages:
+  - wav2vec2-base-960h
+  # Complete version:
+  # - id: asr
+  #   model: wav2vec2-base-960h
+  #   version: "1.0"
+  #   target: device
+
+  - kitten-tts-nano
+  # Complete version:
+  # - id: tts
+  #   model: kitten-tts-nano
+  #   version: "0.1"
+  #   target: device

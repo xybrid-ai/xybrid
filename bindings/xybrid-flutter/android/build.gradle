@@ -1,0 +1,82 @@
+// The Android Gradle Plugin builds the native code with the Android NDK.
+// Xybrid Flutter SDK - Android Configuration
+
+group 'com.flutter_rust_bridge.xybrid_flutter'
+version '1.0'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        // The Android Gradle Plugin knows how to build native code with the NDK.
+        classpath 'com.android.tools.build:gradle:7.3.0'
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    if (project.android.hasProperty("namespace")) {
+        namespace 'com.flutter_rust_bridge.xybrid_flutter'
+    }
+
+    // SDK versions - API 21 minimum for 64-bit requirement (arm64-v8a, x86_64)
+    // and modern NDK toolchain compatibility
+    compileSdkVersion 34
+
+    // Use the NDK version from the host Flutter project
+    // NDK 25+ recommended for full ONNX Runtime compatibility
+    ndkVersion android.ndkVersion
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    defaultConfig {
+        // API 21 minimum for:
+        // - 64-bit ABI support (arm64-v8a required for ML models)
+        // - Modern threading APIs used by ONNX Runtime
+        // - NDK unified headers
+        minSdkVersion 21
+
+        // Target ABIs - cargokit builds these automatically
+        // arm64-v8a: Primary target (most Android devices, 99%+ of market)
+        // x86_64: Emulators and Chrome OS
+        // Note: armeabi-v7a (32-bit ARM) excluded - ONNX Runtime doesn't provide
+        //       pre-built binaries for this target
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    // Ensure native libraries are properly packaged
+    packagingOptions {
+        // Prevent duplicate .so files from dependencies
+        pickFirst '**/libc++_shared.so'
+    }
+}
+
+// Rust build requires API 28+ for aws-lc-sys (used by mistral.rs for TLS)
+// aws-lc-sys uses getentropy() which is only available on Android API 28+
+// This doesn't affect the app's minSdkVersion - the app can still run on older devices,
+// but the Rust code is compiled against API 28 headers.
+// See: https://github.com/tauri-apps/tauri/issues/11964
+// See: https://github.com/huggingface/candle/issues/1625
+ext.set('CARGOKIT_RUST_MIN_SDK_VERSION', '28')
+
+apply from: "../cargokit/gradle/plugin.gradle"
+cargokit {
+    manifestDir = "../rust"
+    libname = "xybrid_flutter"
+}
