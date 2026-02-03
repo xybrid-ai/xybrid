@@ -11,6 +11,7 @@ import 'api/envelope.dart';
 import 'api/model.dart';
 import 'api/pipeline.dart';
 import 'api/result.dart';
+import 'api/sdk_client.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
@@ -27,74 +28,115 @@ abstract class XybridRustLibApiImplPlatform
   });
 
   CrossPlatformFinalizerArg
-      get rust_arc_decrement_strong_count_FfiEnvelopePtr => wire
-          ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelopePtr;
+  get rust_arc_decrement_strong_count_FfiEnvelopePtr => wire
+      ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelopePtr;
 
-  CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_FfiModelPtr => wire
+  CrossPlatformFinalizerArg
+  get rust_arc_decrement_strong_count_FfiModelPtr => wire
       ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelPtr;
 
   CrossPlatformFinalizerArg
-      get rust_arc_decrement_strong_count_FfiModelLoaderPtr => wire
-          ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoaderPtr;
+  get rust_arc_decrement_strong_count_FfiModelLoaderPtr => wire
+      ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoaderPtr;
 
   CrossPlatformFinalizerArg
-      get rust_arc_decrement_strong_count_FfiPipelinePtr => wire
-          ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipelinePtr;
+  get rust_arc_decrement_strong_count_FfiPipelinePtr => wire
+      ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipelinePtr;
+
+  CrossPlatformFinalizerArg
+  get rust_arc_decrement_strong_count_XybridSdkClientPtr => wire
+      ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClientPtr;
+
+  @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw);
 
   @protected
   FfiEnvelope
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
-          dynamic raw);
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+    dynamic raw,
+  );
 
   @protected
   FfiModel
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-          dynamic raw);
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+    dynamic raw,
+  );
 
   @protected
   FfiModelLoader
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-          dynamic raw);
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+    dynamic raw,
+  );
 
   @protected
   FfiPipeline
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-          dynamic raw);
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+    dynamic raw,
+  );
+
+  @protected
+  XybridSdkClient
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
+    dynamic raw,
+  );
 
   @protected
   FfiModel
-      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-          dynamic raw);
+  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+    dynamic raw,
+  );
 
   @protected
   FfiModelLoader
-      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-          dynamic raw);
+  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+    dynamic raw,
+  );
 
   @protected
   FfiPipeline
-      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-          dynamic raw);
+  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+    dynamic raw,
+  );
 
   @protected
   FfiEnvelope
-      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
-          dynamic raw);
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+    dynamic raw,
+  );
 
   @protected
   FfiModel
-      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-          dynamic raw);
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+    dynamic raw,
+  );
 
   @protected
   FfiModelLoader
-      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-          dynamic raw);
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+    dynamic raw,
+  );
 
   @protected
   FfiPipeline
-      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-          dynamic raw);
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+    dynamic raw,
+  );
+
+  @protected
+  XybridSdkClient
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
+    dynamic raw,
+  );
+
+  @protected
+  RustStreamSink<FfiLoadEvent> dco_decode_StreamSink_ffi_load_event_Sse(
+    dynamic raw,
+  );
+
+  @protected
+  RustStreamSink<FfiStreamEvent> dco_decode_StreamSink_ffi_stream_event_Sse(
+    dynamic raw,
+  );
 
   @protected
   String dco_decode_String(dynamic raw);
@@ -106,13 +148,34 @@ abstract class XybridRustLibApiImplPlatform
   double dco_decode_box_autoadd_f_64(dynamic raw);
 
   @protected
+  FfiResult dco_decode_box_autoadd_ffi_result(dynamic raw);
+
+  @protected
+  FfiStreamToken dco_decode_box_autoadd_ffi_stream_token(dynamic raw);
+
+  @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
   double dco_decode_f_32(dynamic raw);
 
   @protected
   double dco_decode_f_64(dynamic raw);
 
   @protected
+  FfiLoadEvent dco_decode_ffi_load_event(dynamic raw);
+
+  @protected
   FfiResult dco_decode_ffi_result(dynamic raw);
+
+  @protected
+  FfiStreamEvent dco_decode_ffi_stream_event(dynamic raw);
+
+  @protected
+  FfiStreamToken dco_decode_ffi_stream_token(dynamic raw);
+
+  @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw);
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
@@ -136,6 +199,9 @@ abstract class XybridRustLibApiImplPlatform
   double? dco_decode_opt_box_autoadd_f_64(dynamic raw);
 
   @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
+
+  @protected
   Float32List? dco_decode_opt_list_prim_f_32_strict(dynamic raw);
 
   @protected
@@ -154,59 +220,95 @@ abstract class XybridRustLibApiImplPlatform
   BigInt dco_decode_usize(dynamic raw);
 
   @protected
-  FfiEnvelope
-      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
-          SseDeserializer deserializer);
-
-  @protected
-  FfiModel
-      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-          SseDeserializer deserializer);
-
-  @protected
-  FfiModelLoader
-      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-          SseDeserializer deserializer);
-
-  @protected
-  FfiPipeline
-      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-          SseDeserializer deserializer);
-
-  @protected
-  FfiModel
-      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-          SseDeserializer deserializer);
-
-  @protected
-  FfiModelLoader
-      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-          SseDeserializer deserializer);
-
-  @protected
-  FfiPipeline
-      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-          SseDeserializer deserializer);
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
 
   @protected
   FfiEnvelope
-      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
-          SseDeserializer deserializer);
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+    SseDeserializer deserializer,
+  );
 
   @protected
   FfiModel
-      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-          SseDeserializer deserializer);
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+    SseDeserializer deserializer,
+  );
 
   @protected
   FfiModelLoader
-      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-          SseDeserializer deserializer);
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+    SseDeserializer deserializer,
+  );
 
   @protected
   FfiPipeline
-      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-          SseDeserializer deserializer);
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  XybridSdkClient
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FfiModel
+  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FfiModelLoader
+  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FfiPipeline
+  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FfiEnvelope
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FfiModel
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FfiModelLoader
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FfiPipeline
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  XybridSdkClient
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RustStreamSink<FfiLoadEvent> sse_decode_StreamSink_ffi_load_event_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RustStreamSink<FfiStreamEvent> sse_decode_StreamSink_ffi_stream_event_Sse(
+    SseDeserializer deserializer,
+  );
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
@@ -218,13 +320,36 @@ abstract class XybridRustLibApiImplPlatform
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
+  FfiResult sse_decode_box_autoadd_ffi_result(SseDeserializer deserializer);
+
+  @protected
+  FfiStreamToken sse_decode_box_autoadd_ffi_stream_token(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
   double sse_decode_f_32(SseDeserializer deserializer);
 
   @protected
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
+  FfiLoadEvent sse_decode_ffi_load_event(SseDeserializer deserializer);
+
+  @protected
   FfiResult sse_decode_ffi_result(SseDeserializer deserializer);
+
+  @protected
+  FfiStreamEvent sse_decode_ffi_stream_event(SseDeserializer deserializer);
+
+  @protected
+  FfiStreamToken sse_decode_ffi_stream_token(SseDeserializer deserializer);
+
+  @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
@@ -248,8 +373,12 @@ abstract class XybridRustLibApiImplPlatform
   double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
   Float32List? sse_decode_opt_list_prim_f_32_strict(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer);
@@ -270,223 +399,113 @@ abstract class XybridRustLibApiImplPlatform
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
-  ffi.Pointer<wire_cst_list_prim_u_8_strict> cst_encode_String(String raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    return cst_encode_list_prim_u_8_strict(utf8.encoder.convert(raw));
-  }
-
-  @protected
-  ffi.Pointer<ffi.Double> cst_encode_box_autoadd_f_64(double raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    return wire.cst_new_box_autoadd_f_64(cst_encode_f_64(raw));
-  }
-
-  @protected
-  ffi.Pointer<wire_cst_list_String> cst_encode_list_String(List<String> raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    final ans = wire.cst_new_list_String(raw.length);
-    for (var i = 0; i < raw.length; ++i) {
-      ans.ref.ptr[i] = cst_encode_String(raw[i]);
-    }
-    return ans;
-  }
-
-  @protected
-  ffi.Pointer<wire_cst_list_prim_f_32_loose> cst_encode_list_prim_f_32_loose(
-      List<double> raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    final ans = wire.cst_new_list_prim_f_32_loose(raw.length);
-    ans.ref.ptr.asTypedList(raw.length).setAll(0, raw);
-    return ans;
-  }
-
-  @protected
-  ffi.Pointer<wire_cst_list_prim_f_32_strict> cst_encode_list_prim_f_32_strict(
-      Float32List raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    final ans = wire.cst_new_list_prim_f_32_strict(raw.length);
-    ans.ref.ptr.asTypedList(raw.length).setAll(0, raw);
-    return ans;
-  }
-
-  @protected
-  ffi.Pointer<wire_cst_list_prim_u_8_loose> cst_encode_list_prim_u_8_loose(
-      List<int> raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    final ans = wire.cst_new_list_prim_u_8_loose(raw.length);
-    ans.ref.ptr.asTypedList(raw.length).setAll(0, raw);
-    return ans;
-  }
-
-  @protected
-  ffi.Pointer<wire_cst_list_prim_u_8_strict> cst_encode_list_prim_u_8_strict(
-      Uint8List raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    final ans = wire.cst_new_list_prim_u_8_strict(raw.length);
-    ans.ref.ptr.asTypedList(raw.length).setAll(0, raw);
-    return ans;
-  }
-
-  @protected
-  ffi.Pointer<wire_cst_list_prim_u_8_strict> cst_encode_opt_String(
-      String? raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    return raw == null ? ffi.nullptr : cst_encode_String(raw);
-  }
-
-  @protected
-  ffi.Pointer<ffi.Double> cst_encode_opt_box_autoadd_f_64(double? raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    return raw == null ? ffi.nullptr : cst_encode_box_autoadd_f_64(raw);
-  }
-
-  @protected
-  ffi.Pointer<wire_cst_list_prim_f_32_strict>
-      cst_encode_opt_list_prim_f_32_strict(Float32List? raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    return raw == null ? ffi.nullptr : cst_encode_list_prim_f_32_strict(raw);
-  }
-
-  @protected
-  ffi.Pointer<wire_cst_list_prim_u_8_strict>
-      cst_encode_opt_list_prim_u_8_strict(Uint8List? raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    return raw == null ? ffi.nullptr : cst_encode_list_prim_u_8_strict(raw);
-  }
-
-  @protected
-  int cst_encode_usize(BigInt raw) {
-    // Codec=Cst (C-struct based), see doc to use other codecs
-    return raw.toSigned(64).toInt();
-  }
-
-  @protected
-  void cst_api_fill_to_wire_ffi_result(
-      FfiResult apiObj, wire_cst_ffi_result wireObj) {
-    wireObj.success = cst_encode_bool(apiObj.success);
-    wireObj.text = cst_encode_opt_String(apiObj.text);
-    wireObj.audio_bytes =
-        cst_encode_opt_list_prim_u_8_strict(apiObj.audioBytes);
-    wireObj.embedding = cst_encode_opt_list_prim_f_32_strict(apiObj.embedding);
-    wireObj.latency_ms = cst_encode_u_32(apiObj.latencyMs);
-  }
-
-  @protected
-  int cst_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
-      FfiEnvelope raw);
-
-  @protected
-  int cst_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-      FfiModel raw);
-
-  @protected
-  int cst_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-      FfiModelLoader raw);
-
-  @protected
-  int cst_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-      FfiPipeline raw);
-
-  @protected
-  int cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-      FfiModel raw);
-
-  @protected
-  int cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-      FfiModelLoader raw);
-
-  @protected
-  int cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-      FfiPipeline raw);
-
-  @protected
-  int cst_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
-      FfiEnvelope raw);
-
-  @protected
-  int cst_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-      FfiModel raw);
-
-  @protected
-  int cst_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-      FfiModelLoader raw);
-
-  @protected
-  int cst_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-      FfiPipeline raw);
-
-  @protected
-  bool cst_encode_bool(bool raw);
-
-  @protected
-  double cst_encode_f_32(double raw);
-
-  @protected
-  double cst_encode_f_64(double raw);
-
-  @protected
-  int cst_encode_u_32(int raw);
-
-  @protected
-  int cst_encode_u_8(int raw);
-
-  @protected
-  void cst_encode_unit(void raw);
+  void sse_encode_AnyhowException(
+    AnyhowException self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
-          FfiEnvelope self, SseSerializer serializer);
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+    FfiEnvelope self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-          FfiModel self, SseSerializer serializer);
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+    FfiModel self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-          FfiModelLoader self, SseSerializer serializer);
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+    FfiModelLoader self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-          FfiPipeline self, SseSerializer serializer);
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+    FfiPipeline self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-          FfiModel self, SseSerializer serializer);
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
+    XybridSdkClient self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-          FfiModelLoader self, SseSerializer serializer);
+  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+    FfiModel self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-          FfiPipeline self, SseSerializer serializer);
+  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+    FfiModelLoader self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
-          FfiEnvelope self, SseSerializer serializer);
+  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+    FfiPipeline self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
-          FfiModel self, SseSerializer serializer);
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+    FfiEnvelope self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
-          FfiModelLoader self, SseSerializer serializer);
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+    FfiModel self,
+    SseSerializer serializer,
+  );
 
   @protected
   void
-      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
-          FfiPipeline self, SseSerializer serializer);
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+    FfiModelLoader self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+    FfiPipeline self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
+    XybridSdkClient self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_StreamSink_ffi_load_event_Sse(
+    RustStreamSink<FfiLoadEvent> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_StreamSink_ffi_stream_event_Sse(
+    RustStreamSink<FfiStreamEvent> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
@@ -498,31 +517,73 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_result(
+    FfiResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_ffi_stream_token(
+    FfiStreamToken self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_i_64(
+    PlatformInt64 self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_f_32(double self, SseSerializer serializer);
 
   @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_load_event(FfiLoadEvent self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_result(FfiResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_stream_event(
+    FfiStreamEvent self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_ffi_stream_token(
+    FfiStreamToken self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_f_32_loose(
-      List<double> self, SseSerializer serializer);
+    List<double> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_prim_f_32_strict(
-      Float32List self, SseSerializer serializer);
+    Float32List self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_strict(
-      Uint8List self, SseSerializer serializer);
+    Uint8List self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
@@ -531,12 +592,22 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_i_64(
+    PlatformInt64? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_list_prim_f_32_strict(
-      Float32List? self, SseSerializer serializer);
+    Float32List? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_list_prim_u_8_strict(
-      Uint8List? self, SseSerializer serializer);
+    Uint8List? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
@@ -556,286 +627,20 @@ abstract class XybridRustLibApiImplPlatform
 
 // Section: wire_class
 
-// ignore_for_file: camel_case_types, non_constant_identifier_names, avoid_positional_boolean_parameters, annotate_overrides, constant_identifier_names
-// AUTO GENERATED FILE, DO NOT EDIT.
-//
-// Generated by `package:ffigen`.
-// ignore_for_file: type=lint
-
-/// generated by flutter_rust_bridge
 class XybridRustLibWire implements BaseWire {
   factory XybridRustLibWire.fromExternalLibrary(ExternalLibrary lib) =>
       XybridRustLibWire(lib.ffiDynamicLibrary);
 
   /// Holds the symbol lookup function.
   final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName)
-      _lookup;
+  _lookup;
 
   /// The symbols are looked up in [dynamicLibrary].
   XybridRustLibWire(ffi.DynamicLibrary dynamicLibrary)
-      : _lookup = dynamicLibrary.lookup;
-
-  /// The symbols are looked up with [lookup].
-  XybridRustLibWire.fromLookup(
-    ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName) lookup,
-  ) : _lookup = lookup;
-
-  void store_dart_post_cobject(DartPostCObjectFnType ptr) {
-    return _store_dart_post_cobject(ptr);
-  }
-
-  late final _store_dart_post_cobjectPtr =
-      _lookup<ffi.NativeFunction<ffi.Void Function(DartPostCObjectFnType)>>(
-    'store_dart_post_cobject',
-  );
-  late final _store_dart_post_cobject = _store_dart_post_cobjectPtr
-      .asFunction<void Function(DartPostCObjectFnType)>();
-
-  WireSyncRust2DartDco wire__crate__api__envelope__FfiEnvelope_audio(
-    ffi.Pointer<wire_cst_list_prim_u_8_loose> bytes,
-    int sample_rate,
-    int channels,
-  ) {
-    return _wire__crate__api__envelope__FfiEnvelope_audio(
-      bytes,
-      sample_rate,
-      channels,
-    );
-  }
-
-  late final _wire__crate__api__envelope__FfiEnvelope_audioPtr = _lookup<
-      ffi.NativeFunction<
-          WireSyncRust2DartDco Function(
-            ffi.Pointer<wire_cst_list_prim_u_8_loose>,
-            ffi.Uint32,
-            ffi.Uint32,
-          )>>('frbgen_xybrid_wire__crate__api__envelope__FfiEnvelope_audio');
-  late final _wire__crate__api__envelope__FfiEnvelope_audio =
-      _wire__crate__api__envelope__FfiEnvelope_audioPtr.asFunction<
-          WireSyncRust2DartDco Function(
-            ffi.Pointer<wire_cst_list_prim_u_8_loose>,
-            int,
-            int,
-          )>();
-
-  WireSyncRust2DartDco wire__crate__api__envelope__FfiEnvelope_embedding(
-    ffi.Pointer<wire_cst_list_prim_f_32_loose> data,
-  ) {
-    return _wire__crate__api__envelope__FfiEnvelope_embedding(data);
-  }
-
-  late final _wire__crate__api__envelope__FfiEnvelope_embeddingPtr = _lookup<
-          ffi.NativeFunction<
-              WireSyncRust2DartDco Function(
-                ffi.Pointer<wire_cst_list_prim_f_32_loose>,
-              )>>(
-      'frbgen_xybrid_wire__crate__api__envelope__FfiEnvelope_embedding');
-  late final _wire__crate__api__envelope__FfiEnvelope_embedding =
-      _wire__crate__api__envelope__FfiEnvelope_embeddingPtr.asFunction<
-          WireSyncRust2DartDco Function(
-            ffi.Pointer<wire_cst_list_prim_f_32_loose>,
-          )>();
-
-  WireSyncRust2DartDco wire__crate__api__envelope__FfiEnvelope_text(
-    ffi.Pointer<wire_cst_list_prim_u_8_strict> text,
-    ffi.Pointer<wire_cst_list_prim_u_8_strict> voice_id,
-    ffi.Pointer<ffi.Double> speed,
-  ) {
-    return _wire__crate__api__envelope__FfiEnvelope_text(text, voice_id, speed);
-  }
-
-  late final _wire__crate__api__envelope__FfiEnvelope_textPtr = _lookup<
-      ffi.NativeFunction<
-          WireSyncRust2DartDco Function(
-            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-            ffi.Pointer<ffi.Double>,
-          )>>('frbgen_xybrid_wire__crate__api__envelope__FfiEnvelope_text');
-  late final _wire__crate__api__envelope__FfiEnvelope_text =
-      _wire__crate__api__envelope__FfiEnvelope_textPtr.asFunction<
-          WireSyncRust2DartDco Function(
-            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-            ffi.Pointer<ffi.Double>,
-          )>();
-
-  WireSyncRust2DartDco wire__crate__api__model__FfiModelLoader_from_bundle(
-    ffi.Pointer<wire_cst_list_prim_u_8_strict> path,
-  ) {
-    return _wire__crate__api__model__FfiModelLoader_from_bundle(path);
-  }
-
-  late final _wire__crate__api__model__FfiModelLoader_from_bundlePtr = _lookup<
-          ffi.NativeFunction<
-              WireSyncRust2DartDco Function(
-                ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-              )>>(
-      'frbgen_xybrid_wire__crate__api__model__FfiModelLoader_from_bundle');
-  late final _wire__crate__api__model__FfiModelLoader_from_bundle =
-      _wire__crate__api__model__FfiModelLoader_from_bundlePtr.asFunction<
-          WireSyncRust2DartDco Function(
-            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-          )>();
-
-  WireSyncRust2DartDco wire__crate__api__model__FfiModelLoader_from_registry(
-    ffi.Pointer<wire_cst_list_prim_u_8_strict> model_id,
-  ) {
-    return _wire__crate__api__model__FfiModelLoader_from_registry(model_id);
-  }
-
-  late final _wire__crate__api__model__FfiModelLoader_from_registryPtr =
-      _lookup<
-              ffi.NativeFunction<
-                  WireSyncRust2DartDco Function(
-                    ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-                  )>>(
-          'frbgen_xybrid_wire__crate__api__model__FfiModelLoader_from_registry');
-  late final _wire__crate__api__model__FfiModelLoader_from_registry =
-      _wire__crate__api__model__FfiModelLoader_from_registryPtr.asFunction<
-          WireSyncRust2DartDco Function(
-            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-          )>();
-
-  void wire__crate__api__model__FfiModelLoader_load(int port_, int that) {
-    return _wire__crate__api__model__FfiModelLoader_load(port_, that);
-  }
-
-  late final _wire__crate__api__model__FfiModelLoader_loadPtr =
-      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Int64, ffi.UintPtr)>>(
-    'frbgen_xybrid_wire__crate__api__model__FfiModelLoader_load',
-  );
-  late final _wire__crate__api__model__FfiModelLoader_load =
-      _wire__crate__api__model__FfiModelLoader_loadPtr
-          .asFunction<void Function(int, int)>();
-
-  void wire__crate__api__model__FfiModel_run(
-    int port_,
-    int that,
-    int envelope,
-  ) {
-    return _wire__crate__api__model__FfiModel_run(port_, that, envelope);
-  }
-
-  late final _wire__crate__api__model__FfiModel_runPtr = _lookup<
-          ffi.NativeFunction<
-              ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.UintPtr)>>(
-      'frbgen_xybrid_wire__crate__api__model__FfiModel_run');
-  late final _wire__crate__api__model__FfiModel_run =
-      _wire__crate__api__model__FfiModel_runPtr
-          .asFunction<void Function(int, int, int)>();
-
-  WireSyncRust2DartDco wire__crate__api__pipeline__FfiPipeline_from_bundle(
-    ffi.Pointer<wire_cst_list_prim_u_8_strict> path,
-  ) {
-    return _wire__crate__api__pipeline__FfiPipeline_from_bundle(path);
-  }
-
-  late final _wire__crate__api__pipeline__FfiPipeline_from_bundlePtr = _lookup<
-          ffi.NativeFunction<
-              WireSyncRust2DartDco Function(
-                ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-              )>>(
-      'frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_from_bundle');
-  late final _wire__crate__api__pipeline__FfiPipeline_from_bundle =
-      _wire__crate__api__pipeline__FfiPipeline_from_bundlePtr.asFunction<
-          WireSyncRust2DartDco Function(
-            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-          )>();
-
-  WireSyncRust2DartDco wire__crate__api__pipeline__FfiPipeline_from_file(
-    ffi.Pointer<wire_cst_list_prim_u_8_strict> path,
-  ) {
-    return _wire__crate__api__pipeline__FfiPipeline_from_file(path);
-  }
-
-  late final _wire__crate__api__pipeline__FfiPipeline_from_filePtr = _lookup<
-          ffi.NativeFunction<
-              WireSyncRust2DartDco Function(
-                ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-              )>>(
-      'frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_from_file');
-  late final _wire__crate__api__pipeline__FfiPipeline_from_file =
-      _wire__crate__api__pipeline__FfiPipeline_from_filePtr.asFunction<
-          WireSyncRust2DartDco Function(
-            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-          )>();
-
-  WireSyncRust2DartDco wire__crate__api__pipeline__FfiPipeline_from_yaml(
-    ffi.Pointer<wire_cst_list_prim_u_8_strict> yaml,
-  ) {
-    return _wire__crate__api__pipeline__FfiPipeline_from_yaml(yaml);
-  }
-
-  late final _wire__crate__api__pipeline__FfiPipeline_from_yamlPtr = _lookup<
-          ffi.NativeFunction<
-              WireSyncRust2DartDco Function(
-                ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-              )>>(
-      'frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_from_yaml');
-  late final _wire__crate__api__pipeline__FfiPipeline_from_yaml =
-      _wire__crate__api__pipeline__FfiPipeline_from_yamlPtr.asFunction<
-          WireSyncRust2DartDco Function(
-            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
-          )>();
-
-  WireSyncRust2DartDco wire__crate__api__pipeline__FfiPipeline_name(int that) {
-    return _wire__crate__api__pipeline__FfiPipeline_name(that);
-  }
-
-  late final _wire__crate__api__pipeline__FfiPipeline_namePtr =
-      _lookup<ffi.NativeFunction<WireSyncRust2DartDco Function(ffi.UintPtr)>>(
-    'frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_name',
-  );
-  late final _wire__crate__api__pipeline__FfiPipeline_name =
-      _wire__crate__api__pipeline__FfiPipeline_namePtr
-          .asFunction<WireSyncRust2DartDco Function(int)>();
-
-  void wire__crate__api__pipeline__FfiPipeline_run(
-    int port_,
-    int that,
-    int envelope,
-  ) {
-    return _wire__crate__api__pipeline__FfiPipeline_run(port_, that, envelope);
-  }
-
-  late final _wire__crate__api__pipeline__FfiPipeline_runPtr = _lookup<
-          ffi.NativeFunction<
-              ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.UintPtr)>>(
-      'frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_run');
-  late final _wire__crate__api__pipeline__FfiPipeline_run =
-      _wire__crate__api__pipeline__FfiPipeline_runPtr
-          .asFunction<void Function(int, int, int)>();
-
-  WireSyncRust2DartDco wire__crate__api__pipeline__FfiPipeline_stage_count(
-    int that,
-  ) {
-    return _wire__crate__api__pipeline__FfiPipeline_stage_count(that);
-  }
-
-  late final _wire__crate__api__pipeline__FfiPipeline_stage_countPtr =
-      _lookup<ffi.NativeFunction<WireSyncRust2DartDco Function(ffi.UintPtr)>>(
-    'frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_stage_count',
-  );
-  late final _wire__crate__api__pipeline__FfiPipeline_stage_count =
-      _wire__crate__api__pipeline__FfiPipeline_stage_countPtr
-          .asFunction<WireSyncRust2DartDco Function(int)>();
-
-  WireSyncRust2DartDco wire__crate__api__pipeline__FfiPipeline_stage_names(
-    int that,
-  ) {
-    return _wire__crate__api__pipeline__FfiPipeline_stage_names(that);
-  }
-
-  late final _wire__crate__api__pipeline__FfiPipeline_stage_namesPtr =
-      _lookup<ffi.NativeFunction<WireSyncRust2DartDco Function(ffi.UintPtr)>>(
-    'frbgen_xybrid_wire__crate__api__pipeline__FfiPipeline_stage_names',
-  );
-  late final _wire__crate__api__pipeline__FfiPipeline_stage_names =
-      _wire__crate__api__pipeline__FfiPipeline_stage_namesPtr
-          .asFunction<WireSyncRust2DartDco Function(int)>();
+    : _lookup = dynamicLibrary.lookup;
 
   void
-      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
     ffi.Pointer<ffi.Void> ptr,
   ) {
     return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
@@ -845,14 +650,14 @@ class XybridRustLibWire implements BaseWire {
 
   late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelopePtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
-    'frbgen_xybrid_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope',
-  );
+        'frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope',
+      );
   late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope =
       _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelopePtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
-      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
     ffi.Pointer<ffi.Void> ptr,
   ) {
     return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
@@ -862,14 +667,14 @@ class XybridRustLibWire implements BaseWire {
 
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelopePtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
-    'frbgen_xybrid_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope',
-  );
+        'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope',
+      );
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope =
       _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelopePtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
-      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
     ffi.Pointer<ffi.Void> ptr,
   ) {
     return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
@@ -879,14 +684,14 @@ class XybridRustLibWire implements BaseWire {
 
   late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
-    'frbgen_xybrid_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel',
-  );
+        'frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel',
+      );
   late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel =
       _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelPtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
-      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
     ffi.Pointer<ffi.Void> ptr,
   ) {
     return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
@@ -896,14 +701,14 @@ class XybridRustLibWire implements BaseWire {
 
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
-    'frbgen_xybrid_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel',
-  );
+        'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel',
+      );
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel =
       _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelPtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
-      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
     ffi.Pointer<ffi.Void> ptr,
   ) {
     return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
@@ -913,14 +718,14 @@ class XybridRustLibWire implements BaseWire {
 
   late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoaderPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
-    'frbgen_xybrid_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader',
-  );
+        'frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader',
+      );
   late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader =
       _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoaderPtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
-      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
     ffi.Pointer<ffi.Void> ptr,
   ) {
     return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
@@ -930,14 +735,14 @@ class XybridRustLibWire implements BaseWire {
 
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoaderPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
-    'frbgen_xybrid_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader',
-  );
+        'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader',
+      );
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader =
       _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoaderPtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
-      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
     ffi.Pointer<ffi.Void> ptr,
   ) {
     return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
@@ -947,14 +752,14 @@ class XybridRustLibWire implements BaseWire {
 
   late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipelinePtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
-    'frbgen_xybrid_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline',
-  );
+        'frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline',
+      );
   late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline =
       _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipelinePtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
-      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
     ffi.Pointer<ffi.Void> ptr,
   ) {
     return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
@@ -964,148 +769,43 @@ class XybridRustLibWire implements BaseWire {
 
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipelinePtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
-    'frbgen_xybrid_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline',
-  );
+        'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline',
+      );
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline =
       _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipelinePtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
-  ffi.Pointer<ffi.Double> cst_new_box_autoadd_f_64(double value) {
-    return _cst_new_box_autoadd_f_64(value);
-  }
-
-  late final _cst_new_box_autoadd_f_64Ptr =
-      _lookup<ffi.NativeFunction<ffi.Pointer<ffi.Double> Function(ffi.Double)>>(
-    'frbgen_xybrid_cst_new_box_autoadd_f_64',
-  );
-  late final _cst_new_box_autoadd_f_64 = _cst_new_box_autoadd_f_64Ptr
-      .asFunction<ffi.Pointer<ffi.Double> Function(double)>();
-
-  ffi.Pointer<wire_cst_list_String> cst_new_list_String(int len) {
-    return _cst_new_list_String(len);
-  }
-
-  late final _cst_new_list_StringPtr = _lookup<
-      ffi.NativeFunction<
-          ffi.Pointer<wire_cst_list_String> Function(
-              ffi.Int32)>>('frbgen_xybrid_cst_new_list_String');
-  late final _cst_new_list_String = _cst_new_list_StringPtr
-      .asFunction<ffi.Pointer<wire_cst_list_String> Function(int)>();
-
-  ffi.Pointer<wire_cst_list_prim_f_32_loose> cst_new_list_prim_f_32_loose(
-    int len,
+  void
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
+    ffi.Pointer<ffi.Void> ptr,
   ) {
-    return _cst_new_list_prim_f_32_loose(len);
+    return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
+      ptr,
+    );
   }
 
-  late final _cst_new_list_prim_f_32_loosePtr = _lookup<
-      ffi.NativeFunction<
-          ffi.Pointer<wire_cst_list_prim_f_32_loose> Function(
-              ffi.Int32)>>('frbgen_xybrid_cst_new_list_prim_f_32_loose');
-  late final _cst_new_list_prim_f_32_loose = _cst_new_list_prim_f_32_loosePtr
-      .asFunction<ffi.Pointer<wire_cst_list_prim_f_32_loose> Function(int)>();
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClientPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+        'frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient',
+      );
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient =
+      _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClientPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
-  ffi.Pointer<wire_cst_list_prim_f_32_strict> cst_new_list_prim_f_32_strict(
-    int len,
+  void
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
+    ffi.Pointer<ffi.Void> ptr,
   ) {
-    return _cst_new_list_prim_f_32_strict(len);
+    return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
+      ptr,
+    );
   }
 
-  late final _cst_new_list_prim_f_32_strictPtr = _lookup<
-      ffi.NativeFunction<
-          ffi.Pointer<wire_cst_list_prim_f_32_strict> Function(
-              ffi.Int32)>>('frbgen_xybrid_cst_new_list_prim_f_32_strict');
-  late final _cst_new_list_prim_f_32_strict = _cst_new_list_prim_f_32_strictPtr
-      .asFunction<ffi.Pointer<wire_cst_list_prim_f_32_strict> Function(int)>();
-
-  ffi.Pointer<wire_cst_list_prim_u_8_loose> cst_new_list_prim_u_8_loose(
-    int len,
-  ) {
-    return _cst_new_list_prim_u_8_loose(len);
-  }
-
-  late final _cst_new_list_prim_u_8_loosePtr = _lookup<
-      ffi.NativeFunction<
-          ffi.Pointer<wire_cst_list_prim_u_8_loose> Function(
-              ffi.Int32)>>('frbgen_xybrid_cst_new_list_prim_u_8_loose');
-  late final _cst_new_list_prim_u_8_loose = _cst_new_list_prim_u_8_loosePtr
-      .asFunction<ffi.Pointer<wire_cst_list_prim_u_8_loose> Function(int)>();
-
-  ffi.Pointer<wire_cst_list_prim_u_8_strict> cst_new_list_prim_u_8_strict(
-    int len,
-  ) {
-    return _cst_new_list_prim_u_8_strict(len);
-  }
-
-  late final _cst_new_list_prim_u_8_strictPtr = _lookup<
-      ffi.NativeFunction<
-          ffi.Pointer<wire_cst_list_prim_u_8_strict> Function(
-              ffi.Int32)>>('frbgen_xybrid_cst_new_list_prim_u_8_strict');
-  late final _cst_new_list_prim_u_8_strict = _cst_new_list_prim_u_8_strictPtr
-      .asFunction<ffi.Pointer<wire_cst_list_prim_u_8_strict> Function(int)>();
-
-  int dummy_method_to_enforce_bundling() {
-    return _dummy_method_to_enforce_bundling();
-  }
-
-  late final _dummy_method_to_enforce_bundlingPtr =
-      _lookup<ffi.NativeFunction<ffi.Int64 Function()>>(
-    'dummy_method_to_enforce_bundling',
-  );
-  late final _dummy_method_to_enforce_bundling =
-      _dummy_method_to_enforce_bundlingPtr.asFunction<int Function()>();
-}
-
-typedef DartPostCObjectFnType = ffi.Pointer<
-    ffi.NativeFunction<
-        ffi.Bool Function(DartPort port_id, ffi.Pointer<ffi.Void> message)>>;
-typedef DartPort = ffi.Int64;
-
-final class wire_cst_list_prim_u_8_loose extends ffi.Struct {
-  external ffi.Pointer<ffi.Uint8> ptr;
-
-  @ffi.Int32()
-  external int len;
-}
-
-final class wire_cst_list_prim_f_32_loose extends ffi.Struct {
-  external ffi.Pointer<ffi.Float> ptr;
-
-  @ffi.Int32()
-  external int len;
-}
-
-final class wire_cst_list_prim_u_8_strict extends ffi.Struct {
-  external ffi.Pointer<ffi.Uint8> ptr;
-
-  @ffi.Int32()
-  external int len;
-}
-
-final class wire_cst_list_String extends ffi.Struct {
-  external ffi.Pointer<ffi.Pointer<wire_cst_list_prim_u_8_strict>> ptr;
-
-  @ffi.Int32()
-  external int len;
-}
-
-final class wire_cst_list_prim_f_32_strict extends ffi.Struct {
-  external ffi.Pointer<ffi.Float> ptr;
-
-  @ffi.Int32()
-  external int len;
-}
-
-final class wire_cst_ffi_result extends ffi.Struct {
-  @ffi.Bool()
-  external bool success;
-
-  external ffi.Pointer<wire_cst_list_prim_u_8_strict> text;
-
-  external ffi.Pointer<wire_cst_list_prim_u_8_strict> audio_bytes;
-
-  external ffi.Pointer<wire_cst_list_prim_f_32_strict> embedding;
-
-  @ffi.Uint32()
-  external int latency_ms;
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClientPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+        'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient',
+      );
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient =
+      _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClientPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 }

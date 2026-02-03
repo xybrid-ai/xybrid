@@ -9,6 +9,6 @@ pub mod sdk_client;
 
 // Re-export all public types for convenient access
 pub use envelope::FfiEnvelope;
-pub use model::{FfiModel, FfiModelLoader};
+pub use model::{FfiModel, FfiModelLoader, FfiStreamEvent, FfiStreamToken};
 pub use pipeline::FfiPipeline;
 pub use result::FfiResult;

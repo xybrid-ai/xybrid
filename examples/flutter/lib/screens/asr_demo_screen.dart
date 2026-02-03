@@ -1,7 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:xybrid_example/utils/recorder.dart';
+import 'package:xybrid_example/widgets/model_status_card.dart';
 import 'package:xybrid_flutter/xybrid.dart';
 
 /// Speech-to-Text demo screen.
@@ -14,21 +15,64 @@ class SpeechToTextScreen extends StatefulWidget {
   State<SpeechToTextScreen> createState() => _SpeechToTextScreenState();
 }
 
+/// Sealed class representing ASR screen states.
+sealed class AsrScreenState {
+  const AsrScreenState();
+}
+
+/// Initial state before model is loaded.
+class AsrIdle extends AsrScreenState {
+  const AsrIdle();
+}
+
+/// Model is being downloaded/loaded with progress.
+class AsrLoadingModel extends AsrScreenState {
+  final double? progress;
+
+  const AsrLoadingModel({this.progress});
+}
+
+/// Model failed to load.
+class AsrLoadError extends AsrScreenState {
+  final String message;
+
+  const AsrLoadError(this.message);
+}
+
+/// Model is loaded and ready for inference.
+class AsrReady extends AsrScreenState {
+  const AsrReady();
+}
+
+/// Recording audio from microphone.
+class AsrRecording extends AsrScreenState {
+  const AsrRecording();
+}
+
+/// Transcribing recorded audio.
+class AsrTranscribing extends AsrScreenState {
+  const AsrTranscribing();
+}
+
+/// Inference failed with an error.
+class AsrError extends AsrScreenState {
+  final String message;
+
+  const AsrError(this.message);
+}
+
 class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
   /// Audio recorder instance.
   final _recorder = XybridRecorder();
 
   /// Current screen state.
-  _AsrState _state = _AsrState.idle;
+  AsrScreenState _state = const AsrIdle();
 
   /// Loaded ASR model (if any).
   XybridModel? _model;
 
   /// The model ID used for ASR.
   static const _asrModelId = 'whisper-tiny';
-
-  /// Error message if operation failed.
-  String? _errorMessage;
 
   /// Latency of the last inference in milliseconds.
   int? _latencyMs;
@@ -39,40 +83,73 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
   /// Sample rate for audio recording (Whisper expects 16kHz).
   static const _sampleRate = 16000;
 
+  /// Load progress stream subscription.
+  StreamSubscription<LoadEvent>? _loadSubscription;
+
   @override
   void dispose() {
     _recorder.dispose();
+    _loadSubscription?.cancel();
     super.dispose();
   }
 
-  /// Load the ASR model from the registry.
+  /// Load the ASR model from the registry with progress tracking.
   Future<void> _loadModel() async {
     setState(() {
-      _state = _AsrState.loadingModel;
-      _errorMessage = null;
+      _state = const AsrLoadingModel();
     });
 
     try {
       final loader = XybridModelLoader.fromRegistry(_asrModelId);
+
+      _loadSubscription = loader.loadWithProgress().listen(
+        (event) {
+          if (!mounted) return;
+
+          switch (event) {
+            case LoadProgress(:final progress):
+              setState(() {
+                _state = AsrLoadingModel(progress: progress);
+              });
+            case LoadComplete():
+              _finalizeModelLoad(loader);
+            case LoadError(:final message):
+              setState(() {
+                _state = AsrLoadError(message);
+              });
+          }
+        },
+        onError: (e) {
+          if (mounted) {
+            setState(() {
+              _state = AsrLoadError(_formatErrorMessage(e.toString()));
+            });
+          }
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _state = AsrLoadError(_formatErrorMessage(e.toString()));
+        });
+      }
+    }
+  }
+
+  /// Finalize model load after download completes.
+  Future<void> _finalizeModelLoad(XybridModelLoader loader) async {
+    try {
       final model = await loader.load();
       if (mounted) {
         setState(() {
-          _state = _AsrState.ready;
+          _state = const AsrReady();
           _model = model;
-        });
-      }
-    } on XybridException catch (e) {
-      if (mounted) {
-        setState(() {
-          _state = _AsrState.error;
-          _errorMessage = e.message;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _state = _AsrState.error;
-          _errorMessage = _formatErrorMessage(e.toString());
+          _state = AsrLoadError(_formatErrorMessage(e.toString()));
         });
       }
     }
@@ -80,7 +157,7 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
 
   /// Start recording audio from microphone.
   Future<void> _startRecording() async {
-    if (_state == _AsrState.recording) {
+    if (_state is AsrRecording) {
       throw StateError('Already recording');
     }
 
@@ -89,7 +166,7 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
       await _recorder.start(config: RecordingConfig.asr);
 
       setState(() {
-        _state = _AsrState.recording;
+        _state = const AsrRecording();
         _transcribedText = null;
         _latencyMs = null;
       });
@@ -98,8 +175,7 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
       await _transcribeFromFilePath(recording.path);
     } catch (e) {
       setState(() {
-        _state = _AsrState.error;
-        _errorMessage = 'Failed to start recording: $e';
+        _state = AsrError('Failed to start recording: $e');
       });
     }
   }
@@ -114,15 +190,14 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
   Future<void> _transcribeFromFilePath(String path) async {
     try {
       setState(() {
-        _state = _AsrState.transcribing;
+        _state = const AsrTranscribing();
       });
 
       final audioBytes = await _recorder.readAudioBytes(path);
 
       if (audioBytes.isEmpty) {
         setState(() {
-          _state = _AsrState.error;
-          _errorMessage = 'Recorded audio is empty.';
+          _state = const AsrError('Recorded audio is empty.');
         });
         return;
       }
@@ -143,7 +218,7 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
       final transcribedText = result.text;
       if (transcribedText == null || transcribedText.isEmpty) {
         setState(() {
-          _state = _AsrState.ready;
+          _state = const AsrReady();
           _transcribedText = '(No speech detected)';
           _latencyMs = result.latencyMs;
         });
@@ -152,7 +227,7 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
 
       if (mounted) {
         setState(() {
-          _state = _AsrState.ready;
+          _state = const AsrReady();
           _transcribedText = transcribedText;
           _latencyMs = result.latencyMs;
         });
@@ -160,15 +235,13 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
     } on XybridException catch (e) {
       if (mounted) {
         setState(() {
-          _state = _AsrState.error;
-          _errorMessage = e.message;
+          _state = AsrError(e.message);
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _state = _AsrState.error;
-          _errorMessage = _formatErrorMessage(e.toString());
+          _state = AsrError(_formatErrorMessage(e.toString()));
         });
       }
     }
@@ -189,6 +262,20 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
       return 'Permission denied: Please grant microphone access in your device settings.';
     }
     return error;
+  }
+
+  /// Convert screen state to ModelLoadState for the status card.
+  ModelLoadState get _modelLoadState {
+    return switch (_state) {
+      AsrIdle() => const ModelIdle(),
+      AsrLoadingModel(:final progress) => ModelLoading(progress: progress),
+      AsrLoadError(:final message) => ModelLoadError(message),
+      AsrReady() ||
+      AsrRecording() ||
+      AsrTranscribing() ||
+      AsrError() =>
+        const ModelReady(),
+    };
   }
 
   @override
@@ -237,7 +324,15 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
             const SizedBox(height: 24),
 
             // Model status section
-            _buildModelStatusSection(theme),
+            ModelStatusCard(
+              state: _modelLoadState,
+              modelId: _asrModelId,
+              idleIcon: Icons.mic,
+              idleTitle: 'ASR Model Required',
+              idleDescription:
+                  'Load the $_asrModelId model to start transcribing speech.',
+              onLoad: _loadModel,
+            ),
             const SizedBox(height: 24),
 
             // Recording section (only shown when model is loaded)
@@ -248,94 +343,8 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
               _buildResultSection(theme),
 
             // Error display
-            if (_state == _AsrState.error && _errorMessage != null)
-              _buildErrorSection(theme),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Build the model status section.
-  Widget _buildModelStatusSection(ThemeData theme) {
-    if (_state == _AsrState.loadingModel) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              Text(
-                'Loading $_asrModelId...',
-                style: theme.textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Downloading model from registry...',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (_model == null) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Icon(
-                Icons.smart_toy_outlined,
-                size: 48,
-                color: theme.colorScheme.primary,
-              ),
-              const SizedBox(height: 16),
-              Text('ASR Model Required', style: theme.textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Text(
-                'Load the $_asrModelId model to start transcribing speech.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _loadModel,
-                icon: const Icon(Icons.download),
-                label: const Text('Load Model'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Card(
-      color: theme.colorScheme.primaryContainer.withAlpha(100),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Icon(Icons.check_circle, color: theme.colorScheme.primary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Model Ready',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
-                  Text(_asrModelId, style: theme.textTheme.bodySmall),
-                ],
-              ),
-            ),
+            if (_state case AsrError(:final message))
+              _buildErrorSection(theme, message),
           ],
         ),
       ),
@@ -344,9 +353,9 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
 
   /// Build the recording section.
   Widget _buildRecordingSection(ThemeData theme) {
-    final isRecording = _state == _AsrState.recording;
-    final isTranscribing = _state == _AsrState.transcribing;
-    final canRecord = _state == _AsrState.ready || _state == _AsrState.error;
+    final isRecording = _state is AsrRecording;
+    final isTranscribing = _state is AsrTranscribing;
+    final canRecord = _state is AsrReady || _state is AsrError;
 
     return Card(
       child: Padding(
@@ -506,7 +515,7 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
   }
 
   /// Build the error section.
-  Widget _buildErrorSection(ThemeData theme) {
+  Widget _buildErrorSection(ThemeData theme, String message) {
     return Card(
       color: theme.colorScheme.errorContainer.withAlpha(100),
       child: Padding(
@@ -528,7 +537,7 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              _errorMessage!,
+              message,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onErrorContainer,
               ),
@@ -545,6 +554,3 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
     );
   }
 }
-
-/// ASR screen states.
-enum _AsrState { idle, loadingModel, ready, recording, transcribing, error }

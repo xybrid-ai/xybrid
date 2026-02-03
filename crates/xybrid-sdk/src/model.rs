@@ -4,20 +4,53 @@
 //! - `ModelLoader`: Preparatory step for loading models (from registry, bundle, or directory)
 //! - `XybridModel`: Loaded model ready for inference
 //! - `ModelHandle`: Internal state management for the loaded model
+//! - `StreamEvent`: Events emitted during streaming inference
 
 use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
 use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use tempfile::TempDir;
+use tokio_stream::wrappers::ReceiverStream;
 use xybrid_core::execution::{
     ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
 };
 use xybrid_core::ir::Envelope;
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
+
+/// A token generated during streaming inference.
+///
+/// This is the SDK's version of the core `PartialToken`, re-exported for convenience.
+#[derive(Debug, Clone)]
+pub struct StreamToken {
+    /// The generated token text
+    pub token: String,
+    /// The token ID (if available from the model)
+    pub token_id: Option<i64>,
+    /// Index of this token in the generation sequence
+    pub index: usize,
+    /// All text generated so far (cumulative)
+    pub cumulative_text: String,
+    /// Reason for stopping (only set on the final token)
+    pub finish_reason: Option<String>,
+}
+
+/// Events emitted during streaming inference.
+///
+/// Use this with `run_stream()` to handle tokens as they're generated.
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    /// A token was generated (emitted for each token during LLM inference)
+    Token(StreamToken),
+    /// Inference completed successfully with final result
+    Complete(InferenceResult),
+    /// An error occurred during inference
+    Error(String),
+}
 
 /// SDK-level error type.
 #[derive(Debug, thiserror::Error)]
@@ -877,6 +910,281 @@ impl XybridModel {
         crate::telemetry::publish_telemetry_event(event);
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+    }
+
+    /// Run inference with streaming output.
+    ///
+    /// This method provides a unified streaming interface for all model types:
+    /// - **LLM models (GGUF)**: True token-by-token streaming via the callback
+    /// - **Other models (TTS, ASR, etc.)**: Single callback with the full result
+    ///
+    /// This "everything is a stream" pattern allows consumers to use the same
+    /// API regardless of model type, while LLMs get the latency benefits of
+    /// true streaming.
+    ///
+    /// # Arguments
+    ///
+    /// * `envelope` - Input data wrapped in an Envelope
+    /// * `on_token` - Callback invoked for each token (LLM) or once (other models)
+    ///
+    /// # Returns
+    ///
+    /// `InferenceResult` containing the final output.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Works for both LLM and non-LLM models
+    /// let result = model.run_streaming(&envelope, |token| {
+    ///     print!("{}", token.token);
+    ///     std::io::Write::flush(&mut std::io::stdout())?;
+    ///     Ok(())
+    /// })?;
+    /// ```
+    pub fn run_streaming<F>(&self, envelope: &Envelope, mut on_token: F) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(xybrid_core::runtime_adapter::llm::PartialToken) -> Result<(), Box<dyn std::error::Error + Send + Sync>> + Send,
+    {
+        use xybrid_core::execution::ExecutionTemplate;
+        use xybrid_core::runtime_adapter::llm::PartialToken;
+
+        let start = Instant::now();
+
+        // Get write lock on handle
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+
+        if !handle.loaded {
+            return Err(SdkError::NotLoaded);
+        }
+
+        // Clone metadata to check execution template
+        let metadata = handle.metadata.clone();
+
+        // Check if this is an LLM model (GGUF template)
+        let is_llm = matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. });
+
+        let output = if is_llm {
+            // True streaming for LLM models
+            handle
+                .executor
+                .execute_streaming(&metadata, envelope, Box::new(&mut on_token))
+                .map_err(|e| SdkError::InferenceError(format!("Streaming execution failed: {}", e)))?
+        } else {
+            // For non-LLM models: run batch and emit single "token" with full result
+            let result = handle
+                .executor
+                .execute(&metadata, envelope)
+                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+
+            // Extract text from result (if any) and emit as single token
+            if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
+                let token = PartialToken {
+                    token: text.clone(),
+                    token_id: None,
+                    index: 0,
+                    cumulative_text: text.clone(),
+                    finish_reason: Some("stop".to_string()),
+                };
+                let _ = on_token(token); // Ignore callback errors for non-streaming
+            }
+
+            result
+        };
+
+        let latency_ms = start.elapsed().as_millis() as u32;
+
+        // Emit telemetry event
+        let event = crate::telemetry::TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some(self.model_id.clone()),
+            target: Some("local".to_string()),
+            latency_ms: Some(latency_ms),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": self.model_id,
+                    "version": self.version,
+                    "output_type": format!("{:?}", self.output_type),
+                    "streaming": true,
+                })
+                .to_string(),
+            ),
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
+        crate::telemetry::publish_telemetry_event(event);
+
+        Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+    }
+
+    /// Run inference returning a stream of events.
+    ///
+    /// This is the idiomatic Rust streaming API that returns a `Stream` instead of
+    /// using callbacks. Events are emitted as they occur:
+    /// - `StreamEvent::Token` - for each generated token (LLM models)
+    /// - `StreamEvent::Complete` - when inference finishes successfully
+    /// - `StreamEvent::Error` - if an error occurs
+    ///
+    /// For non-LLM models, a single `Token` event is emitted with the full result,
+    /// followed by `Complete`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tokio_stream::StreamExt;
+    ///
+    /// let mut stream = model.run_stream(envelope);
+    /// while let Some(event) = stream.next().await {
+    ///     match event {
+    ///         StreamEvent::Token(token) => print!("{}", token.token),
+    ///         StreamEvent::Complete(result) => println!("\nDone: {}ms", result.latency_ms()),
+    ///         StreamEvent::Error(e) => eprintln!("Error: {}", e),
+    ///     }
+    /// }
+    /// ```
+    pub fn run_stream(
+        &self,
+        envelope: Envelope,
+    ) -> Pin<Box<dyn tokio_stream::Stream<Item = StreamEvent> + Send + '_>> {
+        use tokio::sync::mpsc;
+        use xybrid_core::runtime_adapter::llm::PartialToken;
+
+        let (tx, rx) = mpsc::channel::<StreamEvent>(100);
+        let handle = self.handle.clone();
+        let model_id = self.model_id.clone();
+        let version = self.version.clone();
+        let output_type = self.output_type;
+
+        // Clone tx for the completion event (before moving into spawn_blocking)
+        let tx_completion = tx.clone();
+
+        // Spawn blocking task to run inference
+        tokio::task::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let start = Instant::now();
+
+                // Get write lock on handle
+                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+
+                if !guard.loaded {
+                    return Err(SdkError::NotLoaded);
+                }
+
+                let metadata = guard.metadata.clone();
+                let is_llm = matches!(
+                    metadata.execution_template,
+                    xybrid_core::execution::ExecutionTemplate::Gguf { .. }
+                );
+
+                // Clone tx for the streaming callback (so we can use tx in the else branch)
+                let tx_for_callback = tx.clone();
+
+                let output = if is_llm {
+                    // True streaming for LLM models
+                    guard
+                        .executor
+                        .execute_streaming(
+                            &metadata,
+                            &envelope,
+                            Box::new(move |token: PartialToken| {
+                                let stream_token = StreamToken {
+                                    token: token.token.clone(),
+                                    token_id: token.token_id.map(|id| id as i64),
+                                    index: token.index,
+                                    cumulative_text: token.cumulative_text.clone(),
+                                    finish_reason: token.finish_reason.clone(),
+                                };
+                                // Ignore send errors (receiver dropped)
+                                let _ = tx_for_callback.blocking_send(StreamEvent::Token(stream_token));
+                                Ok(())
+                            }),
+                        )
+                        .map_err(|e| {
+                            SdkError::InferenceError(format!("Streaming execution failed: {}", e))
+                        })?
+                } else {
+                    // Non-LLM: batch execution, emit single token
+                    let result = guard
+                        .executor
+                        .execute(&metadata, &envelope)
+                        .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+
+                    // Emit single token with full result
+                    if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
+                        let stream_token = StreamToken {
+                            token: text.clone(),
+                            token_id: None,
+                            index: 0,
+                            cumulative_text: text.clone(),
+                            finish_reason: Some("stop".to_string()),
+                        };
+                        let _ = tx.blocking_send(StreamEvent::Token(stream_token));
+                    }
+                    result
+                };
+
+                let latency_ms = start.elapsed().as_millis() as u32;
+
+                // Emit telemetry
+                let event = crate::telemetry::TelemetryEvent {
+                    event_type: "ModelComplete".to_string(),
+                    stage_name: Some(model_id.clone()),
+                    target: Some("local".to_string()),
+                    latency_ms: Some(latency_ms),
+                    error: None,
+                    data: Some(
+                        serde_json::json!({
+                            "model_id": model_id,
+                            "version": version,
+                            "output_type": format!("{:?}", output_type),
+                            "streaming": true,
+                        })
+                        .to_string(),
+                    ),
+                    timestamp_ms: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
+                };
+                crate::telemetry::publish_telemetry_event(event);
+
+                Ok(InferenceResult::new(output, &model_id, latency_ms))
+            })
+            .await;
+
+            // Send completion or error event
+            match result {
+                Ok(Ok(inference_result)) => {
+                    let _ = tx_completion.send(StreamEvent::Complete(inference_result)).await;
+                }
+                Ok(Err(e)) => {
+                    let _ = tx_completion.send(StreamEvent::Error(e.to_string())).await;
+                }
+                Err(e) => {
+                    let _ = tx_completion.send(StreamEvent::Error(format!("Task failed: {}", e))).await;
+                }
+            }
+        });
+
+        Box::pin(ReceiverStream::new(rx))
+    }
+
+    /// Check if this model supports true token streaming.
+    ///
+    /// Returns `true` for LLM models (GGUF), `false` for other model types.
+    /// Note: `run_streaming()` works for all models, but only LLM models
+    /// get true token-by-token streaming; others emit a single result.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    pub fn supports_token_streaming(&self) -> bool {
+        use xybrid_core::execution::ExecutionTemplate;
+
+        self.handle
+            .read()
+            .ok()
+            .map(|h| matches!(h.metadata.execution_template, ExecutionTemplate::Gguf { .. }))
+            .unwrap_or(false)
     }
 
     /// Run batch inference asynchronously.

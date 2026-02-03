@@ -53,7 +53,9 @@
 library xybrid;
 
 export 'src/envelope.dart' show XybridEnvelope;
-export 'src/model_loader.dart' show XybridModelLoader, XybridModel, XybridException;
+export 'src/llm.dart' show StreamToken;
+export 'src/model_loader.dart'
+    show XybridModelLoader, XybridModel, XybridException, LoadEvent, LoadProgress, LoadComplete, LoadError;
 export 'src/pipeline.dart' show XybridPipeline;
 export 'src/result.dart' show XybridResult;
 export 'src/utils/utils.dart';

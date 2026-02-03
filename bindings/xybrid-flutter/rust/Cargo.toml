@@ -16,6 +16,10 @@ flutter_rust_bridge = "=2.11.1"
 # (Android needs ort-dynamic, iOS/macOS need ort-coreml, etc.)
 xybrid-sdk = { path = "../../../crates/xybrid-sdk" }
 
+# Async runtime for streaming
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync"] }
+tokio-stream = "0.1"
+
 # Logging (optional - for debugging)
 log = "0.4"
 

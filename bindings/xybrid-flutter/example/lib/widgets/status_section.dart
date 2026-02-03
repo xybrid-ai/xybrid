@@ -25,15 +25,14 @@ class StatusSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (isLoading)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: LinearProgressIndicator(),
+                ),
               Row(
                 children: [
-                  if (isLoading)
-                    const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else if (isError)
+                  if (isError)
                     const Icon(Icons.error, color: Colors.red, size: 20)
                   else if (isLoaded)
                     const Icon(
@@ -41,7 +40,7 @@ class StatusSection extends StatelessWidget {
                       color: Colors.green,
                       size: 20,
                     ),
-                  const SizedBox(width: 8),
+                  if (isError || isLoaded) const SizedBox(width: 8),
                   Expanded(
                     child: vm.statusMessage.build(
                       (msg) => Text(

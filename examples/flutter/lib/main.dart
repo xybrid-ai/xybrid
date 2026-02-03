@@ -5,6 +5,7 @@ import 'package:xybrid_flutter/xybrid.dart';
 import 'screens/asr_demo_screen.dart';
 import 'screens/errors_demo_screen.dart';
 import 'screens/hub_screen.dart';
+import 'screens/llm_demo_screen.dart';
 import 'screens/model_loading_screen.dart';
 import 'screens/pipeline_demo_screen.dart';
 import 'screens/tts_demo_screen.dart';
@@ -32,6 +33,7 @@ class XybridExampleApp extends StatelessWidget {
         '/demos/text-to-speech': (context) => const TextToSpeechScreen(),
         '/demos/speech-to-text': (context) => const SpeechToTextScreen(),
         '/demos/pipelines': (context) => const PipelineScreen(),
+        '/demos/llm': (context) => const LlmDemoScreen(),
         '/demos/error-handling': (context) => const ErrorHandlingScreen(),
       },
     );

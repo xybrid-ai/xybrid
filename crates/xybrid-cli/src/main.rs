@@ -55,6 +55,7 @@ use xybrid_core::orchestrator::Orchestrator;
 use xybrid_core::pipeline_config::PipelineConfig;
 use xybrid_core::target::{Platform, TargetResolver};
 use xybrid_core::template_executor::TemplateExecutor;
+use xybrid_sdk::model::ModelLoader;
 use xybrid_sdk::registry_client::RegistryClient;
 
 /// Xybrid CLI - Hybrid Cloud-Edge AI Inference Pipeline Runner
@@ -794,113 +795,50 @@ fn handle_repl_command(
         if use_streaming {
             #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             {
-                use xybrid_sdk::cache::CacheManager;
+                use std::io;
 
                 let bundle_path_str = stages[0].bundle_path.as_ref().unwrap();
                 let bundle_path = PathBuf::from(bundle_path_str);
 
-                // Get model directory and metadata using unified extraction via CacheManager
-                let (model_dir, metadata) = if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
-                    // .xyb bundle file - use CacheManager for unified extraction
-                    match CacheManager::new() {
-                        Ok(cache) => {
-                            match cache.ensure_extracted(&bundle_path) {
-                                Ok(extract_dir) => {
-                                    // Load metadata from extracted directory
-                                    let metadata_path = extract_dir.join("model_metadata.json");
-                                    match fs::read_to_string(&metadata_path) {
-                                        Ok(metadata_str) => {
-                                            match serde_json::from_str::<ModelMetadata>(&metadata_str) {
-                                                Ok(metadata) => (Some(extract_dir), Some(metadata)),
-                                                Err(e) => {
-                                                    eprintln!("⚠️  Failed to parse metadata: {}, falling back to batch mode", e);
-                                                    (None, None)
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            eprintln!("⚠️  Failed to read metadata: {}, falling back to batch mode", e);
-                                            (None, None)
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("⚠️  Failed to extract bundle: {}, falling back to batch mode", e);
-                                    (None, None)
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("⚠️  Failed to create cache manager: {}, falling back to batch mode", e);
-                            (None, None)
-                        }
-                    }
+                // Load model using SDK's ModelLoader (handles bundle extraction, caching, etc.)
+                let model_result = if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
+                    ModelLoader::from_bundle(&bundle_path).and_then(|loader| loader.load())
                 } else {
-                    // Direct directory path - just read metadata
-                    let metadata_path = bundle_path.join("model_metadata.json");
-                    if metadata_path.exists() {
-                        match fs::read_to_string(&metadata_path) {
-                            Ok(metadata_str) => {
-                                match serde_json::from_str::<ModelMetadata>(&metadata_str) {
-                                    Ok(metadata) => (Some(bundle_path.clone()), Some(metadata)),
-                                    Err(e) => {
-                                        eprintln!("⚠️  Failed to parse metadata: {}, falling back to batch mode", e);
-                                        (None, None)
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("⚠️  Failed to read metadata: {}, falling back to batch mode", e);
-                                (None, None)
-                            }
-                        }
-                    } else {
-                        eprintln!("⚠️  No model_metadata.json found at {}, falling back to batch mode", metadata_path.display());
-                        (None, None)
-                    }
+                    ModelLoader::from_directory(&bundle_path).and_then(|loader| loader.load())
                 };
 
-                // Execute streaming if we have valid model dir and metadata
-                if let (Some(model_dir), Some(metadata)) = (model_dir, metadata) {
-                    // Check if this is an LLM model (GGUF)
-                    if matches!(
-                        metadata.execution_template,
-                        xybrid_core::execution::ExecutionTemplate::Gguf { .. }
-                    ) {
-                        let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
-
-                        // Execute with streaming callback
-                        match executor.execute_streaming(
-                            &metadata,
-                            &input,
-                            Box::new(|token| {
+                match model_result {
+                    Ok(model) => {
+                        // Check if this model supports token streaming (LLM/GGUF models)
+                        if model.supports_token_streaming() {
+                            // Execute with streaming callback via SDK
+                            match model.run_streaming(&input, |token| {
                                 print!("{}", token.token);
                                 io::stdout().flush()?;
                                 Ok(())
-                            }),
-                        ) {
-                            Ok(output) => {
-                                let elapsed = start.elapsed();
-                                println!(); // Newline after streamed output
+                            }) {
+                                Ok(result) => {
+                                    let elapsed = start.elapsed();
+                                    println!(); // Newline after streamed output
 
-                                // Show timing info
-                                if let Some(tps) = output.metadata.get("tokens_per_second") {
+                                    // Show timing info from result metadata
                                     println!(
-                                        "\n⏱️  Inference time: {:.2}s ({} tokens/sec)",
+                                        "\n⏱️  Inference time: {:.2}s ({}ms latency)",
                                         elapsed.as_secs_f32(),
-                                        tps
+                                        result.latency_ms()
                                     );
-                                } else {
-                                    println!("\n⏱️  Inference time: {:.2}s", elapsed.as_secs_f32());
+                                }
+                                Err(e) => {
+                                    eprintln!("\n❌ Error: {}", e);
                                 }
                             }
-                            Err(e) => {
-                                eprintln!("\n❌ Error: {}", e);
-                            }
+                            continue;
+                        } else if stream {
+                            eprintln!("⚠️  Streaming only supported for GGUF models, falling back to batch mode");
                         }
-                        continue;
-                    } else if stream {
-                        eprintln!("⚠️  Streaming only supported for GGUF models, falling back to batch mode");
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Failed to load model: {}, falling back to batch mode", e);
                     }
                 }
             }

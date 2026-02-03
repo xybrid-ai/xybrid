@@ -18,6 +18,7 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync", "fs", "time"] }
+tokio-stream = "0.1"
 tempfile = "3.10"
 # ureq is configured per-platform below for Android compatibility
 uuid = { version = "1.0", features = ["v4", "v5", "serde"] }

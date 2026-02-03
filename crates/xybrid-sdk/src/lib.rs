@@ -145,7 +145,7 @@ pub use llm::{
 };
 pub use model::SdkError;
 pub use platform::current_platform;
-pub use model::{ModelLoader, SdkResult, StreamConfig, XybridModel};
+pub use model::{ModelLoader, SdkResult, StreamConfig, StreamEvent, StreamToken, XybridModel};
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
 // Pipeline API (PipelineRef → Pipeline)
 pub use pipeline::{

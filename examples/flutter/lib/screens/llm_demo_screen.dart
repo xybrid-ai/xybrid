@@ -1,0 +1,519 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:xybrid_example/widgets/model_status_card.dart';
+import 'package:xybrid_flutter/xybrid.dart';
+
+/// LLM Chat demo screen with token streaming.
+///
+/// Demonstrates how to run LLM inference with streaming token output,
+/// similar to the CLI repl mode with --stream flag.
+class LlmDemoScreen extends StatefulWidget {
+  const LlmDemoScreen({super.key});
+
+  @override
+  State<LlmDemoScreen> createState() => _LlmDemoScreenState();
+}
+
+/// Sealed class representing LLM screen states.
+sealed class LlmScreenState {
+  const LlmScreenState();
+}
+
+/// Initial state before model is loaded.
+class LlmIdle extends LlmScreenState {
+  const LlmIdle();
+}
+
+/// Model is being downloaded/loaded with progress.
+class LlmLoadingModel extends LlmScreenState {
+  /// Download progress from 0.0 to 1.0 (null if indeterminate).
+  final double? progress;
+
+  const LlmLoadingModel({this.progress});
+}
+
+/// Model failed to load.
+class LlmLoadError extends LlmScreenState {
+  final String message;
+
+  const LlmLoadError(this.message);
+}
+
+/// Model is loaded and ready for inference.
+class LlmReady extends LlmScreenState {
+  const LlmReady();
+}
+
+/// Model is generating a response.
+class LlmGenerating extends LlmScreenState {
+  const LlmGenerating();
+}
+
+/// Inference failed with an error.
+class LlmInferenceError extends LlmScreenState {
+  final String message;
+
+  const LlmInferenceError(this.message);
+}
+
+class _LlmDemoScreenState extends State<LlmDemoScreen> {
+  /// Controller for the prompt input field.
+  final _promptController = TextEditingController(
+    text: 'Tell me a short joke.',
+  );
+
+  /// Scroll controller for auto-scrolling response.
+  final _scrollController = ScrollController();
+
+  /// Current screen state.
+  LlmScreenState _state = const LlmIdle();
+
+  /// Loaded model (if any).
+  XybridModel? _model;
+
+  /// The model ID used for LLM.
+  static const _llmModelId = 'gemma-3-1b';
+
+  /// Streaming response text.
+  String _responseText = '';
+
+  /// Number of tokens generated.
+  int _tokenCount = 0;
+
+  /// Generation stream subscription.
+  StreamSubscription<StreamToken>? _streamSubscription;
+
+  /// Load progress stream subscription.
+  StreamSubscription<LoadEvent>? _loadSubscription;
+
+  @override
+  void dispose() {
+    _promptController.dispose();
+    _scrollController.dispose();
+    _streamSubscription?.cancel();
+    _loadSubscription?.cancel();
+    super.dispose();
+  }
+
+  /// Load the LLM model from the registry with progress tracking.
+  Future<void> _loadModel() async {
+    setState(() {
+      _state = const LlmLoadingModel();
+    });
+
+    try {
+      final loader = XybridModelLoader.fromRegistry(_llmModelId);
+
+      _loadSubscription = loader.loadWithProgress().listen(
+        (event) {
+          if (!mounted) return;
+
+          switch (event) {
+            case LoadProgress(:final progress):
+              setState(() {
+                _state = LlmLoadingModel(progress: progress);
+              });
+            case LoadComplete():
+              // Model is ready, now load it from cache
+              _finalizeModelLoad(loader);
+            case LoadError(:final message):
+              setState(() {
+                _state = LlmLoadError(message);
+              });
+          }
+        },
+        onError: (e) {
+          if (mounted) {
+            setState(() {
+              _state = LlmLoadError(_formatErrorMessage(e.toString()));
+            });
+          }
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _state = LlmLoadError(_formatErrorMessage(e.toString()));
+        });
+      }
+    }
+  }
+
+  /// Finalize model load after download completes.
+  Future<void> _finalizeModelLoad(XybridModelLoader loader) async {
+    try {
+      final model = await loader.load();
+      if (mounted) {
+        setState(() {
+          _state = const LlmReady();
+          _model = model;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _state = LlmLoadError(_formatErrorMessage(e.toString()));
+        });
+      }
+    }
+  }
+
+  /// Generate response with streaming.
+  Future<void> _generate() async {
+    final prompt = _promptController.text.trim();
+    if (prompt.isEmpty) {
+      setState(() {
+        _state = const LlmInferenceError('Please enter a prompt.');
+      });
+      return;
+    }
+
+    if (_model == null) {
+      setState(() {
+        _state =
+            const LlmInferenceError('Model not loaded. Please load the model first.');
+      });
+      return;
+    }
+
+    setState(() {
+      _state = const LlmGenerating();
+      _responseText = '';
+      _tokenCount = 0;
+    });
+
+    try {
+      final envelope = XybridEnvelope.text(prompt);
+      final stream = _model!.runStreaming(envelope);
+
+      _streamSubscription = stream.listen(
+        (token) {
+          if (mounted) {
+            setState(() {
+              _responseText = token.cumulativeText;
+              _tokenCount = token.index + 1;
+            });
+
+            // Auto-scroll to bottom
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_scrollController.hasClients) {
+                _scrollController.animateTo(
+                  _scrollController.position.maxScrollExtent,
+                  duration: const Duration(milliseconds: 100),
+                  curve: Curves.easeOut,
+                );
+              }
+            });
+
+            // Check for completion
+            if (token.isFinal) {
+              setState(() {
+                _state = const LlmReady();
+              });
+            }
+          }
+        },
+        onError: (e) {
+          if (mounted) {
+            setState(() {
+              _state = LlmInferenceError(_formatErrorMessage(e.toString()));
+            });
+          }
+        },
+        onDone: () {
+          if (mounted && _state is LlmGenerating) {
+            setState(() {
+              _state = const LlmReady();
+            });
+          }
+        },
+      );
+    } on XybridException catch (e) {
+      if (mounted) {
+        setState(() {
+          _state = LlmInferenceError(e.message);
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _state = LlmInferenceError(_formatErrorMessage(e.toString()));
+        });
+      }
+    }
+  }
+
+  /// Stop the current generation.
+  void _stopGeneration() {
+    _streamSubscription?.cancel();
+    _streamSubscription = null;
+    if (mounted) {
+      setState(() {
+        _state = const LlmReady();
+      });
+    }
+  }
+
+  /// Format error message for user display.
+  String _formatErrorMessage(String error) {
+    if (error.contains('network') || error.contains('Network')) {
+      return 'Network error: Please check your internet connection and try again.';
+    }
+    if (error.contains('not found') || error.contains('NotFound')) {
+      return 'Model not found: The model may not be available in the registry.';
+    }
+    if (error.contains('timeout') || error.contains('Timeout')) {
+      return 'Request timed out: The server took too long to respond.';
+    }
+    if (error.contains('LLM features not enabled')) {
+      return 'LLM features not enabled in the current build.';
+    }
+    return error;
+  }
+
+  /// Convert screen state to ModelLoadState for the status card.
+  ModelLoadState get _modelLoadState {
+    return switch (_state) {
+      LlmIdle() => const ModelIdle(),
+      LlmLoadingModel(:final progress) => ModelLoading(progress: progress),
+      LlmLoadError(:final message) => ModelLoadError(message),
+      LlmReady() || LlmGenerating() || LlmInferenceError() => const ModelReady(),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: theme.colorScheme.inversePrimary,
+        title: const Text('LLM Chat'),
+      ),
+      body: Column(
+        children: [
+          // Description card
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'About LLM Demo',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'This demo shows LLM inference with token streaming, '
+                      'similar to running "xybrid repl --stream". Tokens are '
+                      'displayed as they are generated.',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Model status section
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ModelStatusCard(
+              state: _modelLoadState,
+              modelId: _llmModelId,
+              idleIcon: Icons.psychology_outlined,
+              idleTitle: 'LLM Model Required',
+              idleDescription: 'Load the $_llmModelId model to start chatting.',
+              onLoad: _loadModel,
+              readyTrailing: _tokenCount > 0
+                  ? Chip(
+                      label: Text('$_tokenCount tokens'),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                    )
+                  : null,
+            ),
+          ),
+
+          // Chat interface (only shown when model is loaded)
+          if (_model != null) ...[
+            const SizedBox(height: 16),
+
+            // Response area
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _buildResponseSection(theme),
+              ),
+            ),
+
+            // Input area
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: _buildInputSection(theme),
+            ),
+          ] else
+            const Spacer(),
+        ],
+      ),
+    );
+  }
+
+  /// Build the response display section.
+  Widget _buildResponseSection(ThemeData theme) {
+    // Inference error state
+    if (_state case LlmInferenceError(:final message)) {
+      return Card(
+        color: theme.colorScheme.errorContainer.withAlpha(100),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.error_outline, color: theme.colorScheme.error),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Error',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                message,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _generate,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Response display
+    return Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.smart_toy_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Response',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+                const Spacer(),
+                if (_state is LlmGenerating)
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+
+          // Response text
+          Expanded(
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              padding: const EdgeInsets.all(16),
+              child: _responseText.isEmpty
+                  ? Text(
+                      'Enter a prompt below and tap "Send" to generate a response.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    )
+                  : SelectableText(
+                      _responseText,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build the input section.
+  Widget _buildInputSection(ThemeData theme) {
+    final isReady = _state is LlmReady;
+    final isGenerating = _state is LlmGenerating;
+
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _promptController,
+            decoration: const InputDecoration(
+              labelText: 'Prompt',
+              hintText: 'Enter your message...',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.edit_note),
+            ),
+            maxLines: 2,
+            minLines: 1,
+            enabled: isReady,
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) {
+              if (isReady) {
+                _generate();
+              }
+            },
+          ),
+        ),
+        const SizedBox(width: 12),
+        if (isGenerating)
+          FilledButton.tonalIcon(
+            onPressed: _stopGeneration,
+            icon: const Icon(Icons.stop),
+            label: const Text('Stop'),
+          )
+        else
+          FilledButton.icon(
+            onPressed: isReady ? _generate : null,
+            icon: const Icon(Icons.send),
+            label: const Text('Send'),
+          ),
+      ],
+    );
+  }
+}

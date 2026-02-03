@@ -3,6 +3,7 @@ use xybrid_sdk::InferenceResult;
 
 /// FFI wrapper for inference results.
 /// Fields are public and accessible directly via FRB-generated bindings.
+#[derive(Clone)]
 pub struct FfiResult {
     pub success: bool,
     pub text: Option<String>,

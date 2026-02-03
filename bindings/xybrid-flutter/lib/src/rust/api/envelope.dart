@@ -12,24 +12,33 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `into_envelope`
 
-// Rust type: RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>>
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>>
 abstract class FfiEnvelope implements RustOpaqueInterface {
   /// Create audio envelope with raw bytes and format metadata.
-  static FfiEnvelope audio(
-          {required List<int> bytes,
-          required int sampleRate,
-          required int channels}) =>
-      XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeAudio(
-          bytes: bytes, sampleRate: sampleRate, channels: channels);
+  static FfiEnvelope audio({
+    required List<int> bytes,
+    required int sampleRate,
+    required int channels,
+  }) => XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeAudio(
+    bytes: bytes,
+    sampleRate: sampleRate,
+    channels: channels,
+  );
 
   /// Create embedding envelope from float vector.
-  static FfiEnvelope embedding({required List<double> data}) =>
-      XybridRustLib.instance.api
-          .crateApiEnvelopeFfiEnvelopeEmbedding(data: data);
+  static FfiEnvelope embedding({required List<double> data}) => XybridRustLib
+      .instance
+      .api
+      .crateApiEnvelopeFfiEnvelopeEmbedding(data: data);
 
   /// Create text envelope for TTS with optional voice and speed.
-  static FfiEnvelope text(
-          {required String text, String? voiceId, double? speed}) =>
-      XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeText(
-          text: text, voiceId: voiceId, speed: speed);
+  static FfiEnvelope text({
+    required String text,
+    String? voiceId,
+    double? speed,
+  }) => XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeText(
+    text: text,
+    voiceId: voiceId,
+    speed: speed,
+  );
 }

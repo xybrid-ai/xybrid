@@ -40,6 +40,12 @@ class DemoHubScreen extends StatelessWidget {
             onTap: () => Navigator.pushNamed(context, '/demos/pipelines'),
           ),
           _DemoTile(
+            icon: Icons.psychology,
+            title: 'LLM Chat',
+            subtitle: 'Text generation with streaming',
+            onTap: () => Navigator.pushNamed(context, '/demos/llm'),
+          ),
+          _DemoTile(
             icon: Icons.warning,
             title: 'Error Handling',
             subtitle: 'Error patterns showcase',

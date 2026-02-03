@@ -7172,6 +7172,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-stream"
+version = "0.1.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "tokio-tungstenite"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8860,6 +8871,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
  "ureq 2.12.1",
  "uuid 1.20.0",
  "xybrid-core",
@@ -8883,6 +8895,8 @@ dependencies = [
  "log",
  "ort",
  "oslog",
+ "tokio",
+ "tokio-stream",
  "xybrid-core",
  "xybrid-sdk",
 ]

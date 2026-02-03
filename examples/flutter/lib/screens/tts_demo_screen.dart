@@ -1,17 +1,65 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:xybrid_flutter/xybrid.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:xybrid_example/widgets/model_status_card.dart';
+import 'package:xybrid_flutter/xybrid.dart';
 
 /// Text-to-Speech demo screen.
 ///
 /// Demonstrates how to run text-based inference (TTS) using the Xybrid SDK.
-
 class TextToSpeechScreen extends StatefulWidget {
   const TextToSpeechScreen({super.key});
 
   @override
   State<TextToSpeechScreen> createState() => _TextToSpeechScreenState();
+}
+
+/// Sealed class representing TTS screen states.
+sealed class TtsScreenState {
+  const TtsScreenState();
+}
+
+/// Initial state before model is loaded.
+class TtsIdle extends TtsScreenState {
+  const TtsIdle();
+}
+
+/// Model is being downloaded/loaded with progress.
+class TtsLoadingModel extends TtsScreenState {
+  final double? progress;
+
+  const TtsLoadingModel({this.progress});
+}
+
+/// Model failed to load.
+class TtsLoadError extends TtsScreenState {
+  final String message;
+
+  const TtsLoadError(this.message);
+}
+
+/// Model is loaded and ready for inference.
+class TtsReady extends TtsScreenState {
+  const TtsReady();
+}
+
+/// Model is synthesizing speech.
+class TtsSynthesizing extends TtsScreenState {
+  const TtsSynthesizing();
+}
+
+/// Audio is playing.
+class TtsPlaying extends TtsScreenState {
+  const TtsPlaying();
+}
+
+/// Inference failed with an error.
+class TtsError extends TtsScreenState {
+  final String message;
+
+  const TtsError(this.message);
 }
 
 class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
@@ -24,7 +72,7 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
   final _audioPlayer = AudioPlayer();
 
   /// Current screen state.
-  _TtsState _state = _TtsState.idle;
+  TtsScreenState _state = const TtsIdle();
 
   /// Loaded TTS model (if any).
   XybridModel? _model;
@@ -32,14 +80,14 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
   /// The model ID used for TTS.
   static const _ttsModelId = 'kokoro-82m';
 
-  /// Error message if operation failed.
-  String? _errorMessage;
-
   /// Latency of the last inference in milliseconds.
   int? _latencyMs;
 
   /// Whether audio is currently playing.
   bool _isPlaying = false;
+
+  /// Load progress stream subscription.
+  StreamSubscription<LoadEvent>? _loadSubscription;
 
   @override
   void initState() {
@@ -57,37 +105,67 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
   void dispose() {
     _textController.dispose();
     _audioPlayer.dispose();
+    _loadSubscription?.cancel();
     super.dispose();
   }
 
-  /// Load the TTS model from the registry.
+  /// Load the TTS model from the registry with progress tracking.
   Future<void> _loadModel() async {
     setState(() {
-      _state = _TtsState.loadingModel;
-      _errorMessage = null;
+      _state = const TtsLoadingModel();
     });
 
     try {
       final loader = XybridModelLoader.fromRegistry(_ttsModelId);
+
+      _loadSubscription = loader.loadWithProgress().listen(
+        (event) {
+          if (!mounted) return;
+
+          switch (event) {
+            case LoadProgress(:final progress):
+              setState(() {
+                _state = TtsLoadingModel(progress: progress);
+              });
+            case LoadComplete():
+              _finalizeModelLoad(loader);
+            case LoadError(:final message):
+              setState(() {
+                _state = TtsLoadError(message);
+              });
+          }
+        },
+        onError: (e) {
+          if (mounted) {
+            setState(() {
+              _state = TtsLoadError(_formatErrorMessage(e.toString()));
+            });
+          }
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _state = TtsLoadError(_formatErrorMessage(e.toString()));
+        });
+      }
+    }
+  }
+
+  /// Finalize model load after download completes.
+  Future<void> _finalizeModelLoad(XybridModelLoader loader) async {
+    try {
       final model = await loader.load();
       if (mounted) {
         setState(() {
-          _state = _TtsState.ready;
+          _state = const TtsReady();
           _model = model;
-        });
-      }
-    } on XybridException catch (e) {
-      if (mounted) {
-        setState(() {
-          _state = _TtsState.error;
-          _errorMessage = e.message;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _state = _TtsState.error;
-          _errorMessage = _formatErrorMessage(e.toString());
+          _state = TtsLoadError(_formatErrorMessage(e.toString()));
         });
       }
     }
@@ -98,23 +176,20 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
     final text = _textController.text.trim();
     if (text.isEmpty) {
       setState(() {
-        _state = _TtsState.error;
-        _errorMessage = 'Please enter some text to speak.';
+        _state = const TtsError('Please enter some text to speak.');
       });
       return;
     }
 
     if (_model == null) {
       setState(() {
-        _state = _TtsState.error;
-        _errorMessage = 'Model not loaded. Please load the model first.';
+        _state = const TtsError('Model not loaded. Please load the model first.');
       });
       return;
     }
 
     setState(() {
-      _state = _TtsState.synthesizing;
-      _errorMessage = null;
+      _state = const TtsSynthesizing();
       _latencyMs = null;
     });
 
@@ -134,7 +209,7 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
 
       if (mounted) {
         setState(() {
-          _state = _TtsState.playing;
+          _state = const TtsPlaying();
           _latencyMs = result.latencyMs;
         });
 
@@ -142,22 +217,20 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
 
         if (mounted) {
           setState(() {
-            _state = _TtsState.ready;
+            _state = const TtsReady();
           });
         }
       }
     } on XybridException catch (e) {
       if (mounted) {
         setState(() {
-          _state = _TtsState.error;
-          _errorMessage = e.message;
+          _state = TtsError(e.message);
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _state = _TtsState.error;
-          _errorMessage = _formatErrorMessage(e.toString());
+          _state = TtsError(_formatErrorMessage(e.toString()));
         });
       }
     }
@@ -182,9 +255,9 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
   /// Stop audio playback.
   Future<void> _stopAudio() async {
     await _audioPlayer.stop();
-    if (mounted && _state == _TtsState.playing) {
+    if (mounted && _state is TtsPlaying) {
       setState(() {
-        _state = _TtsState.ready;
+        _state = const TtsReady();
       });
     }
   }
@@ -201,6 +274,20 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
       return 'Request timed out: The server took too long to respond.';
     }
     return error;
+  }
+
+  /// Convert screen state to ModelLoadState for the status card.
+  ModelLoadState get _modelLoadState {
+    return switch (_state) {
+      TtsIdle() => const ModelIdle(),
+      TtsLoadingModel(:final progress) => ModelLoading(progress: progress),
+      TtsLoadError(:final message) => ModelLoadError(message),
+      TtsReady() ||
+      TtsSynthesizing() ||
+      TtsPlaying() ||
+      TtsError() =>
+        const ModelReady(),
+    };
   }
 
   @override
@@ -249,7 +336,15 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
             const SizedBox(height: 24),
 
             // Model status section
-            _buildModelStatusSection(theme),
+            ModelStatusCard(
+              state: _modelLoadState,
+              modelId: _ttsModelId,
+              idleIcon: Icons.record_voice_over,
+              idleTitle: 'TTS Model Required',
+              idleDescription:
+                  'Load the $_ttsModelId model to start synthesizing speech.',
+              onLoad: _loadModel,
+            ),
             const SizedBox(height: 24),
 
             // Text input section (only shown when model is loaded)
@@ -263,14 +358,14 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
                   prefixIcon: Icon(Icons.text_fields),
                 ),
                 maxLines: 3,
-                enabled: _state == _TtsState.ready,
+                enabled: _state is TtsReady,
               ),
               const SizedBox(height: 16),
 
               // Speak button
               FilledButton.icon(
-                onPressed: _state == _TtsState.ready ? _speak : null,
-                icon: _state == _TtsState.synthesizing
+                onPressed: _state is TtsReady ? _speak : null,
+                icon: _state is TtsSynthesizing
                     ? const SizedBox(
                         width: 20,
                         height: 20,
@@ -281,9 +376,7 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
                       )
                     : const Icon(Icons.record_voice_over),
                 label: Text(
-                  _state == _TtsState.synthesizing
-                      ? 'Synthesizing...'
-                      : 'Speak',
+                  _state is TtsSynthesizing ? 'Synthesizing...' : 'Speak',
                 ),
               ),
               const SizedBox(height: 24),
@@ -297,96 +390,10 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
     );
   }
 
-  /// Build the model status section.
-  Widget _buildModelStatusSection(ThemeData theme) {
-    if (_state == _TtsState.loadingModel) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              Text(
-                'Loading $_ttsModelId...',
-                style: theme.textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Downloading model from registry...',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (_model == null) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Icon(
-                Icons.smart_toy_outlined,
-                size: 48,
-                color: theme.colorScheme.primary,
-              ),
-              const SizedBox(height: 16),
-              Text('TTS Model Required', style: theme.textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Text(
-                'Load the $_ttsModelId model to start synthesizing speech.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _loadModel,
-                icon: const Icon(Icons.download),
-                label: const Text('Load Model'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Card(
-      color: theme.colorScheme.primaryContainer.withAlpha(100),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Icon(Icons.check_circle, color: theme.colorScheme.primary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Model Ready',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
-                  Text(_ttsModelId, style: theme.textTheme.bodySmall),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// Build the status display section.
   Widget _buildStatusSection(ThemeData theme) {
     // Playing state
-    if (_state == _TtsState.playing) {
+    if (_state is TtsPlaying) {
       return Card(
         color: theme.colorScheme.secondaryContainer.withAlpha(100),
         child: Padding(
@@ -432,7 +439,7 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
     }
 
     // Error state
-    if (_state == _TtsState.error && _errorMessage != null) {
+    if (_state case TtsError(:final message)) {
       return Card(
         color: theme.colorScheme.errorContainer.withAlpha(100),
         child: Padding(
@@ -454,7 +461,7 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                _errorMessage!,
+                message,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onErrorContainer,
                 ),
@@ -472,7 +479,7 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
     }
 
     // Show latency from previous inference if available
-    if (_latencyMs != null && _state == _TtsState.ready) {
+    if (_latencyMs != null && _state is TtsReady) {
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -493,9 +500,6 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
     return const SizedBox.shrink();
   }
 }
-
-/// TTS screen states.
-enum _TtsState { idle, loadingModel, ready, synthesizing, playing, error }
 
 /// Custom audio source for playing bytes directly with just_audio.
 class _AudioBytesSource extends StreamAudioSource {
