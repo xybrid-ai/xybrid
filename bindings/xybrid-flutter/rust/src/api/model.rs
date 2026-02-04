@@ -54,6 +54,24 @@ pub struct FfiModelLoader(ModelLoader);
 #[frb(opaque)]
 pub struct FfiModel(Arc<XybridModel>);
 
+impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
+    fn from(event: xybrid_sdk::StreamEvent) -> Self {
+        match event {
+            xybrid_sdk::StreamEvent::Token(token) => FfiStreamEvent::Token(FfiStreamToken {
+                token: token.token,
+                token_id: token.token_id,
+                index: token.index as u32,
+                cumulative_text: token.cumulative_text,
+                finish_reason: token.finish_reason,
+            }),
+            xybrid_sdk::StreamEvent::Complete(result) => {
+                FfiStreamEvent::Complete(FfiResult::from_inference_result(&result))
+            }
+            xybrid_sdk::StreamEvent::Error(e) => FfiStreamEvent::Error(e),
+        }
+    }
+}
+
 impl FfiModelLoader {
     #[frb(sync)]
     pub fn from_registry(model_id: String) -> FfiModelLoader {
@@ -135,32 +153,34 @@ impl FfiModel {
         let model = self.0.clone();
         let env = envelope.into_envelope();
 
-        // Spawn async task to handle the stream
-        tokio::spawn(async move {
-            let mut stream = model.run_stream(env);
-
-            while let Some(event) = stream.next().await {
-                let ffi_event = match event {
-                    xybrid_sdk::StreamEvent::Token(token) => {
-                        FfiStreamEvent::Token(FfiStreamToken {
-                            token: token.token,
-                            token_id: token.token_id,
-                            index: token.index as u32,
-                            cumulative_text: token.cumulative_text,
-                            finish_reason: token.finish_reason,
-                        })
-                    }
-                    xybrid_sdk::StreamEvent::Complete(result) => {
-                        FfiStreamEvent::Complete(FfiResult::from_inference_result(&result))
-                    }
-                    xybrid_sdk::StreamEvent::Error(e) => FfiStreamEvent::Error(e),
-                };
-
-                // Send to Dart stream (ignore errors if sink is closed)
-                if sink.add(ffi_event).is_err() {
-                    break;
+        // Spawn a background thread with its own Tokio runtime
+        // (same pattern as load_with_progress which works)
+        std::thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let _ = sink.add(FfiStreamEvent::Error(format!(
+                        "Failed to create runtime: {}",
+                        e
+                    )));
+                    return;
                 }
-            }
+            };
+
+            rt.block_on(async move {
+                let mut stream = model.run_stream(env);
+
+                while let Some(event) = stream.next().await {
+                    let ffi_event = FfiStreamEvent::from(event);
+                    // Send to Dart stream (ignore errors if sink is closed)
+                    if sink.add(ffi_event).is_err() {
+                        break;
+                    }
+                }
+            });
         });
     }
 
@@ -173,4 +193,3 @@ impl FfiModel {
         self.0.supports_token_streaming()
     }
 }
-

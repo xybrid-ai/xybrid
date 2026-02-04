@@ -78,7 +78,7 @@ class XybridRustLib
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1139201618;
+  int get rustContentHash => -2093305645;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -146,6 +146,10 @@ abstract class XybridRustLibApi extends BaseApi {
 
   List<String> crateApiPipelineFfiPipelineStageNames({
     required FfiPipeline that,
+  });
+
+  void crateApiSdkClientXybridSdkClientInitSdkCacheDir({
+    required String cacheDir,
   });
 
   void crateApiSdkClientXybridSdkClientSetApiKey({required String apiKey});
@@ -723,13 +727,41 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       );
 
   @override
+  void crateApiSdkClientXybridSdkClientInitSdkCacheDir({
+    required String cacheDir,
+  }) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(cacheDir, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSdkClientXybridSdkClientInitSdkCacheDirConstMeta,
+        argValues: [cacheDir],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSdkClientXybridSdkClientInitSdkCacheDirConstMeta =>
+      const TaskConstMeta(
+        debugName: "XybridSdkClient_init_sdk_cache_dir",
+        argNames: ["cacheDir"],
+      );
+
+  @override
   void crateApiSdkClientXybridSdkClientSetApiKey({required String apiKey}) {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(apiKey, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 18)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,

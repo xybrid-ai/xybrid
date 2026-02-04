@@ -81,6 +81,15 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   /// Number of tokens generated.
   int _tokenCount = 0;
 
+  /// Generation start time for timing calculations.
+  DateTime? _generationStartTime;
+
+  /// Total inference time in milliseconds.
+  int? _inferenceTimeMs;
+
+  /// Tokens per second (calculated after generation completes).
+  double? _tokensPerSecond;
+
   /// Generation stream subscription.
   StreamSubscription<StreamToken>? _streamSubscription;
 
@@ -181,6 +190,9 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
       _state = const LlmGenerating();
       _responseText = '';
       _tokenCount = 0;
+      _inferenceTimeMs = null;
+      _tokensPerSecond = null;
+      _generationStartTime = DateTime.now();
     });
 
     try {
@@ -208,6 +220,7 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
 
             // Check for completion
             if (token.isFinal) {
+              _calculateInferenceStats();
               setState(() {
                 _state = const LlmReady();
               });
@@ -223,6 +236,7 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
         },
         onDone: () {
           if (mounted && _state is LlmGenerating) {
+            _calculateInferenceStats();
             setState(() {
               _state = const LlmReady();
             });
@@ -248,10 +262,22 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   void _stopGeneration() {
     _streamSubscription?.cancel();
     _streamSubscription = null;
+    _calculateInferenceStats();
     if (mounted) {
       setState(() {
         _state = const LlmReady();
       });
+    }
+  }
+
+  /// Calculate inference statistics after generation completes.
+  void _calculateInferenceStats() {
+    if (_generationStartTime != null && _tokenCount > 0) {
+      final elapsed = DateTime.now().difference(_generationStartTime!);
+      _inferenceTimeMs = elapsed.inMilliseconds;
+      if (_inferenceTimeMs! > 0) {
+        _tokensPerSecond = (_tokenCount / _inferenceTimeMs!) * 1000;
+      }
     }
   }
 
@@ -468,6 +494,66 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
                     ),
             ),
           ),
+
+          // Stats row (shown when we have results)
+          if (_inferenceTimeMs != null || _state is LlmGenerating)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest.withAlpha(100),
+                border: Border(
+                  top: BorderSide(
+                    color: theme.colorScheme.outline.withAlpha(50),
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.timer_outlined,
+                    size: 16,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  if (_state is LlmGenerating)
+                    Text(
+                      'Generating...',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    )
+                  else if (_inferenceTimeMs != null) ...[
+                    Text(
+                      'Inference: ${(_inferenceTimeMs! / 1000).toStringAsFixed(2)}s',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Icon(
+                      Icons.speed,
+                      size: 16,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$_tokenCount tokens',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    if (_tokensPerSecond != null) ...[
+                      Text(
+                        ' (${_tokensPerSecond!.toStringAsFixed(1)} tok/s)',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ],
+              ),
+            ),
         ],
       ),
     );

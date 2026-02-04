@@ -146,8 +146,9 @@ class XybridModel {
 
   /// Run inference with streaming output.
   ///
-  /// This method runs batch inference and then emits tokens progressively,
-  /// simulating a streaming experience. Returns a [Stream] of [StreamToken].
+  /// This method uses native token-by-token streaming for LLM models,
+  /// providing real-time token output as they are generated.
+  /// Returns a [Stream] of [StreamToken].
   ///
   /// Each [StreamToken] contains the generated token text and metadata.
   /// The stream completes when generation finishes.
@@ -167,63 +168,36 @@ class XybridModel {
   /// ```
   Stream<StreamToken> runStreaming(XybridEnvelope envelope) async* {
     try {
-      // Run batch inference
-      final result = await run(envelope);
-      final fullText = result.text;
+      // Use native streaming from FFI
+      final stream = inner.runStream(envelope: envelope.inner);
 
-      if (fullText == null || fullText.isEmpty) {
-        // Empty response
-        yield StreamToken(
-          token: '',
-          index: 0,
-          cumulativeText: '',
-          isFinal: true,
-          finishReason: 'stop',
-        );
-        return;
-      }
-
-      // Split into words and emit progressively
-      // Use regex to preserve whitespace in output
-      final pattern = RegExp(r'(\S+)(\s*)');
-      final matches = pattern.allMatches(fullText).toList();
-
-      if (matches.isEmpty) {
-        yield StreamToken(
-          token: '',
-          index: 0,
-          cumulativeText: '',
-          isFinal: true,
-          finishReason: 'stop',
-        );
-        return;
-      }
-
-      var cumulative = '';
-      var tokenIndex = 0;
-
-      for (var i = 0; i < matches.length; i++) {
-        final match = matches[i];
-        final word = match.group(1) ?? '';
-        final trailing = match.group(2) ?? '';
-        final chunk = word + trailing;
-
-        // Build cumulative text
-        cumulative += chunk;
-
-        // Emit token
-        final isLast = i == matches.length - 1;
-        yield StreamToken(
-          token: chunk,
-          index: tokenIndex++,
-          cumulativeText: cumulative.trimRight(),
-          isFinal: isLast,
-          finishReason: isLast ? 'stop' : null,
-        );
-
-        // Small delay for streaming effect
-        if (!isLast) {
-          await Future.delayed(const Duration(milliseconds: 20));
+      await for (final event in stream) {
+        switch (event) {
+          case FfiStreamEvent_Token(:final field0):
+            yield StreamToken(
+              token: field0.token,
+              index: field0.index,
+              cumulativeText: field0.cumulativeText,
+              isFinal: field0.finishReason != null,
+              finishReason: field0.finishReason,
+            );
+          case FfiStreamEvent_Complete(:final field0):
+            // Emit final token with the complete result
+            yield StreamToken(
+              token: '',
+              index: 0,
+              cumulativeText: field0.text ?? '',
+              isFinal: true,
+              finishReason: 'stop',
+            );
+          case FfiStreamEvent_Error(:final field0):
+            yield StreamToken(
+              token: '',
+              index: 0,
+              cumulativeText: '',
+              isFinal: true,
+              finishReason: 'error: $field0',
+            );
         }
       }
     } catch (e) {

@@ -5,7 +5,7 @@ pub struct XybridSdkClient;
 
 impl XybridSdkClient {
     #[frb(sync)]
-    pub fn init_sdk_cache_dir(cache_dir: impl Into<std::path::PathBuf>) {
+    pub fn init_sdk_cache_dir(cache_dir: String) {
         xybrid_sdk::init_sdk_cache_dir(cache_dir);
     }
 

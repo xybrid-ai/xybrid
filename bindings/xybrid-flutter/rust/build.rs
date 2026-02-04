@@ -5,10 +5,9 @@ fn main() {
     {
         println!("cargo:rustc-link-lib=c++");
     }
-    
+
     #[cfg(target_os = "ios")]
     {
         println!("cargo:rustc-link-lib=c++");
     }
 }
-
