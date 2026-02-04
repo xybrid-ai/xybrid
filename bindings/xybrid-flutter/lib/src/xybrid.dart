@@ -7,8 +7,11 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-
+import 'package:xybrid_flutter/src/rust/api/sdk_client.dart';
+import 'package:path_provider/path_provider.dart';
 import 'rust/frb_generated.dart';
+
+import '../xybrid.dart';
 
 /// Main entry point for the Xybrid SDK.
 ///
@@ -70,6 +73,12 @@ class Xybrid {
 
       await XybridRustLib.init(externalLibrary: externalLibrary);
 
+      if (Platform.isAndroid) {
+        final appDir = await getApplicationSupportDirectory();
+        final cacheDir = '${appDir.path}/xybrid/models';
+        XybridSdkClient.initSdkCacheDir(cacheDir: cacheDir);
+      }
+
       _initialized = true;
       _initCompleter.complete();
     } catch (e) {
@@ -83,4 +92,66 @@ class Xybrid {
   ///
   /// Returns `true` if [init] has been called successfully.
   static bool get isInitialized => _initialized;
+
+  static void setApiKey(String apiKey) {
+    XybridSdkClient.setApiKey(apiKey: apiKey);
+  }
+
+  static void initTelemetry() {
+    // TODO - Implement telemetry
+    // XybridSdkClient.enableTelemetry();
+    throw UnimplementedError();
+  }
+
+  /// Create a ModelLoader for the specified model.
+  ///
+  /// This is the entry point for the **Loader → Model → Run** pattern.
+  ///
+  /// ## From Registry (recommended for production)
+  /// ```dart
+  /// final loader = Xybrid.model(modelId: 'whisper-tiny');
+  /// final model = await loader.load();
+  /// ```
+  static XybridModelLoader model(String modelId) =>
+      XybridModelLoader.fromRegistry(modelId);
+
+  /// Create a PipelineRef for multi-stage inference pipelines.
+  ///
+  /// Pipelines orchestrate multiple models in sequence (e.g., ASR → LLM → TTS).
+  ///
+  /// ## From YAML Content
+  /// ```dart
+  /// final yaml = '''
+  /// name: "Voice Assistant"
+  /// stages:
+  ///   - whisper-tiny
+  ///   - llm-stage
+  ///   - kokoro-tts
+  /// ''';
+  /// final ref = Xybrid.pipeline(yaml: yaml);
+  /// final pipeline = await ref.load();
+  /// ```
+  ///
+  /// ## From File
+  /// ```dart
+  /// final ref = Xybrid.pipeline(filePath: 'pipelines/voice-assistant.yaml');
+  /// ```
+  static XybridPipeline pipeline({String? yaml, String? filePath}) {
+    final hasYaml = yaml != null;
+    final hasFile = filePath != null;
+
+    if (!hasYaml && !hasFile) {
+      throw ArgumentError('Must provide either yaml or filePath');
+    }
+
+    if (hasYaml && hasFile) {
+      throw ArgumentError('Only one source can be specified: yaml or filePath');
+    }
+
+    if (hasYaml) {
+      return XybridPipeline.fromYaml(yaml);
+    }
+
+    return XybridPipeline.fromFile(filePath!);
+  }
 }
