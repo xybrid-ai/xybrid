@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:xybrid_example/widgets/model_status_card.dart';
 import 'package:xybrid_flutter/xybrid.dart';
 
@@ -488,9 +489,37 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
                         fontStyle: FontStyle.italic,
                       ),
                     )
-                  : SelectableText(
-                      _responseText,
-                      style: theme.textTheme.bodyMedium,
+                  : MarkdownBody(
+                      data: _responseText,
+                      selectable: true,
+                      styleSheet: MarkdownStyleSheet(
+                        p: theme.textTheme.bodyMedium,
+                        h1: theme.textTheme.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        h2: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        h3: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        strong: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        em: theme.textTheme.bodyMedium?.copyWith(
+                          fontStyle: FontStyle.italic,
+                        ),
+                        listBullet: theme.textTheme.bodyMedium,
+                        code: theme.textTheme.bodyMedium?.copyWith(
+                          fontFamily: 'monospace',
+                          backgroundColor:
+                              theme.colorScheme.surfaceContainerHighest,
+                        ),
+                        codeblockDecoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
                     ),
             ),
           ),
