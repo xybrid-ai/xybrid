@@ -1,7 +1,0 @@
-# Text-to-Speech Pipeline
-# Simple TTS demo using Kokoro
-
-name: text-to-speech
-
-stages:
-  - kokoro-82m
