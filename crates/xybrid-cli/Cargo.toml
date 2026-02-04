@@ -9,13 +9,34 @@ path = "src/main.rs"
 
 [features]
 default = []
-# LLM backend features (forwarded to xybrid-core)
-llm-llamacpp = ["xybrid-core/llm-llamacpp", "xybrid-sdk/llm-llamacpp"]
-llm-mistral = ["xybrid-core/llm-mistral", "xybrid-sdk/llm-mistral"]
+
+# PLATFORM PRESETS (forwarded from xybrid-sdk)
+platform-android = ["xybrid-sdk/platform-android"]
+platform-ios = ["xybrid-sdk/platform-ios"]
+platform-macos = ["xybrid-sdk/platform-macos"]
+platform-desktop = ["xybrid-sdk/platform-desktop"]
+
+# INDIVIDUAL FEATURE FORWARDING (for custom builds)
+
+# ONNX Runtime Execution Providers
+ort-download = ["xybrid-sdk/ort-download"]
+ort-dynamic = ["xybrid-sdk/ort-dynamic"]
+ort-coreml = ["xybrid-sdk/ort-coreml"]
+
+# Candle (Pure Rust ML)
+candle = ["xybrid-sdk/candle"]
+candle-metal = ["xybrid-sdk/candle-metal"]
+candle-cuda = ["xybrid-sdk/candle-cuda"]
+
+# Local LLM inference
+llm-mistral = ["xybrid-sdk/llm-mistral"]
+llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
+llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
+llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
 
 [dependencies]
-xybrid-core = { path = "../xybrid-core" }
-xybrid-sdk = { path = "../xybrid-sdk" }
+xybrid-core = { path = "../xybrid-core", default-features = false }
+xybrid-sdk = { path = "../xybrid-sdk", default-features = false }
 clap = { version = "4.5", features = ["derive", "env"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"

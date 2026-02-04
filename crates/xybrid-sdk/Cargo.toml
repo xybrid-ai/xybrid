@@ -8,7 +8,8 @@ name = "xybrid_sdk"
 path = "src/lib.rs"
 
 [dependencies]
-# xybrid-core is defined per-target below to support Android's ort-load-dynamic requirement
+# Base xybrid-core dependency (features selected via platform presets)
+xybrid-core = { path = "../xybrid-core", default-features = false }
 xybrid-macros = { path = "../../macros" }
 anyhow = "1.0"
 log = "0.4"
@@ -20,40 +21,53 @@ thiserror = "1.0"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync", "fs", "time"] }
 tokio-stream = "0.1"
 tempfile = "3.10"
-# ureq is configured per-platform below for Android compatibility
 uuid = { version = "1.0", features = ["v4", "v5", "serde"] }
 dirs = "5.0"
 sha2 = "0.10"
 
-# Platform-specific xybrid-core dependencies
-# Android: ort-dynamic (loads .so at runtime from AAR)
-# iOS: No ort (prebuilt binaries not available), uses Candle with Metal
-# Other platforms: Default features (download-binaries)
-
+# Platform-specific dependencies (NOT features - those are in presets)
+# Android: rustls with ring backend (aws-lc-rs uses getentropy unavailable on API 24)
 [target.'cfg(target_os = "android")'.dependencies]
-# Android: ort-dynamic + llama.cpp for LLM (mistral.rs has +fp16 SIGILL issues on Android)
-xybrid-core = { path = "../xybrid-core", default-features = false, features = ["ort-dynamic", "llm-llamacpp"] }
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
-# Force rustls to use ring crypto backend instead of aws-lc-rs (uses getentropy unavailable on API 24)
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
-[target.'cfg(target_os = "ios")'.dependencies]
-xybrid-core = { path = "../xybrid-core", default-features = false, features = ["candle-metal"] }
+[target.'cfg(not(target_os = "android"))'.dependencies]
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 
-[target.'cfg(all(not(target_os = "android"), not(target_os = "ios")))'.dependencies]
-xybrid-core = { path = "../xybrid-core" }
-ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
-
-# Feature flags
 [features]
 default = []
 
+# PLATFORM PRESETS (SINGLE SOURCE OF TRUTH)
+
+# Android: Dynamic ORT loading + llama.cpp (mistral.rs has SIGILL issues on ARM)
+platform-android = ["xybrid-core/ort-dynamic", "xybrid-core/llm-llamacpp"]
+
+# iOS: CoreML + Metal acceleration + llama.cpp
+platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/llm-llamacpp"]
+
+# macOS: CoreML + Metal + llama.cpp
+platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/llm-llamacpp"]
+
+# Desktop (Linux/Windows): CPU with mistral.rs + llama.cpp
+platform-desktop = ["xybrid-core/ort-download", "xybrid-core/llm-mistral", "xybrid-core/llm-llamacpp"]
+
+# INDIVIDUAL FEATURE FORWARDING (for custom builds)
+
+# ONNX Runtime Execution Providers
+ort-download = ["xybrid-core/ort-download"]
+ort-dynamic = ["xybrid-core/ort-dynamic"]
+ort-coreml = ["xybrid-core/ort-coreml"]
+
+# Candle (Pure Rust ML)
+candle = ["xybrid-core/candle"]
+candle-metal = ["xybrid-core/candle-metal"]
+candle-cuda = ["xybrid-core/candle-cuda"]
+
 # Local LLM inference
-llm-mistral = ["xybrid-core/llm-mistral"]              # mistral.rs (CPU)
-llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]  # mistral.rs + Metal (macOS)
-llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]    # mistral.rs + CUDA (NVIDIA)
-llm-llamacpp = ["xybrid-core/llm-llamacpp"]            # llama.cpp (Android-compatible)
+llm-mistral = ["xybrid-core/llm-mistral"]
+llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]
+llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]
+llm-llamacpp = ["xybrid-core/llm-llamacpp"]
 
 # Re-export the macro
 [package.metadata.docs.rs]

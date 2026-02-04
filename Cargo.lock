@@ -1322,6 +1322,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "csbindgen"
+version = "1.9.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "710604f525e7b68070458083252602c2bf2afe255dfe019e83bd57bdfa50bdb4"
+dependencies = [
+ "regex",
+ "syn 2.0.114",
+]
+
+[[package]]
 name = "cssparser"
 version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8842,6 +8852,7 @@ name = "xybrid-ffi"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "csbindgen",
  "libc",
  "xybrid-sdk",
 ]

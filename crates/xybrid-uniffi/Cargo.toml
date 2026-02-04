@@ -14,4 +14,25 @@ path = "uniffi-bindgen.rs"
 
 [dependencies]
 uniffi = { version = "0.25", features = ["cli"] }
-xybrid-sdk = { path = "../xybrid-sdk" }
+xybrid-sdk = { path = "../xybrid-sdk", default-features = false }
+
+[features]
+default = []
+
+# PLATFORM PRESETS (forwarded from xybrid-sdk)
+platform-android = ["xybrid-sdk/platform-android"]
+platform-ios = ["xybrid-sdk/platform-ios"]
+platform-macos = ["xybrid-sdk/platform-macos"]
+platform-desktop = ["xybrid-sdk/platform-desktop"]
+
+# INDIVIDUAL FEATURE FORWARDING (for custom builds)
+ort-download = ["xybrid-sdk/ort-download"]
+ort-dynamic = ["xybrid-sdk/ort-dynamic"]
+ort-coreml = ["xybrid-sdk/ort-coreml"]
+candle = ["xybrid-sdk/candle"]
+candle-metal = ["xybrid-sdk/candle-metal"]
+candle-cuda = ["xybrid-sdk/candle-cuda"]
+llm-mistral = ["xybrid-sdk/llm-mistral"]
+llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
+llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
+llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]

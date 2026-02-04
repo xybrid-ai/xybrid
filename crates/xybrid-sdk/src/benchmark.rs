@@ -250,7 +250,7 @@ impl ExecutionProviderInfo {
             "other"
         };
 
-        let coreml_available = cfg!(feature = "coreml-ep");
+        let coreml_available = cfg!(feature = "ort-coreml");
         let apple_silicon = cfg!(any(target_os = "ios", target_os = "macos"))
             && cfg!(target_arch = "aarch64");
 
