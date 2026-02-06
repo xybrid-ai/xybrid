@@ -47,6 +47,9 @@ pub(crate) mod metadata_driven;
 pub(crate) mod tensor_utils;
 pub mod traits;
 
+// Always-available types for FFI/bindings (NOT feature-gated)
+pub mod types;
+
 // Runtime backends (organized in subdirectories)
 pub mod onnx;
 
@@ -90,12 +93,10 @@ pub use coreml::CoreMLRuntimeAdapter;
 #[cfg(feature = "candle")]
 pub use candle::{CandleBackend, CandleRuntimeAdapter};
 
-// LLM exports - shared types
+// LLM exports - adapter types only (ChatMessage, GenerationConfig, LlmConfig
+// are re-exported from types.rs unconditionally below)
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-pub use llm::{
-    ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
-    LlmRuntimeAdapter,
-};
+pub use llm::{GenerationOutput, LlmBackend, LlmResult, LlmRuntimeAdapter};
 
 // MistralBackend export (desktop only)
 #[cfg(feature = "llm-mistral")]
@@ -112,6 +113,11 @@ pub use llama_cpp::{llama_log_get_verbosity, llama_log_set_verbosity};
 // Re-export inference backend types
 pub use inference_backend::{BackendError, BackendResult, InferenceBackend, RuntimeType};
 pub use traits::ModelRuntime;
+
+// Always-available streaming and chat types (NOT feature-gated)
+pub use types::{
+    ChatMessage, GenerationConfig, LlmConfig, PartialToken, StreamingCallback, StreamingError,
+};
 
 /// Error type for runtime adapter operations.
 #[derive(Error, Debug)]

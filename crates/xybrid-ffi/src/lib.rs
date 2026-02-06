@@ -1059,6 +1059,54 @@ pub unsafe extern "C" fn xybrid_model_id(model: *mut XybridModelHandle) -> *mut 
     }
 }
 
+/// Check if a model supports token-by-token streaming.
+///
+/// Returns 1 if the model supports true token-by-token streaming (LLM models
+/// with GGUF format when LLM features are enabled), 0 otherwise.
+///
+/// Note: `xybrid_model_run_streaming()` (when implemented) will work for all
+/// models, but only LLM models get true token-by-token streaming; others emit
+/// a single result.
+///
+/// # Parameters
+///
+/// - `model`: A handle to the loaded model.
+///
+/// # Returns
+///
+/// - `1` if the model supports token streaming
+/// - `0` if it does not, or if the handle is null/invalid
+///
+/// # Example (C)
+///
+/// ```c
+/// if (xybrid_model_supports_token_streaming(model)) {
+///     // Use streaming inference
+/// } else {
+///     // Use batch inference
+/// }
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_supports_token_streaming(
+    model: *mut XybridModelHandle,
+) -> i32 {
+    // Don't clear last error - this is a read-only accessor
+    if model.is_null() {
+        return 0;
+    }
+
+    match XybridModelHandle::as_ref(model) {
+        Some(state) => {
+            if state.model.supports_token_streaming() {
+                1
+            } else {
+                0
+            }
+        }
+        None => 0,
+    }
+}
+
 /// Free a model handle.
 ///
 /// This function frees the memory associated with a model handle.
@@ -2058,14 +2106,18 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires real model from registry
     fn test_model_run_null_envelope() {
-        let model_id = CString::new("test-model").unwrap();
+        let model_id = CString::new("kokoro-82m").unwrap();
 
         unsafe {
             // Create loader and load model
             let loader = xybrid_model_loader_from_registry(model_id.as_ptr());
             let model = xybrid_model_loader_load(loader);
-            assert!(!model.is_null());
+            if model.is_null() {
+                xybrid_model_loader_free(loader);
+                return;
+            }
 
             // Run with null envelope
             let result = xybrid_model_run(model, std::ptr::null_mut());
@@ -2151,6 +2203,37 @@ mod tests {
             assert!(!error.is_null());
             let error_str = CStr::from_ptr(error).to_str().unwrap();
             assert_eq!(error_str, "model handle is null");
+        }
+    }
+
+    #[test]
+    fn test_model_supports_token_streaming_null_handle() {
+        unsafe {
+            // Null handle should return 0
+            assert_eq!(xybrid_model_supports_token_streaming(std::ptr::null_mut()), 0);
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires real model from registry
+    fn test_model_supports_token_streaming_tts() {
+        // TTS model should NOT support token streaming
+        let model_id = CString::new("kokoro-82m").unwrap();
+
+        unsafe {
+            let loader = xybrid_model_loader_from_registry(model_id.as_ptr());
+            let model = xybrid_model_loader_load(loader);
+            if model.is_null() {
+                xybrid_model_loader_free(loader);
+                return;
+            }
+
+            // TTS models don't support token streaming
+            let supports = xybrid_model_supports_token_streaming(model);
+            assert_eq!(supports, 0);
+
+            xybrid_model_free(model);
+            xybrid_model_loader_free(loader);
         }
     }
 

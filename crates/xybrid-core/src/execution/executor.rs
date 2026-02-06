@@ -37,8 +37,14 @@ use crate::runtime_adapter::onnx::{ONNXSession, OnnxRuntime};
 #[cfg(feature = "candle")]
 use crate::runtime_adapter::candle::CandleRuntime;
 
+// Always-available LLM types (defined in runtime_adapter/types.rs)
+use crate::runtime_adapter::types::{
+    ChatMessage, GenerationConfig, LlmConfig, PartialToken, StreamingCallback,
+};
+
+// LLM adapter implementation (only available with LLM features)
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-use crate::runtime_adapter::llm::{LlmConfig, LlmRuntimeAdapter};
+use crate::runtime_adapter::llm::LlmRuntimeAdapter;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::runtime_adapter::RuntimeAdapter;
 
@@ -82,8 +88,13 @@ pub struct TemplateExecutor {
     base_path: String,
     /// Cached LLM adapter to avoid reloading models between executions.
     /// Stores (model_path, adapter) tuple - reused if model_path matches.
+    /// This field always exists but is only populated when LLM features are enabled.
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     llm_adapter_cache: Option<(String, LlmRuntimeAdapter)>,
+    /// Placeholder for llm_adapter_cache when LLM features are disabled.
+    /// This ensures the struct has consistent fields regardless of features.
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    llm_adapter_cache: Option<()>,
 }
 
 impl TemplateExecutor {
@@ -132,7 +143,6 @@ impl TemplateExecutor {
         Self {
             runtimes,
             base_path: base_path.into(),
-            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             llm_adapter_cache: None,
         }
     }
@@ -454,6 +464,11 @@ impl TemplateExecutor {
     /// generated token during LLM inference. For non-LLM models, falls back to
     /// regular execution without streaming.
     ///
+    /// **Note**: This method signature is always available, but streaming only
+    /// works when the `llm-mistral` or `llm-llamacpp` feature is enabled.
+    /// Without these features, the callback is ignored and regular execution
+    /// is used.
+    ///
     /// # Arguments
     ///
     /// * `metadata` - Model metadata with execution configuration
@@ -469,58 +484,51 @@ impl TemplateExecutor {
     ///     Ok(())
     /// }))?;
     /// ```
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     pub fn execute_streaming(
         &mut self,
         metadata: &ModelMetadata,
         input: &Envelope,
-        on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+        #[allow(unused_variables)] on_token: StreamingCallback<'_>,
     ) -> ExecutorResult<Envelope> {
-        // Only GGUF (LLM) templates support streaming
-        if let super::template::ExecutionTemplate::Gguf {
-            model_file,
-            chat_template,
-            context_length,
-        } = &metadata.execution_template
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
-            let backend_hint = metadata
-                .metadata
-                .get("backend")
-                .and_then(|v| v.as_str());
-
-            return self.execute_llm_streaming(
+            // Only GGUF (LLM) templates support streaming
+            if let super::template::ExecutionTemplate::Gguf {
                 model_file,
-                chat_template.as_deref(),
-                *context_length,
-                input,
-                backend_hint,
-                on_token,
+                chat_template,
+                context_length,
+            } = &metadata.execution_template
+            {
+                let backend_hint = metadata
+                    .metadata
+                    .get("backend")
+                    .and_then(|v| v.as_str());
+
+                return self.execute_llm_streaming(
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    input,
+                    backend_hint,
+                    on_token,
+                );
+            }
+
+            // Non-LLM models: fall back to regular execution
+            debug!(
+                target: "xybrid_core",
+                "execute_streaming: Non-LLM model, falling back to regular execute()"
             );
         }
 
-        // Non-LLM models: fall back to regular execution
-        debug!(
-            target: "xybrid_core",
-            "execute_streaming: Non-LLM model, falling back to regular execute()"
-        );
-        self.execute(metadata, input)
-    }
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        {
+            debug!(
+                target: "xybrid_core",
+                "execute_streaming: LLM features not enabled, falling back to regular execute()"
+            );
+        }
 
-    /// Execute a model with streaming support (stub when LLM features disabled).
-    ///
-    /// Without LLM features, streaming is not available. This stub falls back
-    /// to regular execution.
-    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
-    pub fn execute_streaming<F>(
-        &mut self,
-        metadata: &ModelMetadata,
-        input: &Envelope,
-        _on_token: F,
-    ) -> ExecutorResult<Envelope>
-    where
-        F: FnMut(()) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    {
-        // No LLM support - just use regular execution
         self.execute(metadata, input)
     }
 
@@ -529,6 +537,11 @@ impl TemplateExecutor {
     /// Combines streaming execution with conversation history management.
     /// The context provides previous messages which are formatted into the prompt
     /// before streaming inference begins.
+    ///
+    /// **Note**: This method signature is always available, but streaming only
+    /// works when the `llm-mistral` or `llm-llamacpp` feature is enabled.
+    /// Without these features, the callback is ignored and regular execution
+    /// with context is used.
     ///
     /// # Arguments
     ///
@@ -549,16 +562,14 @@ impl TemplateExecutor {
     ///     Ok(())
     /// }))?;
     /// ```
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[allow(unused_variables)]
     pub fn execute_streaming_with_context(
         &mut self,
         metadata: &ModelMetadata,
         input: &Envelope,
         context: &ConversationContext,
-        on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+        on_token: StreamingCallback<'_>,
     ) -> ExecutorResult<Envelope> {
-        use crate::runtime_adapter::llm::ChatMessage;
-
         debug!(
             target: "xybrid_core",
             "TemplateExecutor.execute_streaming_with_context START: model_id={}, context_id={}",
@@ -566,93 +577,90 @@ impl TemplateExecutor {
             context.id()
         );
 
-        // Check if this is a GGUF (LLM) model
-        if let ExecutionTemplate::Gguf {
-            model_file,
-            context_length,
-            ..
-        } = &metadata.execution_template
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
-            debug!(
-                target: "xybrid_core",
-                "LLM model detected, converting context to ChatMessages for streaming"
-            );
+            // Check if this is a GGUF (LLM) model
+            if let ExecutionTemplate::Gguf {
+                model_file,
+                context_length,
+                ..
+            } = &metadata.execution_template
+            {
+                debug!(
+                    target: "xybrid_core",
+                    "LLM model detected, converting context to ChatMessages for streaming"
+                );
 
-            // Convert ConversationContext + input to ChatMessages
-            // This avoids double-formatting - we let llama.cpp apply its native template
-            let mut chat_messages: Vec<ChatMessage> = Vec::new();
+                // Convert ConversationContext + input to ChatMessages
+                // This avoids double-formatting - we let llama.cpp apply its native template
+                let mut chat_messages: Vec<ChatMessage> = Vec::new();
 
-            // Add context messages (system + history)
-            for envelope in context.context_for_llm() {
-                if let EnvelopeKind::Text(text) = &envelope.kind {
-                    let role = envelope.role().unwrap_or(MessageRole::User);
+                // Add context messages (system + history)
+                for envelope in context.context_for_llm() {
+                    if let EnvelopeKind::Text(text) = &envelope.kind {
+                        let role = envelope.role().unwrap_or(MessageRole::User);
+                        chat_messages.push(ChatMessage {
+                            role,
+                            content: text.clone(),
+                        });
+                    }
+                }
+
+                // Add current input
+                if let EnvelopeKind::Text(text) = &input.kind {
+                    let role = input.role().unwrap_or(MessageRole::User);
                     chat_messages.push(ChatMessage {
                         role,
                         content: text.clone(),
                     });
                 }
+
+                debug!(
+                    target: "xybrid_core",
+                    "Converted {} messages for LLM",
+                    chat_messages.len()
+                );
+
+                // Execute streaming with ChatMessages directly
+                let backend_hint = metadata
+                    .metadata
+                    .get("backend")
+                    .and_then(|v| v.as_str());
+
+                let result = self.execute_llm_streaming_with_messages(
+                    model_file,
+                    *context_length,
+                    &chat_messages,
+                    backend_hint,
+                    on_token,
+                )?;
+
+                // Tag the result as an assistant message
+                let result = result.with_role(MessageRole::Assistant);
+
+                return Ok(result);
             }
 
-            // Add current input
-            if let EnvelopeKind::Text(text) = &input.kind {
-                let role = input.role().unwrap_or(MessageRole::User);
-                chat_messages.push(ChatMessage {
-                    role,
-                    content: text.clone(),
-                });
-            }
-
+            // For non-LLM models, execute normally with streaming fallback
             debug!(
                 target: "xybrid_core",
-                "Converted {} messages for LLM",
-                chat_messages.len()
+                "Non-LLM model, executing streaming without context transformation"
             );
-
-            // Execute streaming with ChatMessages directly
-            let backend_hint = metadata
-                .metadata
-                .get("backend")
-                .and_then(|v| v.as_str());
-
-            let result = self.execute_llm_streaming_with_messages(
-                model_file,
-                *context_length,
-                &chat_messages,
-                backend_hint,
-                on_token,
-            )?;
-
-            // Tag the result as an assistant message
-            let result = result.with_role(MessageRole::Assistant);
+            let mut result = self.execute_streaming(metadata, input, on_token)?;
+            result = result.with_role(MessageRole::Assistant);
 
             return Ok(result);
         }
 
-        // For non-LLM models, execute normally with streaming fallback
-        debug!(
-            target: "xybrid_core",
-            "Non-LLM model, executing streaming without context transformation"
-        );
-        let mut result = self.execute_streaming(metadata, input, on_token)?;
-        result = result.with_role(MessageRole::Assistant);
-
-        Ok(result)
-    }
-
-    /// Execute a model with streaming and conversation context (stub when LLM features disabled).
-    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
-    pub fn execute_streaming_with_context<F>(
-        &mut self,
-        metadata: &ModelMetadata,
-        input: &Envelope,
-        context: &ConversationContext,
-        _on_token: F,
-    ) -> ExecutorResult<Envelope>
-    where
-        F: FnMut(()) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    {
-        // No LLM support - just use regular execution with context
-        self.execute_with_context(metadata, input, context)
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        {
+            debug!(
+                target: "xybrid_core",
+                "execute_streaming_with_context: LLM features not enabled, using execute_with_context()"
+            );
+            // No LLM support - just use regular execution with context
+            self.execute_with_context(metadata, input, context)
+        }
     }
 
     /// Execute LLM inference with streaming.
@@ -664,10 +672,9 @@ impl TemplateExecutor {
         context_length: usize,
         input: &Envelope,
         backend_hint: Option<&str>,
-        on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+        on_token: StreamingCallback<'_>,
     ) -> ExecutorResult<Envelope> {
-        use crate::ir::EnvelopeKind;
-        use crate::runtime_adapter::llm::{ChatMessage, GenerationConfig};
+        // ChatMessage, GenerationConfig, LlmConfig are imported at module level from types
 
         info!(
             target: "xybrid_core",
@@ -776,12 +783,11 @@ impl TemplateExecutor {
         &mut self,
         model_file: &str,
         context_length: usize,
-        messages: &[crate::runtime_adapter::llm::ChatMessage],
+        messages: &[ChatMessage],
         backend_hint: Option<&str>,
-        on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+        on_token: StreamingCallback<'_>,
     ) -> ExecutorResult<Envelope> {
-        use crate::ir::EnvelopeKind;
-        use crate::runtime_adapter::llm::GenerationConfig;
+        // GenerationConfig, LlmConfig are imported at module level from types
 
         info!(
             target: "xybrid_core",

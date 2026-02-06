@@ -9,6 +9,7 @@
 //! This causes SIGILL on Android devices without ARMv8.2-A FP16 extension.
 //! For Android, use `llama_cpp` backend instead.
 
+use crate::ir::MessageRole;
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
 };
@@ -60,12 +61,12 @@ impl MistralBackend {
         })
     }
 
-    /// Convert our ChatMessage to mistral.rs TextMessageRole.
-    fn convert_role(role: &str) -> TextMessageRole {
+    /// Convert our MessageRole to mistral.rs TextMessageRole.
+    fn convert_role(role: &MessageRole) -> TextMessageRole {
         match role {
-            "system" => TextMessageRole::System,
-            "assistant" => TextMessageRole::Assistant,
-            _ => TextMessageRole::User,
+            MessageRole::System => TextMessageRole::System,
+            MessageRole::Assistant => TextMessageRole::Assistant,
+            MessageRole::User => TextMessageRole::User,
         }
     }
 }

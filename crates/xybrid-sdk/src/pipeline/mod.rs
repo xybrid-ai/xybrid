@@ -1148,7 +1148,7 @@ impl Xybrid {
     pub fn run_pipeline_streaming<'a>(
         yaml: &str,
         envelope: &Envelope,
-        on_token: xybrid_core::runtime_adapter::llm::StreamingCallback<'a>,
+        on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'a>,
     ) -> PipelineResult<PipelineExecutionResult> {
         use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
 
@@ -1228,14 +1228,12 @@ impl Xybrid {
     /// Without LLM features, streaming is not available and this falls back
     /// to regular pipeline execution.
     #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
-    pub fn run_pipeline_streaming<F>(
+    #[allow(unused_variables)]
+    pub fn run_pipeline_streaming<'a>(
         yaml: &str,
         envelope: &Envelope,
-        _on_token: F,
-    ) -> PipelineResult<PipelineExecutionResult>
-    where
-        F: FnMut(()) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    {
+        on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'a>,
+    ) -> PipelineResult<PipelineExecutionResult> {
         // Without LLM features, just run normally
         Self::run_pipeline(yaml, envelope)
     }

@@ -439,6 +439,37 @@ struct XybridResultHandle *xybrid_model_run(struct XybridModelHandle *model,
 char *xybrid_model_id(struct XybridModelHandle *model);
 
 /*
+ Check if a model supports token-by-token streaming.
+
+ Returns 1 if the model supports true token-by-token streaming (LLM models
+ with GGUF format when LLM features are enabled), 0 otherwise.
+
+ Note: `xybrid_model_run_streaming()` (when implemented) will work for all
+ models, but only LLM models get true token-by-token streaming; others emit
+ a single result.
+
+ # Parameters
+
+ - `model`: A handle to the loaded model.
+
+ # Returns
+
+ - `1` if the model supports token streaming
+ - `0` if it does not, or if the handle is null/invalid
+
+ # Example (C)
+
+ ```c
+ if (xybrid_model_supports_token_streaming(model)) {
+     // Use streaming inference
+ } else {
+     // Use batch inference
+ }
+ ```
+ */
+int32_t xybrid_model_supports_token_streaming(struct XybridModelHandle *model);
+
+/*
  Free a model handle.
 
  This function frees the memory associated with a model handle.

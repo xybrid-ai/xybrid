@@ -1065,10 +1065,10 @@ impl XybridModel {
         mut on_token: F,
     ) -> SdkResult<InferenceResult>
     where
-        F: FnMut(xybrid_core::runtime_adapter::llm::PartialToken) -> Result<(), Box<dyn std::error::Error + Send + Sync>> + Send,
+        F: FnMut(xybrid_core::runtime_adapter::types::PartialToken) -> Result<(), Box<dyn std::error::Error + Send + Sync>> + Send,
     {
         use xybrid_core::execution::ExecutionTemplate;
-        use xybrid_core::runtime_adapter::llm::PartialToken;
+        use xybrid_core::runtime_adapter::types::PartialToken;
 
         let start = Instant::now();
 
@@ -1173,10 +1173,10 @@ impl XybridModel {
     /// ```
     pub fn run_streaming<F>(&self, envelope: &Envelope, mut on_token: F) -> SdkResult<InferenceResult>
     where
-        F: FnMut(xybrid_core::runtime_adapter::llm::PartialToken) -> Result<(), Box<dyn std::error::Error + Send + Sync>> + Send,
+        F: FnMut(xybrid_core::runtime_adapter::types::PartialToken) -> Result<(), Box<dyn std::error::Error + Send + Sync>> + Send,
     {
         use xybrid_core::execution::ExecutionTemplate;
-        use xybrid_core::runtime_adapter::llm::PartialToken;
+        use xybrid_core::runtime_adapter::types::PartialToken;
 
         let start = Instant::now();
 
@@ -1279,7 +1279,7 @@ impl XybridModel {
         envelope: Envelope,
     ) -> Pin<Box<dyn tokio_stream::Stream<Item = StreamEvent> + Send + '_>> {
         use tokio::sync::mpsc;
-        use xybrid_core::runtime_adapter::llm::PartialToken;
+        use xybrid_core::runtime_adapter::types::PartialToken;
 
         let (tx, rx) = mpsc::channel::<StreamEvent>(100);
         let handle = self.handle.clone();
@@ -1403,18 +1403,25 @@ impl XybridModel {
 
     /// Check if this model supports true token streaming.
     ///
-    /// Returns `true` for LLM models (GGUF), `false` for other model types.
+    /// Returns `true` for LLM models (GGUF) when LLM features are enabled,
+    /// `false` for other model types or when LLM features are disabled.
     /// Note: `run_streaming()` works for all models, but only LLM models
     /// get true token-by-token streaming; others emit a single result.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     pub fn supports_token_streaming(&self) -> bool {
-        use xybrid_core::execution::ExecutionTemplate;
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        {
+            use xybrid_core::execution::ExecutionTemplate;
 
-        self.handle
-            .read()
-            .ok()
-            .map(|h| matches!(h.metadata.execution_template, ExecutionTemplate::Gguf { .. }))
-            .unwrap_or(false)
+            self.handle
+                .read()
+                .ok()
+                .map(|h| matches!(h.metadata.execution_template, ExecutionTemplate::Gguf { .. }))
+                .unwrap_or(false)
+        }
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        {
+            false
+        }
     }
 
     /// Run batch inference asynchronously.

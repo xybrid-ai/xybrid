@@ -46,6 +46,83 @@
 //! and may change without notice. Use the public API modules listed above.
 
 // ============================================================================
+// Feature Combination Guards
+// These compile_error! blocks prevent invalid feature combinations at build time.
+// See docs/FEATURE_MATRIX.md for valid combinations.
+// ============================================================================
+
+// llm-mistral uses x86 AVX2/FP16 intrinsics that cause SIGILL on Android ARM devices
+// without ARMv8.2-A FP16 extensions (which most devices lack).
+// Use llm-llamacpp instead - it has runtime SIMD detection.
+#[cfg(all(feature = "llm-mistral", target_os = "android"))]
+compile_error!(
+    "Invalid feature combination: `llm-mistral` is not supported on Android.\n\n\
+    Reason: mistral.rs uses x86 AVX2/FP16 intrinsics that cause SIGILL on ARM devices \
+    without ARMv8.2-A FP16 extensions (most Android devices lack this).\n\n\
+    Solution: Use `llm-llamacpp` instead. It performs runtime SIMD detection and works \
+    on all Android devices.\n\n\
+    Change: --features llm-mistral -> --features llm-llamacpp"
+);
+
+// ort-download and ort-dynamic are mutually exclusive ORT loading strategies.
+// ort-download: Downloads prebuilt ONNX Runtime binaries at build time (desktop/iOS).
+// ort-dynamic: Loads .so/.dylib at runtime from platform-specific location (Android AAR).
+#[cfg(all(feature = "ort-download", feature = "ort-dynamic"))]
+compile_error!(
+    "Invalid feature combination: `ort-download` and `ort-dynamic` are mutually exclusive.\n\n\
+    Reason: These are two different strategies for loading ONNX Runtime:\n\
+    - `ort-download`: Downloads prebuilt binaries at build time (for desktop, macOS, iOS)\n\
+    - `ort-dynamic`: Loads .so at runtime from AAR/framework (for Android)\n\n\
+    Solution: Enable only one based on your target platform:\n\
+    - Desktop/macOS/iOS: Use `ort-download` (default)\n\
+    - Android: Use `ort-dynamic`\n\n\
+    Tip: Use platform presets instead: `platform-macos`, `platform-ios`, `platform-android`"
+);
+
+// candle-metal requires Apple's Metal GPU framework (macOS/iOS only).
+#[cfg(all(
+    feature = "candle-metal",
+    not(any(target_os = "macos", target_os = "ios"))
+))]
+compile_error!(
+    "Invalid feature combination: `candle-metal` requires macOS or iOS.\n\n\
+    Reason: Metal is Apple's GPU framework and is only available on Apple platforms.\n\n\
+    Solution:\n\
+    - For macOS/iOS: `candle-metal` is valid\n\
+    - For Linux with NVIDIA GPU: Use `candle-cuda` instead\n\
+    - For CPU-only: Use `candle` (no GPU acceleration)"
+);
+
+// candle-cuda requires NVIDIA CUDA which is not available on Apple platforms.
+#[cfg(all(
+    feature = "candle-cuda",
+    any(target_os = "macos", target_os = "ios")
+))]
+compile_error!(
+    "Invalid feature combination: `candle-cuda` is not supported on macOS or iOS.\n\n\
+    Reason: CUDA is NVIDIA's GPU framework and is not available on Apple platforms \
+    (Apple uses Metal instead).\n\n\
+    Solution:\n\
+    - For macOS/iOS with GPU: Use `candle-metal` instead\n\
+    - For CPU-only on Apple: Use `candle` (no GPU acceleration)"
+);
+
+// ort-coreml enables Apple's CoreML/Neural Engine acceleration (macOS/iOS only).
+#[cfg(all(
+    feature = "ort-coreml",
+    not(any(target_os = "macos", target_os = "ios"))
+))]
+compile_error!(
+    "Invalid feature combination: `ort-coreml` requires macOS or iOS.\n\n\
+    Reason: CoreML is Apple's ML framework for Neural Engine acceleration and is only \
+    available on Apple platforms.\n\n\
+    Solution:\n\
+    - For macOS/iOS: `ort-coreml` is valid (enables ANE acceleration)\n\
+    - For Android: Use `ort-dynamic` with NNAPI\n\
+    - For other platforms: Use `ort-download` (CPU only)"
+);
+
+// ============================================================================
 // Prelude - Common imports for convenience
 // ============================================================================
 
