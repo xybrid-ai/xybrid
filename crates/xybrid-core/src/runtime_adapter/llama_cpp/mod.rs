@@ -385,6 +385,20 @@ impl LlmBackend for LlamaCppBackend {
                     }
                 }
 
+                // Also check for partial/corrupted stop tokens (missing leading "<")
+                // This handles cases where the model generates malformed stop tokens
+                let partial_stop_markers = ["|im_end|>", "im_end|>", "end_of_turn>", "_of_turn>"];
+                for marker in partial_stop_markers {
+                    if cumulative_text.contains(marker) {
+                        log::debug!(target: "xybrid_core", "Streaming: detected partial stop marker '{}', stopping", marker);
+                        hit_stop_pattern = true;
+                        if let Some(pos) = cumulative_text.find(marker) {
+                            cumulative_text.truncate(pos);
+                        }
+                        return Ok(());
+                    }
+                }
+
                 // Find the safe portion to emit (excluding potential stop sequence starts)
                 let safe_end = find_potential_stop_start(&cumulative_text)
                     .unwrap_or(cumulative_text.len());
@@ -429,6 +443,60 @@ impl LlmBackend for LlamaCppBackend {
         if let Some(pos) = earliest_pos {
             text.truncate(pos);
             finish_reason = "stop".to_string();
+        }
+
+        // Clean up partial/corrupted stop tokens that may appear at the end
+        // This handles cases where the model generates parts of stop tokens
+        // that don't exactly match the full pattern (e.g., "|im_end|>" without "<")
+        let partial_stop_fragments = [
+            // ChatML partial fragments
+            "|im_end|>",
+            "im_end|>",
+            "_end|>",
+            "end|>",
+            "nd|>",
+            "d|>",
+            "|>",
+            "<|im_end",
+            "<|im_en",
+            "<|im_e",
+            "<|im_",
+            "<|im",
+            "<|i",
+            "<|",
+            // Gemma partial fragments
+            "end_of_turn>",
+            "_of_turn>",
+            "of_turn>",
+            "f_turn>",
+            "_turn>",
+            "turn>",
+            "urn>",
+            "rn>",
+            "n>",
+            "<end_of_turn",
+            "<end_of_tur",
+            "<end_of_tu",
+            "<end_of_t",
+            "<end_of_",
+            "<end_of",
+            "<end_o",
+            "<end_",
+            "<end",
+            // Common end markers
+            "</s",
+            "<s>",
+            "|endoftext|>",
+            "endoftext|>",
+        ];
+
+        for fragment in partial_stop_fragments {
+            if text.ends_with(fragment) {
+                log::debug!(target: "xybrid_core", "Cleaning up partial stop token: '{}'", fragment);
+                text.truncate(text.len() - fragment.len());
+                finish_reason = "stop".to_string();
+                break;
+            }
         }
 
         let text = text.trim().to_string();

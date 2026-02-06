@@ -557,6 +557,8 @@ impl TemplateExecutor {
         context: &ConversationContext,
         on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
     ) -> ExecutorResult<Envelope> {
+        use crate::runtime_adapter::llm::ChatMessage;
+
         debug!(
             target: "xybrid_core",
             "TemplateExecutor.execute_streaming_with_context START: model_id={}, context_id={}",
@@ -565,38 +567,63 @@ impl TemplateExecutor {
         );
 
         // Check if this is a GGUF (LLM) model
-        if let ExecutionTemplate::Gguf { chat_template, .. } = &metadata.execution_template {
+        if let ExecutionTemplate::Gguf {
+            model_file,
+            context_length,
+            ..
+        } = &metadata.execution_template
+        {
             debug!(
                 target: "xybrid_core",
-                "LLM model detected, formatting prompt with conversation context for streaming"
+                "LLM model detected, converting context to ChatMessages for streaming"
             );
 
-            // Determine the chat template format
-            let template_format = chat_template
-                .as_ref()
-                .and_then(|t| ChatTemplateFormat::from_str(t))
-                .unwrap_or_default();
+            // Convert ConversationContext + input to ChatMessages
+            // This avoids double-formatting - we let llama.cpp apply its native template
+            let mut chat_messages: Vec<ChatMessage> = Vec::new();
 
-            // Build the message list: context + current input
-            let mut messages: Vec<&Envelope> = context.context_for_llm();
-            messages.push(input);
+            // Add context messages (system + history)
+            for envelope in context.context_for_llm() {
+                if let EnvelopeKind::Text(text) = &envelope.kind {
+                    let role = envelope.role().unwrap_or(MessageRole::User);
+                    chat_messages.push(ChatMessage {
+                        role,
+                        content: text.clone(),
+                    });
+                }
+            }
 
-            // Format the full prompt
-            let formatted_prompt = ChatTemplateFormatter::format(&messages, template_format);
+            // Add current input
+            if let EnvelopeKind::Text(text) = &input.kind {
+                let role = input.role().unwrap_or(MessageRole::User);
+                chat_messages.push(ChatMessage {
+                    role,
+                    content: text.clone(),
+                });
+            }
+
             debug!(
                 target: "xybrid_core",
-                "Formatted prompt length: {} chars",
-                formatted_prompt.len()
+                "Converted {} messages for LLM",
+                chat_messages.len()
             );
 
-            // Create a new envelope with the formatted prompt
-            let prompt_envelope = Envelope::new(EnvelopeKind::Text(formatted_prompt));
+            // Execute streaming with ChatMessages directly
+            let backend_hint = metadata
+                .metadata
+                .get("backend")
+                .and_then(|v| v.as_str());
 
-            // Execute streaming with the formatted prompt
-            let mut result = self.execute_streaming(metadata, &prompt_envelope, on_token)?;
+            let result = self.execute_llm_streaming_with_messages(
+                model_file,
+                *context_length,
+                &chat_messages,
+                backend_hint,
+                on_token,
+            )?;
 
             // Tag the result as an assistant message
-            result = result.with_role(MessageRole::Assistant);
+            let result = result.with_role(MessageRole::Assistant);
 
             return Ok(result);
         }
@@ -708,6 +735,92 @@ impl TemplateExecutor {
         // Execute with streaming
         let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
             adapter.backend().generate_streaming(&messages, &gen_config, on_token)?
+        } else {
+            return Err(AdapterError::RuntimeError(
+                "LLM adapter cache unexpectedly empty".to_string(),
+            ));
+        };
+
+        // Build response envelope
+        let mut response_metadata = std::collections::HashMap::new();
+        response_metadata.insert(
+            "tokens_generated".to_string(),
+            output.tokens_generated.to_string(),
+        );
+        response_metadata.insert(
+            "generation_time_ms".to_string(),
+            output.generation_time_ms.to_string(),
+        );
+        response_metadata.insert(
+            "tokens_per_second".to_string(),
+            format!("{:.2}", output.tokens_per_second),
+        );
+        response_metadata.insert("finish_reason".to_string(), output.finish_reason);
+
+        Ok(Envelope {
+            kind: EnvelopeKind::Text(output.text),
+            metadata: response_metadata,
+        })
+    }
+
+    /// Execute LLM streaming with pre-built ChatMessages.
+    ///
+    /// This function takes ChatMessages directly, avoiding double-formatting
+    /// that would occur if we pre-formatted the prompt ourselves. The LLM
+    /// backend (llama.cpp) applies its native chat template to the messages.
+    ///
+    /// Used by `execute_streaming_with_context` to pass conversation history
+    /// to the LLM without our custom template formatting.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn execute_llm_streaming_with_messages(
+        &mut self,
+        model_file: &str,
+        context_length: usize,
+        messages: &[crate::runtime_adapter::llm::ChatMessage],
+        backend_hint: Option<&str>,
+        on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+    ) -> ExecutorResult<Envelope> {
+        use crate::ir::EnvelopeKind;
+        use crate::runtime_adapter::llm::GenerationConfig;
+
+        info!(
+            target: "xybrid_core",
+            "Executing LLM streaming with {} ChatMessages: {} (backend: {:?})",
+            messages.len(),
+            model_file,
+            backend_hint.unwrap_or("default")
+        );
+
+        let _llm_span = xybrid_trace::SpanGuard::new("llm_inference_streaming_with_messages");
+        xybrid_trace::add_metadata("model", model_file);
+        xybrid_trace::add_metadata("message_count", &messages.len().to_string());
+
+        // Build full model path
+        let model_path = Path::new(&self.base_path).join(model_file);
+        let model_path_str = model_path.to_string_lossy().to_string();
+
+        // Check if we have a cached adapter for this model path
+        let need_load = match &self.llm_adapter_cache {
+            Some((cached_path, _)) if cached_path == &model_path_str => false,
+            _ => true,
+        };
+
+        // Load model if needed
+        if need_load {
+            let config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length);
+
+            let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
+            adapter.load_model(&config.model_path)?;
+            self.llm_adapter_cache = Some((model_path_str.clone(), adapter));
+        }
+
+        // Use default generation config
+        let gen_config = GenerationConfig::default();
+
+        // Execute with streaming - pass ChatMessages directly to backend
+        let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
+            adapter.backend().generate_streaming(messages, &gen_config, on_token)?
         } else {
             return Err(AdapterError::RuntimeError(
                 "LLM adapter cache unexpectedly empty".to_string(),
