@@ -36,6 +36,11 @@ pub enum ChatTemplateFormat {
     /// Llama 2 format: `[INST] <<SYS>>\nsystem\n<</SYS>>\n\nuser [/INST] assistant`
     /// Used by Meta's Llama 2 family of models.
     Llama,
+
+    /// Gemma format: `<start_of_turn>role\ncontent<end_of_turn>\n`
+    /// Used by Google's Gemma family of models.
+    /// Note: Gemma uses "model" instead of "assistant" for the assistant role.
+    Gemma,
 }
 
 impl ChatTemplateFormat {
@@ -46,6 +51,7 @@ impl ChatTemplateFormat {
         match s.to_lowercase().as_str() {
             "chatml" | "chat_ml" | "chat-ml" => Some(Self::ChatML),
             "llama" | "llama2" | "llama-2" => Some(Self::Llama),
+            "gemma" | "gemma2" | "gemma3" | "gemma-2" | "gemma-3" => Some(Self::Gemma),
             _ => None,
         }
     }
@@ -75,6 +81,7 @@ impl ChatTemplateFormatter {
         match format {
             ChatTemplateFormat::ChatML => Self::format_chatml(messages),
             ChatTemplateFormat::Llama => Self::format_llama(messages),
+            ChatTemplateFormat::Gemma => Self::format_gemma(messages),
         }
     }
 
@@ -187,6 +194,48 @@ impl ChatTemplateFormatter {
             prompt.push_str("\n<</SYS>>\n\n");
             prompt.push_str(" [/INST] ");
         }
+
+        prompt
+    }
+
+    /// Format using Gemma template.
+    ///
+    /// Format: `<start_of_turn>role\ncontent<end_of_turn>\n`
+    /// Note: Gemma uses "model" instead of "assistant" for the assistant role.
+    fn format_gemma(messages: &[&Envelope]) -> String {
+        let mut prompt = String::new();
+
+        for envelope in messages {
+            let content = match &envelope.kind {
+                EnvelopeKind::Text(text) => text,
+                _ => continue, // Skip non-text envelopes
+            };
+
+            let role = envelope.role().unwrap_or(MessageRole::User);
+            // Gemma uses "model" instead of "assistant"
+            let role_str = match role {
+                MessageRole::System => "user", // Gemma doesn't have a system role, prepend to first user message
+                MessageRole::User => "user",
+                MessageRole::Assistant => "model",
+            };
+
+            // For system messages, we format them as a user turn with special prefix
+            if role == MessageRole::System {
+                prompt.push_str("<start_of_turn>user\n");
+                prompt.push_str("[System Instructions]\n");
+                prompt.push_str(content);
+                prompt.push_str("<end_of_turn>\n");
+            } else {
+                prompt.push_str("<start_of_turn>");
+                prompt.push_str(role_str);
+                prompt.push('\n');
+                prompt.push_str(content);
+                prompt.push_str("<end_of_turn>\n");
+            }
+        }
+
+        // Add the model start marker for generation
+        prompt.push_str("<start_of_turn>model\n");
 
         prompt
     }
@@ -354,6 +403,76 @@ mod tests {
     }
 
     // =========================================================================
+    // Gemma Format Tests
+    // =========================================================================
+
+    #[test]
+    fn test_gemma_single_user_message() {
+        let user = text_envelope("Hello!", MessageRole::User);
+        let messages = vec![&user];
+
+        let prompt = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::Gemma);
+
+        assert_eq!(
+            prompt,
+            "<start_of_turn>user\nHello!<end_of_turn>\n<start_of_turn>model\n"
+        );
+    }
+
+    #[test]
+    fn test_gemma_system_and_user() {
+        let system = text_envelope("You are a helpful assistant.", MessageRole::System);
+        let user = text_envelope("What is 2+2?", MessageRole::User);
+        let messages = vec![&system, &user];
+
+        let prompt = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::Gemma);
+
+        // System is formatted as a special user turn with [System Instructions] prefix
+        let expected = "<start_of_turn>user\n\
+                        [System Instructions]\n\
+                        You are a helpful assistant.<end_of_turn>\n\
+                        <start_of_turn>user\n\
+                        What is 2+2?<end_of_turn>\n\
+                        <start_of_turn>model\n";
+        assert_eq!(prompt, expected);
+    }
+
+    #[test]
+    fn test_gemma_multi_turn_conversation() {
+        let system = text_envelope("You are helpful.", MessageRole::System);
+        let user1 = text_envelope("Hello!", MessageRole::User);
+        let assistant1 = text_envelope("Hi there!", MessageRole::Assistant);
+        let user2 = text_envelope("How are you?", MessageRole::User);
+
+        let messages = vec![&system, &user1, &assistant1, &user2];
+
+        let prompt = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::Gemma);
+
+        let expected = "<start_of_turn>user\n\
+                        [System Instructions]\n\
+                        You are helpful.<end_of_turn>\n\
+                        <start_of_turn>user\n\
+                        Hello!<end_of_turn>\n\
+                        <start_of_turn>model\n\
+                        Hi there!<end_of_turn>\n\
+                        <start_of_turn>user\n\
+                        How are you?<end_of_turn>\n\
+                        <start_of_turn>model\n";
+        assert_eq!(prompt, expected);
+    }
+
+    #[test]
+    fn test_gemma_uses_model_for_assistant() {
+        let assistant = text_envelope("I am an assistant.", MessageRole::Assistant);
+        let messages = vec![&assistant];
+
+        let prompt = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::Gemma);
+
+        // Gemma uses "model" instead of "assistant"
+        assert!(prompt.contains("<start_of_turn>model\nI am an assistant.<end_of_turn>"));
+    }
+
+    // =========================================================================
     // Format Parsing Tests
     // =========================================================================
 
@@ -368,6 +487,12 @@ mod tests {
         assert_eq!(ChatTemplateFormat::from_str("Llama"), Some(ChatTemplateFormat::Llama));
         assert_eq!(ChatTemplateFormat::from_str("llama2"), Some(ChatTemplateFormat::Llama));
         assert_eq!(ChatTemplateFormat::from_str("llama-2"), Some(ChatTemplateFormat::Llama));
+
+        assert_eq!(ChatTemplateFormat::from_str("gemma"), Some(ChatTemplateFormat::Gemma));
+        assert_eq!(ChatTemplateFormat::from_str("Gemma"), Some(ChatTemplateFormat::Gemma));
+        assert_eq!(ChatTemplateFormat::from_str("gemma2"), Some(ChatTemplateFormat::Gemma));
+        assert_eq!(ChatTemplateFormat::from_str("gemma3"), Some(ChatTemplateFormat::Gemma));
+        assert_eq!(ChatTemplateFormat::from_str("gemma-3"), Some(ChatTemplateFormat::Gemma));
 
         assert_eq!(ChatTemplateFormat::from_str("unknown"), None);
         assert_eq!(ChatTemplateFormat::from_str(""), None);

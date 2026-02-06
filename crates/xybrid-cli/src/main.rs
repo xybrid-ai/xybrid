@@ -208,6 +208,10 @@ enum Commands {
         /// Stream tokens as they are generated (LLM models only)
         #[arg(long)]
         stream: bool,
+
+        /// System prompt to set the assistant's behavior
+        #[arg(long, value_name = "PROMPT")]
+        system: Option<String>,
     },
     /// Trace and analyze telemetry logs from a session
     Trace {
@@ -501,7 +505,8 @@ fn run_command(cli: Cli) -> Result<()> {
             voice,
             target,
             stream,
-        } => handle_repl_command(config, model, voice, target, stream, verbose),
+            system,
+        } => handle_repl_command(config, model, voice, target, stream, system, verbose),
         Commands::Trace {
             session,
             latest,
@@ -586,6 +591,7 @@ fn handle_repl_command(
     voice: Option<String>,
     _target: Option<String>,
     stream: bool,
+    system_prompt: Option<String>,
     verbose: u8,
 ) -> Result<()> {
     use std::io::{self, Write};
@@ -715,7 +721,15 @@ fn handle_repl_command(
         if let Ok(model) = model_result {
             if model.is_llm() {
                 println!("💬 LLM detected - conversation context enabled");
-                conversation_context = Some(ConversationContext::new());
+                let mut ctx = ConversationContext::new();
+                if let Some(ref prompt) = system_prompt {
+                    println!("📋 System prompt: {}", prompt);
+                    ctx = ctx.with_system(
+                        Envelope::new(EnvelopeKind::Text(prompt.clone()))
+                            .with_role(MessageRole::System)
+                    );
+                }
+                conversation_context = Some(ctx);
                 if verbose > 0 {
                     println!("   (Use 'history' to view conversation, 'clear' to reset)");
                 }
@@ -894,15 +908,28 @@ fn handle_repl_command(
                         let text_clone = Arc::clone(&accumulated_text);
 
                         // Execute with streaming callback via SDK
-                        match model.run_streaming(&input, |token| {
-                            print!("{}", token.token);
-                            io::stdout().flush()?;
-                            // Accumulate text for context
-                            if let Ok(mut text) = text_clone.lock() {
-                                text.push_str(&token.token);
-                            }
-                            Ok(())
-                        }) {
+                        // Use context-aware streaming if conversation context is active
+                        let streaming_result = if let Some(ref ctx) = conversation_context {
+                            model.run_streaming_with_context(&input, ctx, |token| {
+                                print!("{}", token.token);
+                                io::stdout().flush()?;
+                                if let Ok(mut text) = text_clone.lock() {
+                                    text.push_str(&token.token);
+                                }
+                                Ok(())
+                            })
+                        } else {
+                            model.run_streaming(&input, |token| {
+                                print!("{}", token.token);
+                                io::stdout().flush()?;
+                                if let Ok(mut text) = text_clone.lock() {
+                                    text.push_str(&token.token);
+                                }
+                                Ok(())
+                            })
+                        };
+
+                        match streaming_result {
                             Ok(result) => {
                                 let elapsed = start.elapsed();
                                 println!(); // Newline after streamed output
@@ -948,14 +975,28 @@ fn handle_repl_command(
                                 let accumulated_text = Arc::new(Mutex::new(String::new()));
                                 let text_clone = Arc::clone(&accumulated_text);
 
-                                match model.run_streaming(&input, |token| {
-                                    print!("{}", token.token);
-                                    io::stdout().flush()?;
-                                    if let Ok(mut text) = text_clone.lock() {
-                                        text.push_str(&token.token);
-                                    }
-                                    Ok(())
-                                }) {
+                                // Use context-aware streaming if conversation context is active
+                                let streaming_result = if let Some(ref ctx) = conversation_context {
+                                    model.run_streaming_with_context(&input, ctx, |token| {
+                                        print!("{}", token.token);
+                                        io::stdout().flush()?;
+                                        if let Ok(mut text) = text_clone.lock() {
+                                            text.push_str(&token.token);
+                                        }
+                                        Ok(())
+                                    })
+                                } else {
+                                    model.run_streaming(&input, |token| {
+                                        print!("{}", token.token);
+                                        io::stdout().flush()?;
+                                        if let Ok(mut text) = text_clone.lock() {
+                                            text.push_str(&token.token);
+                                        }
+                                        Ok(())
+                                    })
+                                };
+
+                                match streaming_result {
                                     Ok(result) => {
                                         let elapsed = start.elapsed();
                                         println!();

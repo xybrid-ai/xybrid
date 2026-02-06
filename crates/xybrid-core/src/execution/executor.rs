@@ -524,6 +524,110 @@ impl TemplateExecutor {
         self.execute(metadata, input)
     }
 
+    /// Execute a model with streaming and conversation context.
+    ///
+    /// Combines streaming execution with conversation history management.
+    /// The context provides previous messages which are formatted into the prompt
+    /// before streaming inference begins.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Model metadata with execution configuration
+    /// * `input` - Current user input envelope
+    /// * `context` - Conversation history for multi-turn chat
+    /// * `on_token` - Callback invoked for each generated token
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut ctx = ConversationContext::new();
+    /// ctx.push(Envelope::new(EnvelopeKind::Text("Hello!".into())).with_role(MessageRole::User));
+    ///
+    /// executor.execute_streaming_with_context(&metadata, &input, &ctx, Box::new(|token| {
+    ///     print!("{}", token.token);
+    ///     std::io::stdout().flush()?;
+    ///     Ok(())
+    /// }))?;
+    /// ```
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    pub fn execute_streaming_with_context(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        context: &ConversationContext,
+        on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+    ) -> ExecutorResult<Envelope> {
+        debug!(
+            target: "xybrid_core",
+            "TemplateExecutor.execute_streaming_with_context START: model_id={}, context_id={}",
+            metadata.model_id,
+            context.id()
+        );
+
+        // Check if this is a GGUF (LLM) model
+        if let ExecutionTemplate::Gguf { chat_template, .. } = &metadata.execution_template {
+            debug!(
+                target: "xybrid_core",
+                "LLM model detected, formatting prompt with conversation context for streaming"
+            );
+
+            // Determine the chat template format
+            let template_format = chat_template
+                .as_ref()
+                .and_then(|t| ChatTemplateFormat::from_str(t))
+                .unwrap_or_default();
+
+            // Build the message list: context + current input
+            let mut messages: Vec<&Envelope> = context.context_for_llm();
+            messages.push(input);
+
+            // Format the full prompt
+            let formatted_prompt = ChatTemplateFormatter::format(&messages, template_format);
+            debug!(
+                target: "xybrid_core",
+                "Formatted prompt length: {} chars",
+                formatted_prompt.len()
+            );
+
+            // Create a new envelope with the formatted prompt
+            let prompt_envelope = Envelope::new(EnvelopeKind::Text(formatted_prompt));
+
+            // Execute streaming with the formatted prompt
+            let mut result = self.execute_streaming(metadata, &prompt_envelope, on_token)?;
+
+            // Tag the result as an assistant message
+            result = result.with_role(MessageRole::Assistant);
+
+            return Ok(result);
+        }
+
+        // For non-LLM models, execute normally with streaming fallback
+        debug!(
+            target: "xybrid_core",
+            "Non-LLM model, executing streaming without context transformation"
+        );
+        let mut result = self.execute_streaming(metadata, input, on_token)?;
+        result = result.with_role(MessageRole::Assistant);
+
+        Ok(result)
+    }
+
+    /// Execute a model with streaming and conversation context (stub when LLM features disabled).
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    pub fn execute_streaming_with_context<F>(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        context: &ConversationContext,
+        _on_token: F,
+    ) -> ExecutorResult<Envelope>
+    where
+        F: FnMut(()) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    {
+        // No LLM support - just use regular execution with context
+        self.execute_with_context(metadata, input, context)
+    }
+
     /// Execute LLM inference with streaming.
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_llm_streaming(

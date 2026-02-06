@@ -16,6 +16,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use tempfile::TempDir;
 use tokio_stream::wrappers::ReceiverStream;
+use xybrid_core::conversation::ConversationContext;
 use xybrid_core::execution::{
     ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
 };
@@ -922,6 +923,212 @@ impl XybridModel {
                     "model_id": self.model_id,
                     "version": self.version,
                     "output_type": format!("{:?}", self.output_type),
+                })
+                .to_string(),
+            ),
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
+        crate::telemetry::publish_telemetry_event(event);
+
+        Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+    }
+
+    /// Run inference with conversation context.
+    ///
+    /// This method passes the conversation history to the model, allowing it to
+    /// generate context-aware responses. The model uses its chat template to
+    /// format the conversation history into a prompt.
+    ///
+    /// **Important:** This method does not mutate the context. The caller is
+    /// responsible for pushing the result to the context if desired.
+    ///
+    /// # Arguments
+    ///
+    /// * `envelope` - The current user input (should have `MessageRole::User`)
+    /// * `context` - Conversation history (system prompt + previous turns)
+    ///
+    /// # Returns
+    ///
+    /// `InferenceResult` containing the assistant's response (tagged with `MessageRole::Assistant`).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use xybrid_sdk::{ModelLoader, ConversationContext, Envelope, EnvelopeKind, MessageRole};
+    ///
+    /// let model = ModelLoader::from_registry("gemma-3-1b")?.load()?;
+    /// let mut ctx = ConversationContext::new();
+    ///
+    /// // Add user message to context
+    /// let user_input = Envelope::new(EnvelopeKind::Text("Hello!".into()))
+    ///     .with_role(MessageRole::User);
+    /// ctx.push(user_input.clone());
+    ///
+    /// // Run with context (model sees the full history)
+    /// let result = model.run_with_context(&user_input, &ctx)?;
+    ///
+    /// // Add assistant response to context
+    /// ctx.push(result.envelope().clone());
+    ///
+    /// println!("{}", result.text().unwrap_or_default());
+    /// ```
+    pub fn run_with_context(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+    ) -> SdkResult<InferenceResult> {
+        let start = Instant::now();
+
+        // Recover from poisoned RwLock to prevent permanent lock errors
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+
+        if !handle.loaded {
+            return Err(SdkError::NotLoaded);
+        }
+
+        // Clone metadata to avoid borrow conflict with executor
+        let metadata = handle.metadata.clone();
+        let output = handle
+            .executor
+            .execute_with_context(&metadata, envelope, context)
+            .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+
+        let latency_ms = start.elapsed().as_millis() as u32;
+
+        // Emit ModelComplete telemetry event
+        let event = crate::telemetry::TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some(self.model_id.clone()),
+            target: Some("local".to_string()),
+            latency_ms: Some(latency_ms),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": self.model_id,
+                    "version": self.version,
+                    "output_type": format!("{:?}", self.output_type),
+                    "context_messages": context.history().len(),
+                })
+                .to_string(),
+            ),
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
+        crate::telemetry::publish_telemetry_event(event);
+
+        Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+    }
+
+    /// Run streaming inference with conversation context.
+    ///
+    /// Combines streaming output with multi-turn conversation memory.
+    /// The model sees the full conversation history when generating responses.
+    ///
+    /// # Arguments
+    ///
+    /// * `envelope` - Current user input wrapped in an Envelope
+    /// * `context` - Conversation history for multi-turn chat
+    /// * `on_token` - Callback invoked for each token (LLM) or once (other models)
+    ///
+    /// # Returns
+    ///
+    /// `InferenceResult` containing the final output.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut ctx = ConversationContext::new();
+    ///
+    /// // Add user message and run with streaming
+    /// let input = Envelope::new(EnvelopeKind::Text("Tell me a joke".into()))
+    ///     .with_role(MessageRole::User);
+    /// ctx.push(input.clone());
+    ///
+    /// let result = model.run_streaming_with_context(&input, &ctx, |token| {
+    ///     print!("{}", token.token);
+    ///     std::io::Write::flush(&mut std::io::stdout())?;
+    ///     Ok(())
+    /// })?;
+    ///
+    /// // Add assistant response to context
+    /// ctx.push(result.envelope().clone());
+    /// ```
+    pub fn run_streaming_with_context<F>(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+        mut on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(xybrid_core::runtime_adapter::llm::PartialToken) -> Result<(), Box<dyn std::error::Error + Send + Sync>> + Send,
+    {
+        use xybrid_core::execution::ExecutionTemplate;
+        use xybrid_core::runtime_adapter::llm::PartialToken;
+
+        let start = Instant::now();
+
+        // Get write lock on handle
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+
+        if !handle.loaded {
+            return Err(SdkError::NotLoaded);
+        }
+
+        // Clone metadata to check execution template
+        let metadata = handle.metadata.clone();
+
+        // Check if this is an LLM model (GGUF template)
+        let is_llm = matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. });
+
+        let output = if is_llm {
+            // True streaming with context for LLM models
+            handle
+                .executor
+                .execute_streaming_with_context(&metadata, envelope, context, Box::new(&mut on_token))
+                .map_err(|e| SdkError::InferenceError(format!("Streaming execution failed: {}", e)))?
+        } else {
+            // For non-LLM models: run with context and emit single "token" with full result
+            let result = handle
+                .executor
+                .execute_with_context(&metadata, envelope, context)
+                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+
+            // Extract text from result (if any) and emit as single token
+            if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
+                let token = PartialToken {
+                    token: text.clone(),
+                    token_id: None,
+                    index: 0,
+                    cumulative_text: text.clone(),
+                    finish_reason: Some("stop".to_string()),
+                };
+                let _ = on_token(token);
+            }
+
+            result
+        };
+
+        let latency_ms = start.elapsed().as_millis() as u32;
+
+        // Emit telemetry event
+        let event = crate::telemetry::TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some(self.model_id.clone()),
+            target: Some("local".to_string()),
+            latency_ms: Some(latency_ms),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": self.model_id,
+                    "version": self.version,
+                    "output_type": format!("{:?}", self.output_type),
+                    "streaming": true,
+                    "context_messages": context.history().len(),
                 })
                 .to_string(),
             ),
