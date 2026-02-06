@@ -35,7 +35,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 
 [features]
-default = ["ort-download", "llm-llamacpp", ]
+default = []
 
 # PLATFORM PRESETS (SINGLE SOURCE OF TRUTH)
 

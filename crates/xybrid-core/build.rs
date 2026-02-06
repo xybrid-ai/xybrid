@@ -193,17 +193,10 @@ fn compile_llama_cpp() {
     // Build llama.cpp
     let dst = cmake_config.build();
 
-    // Link directories
+    // Link directories - all paths should use the CMake output directory (dst)
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-search=native={}/lib64", dst.display());
-    println!(
-        "cargo:rustc-link-search=native={}/build",
-        llama_cpp_dir.display()
-    );
-    println!(
-        "cargo:rustc-link-search=native={}/build/ggml/src",
-        llama_cpp_dir.display()
-    );
+    println!("cargo:rustc-link-search=native={}", dst.display());
 
     // Link llama.cpp static libraries
     println!("cargo:rustc-link-lib=static=llama");
