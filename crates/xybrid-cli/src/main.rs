@@ -48,7 +48,8 @@ use xybrid_core::bundler::XyBundle;
 use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::execution_template::ModelMetadata;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::conversation::ConversationContext;
+use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
 use xybrid_core::orchestrator::policy_engine::PolicyEngine;
 use xybrid_core::orchestrator::routing_engine::{LocalAvailability, RoutingEngine};
 use xybrid_core::orchestrator::Orchestrator;
@@ -362,6 +363,7 @@ fn init_telemetry(cli: &Cli) -> bool {
 }
 
 fn run_command(cli: Cli) -> Result<()> {
+    let verbose = cli.verbose;
     match cli.command {
         Commands::Models { command } => handle_models_command(command),
         Commands::Prepare { config } => handle_prepare_command(&config),
@@ -499,7 +501,7 @@ fn run_command(cli: Cli) -> Result<()> {
             voice,
             target,
             stream,
-        } => handle_repl_command(config, model, voice, target, stream),
+        } => handle_repl_command(config, model, voice, target, stream, verbose),
         Commands::Trace {
             session,
             latest,
@@ -584,6 +586,7 @@ fn handle_repl_command(
     voice: Option<String>,
     _target: Option<String>,
     stream: bool,
+    verbose: u8,
 ) -> Result<()> {
     use std::io::{self, Write};
 
@@ -696,6 +699,31 @@ fn handle_repl_command(
         stages.push(desc);
     }
 
+    // Detect if model is an LLM (GGUF) and create conversation context if so
+    // This enables multi-turn conversation history for LLM models
+    let mut conversation_context: Option<ConversationContext> = None;
+    let mut loaded_model: Option<xybrid_sdk::model::XybridModel> = None;
+
+    if stages.len() == 1 && stages[0].bundle_path.is_some() {
+        let bundle_path = PathBuf::from(stages[0].bundle_path.as_ref().unwrap());
+        let model_result = if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
+            ModelLoader::from_bundle(&bundle_path).and_then(|loader| loader.load())
+        } else {
+            ModelLoader::from_directory(&bundle_path).and_then(|loader| loader.load())
+        };
+
+        if let Ok(model) = model_result {
+            if model.is_llm() {
+                println!("💬 LLM detected - conversation context enabled");
+                conversation_context = Some(ConversationContext::new());
+                if verbose > 0 {
+                    println!("   (Use 'history' to view conversation, 'clear' to reset)");
+                }
+            }
+            loaded_model = Some(model);
+        }
+    }
+
     // Collect device metrics
     let device_adapter = LocalDeviceAdapter::new();
     let metrics = device_adapter.collect_metrics();
@@ -753,19 +781,68 @@ fn handle_repl_command(
                 println!("Commands:");
                 println!("  quit, exit, q  - Exit REPL");
                 println!("  help, ?        - Show this help");
+                if conversation_context.is_some() {
+                    println!("  history        - Show conversation history (LLM only)");
+                    println!("  clear          - Clear conversation history (LLM only)");
+                }
                 println!("  <text>         - Run inference with the given text");
+                continue;
+            }
+            "history" if conversation_context.is_some() => {
+                let ctx = conversation_context.as_ref().unwrap();
+                let history = ctx.history();
+                if history.is_empty() {
+                    println!("📜 No conversation history yet.");
+                } else {
+                    println!("📜 Conversation history ({} messages):", history.len());
+                    println!("{}", "-".repeat(50));
+                    for (i, envelope) in history.iter().enumerate() {
+                        let role = envelope.role().map(|r| r.as_str()).unwrap_or("unknown");
+                        let text = match &envelope.kind {
+                            EnvelopeKind::Text(t) => t.as_str(),
+                            _ => "[non-text]",
+                        };
+                        // Truncate long messages in non-verbose mode
+                        let display_text = if verbose == 0 && text.len() > 100 {
+                            format!("{}...", &text[..100])
+                        } else {
+                            text.to_string()
+                        };
+                        println!("[{}] {}: {}", i + 1, role.to_uppercase(), display_text);
+                    }
+                    println!("{}", "-".repeat(50));
+                }
+                continue;
+            }
+            "clear" if conversation_context.is_some() => {
+                let ctx = conversation_context.as_mut().unwrap();
+                ctx.clear();
+                println!("🗑️  Conversation history cleared.");
                 continue;
             }
             "" => continue,
             _ => {}
         }
 
-        // Create input envelope
+        // Create input envelope, tagging as user message for LLM models
         let mut input = Envelope::new(EnvelopeKind::Text(input_line.to_string()));
+
+        // Tag with user role if this is an LLM conversation
+        if conversation_context.is_some() {
+            input = input.with_role(MessageRole::User);
+        }
 
         // Add voice_id if provided
         if let Some(ref voice_id) = voice {
             input.metadata.insert("voice_id".to_string(), voice_id.clone());
+        }
+
+        // Push user message to conversation context (for LLM models)
+        if let Some(ref mut ctx) = conversation_context {
+            ctx.push(input.clone());
+            if verbose > 1 {
+                println!("📝 Added user message to context (total: {} messages)", ctx.history().len());
+            }
         }
 
         // Execute pipeline
@@ -796,49 +873,119 @@ fn handle_repl_command(
             #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             {
                 use std::io;
+                use std::sync::{Arc, Mutex};
 
                 let bundle_path_str = stages[0].bundle_path.as_ref().unwrap();
                 let bundle_path = PathBuf::from(bundle_path_str);
 
-                // Load model using SDK's ModelLoader (handles bundle extraction, caching, etc.)
-                let model_result = if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
-                    ModelLoader::from_bundle(&bundle_path).and_then(|loader| loader.load())
+                // Use the pre-loaded model if available, otherwise load it
+                let model_for_streaming = if let Some(ref model) = loaded_model {
+                    Some(model)
                 } else {
-                    ModelLoader::from_directory(&bundle_path).and_then(|loader| loader.load())
+                    None
                 };
 
-                match model_result {
-                    Ok(model) => {
-                        // Check if this model supports token streaming (LLM/GGUF models)
-                        if model.supports_token_streaming() {
-                            // Execute with streaming callback via SDK
-                            match model.run_streaming(&input, |token| {
-                                print!("{}", token.token);
-                                io::stdout().flush()?;
-                                Ok(())
-                            }) {
-                                Ok(result) => {
-                                    let elapsed = start.elapsed();
-                                    println!(); // Newline after streamed output
+                // Only proceed with streaming if we have a model
+                if let Some(model) = model_for_streaming {
+                    // Check if this model supports token streaming (LLM/GGUF models)
+                    if model.supports_token_streaming() {
+                        // Track accumulated text for conversation context
+                        let accumulated_text = Arc::new(Mutex::new(String::new()));
+                        let text_clone = Arc::clone(&accumulated_text);
 
-                                    // Show timing info from result metadata
-                                    println!(
-                                        "\n⏱️  Inference time: {:.2}s ({}ms latency)",
-                                        elapsed.as_secs_f32(),
-                                        result.latency_ms()
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!("\n❌ Error: {}", e);
-                                }
+                        // Execute with streaming callback via SDK
+                        match model.run_streaming(&input, |token| {
+                            print!("{}", token.token);
+                            io::stdout().flush()?;
+                            // Accumulate text for context
+                            if let Ok(mut text) = text_clone.lock() {
+                                text.push_str(&token.token);
                             }
-                            continue;
-                        } else if stream {
-                            eprintln!("⚠️  Streaming only supported for GGUF models, falling back to batch mode");
+                            Ok(())
+                        }) {
+                            Ok(result) => {
+                                let elapsed = start.elapsed();
+                                println!(); // Newline after streamed output
+
+                                // Push assistant response to conversation context
+                                if let Some(ref mut ctx) = conversation_context {
+                                    if let Ok(text) = accumulated_text.lock() {
+                                        let assistant_response = Envelope::new(EnvelopeKind::Text(text.clone()))
+                                            .with_role(MessageRole::Assistant);
+                                        ctx.push(assistant_response);
+                                        if verbose > 1 {
+                                            println!("📝 Added assistant response to context (total: {} messages)", ctx.history().len());
+                                        }
+                                    }
+                                }
+
+                                // Show timing info from result metadata
+                                println!(
+                                    "\n⏱️  Inference time: {:.2}s ({}ms latency)",
+                                    elapsed.as_secs_f32(),
+                                    result.latency_ms()
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("\n❌ Error: {}", e);
+                            }
                         }
+                        continue;
+                    } else if stream {
+                        eprintln!("⚠️  Streaming only supported for GGUF models, falling back to batch mode");
                     }
-                    Err(e) => {
-                        eprintln!("⚠️  Failed to load model: {}, falling back to batch mode", e);
+                } else {
+                    // Fall back to loading the model if not pre-loaded
+                    let model_result = if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
+                        ModelLoader::from_bundle(&bundle_path).and_then(|loader| loader.load())
+                    } else {
+                        ModelLoader::from_directory(&bundle_path).and_then(|loader| loader.load())
+                    };
+
+                    match model_result {
+                        Ok(model) => {
+                            if model.supports_token_streaming() {
+                                let accumulated_text = Arc::new(Mutex::new(String::new()));
+                                let text_clone = Arc::clone(&accumulated_text);
+
+                                match model.run_streaming(&input, |token| {
+                                    print!("{}", token.token);
+                                    io::stdout().flush()?;
+                                    if let Ok(mut text) = text_clone.lock() {
+                                        text.push_str(&token.token);
+                                    }
+                                    Ok(())
+                                }) {
+                                    Ok(result) => {
+                                        let elapsed = start.elapsed();
+                                        println!();
+
+                                        if let Some(ref mut ctx) = conversation_context {
+                                            if let Ok(text) = accumulated_text.lock() {
+                                                let assistant_response = Envelope::new(EnvelopeKind::Text(text.clone()))
+                                                    .with_role(MessageRole::Assistant);
+                                                ctx.push(assistant_response);
+                                            }
+                                        }
+
+                                        println!(
+                                            "\n⏱️  Inference time: {:.2}s ({}ms latency)",
+                                            elapsed.as_secs_f32(),
+                                            result.latency_ms()
+                                        );
+                                    }
+                                    Err(e) => {
+                                        eprintln!("\n❌ Error: {}", e);
+                                    }
+                                }
+                                continue;
+                            } else if stream {
+                                eprintln!("⚠️  Streaming only supported for GGUF models, falling back to batch mode");
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("⚠️  Failed to load model: {}, falling back to batch mode", e);
+                        }
                     }
                 }
             }
@@ -850,11 +997,21 @@ fn handle_repl_command(
                 let elapsed = start.elapsed();
                 println!();
 
-                // Display results
+                // Display results and collect text for conversation context
                 for result in &results {
                     match &result.output.kind {
                         EnvelopeKind::Text(text) => {
                             println!("{}", text);
+
+                            // Push assistant response to conversation context (for LLM models)
+                            if let Some(ref mut ctx) = conversation_context {
+                                let assistant_response = Envelope::new(EnvelopeKind::Text(text.clone()))
+                                    .with_role(MessageRole::Assistant);
+                                ctx.push(assistant_response);
+                                if verbose > 1 {
+                                    println!("📝 Added assistant response to context (total: {} messages)", ctx.history().len());
+                                }
+                            }
                         }
                         EnvelopeKind::Audio(data) => {
                             println!("🔊 Audio output: {} bytes", data.len());

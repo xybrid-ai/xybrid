@@ -178,18 +178,8 @@ pub fn default_gateway_url() -> String {
 // Message Types
 // ============================================================================
 
-/// Message role in a conversation.
-///
-/// Defines the role of each message in a chat completion request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MessageRole {
-    /// System message - sets the behavior and context for the assistant
-    System,
-    /// User message - the human's input
-    User,
-    /// Assistant message - the AI's response
-    Assistant,
-}
+// Re-export MessageRole from xybrid-core (single source of truth)
+pub use xybrid_core::ir::MessageRole;
 
 /// A message in the conversation.
 ///
@@ -620,9 +610,10 @@ mod tests {
         let user_json = serde_json::to_string(&user).unwrap();
         let assistant_json = serde_json::to_string(&assistant).unwrap();
 
-        assert_eq!(system_json, "\"System\"");
-        assert_eq!(user_json, "\"User\"");
-        assert_eq!(assistant_json, "\"Assistant\"");
+        // MessageRole serializes to lowercase (from xybrid-core)
+        assert_eq!(system_json, "\"system\"");
+        assert_eq!(user_json, "\"user\"");
+        assert_eq!(assistant_json, "\"assistant\"");
 
         // Deserialize back
         let system_parsed: MessageRole = serde_json::from_str(&system_json).unwrap();

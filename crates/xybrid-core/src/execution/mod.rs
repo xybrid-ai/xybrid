@@ -55,6 +55,10 @@
 // Template types (model_metadata.json schema)
 pub mod template;
 
+// Chat template formatting for LLM prompts
+pub mod chat_template;
+pub use chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
+
 // Re-export commonly used template types at execution:: level
 pub use template::{
     ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage, PostprocessingStep,

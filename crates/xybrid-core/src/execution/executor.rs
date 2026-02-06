@@ -20,8 +20,10 @@
 
 use log::{debug, info};
 
+use super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
 use super::template::{ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage};
-use crate::ir::Envelope;
+use crate::conversation::ConversationContext;
+use crate::ir::{Envelope, EnvelopeKind, MessageRole};
 use crate::runtime_adapter::{AdapterError, ModelRuntime};
 use crate::tracing as xybrid_trace;
 use ndarray::ArrayD;
@@ -340,6 +342,108 @@ impl TemplateExecutor {
             metadata.model_id,
             result.kind_str()
         );
+
+        Ok(result)
+    }
+
+    /// Execute a model with conversation context.
+    ///
+    /// For LLM models (GGUF), this builds the full prompt from the conversation
+    /// context plus the current input envelope using the appropriate chat template.
+    /// The result envelope is automatically tagged with `MessageRole::Assistant`.
+    ///
+    /// For non-LLM models, the context is passed through transparently and the
+    /// model receives its normal input (the context is available but not consumed
+    /// by the model execution).
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Model metadata with execution configuration
+    /// * `input` - Current input envelope (typically a user message)
+    /// * `context` - Conversation context containing history and optional system prompt
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use xybrid_core::execution::TemplateExecutor;
+    /// use xybrid_core::conversation::ConversationContext;
+    /// use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
+    ///
+    /// let mut ctx = ConversationContext::new()
+    ///     .with_system(Envelope::new(EnvelopeKind::Text("You are helpful.".into()))
+    ///         .with_role(MessageRole::System));
+    ///
+    /// ctx.push(Envelope::new(EnvelopeKind::Text("Hello".into()))
+    ///     .with_role(MessageRole::User));
+    /// ctx.push(Envelope::new(EnvelopeKind::Text("Hi there!".into()))
+    ///     .with_role(MessageRole::Assistant));
+    ///
+    /// let input = Envelope::new(EnvelopeKind::Text("How are you?".into()))
+    ///     .with_role(MessageRole::User);
+    ///
+    /// let result = executor.execute_with_context(&metadata, &input, &ctx)?;
+    /// assert!(result.is_assistant_message());
+    /// ```
+    pub fn execute_with_context(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        context: &ConversationContext,
+    ) -> ExecutorResult<Envelope> {
+        debug!(
+            target: "xybrid_core",
+            "TemplateExecutor.execute_with_context START: model_id={}, context_id={}",
+            metadata.model_id,
+            context.id()
+        );
+
+        // Check if this is a GGUF (LLM) model
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        if let ExecutionTemplate::Gguf { chat_template, .. } = &metadata.execution_template {
+            debug!(
+                target: "xybrid_core",
+                "LLM model detected, formatting prompt with conversation context"
+            );
+
+            // Determine the chat template format
+            let template_format = chat_template
+                .as_ref()
+                .and_then(|t| ChatTemplateFormat::from_str(t))
+                .unwrap_or_default();
+
+            // Build the message list: context + current input
+            let mut messages: Vec<&Envelope> = context.context_for_llm();
+            messages.push(input);
+
+            // Format the full prompt
+            let formatted_prompt = ChatTemplateFormatter::format(&messages, template_format);
+            debug!(
+                target: "xybrid_core",
+                "Formatted prompt length: {} chars",
+                formatted_prompt.len()
+            );
+
+            // Create a new envelope with the formatted prompt
+            let prompt_envelope = Envelope::new(EnvelopeKind::Text(formatted_prompt));
+
+            // Execute with the formatted prompt
+            let mut result = self.execute(metadata, &prompt_envelope)?;
+
+            // Tag the result as an assistant message
+            result = result.with_role(MessageRole::Assistant);
+
+            return Ok(result);
+        }
+
+        // For non-LLM models, execute normally (context is available but not consumed)
+        debug!(
+            target: "xybrid_core",
+            "Non-LLM model, executing without context transformation"
+        );
+        let mut result = self.execute(metadata, input)?;
+
+        // Tag the result as an assistant message
+        result = result.with_role(MessageRole::Assistant);
 
         Ok(result)
     }
@@ -1290,5 +1394,195 @@ mod tests {
                 max_frames: Some(3000),
             });
         assert!(!TemplateExecutor::is_tts_model(&metadata));
+    }
+
+    // ============================================================================
+    // execute_with_context Tests
+    // ============================================================================
+
+    #[test]
+    fn test_execute_with_context_builds_message_list() {
+        // Test that the method correctly builds the message list from context + input
+        // This is a unit test that verifies the logic without actual model execution
+
+        use crate::conversation::ConversationContext;
+
+        // Create a context with system and history
+        let mut ctx = ConversationContext::new().with_system(
+            Envelope::new(EnvelopeKind::Text("You are helpful.".to_string()))
+                .with_role(MessageRole::System),
+        );
+
+        ctx.push(
+            Envelope::new(EnvelopeKind::Text("Hello!".to_string()))
+                .with_role(MessageRole::User),
+        );
+        ctx.push(
+            Envelope::new(EnvelopeKind::Text("Hi there!".to_string()))
+                .with_role(MessageRole::Assistant),
+        );
+
+        // Verify context_for_llm returns correct structure
+        let messages = ctx.context_for_llm();
+        assert_eq!(messages.len(), 3);
+        assert!(messages[0].is_system_message());
+        assert!(messages[1].is_user_message());
+        assert!(messages[2].is_assistant_message());
+
+        // The input would be the next user message
+        let input = Envelope::new(EnvelopeKind::Text("How are you?".to_string()))
+            .with_role(MessageRole::User);
+
+        // Verify we can append input to messages
+        let mut all_messages = messages.clone();
+        all_messages.push(&input);
+        assert_eq!(all_messages.len(), 4);
+    }
+
+    #[test]
+    fn test_execute_with_context_uses_chat_template_formatter() {
+        // Test that ChatTemplateFormatter correctly formats context + input
+
+        use crate::conversation::ConversationContext;
+        use super::super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
+
+        let mut ctx = ConversationContext::new().with_system(
+            Envelope::new(EnvelopeKind::Text("You are helpful.".to_string()))
+                .with_role(MessageRole::System),
+        );
+
+        ctx.push(
+            Envelope::new(EnvelopeKind::Text("Hello!".to_string()))
+                .with_role(MessageRole::User),
+        );
+        ctx.push(
+            Envelope::new(EnvelopeKind::Text("Hi there!".to_string()))
+                .with_role(MessageRole::Assistant),
+        );
+
+        let input = Envelope::new(EnvelopeKind::Text("How are you?".to_string()))
+            .with_role(MessageRole::User);
+
+        // Build messages as execute_with_context would
+        let mut messages: Vec<&Envelope> = ctx.context_for_llm();
+        messages.push(&input);
+
+        // Format with ChatML
+        let prompt = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::ChatML);
+
+        // Verify the prompt contains all messages in order
+        assert!(prompt.contains("<|im_start|>system\nYou are helpful.<|im_end|>"));
+        assert!(prompt.contains("<|im_start|>user\nHello!<|im_end|>"));
+        assert!(prompt.contains("<|im_start|>assistant\nHi there!<|im_end|>"));
+        assert!(prompt.contains("<|im_start|>user\nHow are you?<|im_end|>"));
+        // Should end with assistant start marker
+        assert!(prompt.ends_with("<|im_start|>assistant\n"));
+    }
+
+    #[test]
+    fn test_execute_with_context_result_tagged_as_assistant() {
+        // Verify that the result envelope role tagging works correctly
+
+        let envelope = Envelope::new(EnvelopeKind::Text("I'm doing great!".to_string()));
+        assert!(envelope.role().is_none());
+
+        let tagged = envelope.with_role(MessageRole::Assistant);
+        assert!(tagged.is_assistant_message());
+        assert_eq!(tagged.role(), Some(MessageRole::Assistant));
+    }
+
+    #[test]
+    fn test_execute_with_context_preserves_input_content() {
+        // Verify that the input content is included in the formatted prompt
+
+        use crate::conversation::ConversationContext;
+        use super::super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
+
+        let ctx = ConversationContext::new();
+        let input = Envelope::new(EnvelopeKind::Text("What is 2+2?".to_string()))
+            .with_role(MessageRole::User);
+
+        let mut messages: Vec<&Envelope> = ctx.context_for_llm();
+        messages.push(&input);
+
+        let prompt = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::ChatML);
+
+        // The input content should be in the formatted prompt
+        assert!(prompt.contains("What is 2+2?"));
+    }
+
+    #[test]
+    fn test_execute_with_context_with_empty_context() {
+        // Test behavior with empty context (no system, no history)
+
+        use crate::conversation::ConversationContext;
+        use super::super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
+
+        let ctx = ConversationContext::new();
+        let input = Envelope::new(EnvelopeKind::Text("Hello!".to_string()))
+            .with_role(MessageRole::User);
+
+        let mut messages: Vec<&Envelope> = ctx.context_for_llm();
+        messages.push(&input);
+
+        let prompt = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::ChatML);
+
+        // With empty context, should just have the input message
+        assert_eq!(
+            prompt,
+            "<|im_start|>user\nHello!<|im_end|>\n<|im_start|>assistant\n"
+        );
+    }
+
+    #[test]
+    fn test_execute_with_context_llama_format() {
+        // Test with Llama format instead of ChatML
+
+        use crate::conversation::ConversationContext;
+        use super::super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
+
+        let mut ctx = ConversationContext::new().with_system(
+            Envelope::new(EnvelopeKind::Text("Be concise.".to_string()))
+                .with_role(MessageRole::System),
+        );
+
+        ctx.push(
+            Envelope::new(EnvelopeKind::Text("Hi!".to_string()))
+                .with_role(MessageRole::User),
+        );
+        ctx.push(
+            Envelope::new(EnvelopeKind::Text("Hello!".to_string()))
+                .with_role(MessageRole::Assistant),
+        );
+
+        let input = Envelope::new(EnvelopeKind::Text("Bye!".to_string()))
+            .with_role(MessageRole::User);
+
+        let mut messages: Vec<&Envelope> = ctx.context_for_llm();
+        messages.push(&input);
+
+        let prompt = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::Llama);
+
+        // Llama format should contain system in <<SYS>> tags
+        assert!(prompt.contains("<<SYS>>"));
+        assert!(prompt.contains("Be concise."));
+        assert!(prompt.contains("[INST]"));
+        assert!(prompt.contains("[/INST]"));
+    }
+
+    #[test]
+    fn test_chat_template_format_from_str() {
+        // Test that chat_template field parsing works
+
+        use super::super::chat_template::ChatTemplateFormat;
+
+        assert_eq!(ChatTemplateFormat::from_str("chatml"), Some(ChatTemplateFormat::ChatML));
+        assert_eq!(ChatTemplateFormat::from_str("llama"), Some(ChatTemplateFormat::Llama));
+        assert_eq!(ChatTemplateFormat::from_str("llama2"), Some(ChatTemplateFormat::Llama));
+        assert_eq!(ChatTemplateFormat::from_str("unknown"), None);
+
+        // Default should be ChatML when None
+        let default: ChatTemplateFormat = Default::default();
+        assert_eq!(default, ChatTemplateFormat::ChatML);
     }
 }

@@ -16,7 +16,7 @@
 //!             └── LlamaCppBackend (llama.cpp - Android + fallback)
 //! ```
 
-use crate::ir::{Envelope, EnvelopeKind};
+use crate::ir::{Envelope, EnvelopeKind, MessageRole};
 use crate::runtime_adapter::{
     AdapterError, AdapterResult, ModelMetadata, RuntimeAdapter, RuntimeAdapterExt,
 };
@@ -36,10 +36,13 @@ pub type LlmResult<T> = Result<T, AdapterError>;
 // =============================================================================
 
 /// Chat message for multi-turn conversations.
-#[derive(Debug, Clone)]
+///
+/// This is the unified ChatMessage type used by the LLM runtime adapter.
+/// It uses `MessageRole` from `xybrid_core::ir` to ensure type-safe role handling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
-    /// Role: "system", "user", or "assistant"
-    pub role: String,
+    /// Role of the message sender (system, user, or assistant)
+    pub role: MessageRole,
     /// Message content
     pub content: String,
 }
@@ -48,7 +51,7 @@ impl ChatMessage {
     /// Create a system message.
     pub fn system(content: impl Into<String>) -> Self {
         Self {
-            role: "system".to_string(),
+            role: MessageRole::System,
             content: content.into(),
         }
     }
@@ -56,7 +59,7 @@ impl ChatMessage {
     /// Create a user message.
     pub fn user(content: impl Into<String>) -> Self {
         Self {
-            role: "user".to_string(),
+            role: MessageRole::User,
             content: content.into(),
         }
     }
@@ -64,7 +67,7 @@ impl ChatMessage {
     /// Create an assistant message.
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
-            role: "assistant".to_string(),
+            role: MessageRole::Assistant,
             content: content.into(),
         }
     }
@@ -810,16 +813,41 @@ mod tests {
     #[test]
     fn test_chat_message_constructors() {
         let user = ChatMessage::user("hello");
-        assert_eq!(user.role, "user");
+        assert_eq!(user.role, MessageRole::User);
         assert_eq!(user.content, "hello");
 
         let system = ChatMessage::system("you are helpful");
-        assert_eq!(system.role, "system");
+        assert_eq!(system.role, MessageRole::System);
         assert_eq!(system.content, "you are helpful");
 
         let assistant = ChatMessage::assistant("hi there");
-        assert_eq!(assistant.role, "assistant");
+        assert_eq!(assistant.role, MessageRole::Assistant);
         assert_eq!(assistant.content, "hi there");
+    }
+
+    #[test]
+    fn test_chat_message_serialization() {
+        let msg = ChatMessage::user("test");
+        let json = serde_json::to_string(&msg).unwrap();
+        // Role should serialize to lowercase
+        assert!(json.contains("\"role\":\"user\""));
+        assert!(json.contains("\"content\":\"test\""));
+
+        // Deserialize back
+        let parsed: ChatMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.role, MessageRole::User);
+        assert_eq!(parsed.content, "test");
+    }
+
+    #[test]
+    fn test_chat_message_role_as_str() {
+        let system = ChatMessage::system("sys");
+        let user = ChatMessage::user("usr");
+        let assistant = ChatMessage::assistant("ast");
+
+        assert_eq!(system.role.as_str(), "system");
+        assert_eq!(user.role.as_str(), "user");
+        assert_eq!(assistant.role.as_str(), "assistant");
     }
 
     #[test]

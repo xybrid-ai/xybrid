@@ -626,6 +626,29 @@ impl XybridModel {
         self.output_type
     }
 
+    /// Check if this is an LLM model (uses GGUF execution template).
+    ///
+    /// LLM models support multi-turn conversation contexts. Use this to
+    /// determine if conversation history should be maintained.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let model = loader.load()?;
+    /// if model.is_llm() {
+    ///     // Create conversation context for multi-turn chat
+    ///     let mut ctx = ConversationContext::new();
+    ///     // ... manage conversation history
+    /// }
+    /// ```
+    pub fn is_llm(&self) -> bool {
+        self.handle
+            .read()
+            .ok()
+            .map(|h| matches!(h.metadata.execution_template, ExecutionTemplate::Gguf { .. }))
+            .unwrap_or(false)
+    }
+
     // =========================================================================
     // Voice Discovery (TTS models only)
     // =========================================================================

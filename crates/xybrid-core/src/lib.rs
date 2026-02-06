@@ -115,6 +115,9 @@ pub mod cache_provider;
 /// Envelope-based data passing (Audio, Text, Embedding)
 pub mod ir;
 
+/// Conversation context for multi-turn LLM interactions
+pub mod conversation;
+
 /// Device metrics and stage descriptors
 pub mod context;
 

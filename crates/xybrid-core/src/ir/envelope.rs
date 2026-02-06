@@ -148,6 +148,119 @@ impl Envelope {
         self.metadata.get(key)
     }
 
+    // =========================================================================
+    // Message Role Helpers (for conversation/chat contexts)
+    // =========================================================================
+
+    /// Metadata key for storing the message role.
+    pub const ROLE_METADATA_KEY: &'static str = "xybrid.role";
+
+    /// Sets the message role for this envelope and returns self (builder pattern).
+    ///
+    /// Stores the role under the `xybrid.role` metadata key.
+    ///
+    /// # Arguments
+    ///
+    /// * `role` - The message role (System, User, or Assistant)
+    ///
+    /// # Returns
+    ///
+    /// Self with the role set
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
+    ///
+    /// let envelope = Envelope::new(EnvelopeKind::Text("Hello".to_string()))
+    ///     .with_role(MessageRole::User);
+    /// assert_eq!(envelope.role(), Some(MessageRole::User));
+    /// ```
+    pub fn with_role(mut self, role: super::MessageRole) -> Self {
+        self.metadata.insert(
+            Self::ROLE_METADATA_KEY.to_string(),
+            role.as_str().to_string(),
+        );
+        self
+    }
+
+    /// Gets the message role of this envelope.
+    ///
+    /// Reads the role from the `xybrid.role` metadata key.
+    ///
+    /// # Returns
+    ///
+    /// `Some(MessageRole)` if a valid role is set, `None` otherwise
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
+    ///
+    /// let envelope = Envelope::new(EnvelopeKind::Text("Hello".to_string()))
+    ///     .with_role(MessageRole::User);
+    /// assert_eq!(envelope.role(), Some(MessageRole::User));
+    ///
+    /// // Envelopes without a role return None
+    /// let plain = Envelope::new(EnvelopeKind::Text("Hello".to_string()));
+    /// assert_eq!(plain.role(), None);
+    /// ```
+    pub fn role(&self) -> Option<super::MessageRole> {
+        self.metadata.get(Self::ROLE_METADATA_KEY).and_then(|s| {
+            match s.as_str() {
+                "system" => Some(super::MessageRole::System),
+                "user" => Some(super::MessageRole::User),
+                "assistant" => Some(super::MessageRole::Assistant),
+                _ => None,
+            }
+        })
+    }
+
+    /// Returns `true` if this envelope has the User message role.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
+    ///
+    /// let user_msg = Envelope::new(EnvelopeKind::Text("Hi".to_string()))
+    ///     .with_role(MessageRole::User);
+    /// assert!(user_msg.is_user_message());
+    /// ```
+    pub fn is_user_message(&self) -> bool {
+        self.role() == Some(super::MessageRole::User)
+    }
+
+    /// Returns `true` if this envelope has the Assistant message role.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
+    ///
+    /// let assistant_msg = Envelope::new(EnvelopeKind::Text("Hello!".to_string()))
+    ///     .with_role(MessageRole::Assistant);
+    /// assert!(assistant_msg.is_assistant_message());
+    /// ```
+    pub fn is_assistant_message(&self) -> bool {
+        self.role() == Some(super::MessageRole::Assistant)
+    }
+
+    /// Returns `true` if this envelope has the System message role.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
+    ///
+    /// let system_msg = Envelope::new(EnvelopeKind::Text("You are helpful.".to_string()))
+    ///     .with_role(MessageRole::System);
+    /// assert!(system_msg.is_system_message());
+    /// ```
+    pub fn is_system_message(&self) -> bool {
+        self.role() == Some(super::MessageRole::System)
+    }
+
     /// Returns a string representation of the envelope kind.
     ///
     /// # Returns
@@ -520,6 +633,108 @@ mod tests {
             EnvelopeKind::Embedding(data) => assert_eq!(data, embedding_data),
             _ => panic!("Expected Embedding variant"),
         }
+
+        Ok(())
+    }
+
+    // =========================================================================
+    // Message Role Tests
+    // =========================================================================
+
+    #[test]
+    fn test_envelope_with_role_user() {
+        use super::super::MessageRole;
+
+        let envelope = Envelope::new(EnvelopeKind::Text("Hello".to_string()))
+            .with_role(MessageRole::User);
+
+        assert_eq!(envelope.role(), Some(MessageRole::User));
+        assert!(envelope.is_user_message());
+        assert!(!envelope.is_assistant_message());
+        assert!(!envelope.is_system_message());
+    }
+
+    #[test]
+    fn test_envelope_with_role_assistant() {
+        use super::super::MessageRole;
+
+        let envelope = Envelope::new(EnvelopeKind::Text("Hi there!".to_string()))
+            .with_role(MessageRole::Assistant);
+
+        assert_eq!(envelope.role(), Some(MessageRole::Assistant));
+        assert!(!envelope.is_user_message());
+        assert!(envelope.is_assistant_message());
+        assert!(!envelope.is_system_message());
+    }
+
+    #[test]
+    fn test_envelope_with_role_system() {
+        use super::super::MessageRole;
+
+        let envelope = Envelope::new(EnvelopeKind::Text("You are helpful.".to_string()))
+            .with_role(MessageRole::System);
+
+        assert_eq!(envelope.role(), Some(MessageRole::System));
+        assert!(!envelope.is_user_message());
+        assert!(!envelope.is_assistant_message());
+        assert!(envelope.is_system_message());
+    }
+
+    #[test]
+    fn test_envelope_without_role() {
+        use super::super::MessageRole;
+
+        let envelope = Envelope::new(EnvelopeKind::Text("Plain message".to_string()));
+
+        // Envelopes without a role return None (backwards compatible)
+        assert_eq!(envelope.role(), None);
+        assert!(!envelope.is_user_message());
+        assert!(!envelope.is_assistant_message());
+        assert!(!envelope.is_system_message());
+    }
+
+    #[test]
+    fn test_envelope_role_roundtrip() {
+        use super::super::MessageRole;
+
+        // Test round-trip: with_role -> role() returns correct value
+        for role in [MessageRole::System, MessageRole::User, MessageRole::Assistant] {
+            let envelope = Envelope::new(EnvelopeKind::Text("test".to_string()))
+                .with_role(role);
+            assert_eq!(envelope.role(), Some(role), "Round-trip failed for {:?}", role);
+        }
+    }
+
+    #[test]
+    fn test_envelope_role_metadata_key() {
+        use super::super::MessageRole;
+
+        let envelope = Envelope::new(EnvelopeKind::Text("test".to_string()))
+            .with_role(MessageRole::User);
+
+        // Verify the metadata key is correctly set
+        assert_eq!(
+            envelope.get_metadata(Envelope::ROLE_METADATA_KEY),
+            Some(&"user".to_string())
+        );
+    }
+
+    #[test]
+    fn test_envelope_role_serialization_roundtrip() -> Result<(), EnvelopeError> {
+        use super::super::MessageRole;
+
+        let envelope = Envelope::new(EnvelopeKind::Text("Hello".to_string()))
+            .with_role(MessageRole::User);
+
+        // Binary roundtrip
+        let bytes = envelope.to_bytes()?;
+        let deserialized = Envelope::from_bytes(&bytes)?;
+        assert_eq!(deserialized.role(), Some(MessageRole::User));
+
+        // JSON roundtrip
+        let json = envelope.to_json()?;
+        let from_json = Envelope::from_json(&json)?;
+        assert_eq!(from_json.role(), Some(MessageRole::User));
 
         Ok(())
     }

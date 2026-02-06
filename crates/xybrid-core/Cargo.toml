@@ -74,7 +74,7 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", branch = "master", optional = true }
 
 [features]
-default = ["ort-download"]
+default = ["ort-download", "llm-llamacpp"]
 
 # ONNX Runtime
 ort-download = ["ort/download-binaries", "ort/tls-native"]  # Desktop/macOS/iOS: download prebuilt binaries
