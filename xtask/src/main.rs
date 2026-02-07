@@ -1516,7 +1516,7 @@ fn build_flutter_native(target: &str, release: bool, features: &str) -> Result<(
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("-p")
-        .arg("xybrid-flutter-ffi")
+        .arg("xybrid_flutter")
         .arg("--target")
         .arg(target)
         .arg("--features")
@@ -1578,7 +1578,7 @@ fn build_flutter_android(target: &str, release: bool) -> Result<()> {
             .arg("28")
             .arg("build")
             .arg("-p")
-            .arg("xybrid-flutter-ffi")
+            .arg("xybrid_flutter")
             .arg("--features")
             .arg("platform-android");
 
@@ -1632,7 +1632,7 @@ fn build_flutter_android(target: &str, release: bool) -> Result<()> {
         let mut cmd = Command::new("cargo");
         cmd.arg("build")
             .arg("-p")
-            .arg("xybrid-flutter-ffi")
+            .arg("xybrid_flutter")
             .arg("--target")
             .arg(target)
             .arg("--features")
