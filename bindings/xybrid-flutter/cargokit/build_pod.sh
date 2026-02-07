@@ -62,10 +62,11 @@ if [[ "$PLATFORM_NAME" == "iphoneos" || "$PLATFORM_NAME" == "iphonesimulator" ]]
   ORT_XCFRAMEWORK_BASE="$PODS_TARGET_SRCROOT/Frameworks/onnxruntime.xcframework"
 
   # If the xcframework is a symlink, resolve it to the real path
-  # This handles cases where CocoaPods doesn't follow symlinks correctly
+  # This handles cases where CocoaPods accesses the plugin through .symlinks/ which
+  # breaks relative symlink resolution (.. navigates the logical symlink path, not physical)
+  # Using cd -P ensures we resolve to the physical filesystem path first
   if [[ -L "$ORT_XCFRAMEWORK_BASE" ]]; then
-    # Change to the directory containing the symlink, then follow the relative link
-    ORT_XCFRAMEWORK_REAL=$(cd "$(dirname "$ORT_XCFRAMEWORK_BASE")" && cd "$(readlink "$(basename "$ORT_XCFRAMEWORK_BASE")")" && pwd)
+    ORT_XCFRAMEWORK_REAL=$(cd -P "$ORT_XCFRAMEWORK_BASE" 2>/dev/null && pwd -P)
     if [[ -d "$ORT_XCFRAMEWORK_REAL" ]]; then
       echo "=== Resolved xcframework symlink: $ORT_XCFRAMEWORK_BASE -> $ORT_XCFRAMEWORK_REAL ==="
       ORT_XCFRAMEWORK_BASE="$ORT_XCFRAMEWORK_REAL"
