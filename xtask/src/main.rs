@@ -5,6 +5,87 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Checks if a target is an iOS target.
+fn is_ios_target(target: &str) -> bool {
+    target.contains("apple-ios")
+}
+
+/// Sets fp16 rustflags for iOS targets via CARGO_TARGET_<TRIPLE>_RUSTFLAGS env var.
+/// Required by gemm-f16 crate (used by Candle for Whisper).
+/// See: https://github.com/sarah-quinones/gemm/issues/31
+fn set_ios_rustflags(cmd: &mut Command, target: &str) {
+    if !is_ios_target(target) {
+        return;
+    }
+    let env_key = format!(
+        "CARGO_TARGET_{}_RUSTFLAGS",
+        target.to_uppercase().replace('-', "_")
+    );
+    cmd.env(&env_key, "-Ctarget-feature=+fp16");
+    println!("  Setting {}=\"-Ctarget-feature=+fp16\"", env_key);
+}
+
+/// Maps a Rust target triple to the corresponding xcframework subdirectory name.
+/// Returns None if the target is not an iOS target or has no known mapping.
+fn xcframework_subdir_for_target(target: &str) -> Option<&'static str> {
+    match target {
+        "aarch64-apple-ios" => Some("ios-arm64"),
+        "aarch64-apple-ios-sim" => Some("ios-arm64-simulator"),
+        "x86_64-apple-ios" => Some("ios-x86_64-simulator"),
+        _ if target.contains("apple-ios") => Some("ios-arm64"), // fallback for unknown iOS
+        _ => None,
+    }
+}
+
+/// Resolves the ORT iOS library location for iOS targets.
+///
+/// Resolution order:
+/// 1. ORT_LIB_LOCATION env var if set and contains libonnxruntime.a
+/// 2. vendor/ort-ios/onnxruntime.xcframework/<subdir>/ matching the target
+/// 3. None if not found
+///
+/// Returns None for non-iOS targets or when no library exists for the target.
+fn resolve_ort_lib_location(target: &str) -> Option<PathBuf> {
+    // Only applies to iOS targets
+    if !is_ios_target(target) {
+        return None;
+    }
+
+    // Check ORT_LIB_LOCATION env var first (explicit override, any target)
+    if let Ok(env_path) = std::env::var("ORT_LIB_LOCATION") {
+        let lib_path = PathBuf::from(&env_path).join("libonnxruntime.a");
+        if lib_path.exists() {
+            return Some(PathBuf::from(env_path));
+        } else {
+            eprintln!(
+                "Warning: ORT_LIB_LOCATION is set to '{}' but libonnxruntime.a not found there",
+                env_path
+            );
+        }
+    }
+
+    // Map target to xcframework subdirectory
+    let subdir = xcframework_subdir_for_target(target)?;
+
+    // Check vendored location (must return absolute path since ort-sys build script
+    // runs from a different working directory)
+    let vendor_path = PathBuf::from(format!(
+        "vendor/ort-ios/onnxruntime.xcframework/{}",
+        subdir
+    ));
+    let vendor_lib = vendor_path.join("libonnxruntime.a");
+    if vendor_lib.exists() {
+        let abs_path = vendor_path.canonicalize().unwrap_or(vendor_path);
+        println!(
+            "Using ORT iOS library: {}",
+            abs_path.display()
+        );
+        return Some(abs_path);
+    }
+
+    None
+}
+
 /// Maps a Rust target triple to the appropriate xybrid platform preset feature.
 ///
 /// Platform presets configure ORT execution providers and LLM backends correctly
@@ -488,6 +569,21 @@ fn build_uniffi(
 
     if let Some(ref t) = target {
         cmd.arg("--target").arg(t);
+
+        // For iOS targets, resolve and set ORT_LIB_LOCATION + fp16 rustflags
+        if is_ios_target(t) {
+            if let Some(ort_path) = resolve_ort_lib_location(t) {
+                cmd.env("ORT_LIB_LOCATION", &ort_path);
+            } else {
+                anyhow::bail!(
+                    "ORT iOS library not found. To build for iOS, either:\n\
+                     1. Place the ORT iOS xcframework at vendor/ort-ios/onnxruntime.xcframework/\n\
+                     2. Set ORT_LIB_LOCATION env var to a directory containing libonnxruntime.a\n\n\
+                     Download from: https://huggingface.co/csukuangfj/ios-onnxruntime"
+                );
+            }
+            set_ios_rustflags(&mut cmd, t);
+        }
     }
 
     let status = cmd.status().context("Failed to run cargo build")?;
@@ -547,6 +643,21 @@ fn build_ffi(
 
     if let Some(ref t) = target {
         cmd.arg("--target").arg(t);
+
+        // For iOS targets, resolve and set ORT_LIB_LOCATION + fp16 rustflags
+        if is_ios_target(t) {
+            if let Some(ort_path) = resolve_ort_lib_location(t) {
+                cmd.env("ORT_LIB_LOCATION", &ort_path);
+            } else {
+                anyhow::bail!(
+                    "ORT iOS library not found. To build for iOS, either:\n\
+                     1. Place the ORT iOS xcframework at vendor/ort-ios/onnxruntime.xcframework/\n\
+                     2. Set ORT_LIB_LOCATION env var to a directory containing libonnxruntime.a\n\n\
+                     Download from: https://huggingface.co/csukuangfj/ios-onnxruntime"
+                );
+            }
+            set_ios_rustflags(&mut cmd, t);
+        }
     }
 
     let status = cmd.status().context("Failed to run cargo build")?;
@@ -704,23 +815,23 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
     println!("Building XCFramework ({} mode, version {})...", profile, version);
     println!();
 
-    // Check for ONNX Runtime iOS XCFramework requirement
-    // iOS builds need ORT_IOS_XCFWK_LOCATION pointing to onnxruntime.xcframework
-    let ort_ios_xcfwk = std::env::var("ORT_IOS_XCFWK_LOCATION").ok();
-    if ort_ios_xcfwk.is_none() {
-        println!("⚠️  Warning: ORT_IOS_XCFWK_LOCATION is not set");
+    // Check for ONNX Runtime iOS library using the unified resolution
+    // Use aarch64-apple-ios as the probe target to check for ORT availability
+    let ort_lib_location = resolve_ort_lib_location(IOS_ARM64);
+    if ort_lib_location.is_none() {
+        println!("⚠️  Warning: ORT iOS library not found");
         println!();
-        println!("   iOS builds require ONNX Runtime iOS XCFramework. Options:");
+        println!("   iOS builds require ONNX Runtime iOS static library. Options:");
         println!();
-        println!("   1. Download prebuilt XCFramework:");
-        println!("      - From VOICEVOX: https://github.com/VOICEVOX/onnxruntime-builder/releases");
+        println!("   1. Use the vendored library (recommended):");
+        println!("      - Ensure vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a exists");
+        println!();
+        println!("   2. Download prebuilt XCFramework:");
         println!("      - From HuggingFace: https://huggingface.co/csukuangfj/ios-onnxruntime");
+        println!("      - Extract to vendor/ort-ios/onnxruntime.xcframework/");
         println!();
-        println!("   2. Build from source:");
-        println!("      - See: https://onnxruntime.ai/docs/build/ios.html");
-        println!();
-        println!("   3. Set environment variable:");
-        println!("      export ORT_IOS_XCFWK_LOCATION=/path/to/onnxruntime.xcframework");
+        println!("   3. Set ORT_LIB_LOCATION environment variable:");
+        println!("      export ORT_LIB_LOCATION=/path/to/directory/containing/libonnxruntime.a");
         println!();
         println!("   Building macOS-only (skipping iOS targets)...");
         println!();
@@ -728,7 +839,6 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
         return build_xcframework_macos_only(release, version);
     }
 
-    println!("Using ONNX Runtime iOS XCFramework: {}", ort_ios_xcfwk.as_ref().unwrap());
     println!();
 
     // Define targets
@@ -740,8 +850,18 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
         (MACOS_X86_64, "macOS x86_64"),
     ];
 
+    let mut built_targets: Vec<(&str, &str)> = Vec::new();
+
     // Build for each target
     for (target, description) in targets.iter() {
+        // For iOS targets, resolve ORT per-target (device vs simulator have different libs)
+        if is_ios_target(target) {
+            if resolve_ort_lib_location(target).is_none() {
+                println!("Skipping {} (no ORT library for this target)", description);
+                continue;
+            }
+        }
+
         // Resolve platform preset for this target
         let preset = platform_preset_for_target(target);
         println!("Building for {} with features: {}...", description, preset);
@@ -759,6 +879,14 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
             cmd.arg("--release");
         }
 
+        // Set ORT_LIB_LOCATION and fp16 rustflags for iOS targets
+        if is_ios_target(target) {
+            if let Some(ort_path) = resolve_ort_lib_location(target) {
+                cmd.env("ORT_LIB_LOCATION", &ort_path);
+            }
+            set_ios_rustflags(&mut cmd, target);
+        }
+
         let status = cmd
             .status()
             .with_context(|| format!("Failed to run cargo build for {}", target))?;
@@ -767,8 +895,13 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
             anyhow::bail!("cargo build failed for {}", target);
         }
 
+        built_targets.push((target, description));
         println!("  ✓ {} ({})", description, preset);
     }
+
+    let has_ios_device = built_targets.iter().any(|(t, _)| *t == IOS_ARM64);
+    let has_ios_sim_arm64 = built_targets.iter().any(|(t, _)| *t == IOS_SIM_ARM64);
+    let has_ios_sim_x86 = built_targets.iter().any(|(t, _)| *t == IOS_SIM_X86_64);
 
     println!();
     println!("Creating XCFramework...");
@@ -791,27 +924,32 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
             .context("Failed to remove existing XCFramework symlink")?;
     }
 
-    // Create lipo'd iOS Simulator library (combine arm64 and x86_64)
-    let ios_sim_dir = PathBuf::from(format!("target/ios-simulator-universal/{}", profile));
-    std::fs::create_dir_all(&ios_sim_dir)
-        .context("Failed to create iOS Simulator universal directory")?;
+    // Create lipo'd iOS Simulator library if both sim targets were built
+    let ios_sim_lib_path = if has_ios_sim_arm64 && has_ios_sim_x86 {
+        let ios_sim_dir = PathBuf::from(format!("target/ios-simulator-universal/{}", profile));
+        std::fs::create_dir_all(&ios_sim_dir)
+            .context("Failed to create iOS Simulator universal directory")?;
 
-    let ios_sim_lib = ios_sim_dir.join("libxybrid_uniffi.a");
-    let sim_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_SIM_ARM64, profile);
-    let sim_x86_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_SIM_X86_64, profile);
+        let ios_sim_lib = ios_sim_dir.join("libxybrid_uniffi.a");
+        let sim_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_SIM_ARM64, profile);
+        let sim_x86_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_SIM_X86_64, profile);
 
-    println!("  Creating universal iOS Simulator library...");
-    let lipo_status = Command::new("lipo")
-        .args(["-create", "-output"])
-        .arg(&ios_sim_lib)
-        .arg(&sim_arm64_lib)
-        .arg(&sim_x86_lib)
-        .status()
-        .context("Failed to run lipo for iOS Simulator")?;
+        println!("  Creating universal iOS Simulator library...");
+        let lipo_status = Command::new("lipo")
+            .args(["-create", "-output"])
+            .arg(&ios_sim_lib)
+            .arg(&sim_arm64_lib)
+            .arg(&sim_x86_lib)
+            .status()
+            .context("Failed to run lipo for iOS Simulator")?;
 
-    if !lipo_status.success() {
-        anyhow::bail!("lipo failed for iOS Simulator libraries");
-    }
+        if !lipo_status.success() {
+            anyhow::bail!("lipo failed for iOS Simulator libraries");
+        }
+        Some(ios_sim_lib)
+    } else {
+        None
+    };
 
     // Create lipo'd macOS library (combine arm64 and x86_64)
     let macos_dir = PathBuf::from(format!("target/macos-universal/{}", profile));
@@ -834,21 +972,30 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
         anyhow::bail!("lipo failed for macOS libraries");
     }
 
-    // Get iOS device library path
-    let ios_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_ARM64, profile);
-
-    // Create XCFramework using xcodebuild
+    // Create XCFramework using xcodebuild with available slices
     println!("  Packaging XCFramework...");
-    let xcbuild_status = Command::new("xcodebuild")
-        .arg("-create-xcframework")
-        .arg("-library")
-        .arg(&ios_arm64_lib)
-        .arg("-library")
-        .arg(&ios_sim_lib)
-        .arg("-library")
-        .arg(&macos_lib)
-        .arg("-output")
-        .arg(&xcframework_path)
+    let mut xcbuild = Command::new("xcodebuild");
+    xcbuild.arg("-create-xcframework");
+
+    let mut arch_descriptions: Vec<&str> = Vec::new();
+
+    if has_ios_device {
+        let ios_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_ARM64, profile);
+        xcbuild.arg("-library").arg(&ios_arm64_lib);
+        arch_descriptions.push("iOS arm64");
+    }
+
+    if let Some(ref sim_lib) = ios_sim_lib_path {
+        xcbuild.arg("-library").arg(sim_lib);
+        arch_descriptions.push("iOS Simulator arm64 + x86_64 (universal)");
+    }
+
+    xcbuild.arg("-library").arg(&macos_lib);
+    arch_descriptions.push("macOS arm64 + x86_64 (universal)");
+
+    xcbuild.arg("-output").arg(&xcframework_path);
+
+    let xcbuild_status = xcbuild
         .status()
         .context("Failed to run xcodebuild -create-xcframework")?;
 
@@ -868,14 +1015,14 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
     println!("  Also:   {}", xcframework_latest.display());
     println!();
     println!("Architectures included:");
-    println!("  - iOS arm64");
-    println!("  - iOS Simulator arm64 + x86_64 (universal)");
-    println!("  - macOS arm64 + x86_64 (universal)");
+    for desc in &arch_descriptions {
+        println!("  - {}", desc);
+    }
 
     Ok(())
 }
 
-/// Build macOS-only XCFramework (fallback when ORT_IOS_XCFWK_LOCATION is not set)
+/// Build macOS-only XCFramework (fallback when ORT iOS library is not available)
 fn build_xcframework_macos_only(release: bool, version: &str) -> Result<()> {
     let profile = if release { "release" } else { "debug" };
 
@@ -980,8 +1127,9 @@ fn build_xcframework_macos_only(release: bool, version: &str) -> Result<()> {
     println!("Architectures included:");
     println!("  - macOS arm64 + x86_64 (universal)");
     println!();
-    println!("⚠️  Note: iOS targets were skipped because ORT_IOS_XCFWK_LOCATION is not set.");
-    println!("   To include iOS, set ORT_IOS_XCFWK_LOCATION to your ONNX Runtime iOS XCFramework path.");
+    println!("⚠️  Note: iOS targets were skipped because ORT iOS library was not found.");
+    println!("   To include iOS, ensure vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a exists,");
+    println!("   or set ORT_LIB_LOCATION to a directory containing libonnxruntime.a.");
 
     Ok(())
 }
@@ -1376,6 +1524,24 @@ fn build_flutter_native(target: &str, release: bool, features: &str) -> Result<(
 
     if release {
         cmd.arg("--release");
+    }
+
+    // Set ORT_LIB_LOCATION and fp16 rustflags for iOS targets
+    if is_ios_target(target) {
+        if let Some(ort_lib_path) = resolve_ort_lib_location(target) {
+            println!(
+                "  Using ORT iOS library: {}",
+                ort_lib_path.display()
+            );
+            cmd.env("ORT_LIB_LOCATION", &ort_lib_path);
+        } else {
+            // Warn but don't bail - Flutter iOS via xtask is less common than via flutter build ios
+            println!(
+                "  Warning: ORT iOS library not found. Build may fail during linking.\n  \
+                 Set ORT_LIB_LOCATION env var or place library in vendor/ort-ios/"
+            );
+        }
+        set_ios_rustflags(&mut cmd, target);
     }
 
     let status = cmd.status().context("Failed to run cargo build")?;
@@ -2408,5 +2574,49 @@ mod tests {
         // On Linux, it should return platform-desktop
         #[cfg(target_os = "linux")]
         assert_eq!(preset, "platform-desktop");
+    }
+
+    #[test]
+    fn test_is_ios_target() {
+        // iOS targets
+        assert!(is_ios_target("aarch64-apple-ios"));
+        assert!(is_ios_target("aarch64-apple-ios-sim"));
+        assert!(is_ios_target("x86_64-apple-ios"));
+
+        // Non-iOS targets
+        assert!(!is_ios_target("aarch64-apple-darwin"));
+        assert!(!is_ios_target("x86_64-apple-darwin"));
+        assert!(!is_ios_target("aarch64-linux-android"));
+        assert!(!is_ios_target("x86_64-unknown-linux-gnu"));
+        assert!(!is_ios_target("x86_64-pc-windows-msvc"));
+    }
+
+    #[test]
+    fn test_resolve_ort_lib_location_returns_none_for_non_ios_targets() {
+        // Non-iOS targets should always return None
+        assert!(resolve_ort_lib_location("aarch64-apple-darwin").is_none());
+        assert!(resolve_ort_lib_location("x86_64-apple-darwin").is_none());
+        assert!(resolve_ort_lib_location("aarch64-linux-android").is_none());
+        assert!(resolve_ort_lib_location("x86_64-unknown-linux-gnu").is_none());
+        assert!(resolve_ort_lib_location("x86_64-pc-windows-msvc").is_none());
+    }
+
+    #[test]
+    fn test_resolve_ort_lib_location_for_ios_target() {
+        // For iOS targets, the function checks for the library on disk.
+        // In test environment where vendor/ort-ios exists, it should return Some.
+        // If vendor doesn't exist and no env var is set, it returns None.
+        let result = resolve_ort_lib_location("aarch64-apple-ios");
+
+        // The result depends on whether the vendor directory exists in the test environment.
+        // We can only verify that the function runs without error and returns the correct type.
+        // If vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a exists, it's Some.
+        // Otherwise, it's None.
+        let vendor_lib = PathBuf::from("vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a");
+        if vendor_lib.exists() {
+            assert!(result.is_some());
+            assert!(result.unwrap().ends_with("ios-arm64"));
+        }
+        // If the file doesn't exist and no ORT_LIB_LOCATION is set, result can be None
     }
 }

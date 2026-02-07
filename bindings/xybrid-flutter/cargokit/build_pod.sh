@@ -57,9 +57,20 @@ fi
 # 2. ORT_LIB_LOCATION: Expects directory with libonnxruntime.a (static library)
 # We use mode 2 since we built a static library, not a framework.
 if [[ "$PLATFORM_NAME" == "iphoneos" || "$PLATFORM_NAME" == "iphonesimulator" ]]; then
-  # Custom xcframework is bundled in the pod's Frameworks directory
+  # Custom xcframework is bundled in the pod's Frameworks directory (may be a symlink)
   # Structure: ios/Frameworks/onnxruntime.xcframework/ios-arm64/libonnxruntime.a
   ORT_XCFRAMEWORK_BASE="$PODS_TARGET_SRCROOT/Frameworks/onnxruntime.xcframework"
+
+  # If the xcframework is a symlink, resolve it to the real path
+  # This handles cases where CocoaPods doesn't follow symlinks correctly
+  if [[ -L "$ORT_XCFRAMEWORK_BASE" ]]; then
+    # Change to the directory containing the symlink, then follow the relative link
+    ORT_XCFRAMEWORK_REAL=$(cd "$(dirname "$ORT_XCFRAMEWORK_BASE")" && cd "$(readlink "$(basename "$ORT_XCFRAMEWORK_BASE")")" && pwd)
+    if [[ -d "$ORT_XCFRAMEWORK_REAL" ]]; then
+      echo "=== Resolved xcframework symlink: $ORT_XCFRAMEWORK_BASE -> $ORT_XCFRAMEWORK_REAL ==="
+      ORT_XCFRAMEWORK_BASE="$ORT_XCFRAMEWORK_REAL"
+    fi
+  fi
 
   # Determine the correct library path based on platform
   if [[ "$PLATFORM_NAME" == "iphoneos" ]]; then
