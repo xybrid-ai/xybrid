@@ -5,6 +5,65 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Maps a Rust target triple to the appropriate xybrid platform preset feature.
+///
+/// Platform presets configure ORT execution providers and LLM backends correctly
+/// for each target platform. Unknown targets fall back to `platform-desktop`.
+///
+/// # Arguments
+/// * `target` - A Rust target triple (e.g., "aarch64-apple-darwin")
+///
+/// # Returns
+/// The platform preset feature name (e.g., "platform-macos")
+fn platform_preset_for_target(target: &str) -> &'static str {
+    match target {
+        // macOS targets
+        "aarch64-apple-darwin" | "x86_64-apple-darwin" => "platform-macos",
+
+        // iOS targets
+        "aarch64-apple-ios" | "aarch64-apple-ios-sim" | "x86_64-apple-ios" => "platform-ios",
+
+        // Android targets
+        "aarch64-linux-android" | "armv7-linux-androideabi" | "x86_64-linux-android" => {
+            "platform-android"
+        }
+
+        // Desktop/unknown targets
+        "x86_64-unknown-linux-gnu" | "x86_64-pc-windows-msvc" => "platform-desktop",
+
+        // Unknown target - warn and fallback to desktop
+        _ => {
+            eprintln!(
+                "Warning: Unknown target '{}', falling back to platform-desktop",
+                target
+            );
+            "platform-desktop"
+        }
+    }
+}
+
+/// Returns the platform preset for the current build machine.
+///
+/// Uses compile-time detection to determine the host platform.
+fn host_platform_preset() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "platform-macos"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "platform-desktop"
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "platform-desktop"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        "platform-desktop"
+    }
+}
+
 /// Get the version from Cargo.toml workspace or git tag
 fn get_version(override_version: Option<&str>) -> String {
     // If explicit version provided, use it
@@ -83,6 +142,11 @@ enum Commands {
         /// Build in release mode
         #[arg(long)]
         release: bool,
+
+        /// Override the platform preset (e.g., platform-macos, platform-ios, platform-android, platform-desktop)
+        /// If not specified, auto-detected from target or host
+        #[arg(long)]
+        platform_preset: Option<String>,
     },
 
     /// Build the xybrid-ffi library (C ABI for Unity/C++)
@@ -94,6 +158,11 @@ enum Commands {
         /// Build in release mode
         #[arg(long)]
         release: bool,
+
+        /// Override the platform preset (e.g., platform-macos, platform-ios, platform-android, platform-desktop)
+        /// If not specified, auto-detected from target or host
+        #[arg(long)]
+        platform_preset: Option<String>,
     },
 
     /// Generate Swift/Kotlin bindings from xybrid-uniffi
@@ -316,11 +385,19 @@ fn main() -> Result<()> {
         Commands::SetupTestEnv { registry } => {
             setup_env::run(registry)?;
         }
-        Commands::BuildUniffi { target, release } => {
-            build_uniffi(target, release)?;
+        Commands::BuildUniffi {
+            target,
+            release,
+            platform_preset,
+        } => {
+            build_uniffi(target, release, platform_preset)?;
         }
-        Commands::BuildFfi { target, release } => {
-            build_ffi(target, release)?;
+        Commands::BuildFfi {
+            target,
+            release,
+            platform_preset,
+        } => {
+            build_ffi(target, release, platform_preset)?;
         }
         Commands::GenerateBindings { language, out_dir } => {
             generate_bindings(language, out_dir)?;
@@ -383,11 +460,27 @@ fn main() -> Result<()> {
 }
 
 /// Build the xybrid-uniffi library
-fn build_uniffi(target: Option<String>, release: bool) -> Result<()> {
-    println!("Building xybrid-uniffi...");
+fn build_uniffi(
+    target: Option<String>,
+    release: bool,
+    platform_preset: Option<String>,
+) -> Result<()> {
+    // Resolve the platform preset: use override if provided, otherwise auto-detect
+    let preset = if let Some(ref p) = platform_preset {
+        p.clone()
+    } else if let Some(ref t) = target {
+        platform_preset_for_target(t).to_string()
+    } else {
+        host_platform_preset().to_string()
+    };
+
+    println!("Building xybrid-uniffi with features: {}", preset);
 
     let mut cmd = Command::new("cargo");
     cmd.arg("build").arg("-p").arg("xybrid-uniffi");
+
+    // Pass the platform preset as a feature
+    cmd.arg("--features").arg(&preset);
 
     if release {
         cmd.arg("--release");
@@ -426,11 +519,27 @@ fn build_uniffi(target: Option<String>, release: bool) -> Result<()> {
 }
 
 /// Build the xybrid-ffi library (C ABI)
-fn build_ffi(target: Option<String>, release: bool) -> Result<()> {
-    println!("Building xybrid-ffi...");
+fn build_ffi(
+    target: Option<String>,
+    release: bool,
+    platform_preset: Option<String>,
+) -> Result<()> {
+    // Resolve the platform preset: use override if provided, otherwise auto-detect
+    let preset = if let Some(ref p) = platform_preset {
+        p.clone()
+    } else if let Some(ref t) = target {
+        platform_preset_for_target(t).to_string()
+    } else {
+        host_platform_preset().to_string()
+    };
+
+    println!("Building xybrid-ffi with features: {}", preset);
 
     let mut cmd = Command::new("cargo");
     cmd.arg("build").arg("-p").arg("xybrid-ffi");
+
+    // Pass the platform preset as a feature
+    cmd.arg("--features").arg(&preset);
 
     if release {
         cmd.arg("--release");
@@ -483,9 +592,9 @@ fn build_ffi(target: Option<String>, release: bool) -> Result<()> {
 
 /// Generate Swift/Kotlin bindings using uniffi-bindgen
 fn generate_bindings(language: BindingsLanguage, out_dir: Option<PathBuf>) -> Result<()> {
-    // First, ensure the library is built
+    // First, ensure the library is built with host platform preset
     println!("Building xybrid-uniffi (release)...");
-    build_uniffi(None, true)?;
+    build_uniffi(None, true, None)?;
 
     let lib_path = if cfg!(target_os = "macos") {
         "target/release/libxybrid_uniffi.dylib"
@@ -633,14 +742,18 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
 
     // Build for each target
     for (target, description) in targets.iter() {
-        println!("Building for {}...", description);
+        // Resolve platform preset for this target
+        let preset = platform_preset_for_target(target);
+        println!("Building for {} with features: {}...", description, preset);
 
         let mut cmd = Command::new("cargo");
         cmd.arg("build")
             .arg("-p")
             .arg("xybrid-uniffi")
             .arg("--target")
-            .arg(target);
+            .arg(target)
+            .arg("--features")
+            .arg(preset);
 
         if release {
             cmd.arg("--release");
@@ -654,7 +767,7 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
             anyhow::bail!("cargo build failed for {}", target);
         }
 
-        println!("  ✓ {}", description);
+        println!("  ✓ {} ({})", description, preset);
     }
 
     println!();
@@ -770,14 +883,18 @@ fn build_xcframework_macos_only(release: bool, version: &str) -> Result<()> {
     let targets = [(MACOS_ARM64, "macOS arm64"), (MACOS_X86_64, "macOS x86_64")];
 
     for (target, description) in targets.iter() {
-        println!("Building for {}...", description);
+        // Resolve platform preset for this target (will be platform-macos)
+        let preset = platform_preset_for_target(target);
+        println!("Building for {} with features: {}...", description, preset);
 
         let mut cmd = Command::new("cargo");
         cmd.arg("build")
             .arg("-p")
             .arg("xybrid-uniffi")
             .arg("--target")
-            .arg(target);
+            .arg(target)
+            .arg("--features")
+            .arg(preset);
 
         if release {
             cmd.arg("--release");
@@ -791,7 +908,7 @@ fn build_xcframework_macos_only(release: bool, version: &str) -> Result<()> {
             anyhow::bail!("cargo build failed for {}", target);
         }
 
-        println!("  ✓ {}", description);
+        println!("  ✓ {} ({})", description, preset);
     }
 
     println!();
@@ -992,6 +1109,8 @@ fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<
 
 /// Build using cargo-ndk
 fn build_android_with_cargo_ndk(target: &str, release: bool) -> Result<()> {
+    println!("  Building with features: platform-android");
+
     let mut cmd = Command::new("cargo");
     cmd.arg("ndk")
         .arg("--target")
@@ -1005,7 +1124,9 @@ fn build_android_with_cargo_ndk(target: &str, release: bool) -> Result<()> {
         .arg("28")
         .arg("build")
         .arg("-p")
-        .arg("xybrid-uniffi");
+        .arg("xybrid-uniffi")
+        .arg("--features")
+        .arg("platform-android");
 
     if release {
         cmd.arg("--release");
@@ -1022,6 +1143,8 @@ fn build_android_with_cargo_ndk(target: &str, release: bool) -> Result<()> {
 
 /// Build using ANDROID_NDK_HOME for cross-compilation
 fn build_android_with_ndk(target: &str, release: bool) -> Result<()> {
+    println!("  Building with features: platform-android");
+
     let ndk_home = std::env::var("ANDROID_NDK_HOME").context("ANDROID_NDK_HOME not set")?;
 
     // Determine the linker name based on target
@@ -1061,6 +1184,8 @@ fn build_android_with_ndk(target: &str, release: bool) -> Result<()> {
         .arg("xybrid-uniffi")
         .arg("--target")
         .arg(target)
+        .arg("--features")
+        .arg("platform-android")
         .env(&linker_env, &clang_path);
 
     if release {
@@ -1078,12 +1203,16 @@ fn build_android_with_ndk(target: &str, release: bool) -> Result<()> {
 
 /// Attempt plain cargo build (requires manual toolchain setup)
 fn build_android_plain(target: &str, release: bool) -> Result<()> {
+    println!("  Building with features: platform-android");
+
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("-p")
         .arg("xybrid-uniffi")
         .arg("--target")
-        .arg(target);
+        .arg(target)
+        .arg("--features")
+        .arg("platform-android");
 
     if release {
         cmd.arg("--release");
@@ -1179,7 +1308,9 @@ fn build_flutter(platform: FlutterPlatform, release: bool, version: &str) -> Res
     // Build for each target
     let mut built_targets = Vec::new();
     for target in &targets {
-        println!("Building for {}...", target);
+        // Resolve the platform preset for this target
+        let preset = platform_preset_for_target(target);
+        println!("Building for {} with features: {}...", target, preset);
 
         let build_result = match platform {
             FlutterPlatform::Android => {
@@ -1188,13 +1319,13 @@ fn build_flutter(platform: FlutterPlatform, release: bool, version: &str) -> Res
             }
             _ => {
                 // Other platforms use regular cargo build
-                build_flutter_native(target, release)
+                build_flutter_native(target, release, preset)
             }
         };
 
         match build_result {
             Ok(()) => {
-                println!("  ✓ {}", target);
+                println!("  ✓ {} ({})", target, preset);
                 built_targets.push(*target);
             }
             Err(e) => {
@@ -1233,13 +1364,15 @@ fn build_flutter(platform: FlutterPlatform, release: bool, version: &str) -> Res
 }
 
 /// Build Flutter FFI for a native platform (not Android)
-fn build_flutter_native(target: &str, release: bool) -> Result<()> {
+fn build_flutter_native(target: &str, release: bool, features: &str) -> Result<()> {
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("-p")
         .arg("xybrid-flutter-ffi")
         .arg("--target")
-        .arg(target);
+        .arg(target)
+        .arg("--features")
+        .arg(features);
 
     if release {
         cmd.arg("--release");
@@ -1256,6 +1389,8 @@ fn build_flutter_native(target: &str, release: bool) -> Result<()> {
 
 /// Build Flutter FFI for Android using cargo-ndk or manual NDK setup
 fn build_flutter_android(target: &str, release: bool) -> Result<()> {
+    println!("  Building with features: platform-android");
+
     // Check for cargo-ndk first
     let has_cargo_ndk = Command::new("cargo")
         .args(["ndk", "--version"])
@@ -1277,7 +1412,9 @@ fn build_flutter_android(target: &str, release: bool) -> Result<()> {
             .arg("28")
             .arg("build")
             .arg("-p")
-            .arg("xybrid-flutter-ffi");
+            .arg("xybrid-flutter-ffi")
+            .arg("--features")
+            .arg("platform-android");
 
         if release {
             cmd.arg("--release");
@@ -1332,6 +1469,8 @@ fn build_flutter_android(target: &str, release: bool) -> Result<()> {
             .arg("xybrid-flutter-ffi")
             .arg("--target")
             .arg(target)
+            .arg("--features")
+            .arg("platform-android")
             .env(&linker_env, &clang_path);
 
         if release {
@@ -2172,4 +2311,102 @@ fn package_flutter(version: &str, output_dir: &Path) -> Result<Option<PackageInf
         platform: Some("flutter".to_string()),
         architectures: None,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_platform_preset_for_target_macos() {
+        assert_eq!(
+            platform_preset_for_target("aarch64-apple-darwin"),
+            "platform-macos"
+        );
+        assert_eq!(
+            platform_preset_for_target("x86_64-apple-darwin"),
+            "platform-macos"
+        );
+    }
+
+    #[test]
+    fn test_platform_preset_for_target_ios() {
+        assert_eq!(
+            platform_preset_for_target("aarch64-apple-ios"),
+            "platform-ios"
+        );
+        assert_eq!(
+            platform_preset_for_target("aarch64-apple-ios-sim"),
+            "platform-ios"
+        );
+        assert_eq!(
+            platform_preset_for_target("x86_64-apple-ios"),
+            "platform-ios"
+        );
+    }
+
+    #[test]
+    fn test_platform_preset_for_target_android() {
+        assert_eq!(
+            platform_preset_for_target("aarch64-linux-android"),
+            "platform-android"
+        );
+        assert_eq!(
+            platform_preset_for_target("armv7-linux-androideabi"),
+            "platform-android"
+        );
+        assert_eq!(
+            platform_preset_for_target("x86_64-linux-android"),
+            "platform-android"
+        );
+    }
+
+    #[test]
+    fn test_platform_preset_for_target_desktop() {
+        assert_eq!(
+            platform_preset_for_target("x86_64-unknown-linux-gnu"),
+            "platform-desktop"
+        );
+        assert_eq!(
+            platform_preset_for_target("x86_64-pc-windows-msvc"),
+            "platform-desktop"
+        );
+    }
+
+    #[test]
+    fn test_platform_preset_for_target_unknown_falls_back_to_desktop() {
+        // Unknown targets should fall back to platform-desktop
+        assert_eq!(
+            platform_preset_for_target("some-unknown-target"),
+            "platform-desktop"
+        );
+        assert_eq!(
+            platform_preset_for_target("riscv64gc-unknown-linux-gnu"),
+            "platform-desktop"
+        );
+    }
+
+    #[test]
+    fn test_host_platform_preset() {
+        // The host preset should be a valid preset string
+        let preset = host_platform_preset();
+        assert!(
+            preset == "platform-macos"
+                || preset == "platform-desktop"
+                || preset == "platform-ios"
+                || preset == "platform-android"
+        );
+
+        // On macOS, it should specifically return platform-macos
+        #[cfg(target_os = "macos")]
+        assert_eq!(preset, "platform-macos");
+
+        // On Windows, it should return platform-desktop
+        #[cfg(target_os = "windows")]
+        assert_eq!(preset, "platform-desktop");
+
+        // On Linux, it should return platform-desktop
+        #[cfg(target_os = "linux")]
+        assert_eq!(preset, "platform-desktop");
+    }
 }
