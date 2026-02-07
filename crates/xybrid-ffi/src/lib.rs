@@ -28,9 +28,8 @@ use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::Arc;
 
 // Import SDK types
-use xybrid_core::conversation::ConversationContext;
 use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
-use xybrid_sdk::{InferenceResult, ModelLoader, XybridModel};
+use xybrid_sdk::{InferenceResult, ConversationContext, ModelLoader, XybridModel};
 
 // ============================================================================
 // Opaque Handle Types (US-009)
