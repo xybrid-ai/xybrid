@@ -4,6 +4,7 @@
 /// idiomatic Dart API.
 library;
 
+import 'context.dart';
 import 'rust/api/envelope.dart';
 
 /// Envelope containing input data for model inference.
@@ -63,5 +64,30 @@ class XybridEnvelope {
     return XybridEnvelope._(
       FfiEnvelope.embedding(data: data),
     );
+  }
+
+  /// Create a text envelope with a specific message role.
+  ///
+  /// This is used for building conversation context with proper role tagging.
+  ///
+  /// [text] - The message text
+  /// [role] - The message role (system, user, or assistant)
+  factory XybridEnvelope.textWithRole(String text, MessageRole role) {
+    return XybridEnvelope._(
+      FfiEnvelope.textWithRole(text: text, role: role.toFfi()),
+    );
+  }
+
+  /// Set the message role on this envelope.
+  ///
+  /// Returns a new envelope with the role set.
+  XybridEnvelope withRole(MessageRole role) {
+    return XybridEnvelope._(inner.withRole(role: role.toFfi()));
+  }
+
+  /// Get the message role of this envelope, if set.
+  MessageRole? get role {
+    final ffiRole = inner.role();
+    return ffiRole != null ? MessageRole.fromFfi(ffiRole) : null;
   }
 }

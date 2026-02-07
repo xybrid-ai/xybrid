@@ -308,6 +308,218 @@ namespace Xybrid.Native
         internal static extern void xybrid_envelope_free(XybridEnvelopeHandle* handle);
 
         /// <summary>
+        ///  Create a new conversation context with a generated UUID.
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the conversation context, or null on failure.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  XybridContextHandle* ctx = xybrid_context_new();
+        ///  if (ctx == NULL) {
+        ///      fprintf(stderr, "Failed: %s\n", xybrid_last_error());
+        ///      return 1;
+        ///  }
+        ///  // Use context...
+        ///  xybrid_context_free(ctx);
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_context_new", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridContextHandle* xybrid_context_new();
+
+        /// <summary>
+        ///  Create a new conversation context with a specific ID.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `id`: A null-terminated string containing the context ID.
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the conversation context, or null on failure.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  XybridContextHandle* ctx = xybrid_context_with_id("session-123");
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_context_with_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridContextHandle* xybrid_context_with_id(byte* id);
+
+        /// <summary>
+        ///  Set the system prompt for a conversation context.
+        ///
+        ///  The system prompt defines the assistant's behavior and persists
+        ///  across `xybrid_context_clear()` calls.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to the conversation context.
+        ///  - `text`: A null-terminated string containing the system prompt.
+        ///
+        ///  # Returns
+        ///
+        ///  - `0` on success
+        ///  - Non-zero on failure (check `xybrid_last_error()`)
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  xybrid_context_set_system(ctx, "You are a helpful assistant.");
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_context_set_system", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_context_set_system(XybridContextHandle* handle, byte* text);
+
+        /// <summary>
+        ///  Set the maximum history length for a conversation context.
+        ///
+        ///  When the history exceeds this limit, oldest messages are dropped (FIFO).
+        ///  Default is 50 messages.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to the conversation context.
+        ///  - `max_len`: Maximum number of history entries.
+        ///
+        ///  # Returns
+        ///
+        ///  - `0` on success
+        ///  - Non-zero on failure
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_context_set_max_history_len", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_context_set_max_history_len(XybridContextHandle* handle, uint max_len);
+
+        /// <summary>
+        ///  Push an envelope to the conversation history.
+        ///
+        ///  The envelope should have a role set (use `xybrid_envelope_text_with_role`).
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to the conversation context.
+        ///  - `envelope`: A handle to the envelope to push.
+        ///
+        ///  # Returns
+        ///
+        ///  - `0` on success
+        ///  - Non-zero on failure
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  XybridEnvelopeHandle* msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+        ///  xybrid_context_push(ctx, msg);
+        ///  xybrid_envelope_free(msg);
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_context_push", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_context_push(XybridContextHandle* handle, XybridEnvelopeHandle* envelope);
+
+        /// <summary>
+        ///  Clear the conversation history but preserve the system prompt and ID.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to the conversation context.
+        ///
+        ///  # Returns
+        ///
+        ///  - `0` on success
+        ///  - Non-zero on failure
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_context_clear", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_context_clear(XybridContextHandle* handle);
+
+        /// <summary>
+        ///  Get the conversation context ID.
+        ///
+        ///  Returns a pointer to a null-terminated string containing the context ID.
+        ///  The returned pointer is valid until the context handle is freed.
+        ///  Do NOT free the returned string.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to the conversation context.
+        ///
+        ///  # Returns
+        ///
+        ///  A pointer to the context ID string, or null on failure.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_context_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_context_id(XybridContextHandle* handle);
+
+        /// <summary>
+        ///  Get the current history length (excluding system prompt).
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to the conversation context.
+        ///
+        ///  # Returns
+        ///
+        ///  The number of messages in the history, or 0 if the handle is null/invalid.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_context_history_len", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint xybrid_context_history_len(XybridContextHandle* handle);
+
+        /// <summary>
+        ///  Check if a system prompt is set.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to the conversation context.
+        ///
+        ///  # Returns
+        ///
+        ///  - `1` if a system prompt is set
+        ///  - `0` if not, or if the handle is null/invalid
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_context_has_system", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_context_has_system(XybridContextHandle* handle);
+
+        /// <summary>
+        ///  Free a conversation context handle.
+        ///
+        ///  This function frees the memory associated with a context handle.
+        ///  After calling this function, the handle is no longer valid.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to the context to free. May be null (no-op).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_context_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_context_free(XybridContextHandle* handle);
+
+        /// <summary>
+        ///  Create an envelope containing text data with a message role.
+        ///
+        ///  This is used for building conversation context with proper role tagging.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `text`: A null-terminated string containing the text.
+        ///  - `role`: The message role (0=System, 1=User, 2=Assistant).
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the envelope, or null on failure.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  XybridEnvelopeHandle* user_msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+        ///  xybrid_context_push(ctx, user_msg);
+        ///  xybrid_envelope_free(user_msg);
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_envelope_text_with_role", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridEnvelopeHandle* xybrid_envelope_text_with_role(byte* text, int role);
+
+        /// <summary>
         ///  Run inference on a model with the given input envelope.
         ///
         ///  This function executes inference using the loaded model and returns
@@ -348,6 +560,52 @@ namespace Xybrid.Native
         internal static extern XybridResultHandle* xybrid_model_run(XybridModelHandle* model, XybridEnvelopeHandle* envelope);
 
         /// <summary>
+        ///  Run inference on a model with conversation context.
+        ///
+        ///  This function executes inference using the loaded model with conversation
+        ///  history. The context provides previous messages which are formatted into
+        ///  the prompt using the model's chat template.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `model`: A handle to the loaded model.
+        ///  - `envelope`: A handle to the input envelope (current user message).
+        ///  - `context`: A handle to the conversation context.
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the result, or null on failure.
+        ///  The envelope and context are NOT consumed - they can be reused.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  XybridContextHandle* ctx = xybrid_context_new();
+        ///  xybrid_context_set_system(ctx, "You are a helpful assistant.");
+        ///
+        ///  XybridEnvelopeHandle* user_msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+        ///  xybrid_context_push(ctx, user_msg);
+        ///
+        ///  XybridResultHandle* result = xybrid_model_run_with_context(model, user_msg, ctx);
+        ///  if (xybrid_result_success(result)) {
+        ///      const char* response = xybrid_result_text(result);
+        ///      printf("Assistant: %s\n", response);
+        ///
+        ///      // Add assistant response to context
+        ///      XybridEnvelopeHandle* asst_msg = xybrid_envelope_text_with_role(response, XYBRID_ROLE_ASSISTANT);
+        ///      xybrid_context_push(ctx, asst_msg);
+        ///      xybrid_envelope_free(asst_msg);
+        ///  }
+        ///
+        ///  xybrid_result_free(result);
+        ///  xybrid_envelope_free(user_msg);
+        ///  xybrid_context_free(ctx);
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_model_run_with_context", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridResultHandle* xybrid_model_run_with_context(XybridModelHandle* model, XybridEnvelopeHandle* envelope, XybridContextHandle* context);
+
+        /// <summary>
         ///  Get the model ID of a loaded model.
         ///
         ///  Returns a pointer to a null-terminated string containing the model ID.
@@ -375,6 +633,38 @@ namespace Xybrid.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_model_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* xybrid_model_id(XybridModelHandle* model);
+
+        /// <summary>
+        ///  Check if a model supports token-by-token streaming.
+        ///
+        ///  Returns 1 if the model supports true token-by-token streaming (LLM models
+        ///  with GGUF format when LLM features are enabled), 0 otherwise.
+        ///
+        ///  Note: `xybrid_model_run_streaming()` (when implemented) will work for all
+        ///  models, but only LLM models get true token-by-token streaming; others emit
+        ///  a single result.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `model`: A handle to the loaded model.
+        ///
+        ///  # Returns
+        ///
+        ///  - `1` if the model supports token streaming
+        ///  - `0` if it does not, or if the handle is null/invalid
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  if (xybrid_model_supports_token_streaming(model)) {
+        ///      // Use streaming inference
+        ///  } else {
+        ///      // Use batch inference
+        ///  }
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_model_supports_token_streaming", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_model_supports_token_streaming(XybridModelHandle* model);
 
         /// <summary>
         ///  Free a model handle.
@@ -531,83 +821,6 @@ namespace Xybrid.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_result_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void xybrid_result_free(XybridResultHandle* handle);
-
-        // ============================================================================
-        // Conversation Context Functions
-        // ============================================================================
-
-        /// <summary>
-        /// Create a new conversation context with a generated UUID.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_context_new", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern XybridContextHandle* xybrid_context_new();
-
-        /// <summary>
-        /// Create a new conversation context with a specific ID.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_context_with_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern XybridContextHandle* xybrid_context_with_id(byte* id);
-
-        /// <summary>
-        /// Set the system prompt for a conversation context.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_context_set_system", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int xybrid_context_set_system(XybridContextHandle* handle, byte* text);
-
-        /// <summary>
-        /// Set the maximum history length for a conversation context.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_context_set_max_history_len", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int xybrid_context_set_max_history_len(XybridContextHandle* handle, uint max_len);
-
-        /// <summary>
-        /// Push an envelope to the conversation history.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_context_push", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int xybrid_context_push(XybridContextHandle* handle, XybridEnvelopeHandle* envelope);
-
-        /// <summary>
-        /// Clear the conversation history but preserve the system prompt and ID.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_context_clear", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int xybrid_context_clear(XybridContextHandle* handle);
-
-        /// <summary>
-        /// Get the conversation context ID.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_context_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern byte* xybrid_context_id(XybridContextHandle* handle);
-
-        /// <summary>
-        /// Get the current history length (excluding system prompt).
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_context_history_len", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint xybrid_context_history_len(XybridContextHandle* handle);
-
-        /// <summary>
-        /// Check if a system prompt is set.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_context_has_system", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int xybrid_context_has_system(XybridContextHandle* handle);
-
-        /// <summary>
-        /// Free a conversation context handle.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_context_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void xybrid_context_free(XybridContextHandle* handle);
-
-        /// <summary>
-        /// Create an envelope containing text data with a message role.
-        /// Role values: 0=System, 1=User, 2=Assistant.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_envelope_text_with_role", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern XybridEnvelopeHandle* xybrid_envelope_text_with_role(byte* text, int role);
-
-        /// <summary>
-        /// Run inference on a model with conversation context.
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "xybrid_model_run_with_context", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern XybridResultHandle* xybrid_model_run_with_context(XybridModelHandle* model, XybridEnvelopeHandle* envelope, XybridContextHandle* context);
 
 
     }

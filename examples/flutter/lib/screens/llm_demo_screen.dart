@@ -58,6 +58,14 @@ class LlmInferenceError extends LlmScreenState {
   const LlmInferenceError(this.message);
 }
 
+/// A message in the conversation history.
+class _ChatMessage {
+  final String role; // 'system', 'user', 'assistant'
+  final String content;
+
+  const _ChatMessage({required this.role, required this.content});
+}
+
 class _LlmDemoScreenState extends State<LlmDemoScreen> {
   /// Controller for the prompt input field.
   final _promptController = TextEditingController(
@@ -97,6 +105,16 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   /// Load progress stream subscription.
   StreamSubscription<LoadEvent>? _loadSubscription;
 
+  /// Whether context mode is enabled (preserves conversation history).
+  bool _contextEnabled = false;
+
+  /// Conversation history for context mode.
+  List<_ChatMessage> _conversationHistory = [];
+
+  /// Get conversation length (excluding system prompt).
+  int get _conversationLength =>
+      _conversationHistory.where((m) => m.role != 'system').length;
+
   @override
   void dispose() {
     _promptController.dispose();
@@ -104,6 +122,58 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
     _streamSubscription?.cancel();
     _loadSubscription?.cancel();
     super.dispose();
+  }
+
+  /// Toggle context mode on/off.
+  void _toggleContext() {
+    setState(() {
+      _contextEnabled = !_contextEnabled;
+      if (_contextEnabled && _conversationHistory.isEmpty) {
+        _conversationHistory = [
+          const _ChatMessage(
+            role: 'system',
+            content: 'You are a helpful AI assistant. Keep responses concise.',
+          ),
+        ];
+      }
+    });
+  }
+
+  /// Clear the conversation history.
+  void _clearContext() {
+    setState(() {
+      _conversationHistory = [
+        const _ChatMessage(
+          role: 'system',
+          content: 'You are a helpful AI assistant. Keep responses concise.',
+        ),
+      ];
+      _responseText = '';
+      _tokenCount = 0;
+      _inferenceTimeMs = null;
+      _tokensPerSecond = null;
+    });
+  }
+
+  /// Build a prompt that includes conversation history.
+  String _buildContextualPrompt(String userMessage) {
+    final buffer = StringBuffer();
+
+    for (final message in _conversationHistory) {
+      switch (message.role) {
+        case 'system':
+          buffer.writeln('System: ${message.content}');
+        case 'user':
+          buffer.writeln('User: ${message.content}');
+        case 'assistant':
+          buffer.writeln('Assistant: ${message.content}');
+      }
+    }
+
+    // Add the new user message
+    buffer.writeln('User: $userMessage');
+    buffer.writeln('Assistant:');
+    return buffer.toString();
   }
 
   /// Load the LLM model from the registry with progress tracking.
@@ -171,8 +241,8 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
 
   /// Generate response with streaming.
   Future<void> _generate() async {
-    final prompt = _promptController.text.trim();
-    if (prompt.isEmpty) {
+    final userMessage = _promptController.text.trim();
+    if (userMessage.isEmpty) {
       setState(() {
         _state = const LlmInferenceError('Please enter a prompt.');
       });
@@ -185,6 +255,16 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
             const LlmInferenceError('Model not loaded. Please load the model first.');
       });
       return;
+    }
+
+    // Build the prompt (with or without context)
+    final prompt = _contextEnabled
+        ? _buildContextualPrompt(userMessage)
+        : userMessage;
+
+    // Add user message to history if context is enabled
+    if (_contextEnabled) {
+      _conversationHistory.add(_ChatMessage(role: 'user', content: userMessage));
     }
 
     setState(() {
@@ -222,6 +302,12 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
             // Check for completion
             if (token.isFinal) {
               _calculateInferenceStats();
+              // Add assistant response to history if context is enabled
+              if (_contextEnabled && _responseText.isNotEmpty) {
+                _conversationHistory.add(
+                  _ChatMessage(role: 'assistant', content: _responseText),
+                );
+              }
               setState(() {
                 _state = const LlmReady();
               });
@@ -238,6 +324,12 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
         onDone: () {
           if (mounted && _state is LlmGenerating) {
             _calculateInferenceStats();
+            // Add assistant response to history if context is enabled
+            if (_contextEnabled && _responseText.isNotEmpty) {
+              _conversationHistory.add(
+                _ChatMessage(role: 'assistant', content: _responseText),
+              );
+            }
             setState(() {
               _state = const LlmReady();
             });
@@ -313,86 +405,154 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: theme.colorScheme.inversePrimary,
         title: const Text('LLM Chat'),
       ),
-      body: Column(
-        children: [
-          // Description card
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Scrollable top section (description + model status)
+            Expanded(
+              child: SingleChildScrollView(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.info_outline,
-                          color: theme.colorScheme.primary,
+                    // Description card with context toggle
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.info_outline,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'About LLM Demo',
+                                    style: theme.textTheme.titleMedium,
+                                  ),
+                                  const Spacer(),
+                                  // Context toggle
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.chat_bubble_outline,
+                                        size: 16,
+                                        color: _contextEnabled ? Colors.blue : Colors.grey,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Context',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: _contextEnabled ? Colors.blue : Colors.grey,
+                                        ),
+                                      ),
+                                      Switch(
+                                        value: _contextEnabled,
+                                        onChanged: (_) => _toggleContext(),
+                                        activeColor: Colors.blue,
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'This demo shows LLM inference with token streaming, '
+                                'similar to running "xybrid repl --stream". Tokens are '
+                                'displayed as they are generated.',
+                              ),
+                              // Context info panel (when enabled)
+                              if (_contextEnabled) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.history, size: 16, color: Colors.blue),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Conversation: $_conversationLength messages',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.blue,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      TextButton.icon(
+                                        onPressed: _clearContext,
+                                        icon: const Icon(Icons.delete_outline, size: 16),
+                                        label: const Text('Clear'),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: Colors.blue,
+                                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'About LLM Demo',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                      ],
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'This demo shows LLM inference with token streaming, '
-                      'similar to running "xybrid repl --stream". Tokens are '
-                      'displayed as they are generated.',
+
+                    // Model status section
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: ModelStatusCard(
+                        state: _modelLoadState,
+                        modelId: _llmModelId,
+                        idleIcon: Icons.psychology_outlined,
+                        idleTitle: 'LLM Model Required',
+                        idleDescription: 'Load the $_llmModelId model to start chatting.',
+                        onLoad: _loadModel,
+                        readyTrailing: _tokenCount > 0
+                            ? Chip(
+                                label: Text('$_tokenCount tokens'),
+                                padding: EdgeInsets.zero,
+                                visualDensity: VisualDensity.compact,
+                              )
+                            : null,
+                      ),
                     ),
+
+                    // Response area (only shown when model is loaded)
+                    if (_model != null) ...[
+                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: _buildResponseSection(theme),
+                      ),
+                    ],
                   ],
                 ),
               ),
             ),
-          ),
 
-          // Model status section
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: ModelStatusCard(
-              state: _modelLoadState,
-              modelId: _llmModelId,
-              idleIcon: Icons.psychology_outlined,
-              idleTitle: 'LLM Model Required',
-              idleDescription: 'Load the $_llmModelId model to start chatting.',
-              onLoad: _loadModel,
-              readyTrailing: _tokenCount > 0
-                  ? Chip(
-                      label: Text('$_tokenCount tokens'),
-                      padding: EdgeInsets.zero,
-                      visualDensity: VisualDensity.compact,
-                    )
-                  : null,
-            ),
-          ),
-
-          // Chat interface (only shown when model is loaded)
-          if (_model != null) ...[
-            const SizedBox(height: 16),
-
-            // Response area
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _buildResponseSection(theme),
+            // Input area - fixed at bottom (only shown when model is loaded)
+            if (_model != null)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: _buildInputSection(theme),
               ),
-            ),
-
-            // Input area
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: _buildInputSection(theme),
-            ),
-          ] else
-            const Spacer(),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -476,8 +636,12 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
           ),
           const Divider(height: 1),
 
-          // Response text
-          Expanded(
+          // Response text - constrained height to allow scrolling within
+          ConstrainedBox(
+            constraints: const BoxConstraints(
+              minHeight: 150,
+              maxHeight: 300,
+            ),
             child: SingleChildScrollView(
               controller: _scrollController,
               padding: const EdgeInsets.all(16),

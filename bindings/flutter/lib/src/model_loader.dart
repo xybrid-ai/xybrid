@@ -6,6 +6,7 @@ library;
 
 import 'dart:async';
 
+import 'context.dart';
 import 'envelope.dart';
 import 'llm.dart';
 import 'result.dart';
@@ -144,6 +145,43 @@ class XybridModel {
     }
   }
 
+  /// Run inference with conversation context.
+  ///
+  /// The context provides conversation history which is formatted into
+  /// the prompt using the model's chat template.
+  ///
+  /// **Note:** The context is NOT automatically updated with the result.
+  /// Call `context.pushText(result.text, MessageRole.assistant)` to add
+  /// the response to the history.
+  ///
+  /// ## Example
+  ///
+  /// ```dart
+  /// final context = ConversationContext();
+  /// context.setSystem('You are a helpful assistant.');
+  ///
+  /// context.pushText('Hello!', MessageRole.user);
+  /// final result = await model.runWithContext(
+  ///   XybridEnvelope.text('Hello!'),
+  ///   context,
+  /// );
+  /// context.pushText(result.text ?? '', MessageRole.assistant);
+  /// ```
+  Future<XybridResult> runWithContext(
+    XybridEnvelope envelope,
+    ConversationContext context,
+  ) async {
+    try {
+      final ffiResult = await inner.runWithContext(
+        envelope: envelope.inner,
+        context: context.inner,
+      );
+      return XybridResult.fromFfi(ffiResult);
+    } catch (e) {
+      throw XybridException('Inference with context failed: $e');
+    }
+  }
+
   /// Run inference with streaming output.
   ///
   /// This method uses native token-by-token streaming for LLM models,
@@ -202,6 +240,80 @@ class XybridModel {
       }
     } catch (e) {
       // Emit error token
+      yield StreamToken(
+        token: '',
+        index: 0,
+        cumulativeText: '',
+        isFinal: true,
+        finishReason: 'error: $e',
+      );
+    }
+  }
+
+  /// Run inference with streaming output and conversation context.
+  ///
+  /// Combines streaming output with multi-turn conversation memory.
+  /// The model sees the full conversation history when generating responses.
+  ///
+  /// **Note:** The context is NOT automatically updated with the result.
+  /// You should push the final response to the context after streaming completes.
+  ///
+  /// ## Example
+  ///
+  /// ```dart
+  /// final context = ConversationContext();
+  /// context.setSystem('You are a helpful assistant.');
+  /// context.pushText('Tell me a joke', MessageRole.user);
+  ///
+  /// final buffer = StringBuffer();
+  /// await for (final token in model.runStreamingWithContext(
+  ///   XybridEnvelope.text('Tell me a joke'),
+  ///   context,
+  /// )) {
+  ///   stdout.write(token.token);
+  ///   buffer.write(token.token);
+  /// }
+  /// context.pushText(buffer.toString(), MessageRole.assistant);
+  /// ```
+  Stream<StreamToken> runStreamingWithContext(
+    XybridEnvelope envelope,
+    ConversationContext context,
+  ) async* {
+    try {
+      final stream = inner.runStreamWithContext(
+        envelope: envelope.inner,
+        context: context.inner,
+      );
+
+      await for (final event in stream) {
+        switch (event) {
+          case FfiStreamEvent_Token(:final field0):
+            yield StreamToken(
+              token: field0.token,
+              index: field0.index,
+              cumulativeText: field0.cumulativeText,
+              isFinal: field0.finishReason != null,
+              finishReason: field0.finishReason,
+            );
+          case FfiStreamEvent_Complete(:final field0):
+            yield StreamToken(
+              token: '',
+              index: 0,
+              cumulativeText: field0.text ?? '',
+              isFinal: true,
+              finishReason: 'stop',
+            );
+          case FfiStreamEvent_Error(:final field0):
+            yield StreamToken(
+              token: '',
+              index: 0,
+              cumulativeText: '',
+              isFinal: true,
+              finishReason: 'error: $field0',
+            );
+        }
+      }
+    } catch (e) {
       yield StreamToken(
         token: '',
         index: 0,

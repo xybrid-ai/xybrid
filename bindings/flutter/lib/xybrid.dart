@@ -43,6 +43,22 @@
 /// final result = await pipeline.run(envelope);
 /// ```
 ///
+/// ## Conversation Context (LLM)
+///
+/// ```dart
+/// // Create conversation context for multi-turn chat
+/// final context = ConversationContext();
+/// context.setSystem('You are a helpful assistant.');
+///
+/// // Run with context
+/// context.pushText('Hello!', MessageRole.user);
+/// final result = await model.runWithContext(
+///   XybridEnvelope.text('Hello!'),
+///   context,
+/// );
+/// context.pushText(result.text ?? '', MessageRole.assistant);
+/// ```
+///
 /// ## Classes
 ///
 /// - [XybridModelLoader] - Prepare and load models from registry or bundles
@@ -50,8 +66,11 @@
 /// - [XybridEnvelope] - Input data wrapper for different modalities
 /// - [XybridResult] - Inference output containing text, audio, or embeddings
 /// - [XybridPipeline] - Multi-stage inference pipeline
-library xybrid;
+/// - [ConversationContext] - Multi-turn conversation memory for LLMs
+/// - [MessageRole] - Message role for conversation turns
+library;
 
+export 'src/context.dart' show ConversationContext, MessageRole;
 export 'src/envelope.dart' show XybridEnvelope;
 export 'src/llm.dart' show StreamToken;
 export 'src/model_loader.dart'
