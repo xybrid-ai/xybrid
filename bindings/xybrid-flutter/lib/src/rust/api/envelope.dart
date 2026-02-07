@@ -8,9 +8,10 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'context.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `into_envelope`
+// These functions are ignored because they are not marked as `pub`: `clone_envelope`, `into_envelope`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>>
 abstract class FfiEnvelope implements RustOpaqueInterface {
@@ -31,6 +32,9 @@ abstract class FfiEnvelope implements RustOpaqueInterface {
       .api
       .crateApiEnvelopeFfiEnvelopeEmbedding(data: data);
 
+  /// Get the message role of this envelope, if set.
+  FfiMessageRole? role();
+
   /// Create text envelope for TTS with optional voice and speed.
   static FfiEnvelope text({
     required String text,
@@ -41,4 +45,20 @@ abstract class FfiEnvelope implements RustOpaqueInterface {
     voiceId: voiceId,
     speed: speed,
   );
+
+  /// Create a text envelope with a specific message role.
+  ///
+  /// This is useful for building conversation context.
+  static FfiEnvelope textWithRole({
+    required String text,
+    required FfiMessageRole role,
+  }) => XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeTextWithRole(
+    text: text,
+    role: role,
+  );
+
+  /// Set the message role on this envelope.
+  ///
+  /// Returns a new envelope with the role set.
+  FfiEnvelope withRole({required FfiMessageRole role});
 }

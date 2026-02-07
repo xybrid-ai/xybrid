@@ -5,6 +5,7 @@ use xybrid_sdk::{ModelLoader, XybridModel};
 
 use crate::frb_generated::StreamSink;
 
+use super::context::FfiConversationContext;
 use super::result::FfiResult;
 
 /// Event emitted during model loading with progress.
@@ -191,5 +192,92 @@ impl FfiModel {
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     pub fn supports_token_streaming(&self) -> bool {
         self.0.supports_token_streaming()
+    }
+
+    /// Run inference with conversation context.
+    ///
+    /// The context provides conversation history which is formatted into
+    /// the prompt using the model's chat template.
+    ///
+    /// Note: The context is NOT automatically updated with the result.
+    /// Call `context.push_text(result.text(), FfiMessageRole::Assistant)` to add the response.
+    pub fn run_with_context(
+        &self,
+        envelope: super::envelope::FfiEnvelope,
+        context: &FfiConversationContext,
+    ) -> Result<FfiResult, String> {
+        let ctx_guard = context
+            .0
+            .read()
+            .map_err(|e| format!("Failed to read context: {}", e))?;
+
+        let result = self
+            .0
+            .run_with_context(&envelope.into_envelope(), &ctx_guard)
+            .map_err(|e| e.to_string())?;
+
+        Ok(FfiResult::from_inference_result(&result))
+    }
+
+    /// Run inference with streaming output and conversation context.
+    ///
+    /// Combines streaming output with multi-turn conversation memory.
+    /// The model sees the full conversation history when generating responses.
+    ///
+    /// Returns a stream of events:
+    /// - `FfiStreamEvent::Token` for each generated token (LLM models)
+    /// - `FfiStreamEvent::Complete` when inference finishes
+    /// - `FfiStreamEvent::Error` if an error occurs
+    pub fn run_stream_with_context(
+        &self,
+        envelope: super::envelope::FfiEnvelope,
+        context: &FfiConversationContext,
+        sink: StreamSink<FfiStreamEvent>,
+    ) {
+        let model = self.0.clone();
+        let env = envelope.into_envelope();
+        let ctx = context.0.clone();
+
+        // Spawn a background thread
+        std::thread::spawn(move || {
+            // Get read lock on context
+            let ctx_guard = match ctx.read() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    let _ = sink.add(FfiStreamEvent::Error(format!(
+                        "Failed to read context: {}",
+                        e
+                    )));
+                    return;
+                }
+            };
+
+            // Track token index for the stream
+            let mut token_index = 0u32;
+
+            // Use callback-based streaming
+            let result = model.run_streaming_with_context(&env, &ctx_guard, |token| {
+                let ffi_token = FfiStreamToken {
+                    token: token.token.clone(),
+                    token_id: token.token_id,
+                    index: token_index,
+                    cumulative_text: token.cumulative_text.clone(),
+                    finish_reason: token.finish_reason.clone(),
+                };
+                token_index += 1;
+                let _ = sink.add(FfiStreamEvent::Token(ffi_token));
+                Ok(())
+            });
+
+            match result {
+                Ok(inference_result) => {
+                    let ffi_result = FfiResult::from_inference_result(&inference_result);
+                    let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
+                }
+                Err(e) => {
+                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                }
+            }
+        });
     }
 }

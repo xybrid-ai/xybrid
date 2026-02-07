@@ -8,6 +8,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'context.dart';
 import 'envelope.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
@@ -30,6 +31,32 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// For non-LLM models, a single Token event is emitted with the full result.
   Stream<FfiStreamEvent> runStream({required FfiEnvelope envelope});
+
+  /// Run inference with streaming output and conversation context.
+  ///
+  /// Combines streaming output with multi-turn conversation memory.
+  /// The model sees the full conversation history when generating responses.
+  ///
+  /// Returns a stream of events:
+  /// - `FfiStreamEvent::Token` for each generated token (LLM models)
+  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Error` if an error occurs
+  Stream<FfiStreamEvent> runStreamWithContext({
+    required FfiEnvelope envelope,
+    required FfiConversationContext context,
+  });
+
+  /// Run inference with conversation context.
+  ///
+  /// The context provides conversation history which is formatted into
+  /// the prompt using the model's chat template.
+  ///
+  /// Note: The context is NOT automatically updated with the result.
+  /// Call `context.push_text(result.text(), FfiMessageRole::Assistant)` to add the response.
+  Future<FfiResult> runWithContext({
+    required FfiEnvelope envelope,
+    required FfiConversationContext context,
+  });
 }
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>>

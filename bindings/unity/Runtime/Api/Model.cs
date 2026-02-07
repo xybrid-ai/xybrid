@@ -119,6 +119,75 @@ namespace Xybrid
             }
         }
 
+        /// <summary>
+        /// Runs inference with conversation context.
+        /// </summary>
+        /// <param name="envelope">The input data for inference.</param>
+        /// <param name="context">The conversation context with history.</param>
+        /// <returns>The inference result.</returns>
+        /// <remarks>
+        /// The context provides conversation history which is formatted into the prompt
+        /// using the model's chat template. The context is NOT automatically updated
+        /// with the result - call context.Push() to add the response.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">Thrown if envelope or context is null.</exception>
+        /// <exception cref="ObjectDisposedException">Thrown if this model, envelope, or context is disposed.</exception>
+        /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
+        public unsafe InferenceResult Run(Envelope envelope, ConversationContext context)
+        {
+            ThrowIfDisposed();
+
+            if (envelope == null)
+            {
+                throw new ArgumentNullException(nameof(envelope));
+            }
+
+            if (context == null)
+            {
+                throw new ArgumentNullException(nameof(context));
+            }
+
+            if (envelope.IsDisposed)
+            {
+                throw new ObjectDisposedException(nameof(envelope));
+            }
+
+            if (context.IsDisposed)
+            {
+                throw new ObjectDisposedException(nameof(context));
+            }
+
+            XybridResultHandle* resultHandle = NativeMethods.xybrid_model_run_with_context(
+                _handle, envelope.Handle, context.Handle);
+            if (resultHandle == null)
+            {
+                NativeHelpers.ThrowLastError("Failed to run inference with context");
+            }
+
+            return new InferenceResult(resultHandle);
+        }
+
+        /// <summary>
+        /// Runs inference with conversation context and returns the text result.
+        /// </summary>
+        /// <param name="text">The input text for LLM inference.</param>
+        /// <param name="context">The conversation context with history.</param>
+        /// <returns>The text output from the model.</returns>
+        /// <remarks>
+        /// This is a convenience method. The input message is NOT automatically pushed
+        /// to the context - you must call context.Push() for both input and output.
+        /// </remarks>
+        /// <exception cref="InferenceException">Thrown if inference fails.</exception>
+        public string RunText(string text, ConversationContext context)
+        {
+            using (var envelope = Envelope.Text(text))
+            using (var result = Run(envelope, context))
+            {
+                result.ThrowIfFailed();
+                return result.Text;
+            }
+        }
+
         private void ThrowIfDisposed()
         {
             if (_disposed)

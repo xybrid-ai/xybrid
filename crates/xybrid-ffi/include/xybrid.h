@@ -49,6 +49,20 @@
 #include <stdbool.h>
 
 /*
+ Message role constants for conversation context.
+
+ Use these values with `xybrid_envelope_text_with_role`:
+ - `XYBRID_ROLE_SYSTEM` (0): System prompt
+ - `XYBRID_ROLE_USER` (1): User message
+ - `XYBRID_ROLE_ASSISTANT` (2): Assistant response
+ */
+#define XYBRID_ROLE_SYSTEM 0
+
+#define XYBRID_ROLE_USER 1
+
+#define XYBRID_ROLE_ASSISTANT 2
+
+/*
  Opaque handle to a model loader.
 
  This handle is created by `xybrid_model_loader_from_registry` or
@@ -78,6 +92,16 @@ typedef struct XybridModelHandle {
 typedef struct XybridEnvelopeHandle {
   void *_0;
 } XybridEnvelopeHandle;
+
+/*
+ Opaque handle to a conversation context.
+
+ This handle is created by `xybrid_context_new` and must be freed with
+ `xybrid_context_free`.
+ */
+typedef struct XybridContextHandle {
+  void *_0;
+} XybridContextHandle;
 
 /*
  Opaque handle to an inference result.
@@ -371,6 +395,208 @@ struct XybridEnvelopeHandle *xybrid_envelope_text(const char *text);
 void xybrid_envelope_free(struct XybridEnvelopeHandle *handle);
 
 /*
+ Create a new conversation context with a generated UUID.
+
+ # Returns
+
+ A handle to the conversation context, or null on failure.
+
+ # Example (C)
+
+ ```c
+ XybridContextHandle* ctx = xybrid_context_new();
+ if (ctx == NULL) {
+     fprintf(stderr, "Failed: %s\n", xybrid_last_error());
+     return 1;
+ }
+ // Use context...
+ xybrid_context_free(ctx);
+ ```
+ */
+struct XybridContextHandle *xybrid_context_new(void);
+
+/*
+ Create a new conversation context with a specific ID.
+
+ # Parameters
+
+ - `id`: A null-terminated string containing the context ID.
+
+ # Returns
+
+ A handle to the conversation context, or null on failure.
+
+ # Example (C)
+
+ ```c
+ XybridContextHandle* ctx = xybrid_context_with_id("session-123");
+ ```
+ */
+struct XybridContextHandle *xybrid_context_with_id(const char *id);
+
+/*
+ Set the system prompt for a conversation context.
+
+ The system prompt defines the assistant's behavior and persists
+ across `xybrid_context_clear()` calls.
+
+ # Parameters
+
+ - `handle`: A handle to the conversation context.
+ - `text`: A null-terminated string containing the system prompt.
+
+ # Returns
+
+ - `0` on success
+ - Non-zero on failure (check `xybrid_last_error()`)
+
+ # Example (C)
+
+ ```c
+ xybrid_context_set_system(ctx, "You are a helpful assistant.");
+ ```
+ */
+int32_t xybrid_context_set_system(struct XybridContextHandle *handle, const char *text);
+
+/*
+ Set the maximum history length for a conversation context.
+
+ When the history exceeds this limit, oldest messages are dropped (FIFO).
+ Default is 50 messages.
+
+ # Parameters
+
+ - `handle`: A handle to the conversation context.
+ - `max_len`: Maximum number of history entries.
+
+ # Returns
+
+ - `0` on success
+ - Non-zero on failure
+ */
+int32_t xybrid_context_set_max_history_len(struct XybridContextHandle *handle, uint32_t max_len);
+
+/*
+ Push an envelope to the conversation history.
+
+ The envelope should have a role set (use `xybrid_envelope_text_with_role`).
+
+ # Parameters
+
+ - `handle`: A handle to the conversation context.
+ - `envelope`: A handle to the envelope to push.
+
+ # Returns
+
+ - `0` on success
+ - Non-zero on failure
+
+ # Example (C)
+
+ ```c
+ XybridEnvelopeHandle* msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+ xybrid_context_push(ctx, msg);
+ xybrid_envelope_free(msg);
+ ```
+ */
+int32_t xybrid_context_push(struct XybridContextHandle *handle,
+                            struct XybridEnvelopeHandle *envelope);
+
+/*
+ Clear the conversation history but preserve the system prompt and ID.
+
+ # Parameters
+
+ - `handle`: A handle to the conversation context.
+
+ # Returns
+
+ - `0` on success
+ - Non-zero on failure
+ */
+int32_t xybrid_context_clear(struct XybridContextHandle *handle);
+
+/*
+ Get the conversation context ID.
+
+ Returns a pointer to a null-terminated string containing the context ID.
+ The returned pointer is valid until the context handle is freed.
+ Do NOT free the returned string.
+
+ # Parameters
+
+ - `handle`: A handle to the conversation context.
+
+ # Returns
+
+ A pointer to the context ID string, or null on failure.
+ */
+const char *xybrid_context_id(struct XybridContextHandle *handle);
+
+/*
+ Get the current history length (excluding system prompt).
+
+ # Parameters
+
+ - `handle`: A handle to the conversation context.
+
+ # Returns
+
+ The number of messages in the history, or 0 if the handle is null/invalid.
+ */
+uint32_t xybrid_context_history_len(struct XybridContextHandle *handle);
+
+/*
+ Check if a system prompt is set.
+
+ # Parameters
+
+ - `handle`: A handle to the conversation context.
+
+ # Returns
+
+ - `1` if a system prompt is set
+ - `0` if not, or if the handle is null/invalid
+ */
+int32_t xybrid_context_has_system(struct XybridContextHandle *handle);
+
+/*
+ Free a conversation context handle.
+
+ This function frees the memory associated with a context handle.
+ After calling this function, the handle is no longer valid.
+
+ # Parameters
+
+ - `handle`: A handle to the context to free. May be null (no-op).
+ */
+void xybrid_context_free(struct XybridContextHandle *handle);
+
+/*
+ Create an envelope containing text data with a message role.
+
+ This is used for building conversation context with proper role tagging.
+
+ # Parameters
+
+ - `text`: A null-terminated string containing the text.
+ - `role`: The message role (0=System, 1=User, 2=Assistant).
+
+ # Returns
+
+ A handle to the envelope, or null on failure.
+
+ # Example (C)
+
+ ```c
+ XybridEnvelopeHandle* user_msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+ xybrid_context_push(ctx, user_msg);
+ xybrid_envelope_free(user_msg);
+ ```
+ */
+struct XybridEnvelopeHandle *xybrid_envelope_text_with_role(const char *text, int32_t role);
+
+/*
  Run inference on a model with the given input envelope.
 
  This function executes inference using the loaded model and returns
@@ -409,6 +635,53 @@ void xybrid_envelope_free(struct XybridEnvelopeHandle *handle);
  */
 struct XybridResultHandle *xybrid_model_run(struct XybridModelHandle *model,
                                             struct XybridEnvelopeHandle *envelope);
+
+/*
+ Run inference on a model with conversation context.
+
+ This function executes inference using the loaded model with conversation
+ history. The context provides previous messages which are formatted into
+ the prompt using the model's chat template.
+
+ # Parameters
+
+ - `model`: A handle to the loaded model.
+ - `envelope`: A handle to the input envelope (current user message).
+ - `context`: A handle to the conversation context.
+
+ # Returns
+
+ A handle to the result, or null on failure.
+ The envelope and context are NOT consumed - they can be reused.
+
+ # Example (C)
+
+ ```c
+ XybridContextHandle* ctx = xybrid_context_new();
+ xybrid_context_set_system(ctx, "You are a helpful assistant.");
+
+ XybridEnvelopeHandle* user_msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+ xybrid_context_push(ctx, user_msg);
+
+ XybridResultHandle* result = xybrid_model_run_with_context(model, user_msg, ctx);
+ if (xybrid_result_success(result)) {
+     const char* response = xybrid_result_text(result);
+     printf("Assistant: %s\n", response);
+
+     // Add assistant response to context
+     XybridEnvelopeHandle* asst_msg = xybrid_envelope_text_with_role(response, XYBRID_ROLE_ASSISTANT);
+     xybrid_context_push(ctx, asst_msg);
+     xybrid_envelope_free(asst_msg);
+ }
+
+ xybrid_result_free(result);
+ xybrid_envelope_free(user_msg);
+ xybrid_context_free(ctx);
+ ```
+ */
+struct XybridResultHandle *xybrid_model_run_with_context(struct XybridModelHandle *model,
+                                                         struct XybridEnvelopeHandle *envelope,
+                                                         struct XybridContextHandle *context);
 
 /*
  Get the model ID of a loaded model.

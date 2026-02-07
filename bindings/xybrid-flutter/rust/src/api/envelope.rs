@@ -1,7 +1,9 @@
 //! Envelope FFI wrappers for Flutter.
 use flutter_rust_bridge::frb;
 use std::collections::HashMap;
-use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
+
+use super::context::FfiMessageRole;
 
 /// FFI wrapper for input envelopes.
 #[frb(opaque)]
@@ -39,8 +41,36 @@ impl FfiEnvelope {
         FfiEnvelope(Envelope::new(EnvelopeKind::Embedding(data)))
     }
 
+    /// Create a text envelope with a specific message role.
+    ///
+    /// This is useful for building conversation context.
+    #[frb(sync)]
+    pub fn text_with_role(text: String, role: FfiMessageRole) -> FfiEnvelope {
+        let envelope = Envelope::new(EnvelopeKind::Text(text)).with_role(role.into());
+        FfiEnvelope(envelope)
+    }
+
+    /// Set the message role on this envelope.
+    ///
+    /// Returns a new envelope with the role set.
+    #[frb(sync)]
+    pub fn with_role(&self, role: FfiMessageRole) -> FfiEnvelope {
+        FfiEnvelope(self.0.clone().with_role(role.into()))
+    }
+
+    /// Get the message role of this envelope, if set.
+    #[frb(sync)]
+    pub fn role(&self) -> Option<FfiMessageRole> {
+        self.0.role().map(|r| r.into())
+    }
+
     /// Convert to inner Envelope for SDK calls.
     pub(crate) fn into_envelope(self) -> Envelope {
         self.0
+    }
+
+    /// Clone the inner envelope (for context operations).
+    pub(crate) fn clone_envelope(&self) -> Envelope {
+        self.0.clone()
     }
 }

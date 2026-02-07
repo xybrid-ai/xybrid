@@ -28,7 +28,8 @@ use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::Arc;
 
 // Import SDK types
-use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+use xybrid_core::conversation::ConversationContext;
+use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
 use xybrid_sdk::{InferenceResult, ModelLoader, XybridModel};
 
 // ============================================================================
@@ -74,6 +75,13 @@ pub struct XybridEnvelopeHandle(*mut c_void);
 #[repr(C)]
 pub struct XybridResultHandle(*mut c_void);
 
+/// Opaque handle to a conversation context.
+///
+/// This handle is created by `xybrid_context_new` and must be freed with
+/// `xybrid_context_free`.
+#[repr(C)]
+pub struct XybridContextHandle(*mut c_void);
+
 // ============================================================================
 // Internal Boxed Types
 // ============================================================================
@@ -106,11 +114,13 @@ pub(crate) enum EnvelopeData {
         sample_rate: u32,
         channels: u32,
     },
-    /// Text data with optional voice and speed.
+    /// Text data with optional voice, speed, and message role.
     Text {
         text: String,
         voice_id: Option<String>,
         speed: Option<f64>,
+        /// Message role for conversation context (None for non-context usage).
+        role: Option<MessageRole>,
     },
 }
 
@@ -132,6 +142,12 @@ pub(crate) struct ResultData {
     pub latency_ms: u32,
 }
 
+/// Internal conversation context.
+pub(crate) struct ContextData {
+    /// The conversation context instance.
+    pub context: ConversationContext,
+}
+
 /// Type alias for a boxed loader.
 pub(crate) type BoxedLoader = Box<LoaderState>;
 
@@ -143,6 +159,9 @@ pub(crate) type BoxedEnvelope = Box<EnvelopeData>;
 
 /// Type alias for a boxed result.
 pub(crate) type BoxedResult = Box<ResultData>;
+
+/// Type alias for a boxed context.
+pub(crate) type BoxedContext = Box<ContextData>;
 
 // ============================================================================
 // Handle Conversion Utilities
@@ -300,6 +319,59 @@ impl XybridResultHandle {
             return None;
         }
         Some(&*(wrapper.0 as *const ResultData))
+    }
+}
+
+impl XybridContextHandle {
+    /// Create a handle from a boxed context (takes ownership).
+    pub(crate) fn from_boxed(context: BoxedContext) -> *mut Self {
+        let ptr = Box::into_raw(context) as *mut c_void;
+        Box::into_raw(Box::new(XybridContextHandle(ptr)))
+    }
+
+    /// Convert handle back to boxed context (takes ownership of handle).
+    ///
+    /// # Safety
+    /// The handle must be valid and not already freed.
+    pub(crate) unsafe fn into_boxed(handle: *mut Self) -> Option<BoxedContext> {
+        if handle.is_null() {
+            return None;
+        }
+        let wrapper = Box::from_raw(handle);
+        if wrapper.0.is_null() {
+            return None;
+        }
+        Some(Box::from_raw(wrapper.0 as *mut ContextData))
+    }
+
+    /// Borrow the context data from a handle.
+    ///
+    /// # Safety
+    /// The handle must be valid and not already freed.
+    pub(crate) unsafe fn as_ref<'a>(handle: *mut Self) -> Option<&'a ContextData> {
+        if handle.is_null() {
+            return None;
+        }
+        let wrapper = &*handle;
+        if wrapper.0.is_null() {
+            return None;
+        }
+        Some(&*(wrapper.0 as *const ContextData))
+    }
+
+    /// Mutably borrow the context data from a handle.
+    ///
+    /// # Safety
+    /// The handle must be valid and not already freed.
+    pub(crate) unsafe fn as_mut<'a>(handle: *mut Self) -> Option<&'a mut ContextData> {
+        if handle.is_null() {
+            return None;
+        }
+        let wrapper = &*handle;
+        if wrapper.0.is_null() {
+            return None;
+        }
+        Some(&mut *(wrapper.0 as *mut ContextData))
     }
 }
 
@@ -819,11 +891,12 @@ pub unsafe extern "C" fn xybrid_envelope_text(text: *const c_char) -> *mut Xybri
 
     // Note: Empty text is allowed (for edge cases)
 
-    // Create envelope with no voice_id or speed (those would require additional parameters)
+    // Create envelope with no voice_id, speed, or role
     let envelope = Box::new(EnvelopeData::Text {
         text: text_str,
         voice_id: None,
         speed: None,
+        role: None,
     });
 
     XybridEnvelopeHandle::from_boxed(envelope)
@@ -850,6 +923,491 @@ pub unsafe extern "C" fn xybrid_envelope_free(handle: *mut XybridEnvelopeHandle)
         // Take ownership and let it drop to free memory
         let _ = XybridEnvelopeHandle::into_boxed(handle);
     }
+}
+
+// ============================================================================
+// C ABI Conversation Context Functions
+// ============================================================================
+//
+// These functions allow C consumers to manage conversation context for
+// multi-turn LLM interactions.
+
+/// Message role constants for conversation context.
+///
+/// Use these values with `xybrid_envelope_text_with_role`:
+/// - `XYBRID_ROLE_SYSTEM` (0): System prompt
+/// - `XYBRID_ROLE_USER` (1): User message
+/// - `XYBRID_ROLE_ASSISTANT` (2): Assistant response
+pub const XYBRID_ROLE_SYSTEM: i32 = 0;
+pub const XYBRID_ROLE_USER: i32 = 1;
+pub const XYBRID_ROLE_ASSISTANT: i32 = 2;
+
+/// Create a new conversation context with a generated UUID.
+///
+/// # Returns
+///
+/// A handle to the conversation context, or null on failure.
+///
+/// # Example (C)
+///
+/// ```c
+/// XybridContextHandle* ctx = xybrid_context_new();
+/// if (ctx == NULL) {
+///     fprintf(stderr, "Failed: %s\n", xybrid_last_error());
+///     return 1;
+/// }
+/// // Use context...
+/// xybrid_context_free(ctx);
+/// ```
+#[no_mangle]
+pub extern "C" fn xybrid_context_new() -> *mut XybridContextHandle {
+    clear_last_error();
+
+    let context = Box::new(ContextData {
+        context: ConversationContext::new(),
+    });
+
+    XybridContextHandle::from_boxed(context)
+}
+
+/// Create a new conversation context with a specific ID.
+///
+/// # Parameters
+///
+/// - `id`: A null-terminated string containing the context ID.
+///
+/// # Returns
+///
+/// A handle to the conversation context, or null on failure.
+///
+/// # Example (C)
+///
+/// ```c
+/// XybridContextHandle* ctx = xybrid_context_with_id("session-123");
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_context_with_id(id: *const c_char) -> *mut XybridContextHandle {
+    clear_last_error();
+
+    if id.is_null() {
+        set_last_error("id is null");
+        return std::ptr::null_mut();
+    }
+
+    let id_str = match CStr::from_ptr(id).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("id is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let context = Box::new(ContextData {
+        context: ConversationContext::with_id(id_str),
+    });
+
+    XybridContextHandle::from_boxed(context)
+}
+
+/// Set the system prompt for a conversation context.
+///
+/// The system prompt defines the assistant's behavior and persists
+/// across `xybrid_context_clear()` calls.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to the conversation context.
+/// - `text`: A null-terminated string containing the system prompt.
+///
+/// # Returns
+///
+/// - `0` on success
+/// - Non-zero on failure (check `xybrid_last_error()`)
+///
+/// # Example (C)
+///
+/// ```c
+/// xybrid_context_set_system(ctx, "You are a helpful assistant.");
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_context_set_system(
+    handle: *mut XybridContextHandle,
+    text: *const c_char,
+) -> i32 {
+    clear_last_error();
+
+    if handle.is_null() {
+        set_last_error("context handle is null");
+        return -1;
+    }
+
+    if text.is_null() {
+        set_last_error("text is null");
+        return -1;
+    }
+
+    let text_str = match CStr::from_ptr(text).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("text is not valid UTF-8");
+            return -1;
+        }
+    };
+
+    let ctx_data = match XybridContextHandle::as_mut(handle) {
+        Some(data) => data,
+        None => {
+            set_last_error("invalid context handle");
+            return -1;
+        }
+    };
+
+    // Create system envelope
+    let system_envelope = Envelope::new(EnvelopeKind::Text(text_str)).with_role(MessageRole::System);
+
+    // Rebuild context with system (preserving ID and max_history_len)
+    let id = ctx_data.context.id().to_string();
+    let max_len = ctx_data.context.max_history_len();
+    let history: Vec<_> = ctx_data.context.history().to_vec();
+
+    let mut new_ctx = ConversationContext::with_id(id)
+        .with_max_history_len(max_len)
+        .with_system(system_envelope);
+
+    for envelope in history {
+        new_ctx.push(envelope);
+    }
+
+    ctx_data.context = new_ctx;
+    0
+}
+
+/// Set the maximum history length for a conversation context.
+///
+/// When the history exceeds this limit, oldest messages are dropped (FIFO).
+/// Default is 50 messages.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to the conversation context.
+/// - `max_len`: Maximum number of history entries.
+///
+/// # Returns
+///
+/// - `0` on success
+/// - Non-zero on failure
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_context_set_max_history_len(
+    handle: *mut XybridContextHandle,
+    max_len: u32,
+) -> i32 {
+    clear_last_error();
+
+    if handle.is_null() {
+        set_last_error("context handle is null");
+        return -1;
+    }
+
+    let ctx_data = match XybridContextHandle::as_mut(handle) {
+        Some(data) => data,
+        None => {
+            set_last_error("invalid context handle");
+            return -1;
+        }
+    };
+
+    // Rebuild context with new max_history_len
+    let id = ctx_data.context.id().to_string();
+    let system = ctx_data.context.system_envelope().cloned();
+    let history: Vec<_> = ctx_data.context.history().to_vec();
+
+    let mut new_ctx = ConversationContext::with_id(id).with_max_history_len(max_len as usize);
+
+    if let Some(sys) = system {
+        new_ctx = new_ctx.with_system(sys);
+    }
+
+    for envelope in history {
+        new_ctx.push(envelope);
+    }
+
+    ctx_data.context = new_ctx;
+    0
+}
+
+/// Push an envelope to the conversation history.
+///
+/// The envelope should have a role set (use `xybrid_envelope_text_with_role`).
+///
+/// # Parameters
+///
+/// - `handle`: A handle to the conversation context.
+/// - `envelope`: A handle to the envelope to push.
+///
+/// # Returns
+///
+/// - `0` on success
+/// - Non-zero on failure
+///
+/// # Example (C)
+///
+/// ```c
+/// XybridEnvelopeHandle* msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+/// xybrid_context_push(ctx, msg);
+/// xybrid_envelope_free(msg);
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_context_push(
+    handle: *mut XybridContextHandle,
+    envelope: *mut XybridEnvelopeHandle,
+) -> i32 {
+    clear_last_error();
+
+    if handle.is_null() {
+        set_last_error("context handle is null");
+        return -1;
+    }
+
+    if envelope.is_null() {
+        set_last_error("envelope handle is null");
+        return -1;
+    }
+
+    let ctx_data = match XybridContextHandle::as_mut(handle) {
+        Some(data) => data,
+        None => {
+            set_last_error("invalid context handle");
+            return -1;
+        }
+    };
+
+    let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
+        Some(data) => data,
+        None => {
+            set_last_error("invalid envelope handle");
+            return -1;
+        }
+    };
+
+    // Convert to SDK envelope and push
+    let sdk_envelope = match envelope_data {
+        EnvelopeData::Text {
+            text,
+            voice_id,
+            speed,
+            role,
+        } => {
+            let mut metadata = HashMap::new();
+            if let Some(v) = voice_id {
+                metadata.insert("voice_id".to_string(), v.clone());
+            }
+            if let Some(s) = speed {
+                metadata.insert("speed".to_string(), s.to_string());
+            }
+            // Use the role from envelope, default to User
+            let msg_role = role.unwrap_or(MessageRole::User);
+
+            Envelope::with_metadata(EnvelopeKind::Text(text.clone()), metadata).with_role(msg_role)
+        }
+        EnvelopeData::Audio { .. } => {
+            set_last_error("audio envelopes cannot be pushed to context");
+            return -1;
+        }
+    };
+
+    ctx_data.context.push(sdk_envelope);
+    0
+}
+
+/// Clear the conversation history but preserve the system prompt and ID.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to the conversation context.
+///
+/// # Returns
+///
+/// - `0` on success
+/// - Non-zero on failure
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_context_clear(handle: *mut XybridContextHandle) -> i32 {
+    clear_last_error();
+
+    if handle.is_null() {
+        set_last_error("context handle is null");
+        return -1;
+    }
+
+    let ctx_data = match XybridContextHandle::as_mut(handle) {
+        Some(data) => data,
+        None => {
+            set_last_error("invalid context handle");
+            return -1;
+        }
+    };
+
+    ctx_data.context.clear();
+    0
+}
+
+/// Get the conversation context ID.
+///
+/// Returns a pointer to a null-terminated string containing the context ID.
+/// The returned pointer is valid until the context handle is freed.
+/// Do NOT free the returned string.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to the conversation context.
+///
+/// # Returns
+///
+/// A pointer to the context ID string, or null on failure.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_context_id(handle: *mut XybridContextHandle) -> *const c_char {
+    if handle.is_null() {
+        return std::ptr::null();
+    }
+
+    match XybridContextHandle::as_ref(handle) {
+        Some(data) => {
+            thread_local! {
+                static CONTEXT_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
+            }
+            CONTEXT_ID.with(|e| {
+                *e.borrow_mut() = CString::new(data.context.id()).ok();
+                match e.borrow().as_ref() {
+                    Some(cstr) => cstr.as_ptr(),
+                    None => std::ptr::null(),
+                }
+            })
+        }
+        None => std::ptr::null(),
+    }
+}
+
+/// Get the current history length (excluding system prompt).
+///
+/// # Parameters
+///
+/// - `handle`: A handle to the conversation context.
+///
+/// # Returns
+///
+/// The number of messages in the history, or 0 if the handle is null/invalid.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_context_history_len(handle: *mut XybridContextHandle) -> u32 {
+    if handle.is_null() {
+        return 0;
+    }
+
+    match XybridContextHandle::as_ref(handle) {
+        Some(data) => data.context.history().len() as u32,
+        None => 0,
+    }
+}
+
+/// Check if a system prompt is set.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to the conversation context.
+///
+/// # Returns
+///
+/// - `1` if a system prompt is set
+/// - `0` if not, or if the handle is null/invalid
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_context_has_system(handle: *mut XybridContextHandle) -> i32 {
+    if handle.is_null() {
+        return 0;
+    }
+
+    match XybridContextHandle::as_ref(handle) {
+        Some(data) => {
+            if data.context.system_envelope().is_some() {
+                1
+            } else {
+                0
+            }
+        }
+        None => 0,
+    }
+}
+
+/// Free a conversation context handle.
+///
+/// This function frees the memory associated with a context handle.
+/// After calling this function, the handle is no longer valid.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to the context to free. May be null (no-op).
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_context_free(handle: *mut XybridContextHandle) {
+    if !handle.is_null() {
+        let _ = XybridContextHandle::into_boxed(handle);
+    }
+}
+
+/// Create an envelope containing text data with a message role.
+///
+/// This is used for building conversation context with proper role tagging.
+///
+/// # Parameters
+///
+/// - `text`: A null-terminated string containing the text.
+/// - `role`: The message role (0=System, 1=User, 2=Assistant).
+///
+/// # Returns
+///
+/// A handle to the envelope, or null on failure.
+///
+/// # Example (C)
+///
+/// ```c
+/// XybridEnvelopeHandle* user_msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+/// xybrid_context_push(ctx, user_msg);
+/// xybrid_envelope_free(user_msg);
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_envelope_text_with_role(
+    text: *const c_char,
+    role: i32,
+) -> *mut XybridEnvelopeHandle {
+    clear_last_error();
+
+    if text.is_null() {
+        set_last_error("text is null");
+        return std::ptr::null_mut();
+    }
+
+    let text_str = match CStr::from_ptr(text).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("text is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let msg_role = match role {
+        XYBRID_ROLE_SYSTEM => MessageRole::System,
+        XYBRID_ROLE_USER => MessageRole::User,
+        XYBRID_ROLE_ASSISTANT => MessageRole::Assistant,
+        _ => {
+            set_last_error("invalid role value (use 0=System, 1=User, 2=Assistant)");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let envelope = Box::new(EnvelopeData::Text {
+        text: text_str,
+        voice_id: None,
+        speed: None,
+        role: Some(msg_role),
+    });
+
+    XybridEnvelopeHandle::from_boxed(envelope)
 }
 
 // ============================================================================
@@ -949,6 +1507,7 @@ pub unsafe extern "C" fn xybrid_model_run(
             text,
             voice_id,
             speed,
+            role,
         } => {
             let mut metadata = HashMap::new();
             if let Some(v) = voice_id {
@@ -957,15 +1516,191 @@ pub unsafe extern "C" fn xybrid_model_run(
             if let Some(s) = speed {
                 metadata.insert("speed".to_string(), s.to_string());
             }
-            Envelope {
+            let mut envelope = Envelope {
                 kind: EnvelopeKind::Text(text.clone()),
                 metadata,
+            };
+            if let Some(r) = role {
+                envelope = envelope.with_role(*r);
             }
+            envelope
         }
     };
 
     // Run inference using the SDK
     let inference_result = match model_state.model.run(&sdk_envelope) {
+        Ok(result) => result,
+        Err(e) => {
+            // Return error result
+            let result = ResultData {
+                success: false,
+                error: Some(format!("Inference failed: {}", e)),
+                output_type: "".to_string(),
+                text: None,
+                embedding: None,
+                audio_bytes: None,
+                latency_ms: 0,
+            };
+            return XybridResultHandle::from_boxed(Box::new(result));
+        }
+    };
+
+    // Convert InferenceResult to ResultData
+    let result = ResultData {
+        success: true,
+        error: None,
+        output_type: match inference_result.text() {
+            Some(_) => "text".to_string(),
+            None => match inference_result.audio_bytes() {
+                Some(_) => "audio".to_string(),
+                None => match inference_result.embedding() {
+                    Some(_) => "embedding".to_string(),
+                    None => "unknown".to_string(),
+                },
+            },
+        },
+        text: inference_result.text().map(|s| s.to_string()),
+        embedding: inference_result.embedding().map(|e| e.to_vec()),
+        audio_bytes: inference_result.audio_bytes().map(|b| b.to_vec()),
+        latency_ms: inference_result.latency_ms(),
+    };
+
+    XybridResultHandle::from_boxed(Box::new(result))
+}
+
+/// Run inference on a model with conversation context.
+///
+/// This function executes inference using the loaded model with conversation
+/// history. The context provides previous messages which are formatted into
+/// the prompt using the model's chat template.
+///
+/// # Parameters
+///
+/// - `model`: A handle to the loaded model.
+/// - `envelope`: A handle to the input envelope (current user message).
+/// - `context`: A handle to the conversation context.
+///
+/// # Returns
+///
+/// A handle to the result, or null on failure.
+/// The envelope and context are NOT consumed - they can be reused.
+///
+/// # Example (C)
+///
+/// ```c
+/// XybridContextHandle* ctx = xybrid_context_new();
+/// xybrid_context_set_system(ctx, "You are a helpful assistant.");
+///
+/// XybridEnvelopeHandle* user_msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+/// xybrid_context_push(ctx, user_msg);
+///
+/// XybridResultHandle* result = xybrid_model_run_with_context(model, user_msg, ctx);
+/// if (xybrid_result_success(result)) {
+///     const char* response = xybrid_result_text(result);
+///     printf("Assistant: %s\n", response);
+///
+///     // Add assistant response to context
+///     XybridEnvelopeHandle* asst_msg = xybrid_envelope_text_with_role(response, XYBRID_ROLE_ASSISTANT);
+///     xybrid_context_push(ctx, asst_msg);
+///     xybrid_envelope_free(asst_msg);
+/// }
+///
+/// xybrid_result_free(result);
+/// xybrid_envelope_free(user_msg);
+/// xybrid_context_free(ctx);
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_run_with_context(
+    model: *mut XybridModelHandle,
+    envelope: *mut XybridEnvelopeHandle,
+    context: *mut XybridContextHandle,
+) -> *mut XybridResultHandle {
+    clear_last_error();
+
+    // Validate handles
+    if model.is_null() {
+        set_last_error("model handle is null");
+        return std::ptr::null_mut();
+    }
+
+    if envelope.is_null() {
+        set_last_error("envelope handle is null");
+        return std::ptr::null_mut();
+    }
+
+    if context.is_null() {
+        set_last_error("context handle is null");
+        return std::ptr::null_mut();
+    }
+
+    // Borrow the model state
+    let model_state = match XybridModelHandle::as_ref(model) {
+        Some(state) => state,
+        None => {
+            set_last_error("invalid model handle");
+            return std::ptr::null_mut();
+        }
+    };
+
+    // Borrow the envelope data
+    let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
+        Some(data) => data,
+        None => {
+            set_last_error("invalid envelope handle");
+            return std::ptr::null_mut();
+        }
+    };
+
+    // Borrow the context data
+    let ctx_data = match XybridContextHandle::as_ref(context) {
+        Some(data) => data,
+        None => {
+            set_last_error("invalid context handle");
+            return std::ptr::null_mut();
+        }
+    };
+
+    // Convert EnvelopeData to SDK Envelope
+    let sdk_envelope = match envelope_data {
+        EnvelopeData::Audio {
+            bytes,
+            sample_rate,
+            channels,
+        } => {
+            let mut metadata = HashMap::new();
+            metadata.insert("sample_rate".to_string(), sample_rate.to_string());
+            metadata.insert("channels".to_string(), channels.to_string());
+            Envelope {
+                kind: EnvelopeKind::Audio(bytes.clone()),
+                metadata,
+            }
+        }
+        EnvelopeData::Text {
+            text,
+            voice_id,
+            speed,
+            role,
+        } => {
+            let mut metadata = HashMap::new();
+            if let Some(v) = voice_id {
+                metadata.insert("voice_id".to_string(), v.clone());
+            }
+            if let Some(s) = speed {
+                metadata.insert("speed".to_string(), s.to_string());
+            }
+            let mut envelope = Envelope {
+                kind: EnvelopeKind::Text(text.clone()),
+                metadata,
+            };
+            if let Some(r) = role {
+                envelope = envelope.with_role(*r);
+            }
+            envelope
+        }
+    };
+
+    // Run inference with context using the SDK
+    let inference_result = match model_state.model.run_with_context(&sdk_envelope, &ctx_data.context) {
         Ok(result) => result,
         Err(e) => {
             // Return error result
@@ -1407,6 +2142,7 @@ mod tests {
             text: "Hello, world!".to_string(),
             voice_id: Some("voice-1".to_string()),
             speed: Some(1.0),
+            role: None,
         });
 
         let handle = XybridEnvelopeHandle::from_boxed(envelope);
@@ -1419,10 +2155,12 @@ mod tests {
                     text,
                     voice_id,
                     speed,
+                    role,
                 } => {
                     assert_eq!(text, "Hello, world!");
                     assert_eq!(voice_id.as_deref(), Some("voice-1"));
                     assert_eq!(*speed, Some(1.0));
+                    assert!(role.is_none());
                 }
                 _ => panic!("Expected Text variant"),
             }
@@ -1925,10 +2663,12 @@ mod tests {
                     text,
                     voice_id,
                     speed,
+                    role,
                 } => {
                     assert_eq!(text, "Hello, world!");
                     assert!(voice_id.is_none());
                     assert!(speed.is_none());
+                    assert!(role.is_none());
                 }
                 _ => panic!("Expected Text variant"),
             }

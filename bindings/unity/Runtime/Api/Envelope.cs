@@ -71,6 +71,35 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Creates an envelope containing text data with a message role.
+        /// </summary>
+        /// <param name="text">The text to process.</param>
+        /// <param name="role">The message role for conversation context.</param>
+        /// <returns>A new Envelope containing the text with the specified role.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if text is null.</exception>
+        /// <exception cref="XybridException">Thrown if envelope creation fails.</exception>
+        public static unsafe Envelope Text(string text, MessageRole role)
+        {
+            if (text == null)
+            {
+                throw new ArgumentNullException(nameof(text));
+            }
+
+            byte[] textBytes = NativeHelpers.ToUtf8Bytes(text);
+
+            fixed (byte* textPtr = textBytes)
+            {
+                XybridEnvelopeHandle* handle = NativeMethods.xybrid_envelope_text_with_role(textPtr, (int)role);
+                if (handle == null)
+                {
+                    NativeHelpers.ThrowLastError("Failed to create text envelope with role");
+                }
+
+                return new Envelope(handle);
+            }
+        }
+
+        /// <summary>
         /// Creates an envelope containing audio data for ASR inference.
         /// </summary>
         /// <param name="audioBytes">Raw audio bytes (typically PCM or WAV format).</param>
