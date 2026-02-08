@@ -1,8 +1,8 @@
 name: xybrid_flutter
 description: "Xybrid Flutter SDK for hybrid cloud-edge ML inference."
 version: 0.0.1
-homepage: https://github.com/xybrid-ai/xybrid-flutter
-repository: https://github.com/xybrid-ai/xybrid-flutter
+homepage: https://github.com/xybrid-ai/bindings/flutter
+repository: https://github.com/xybrid-ai/bindings/flutter
 
 environment:
   sdk: ^3.9.2

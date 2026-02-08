@@ -31,6 +31,6 @@ The library is automatically detected by xtask commands that build for iOS targe
 ## Symlinks
 
 For Flutter compatibility, a symlink exists at:
-- `bindings/xybrid-flutter/ios/Frameworks/onnxruntime.xcframework` -> `../../../../vendor/ort-ios/onnxruntime.xcframework`
+- `bindings/flutter/ios/Frameworks/onnxruntime.xcframework` -> `../../../../vendor/ort-ios/onnxruntime.xcframework`
 
 This allows the Flutter podspec to reference the framework without changing its vendored_frameworks path.

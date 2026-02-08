@@ -10,7 +10,7 @@ Pod::Spec.new do |s|
 Xybrid Flutter SDK enables running ML models on-device (edge) or in the cloud,
 with intelligent routing based on device capabilities. Supports ASR, TTS, and LLM pipelines.
                        DESC
-  s.homepage         = 'https://github.com/xybrid-ai/xybrid-flutter'
+  s.homepage         = 'https://github.com/xybrid-ai/bindings/flutter'
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Xybrid' => 'support@xybrid.dev' }
 

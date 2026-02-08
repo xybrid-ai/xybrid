@@ -20,7 +20,7 @@ Add to your `pubspec.yaml`:
 dependencies:
   xybrid_flutter:
     git:
-      url: https://github.com/xybrid-ai/xybrid-flutter.git
+      url: https://github.com/xybrid-ai/bindings/flutter.git
       ref: main
 ```
 
@@ -29,7 +29,7 @@ Or for local development:
 ```yaml
 dependencies:
   xybrid_flutter:
-    path: ../xybrid-flutter
+     path: ../../bindings/flutter
 ```
 
 ### Platform Requirements

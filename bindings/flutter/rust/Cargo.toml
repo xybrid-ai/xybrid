@@ -3,7 +3,7 @@ name = "xybrid_flutter"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/xybrid-ai/xybrid-flutter"
+repository = "https://github.com/xybrid-ai/bindings/flutter"
 
 [lib]
 name = "xybrid_flutter_ffi"
