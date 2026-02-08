@@ -1,10 +1,32 @@
 ---
-title: Pipeline DSL
-description: Defining multi-stage ML pipelines in YAML
+title: Pipelines
+description: Multi-stage ML pipeline definition and YAML DSL reference
 ---
 
 
-Xybrid uses a YAML-based DSL for defining multi-stage ML pipelines. Pipelines enable chaining models together (ASR → LLM → TTS) with automatic routing between device and cloud execution.
+A **Pipeline** is a sequence of stages that transform data. Pipelines are defined in YAML and executed by the orchestrator, enabling you to chain models together (ASR → LLM → TTS) with automatic routing between device and cloud execution.
+
+## How Pipelines Work
+
+```mermaid
+flowchart TD
+  A[YAML Definition] --> B[Pipeline Loader]
+
+  B --> BB
+  subgraph BB[Load]
+    direction LR
+      B1[1. Parse YAML] --> B2[2. Resolve models from Registry] --> B3[3. Validate type compatibility] --> B4[4. Prepare execution context]
+    end
+
+    BB --> C[Orchestrator]
+
+    C --> D
+
+    subgraph D[Sequential Execution]
+        direction LR
+        S1[Stage 1</br>Whisper] --> S2[Stage 2</br>GPT-4o] --> S3[Stage 3</br>Kokoro]
+    end
+```
 
 ## Basic Structure
 
@@ -39,6 +61,7 @@ For more control, use the object format:
 ```yaml
 stages:
   - name: whisper-tiny@1.0
+    target: device
     registry: "http://other-registry:8080"
 ```
 
@@ -71,7 +94,7 @@ stages:
 
 ## Input Types
 
-Declare expected input type:
+Declare expected input type for validation:
 
 ```yaml
 input:
@@ -87,6 +110,18 @@ input:
 input:
   kind: "Embedding"  # For vector search
 ```
+
+## Data Flow
+
+Each stage transforms an Envelope:
+
+| Stage Type | Input | Output |
+|------------|-------|--------|
+| ASR (Whisper) | `AudioRaw` | `Text` |
+| LLM (GPT-4o) | `Text` | `Text` |
+| TTS (Kokoro) | `Text` | `AudioRaw` |
+
+The pipeline validates that outputs match the next stage's expected input.
 
 ## Registry Configuration
 
@@ -121,13 +156,6 @@ Supported providers for cloud LLM stages:
 |----------|--------|-------|
 | `openai` | gpt-4o, gpt-4o-mini | Requires OPENAI_API_KEY |
 | `anthropic` | claude-3-5-sonnet | Requires ANTHROPIC_API_KEY |
-
-### API Key Management
-
-```yaml
-
-Xybrid.simple(apiKey: "your-xybrid-api-key")
-```
 
 ## Example Pipelines
 
@@ -225,6 +253,11 @@ pipeline.isLoaded;    // true/false
 
 ## Lifecycle
 
+1. **Load** - Parse YAML, resolve models from registry
+2. **Validate** - Check type compatibility between stages
+3. **Execute** - Run stages sequentially via orchestrator
+4. **Unload** - Release resources
+
 ```dart
 // Load
 final pipeline = await Xybrid.pipeline('pipeline.yaml');
@@ -235,3 +268,8 @@ final result = await pipeline.run(envelope: input);
 // Unload when done
 pipeline.unload();
 ```
+
+## Related
+
+- [Registry](/docs/concepts/registry) - Model bundle resolution
+- [Bundles](/docs/concepts/bundles) - Bundle format and metadata

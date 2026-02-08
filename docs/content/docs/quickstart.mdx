@@ -3,287 +3,182 @@ title: Quick Start
 description: Get up and running with Xybrid in minutes
 ---
 
-import { Step, Steps } from 'fumadocs-ui/components/steps';
+Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 
-Get Xybrid running and execute your first pipeline in under 5 minutes.
-
-<Steps>
-<Step>
-## Installation
-
-Add the Xybrid SDK to your project:
-
-<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
+<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'CLI']}>
   <Tab value="Flutter">
+### Install
+
 ```yaml
 # pubspec.yaml
 dependencies:
   xybrid_flutter: ^0.1.0
 ```
+
 ```bash
 flutter pub get
 ```
-  </Tab>
-  <Tab value="iOS">
-```swift
-// Package.swift
-dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid-swift.git", from: "0.1.0")
-]
-```
-  </Tab>
-  <Tab value="Android">
-```kotlin
-// build.gradle.kts
-dependencies {
-    implementation("ai.xybrid:xybrid-android:0.1.0")
-}
-```
-  </Tab>
-  <Tab value="Kotlin Multiplatform">
-```kotlin
-// build.gradle.kts
-kotlin {
-    sourceSets {
-        commonMain.dependencies {
-            implementation("ai.xybrid:xybrid-kmp:0.1.0")
-        }
-    }
-}
-```
-  </Tab>
-</Tabs>
 
-<Callout type="info">
-For CLI installation, see [CLI Installation](/docs/cli/installation).
-</Callout>
-</Step>
+### Run inference
 
-<Step>
-## Run
-
-### Pipeline
-
-Pipelines chain multiple models together. Define a `voice-assistant.yaml`:
-
-```yaml
-name: voice-assistant
-stages:
-  # Speech recognition (runs on device)
-  - whisper-tiny@1.0
-
-  # Language model (routes to cloud)
-  - target: integration
-    provider: openai
-    model: gpt-4o-mini
-
-  # Text-to-speech (runs on device)
-  - kokoro-82m@0.1
-```
-
-Run it:
-
-<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
-  <Tab value="Flutter">
 ```dart
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
-await Xybrid.init();
+await RustLib.init();
 
-final loader = Xybrid.pipeline('assets/voice-assistant.yaml');
-final pipeline = await loader.load();
-
-final audioBytes = await recorder.readAudioBytes(recordingPath);
-final envelope = Envelope.audio(
-  audioBytes: audioBytes,
-  sampleRate: 16000,
-  channels: 1,
+// Load a model and run text-to-speech
+final model = await Xybrid.model(modelId: 'kokoro-82m').load();
+final result = await model.run(
+  envelope: Envelope.text(text: "Hello from Xybrid!"),
 );
 
-final result = await pipeline.run(envelope: envelope);
-await audioPlayer.play(result.audio);
+// result.audioBytes contains the generated speech audio
 ```
+
+**Expected output:** Audio bytes containing synthesized speech.
   </Tab>
-  <Tab value="iOS">
+  <Tab value="Swift">
+### Install
+
+Add via Swift Package Manager in Xcode:
+
+**File > Add Package Dependencies** and enter:
+
+```
+https://github.com/xybrid-ai/xybrid
+```
+
+Or add to `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.0")
+]
+```
+
+### Run inference
+
 ```swift
 import Xybrid
 
-let xybrid = Xybrid()
-let audioData = recorder.stop()
+// Load a model from the registry
+let loader = XybridModelLoader.fromRegistry(modelId: "kokoro-82m")
+let model = try loader.load()
 
-let result = try await xybrid.runPipeline(
-    pipeline: "voice-assistant",
-    input: .audio(data: audioData)
-)
+// Run text-to-speech
+let envelope = XybridEnvelope.text(text: "Hello from Xybrid!")
+let result = try model.run(envelope: envelope)
 
-audioPlayer.play(result.audio)
+// result.audioBytes contains the generated speech audio
 ```
+
+**Expected output:** `result.success == true` with audio bytes in `result.audioBytes`.
   </Tab>
-  <Tab value="Android">
+  <Tab value="Kotlin">
+### Install
+
 ```kotlin
-import ai.xybrid.Xybrid
-import ai.xybrid.Envelope
-
-val xybrid = Xybrid()
-val audioBytes = recorder.stop()
-
-val result = xybrid.runPipeline(
-    pipeline = "voice-assistant",
-    input = Envelope.audio(audioBytes)
-)
-
-audioPlayer.play(result.audio)
+// build.gradle.kts
+dependencies {
+    implementation("ai.xybrid:xybrid:0.1.0")
+}
 ```
-  </Tab>
-  <Tab value="Kotlin Multiplatform">
+
+### Run inference
+
 ```kotlin
-import ai.xybrid.Xybrid
-import ai.xybrid.Envelope
+import ai.xybrid.XybridModelLoader
+import ai.xybrid.XybridEnvelope
 
-val xybrid = Xybrid()
-val audioBytes = recorder.stop()
+// Load a model from the registry
+val loader = XybridModelLoader.fromRegistry("kokoro-82m")
+val model = loader.load()
 
-val result = xybrid.runPipeline(
-    pipeline = "voice-assistant",
-    input = Envelope.audio(audioBytes)
-)
+// Run text-to-speech
+val envelope = XybridEnvelope.Text(text = "Hello from Xybrid!")
+val result = model.run(envelope)
 
-playAudio(result.audio)
+// result.audioBytes contains the generated speech audio
 ```
+
+**Expected output:** `result.success == true` with audio bytes in `result.audioBytes`.
   </Tab>
-</Tabs>
+  <Tab value="Unity">
+### Install
 
-### Single Model
+In Unity, go to **Window > Package Manager > + > Add package from git URL** and enter:
 
-Run a single model directly:
-
-<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
-  <Tab value="Flutter">
-```dart
-final result = await xybrid.runModel(
-  modelId: 'whisper-tiny',
-  version: '1.0',
-  input: Envelope.audio(bytes: audioBytes),
-);
-
-print(result.text); // "Hello, how can I help you?"
 ```
-  </Tab>
-  <Tab value="iOS">
-```swift
-let result = try await xybrid.runModel(
-    modelId: "whisper-tiny",
-    version: "1.0",
-    input: .audio(data: audioData)
-)
-
-print(result.text) // "Hello, how can I help you?"
+https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
 ```
-  </Tab>
-  <Tab value="Android">
-```kotlin
-val result = xybrid.runModel(
-    modelId = "whisper-tiny",
-    version = "1.0",
-    input = Envelope.audio(audioBytes)
-)
 
-println(result.text) // "Hello, how can I help you?"
-```
-  </Tab>
-  <Tab value="Kotlin Multiplatform">
-```kotlin
-val result = xybrid.runModel(
-    modelId = "whisper-tiny",
-    version = "1.0",
-    input = Envelope.audio(audioBytes)
-)
+Or add to `Packages/manifest.json`:
 
-println(result.text) // "Hello, how can I help you?"
-```
-  </Tab>
-</Tabs>
-</Step>
-
-<Step>
-## Handle Results
-
-<Tabs items={['Flutter', 'iOS', 'Android', 'Kotlin Multiplatform']}>
-  <Tab value="Flutter">
-```dart
-try {
-  final result = await pipeline.run(envelope: envelope);
-
-  // Access different result types
-  if (result.hasText) {
-    print('Transcription: ${result.text}');
+```json
+{
+  "dependencies": {
+    "ai.xybrid.sdk": "https://github.com/xybrid-ai/xybrid.git?path=bindings/unity"
   }
-  if (result.hasAudio) {
-    await audioPlayer.play(result.audio);
-  }
-} on XybridException catch (e) {
-  print('Pipeline failed: ${e.message}');
 }
 ```
-  </Tab>
-  <Tab value="iOS">
-```swift
-do {
-    let result = try await xybrid.runPipeline(
-        pipeline: "voice-assistant",
-        input: .audio(data: audioData)
-    )
 
-    if let text = result.text {
-        print("Transcription: \(text)")
-    }
-    if let audio = result.audio {
-        audioPlayer.play(audio)
-    }
-} catch let error as XybridError {
-    print("Pipeline failed: \(error.message)")
-}
+### Run inference
+
+```csharp
+using Xybrid.Native;
+using UnityEngine;
+
+// Initialize the SDK
+NativeMethods.xybrid_init();
+
+// Create a model loader and load a model
+var loader = NativeMethods.xybrid_model_loader_new();
+NativeMethods.xybrid_model_loader_load(loader, "kokoro-82m", IntPtr.Zero, out var model);
+
+// Run text-to-speech
+var envelope = NativeMethods.xybrid_envelope_new_text("Hello from Xybrid!");
+NativeMethods.xybrid_model_run(model, envelope, out var output);
+
+// Get the result
+var textPtr = NativeMethods.xybrid_result_get_text(output);
+Debug.Log($"Result: {Marshal.PtrToStringUTF8(textPtr)}");
 ```
-  </Tab>
-  <Tab value="Android">
-```kotlin
-try {
-    val result = xybrid.runPipeline(
-        pipeline = "voice-assistant",
-        input = Envelope.audio(audioBytes)
-    )
 
-    result.text?.let { println("Transcription: $it") }
-    result.audio?.let { audioPlayer.play(it) }
-} catch (e: XybridException) {
-    println("Pipeline failed: ${e.message}")
-}
+**Expected output:** Audio result from the TTS model, accessible via the result pointer.
+  </Tab>
+  <Tab value="CLI">
+### Install
+
+```bash
+cargo install xybrid-cli
 ```
-  </Tab>
-  <Tab value="Kotlin Multiplatform">
-```kotlin
-try {
-    val result = xybrid.runPipeline(
-        pipeline = "voice-assistant",
-        input = Envelope.audio(audioBytes)
-    )
 
-    result.text?.let { println("Transcription: $it") }
-    result.audio?.let { playAudio(it) }
-} catch (e: XybridException) {
-    println("Pipeline failed: ${e.message}")
-}
+### Run inference
+
+```bash
+# List available models
+xybrid models list
+
+# Run text-to-speech
+xybrid run kokoro-82m --input "Hello from Xybrid!" --output hello.wav
+
+# Run speech-to-text
+xybrid run whisper-tiny --input recording.wav
+```
+
+**Expected output:**
+
+```
+Transcription: "Hello, how can I help you?"
 ```
   </Tab>
 </Tabs>
-</Step>
-</Steps>
 
 ## Next Steps
 
 <Cards>
-  <Card title="Pipelines" href="/docs/internals/pipelines" description="Learn the Pipeline DSL" />
-  <Card title="SDKs" href="/docs/integrations/sdks" description="Platform SDK guides" />
+  <Card title="SDKs" href="/docs/integrations/sdks" description="Detailed SDK guides for each platform" />
+  <Card title="Pipelines" href="/docs/concepts/pipelines" description="Chain multiple models together" />
   <Card title="CLI Reference" href="/docs/cli/reference" description="All CLI commands" />
-  <Card title="Internals" href="/docs/internals" description="How Xybrid works" />
+  <Card title="Concepts" href="/docs/concepts" description="How Xybrid works under the hood" />
 </Cards>

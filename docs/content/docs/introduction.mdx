@@ -1,50 +1,35 @@
 ---
 title: What is Xybrid
-description: Hybrid AI orchestration that runs inference anywhere
+description: On-device AI SDK for mobile, desktop, and edge
 ---
 
-Xybrid is a **hybrid AI orchestration runtime** that lets developers run inference anywhere—device, edge, or cloud—without rewriting code.
+Xybrid is an **on-device AI SDK** that lets you run ML models directly in your mobile and desktop apps. Add speech-to-text, text-to-speech, LLMs, vision, and embeddings — all running locally on the user's device with no cloud dependency.
 
-## The Problem
+## What You Can Build
 
-AI inference is fragmenting across compute surfaces:
+- **Speech-to-text** — transcribe audio on-device with Whisper
+- **Text-to-speech** — generate natural-sounding speech with Kokoro
+- **LLMs** — run language models locally for chat, summarization, and more
+- **Vision** — classify images and detect objects on-device
+- **Embeddings** — generate vector embeddings for search and similarity
 
-- **Mobile NPUs** now rival cloud GPUs in capability
-- **Privacy regulations** demand localized processing
-- **Cloud costs** escalate with scale
-- **Latency requirements** push computation to the edge
+Chain these capabilities into multi-step pipelines that run entirely on-device, or selectively route to cloud APIs when you need more power.
 
-Yet tooling remains siloed. Developers must manually handle device detection, model routing, format conversion, and fallback logic.
+## Supported Platforms
 
-## The Solution
-
-Xybrid provides a unified control plane:
-
-```yaml
-name: voice-assistant
-stages:
-  - whisper-tiny@1.0      # ASR: runs on device (privacy)
-  - target: integration
-    provider: openai
-    model: gpt-4o-mini    # LLM: routes to cloud (capability)
-  - kokoro-82m@0.1        # TTS: runs on device (latency)
-```
-
-Three models, two execution locations, one pipeline. Xybrid handles the routing.
-
-## Core Principles
-
-| Principle | Description |
-|-----------|-------------|
-| **Privacy-first** | Policies govern what data may leave the device |
-| **Adaptive compute** | Routing adapts to latency, RTT, and power budgets |
-| **Real-time ready** | Streaming pipelines emit incremental results |
-| **Extensible** | `.xyb` bundles enable adding models without rewrites |
+| Platform | SDK |
+|----------|-----|
+| iOS | Swift, Flutter |
+| Android | Kotlin, Flutter |
+| macOS | Swift, Flutter |
+| Linux | Rust, CLI |
+| Windows | Rust, CLI |
 
 ## Next Steps
 
 <Cards>
-  <Card title="Quick Start" href="/docs/quickstart" description="Get up and running in minutes" />
-  <Card title="Integrations" href="/docs/integrations" description="SDKs and APIs for your platform" />
-  <Card title="Internals" href="/docs/internals" description="How Xybrid works under the hood" />
+  <Card title="Quick Start" href="/docs/quickstart" description="Install the SDK and run your first model" />
+  <Card title="Flutter SDK" href="/docs/integrations/sdks/flutter" description="Flutter integration guide" />
+  <Card title="iOS SDK" href="/docs/integrations/sdks/ios" description="Native iOS integration" />
+  <Card title="Android SDK" href="/docs/integrations/sdks/android" description="Native Android integration" />
 </Cards>

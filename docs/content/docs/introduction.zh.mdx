@@ -1,50 +1,35 @@
 ---
 title: 什么是 Xybrid
-description: 混合 AI 编排，让推理在任何地方运行
+description: 面向移动端、桌面端和边缘端的设备端 AI SDK
 ---
 
-Xybrid 是一个**混合 AI 编排运行时**，让开发者无需重写代码即可在设备端、边缘端或云端运行推理。
+Xybrid 是一个**设备端 AI SDK**，让你可以直接在移动和桌面应用中运行 ML 模型。添加语音转文字、文字转语音、大语言模型、视觉和嵌入功能 — 全部在用户设备上本地运行，无需依赖云端。
 
-## 问题
+## 你可以构建什么
 
-AI 推理正在分散到多个计算平台：
+- **语音转文字** — 使用 Whisper 在设备端转录音频
+- **文字转语音** — 使用 Kokoro 生成自然语音
+- **大语言模型** — 在本地运行语言模型，用于对话、摘要等
+- **视觉** — 在设备端进行图像分类和目标检测
+- **嵌入** — 生成用于搜索和相似度的向量嵌入
 
-- **移动端 NPU** 现在的能力可以媲美云端 GPU
-- **隐私法规** 要求本地化处理
-- **云端成本** 随规模攀升
-- **延迟要求** 将计算推向边缘
+将这些能力串联成多步流水线，完全在设备端运行，或在需要更强算力时选择性地路由到云端 API。
 
-然而工具链仍然是孤立的。开发者必须手动处理设备检测、模型路由、格式转换和回退逻辑。
+## 支持的平台
 
-## 解决方案
-
-Xybrid 提供统一的控制平面：
-
-```yaml
-name: voice-assistant
-stages:
-  - whisper-tiny@1.0      # ASR：在设备端运行（隐私）
-  - target: integration
-    provider: openai
-    model: gpt-4o-mini    # LLM：路由到云端（能力）
-  - kokoro-82m@0.1        # TTS：在设备端运行（延迟）
-```
-
-三个模型，两个执行位置，一个流水线。Xybrid 处理路由。
-
-## 核心原则
-
-| 原则 | 描述 |
-|-----------|-------------|
-| **隐私优先** | 策略控制哪些数据可以离开设备 |
-| **自适应计算** | 路由根据延迟、RTT 和功耗预算进行调整 |
-| **实时就绪** | 流式流水线输出增量结果 |
-| **可扩展** | `.xyb` 包支持无需重写即可添加模型 |
+| 平台 | SDK |
+|----------|-----|
+| iOS | Swift, Flutter |
+| Android | Kotlin, Flutter |
+| macOS | Swift, Flutter |
+| Linux | Rust, CLI |
+| Windows | Rust, CLI |
 
 ## 下一步
 
 <Cards>
-  <Card title="快速开始" href="/zh/docs/quickstart" description="几分钟内开始运行" />
-  <Card title="集成" href="/zh/docs/integrations" description="适用于您平台的 SDK 和 API" />
-  <Card title="内部原理" href="/zh/docs/internals" description="Xybrid 的工作原理" />
+  <Card title="快速开始" href="/zh/docs/quickstart" description="安装 SDK 并运行你的第一个模型" />
+  <Card title="Flutter SDK" href="/zh/docs/integrations/sdks/flutter" description="Flutter 集成指南" />
+  <Card title="iOS SDK" href="/zh/docs/integrations/sdks/ios" description="原生 iOS 集成" />
+  <Card title="Android SDK" href="/zh/docs/integrations/sdks/android" description="原生 Android 集成" />
 </Cards>

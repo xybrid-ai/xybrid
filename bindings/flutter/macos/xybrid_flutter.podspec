@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'xybrid_flutter'
-  s.version          = '0.0.1'
+  s.version          = '0.1.0'
   s.summary          = 'Xybrid Flutter SDK for hybrid cloud-edge ML inference.'
   s.description      = <<-DESC
 Xybrid Flutter SDK enables running ML models on-device (edge) or in the cloud,

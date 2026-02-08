@@ -7,8 +7,8 @@
       "...(integration)",
       "---[Terminal]命令行---",
       "...cli",
-      "---[Cog]内部原理---",
-      "internals"
+      "---[Cog]核心概念---",
+      "concepts"
     ]
   }
   
