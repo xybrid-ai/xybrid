@@ -125,26 +125,22 @@ https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
 **运行推理**
 
 ```csharp
-using Xybrid.Native;
+using Xybrid;
 using UnityEngine;
 
 // 初始化 SDK
-NativeMethods.xybrid_init();
+XybridClient.Initialize();
 
-// 创建模型加载器并加载模型
-var loader = NativeMethods.xybrid_model_loader_new();
-NativeMethods.xybrid_model_loader_load(loader, "kokoro-82m", IntPtr.Zero, out var model);
+// 加载 TTS 模型并生成 NPC 对话
+using var model = XybridClient.LoadModel("kokoro-82m");
+using var result = model.Run(Envelope.Text("Welcome, traveler. The road ahead is dangerous."));
 
-// 运行文本转语音
-var envelope = NativeMethods.xybrid_envelope_new_text("Hello from Xybrid!");
-NativeMethods.xybrid_model_run(model, envelope, out var output);
-
-// 获取结果
-var textPtr = NativeMethods.xybrid_result_get_text(output);
-Debug.Log($"Result: {Marshal.PtrToStringUTF8(textPtr)}");
+result.ThrowIfFailed();
+Debug.Log($"输出: {result.Text}");
+Debug.Log($"延迟: {result.LatencyMs}ms");
 ```
 
-**预期输出：** 来自 TTS 模型的音频结果，可通过结果指针访问。
+**预期输出：** `result.Success == true`，包含来自 TTS 模型的音频输出。
   </Tab>
   <Tab value="CLI">
 **安装**

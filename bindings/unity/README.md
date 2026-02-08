@@ -46,68 +46,87 @@ Download the `.tgz` release from GitHub, then:
 ## Quick Start
 
 ```csharp
-using Xybrid.Native;
+using Xybrid;
 using UnityEngine;
 
 public class XybridExample : MonoBehaviour
 {
-    private IntPtr loader;
-    private IntPtr model;
+    private Model model;
 
     void Start()
     {
         // Initialize the SDK
-        NativeMethods.xybrid_init();
-
-        // Create a model loader
-        loader = NativeMethods.xybrid_model_loader_new();
+        XybridClient.Initialize();
 
         // Load a model from the registry
-        int result = NativeMethods.xybrid_model_loader_load(
-            loader,
-            "gemma-3-4b-it-qat-q4_0",  // model ID
-            IntPtr.Zero,               // version (null = latest)
-            out model
-        );
-
-        if (result != 0)
-        {
-            Debug.LogError($"Failed to load model: {NativeMethods.xybrid_last_error()}");
-            return;
-        }
-
-        Debug.Log("Model loaded successfully!");
+        model = XybridClient.LoadModel("gemma-3-4b-it-qat-q4_0");
+        Debug.Log($"Model loaded: {model.ModelId}");
     }
 
     public string Generate(string prompt)
     {
-        // Create input envelope with text
-        IntPtr envelope = NativeMethods.xybrid_envelope_new_text(prompt);
-
-        // Run inference
-        int result = NativeMethods.xybrid_model_run(model, envelope, out IntPtr output);
-
-        // Get the result text
-        string response = "";
-        if (result == 0)
-        {
-            IntPtr textPtr = NativeMethods.xybrid_result_get_text(output);
-            response = Marshal.PtrToStringUTF8(textPtr);
-            NativeMethods.xybrid_result_free(output);
-        }
-
-        NativeMethods.xybrid_envelope_free(envelope);
-        return response;
+        // Run inference with a text prompt
+        using var result = model.Run(Envelope.Text(prompt));
+        result.ThrowIfFailed();
+        return result.Text;
     }
 
     void OnDestroy()
     {
-        if (model != IntPtr.Zero)
-            NativeMethods.xybrid_model_free(model);
-        if (loader != IntPtr.Zero)
-            NativeMethods.xybrid_model_loader_free(loader);
+        model?.Dispose();
     }
 }
+```
+
+### Text-to-Speech
+
+```csharp
+using Xybrid;
+
+// Load a TTS model
+using var model = XybridClient.LoadModel("kokoro-82m");
+
+// Generate NPC dialogue audio
+using var result = model.Run(Envelope.Text("Welcome, traveler. The road ahead is dangerous."));
+result.ThrowIfFailed();
+
+// result.Text contains the audio output
+Debug.Log($"Inference completed in {result.LatencyMs}ms");
+```
+
+### Speech Recognition
+
+```csharp
+using Xybrid;
+
+// Load an ASR model
+using var model = XybridClient.LoadModel("whisper-tiny");
+
+// Transcribe player voice command
+using var result = model.Run(Envelope.Audio(microphoneBytes, sampleRate: 16000, channels: 1));
+result.ThrowIfFailed();
+
+Debug.Log($"Player said: {result.Text}");
+```
+
+### Multi-Turn Conversation
+
+```csharp
+using Xybrid;
+
+using var model = XybridClient.LoadModel("gemma-3-4b-it-qat-q4_0");
+using var context = new ConversationContext();
+
+// Set the NPC personality
+context.SetSystem("You are a merchant in a medieval village. You sell potions and gear.");
+
+// First turn
+using var result1 = model.Run(Envelope.Text("What do you have for sale?", MessageRole.User), context);
+Debug.Log(result1.Text);
+
+// Second turn (conversation history is maintained)
+using var result2 = model.Run(Envelope.Text("How much for the healing potion?", MessageRole.User), context);
+Debug.Log(result2.Text);
 ```
 
 ## Available Models
@@ -170,6 +189,15 @@ cargo xtask build-ffi --release --target aarch64-linux-android
 bindings/unity/
 ├── package.json                 # UPM package manifest
 ├── Runtime/
+│   ├── Api/
+│   │   ├── XybridClient.cs      # SDK entry point (Initialize, LoadModel)
+│   │   ├── Model.cs             # Model inference (Run, RunText, RunAudio)
+│   │   ├── ModelLoader.cs       # Model loading (FromRegistry, FromBundle)
+│   │   ├── Envelope.cs          # Input data (Text, Audio)
+│   │   ├── InferenceResult.cs   # Output container (Text, Success, LatencyMs)
+│   │   ├── ConversationContext.cs # Multi-turn LLM state
+│   │   ├── MessageRole.cs       # Role enum (System, User, Assistant)
+│   │   └── XybridException.cs   # Exception types
 │   ├── Native/
 │   │   ├── NativeMethods.g.cs   # Auto-generated P/Invoke bindings
 │   │   └── NativeHelpers.cs     # Helper utilities

@@ -39,7 +39,7 @@ using Xybrid;
 
 // Load and run in one line
 var model = XybridClient.LoadModel("kokoro-82m");
-using (var envelope = Envelope.Text("Hello, world!"))
+using (var envelope = Envelope.Text("Halt! None shall pass without the king's seal."))
 using (var result = model.Run(envelope))
 {
     result.ThrowIfFailed();
@@ -86,7 +86,7 @@ var model = XybridClient.LoadModelFromBundle("path/to/model.xyb");
 ### Text
 
 ```csharp
-using (var envelope = Envelope.Text("Hello, how are you?"))
+using (var envelope = Envelope.Text("The dragon sleeps in the northern cave."))
 {
     using (var result = model.Run(envelope))
     {
@@ -98,7 +98,7 @@ using (var envelope = Envelope.Text("Hello, how are you?"))
 ### Text with Role (for conversations)
 
 ```csharp
-using (var envelope = Envelope.Text("You are a helpful assistant.", MessageRole.System))
+using (var envelope = Envelope.Text("You are a blacksmith in a medieval village.", MessageRole.System))
 {
     // Use with ConversationContext
 }
@@ -121,10 +121,10 @@ using (var envelope = Envelope.Audio(audioBytes, sampleRate: 16000, channels: 1)
 
 ```csharp
 // Text-in, text-out shorthand
-string output = model.RunText("Hello!");
+string output = model.RunText("Tell me about the ancient ruins.");
 
-// Audio-in, text-out shorthand
-string transcription = model.RunAudio(audioBytes, sampleRate: 16000);
+// Audio-in, text-out shorthand (player voice command)
+string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
 ```
 
 ---
@@ -171,12 +171,12 @@ Multi-turn LLM conversations with automatic history management:
 ```csharp
 using (var context = new ConversationContext())
 {
-    context.SetSystem("You are a helpful assistant.");
+    context.SetSystem("You are a wise elder in a forest village. You speak in short, cryptic phrases.");
     context.SetMaxHistoryLength(50); // FIFO pruning after 50 messages
 
     // First turn
-    context.Push("What is ML inference?", MessageRole.User);
-    using (var envelope = Envelope.Text("What is ML inference?"))
+    context.Push("Where is the lost temple?", MessageRole.User);
+    using (var envelope = Envelope.Text("Where is the lost temple?"))
     using (var result = model.Run(envelope, context))
     {
         result.ThrowIfFailed();
@@ -185,8 +185,8 @@ using (var context = new ConversationContext())
     }
 
     // Second turn (has full history)
-    context.Push("Can you give an example?", MessageRole.User);
-    using (var envelope = Envelope.Text("Can you give an example?"))
+    context.Push("What dangers await there?", MessageRole.User);
+    using (var envelope = Envelope.Text("What dangers await there?"))
     using (var result = model.Run(envelope, context))
     {
         result.ThrowIfFailed();
@@ -216,7 +216,7 @@ All resource-holding classes implement `IDisposable`. Use `using` blocks to ensu
 ```csharp
 using (var loader = ModelLoader.FromRegistry("kokoro-82m"))
 using (var model = loader.Load())
-using (var envelope = Envelope.Text("Hello"))
+using (var envelope = Envelope.Text("Your quest is complete, hero."))
 using (var result = model.Run(envelope))
 {
     result.ThrowIfFailed();

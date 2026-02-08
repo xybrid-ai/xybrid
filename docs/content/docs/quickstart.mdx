@@ -125,26 +125,22 @@ Or add to `Packages/manifest.json`:
 **Run inference**
 
 ```csharp
-using Xybrid.Native;
+using Xybrid;
 using UnityEngine;
 
 // Initialize the SDK
-NativeMethods.xybrid_init();
+XybridClient.Initialize();
 
-// Create a model loader and load a model
-var loader = NativeMethods.xybrid_model_loader_new();
-NativeMethods.xybrid_model_loader_load(loader, "kokoro-82m", IntPtr.Zero, out var model);
+// Load a TTS model and generate NPC dialogue
+using var model = XybridClient.LoadModel("kokoro-82m");
+using var result = model.Run(Envelope.Text("Welcome, traveler. The road ahead is dangerous."));
 
-// Run text-to-speech
-var envelope = NativeMethods.xybrid_envelope_new_text("Hello from Xybrid!");
-NativeMethods.xybrid_model_run(model, envelope, out var output);
-
-// Get the result
-var textPtr = NativeMethods.xybrid_result_get_text(output);
-Debug.Log($"Result: {Marshal.PtrToStringUTF8(textPtr)}");
+result.ThrowIfFailed();
+Debug.Log($"Output: {result.Text}");
+Debug.Log($"Latency: {result.LatencyMs}ms");
 ```
 
-**Expected output:** Audio result from the TTS model, accessible via the result pointer.
+**Expected output:** `result.Success == true` with audio output from the TTS model.
   </Tab>
   <Tab value="CLI">
 **Install**
