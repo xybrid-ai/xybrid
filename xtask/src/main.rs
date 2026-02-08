@@ -244,6 +244,14 @@ enum Commands {
         /// If not specified, auto-detected from target or host
         #[arg(long)]
         platform_preset: Option<String>,
+
+        /// Generate C# bindings for Unity (enables csharp feature)
+        #[arg(long)]
+        csharp: bool,
+
+        /// Copy built library to Unity bindings directory
+        #[arg(long)]
+        deploy_unity: bool,
     },
 
     /// Generate Swift/Kotlin bindings from xybrid-uniffi
@@ -477,8 +485,10 @@ fn main() -> Result<()> {
             target,
             release,
             platform_preset,
+            csharp,
+            deploy_unity,
         } => {
-            build_ffi(target, release, platform_preset)?;
+            build_ffi(target, release, platform_preset, csharp, deploy_unity)?;
         }
         Commands::GenerateBindings { language, out_dir } => {
             generate_bindings(language, out_dir)?;
@@ -619,6 +629,8 @@ fn build_ffi(
     target: Option<String>,
     release: bool,
     platform_preset: Option<String>,
+    csharp: bool,
+    deploy_unity: bool,
 ) -> Result<()> {
     // Resolve the platform preset: use override if provided, otherwise auto-detect
     let preset = if let Some(ref p) = platform_preset {
@@ -629,13 +641,24 @@ fn build_ffi(
         host_platform_preset().to_string()
     };
 
-    println!("Building xybrid-ffi with features: {}", preset);
+    // Build features list
+    let mut features = vec![preset.clone()];
+    if csharp {
+        features.push("csharp".to_string());
+    }
+    let features_str = features.join(",");
+
+    println!(
+        "Building xybrid-ffi{}...",
+        if csharp { " with C# bindings" } else { "" }
+    );
+    println!("  Features: {}", features_str);
 
     let mut cmd = Command::new("cargo");
     cmd.arg("build").arg("-p").arg("xybrid-ffi");
 
-    // Pass the platform preset as a feature
-    cmd.arg("--features").arg(&preset);
+    // Pass all features
+    cmd.arg("--features").arg(&features_str);
 
     if release {
         cmd.arg("--release");
@@ -697,6 +720,62 @@ fn build_ffi(
     println!("  Dynamic library: {}", dylib_path);
     println!("  Static library:  {}", staticlib_path);
     println!("  C header:        crates/xybrid-ffi/include/xybrid.h");
+
+    if csharp {
+        println!("  C# bindings:     bindings/unity/Runtime/Native/NativeMethods.g.cs");
+    }
+
+    // Deploy to Unity if requested
+    if deploy_unity {
+        deploy_ffi_to_unity(&dylib_path)?;
+    }
+
+    Ok(())
+}
+
+/// Deploy the built xybrid-ffi library to the Unity bindings directory
+fn deploy_ffi_to_unity(dylib_path: &str) -> Result<()> {
+    println!("\nDeploying to Unity...");
+
+    // Determine the platform subdirectory
+    let platform_dir = if cfg!(target_os = "macos") {
+        "macOS"
+    } else if cfg!(target_os = "windows") {
+        "Windows"
+    } else {
+        "Linux"
+    };
+
+    // Unity native plugins directory
+    let unity_plugins_dir = PathBuf::from("bindings/unity/Runtime/Plugins").join(platform_dir);
+    std::fs::create_dir_all(&unity_plugins_dir)
+        .with_context(|| format!("Failed to create Unity plugins directory: {:?}", unity_plugins_dir))?;
+
+    // Copy the dynamic library
+    let src = PathBuf::from(dylib_path);
+    if !src.exists() {
+        anyhow::bail!("Built library not found at: {}", dylib_path);
+    }
+
+    let lib_name = src.file_name().unwrap();
+    let dst = unity_plugins_dir.join(lib_name);
+
+    std::fs::copy(&src, &dst)
+        .with_context(|| format!("Failed to copy library to {:?}", dst))?;
+
+    println!("  ✓ Deployed to: {}", dst.display());
+
+    // Also copy the C header
+    let header_src = PathBuf::from("crates/xybrid-ffi/include/xybrid.h");
+    if header_src.exists() {
+        let header_dst = PathBuf::from("bindings/unity/Runtime/Native/xybrid.h");
+        if let Some(parent) = header_dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(&header_src, &header_dst)
+            .with_context(|| format!("Failed to copy header to {:?}", header_dst))?;
+        println!("  ✓ Header copied to: {}", header_dst.display());
+    }
 
     Ok(())
 }
