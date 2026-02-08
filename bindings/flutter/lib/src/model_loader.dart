@@ -209,33 +209,41 @@ class XybridModel {
       // Use native streaming from FFI
       final stream = inner.runStream(envelope: envelope.inner);
 
+      var emittedFinal = false;
+
       await for (final event in stream) {
         switch (event) {
           case FfiStreamEvent_Token(:final field0):
+            final isFinal = field0.finishReason != null;
+            if (isFinal) emittedFinal = true;
             yield StreamToken(
               token: field0.token,
               index: field0.index,
               cumulativeText: field0.cumulativeText,
-              isFinal: field0.finishReason != null,
+              isFinal: isFinal,
               finishReason: field0.finishReason,
             );
           case FfiStreamEvent_Complete(:final field0):
-            // Emit final token with the complete result
-            yield StreamToken(
-              token: '',
-              index: 0,
-              cumulativeText: field0.text ?? '',
-              isFinal: true,
-              finishReason: 'stop',
-            );
+            // Only emit if we haven't already emitted a final token
+            if (!emittedFinal) {
+              yield StreamToken(
+                token: '',
+                index: 0,
+                cumulativeText: field0.text ?? '',
+                isFinal: true,
+                finishReason: 'stop',
+              );
+            }
           case FfiStreamEvent_Error(:final field0):
-            yield StreamToken(
-              token: '',
-              index: 0,
-              cumulativeText: '',
-              isFinal: true,
-              finishReason: 'error: $field0',
-            );
+            if (!emittedFinal) {
+              yield StreamToken(
+                token: '',
+                index: 0,
+                cumulativeText: '',
+                isFinal: true,
+                finishReason: 'error: $field0',
+              );
+            }
         }
       }
     } catch (e) {

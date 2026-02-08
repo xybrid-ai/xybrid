@@ -111,6 +111,9 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   /// Conversation history for context mode.
   List<_ChatMessage> _conversationHistory = [];
 
+  /// Last user message (for non-context mode display).
+  String _lastUserMessage = '';
+
   /// Get conversation length (excluding system prompt).
   int get _conversationLength =>
       _conversationHistory.where((m) => m.role != 'system').length;
@@ -132,7 +135,7 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
         _conversationHistory = [
           const _ChatMessage(
             role: 'system',
-            content: 'You are a helpful AI assistant. Keep responses concise.',
+            content: 'You are a helpful AI assistant. Always ask the user their name first before helping them. Keep responses concise.',
           ),
         ];
       }
@@ -145,7 +148,7 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
       _conversationHistory = [
         const _ChatMessage(
           role: 'system',
-          content: 'You are a helpful AI assistant. Keep responses concise.',
+          content: 'You are a helpful AI assistant. Always ask the user their name first before helping them. Keep responses concise.',
         ),
       ];
       _responseText = '';
@@ -267,6 +270,12 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
       _conversationHistory.add(_ChatMessage(role: 'user', content: userMessage));
     }
 
+    // Store user message for display (in non-context mode)
+    _lastUserMessage = userMessage;
+
+    // Clear input field after sending
+    _promptController.clear();
+
     setState(() {
       _state = const LlmGenerating();
       _responseText = '';
@@ -301,16 +310,7 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
 
             // Check for completion
             if (token.isFinal) {
-              _calculateInferenceStats();
-              // Add assistant response to history if context is enabled
-              if (_contextEnabled && _responseText.isNotEmpty) {
-                _conversationHistory.add(
-                  _ChatMessage(role: 'assistant', content: _responseText),
-                );
-              }
-              setState(() {
-                _state = const LlmReady();
-              });
+              _completeGeneration();
             }
           }
         },
@@ -322,17 +322,9 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
           }
         },
         onDone: () {
+          // Fallback: complete if stream ends without isFinal token
           if (mounted && _state is LlmGenerating) {
-            _calculateInferenceStats();
-            // Add assistant response to history if context is enabled
-            if (_contextEnabled && _responseText.isNotEmpty) {
-              _conversationHistory.add(
-                _ChatMessage(role: 'assistant', content: _responseText),
-              );
-            }
-            setState(() {
-              _state = const LlmReady();
-            });
+            _completeGeneration();
           }
         },
       );
@@ -355,7 +347,24 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   void _stopGeneration() {
     _streamSubscription?.cancel();
     _streamSubscription = null;
+    _completeGeneration();
+  }
+
+  /// Complete the generation and add response to history.
+  /// Guarded to only run once per generation.
+  void _completeGeneration() {
+    // Guard: only complete if still generating
+    if (_state is! LlmGenerating) return;
+
     _calculateInferenceStats();
+
+    // Add assistant response to history if context is enabled
+    if (_contextEnabled && _responseText.isNotEmpty) {
+      _conversationHistory.add(
+        _ChatMessage(role: 'assistant', content: _responseText),
+      );
+    }
+
     if (mounted) {
       setState(() {
         _state = const LlmReady();
@@ -409,344 +418,330 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
       appBar: AppBar(
         backgroundColor: theme.colorScheme.inversePrimary,
         title: const Text('LLM Chat'),
+        actions: [
+          // Context toggle in app bar
+          if (_model != null) ...[
+            Icon(
+              Icons.chat_bubble_outline,
+              size: 18,
+              color: _contextEnabled
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
+            ),
+            Switch(
+              value: _contextEnabled,
+              onChanged: (_) => _toggleContext(),
+              activeColor: theme.colorScheme.primary,
+            ),
+            if (_contextEnabled && _conversationLength > 0)
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: _clearContext,
+                tooltip: 'Clear conversation',
+              ),
+          ],
+        ],
       ),
       body: SafeArea(
         child: Column(
           children: [
-            // Scrollable top section (description + model status)
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    // Description card with context toggle
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.info_outline,
-                                    color: theme.colorScheme.primary,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'About LLM Demo',
-                                    style: theme.textTheme.titleMedium,
-                                  ),
-                                  const Spacer(),
-                                  // Context toggle
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.chat_bubble_outline,
-                                        size: 16,
-                                        color: _contextEnabled ? Colors.blue : Colors.grey,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Context',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: _contextEnabled ? Colors.blue : Colors.grey,
-                                        ),
-                                      ),
-                                      Switch(
-                                        value: _contextEnabled,
-                                        onChanged: (_) => _toggleContext(),
-                                        activeColor: Colors.blue,
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                'This demo shows LLM inference with token streaming, '
-                                'similar to running "xybrid repl --stream". Tokens are '
-                                'displayed as they are generated.',
-                              ),
-                              // Context info panel (when enabled)
-                              if (_contextEnabled) ...[
-                                const SizedBox(height: 12),
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blue.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.history, size: 16, color: Colors.blue),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        'Conversation: $_conversationLength messages',
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.blue,
-                                        ),
-                                      ),
-                                      const Spacer(),
-                                      TextButton.icon(
-                                        onPressed: _clearContext,
-                                        icon: const Icon(Icons.delete_outline, size: 16),
-                                        label: const Text('Clear'),
-                                        style: TextButton.styleFrom(
-                                          foregroundColor: Colors.blue,
-                                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
+            // Model status (only when not loaded)
+            if (_model == null)
+              Expanded(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: ModelStatusCard(
+                      state: _modelLoadState,
+                      modelId: _llmModelId,
+                      idleIcon: Icons.psychology_outlined,
+                      idleTitle: 'LLM Model Required',
+                      idleDescription: 'Load the $_llmModelId model to start chatting.',
+                      onLoad: _loadModel,
                     ),
-
-                    // Model status section
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: ModelStatusCard(
-                        state: _modelLoadState,
-                        modelId: _llmModelId,
-                        idleIcon: Icons.psychology_outlined,
-                        idleTitle: 'LLM Model Required',
-                        idleDescription: 'Load the $_llmModelId model to start chatting.',
-                        onLoad: _loadModel,
-                        readyTrailing: _tokenCount > 0
-                            ? Chip(
-                                label: Text('$_tokenCount tokens'),
-                                padding: EdgeInsets.zero,
-                                visualDensity: VisualDensity.compact,
-                              )
-                            : null,
-                      ),
-                    ),
-
-                    // Response area (only shown when model is loaded)
-                    if (_model != null) ...[
-                      const SizedBox(height: 16),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: _buildResponseSection(theme),
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
+              )
+            else ...[
+              // Chat messages area
+              Expanded(
+                child: _buildChatArea(theme),
               ),
-            ),
 
-            // Input area - fixed at bottom (only shown when model is loaded)
-            if (_model != null)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: _buildInputSection(theme),
-              ),
+              // Stats bar (when generating or after completion)
+              if (_inferenceTimeMs != null || _state is LlmGenerating)
+                _buildStatsBar(theme),
+
+              // Input area
+              _buildInputSection(theme),
+            ],
           ],
         ),
       ),
     );
   }
 
-  /// Build the response display section.
-  Widget _buildResponseSection(ThemeData theme) {
-    // Inference error state
-    if (_state case LlmInferenceError(:final message)) {
-      return Card(
-        color: theme.colorScheme.errorContainer.withAlpha(100),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.error_outline, color: theme.colorScheme.error),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Error',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.colorScheme.error,
-                    ),
-                  ),
-                ],
+  /// Build the chat messages area.
+  Widget _buildChatArea(ThemeData theme) {
+    final isGenerating = _state is LlmGenerating;
+
+    // Build list of messages to display
+    final messages = <_ChatMessage>[];
+
+    if (_contextEnabled) {
+      // Add conversation history (excluding system message)
+      messages.addAll(
+        _conversationHistory.where((m) => m.role != 'system'),
+      );
+    } else {
+      // In non-context mode, show last exchange
+      if (_lastUserMessage.isNotEmpty) {
+        messages.add(_ChatMessage(role: 'user', content: _lastUserMessage));
+      }
+    }
+
+    // Determine if we should show a streaming assistant bubble
+    final showStreamingBubble =
+        isGenerating || (!_contextEnabled && _responseText.isNotEmpty);
+
+    if (messages.isEmpty && !showStreamingBubble) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.chat_bubble_outline,
+              size: 64,
+              color: theme.colorScheme.outlineVariant,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Start a conversation',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
-              const SizedBox(height: 12),
-              Text(
-                message,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onErrorContainer,
-                ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Type a message below to begin',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.outline,
               ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _generate,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
     }
 
-    // Response display
-    return Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.smart_toy_outlined,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Response',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-                const Spacer(),
-                if (_state is LlmGenerating)
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: messages.length + (showStreamingBubble ? 1 : 0),
+      itemBuilder: (context, index) {
+        // Assistant response bubble (streaming or completed)
+        if (index == messages.length) {
+          return _buildMessageBubble(
+            theme,
+            _ChatMessage(role: 'assistant', content: _responseText),
+            isStreaming: isGenerating,
+          );
+        }
 
-          // Response text - constrained height to allow scrolling within
-          ConstrainedBox(
-            constraints: const BoxConstraints(
-              minHeight: 150,
-              maxHeight: 300,
+        final message = messages[index];
+
+        // In context mode, the last assistant message might be streaming
+        final isLiveAssistant = _contextEnabled &&
+            isGenerating &&
+            message.role == 'assistant' &&
+            index == messages.length - 1;
+
+        return _buildMessageBubble(
+          theme,
+          isLiveAssistant
+              ? _ChatMessage(role: 'assistant', content: _responseText)
+              : message,
+          isStreaming: isLiveAssistant,
+        );
+      },
+    );
+  }
+
+  /// Build a single chat message bubble.
+  Widget _buildMessageBubble(
+    ThemeData theme,
+    _ChatMessage message, {
+    bool isStreaming = false,
+  }) {
+    final isUser = message.role == 'user';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment:
+            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!isUser) ...[
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: theme.colorScheme.primaryContainer,
+              child: Icon(
+                Icons.smart_toy,
+                size: 18,
+                color: theme.colorScheme.onPrimaryContainer,
+              ),
             ),
-            child: SingleChildScrollView(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(16),
-              child: _responseText.isEmpty
-                  ? Text(
-                      'Enter a prompt below and tap "Send" to generate a response.',
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: isUser
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(isUser ? 16 : 4),
+                  bottomRight: Radius.circular(isUser ? 4 : 16),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (isUser)
+                    Text(
+                      message.content,
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontStyle: FontStyle.italic,
+                        color: theme.colorScheme.onPrimary,
                       ),
                     )
-                  : MarkdownBody(
-                      data: _responseText,
+                  else
+                    MarkdownBody(
+                      data: message.content.isEmpty && isStreaming
+                          ? '...'
+                          : message.content,
                       selectable: true,
                       styleSheet: MarkdownStyleSheet(
-                        p: theme.textTheme.bodyMedium,
-                        h1: theme.textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                        h2: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                        h3: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
+                        p: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurface,
                         ),
                         strong: theme.textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.bold,
+                          color: theme.colorScheme.onSurface,
                         ),
                         em: theme.textTheme.bodyMedium?.copyWith(
                           fontStyle: FontStyle.italic,
+                          color: theme.colorScheme.onSurface,
                         ),
-                        listBullet: theme.textTheme.bodyMedium,
-                        code: theme.textTheme.bodyMedium?.copyWith(
+                        code: theme.textTheme.bodySmall?.copyWith(
                           fontFamily: 'monospace',
-                          backgroundColor:
-                              theme.colorScheme.surfaceContainerHighest,
+                          backgroundColor: theme.colorScheme.surface,
+                          color: theme.colorScheme.onSurface,
                         ),
                         codeblockDecoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest,
+                          color: theme.colorScheme.surface,
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
                     ),
-            ),
-          ),
-
-          // Stats row (shown when we have results)
-          if (_inferenceTimeMs != null || _state is LlmGenerating)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest.withAlpha(100),
-                border: Border(
-                  top: BorderSide(
-                    color: theme.colorScheme.outline.withAlpha(50),
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.timer_outlined,
-                    size: 16,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 6),
-                  if (_state is LlmGenerating)
-                    Text(
-                      'Generating...',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    )
-                  else if (_inferenceTimeMs != null) ...[
-                    Text(
-                      'Inference: ${(_inferenceTimeMs! / 1000).toStringAsFixed(2)}s',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                  if (isStreaming) ...[
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: theme.colorScheme.primary,
                       ),
                     ),
-                    const SizedBox(width: 16),
-                    Icon(
-                      Icons.speed,
-                      size: 16,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$_tokenCount tokens',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    if (_tokensPerSecond != null) ...[
-                      Text(
-                        ' (${_tokensPerSecond!.toStringAsFixed(1)} tok/s)',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
                   ],
                 ],
               ),
             ),
+          ),
+          if (isUser) ...[
+            const SizedBox(width: 8),
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: theme.colorScheme.secondaryContainer,
+              child: Icon(
+                Icons.person,
+                size: 18,
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Build the stats bar.
+  Widget _buildStatsBar(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withAlpha(100),
+        border: Border(
+          top: BorderSide(
+            color: theme.colorScheme.outline.withAlpha(50),
+          ),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (_state is LlmGenerating) ...[
+            SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '$_tokenCount tokens',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ] else if (_inferenceTimeMs != null) ...[
+            Icon(
+              Icons.timer_outlined,
+              size: 14,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '${(_inferenceTimeMs! / 1000).toStringAsFixed(2)}s',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              '$_tokenCount tokens',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            if (_tokensPerSecond != null) ...[
+              const SizedBox(width: 4),
+              Text(
+                '(${_tokensPerSecond!.toStringAsFixed(1)} tok/s)',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+            ],
+          ],
         ],
       ),
     );
@@ -757,42 +752,109 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
     final isReady = _state is LlmReady;
     final isGenerating = _state is LlmGenerating;
 
-    return Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: _promptController,
-            decoration: const InputDecoration(
-              labelText: 'Prompt',
-              hintText: 'Enter your message...',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.edit_note),
+    // Show error inline if there is one
+    if (_state case LlmInferenceError(:final message)) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.errorContainer.withAlpha(100),
+              borderRadius: BorderRadius.circular(8),
             ),
-            maxLines: 2,
-            minLines: 1,
-            enabled: isReady,
-            textInputAction: TextInputAction.send,
-            onSubmitted: (_) {
-              if (isReady) {
-                _generate();
-              }
-            },
+            child: Row(
+              children: [
+                Icon(Icons.error_outline,
+                    size: 16, color: theme.colorScheme.error),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _generate,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+          _buildInputRow(theme, isReady: true, isGenerating: false),
+        ],
+      );
+    }
+
+    return _buildInputRow(theme, isReady: isReady, isGenerating: isGenerating);
+  }
+
+  Widget _buildInputRow(
+    ThemeData theme, {
+    required bool isReady,
+    required bool isGenerating,
+  }) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+          top: BorderSide(
+            color: theme.colorScheme.outline.withAlpha(30),
           ),
         ),
-        const SizedBox(width: 12),
-        if (isGenerating)
-          FilledButton.tonalIcon(
-            onPressed: _stopGeneration,
-            icon: const Icon(Icons.stop),
-            label: const Text('Stop'),
-          )
-        else
-          FilledButton.icon(
-            onPressed: isReady ? _generate : null,
-            icon: const Icon(Icons.send),
-            label: const Text('Send'),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _promptController,
+              decoration: InputDecoration(
+                hintText: 'Message...',
+                filled: true,
+                fillColor: theme.colorScheme.surfaceContainerHighest,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+              ),
+              maxLines: 4,
+              minLines: 1,
+              enabled: isReady || _state is LlmInferenceError,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) {
+                if (isReady || _state is LlmInferenceError) {
+                  _generate();
+                }
+              },
+            ),
           ),
-      ],
+          const SizedBox(width: 8),
+          if (isGenerating)
+            IconButton.filled(
+              onPressed: _stopGeneration,
+              icon: const Icon(Icons.stop),
+              style: IconButton.styleFrom(
+                backgroundColor: theme.colorScheme.errorContainer,
+                foregroundColor: theme.colorScheme.onErrorContainer,
+              ),
+            )
+          else
+            IconButton.filled(
+              onPressed:
+                  (isReady || _state is LlmInferenceError) ? _generate : null,
+              icon: const Icon(Icons.send),
+            ),
+        ],
+      ),
     );
   }
 }
