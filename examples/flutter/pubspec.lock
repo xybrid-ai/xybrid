@@ -975,7 +975,7 @@ packages:
   xybrid_flutter:
     dependency: "direct main"
     description:
-      path: "../../bindings/xybrid-flutter"
+      path: "../../bindings/flutter"
       relative: true
     source: path
     version: "0.0.1"
