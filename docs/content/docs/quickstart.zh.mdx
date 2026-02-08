@@ -7,7 +7,7 @@ description: 几分钟内开始使用 Xybrid
 
 <Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'CLI']}>
   <Tab value="Flutter">
-### 安装
+**安装**
 
 ```yaml
 # pubspec.yaml
@@ -19,7 +19,7 @@ dependencies:
 flutter pub get
 ```
 
-### 运行推理
+**运行推理**
 
 ```dart
 import 'package:xybrid_flutter/xybrid_flutter.dart';
@@ -38,7 +38,7 @@ final result = await model.run(
 **预期输出：** 包含合成语音的音频字节。
   </Tab>
   <Tab value="Swift">
-### 安装
+**安装**
 
 在 Xcode 中通过 Swift Package Manager 添加：
 
@@ -56,7 +56,7 @@ dependencies: [
 ]
 ```
 
-### 运行推理
+**运行推理**
 
 ```swift
 import Xybrid
@@ -75,7 +75,7 @@ let result = try model.run(envelope: envelope)
 **预期输出：** `result.success == true`，音频字节在 `result.audioBytes` 中。
   </Tab>
   <Tab value="Kotlin">
-### 安装
+**安装**
 
 ```kotlin
 // build.gradle.kts
@@ -84,7 +84,7 @@ dependencies {
 }
 ```
 
-### 运行推理
+**运行推理**
 
 ```kotlin
 import ai.xybrid.XybridModelLoader
@@ -104,7 +104,7 @@ val result = model.run(envelope)
 **预期输出：** `result.success == true`，音频字节在 `result.audioBytes` 中。
   </Tab>
   <Tab value="Unity">
-### 安装
+**安装**
 
 在 Unity 中，前往 **Window > Package Manager > + > Add package from git URL**，输入：
 
@@ -122,7 +122,7 @@ https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
 }
 ```
 
-### 运行推理
+**运行推理**
 
 ```csharp
 using Xybrid.Native;
@@ -147,13 +147,13 @@ Debug.Log($"Result: {Marshal.PtrToStringUTF8(textPtr)}");
 **预期输出：** 来自 TTS 模型的音频结果，可通过结果指针访问。
   </Tab>
   <Tab value="CLI">
-### 安装
+**安装**
 
 ```bash
 cargo install xybrid-cli
 ```
 
-### 运行推理
+**运行推理**
 
 ```bash
 # 列出可用模型
@@ -179,6 +179,5 @@ Transcription: "Hello, how can I help you?"
 <Cards>
   <Card title="SDK" href="/zh/docs/integrations/sdks" description="各平台的详细 SDK 指南" />
   <Card title="流水线" href="/zh/docs/concepts/pipelines" description="将多个模型串联在一起" />
-  <Card title="CLI 参考" href="/zh/docs/cli/reference" description="所有 CLI 命令" />
   <Card title="核心概念" href="/zh/docs/concepts" description="Xybrid 的工作原理" />
 </Cards>

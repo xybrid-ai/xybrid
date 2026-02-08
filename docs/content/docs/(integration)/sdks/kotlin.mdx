@@ -1,85 +1,106 @@
 ---
-title: Kotlin Multiplatform
-description: Kotlin Multiplatform SDK for iOS and Android
+title: Kotlin
+description: Kotlin SDK patterns and advanced usage
 ---
 
-The Kotlin Multiplatform SDK enables sharing Xybrid integration code between iOS and Android applications.
+The Kotlin SDK (`ai.xybrid`) uses UniFFI-generated bindings for type-safe ML inference from Kotlin. For installation and core API reference, see the [Android SDK guide](/docs/integrations/sdks/android).
 
-<Callout type="info">
-**Coming Soon** - The Kotlin Multiplatform SDK is currently in development. In the meantime, you can use the [Flutter SDK](/docs/integrations/sdks/flutter) for cross-platform development.
-</Callout>
+This page covers Kotlin-specific patterns and advanced usage.
 
-## Planned Features
+## Sealed Classes
 
-- Shared business logic for iOS and Android
-- Native platform optimizations
-- Coroutines-based async API
-- Platform-specific accelerators (CoreML, NNAPI)
+The SDK leverages Kotlin sealed classes for exhaustive pattern matching.
 
-## Expected API
-
-Based on the Flutter SDK patterns, the KMP SDK will follow a similar structure:
+### Envelope Variants
 
 ```kotlin
-// Shared code (commonMain)
-import ai.xybrid.sdk.*
+val envelope: XybridEnvelope = when (inputType) {
+    InputType.AUDIO -> Envelope.audio(audioBytes, 16000u)
+    InputType.TEXT -> Envelope.text("Hello world")
+    InputType.EMBEDDING -> Envelope.embedding(floatList)
+}
+```
 
-class VoiceAssistant {
-    private val xybrid = Xybrid()
-    private var pipeline: XybridPipeline? = null
+### Error Handling
 
-    suspend fun initialize() {
-        pipeline = xybrid.pipeline(yaml = """
-            name: voice-assistant
-            stages:
-              - whisper-tiny-candle@1.0
-              - target: integration
-                provider: openai
-                model: gpt-4o-mini
-              - kokoro-82m@0.1
-        """.trimIndent()).load()
+```kotlin
+val result = try {
+    model.run(envelope)
+} catch (e: XybridException) {
+    when (e) {
+        is XybridException.ModelNotFound -> showError("Model ${e.modelId} not found")
+        is XybridException.InferenceFailed -> showError("Failed: ${e.message}")
+        is XybridException.InvalidInput -> showError("Bad input: ${e.message}")
+        is XybridException.IoException -> showError("I/O error: ${e.message}")
+    }
+    return
+}
+```
+
+## Coroutines Integration
+
+Wrap synchronous SDK calls with coroutines for non-blocking UI:
+
+```kotlin
+import kotlinx.coroutines.*
+
+class InferenceRepository {
+    private val dispatcher = Dispatchers.IO
+
+    suspend fun loadModel(modelId: String): XybridModel = withContext(dispatcher) {
+        XybridModelLoader.fromRegistry(modelId).load()
     }
 
-    suspend fun process(audioBytes: ByteArray): ByteArray {
-        val envelope = Envelope.audio(audioBytes)
-        val result = pipeline!!.run(envelope)
-        return result.audio
-    }
-
-    fun dispose() {
-        pipeline?.unload()
+    suspend fun runInference(
+        model: XybridModel,
+        envelope: XybridEnvelope
+    ): XybridResult = withContext(dispatcher) {
+        model.run(envelope)
     }
 }
 ```
 
-## Platform Usage
-
-### Android
+## Jetpack Compose Integration
 
 ```kotlin
-// androidMain
-class MainActivity : ComponentActivity() {
-    private val assistant = VoiceAssistant()
+@Composable
+fun InferenceScreen() {
+    var result by remember { mutableStateOf<XybridResult?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        lifecycleScope.launch {
-            assistant.initialize()
+    Button(onClick = {
+        scope.launch {
+            isLoading = true
+            val model = withContext(Dispatchers.IO) {
+                XybridModelLoader.fromRegistry("kokoro-82m").load()
+            }
+            result = withContext(Dispatchers.IO) {
+                model.run(Envelope.text("Hello from Compose!"))
+            }
+            isLoading = false
         }
+    }) {
+        Text(if (isLoading) "Running..." else "Run Inference")
+    }
+
+    result?.let {
+        Text("Output: ${it.text ?: "Audio output"}")
+        Text("Latency: ${it.latencyMs}ms")
     }
 }
 ```
 
-### iOS
+## Type Aliases
 
-```swift
-// iosMain via Kotlin/Native
-let assistant = VoiceAssistant()
-Task {
-    try await assistant.initialize()
-}
-```
+The SDK provides short aliases matching the full qualified names:
 
-## Stay Updated
+| Alias | Full Type |
+|-------|-----------|
+| `ModelLoader` | `XybridModelLoader` |
+| `Model` | `XybridModel` |
+| `Envelope` | `XybridEnvelope` |
+| `Result` | `XybridResult` |
+| `XybridError` | `XybridException` |
 
-Follow the [GitHub repository](https://github.com/xybrid-ai/xybrid) for Kotlin Multiplatform SDK announcements.
+See the [Android SDK guide](/docs/integrations/sdks/android) for the complete API reference.

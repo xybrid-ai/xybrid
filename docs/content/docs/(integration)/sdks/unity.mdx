@@ -1,0 +1,269 @@
+---
+title: Unity
+description: On-device ML inference SDK for Unity applications
+---
+
+The Unity SDK (`ai.xybrid.sdk`) provides C# bindings to the Xybrid runtime via C FFI, enabling on-device ML inference in Unity games and applications.
+
+## Installation
+
+Install via Unity Package Manager using the git URL:
+
+```
+https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
+```
+
+In Unity: **Window > Package Manager > + > Add package from git URL**
+
+Minimum Unity version: **2021.3 LTS**
+
+## Initialization
+
+Initialize the SDK once at startup:
+
+```csharp
+using Xybrid;
+
+void Awake()
+{
+    XybridClient.Initialize();
+}
+```
+
+`Initialize()` is thread-safe and idempotent — multiple calls are no-ops.
+
+## Quick Start
+
+```csharp
+using Xybrid;
+
+// Load and run in one line
+var model = XybridClient.LoadModel("kokoro-82m");
+using (var envelope = Envelope.Text("Hello, world!"))
+using (var result = model.Run(envelope))
+{
+    result.ThrowIfFailed();
+    Debug.Log($"Output: {result.Text}");
+    Debug.Log($"Latency: {result.LatencyMs}ms");
+}
+```
+
+---
+
+## Model Loading
+
+### From Registry
+
+```csharp
+using (var loader = ModelLoader.FromRegistry("whisper-tiny"))
+{
+    var model = loader.Load();
+    // Use model for inference...
+}
+```
+
+### From Local Bundle
+
+```csharp
+using (var loader = ModelLoader.FromBundle("path/to/model.xyb"))
+{
+    var model = loader.Load();
+}
+```
+
+### Convenience Methods
+
+```csharp
+// Load directly without managing the loader
+var model = XybridClient.LoadModel("kokoro-82m");
+var model = XybridClient.LoadModelFromBundle("path/to/model.xyb");
+```
+
+---
+
+## Input Envelopes
+
+### Text
+
+```csharp
+using (var envelope = Envelope.Text("Hello, how are you?"))
+{
+    using (var result = model.Run(envelope))
+    {
+        Debug.Log(result.Text);
+    }
+}
+```
+
+### Text with Role (for conversations)
+
+```csharp
+using (var envelope = Envelope.Text("You are a helpful assistant.", MessageRole.System))
+{
+    // Use with ConversationContext
+}
+```
+
+### Audio
+
+```csharp
+byte[] audioBytes = File.ReadAllBytes("audio.wav");
+using (var envelope = Envelope.Audio(audioBytes, sampleRate: 16000, channels: 1))
+{
+    using (var result = model.Run(envelope))
+    {
+        Debug.Log($"Transcription: {result.Text}");
+    }
+}
+```
+
+### Convenience Methods
+
+```csharp
+// Text-in, text-out shorthand
+string output = model.RunText("Hello!");
+
+// Audio-in, text-out shorthand
+string transcription = model.RunAudio(audioBytes, sampleRate: 16000);
+```
+
+---
+
+## Result Handling
+
+```csharp
+using (var result = model.Run(envelope))
+{
+    if (result.Success)
+    {
+        Debug.Log($"Output: {result.Text}");
+        Debug.Log($"Latency: {result.LatencyMs}ms");
+    }
+    else
+    {
+        Debug.LogError($"Error: {result.Error}");
+    }
+}
+
+// Or throw on failure
+using (var result = model.Run(envelope))
+{
+    result.ThrowIfFailed();
+    // Safe to use result.Text here
+}
+```
+
+### InferenceResult Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Success` | `bool` | Whether inference succeeded |
+| `Error` | `string` | Error message if failed |
+| `Text` | `string` | Text output (ASR, LLM) |
+| `LatencyMs` | `uint` | Inference latency in ms |
+
+---
+
+## Conversation Context
+
+Multi-turn LLM conversations with automatic history management:
+
+```csharp
+using (var context = new ConversationContext())
+{
+    context.SetSystem("You are a helpful assistant.");
+    context.SetMaxHistoryLength(50); // FIFO pruning after 50 messages
+
+    // First turn
+    context.Push("What is ML inference?", MessageRole.User);
+    using (var envelope = Envelope.Text("What is ML inference?"))
+    using (var result = model.Run(envelope, context))
+    {
+        result.ThrowIfFailed();
+        context.Push(result.Text, MessageRole.Assistant);
+        Debug.Log(result.Text);
+    }
+
+    // Second turn (has full history)
+    context.Push("Can you give an example?", MessageRole.User);
+    using (var envelope = Envelope.Text("Can you give an example?"))
+    using (var result = model.Run(envelope, context))
+    {
+        result.ThrowIfFailed();
+        context.Push(result.Text, MessageRole.Assistant);
+        Debug.Log(result.Text);
+    }
+
+    // Clear history but keep system prompt
+    context.Clear();
+}
+```
+
+### ConversationContext Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Id` | `string` | Conversation UUID |
+| `HistoryLength` | `uint` | Current message count |
+| `HasSystem` | `bool` | System prompt set? |
+
+---
+
+## IDisposable Pattern
+
+All resource-holding classes implement `IDisposable`. Use `using` blocks to ensure cleanup:
+
+```csharp
+using (var loader = ModelLoader.FromRegistry("kokoro-82m"))
+using (var model = loader.Load())
+using (var envelope = Envelope.Text("Hello"))
+using (var result = model.Run(envelope))
+{
+    result.ThrowIfFailed();
+    Debug.Log(result.Text);
+}
+```
+
+Classes with `IDisposable`: `Model`, `ModelLoader`, `Envelope`, `InferenceResult`, `ConversationContext`
+
+---
+
+## Error Handling
+
+```csharp
+try
+{
+    var model = XybridClient.LoadModel("nonexistent-model");
+}
+catch (ModelNotFoundException e)
+{
+    Debug.LogError($"Model not found: {e.ModelId}");
+}
+catch (InferenceException e)
+{
+    Debug.LogError($"Inference failed: {e.Message}");
+}
+catch (XybridException e)
+{
+    Debug.LogError($"SDK error: {e.Message}");
+}
+```
+
+### Exception Hierarchy
+
+| Exception | Description |
+|-----------|-------------|
+| `XybridException` | Base exception for all SDK errors |
+| `ModelNotFoundException` | Model ID not found in registry (has `ModelId` property) |
+| `InferenceException` | Inference execution failed |
+
+---
+
+## Platform Support
+
+| Platform | Status |
+|----------|--------|
+| macOS (Apple Silicon) | Supported |
+| macOS (Intel) | Supported |
+| Windows | Planned |
+| Linux | Planned |

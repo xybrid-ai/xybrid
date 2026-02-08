@@ -13,13 +13,14 @@ Add to your `pubspec.yaml`:
 dependencies:
   xybrid_flutter:
     git:
-      url: https://github.com/xybrid-ai/bindings/flutter.git
+      url: https://github.com/xybrid-ai/xybrid.git
+      path: bindings/flutter
       ref: main
 ```
 
 ## Initialization
 
-Initialize the Rust library before using any Xybrid APIs:
+Initialize the SDK before using any Xybrid APIs:
 
 ```dart
 import 'package:xybrid_flutter/xybrid_flutter.dart';
@@ -31,112 +32,117 @@ void main() async {
 }
 ```
 
-## Core Concepts
+## Core Pattern: Load → Run
 
-### Loader → Model → Run Pattern
+All inference follows the same pattern:
 
-The SDK uses a consistent pattern for all inference:
+1. **Create a loader** — specify the model by registry ID or local bundle
+2. **Load** — download (if needed) and initialize the model
+3. **Run** — execute inference with an input envelope
 
-1. **Create a Loader** - Specify the model source (registry, bundle, or directory)
-2. **Load** - Download (if needed) and initialize the model
-3. **Run** - Execute inference with an input envelope
+```dart
+final model = await Xybrid.model('kokoro-82m').load();
+final result = await model.run(XybridEnvelope.text('Hello world'));
+print(result.text);
+```
+
+---
+
+## Text-to-Speech
+
+```dart
+final model = await Xybrid.model('kokoro-82m').load();
+final envelope = XybridEnvelope.text('Hello, how are you?', voiceId: 'af_heart');
+final result = await model.run(envelope);
+
+// Get WAV-wrapped audio bytes for playback
+final wavBytes = result.audioAsWav(sampleRate: 24000);
+```
+
+## Speech-to-Text
+
+```dart
+final model = await Xybrid.model('whisper-tiny').load();
+final envelope = XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000);
+final result = await model.run(envelope);
+print(result.text); // "Hello, how are you?"
+```
+
+## LLM Chat with Streaming
+
+```dart
+final model = await Xybrid.model('gemma-3-1b').load();
+
+final context = ConversationContext();
+context.setSystem('You are a helpful assistant.');
+context.pushText('Tell me a joke', MessageRole.user);
+
+final envelope = XybridEnvelope.text('Tell me a joke');
+
+await for (final token in model.runStreamingWithContext(envelope, context)) {
+  stdout.write(token.token); // Print each token as it arrives
+}
+```
+
+## Loading with Progress
+
+```dart
+final loader = XybridModelLoader.fromRegistry('kokoro-82m');
+
+await for (final event in loader.loadWithProgress()) {
+  switch (event) {
+    case LoadProgress(:final percentage):
+      print('Loading: $percentage%');
+    case LoadComplete():
+      print('Model ready!');
+    case LoadError(:final message):
+      print('Error: $message');
+  }
+}
+```
 
 ---
 
 ## API Reference
 
-### Xybrid Class
+### Xybrid
 
-Main entry point for loading models and pipelines.
-
-#### Static Methods
+Main entry point for the SDK.
 
 ```dart
-/// Initialize the Rust library
-static Future<void> init({bool? withLogging = true});
+class Xybrid {
+  static Future<void> init();
+  static bool get isInitialized;
+  static void setApiKey(String apiKey);
 
-/// Create a ModelLoader for single-model inference
-static XybridModelLoader model({
-  // Registry source
-  String? modelId,
-  String? version,
-  String? registry,
-  String? platform,
-  // Bundle source
-  String? bundlePath,
-  // Directory source (development)
-  String? modelDir,
-});
-
-/// Create a PipelineLoader for multi-stage inference
-static XybridPipelineLoader pipeline({
-  String? yaml,       // YAML content string
-  String? filePath,   // Path to YAML file
-});
-
-/// Create instance with API key for cloud integrations
-factory Xybrid.simple({String? registry, String? apiKey});
-```
-
-#### Examples
-
-```dart
-// Load from registry
-final loader = Xybrid.model(
-  modelId: 'whisper-tiny-candle',
-  version: '1.0',
-  registry: 'http://localhost:8080',
-);
-
-// Load from local bundle
-final loader = Xybrid.model(bundlePath: 'models/whisper.xyb');
-
-// Load from directory (development)
-final loader = Xybrid.model(modelDir: 'test_models/whisper-tiny-candle');
-
-// Load pipeline from YAML
-final loader = Xybrid.pipeline(yaml: pipelineYaml);
-final loader = Xybrid.pipeline(filePath: 'assets/pipelines/voice-assistant.yaml');
+  static XybridModelLoader model(String modelId);
+  static XybridPipeline pipeline({String? yaml, String? filePath});
+}
 ```
 
 ---
 
 ### XybridModelLoader
 
-Loads a single model for inference.
-
-#### Constructors
+Creates and loads models from different sources.
 
 ```dart
-/// Load from HTTP registry
-static XybridModelLoader fromRegistry({
-  required String url,
-  required String modelId,
-  required String version,
-});
+class XybridModelLoader {
+  factory XybridModelLoader.fromRegistry(String modelId);
+  factory XybridModelLoader.fromBundle(String path);
 
-/// Load from local .xyb bundle file
-static XybridModelLoader fromBundle({required String path});
-
-/// Load from model directory (development)
-static XybridModelLoader fromDirectory({required String path});
+  Future<XybridModel> load();
+  Stream<LoadEvent> loadWithProgress();
+}
 ```
 
-#### Properties
+**Load events:**
 
-```dart
-String? get modelId;     // Model ID (if known)
-String? get version;     // Model version (if known)
-String get sourceType;   // "registry", "bundle", or "directory"
-```
-
-#### Methods
-
-```dart
-/// Load the model into memory (async)
-/// Downloads from registry if needed
-Future<XybridModel> load();
-```
+| Event | Properties | Description |
+|-------|-----------|-------------|
+| `LoadProgress` | `progress` (0.0–1.0), `percentage` (0–100) | Download/load progress |
+| `LoadComplete` | — | Model is ready |
+| `LoadError` | `message` | Loading failed |
 
 ---
 
@@ -144,488 +150,147 @@ Future<XybridModel> load();
 
 A loaded model ready for inference.
 
-#### Properties
-
 ```dart
-String get modelId;              // Model identifier
-String get version;              // Model version
-bool get isLoaded;               // Whether model is loaded
-bool get supportsStreaming;      // Whether streaming is supported
-FfiOutputType get outputType;    // Expected output type
-```
-
-#### Methods
-
-```dart
-/// Run batch inference
-Future<FfiInferenceResult> run({required Envelope envelope});
-
-/// Create streaming session (for ASR models)
-XybridStream stream({required FfiStreamConfig config});
-
-/// Unload model from memory
-void unload();
-```
-
-#### Example
-
-```dart
-// Load and run inference
-final loader = Xybrid.model(
-  modelId: 'wav2vec2-base-960h',
-  version: '1.0',
-  registry: 'http://localhost:8080',
-);
-final model = await loader.load();
-
-// Create audio envelope
-final audioBytes = await File('audio.wav').readAsBytes();
-final envelope = Envelope.audio(audioBytes: audioBytes);
-
-// Run inference
-final result = await model.run(envelope: envelope);
-print('Transcription: ${result.unwrapText()}');
-
-// Cleanup
-model.unload();
+class XybridModel {
+  Future<XybridResult> run(XybridEnvelope envelope);
+  Future<XybridResult> runWithContext(XybridEnvelope envelope, ConversationContext context);
+  Stream<StreamToken> runStreaming(XybridEnvelope envelope);
+  Stream<StreamToken> runStreamingWithContext(XybridEnvelope envelope, ConversationContext context);
+}
 ```
 
 ---
 
-### XybridPipelineLoader
+### XybridEnvelope
 
-Loads a multi-stage pipeline from YAML.
-
-#### Constructors
+Input container for model inference.
 
 ```dart
-/// Load from YAML content string
-static XybridPipelineLoader fromYaml({required String yamlContent});
+class XybridEnvelope {
+  factory XybridEnvelope.audio({
+    required List<int> bytes,
+    required int sampleRate,
+    int channels = 1,
+  });
 
-/// Load from YAML file path
-static XybridPipelineLoader fromFile({required String path});
+  factory XybridEnvelope.text(String text, {String? voiceId, double? speed});
+  factory XybridEnvelope.embedding(List<double> data);
+  factory XybridEnvelope.textWithRole(String text, MessageRole role);
+
+  XybridEnvelope withRole(MessageRole role);
+}
 ```
 
-#### Properties
+---
+
+### XybridResult
+
+Output from model inference.
 
 ```dart
-String? get name;              // Pipeline name from YAML
-List<String> get stageNames;   // Stage names
+class XybridResult {
+  bool get success;
+  String? get text;                  // ASR / LLM output
+  Uint8List? get audioBytes;         // TTS output (raw PCM)
+  List<double>? get embedding;       // Embedding output
+  int get latencyMs;
+
+  Uint8List? audioAsWav({int sampleRate = 24000, int channels = 1});
+}
 ```
 
-#### Methods
+---
+
+### StreamToken
+
+Token from streaming LLM inference.
 
 ```dart
-/// Load the pipeline
-Future<XybridPipeline> load();
+class StreamToken {
+  final String token;            // Generated token text
+  final int index;               // Token position
+  final String cumulativeText;   // All text so far
+  final bool isFinal;            // Last token in sequence
+  final String? finishReason;    // "stop", "length", "error"
+}
+```
+
+---
+
+### ConversationContext
+
+Multi-turn conversation management for LLM models.
+
+```dart
+class ConversationContext {
+  ConversationContext();
+  ConversationContext.withId(String id);
+
+  String get id;
+  int get historyLength;
+  bool get hasSystem;
+
+  void setSystem(String text);
+  void setMaxHistoryLength(int length);
+  void push(XybridEnvelope envelope);
+  void pushText(String text, MessageRole role);
+  void clear();  // Clears history, keeps system prompt
+}
+```
+
+```dart
+enum MessageRole { system, user, assistant }
 ```
 
 ---
 
 ### XybridPipeline
 
-A loaded pipeline ready for execution.
-
-#### Properties
+Multi-stage pipeline for chaining models.
 
 ```dart
-String? get name;                       // Pipeline name
-BigInt get stageCount;                  // Number of stages
-List<String> get stageNames;            // Stage names
-FfiPipelineInputType get inputType;     // Expected input type
-bool get isLoaded;                      // Whether models are loaded
+class XybridPipeline {
+  factory XybridPipeline.fromYaml(String yaml);
+  factory XybridPipeline.fromFile(String path);
+
+  String? get name;
+  int get stageCount;
+  List<String> get stageNames;
+
+  Future<XybridResult> run(XybridEnvelope envelope);
+}
 ```
 
-#### Methods
-
-```dart
-/// Run the pipeline
-Future<FfiPipelineResult> run({required Envelope envelope});
-
-/// Unload pipeline
-void unload();
-```
-
-#### Example
+#### Pipeline Example
 
 ```dart
 final yaml = '''
 name: voice-assistant
-registry: http://localhost:8080
 stages:
-  - whisper-tiny-candle@1.0
-  - target: integration
-    provider: openai
-    model: gpt-4o-mini
-  - kokoro-82m@0.1
+  - whisper-tiny
+  - gemma-3-1b
+  - kokoro-82m
 ''';
 
-final loader = Xybrid.pipeline(yaml: yaml);
-final pipeline = await loader.load();
-
+final pipeline = XybridPipeline.fromYaml(yaml);
 final result = await pipeline.run(
-  envelope: Envelope.audio(audioBytes: audioBytes),
+  XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000),
 );
-
-// Pipeline output is TTS audio
-final audioOutput = result.unwrapAudio();
+// Result is TTS audio from the final stage
+final wav = result.audioAsWav();
 ```
 
 ---
 
-### Envelope
-
-Data container for model input/output.
-
-#### Constructors
+### XybridException
 
 ```dart
-/// Create audio envelope
-static Envelope audio({
-  required List<int> audioBytes,
-  int? sampleRate,    // Default: 16000
-  int? channels,      // Default: 1
-});
-
-/// Create text envelope
-static Envelope text({required String text});
-
-/// Create embedding envelope
-static Envelope embedding({required List<double> embedding});
-```
-
----
-
-### FfiInferenceResult
-
-Result from single-model inference.
-
-#### Properties
-
-```dart
-FfiOutputType outputType;    // Output type
-int latencyMs;               // Inference latency
-String modelId;              // Model that produced result
-String? text;                // Text output (if text type)
-String? audioBase64;         // Audio as base64 (if audio type)
-Float32List? embedding;      // Embedding (if embedding type)
-```
-
-#### Methods
-
-```dart
-bool isText();
-bool isAudio();
-bool isEmbedding();
-
-String unwrapText();         // Get text, panic if not text
-Uint8List unwrapAudio();     // Get audio bytes, panic if not audio
-Float32List unwrapEmbedding(); // Get embedding, panic if not embedding
-```
-
----
-
-### FfiPipelineResult
-
-Result from pipeline execution.
-
-#### Properties
-
-```dart
-String? name;                      // Pipeline name
-List<FfiStageTiming> stages;       // Stage timing info
-int totalLatencyMs;                // Total pipeline latency
-FfiOutputType outputType;          // Final output type
-String? text;
-String? audioBase64;
-Float32List? embedding;
-```
-
-#### Methods
-
-```dart
-bool isText();
-bool isAudio();
-bool isEmbedding();
-String unwrapText();
-Uint8List unwrapAudio();
-Float32List unwrapEmbedding();
-```
-
----
-
-## Streaming ASR
-
-For real-time speech transcription, use `XybridStreamer`.
-
-### XybridStreamer
-
-```dart
-// Create from local model directory
-final streamer = await XybridStreamer.create(
-  config: StreamingConfig(
-    modelDir: 'test_models/whisper-tiny-candle',
-    enableVad: true,
-    language: 'en',
-  ),
-);
-
-// Or create from registry
-final streamer = await XybridStreamer.createFromRegistry(
-  config: RegistryStreamingConfig(
-    registryUrl: 'http://localhost:8080',
-    modelId: 'whisper-tiny-candle',
-    version: '1.0',
-    platform: 'macos-arm64',
-    enableVad: true,
-  ),
-);
-```
-
-#### Properties
-
-```dart
-Stream<PartialResult> get onPartialResult;  // Partial results stream
-StreamState get state;                       // Session state
-bool get isDisposed;
-bool get hasVad;                             // VAD enabled
-String get modelId;
-StreamStats get stats;                       // Session statistics
-```
-
-#### Methods
-
-```dart
-/// Feed float32 audio samples (16kHz mono)
-Future<void> feed(List<double> samples);
-
-/// Feed PCM 16-bit audio bytes
-Future<void> feedPcm16(Uint8List pcmBytes);
-
-/// Flush and get final transcription
-Future<TranscriptionResult> flush();
-
-/// Reset for new utterance
-Future<void> reset();
-
-/// Release resources
-void dispose();
-```
-
-#### Example
-
-```dart
-final streamer = await XybridStreamer.createFromRegistry(
-  config: RegistryStreamingConfig(
-    registryUrl: 'http://localhost:8080',
-    modelId: 'whisper-tiny-candle',
-    version: '1.0',
-    platform: 'macos-arm64',
-    enableVad: true,
-  ),
-);
-
-// Listen for partial results
-streamer.onPartialResult.listen((partial) {
-  print('Partial: ${partial.text}');
-});
-
-// Feed audio from microphone
-micStream.listen((samples) {
-  streamer.feed(samples);
-});
-
-// Get final result
-final result = await streamer.flush();
-print('Final: ${result.text}');
-
-streamer.dispose();
-```
-
----
-
-## Audio Recording
-
-Use `XybridRecorder` for integrated microphone capture.
-
-### XybridRecorder
-
-```dart
-final recorder = XybridRecorder();
-
-// Request permission
-if (await recorder.requestPermission() == PermissionStatus.granted) {
-  // Start recording with auto-stop on silence
-  await recorder.start(config: RecordingConfig.asr);
-
-  // Wait for completion
-  final result = await recorder.waitForCompletion();
-
-  // Read audio bytes
-  final bytes = await recorder.readAudioBytes(result.path);
-}
-
-recorder.dispose();
-```
-
-#### Recording Configurations
-
-```dart
-// Default ASR config (16kHz, mono, auto-stop on silence)
-RecordingConfig.asr
-
-// With VAD enabled
-RecordingConfig.withVad
-
-// Custom config
-RecordingConfig(
-  sampleRate: 16000,
-  channels: 1,
-  autoStopOnSilence: true,
-  silenceThresholdDb: -40.0,
-  silenceDurationMs: 2000,
-  enableVad: true,
-  vadSensitivity: 0.5,
-  maxDurationMs: 60000,
-)
-```
-
-#### Methods
-
-```dart
-// Permissions
-Future<bool> hasPermission();
-Future<PermissionStatus> requestPermission();
-
-// File-based recording
-Future<void> start({RecordingConfig config});
-Future<RecordingResult> stop();
-Future<void> cancel();
-Future<RecordingResult> waitForCompletion();
-
-// Streaming mode (real-time samples)
-Future<void> startStreaming({
-  required void Function(List<double> samples) onSamples,
-});
-Future<int> stopStreaming();  // Returns duration in ms
-
-// Playback
-Future<void> playLastRecording();
-Future<void> playAudioFile(String path);
-Future<void> stopPlayback();
-
-// File operations
-Future<Uint8List> readAudioBytes(String path);
-Future<Uint8List> readLastRecordingBytes();
-
-// Cleanup
-Future<void> dispose();
-```
-
-#### Callbacks
-
-```dart
-recorder.onStateChanged = (state) { /* RecordingState */ };
-recorder.onAmplitude = (db) { /* double */ };
-recorder.onVoiceStart = () { /* ... */ };
-recorder.onVoiceEnd = () { /* ... */ };
-recorder.onPlaybackComplete = () { /* ... */ };
-```
-
----
-
-## API Key Configuration
-
-For pipelines that use cloud LLM integrations:
-
-```dart
-import 'package:xybrid_flutter/xybrid_flutter.dart';
-
-// Set Xybrid Gateway API key
-Xybrid.setApiKey('your-xybrid-api-key');
-
-// Or set provider-specific keys for direct API calls
-Xybrid.setProviderApiKey('openai', 'sk-...');
-Xybrid.setProviderApiKey('anthropic', 'sk-ant-...');
-
-// Check if configured
-if (Xybrid.hasApiKey()) {
-  final key = Xybrid.getApiKey();
+class XybridException implements Exception {
+  final String message;
 }
 ```
 
----
-
-## Gateway URL Configuration
-
-Configure the gateway URL for LLM API calls (used by pipelines with `target: integration`):
-
-```dart
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Xybrid.init();
-
-  // Configure gateway URL for local development
-  // The SDK automatically appends /v1 for API endpoints
-  Xybrid.setGatewayUrl('http://localhost:8000');
-
-  // Set API key for authentication
-  Xybrid.setApiKey('your-api-key');
-
-  runApp(MyApp());
-}
-```
-
-### URL Resolution Priority
-
-The SDK determines the gateway URL using this priority:
-
-1. **Per-pipeline override**: Set `gateway_url` in pipeline YAML stage options
-2. **`XYBRID_GATEWAY_URL`**: Environment variable (explicit, must include `/v1`)
-3. **`XYBRID_PLATFORM_URL`**: Environment variable (SDK appends `/v1` automatically)
-4. **`Xybrid.setGatewayUrl()`**: Set programmatically (SDK appends `/v1` automatically)
-5. **Default**: `https://api.xybrid.dev/v1`
-
-### Per-Pipeline Override
-
-Override the gateway URL for a specific LLM stage in your pipeline YAML:
-
-```yaml
-stages:
-  - id: llm
-    model: gpt-4o-mini
-    target: integration
-    provider: openai
-    options:
-      gateway_url: "http://localhost:8000/v1"  # Must include /v1
-      system_prompt: "You are a helpful assistant."
-```
-
----
-
-## Telemetry
-
-Subscribe to real-time telemetry events:
-
-```dart
-import 'package:xybrid_flutter/xybrid_flutter.dart';
-
-// Initialize telemetry stream
-initTelemetryStream();
-
-// Subscribe to events
-subscribeTelemetryEvents().listen((event) {
-  print('[${event.eventType}] ${event.stageName} - ${event.latencyMs}ms');
-});
-
-// Get device capabilities
-final caps = getDeviceCapabilities();
-print('GPU: ${caps.hasGpu}, Metal: ${caps.hasMetal}');
-print('Battery: ${caps.batteryLevel}%');
-
-// Export session metrics
-final json = exportTelemetryJson();
-```
+All SDK errors throw `XybridException`. Loading errors are surfaced via `LoadError` events when using `loadWithProgress()`.
 
 ---
 
@@ -633,98 +298,8 @@ final json = exportTelemetryJson();
 
 | Platform | Status | Accelerators |
 |----------|--------|--------------|
-| macOS | ✅ | Metal, CoreML |
-| iOS | ✅ | Metal, CoreML |
-| Android | ✅ | NNAPI, Vulkan |
-| Linux | ✅ | Vulkan |
-| Windows | 🔄 | DirectML (planned) |
-
----
-
-## Complete Example
-
-```dart
-import 'package:flutter/material.dart';
-import 'package:xybrid_flutter/xybrid_flutter.dart';
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Xybrid.init();
-
-  // Configure gateway URL for local development (optional)
-  // Xybrid.setGatewayUrl('http://localhost:8000');
-
-  // Set API key for cloud integrations
-  Xybrid.setApiKey('your-api-key');
-
-  runApp(MyApp());
-}
-
-class VoiceAssistant extends StatefulWidget {
-  @override
-  _VoiceAssistantState createState() => _VoiceAssistantState();
-}
-
-class _VoiceAssistantState extends State<VoiceAssistant> {
-  final recorder = XybridRecorder();
-  XybridPipeline? pipeline;
-  String result = '';
-  bool isLoading = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPipeline();
-  }
-
-  Future<void> _loadPipeline() async {
-    setState(() => isLoading = true);
-
-    final yaml = '''
-name: voice-assistant
-registry: http://localhost:8080
-stages:
-  - whisper-tiny-candle@1.0
-  - target: integration
-    provider: openai
-    model: gpt-4o-mini
-    options:
-      system_prompt: "You are a helpful assistant."
-  - kokoro-82m@0.1
-''';
-
-    final loader = Xybrid.pipeline(yaml: yaml);
-    pipeline = await loader.load();
-
-    setState(() => isLoading = false);
-  }
-
-  Future<void> _recordAndProcess() async {
-    if (pipeline == null) return;
-
-    // Record audio
-    await recorder.start(config: RecordingConfig.asr);
-    final recording = await recorder.waitForCompletion();
-    final audioBytes = await recorder.readAudioBytes(recording.path);
-
-    // Run pipeline
-    final envelope = Envelope.audio(audioBytes: audioBytes);
-    final pipelineResult = await pipeline!.run(envelope: envelope);
-
-    // Get TTS audio output
-    final ttsAudio = pipelineResult.unwrapAudio();
-
-    // Play response
-    // ... play ttsAudio
-  }
-
-  @override
-  void dispose() {
-    recorder.dispose();
-    pipeline?.unload();
-    super.dispose();
-  }
-
-  // ... build method
-}
-```
+| macOS | Supported | Metal, CoreML |
+| iOS | Supported | Metal, CoreML |
+| Android | Supported | NNAPI |
+| Linux | Supported | CPU |
+| Windows | Planned | DirectML |

@@ -3,5 +3,5 @@
   "root": true,
   "description": "SDKs and APIs for integrating Xybrid",
   "icon": "Puzzle",
-  "pages": ["sdks", "api"]
+  "pages": ["sdks"]
 }

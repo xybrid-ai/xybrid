@@ -4,8 +4,6 @@
     "introduction",
     "quickstart", 
     "---[Puzzle]Integration---",
-    "...(integration)",
-    "---[Terminal]CLI---",
-    "...cli"
+    "...(integration)"
   ]
 }

@@ -142,50 +142,6 @@ print('Chunks processed: ${stats.chunksProcessed}');
 print('Audio duration: ${stats.audioDurationMs}ms');
 ```
 
-## WebSocket Streaming
-
-For browser clients, use the WebSocket endpoint:
-
-### Connect
-
-```javascript
-const ws = new WebSocket('ws://localhost:3000/v1/audio/transcriptions/stream');
-```
-
-### Send Audio
-
-```javascript
-// Binary: PCM 16-bit, 16kHz, mono
-ws.send(audioChunk);
-
-// Control: JSON messages
-ws.send(JSON.stringify({ type: 'flush' }));
-ws.send(JSON.stringify({ type: 'reset' }));
-ws.send(JSON.stringify({ type: 'close' }));
-```
-
-### Receive Results
-
-```javascript
-ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
-  switch (msg.type) {
-    case 'ready':
-      console.log('Session ready');
-      break;
-    case 'partial':
-      console.log('Partial:', msg.text);
-      break;
-    case 'final':
-      console.log('Final:', msg.text);
-      break;
-    case 'error':
-      console.error('Error:', msg.message);
-      break;
-  }
-};
-```
-
 ## Voice Activity Detection (VAD)
 
 VAD automatically segments audio based on speech detection:

@@ -7,7 +7,7 @@ Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 
 <Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'CLI']}>
   <Tab value="Flutter">
-### Install
+**Install**
 
 ```yaml
 # pubspec.yaml
@@ -19,7 +19,7 @@ dependencies:
 flutter pub get
 ```
 
-### Run inference
+**Run inference**
 
 ```dart
 import 'package:xybrid_flutter/xybrid_flutter.dart';
@@ -38,7 +38,7 @@ final result = await model.run(
 **Expected output:** Audio bytes containing synthesized speech.
   </Tab>
   <Tab value="Swift">
-### Install
+**Install**
 
 Add via Swift Package Manager in Xcode:
 
@@ -56,7 +56,7 @@ dependencies: [
 ]
 ```
 
-### Run inference
+**Run inference**
 
 ```swift
 import Xybrid
@@ -75,7 +75,7 @@ let result = try model.run(envelope: envelope)
 **Expected output:** `result.success == true` with audio bytes in `result.audioBytes`.
   </Tab>
   <Tab value="Kotlin">
-### Install
+**Install**
 
 ```kotlin
 // build.gradle.kts
@@ -84,7 +84,7 @@ dependencies {
 }
 ```
 
-### Run inference
+**Run inference**
 
 ```kotlin
 import ai.xybrid.XybridModelLoader
@@ -104,7 +104,7 @@ val result = model.run(envelope)
 **Expected output:** `result.success == true` with audio bytes in `result.audioBytes`.
   </Tab>
   <Tab value="Unity">
-### Install
+**Install**
 
 In Unity, go to **Window > Package Manager > + > Add package from git URL** and enter:
 
@@ -122,7 +122,7 @@ Or add to `Packages/manifest.json`:
 }
 ```
 
-### Run inference
+**Run inference**
 
 ```csharp
 using Xybrid.Native;
@@ -147,13 +147,13 @@ Debug.Log($"Result: {Marshal.PtrToStringUTF8(textPtr)}");
 **Expected output:** Audio result from the TTS model, accessible via the result pointer.
   </Tab>
   <Tab value="CLI">
-### Install
+**Install**
 
 ```bash
 cargo install xybrid-cli
 ```
 
-### Run inference
+**Run inference**
 
 ```bash
 # List available models
@@ -179,6 +179,5 @@ Transcription: "Hello, how can I help you?"
 <Cards>
   <Card title="SDKs" href="/docs/integrations/sdks" description="Detailed SDK guides for each platform" />
   <Card title="Pipelines" href="/docs/concepts/pipelines" description="Chain multiple models together" />
-  <Card title="CLI Reference" href="/docs/cli/reference" description="All CLI commands" />
   <Card title="Concepts" href="/docs/concepts" description="How Xybrid works under the hood" />
 </Cards>

@@ -3,67 +3,164 @@ title: Android
 description: Native Android SDK for on-device ML inference
 ---
 
-The Android SDK provides native Kotlin/Java bindings to the Xybrid runtime for Android applications.
+The Android SDK provides native Kotlin bindings to the Xybrid runtime via UniFFI, enabling on-device ML inference in Android applications.
 
 <Callout type="info">
-**Coming Soon** - The Android SDK is currently in development. In the meantime, you can use the [Flutter SDK](/docs/integrations/sdks/flutter) for cross-platform Android development.
+The Android SDK is in early access. The API is stable but the package is not yet published to Maven Central. Install from source or use the [Flutter SDK](/docs/integrations/sdks/flutter) for cross-platform development.
 </Callout>
 
-## Planned Features
+## Installation
 
-- Native Kotlin API with Java interop
-- Jetpack Compose integration
-- NNAPI acceleration
-- Vulkan GPU support
-- Qualcomm QNN support (Hexagon DSP)
+Add the Xybrid AAR and native libraries to your project:
 
-## Expected API
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation(files("libs/xybrid.aar"))
+}
+```
 
-Based on the Flutter SDK patterns, the Android SDK will follow a similar structure:
+Minimum SDK: **24** (Android 7.0)
+
+## Quick Start
 
 ```kotlin
-import ai.xybrid.sdk.*
+import ai.xybrid.*
 
-// Initialize
-Xybrid.initialize(context)
-
-// Load model from registry
-val model = Xybrid.model(
-    modelId = "whisper-tiny-candle",
-    version = "1.0",
-    registry = "https://registry.xybrid.dev"
-).load()
+// Load a model from the registry
+val loader = XybridModelLoader.fromRegistry("kokoro-82m")
+val model = loader.load()
 
 // Run inference
-val envelope = Envelope.audio(audioBytes)
-val result = model.run(envelope)
-println("Transcription: ${result.text}")
+val result = model.run(Envelope.text("Hello, world!"))
 
-// Cleanup
-model.unload()
+if (result.success) {
+    println("Output: ${result.text}")
+    println("Latency: ${result.latencyMs}ms")
+}
 ```
 
-## Pipeline Example
+---
+
+## Model Loading
+
+### From Registry
 
 ```kotlin
-val pipeline = Xybrid.pipeline(yaml = """
-name: voice-assistant
-stages:
-  - whisper-tiny-candle@1.0
-  - target: integration
-    provider: openai
-    model: gpt-4o-mini
-  - kokoro-82m@0.1
-""".trimIndent()).load()
-
-val result = pipeline.run(
-    envelope = Envelope.audio(audioBytes)
-)
-
-// Play TTS response
-val audioOutput = result.audio
+val loader = XybridModelLoader.fromRegistry("whisper-tiny")
+val model = loader.load()
 ```
 
-## Stay Updated
+### From Local Bundle
 
-Follow the [GitHub repository](https://github.com/xybrid-ai/xybrid) for Android SDK announcements.
+```kotlin
+val loader = XybridModelLoader.fromBundle("/path/to/model.xyb")
+val model = loader.load()
+```
+
+---
+
+## Input Envelopes
+
+The `Envelope` factory creates type-safe inputs for different model types.
+
+### Audio (Speech Recognition)
+
+```kotlin
+val envelope = Envelope.audio(
+    bytes = audioBytes,     // Raw PCM bytes
+    sampleRate = 16000u,    // Sample rate in Hz
+    channels = 1u           // Mono
+)
+val result = model.run(envelope)
+println("Transcription: ${result.text}")
+```
+
+### Text (Text-to-Speech)
+
+```kotlin
+// Simple text
+val envelope = Envelope.text("Hello, how are you?")
+
+// With voice and speed
+val envelope = Envelope.text("Hello", voiceId = "af_heart", speed = 1.0)
+
+val result = model.run(envelope)
+val audioOutput = result.audioBytes  // Raw PCM audio
+```
+
+### Embedding
+
+```kotlin
+val envelope = Envelope.embedding(listOf(0.1f, 0.2f, 0.3f))
+val result = model.run(envelope)
+val vector = result.embedding
+```
+
+---
+
+## Result Handling
+
+```kotlin
+val result = model.run(envelope)
+
+if (result.success) {
+    when (result.outputType) {
+        "text" -> println("Text: ${result.text}")
+        "audio" -> playAudio(result.audioBytes!!)
+        "embedding" -> process(result.embedding!!)
+    }
+    println("Latency: ${result.latencyMs}ms")
+    println("Latency: ${result.latencySeconds}s")
+} else {
+    println("Error: ${result.error}")
+}
+```
+
+### XybridResult Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `success` | `Boolean` | Whether inference succeeded |
+| `error` | `String?` | Error message if failed |
+| `outputType` | `String` | `"text"`, `"audio"`, or `"embedding"` |
+| `text` | `String?` | Text output (ASR, LLM) |
+| `audioBytes` | `ByteArray?` | Audio output (TTS) |
+| `embedding` | `List<Float>?` | Embedding vector |
+| `latencyMs` | `UInt` | Inference latency in ms |
+| `isFailure` | `Boolean` | Convenience: `!success` |
+| `latencySeconds` | `Double` | Latency in seconds |
+
+---
+
+## Error Handling
+
+The SDK uses sealed exception classes for type-safe error handling:
+
+```kotlin
+try {
+    val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
+    val result = model.run(envelope)
+} catch (e: XybridException.ModelNotFound) {
+    println("Model not found: ${e.modelId}")
+} catch (e: XybridException.InferenceFailed) {
+    println("Inference failed: ${e.message}")
+} catch (e: XybridException.InvalidInput) {
+    println("Invalid input: ${e.message}")
+} catch (e: XybridException.IoException) {
+    println("I/O error: ${e.message}")
+} catch (e: XybridException) {
+    // Catch-all with user-friendly message
+    showError(e.displayMessage)
+}
+```
+
+---
+
+## Platform Support
+
+| Architecture | Status |
+|-------------|--------|
+| arm64-v8a | Supported |
+| armeabi-v7a | Supported |
+| x86_64 | Supported (emulator) |

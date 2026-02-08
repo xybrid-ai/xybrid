@@ -4,7 +4,7 @@ description: Multi-stage ML pipeline definition and YAML DSL reference
 ---
 
 
-A **Pipeline** is a sequence of stages that transform data. Pipelines are defined in YAML and executed by the orchestrator, enabling you to chain models together (ASR → LLM → TTS) with automatic routing between device and cloud execution.
+A **Pipeline** is a sequence of stages that transform data. Pipelines are defined in YAML and executed by the SDK, enabling you to chain models together (ASR → LLM → TTS) with automatic routing between device and cloud execution.
 
 ## How Pipelines Work
 
@@ -18,7 +18,7 @@ flowchart TD
       B1[1. Parse YAML] --> B2[2. Resolve models from Registry] --> B3[3. Validate type compatibility] --> B4[4. Prepare execution context]
     end
 
-    BB --> C[Orchestrator]
+    BB --> C[Pipeline Execution]
 
     C --> D
 
@@ -255,7 +255,7 @@ pipeline.isLoaded;    // true/false
 
 1. **Load** - Parse YAML, resolve models from registry
 2. **Validate** - Check type compatibility between stages
-3. **Execute** - Run stages sequentially via orchestrator
+3. **Execute** - Run stages sequentially
 4. **Unload** - Release resources
 
 ```dart
