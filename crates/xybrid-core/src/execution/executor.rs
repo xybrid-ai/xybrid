@@ -18,7 +18,7 @@
 //! let executor = TemplateExecutor::with_runtimes("models/", runtimes);
 //! ```
 
-use log::{debug, info};
+use log::{debug, info, warn};
 
 use super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
 use super::template::{ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage};
@@ -372,6 +372,27 @@ impl TemplateExecutor {
     /// * `input` - Current input envelope (typically a user message)
     /// * `context` - Conversation context containing history and optional system prompt
     ///
+    /// # Important: Context Update Pattern
+    ///
+    /// **Do NOT push the input to context before calling this method!**
+    /// The input is automatically appended to the context when building the prompt.
+    /// Push both input and result to context **after** execution for the next turn:
+    ///
+    /// ```rust,ignore
+    /// // CORRECT: Push AFTER execution
+    /// let input = Envelope::new(EnvelopeKind::Text("Hello".into()))
+    ///     .with_role(MessageRole::User);
+    /// let result = executor.execute_with_context(&metadata, &input, &ctx)?;
+    /// ctx.push(input);   // Push for next turn
+    /// ctx.push(result);  // Push for next turn
+    ///
+    /// // WRONG: Pushing before causes duplicate messages!
+    /// ctx.push(input.clone());  // DON'T DO THIS
+    /// let result = executor.execute_with_context(&metadata, &input, &ctx)?;
+    /// ```
+    ///
+    /// A runtime warning is logged if the input is already in context (detected by local_id).
+    ///
     /// # Example
     ///
     /// ```rust,ignore
@@ -383,16 +404,22 @@ impl TemplateExecutor {
     ///     .with_system(Envelope::new(EnvelopeKind::Text("You are helpful.".into()))
     ///         .with_role(MessageRole::System));
     ///
+    /// // Previous conversation turns (already happened)
     /// ctx.push(Envelope::new(EnvelopeKind::Text("Hello".into()))
     ///     .with_role(MessageRole::User));
     /// ctx.push(Envelope::new(EnvelopeKind::Text("Hi there!".into()))
     ///     .with_role(MessageRole::Assistant));
     ///
+    /// // Current turn - don't push input before execution
     /// let input = Envelope::new(EnvelopeKind::Text("How are you?".into()))
     ///     .with_role(MessageRole::User);
     ///
     /// let result = executor.execute_with_context(&metadata, &input, &ctx)?;
     /// assert!(result.is_assistant_message());
+    ///
+    /// // Update context for next turn
+    /// ctx.push(input);
+    /// ctx.push(result);
     /// ```
     pub fn execute_with_context(
         &mut self,
@@ -406,6 +433,20 @@ impl TemplateExecutor {
             metadata.model_id,
             context.id()
         );
+
+        // Warn if input was already pushed to context (common mistake)
+        // This causes the input message to appear twice in the prompt
+        if let Some(last) = context.history().last() {
+            if last.local_id() == input.local_id() {
+                warn!(
+                    target: "xybrid_core",
+                    "Input envelope was already pushed to context (local_id={}). \
+                     This will cause the message to appear twice in the prompt. \
+                     Push input to context AFTER execute_with_context, not before.",
+                    input.local_id()
+                );
+            }
+        }
 
         // Check if this is a GGUF (LLM) model
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -576,6 +617,19 @@ impl TemplateExecutor {
             metadata.model_id,
             context.id()
         );
+
+        // Warn if input was already pushed to context (common mistake)
+        if let Some(last) = context.history().last() {
+            if last.local_id() == input.local_id() {
+                warn!(
+                    target: "xybrid_core",
+                    "Input envelope was already pushed to context (local_id={}). \
+                     This will cause the message to appear twice in the prompt. \
+                     Push input to context AFTER execute_streaming_with_context, not before.",
+                    input.local_id()
+                );
+            }
+        }
 
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {

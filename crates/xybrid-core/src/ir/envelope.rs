@@ -33,6 +33,7 @@
 
 use std::collections::HashMap;
 use thiserror::Error;
+use uuid::Uuid;
 
 /// Typed payload variants for envelope data.
 ///
@@ -95,7 +96,13 @@ pub struct Envelope {
 }
 
 impl Envelope {
+    /// Metadata key for storing the local unique ID.
+    pub const LOCAL_ID_METADATA_KEY: &'static str = "xybrid.local_id";
+
     /// Creates a new envelope with the specified kind and empty metadata.
+    ///
+    /// A unique local ID is automatically generated for tracking and
+    /// duplicate detection.
     ///
     /// # Arguments
     ///
@@ -103,15 +110,19 @@ impl Envelope {
     ///
     /// # Returns
     ///
-    /// A new `Envelope` instance
+    /// A new `Envelope` instance with a unique local ID
     pub fn new(kind: EnvelopeKind) -> Self {
-        Self {
-            kind,
-            metadata: HashMap::new(),
-        }
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            Self::LOCAL_ID_METADATA_KEY.to_string(),
+            Uuid::new_v4().to_string(),
+        );
+        Self { kind, metadata }
     }
 
     /// Creates a new envelope with the specified kind and metadata.
+    ///
+    /// If the metadata does not contain a local ID, one is automatically generated.
     ///
     /// # Arguments
     ///
@@ -120,9 +131,59 @@ impl Envelope {
     ///
     /// # Returns
     ///
-    /// A new `Envelope` instance
-    pub fn with_metadata(kind: EnvelopeKind, metadata: HashMap<String, String>) -> Self {
+    /// A new `Envelope` instance with a unique local ID
+    pub fn with_metadata(kind: EnvelopeKind, mut metadata: HashMap<String, String>) -> Self {
+        // Ensure a local ID exists
+        if !metadata.contains_key(Self::LOCAL_ID_METADATA_KEY) {
+            metadata.insert(
+                Self::LOCAL_ID_METADATA_KEY.to_string(),
+                Uuid::new_v4().to_string(),
+            );
+        }
         Self { kind, metadata }
+    }
+
+    /// Returns the unique local ID of this envelope.
+    ///
+    /// Each envelope gets a UUID on creation for tracking and duplicate detection.
+    ///
+    /// # Returns
+    ///
+    /// The local ID string, or an empty string if somehow missing
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use xybrid_core::ir::{Envelope, EnvelopeKind};
+    ///
+    /// let e1 = Envelope::new(EnvelopeKind::Text("Hello".to_string()));
+    /// let e2 = Envelope::new(EnvelopeKind::Text("Hello".to_string()));
+    ///
+    /// // Each envelope has a unique ID even with identical content
+    /// assert_ne!(e1.local_id(), e2.local_id());
+    /// ```
+    pub fn local_id(&self) -> &str {
+        self.metadata
+            .get(Self::LOCAL_ID_METADATA_KEY)
+            .map(|s| s.as_str())
+            .unwrap_or("")
+    }
+
+    /// Sets a custom local ID for this envelope (builder pattern).
+    ///
+    /// Useful for testing or when resuming from serialized state.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The custom local ID
+    ///
+    /// # Returns
+    ///
+    /// Self with the custom local ID set
+    pub fn with_local_id(mut self, id: impl Into<String>) -> Self {
+        self.metadata
+            .insert(Self::LOCAL_ID_METADATA_KEY.to_string(), id.into());
+        self
     }
 
     /// Adds a metadata key-value pair.
@@ -543,7 +604,26 @@ mod tests {
     fn test_envelope_new() {
         let envelope = Envelope::new(EnvelopeKind::Text("test".to_string()));
         assert_eq!(envelope.kind, EnvelopeKind::Text("test".to_string()));
-        assert!(envelope.metadata.is_empty());
+        // New envelopes have a local_id automatically generated
+        assert!(!envelope.local_id().is_empty());
+        assert_eq!(envelope.local_id().len(), 36); // UUID format
+    }
+
+    #[test]
+    fn test_envelope_unique_local_ids() {
+        let e1 = Envelope::new(EnvelopeKind::Text("same text".to_string()));
+        let e2 = Envelope::new(EnvelopeKind::Text("same text".to_string()));
+
+        // Each envelope has a unique local ID even with identical content
+        assert_ne!(e1.local_id(), e2.local_id());
+    }
+
+    #[test]
+    fn test_envelope_with_local_id() {
+        let envelope = Envelope::new(EnvelopeKind::Text("test".to_string()))
+            .with_local_id("custom-id-123");
+
+        assert_eq!(envelope.local_id(), "custom-id-123");
     }
 
     #[test]
@@ -552,7 +632,24 @@ mod tests {
         metadata.insert("key1".to_string(), "value1".to_string());
         let envelope =
             Envelope::with_metadata(EnvelopeKind::Audio(vec![1, 2, 3]), metadata.clone());
-        assert_eq!(envelope.metadata, metadata);
+
+        // with_metadata preserves provided metadata AND adds local_id
+        assert_eq!(envelope.get_metadata("key1"), Some(&"value1".to_string()));
+        assert!(!envelope.local_id().is_empty());
+    }
+
+    #[test]
+    fn test_envelope_with_metadata_preserves_local_id() {
+        let mut metadata = HashMap::new();
+        metadata.insert("key1".to_string(), "value1".to_string());
+        metadata.insert(
+            Envelope::LOCAL_ID_METADATA_KEY.to_string(),
+            "my-custom-id".to_string(),
+        );
+        let envelope = Envelope::with_metadata(EnvelopeKind::Audio(vec![1, 2, 3]), metadata);
+
+        // Custom local_id in metadata is preserved
+        assert_eq!(envelope.local_id(), "my-custom-id");
     }
 
     #[test]

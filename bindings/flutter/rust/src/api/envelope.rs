@@ -64,6 +64,15 @@ impl FfiEnvelope {
         self.0.role().map(|r| r.into())
     }
 
+    /// Get the unique local ID of this envelope.
+    ///
+    /// Each envelope has a UUID generated on creation for tracking
+    /// and duplicate detection.
+    #[frb(sync)]
+    pub fn local_id(&self) -> String {
+        self.0.local_id().to_string()
+    }
+
     /// Convert to inner Envelope for SDK calls.
     pub(crate) fn into_envelope(self) -> Envelope {
         self.0
