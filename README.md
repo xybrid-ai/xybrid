@@ -83,6 +83,37 @@ final result = await model.run(envelope: Envelope.audio(bytes: audioBytes));
 print('Transcription: ${result.unwrapText()}');
 ```
 
+### Unity
+
+Add to your `Packages/manifest.json`:
+
+```json
+{
+  "dependencies": {
+    "ai.xybrid.sdk": "https://github.com/xybrid-ai/xybrid.git?path=bindings/unity"
+  }
+}
+```
+
+```csharp
+using Xybrid.Native;
+using UnityEngine;
+
+public class XybridExample : MonoBehaviour
+{
+    void Start()
+    {
+        NativeMethods.xybrid_init();
+        var loader = NativeMethods.xybrid_model_loader_new();
+        NativeMethods.xybrid_model_loader_load(loader, "kokoro-82m", IntPtr.Zero, out var model);
+
+        var envelope = NativeMethods.xybrid_envelope_new_text("Hello world");
+        NativeMethods.xybrid_model_run(model, envelope, out var output);
+        Debug.Log(Marshal.PtrToStringUTF8(NativeMethods.xybrid_result_get_text(output)));
+    }
+}
+```
+
 ### CLI
 
 ```bash
@@ -109,6 +140,7 @@ xybrid run --model whisper-tiny --input-audio recording.wav -o transcript.txt
 | Package | Platform | Status |
 |---------|----------|--------|
 | **xybrid_flutter** | iOS, Android, macOS | [![](https://img.shields.io/pub/v/xybrid_flutter.svg)](https://pub.dev/packages/xybrid_flutter) |
+| **xybrid-unity** | Windows, macOS, Linux | [UPM Package](bindings/unity/) |
 | **xybrid-cli** | macOS, Linux, Windows | [Releases](https://github.com/xybrid-ai/xybrid/releases) |
 | **xybrid-swift** | iOS, macOS | Coming Soon |
 | **xybrid-kotlin** | Android | Coming Soon |
