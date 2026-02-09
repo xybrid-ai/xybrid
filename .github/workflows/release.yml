@@ -361,21 +361,25 @@ jobs:
             os: macos-14
             target: aarch64-apple-darwin
             artifact: xybrid
+            features: ort-download
 
           - name: macos-x86_64
             os: macos-13
             target: x86_64-apple-darwin
             artifact: xybrid
+            features: ort-download
 
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: xybrid
+            features: ort-download
 
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: xybrid.exe
+            features: ort-download
 
     steps:
       - uses: actions/checkout@v4
@@ -389,7 +393,7 @@ jobs:
           key: release-cli-${{ matrix.name }}
 
       - name: Build CLI
-        run: cargo build --release -p xybrid-cli --target ${{ matrix.target }}
+        run: cargo build --release -p xybrid-cli --target ${{ matrix.target }} --features ${{ matrix.features }}
 
       - name: Strip binary (Unix)
         if: runner.os != 'Windows'
