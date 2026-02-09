@@ -904,6 +904,186 @@ namespace Xybrid.Native
         [DllImport(__DllName, EntryPoint = "xybrid_result_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void xybrid_result_free(XybridResultHandle* handle);
 
+        /// <summary>
+        ///  Open a .xyb bundle file and return a handle.
+        ///
+        ///  Loads the bundle into memory (decompresses zstd, parses tar, validates manifest).
+        ///  The returned handle can be used with other `xybrid_bundle_*` functions.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `path`: Null-terminated UTF-8 path to the .xyb file.
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the opened bundle, or null on error (check `xybrid_last_error()`).
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  XybridBundleHandle* bundle = xybrid_bundle_open("/path/to/model.xyb");
+        ///  if (!bundle) {
+        ///      fprintf(stderr, "Failed: %s\n", xybrid_last_error());
+        ///  }
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_open", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridBundleHandle* xybrid_bundle_open(byte* path);
+
+        /// <summary>
+        ///  Get the manifest JSON from an opened bundle.
+        ///
+        ///  Returns the full manifest as a JSON string. The manifest contains:
+        ///  `model_id`, `version`, `target`, `hash`, `files`, `has_metadata`.
+        ///
+        ///  The returned string must be freed with `xybrid_free_string()`.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to an opened bundle.
+        ///
+        ///  # Returns
+        ///
+        ///  A newly allocated null-terminated JSON string, or null on error.
+        ///  The caller must free the returned string with `xybrid_free_string()`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_manifest_json", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_bundle_manifest_json(XybridBundleHandle* handle);
+
+        /// <summary>
+        ///  Get the model_metadata.json content from an opened bundle.
+        ///
+        ///  Returns the content of the `model_metadata.json` file inside the bundle,
+        ///  or null if the bundle does not contain one.
+        ///
+        ///  The returned string must be freed with `xybrid_free_string()`.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to an opened bundle.
+        ///
+        ///  # Returns
+        ///
+        ///  A newly allocated null-terminated JSON string, or null if not present or on error.
+        ///  Check `xybrid_last_error()` to distinguish "not present" (no error) from failure.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_metadata_json", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_bundle_metadata_json(XybridBundleHandle* handle);
+
+        /// <summary>
+        ///  Extract all files from a bundle to a directory.
+        ///
+        ///  Creates the output directory if it doesn't exist. Extracts all files
+        ///  from the bundle, preserving relative paths.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to an opened bundle.
+        ///  - `output_dir`: Null-terminated UTF-8 path to the output directory.
+        ///
+        ///  # Returns
+        ///
+        ///  - `0` on success
+        ///  - Non-zero on failure (check `xybrid_last_error()`)
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_extract", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_bundle_extract(XybridBundleHandle* handle, byte* output_dir);
+
+        /// <summary>
+        ///  Get the model ID from an opened bundle's manifest.
+        ///
+        ///  The returned pointer uses thread-local storage and is valid until the next
+        ///  call to this function on the same thread. Do NOT free it.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to an opened bundle.
+        ///
+        ///  # Returns
+        ///
+        ///  A pointer to the model ID string, or null on error.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_model_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_bundle_model_id(XybridBundleHandle* handle);
+
+        /// <summary>
+        ///  Get the version from an opened bundle's manifest.
+        ///
+        ///  The returned pointer uses thread-local storage and is valid until the next
+        ///  call to this function on the same thread. Do NOT free it.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_bundle_version(XybridBundleHandle* handle);
+
+        /// <summary>
+        ///  Get the target platform from an opened bundle's manifest.
+        ///
+        ///  The returned pointer uses thread-local storage and is valid until the next
+        ///  call to this function on the same thread. Do NOT free it.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_target", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_bundle_target(XybridBundleHandle* handle);
+
+        /// <summary>
+        ///  Get the SHA-256 hash from an opened bundle's manifest.
+        ///
+        ///  The returned pointer uses thread-local storage and is valid until the next
+        ///  call to this function on the same thread. Do NOT free it.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_hash", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_bundle_hash(XybridBundleHandle* handle);
+
+        /// <summary>
+        ///  Check if the bundle contains a model_metadata.json file.
+        ///
+        ///  # Returns
+        ///
+        ///  - `1` if the bundle has model_metadata.json
+        ///  - `0` if not, or if the handle is null/invalid
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_has_metadata", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_bundle_has_metadata(XybridBundleHandle* handle);
+
+        /// <summary>
+        ///  Get the number of files in the bundle.
+        ///
+        ///  # Returns
+        ///
+        ///  The file count, or 0 if the handle is null/invalid.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_file_count", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint xybrid_bundle_file_count(XybridBundleHandle* handle);
+
+        /// <summary>
+        ///  Get the filename at a given index in the bundle's file list.
+        ///
+        ///  The returned pointer uses thread-local storage and is valid until the next
+        ///  call to this function on the same thread. Do NOT free it.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to an opened bundle.
+        ///  - `index`: Zero-based index into the file list.
+        ///
+        ///  # Returns
+        ///
+        ///  A pointer to the filename string, or null if index is out of bounds.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_file_name", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_bundle_file_name(XybridBundleHandle* handle, uint index);
+
+        /// <summary>
+        ///  Free a bundle handle.
+        ///
+        ///  After calling this function, the handle is no longer valid.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: A handle to the bundle to free. May be null (no-op).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_bundle_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_bundle_free(XybridBundleHandle* handle);
+
 
     }
 
@@ -964,6 +1144,18 @@ namespace Xybrid.Native
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct XybridContextHandle
+    {
+        public void* Item1;
+    }
+
+    /// <summary>
+    ///  Opaque handle to a loaded bundle.
+    ///
+    ///  This handle is created by `xybrid_bundle_open` and must be freed with
+    ///  `xybrid_bundle_free`.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct XybridBundleHandle
     {
         public void* Item1;
     }
