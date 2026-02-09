@@ -315,9 +315,10 @@ fn compile_llama_cpp() {
     println!("cargo:rustc-link-lib=static=ggml-base");
     println!("cargo:rustc-link-lib=static=ggml-cpu");
 
-    // Build our C++ wrapper
+    // Build our C++ wrapper (C++17 required by llama.cpp headers)
     cc::Build::new()
         .cpp(true)
+        .std("c++17")
         .file(&wrapper_path)
         .include(llama_cpp_dir.join("include"))
         .include(llama_cpp_dir.join("ggml/include"))
