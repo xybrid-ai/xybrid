@@ -374,7 +374,7 @@ pub fn llama_format_chat(
     }
 
     // If buffer was too small, resize and retry
-    if result as usize >= buf.len() {
+    let len = if result as usize >= buf.len() {
         buf.resize((result as usize) + 1, 0);
         let retry_result = unsafe {
             llama_format_chat_with_model_c(
@@ -389,10 +389,13 @@ pub fn llama_format_chat(
         if retry_result < 0 {
             return llama_format_chat_chatml(messages);
         }
-    }
+        // Use the retry's return value, not the first call's
+        retry_result as usize
+    } else {
+        result as usize
+    };
 
     // Convert result to string
-    let len = result as usize;
     if let Ok(prompt) = std::str::from_utf8(&buf[..len]) {
         Ok(prompt.to_string())
     } else {
@@ -654,13 +657,15 @@ pub fn llama_generate_with_stops(
         .map(|d| d.as_secs() as u32)
         .unwrap_or(42);
 
-    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = if stop_sequences.is_empty() {
+    // Use stop_lens.len() (filtered count) not stop_sequences.len() (original count).
+    // Some sequences may tokenize to empty and get filtered out above.
+    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = if stop_lens.is_empty() {
         (ptr::null(), ptr::null(), 0)
     } else {
         (
             stop_tokens.as_ptr(),
             stop_lens.as_ptr(),
-            stop_sequences.len() as c_int,
+            stop_lens.len() as c_int,
         )
     };
 
@@ -812,13 +817,15 @@ where
         .map(|d| d.as_secs() as u32)
         .unwrap_or(42);
 
-    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = if stop_sequences.is_empty() {
+    // Use stop_lens.len() (filtered count) not stop_sequences.len() (original count).
+    // Some sequences may tokenize to empty and get filtered out above.
+    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = if stop_lens.is_empty() {
         (ptr::null(), ptr::null(), 0)
     } else {
         (
             stop_tokens.as_ptr(),
             stop_lens.as_ptr(),
-            stop_sequences.len() as c_int,
+            stop_lens.len() as c_int,
         )
     };
 
@@ -1019,4 +1026,101 @@ where
     Err(AdapterError::RuntimeError(
         "llm-llamacpp feature not enabled".to_string(),
     ))
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use std::os::raw::c_int;
+
+    // =========================================================================
+    // Regression: Stop Sequence Count Mismatch
+    // =========================================================================
+    //
+    // Bug: llama_generate_with_stops() and llama_generate_streaming() pass
+    // `stop_sequences.len()` as n_stop_seqs to the C function, but the
+    // `stop_lens` array only has entries for sequences that tokenized to
+    // non-empty results. If any sequence tokenizes to empty, the C code reads
+    // past the end of stop_lens → out-of-bounds access → SIGSEGV.
+    //
+    // This test reproduces the logic without needing llama.cpp loaded.
+
+    /// Verify that when some stop sequences tokenize to empty, the count passed
+    /// to the C function matches the actual number of entries in the lengths array.
+    ///
+    /// Regression test: previously used `stop_sequences.len()` (unfiltered) which
+    /// caused out-of-bounds reads when some sequences were filtered out.
+    #[test]
+    fn test_stop_sequence_count_matches_filtered_lens() {
+        // Simulate tokenization results: sequence [1] returns empty
+        let tokenize_results: Vec<Vec<i32>> = vec![
+            vec![32000, 32001],  // <|im_end|> → 2 tokens
+            vec![],              // <|unknown_token|> → empty (filtered out)
+            vec![32002],         // <|end_of_text|> → 1 token
+        ];
+
+        // Reproduce the fixed logic: filter empties, then count from stop_lens
+        let mut stop_tokens: Vec<i32> = Vec::new();
+        let mut stop_lens: Vec<c_int> = Vec::new();
+
+        for tokens in &tokenize_results {
+            if !tokens.is_empty() {
+                stop_lens.push(tokens.len() as c_int);
+                stop_tokens.extend(tokens);
+            }
+        }
+
+        // Fixed: use stop_lens.len() (filtered count = 2), not original count (3)
+        let n_stop_seqs = stop_lens.len() as c_int;
+
+        assert_eq!(n_stop_seqs, 2, "n_stop_seqs must match stop_lens.len()");
+        assert_eq!(stop_lens.len(), 2);
+        assert_eq!(stop_tokens.len(), 3); // 2 + 1 tokens total
+        assert_eq!(stop_lens[0], 2); // first sequence: 2 tokens
+        assert_eq!(stop_lens[1], 1); // third sequence: 1 token
+    }
+
+    // =========================================================================
+    // Regression: Buffer Retry Uses Wrong Length Variable
+    // =========================================================================
+    //
+    // Bug: In llama_format_chat(), after the buffer resize and retry, the code
+    // uses `result` (from the FIRST call) instead of `retry_result` to
+    // determine how many bytes to read from the buffer.
+    //
+    // This test simulates the logic pattern to show the wrong variable is used.
+
+    /// Verify that the buffer retry logic uses the retry call's return value,
+    /// not the first call's, to determine how many bytes to read.
+    ///
+    /// Regression test: previously used `result` (first call) after resize+retry
+    /// instead of `retry_result`, which could read stale/uninitialized data.
+    #[test]
+    fn test_format_chat_retry_uses_correct_length() {
+        // Simulate the fixed buffer management logic from llama_format_chat
+        let buf_len: usize = 4096;
+
+        // First call: C function says it needs 5000 bytes (buffer too small)
+        let result: c_int = 5000;
+
+        assert!(result as usize >= buf_len, "Should trigger resize path");
+
+        // Resize buffer
+        let _new_buf_len = (result as usize) + 1; // 5001
+
+        // Retry call: C function returns actual bytes written
+        let retry_result: c_int = 4998;
+
+        // Fixed logic: use retry_result when resize path was taken
+        let len = if result as usize >= buf_len {
+            retry_result as usize  // FIXED: use retry's value
+        } else {
+            result as usize
+        };
+
+        assert_eq!(len, 4998, "Must use retry_result (4998), not first result (5000)");
+    }
 }

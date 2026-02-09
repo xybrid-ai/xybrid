@@ -5,10 +5,10 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:xybrid_example/widgets/model_status_card.dart';
 import 'package:xybrid_flutter/xybrid.dart';
 
-/// LLM Chat demo screen with token streaming.
+/// LLM Chat demo screen with token streaming and conversation context.
 ///
-/// Demonstrates how to run LLM inference with streaming token output,
-/// similar to the CLI repl mode with --stream flag.
+/// Demonstrates how to run LLM inference with streaming token output
+/// and multi-turn conversation memory via [ConversationContext].
 class LlmDemoScreen extends StatefulWidget {
   const LlmDemoScreen({super.key});
 
@@ -108,15 +108,17 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   /// Whether context mode is enabled (preserves conversation history).
   bool _contextEnabled = false;
 
-  /// Conversation history for context mode.
-  List<_ChatMessage> _conversationHistory = [];
+  /// Native conversation context for multi-turn LLM inference.
+  ConversationContext? _conversationContext;
+
+  /// UI-only message list for display (ConversationContext doesn't expose history).
+  List<_ChatMessage> _displayMessages = [];
 
   /// Last user message (for non-context mode display).
   String _lastUserMessage = '';
 
   /// Get conversation length (excluding system prompt).
-  int get _conversationLength =>
-      _conversationHistory.where((m) => m.role != 'system').length;
+  int get _conversationLength => _conversationContext?.historyLength ?? 0;
 
   @override
   void dispose() {
@@ -127,17 +129,17 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
     super.dispose();
   }
 
+  /// System prompt used for conversation context.
+  static const _systemPrompt =
+      'You are a helpful AI assistant. Always ask the user their name first before helping them. Keep responses concise.';
+
   /// Toggle context mode on/off.
   void _toggleContext() {
     setState(() {
       _contextEnabled = !_contextEnabled;
-      if (_contextEnabled && _conversationHistory.isEmpty) {
-        _conversationHistory = [
-          const _ChatMessage(
-            role: 'system',
-            content: 'You are a helpful AI assistant. Always ask the user their name first before helping them. Keep responses concise.',
-          ),
-        ];
+      if (_contextEnabled && _conversationContext == null) {
+        _conversationContext = ConversationContext()..setSystem(_systemPrompt);
+        _displayMessages = [];
       }
     });
   }
@@ -145,38 +147,13 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   /// Clear the conversation history.
   void _clearContext() {
     setState(() {
-      _conversationHistory = [
-        const _ChatMessage(
-          role: 'system',
-          content: 'You are a helpful AI assistant. Always ask the user their name first before helping them. Keep responses concise.',
-        ),
-      ];
+      _conversationContext?.clear();
+      _displayMessages = [];
       _responseText = '';
       _tokenCount = 0;
       _inferenceTimeMs = null;
       _tokensPerSecond = null;
     });
-  }
-
-  /// Build a prompt that includes conversation history.
-  String _buildContextualPrompt(String userMessage) {
-    final buffer = StringBuffer();
-
-    for (final message in _conversationHistory) {
-      switch (message.role) {
-        case 'system':
-          buffer.writeln('System: ${message.content}');
-        case 'user':
-          buffer.writeln('User: ${message.content}');
-        case 'assistant':
-          buffer.writeln('Assistant: ${message.content}');
-      }
-    }
-
-    // Add the new user message
-    buffer.writeln('User: $userMessage');
-    buffer.writeln('Assistant:');
-    return buffer.toString();
   }
 
   /// Load the LLM model from the registry with progress tracking.
@@ -260,14 +237,10 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
       return;
     }
 
-    // Build the prompt (with or without context)
-    final prompt = _contextEnabled
-        ? _buildContextualPrompt(userMessage)
-        : userMessage;
-
-    // Add user message to history if context is enabled
-    if (_contextEnabled) {
-      _conversationHistory.add(_ChatMessage(role: 'user', content: userMessage));
+    // Add user message to context and display list if context is enabled
+    if (_contextEnabled && _conversationContext != null) {
+      _conversationContext!.pushText(userMessage, MessageRole.user);
+      _displayMessages.add(_ChatMessage(role: 'user', content: userMessage));
     }
 
     // Store user message for display (in non-context mode)
@@ -286,8 +259,10 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
     });
 
     try {
-      final envelope = XybridEnvelope.text(prompt);
-      final stream = _model!.runStreaming(envelope);
+      final envelope = XybridEnvelope.text(userMessage);
+      final stream = (_contextEnabled && _conversationContext != null)
+          ? _model!.runStreamingWithContext(envelope, _conversationContext!)
+          : _model!.runStreaming(envelope);
 
       _streamSubscription = stream.listen(
         (token) {
@@ -358,9 +333,10 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
 
     _calculateInferenceStats();
 
-    // Add assistant response to history if context is enabled
+    // Add assistant response to context and display list
     if (_contextEnabled && _responseText.isNotEmpty) {
-      _conversationHistory.add(
+      _conversationContext?.pushText(_responseText, MessageRole.assistant);
+      _displayMessages.add(
         _ChatMessage(role: 'assistant', content: _responseText),
       );
     }
@@ -489,10 +465,8 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
     final messages = <_ChatMessage>[];
 
     if (_contextEnabled) {
-      // Add conversation history (excluding system message)
-      messages.addAll(
-        _conversationHistory.where((m) => m.role != 'system'),
-      );
+      // Display messages from conversation (system prompt is managed by ConversationContext)
+      messages.addAll(_displayMessages);
     } else {
       // In non-context mode, show last exchange
       if (_lastUserMessage.isNotEmpty) {

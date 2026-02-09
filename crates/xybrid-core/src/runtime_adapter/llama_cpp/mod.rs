@@ -241,7 +241,11 @@ impl LlmBackend for LlamaCppBackend {
         let mut stop_patterns: Vec<&str> = config.stop_sequences.iter().map(|s| s.as_str()).collect();
         // Always check for these common markers even if not in config
         // Note: <end_of_turn> is Gemma's stop token, <|im_end|> is ChatML (Qwen, Phi)
-        let extra_patterns = ["<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>", "<end_of_turn>"];
+        // Also include partial markers without "<" for models using ChatML fallback
+        let extra_patterns = [
+            "<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>", "<end_of_turn>",
+            "|im_end|>", "|im_start|>", "|endoftext|>", "end_of_turn>",
+        ];
         for p in &extra_patterns {
             if !stop_patterns.contains(p) {
                 stop_patterns.push(p);
@@ -338,10 +342,27 @@ impl LlmBackend for LlamaCppBackend {
             patterns
         };
 
+        // Partial stop markers that can appear without a leading "<".
+        // When a model is prompted with ChatML but doesn't natively use it
+        // (e.g., Gemma with ChatML fallback), it may generate malformed stop
+        // tokens like "|im_end|>" without the "<". We need to hold back
+        // prefixes of these markers too, so they aren't emitted before the
+        // full marker is accumulated and caught.
+        let partial_holdback_patterns: Vec<&str> = vec![
+            "|im_end|>",
+            "|im_start|>",
+            "|endoftext|>",
+            "end_of_turn>",
+        ];
+
         // Helper: find if text ends with a PREFIX of any stop pattern
         // Returns the position where the potential stop sequence starts, or None
         let find_potential_stop_start = |text: &str| -> Option<usize> {
-            for pattern in &streaming_stop_patterns {
+            // Check both full stop patterns and partial holdback patterns
+            let full_iter = streaming_stop_patterns.iter().map(|s| s.as_str());
+            let partial_iter = partial_holdback_patterns.iter().copied();
+
+            for pattern in full_iter.chain(partial_iter) {
                 // Check if text ends with any prefix of this pattern
                 for prefix_len in 1..=pattern.len() {
                     let prefix = &pattern[..prefix_len];
