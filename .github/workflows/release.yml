@@ -11,7 +11,7 @@ env:
   RUST_BACKTRACE: 1
   # NDK version - r26b is stable and widely supported
   NDK_VERSION: "26.1.10909125"
-  FLUTTER_VERSION: "3.24.0"
+  FLUTTER_VERSION: "3.35.7"
   FRB_VERSION: "2.11.1"
 
 permissions:
@@ -87,6 +87,17 @@ jobs:
             aarch64-apple-darwin,
             x86_64-apple-darwin
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -129,6 +140,17 @@ jobs:
             aarch64-linux-android,
             armv7-linux-androideabi,
             x86_64-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -195,6 +217,17 @@ jobs:
         with:
           targets: ${{ matrix.rust_targets }}
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -207,19 +240,22 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install LLVM (Linux)
-        if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "18"
 
-      - name: Install LLVM (macOS)
-        if: matrix.platform == 'macos'
-        run: brew install llvm
-
-      - name: Install LLVM (Windows)
-        if: matrix.platform == 'windows'
-        run: choco install llvm
+      - name: Cache FRB codegen binary
+        id: cache-frb
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/flutter_rust_bridge_codegen
+            ~/.cargo/bin/flutter_rust_bridge_codegen.exe
+          key: frb-codegen-${{ runner.os }}-${{ env.FRB_VERSION }}
 
       - name: Install flutter_rust_bridge_codegen
+        if: steps.cache-frb.outputs.cache-hit != 'true'
         run: cargo install flutter_rust_bridge_codegen@${{ env.FRB_VERSION }}
 
       - name: Run FRB codegen
@@ -329,6 +365,17 @@ jobs:
         with:
           targets: ${{ matrix.rust_targets }}
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -336,17 +383,10 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
 
-      - name: Install LLVM (Linux)
-        if: matrix.name == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
-
-      - name: Install LLVM (macOS)
-        if: matrix.name == 'darwin'
-        run: brew install llvm
-
-      - name: Install LLVM (Windows)
-        if: matrix.name == 'windows'
-        run: choco install llvm
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "18"
 
       - name: Setup Android SDK
         if: matrix.android
@@ -429,6 +469,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
 
       - uses: Swatinem/rust-cache@v2
         with:

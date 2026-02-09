@@ -41,10 +41,19 @@ jobs:
         with:
           targets: ${{ matrix.rust_targets }}
 
-      # Rust caching with Swatinem/rust-cache
-      # Cache key is based on Cargo.lock hash (automatic) + platform-specific prefix
-      # Expected cache hit rate: ~80-90% on incremental changes
-      # Cache includes: ~/.cargo/registry, ~/.cargo/git, target/
+      # sccache: caches individual compiler outputs (Rust + C/C++)
+      # Uses GitHub Actions cache as backend (no external service needed)
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -63,19 +72,23 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install LLVM (Linux)
-        if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "18"
 
-      - name: Install LLVM (macOS)
-        if: matrix.platform == 'macos'
-        run: brew install llvm
-
-      - name: Install LLVM (Windows)
-        if: matrix.platform == 'windows'
-        run: choco install llvm
+      # Cache the FRB codegen binary to avoid compiling from source every run
+      - name: Cache FRB codegen binary
+        id: cache-frb
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/flutter_rust_bridge_codegen
+            ~/.cargo/bin/flutter_rust_bridge_codegen.exe
+          key: frb-codegen-${{ runner.os }}-${{ env.FRB_VERSION }}
 
       - name: Install flutter_rust_bridge_codegen
+        if: steps.cache-frb.outputs.cache-hit != 'true'
         run: cargo install flutter_rust_bridge_codegen@${{ env.FRB_VERSION }}
 
       - name: Force dynamic CRT on Windows (required for cdylib DLL linking)
