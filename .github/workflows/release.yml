@@ -17,10 +17,58 @@ permissions:
 
 jobs:
   #
+  # Version check - verify all package versions match the git tag
+  #
+  check-version:
+    name: Verify Version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check versions match git tag
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Git tag version: $TAG_VERSION"
+
+          # Check Cargo workspace
+          CARGO_VERSION=$(grep -A5 '\[workspace\.package\]' Cargo.toml | grep '^version' | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          echo "Cargo workspace:  $CARGO_VERSION"
+
+          # Check Flutter
+          FLUTTER_VERSION_PKG=$(grep '^version:' bindings/flutter/pubspec.yaml | sed 's/version: *//')
+          echo "Flutter pubspec:  $FLUTTER_VERSION_PKG"
+
+          # Check Unity
+          UNITY_VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
+          echo "Unity package:    $UNITY_VERSION"
+
+          # Check Kotlin
+          KOTLIN_VERSION=$(grep '^version = ' bindings/kotlin/build.gradle.kts | sed 's/version = "\(.*\)"/\1/')
+          echo "Kotlin gradle:    $KOTLIN_VERSION"
+
+          # Verify all match
+          FAILED=0
+          for V in "$CARGO_VERSION" "$FLUTTER_VERSION_PKG" "$UNITY_VERSION" "$KOTLIN_VERSION"; do
+            if [ "$V" != "$TAG_VERSION" ]; then
+              echo ""
+              echo "ERROR: Version mismatch! Tag is v$TAG_VERSION but found $V"
+              echo "Run 'just bump-version $TAG_VERSION' and commit before tagging."
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            exit 1
+          fi
+          echo ""
+          echo "All versions match v$TAG_VERSION"
+
+  #
   # Apple XCFramework build (macOS only)
   #
   build-apple:
     name: Build Apple XCFramework
+    needs: [check-version]
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +111,7 @@ jobs:
   #
   build-android:
     name: Build Android
+    needs: [check-version]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,6 +163,7 @@ jobs:
   #
   build-flutter:
     name: Build Flutter (${{ matrix.platform }})
+    needs: [check-version]
     strategy:
       fail-fast: false
       matrix:
@@ -213,6 +263,7 @@ jobs:
   #
   precompile-flutter:
     name: Precompile Flutter (${{ matrix.name }})
+    needs: [check-version]
     strategy:
       fail-fast: false
       matrix:
@@ -308,6 +359,7 @@ jobs:
   #
   build-cli:
     name: Build CLI (${{ matrix.name }})
+    needs: [check-version]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

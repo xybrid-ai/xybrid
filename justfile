@@ -64,6 +64,24 @@ example-candle name *args:
     cargo run --example {{name}} -p xybrid-core --features candle {{args}}
 
 # =============================================================================
+# Version Management
+# =============================================================================
+
+# Show current version across all packages
+version:
+    @./tools/scripts/version-sync.sh --check
+
+# Set version across all packages (e.g., just bump-version 0.2.0)
+bump-version new_version:
+    ./tools/scripts/version-sync.sh {{new_version}}
+    @./tools/scripts/version-sync.sh --check
+
+# Sync non-Rust packages to match Cargo workspace version
+version-sync:
+    ./tools/scripts/version-sync.sh
+    @./tools/scripts/version-sync.sh --check
+
+# =============================================================================
 # Documentation
 # =============================================================================
 
