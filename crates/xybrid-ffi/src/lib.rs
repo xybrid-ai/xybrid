@@ -25,6 +25,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
 
 // Import SDK types
@@ -504,6 +505,21 @@ impl XybridContextHandle {
 ///
 /// Returns the version of the xybrid-ffi library.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// ============================================================================
+// Panic Safety Helper
+// ============================================================================
+
+/// Extract a human-readable message from a panic payload.
+fn panic_payload_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
 
 // ============================================================================
 // Thread-Local Error Storage (US-010)
@@ -1595,47 +1611,68 @@ pub unsafe extern "C" fn xybrid_model_run(
         return std::ptr::null_mut();
     }
 
-    // Borrow the model state
-    let model_state = match XybridModelHandle::as_ref(model) {
-        Some(state) => state,
-        None => {
-            set_last_error("invalid model handle");
-            return std::ptr::null_mut();
-        }
-    };
+    // Wrap in catch_unwind to prevent panics from crossing FFI boundary
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        // Borrow the model state
+        let model_state = match XybridModelHandle::as_ref(model) {
+            Some(state) => state,
+            None => {
+                set_last_error("invalid model handle");
+                return std::ptr::null_mut();
+            }
+        };
 
-    // Borrow the envelope data
-    let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid envelope handle");
-            return std::ptr::null_mut();
-        }
-    };
+        // Borrow the envelope data
+        let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid envelope handle");
+                return std::ptr::null_mut();
+            }
+        };
 
-    // Convert EnvelopeData to SDK Envelope
-    let sdk_envelope = envelope_data_to_sdk(envelope_data);
+        // Convert EnvelopeData to SDK Envelope
+        let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
-    // Run inference using the SDK
-    let inference_result = match model_state.model.run(&sdk_envelope) {
-        Ok(result) => result,
-        Err(e) => {
-            // Return error result
+        // Run inference using the SDK
+        let inference_result = match model_state.model.run(&sdk_envelope) {
+            Ok(result) => result,
+            Err(e) => {
+                // Return error result
+                let result = ResultData {
+                    success: false,
+                    error: Some(format!("Inference failed: {}", e)),
+                    output_type: "".to_string(),
+                    text: None,
+                    embedding: None,
+                    audio_bytes: None,
+                    latency_ms: 0,
+                };
+                return XybridResultHandle::from_boxed(Box::new(result));
+            }
+        };
+
+        // Convert InferenceResult to ResultData
+        XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&inference_result)))
+    }));
+
+    match result {
+        Ok(ptr) => ptr,
+        Err(panic_info) => {
+            let msg = panic_payload_to_string(&panic_info);
+            set_last_error(&format!("Internal panic in xybrid_model_run: {}", msg));
             let result = ResultData {
                 success: false,
-                error: Some(format!("Inference failed: {}", e)),
+                error: Some(format!("Internal panic: {}", msg)),
                 output_type: "".to_string(),
                 text: None,
                 embedding: None,
                 audio_bytes: None,
                 latency_ms: 0,
             };
-            return XybridResultHandle::from_boxed(Box::new(result));
+            XybridResultHandle::from_boxed(Box::new(result))
         }
-    };
-
-    // Convert InferenceResult to ResultData
-    XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&inference_result)))
+    }
 }
 
 /// Run inference on a model with conversation context.
@@ -1703,56 +1740,77 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
         return std::ptr::null_mut();
     }
 
-    // Borrow the model state
-    let model_state = match XybridModelHandle::as_ref(model) {
-        Some(state) => state,
-        None => {
-            set_last_error("invalid model handle");
-            return std::ptr::null_mut();
-        }
-    };
+    // Wrap in catch_unwind to prevent panics from crossing FFI boundary
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        // Borrow the model state
+        let model_state = match XybridModelHandle::as_ref(model) {
+            Some(state) => state,
+            None => {
+                set_last_error("invalid model handle");
+                return std::ptr::null_mut();
+            }
+        };
 
-    // Borrow the envelope data
-    let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid envelope handle");
-            return std::ptr::null_mut();
-        }
-    };
+        // Borrow the envelope data
+        let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid envelope handle");
+                return std::ptr::null_mut();
+            }
+        };
 
-    // Borrow the context data
-    let ctx_data = match XybridContextHandle::as_ref(context) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid context handle");
-            return std::ptr::null_mut();
-        }
-    };
+        // Borrow the context data
+        let ctx_data = match XybridContextHandle::as_ref(context) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid context handle");
+                return std::ptr::null_mut();
+            }
+        };
 
-    // Convert EnvelopeData to SDK Envelope
-    let sdk_envelope = envelope_data_to_sdk(envelope_data);
+        // Convert EnvelopeData to SDK Envelope
+        let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
-    // Run inference with context using the SDK
-    let inference_result = match model_state.model.run_with_context(&sdk_envelope, &ctx_data.context) {
-        Ok(result) => result,
-        Err(e) => {
-            // Return error result
+        // Run inference with context using the SDK
+        let inference_result = match model_state.model.run_with_context(&sdk_envelope, &ctx_data.context) {
+            Ok(result) => result,
+            Err(e) => {
+                // Return error result
+                let result = ResultData {
+                    success: false,
+                    error: Some(format!("Inference failed: {}", e)),
+                    output_type: "".to_string(),
+                    text: None,
+                    embedding: None,
+                    audio_bytes: None,
+                    latency_ms: 0,
+                };
+                return XybridResultHandle::from_boxed(Box::new(result));
+            }
+        };
+
+        // Convert InferenceResult to ResultData
+        XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&inference_result)))
+    }));
+
+    match result {
+        Ok(ptr) => ptr,
+        Err(panic_info) => {
+            let msg = panic_payload_to_string(&panic_info);
+            set_last_error(&format!("Internal panic in xybrid_model_run_with_context: {}", msg));
             let result = ResultData {
                 success: false,
-                error: Some(format!("Inference failed: {}", e)),
+                error: Some(format!("Internal panic: {}", msg)),
                 output_type: "".to_string(),
                 text: None,
                 embedding: None,
                 audio_bytes: None,
                 latency_ms: 0,
             };
-            return XybridResultHandle::from_boxed(Box::new(result));
+            XybridResultHandle::from_boxed(Box::new(result))
         }
-    };
-
-    // Convert InferenceResult to ResultData
-    XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&inference_result)))
+    }
 }
 
 /// Get the model ID of a loaded model.
@@ -1919,41 +1977,62 @@ pub unsafe extern "C" fn xybrid_model_run_streaming(
         }
     };
 
-    let model_state = match XybridModelHandle::as_ref(model) {
-        Some(state) => state,
-        None => {
-            set_last_error("invalid model handle");
-            return std::ptr::null_mut();
+    // Wrap in catch_unwind to prevent panics from crossing FFI boundary
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        let model_state = match XybridModelHandle::as_ref(model) {
+            Some(state) => state,
+            None => {
+                set_last_error("invalid model handle");
+                return std::ptr::null_mut();
+            }
+        };
+        let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid envelope handle");
+                return std::ptr::null_mut();
+            }
+        };
+
+        let sdk_envelope = envelope_data_to_sdk(envelope_data);
+
+        // Wrap callback + user_data in a Send-safe context
+        let ctx = StreamCallbackCtx { callback: callback_fn, user_data };
+
+        // Build the on_token closure that bridges to the C callback
+        let on_token = move |token: PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            unsafe { ctx.invoke(&token) };
+            Ok(())
+        };
+
+        // Call the SDK streaming method
+        match model_state.model.run_streaming(&sdk_envelope, on_token) {
+            Ok(result) => {
+                XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&result)))
+            }
+            Err(e) => {
+                let result = ResultData {
+                    success: false,
+                    error: Some(format!("Streaming inference failed: {}", e)),
+                    output_type: "".to_string(),
+                    text: None,
+                    embedding: None,
+                    audio_bytes: None,
+                    latency_ms: 0,
+                };
+                XybridResultHandle::from_boxed(Box::new(result))
+            }
         }
-    };
-    let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid envelope handle");
-            return std::ptr::null_mut();
-        }
-    };
+    }));
 
-    let sdk_envelope = envelope_data_to_sdk(envelope_data);
-
-    // Wrap callback + user_data in a Send-safe context
-    let ctx = StreamCallbackCtx { callback: callback_fn, user_data };
-
-    // Build the on_token closure that bridges to the C callback
-    let on_token = move |token: PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        unsafe { ctx.invoke(&token) };
-        Ok(())
-    };
-
-    // Call the SDK streaming method
-    match model_state.model.run_streaming(&sdk_envelope, on_token) {
-        Ok(result) => {
-            XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&result)))
-        }
-        Err(e) => {
+    match result {
+        Ok(ptr) => ptr,
+        Err(panic_info) => {
+            let msg = panic_payload_to_string(&panic_info);
+            set_last_error(&format!("Internal panic in xybrid_model_run_streaming: {}", msg));
             let result = ResultData {
                 success: false,
-                error: Some(format!("Streaming inference failed: {}", e)),
+                error: Some(format!("Internal panic: {}", msg)),
                 output_type: "".to_string(),
                 text: None,
                 embedding: None,
@@ -2026,48 +2105,69 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
         }
     };
 
-    let model_state = match XybridModelHandle::as_ref(model) {
-        Some(state) => state,
-        None => {
-            set_last_error("invalid model handle");
-            return std::ptr::null_mut();
-        }
-    };
-    let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid envelope handle");
-            return std::ptr::null_mut();
-        }
-    };
-    let ctx_data = match XybridContextHandle::as_ref(context) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid context handle");
-            return std::ptr::null_mut();
-        }
-    };
+    // Wrap in catch_unwind to prevent panics from crossing FFI boundary
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        let model_state = match XybridModelHandle::as_ref(model) {
+            Some(state) => state,
+            None => {
+                set_last_error("invalid model handle");
+                return std::ptr::null_mut();
+            }
+        };
+        let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid envelope handle");
+                return std::ptr::null_mut();
+            }
+        };
+        let ctx_data = match XybridContextHandle::as_ref(context) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid context handle");
+                return std::ptr::null_mut();
+            }
+        };
 
-    let sdk_envelope = envelope_data_to_sdk(envelope_data);
+        let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
-    // Wrap callback + user_data in a Send-safe context
-    let cb_ctx = StreamCallbackCtx { callback: callback_fn, user_data };
+        // Wrap callback + user_data in a Send-safe context
+        let cb_ctx = StreamCallbackCtx { callback: callback_fn, user_data };
 
-    // Build the on_token closure that bridges to the C callback
-    let on_token = move |token: PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        unsafe { cb_ctx.invoke(&token) };
-        Ok(())
-    };
+        // Build the on_token closure that bridges to the C callback
+        let on_token = move |token: PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            unsafe { cb_ctx.invoke(&token) };
+            Ok(())
+        };
 
-    // Call the SDK streaming method with context
-    match model_state.model.run_streaming_with_context(&sdk_envelope, &ctx_data.context, on_token) {
-        Ok(result) => {
-            XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&result)))
+        // Call the SDK streaming method with context
+        match model_state.model.run_streaming_with_context(&sdk_envelope, &ctx_data.context, on_token) {
+            Ok(result) => {
+                XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&result)))
+            }
+            Err(e) => {
+                let result = ResultData {
+                    success: false,
+                    error: Some(format!("Streaming inference with context failed: {}", e)),
+                    output_type: "".to_string(),
+                    text: None,
+                    embedding: None,
+                    audio_bytes: None,
+                    latency_ms: 0,
+                };
+                XybridResultHandle::from_boxed(Box::new(result))
+            }
         }
-        Err(e) => {
+    }));
+
+    match result {
+        Ok(ptr) => ptr,
+        Err(panic_info) => {
+            let msg = panic_payload_to_string(&panic_info);
+            set_last_error(&format!("Internal panic in xybrid_model_run_streaming_with_context: {}", msg));
             let result = ResultData {
                 success: false,
-                error: Some(format!("Streaming inference with context failed: {}", e)),
+                error: Some(format!("Internal panic: {}", msg)),
                 output_type: "".to_string(),
                 text: None,
                 embedding: None,
