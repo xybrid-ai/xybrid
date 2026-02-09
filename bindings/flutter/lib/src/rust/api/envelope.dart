@@ -32,6 +32,12 @@ abstract class FfiEnvelope implements RustOpaqueInterface {
       .api
       .crateApiEnvelopeFfiEnvelopeEmbedding(data: data);
 
+  /// Get the unique local ID of this envelope.
+  ///
+  /// Each envelope has a UUID generated on creation for tracking
+  /// and duplicate detection.
+  String localId();
+
   /// Get the message role of this envelope, if set.
   FfiMessageRole? role();
 
