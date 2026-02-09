@@ -1,0 +1,4 @@
+[submodule "crates/xybrid-core/vendor/llama.cpp"]
+	path = crates/xybrid-core/vendor/llama.cpp
+	url = https://github.com/ggerganov/llama.cpp
+	shallow = true
