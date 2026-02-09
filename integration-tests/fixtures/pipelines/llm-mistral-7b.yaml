@@ -1,0 +1,6 @@
+# Mistral 7B LLM Pipeline
+
+name: Mistral 7B LLM Pipeline
+
+stages:
+  - mistral-7b

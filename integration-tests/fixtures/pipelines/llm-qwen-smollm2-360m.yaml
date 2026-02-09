@@ -1,6 +1,0 @@
-# smollm2-360m LLM Pipeline
-
-name: smollm2-360m LLM Pipeline
-
-stages:
-  - smollm2-360m
