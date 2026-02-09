@@ -9,8 +9,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  FLUTTER_VERSION: "3.24.0"
-  FRB_VERSION: "2.0.0"
+  FLUTTER_VERSION: "3.35.7"
+  FRB_VERSION: "2.11.1"
 
 jobs:
   build-flutter:
@@ -72,39 +72,8 @@ jobs:
         if: matrix.platform == 'windows'
         run: choco install llvm
 
-      # Cache Dart pub cache for flutter_rust_bridge_codegen
-      # Expected cache hit rate: ~95% (FRB version changes rarely)
-      # Cache includes: ~/.pub-cache (Unix) or %LOCALAPPDATA%\Pub\Cache (Windows)
-      - name: Cache Dart pub cache (Unix)
-        if: runner.os != 'Windows'
-        uses: actions/cache@v4
-        with:
-          path: ~/.pub-cache
-          key: pub-cache-${{ runner.os }}-frb-${{ env.FRB_VERSION }}
-          restore-keys: |
-            pub-cache-${{ runner.os }}-frb-
-            pub-cache-${{ runner.os }}-
-
-      - name: Cache Dart pub cache (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.LOCALAPPDATA }}\Pub\Cache
-          key: pub-cache-${{ runner.os }}-frb-${{ env.FRB_VERSION }}
-          restore-keys: |
-            pub-cache-${{ runner.os }}-frb-
-            pub-cache-${{ runner.os }}-
-
       - name: Install flutter_rust_bridge_codegen
-        run: dart pub global activate flutter_rust_bridge_codegen
-
-      - name: Add Dart pub cache to PATH (Unix)
-        if: runner.os != 'Windows'
-        run: echo "$HOME/.pub-cache/bin" >> $GITHUB_PATH
-
-      - name: Add Dart pub cache to PATH (Windows)
-        if: runner.os == 'Windows'
-        run: echo "$env:LOCALAPPDATA\Pub\Cache\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+        run: cargo install flutter_rust_bridge_codegen@${{ env.FRB_VERSION }}
 
       - name: Build Flutter native library
         run: cargo xtask build-flutter --platform ${{ matrix.platform }} --release
