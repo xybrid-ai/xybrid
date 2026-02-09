@@ -54,13 +54,12 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           key: macos-platform
-      # Clone llama.cpp for the llm-llamacpp feature
-      - name: Clone llama.cpp
-        run: git clone --depth 1 https://github.com/ggerganov/llama.cpp crates/xybrid-core/vendor/llama.cpp
       - name: Check platform-macos
         run: cargo check -p xybrid-sdk --features platform-macos
 
@@ -69,13 +68,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           key: ubuntu-platform-desktop
-      # Clone llama.cpp for the llm-llamacpp feature
-      - name: Clone llama.cpp
-        run: git clone --depth 1 https://github.com/ggerganov/llama.cpp crates/xybrid-core/vendor/llama.cpp
       - name: Check platform-desktop
         run: cargo check -p xybrid-sdk --features platform-desktop
 
@@ -84,15 +82,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           key: macos-clippy-llm
-      # Clone llama.cpp for the llm-llamacpp feature
-      - name: Clone llama.cpp
-        run: git clone --depth 1 https://github.com/ggerganov/llama.cpp crates/xybrid-core/vendor/llama.cpp
       - name: Clippy with llm-llamacpp
         run: cargo clippy -p xybrid-core --features "ort-download,llm-llamacpp" -- -D warnings
 
@@ -101,13 +98,12 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           key: macos-test-llm
-      # Clone llama.cpp for the llm-llamacpp feature
-      - name: Clone llama.cpp
-        run: git clone --depth 1 https://github.com/ggerganov/llama.cpp crates/xybrid-core/vendor/llama.cpp
       - name: Test with llm-llamacpp
         run: cargo test -p xybrid-core --features "ort-download,llm-llamacpp" --lib
 
@@ -157,19 +153,21 @@ jobs:
         include:
           - os: macos-14
             target: aarch64-apple-darwin
-            features: ort-download
+            features: platform-macos
           - os: macos-13
             target: x86_64-apple-darwin
-            features: ort-download
+            features: platform-macos
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            features: ort-download
+            features: platform-desktop
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            features: ort-download
+            features: platform-desktop
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: dtolnay/rust-toolchain@stable
         with:
