@@ -13,7 +13,7 @@ PODS:
     - FlutterMacOS
   - record_macos (1.2.0):
     - FlutterMacOS
-  - xybrid_flutter (0.0.1):
+  - xybrid_flutter (0.1.0):
     - FlutterMacOS
 
 DEPENDENCIES:
@@ -48,7 +48,7 @@ SPEC CHECKSUMS:
   just_audio: a42c63806f16995daf5b219ae1d679deb76e6a79
   path_provider_foundation: 0b743cbb62d8e47eab856f09262bb8c1ddcfe6ba
   record_macos: 4680f37daeebf52162e715efb7ff682f0a5ce4fd
-  xybrid_flutter: b6dfc302e2b7fe5fa7717847fe75da3031fc500c
+  xybrid_flutter: 6bdc9742e4ad5a35f7587b7951a37382ed03f7ca
 
 PODFILE CHECKSUM: bf162e3eb83fb8ab8f8ccef4dafd3679ba12a734
 
