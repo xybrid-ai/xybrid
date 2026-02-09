@@ -72,10 +72,17 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install LLVM and Clang
-        uses: KyleMayes/install-llvm-action@v1
-        with:
-          version: "18"
+      - name: Install LLVM (Linux)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+
+      - name: Install LLVM (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install llvm
+
+      - name: Install LLVM (Windows)
+        if: matrix.platform == 'windows'
+        run: choco install llvm
 
       # Cache the FRB codegen binary to avoid compiling from source every run
       - name: Cache FRB codegen binary

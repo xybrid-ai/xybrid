@@ -240,10 +240,17 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install LLVM and Clang
-        uses: KyleMayes/install-llvm-action@v1
-        with:
-          version: "18"
+      - name: Install LLVM (Linux)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+
+      - name: Install LLVM (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install llvm
+
+      - name: Install LLVM (Windows)
+        if: matrix.platform == 'windows'
+        run: choco install llvm
 
       - name: Cache FRB codegen binary
         id: cache-frb
@@ -383,10 +390,17 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
 
-      - name: Install LLVM and Clang
-        uses: KyleMayes/install-llvm-action@v1
-        with:
-          version: "18"
+      - name: Install LLVM (Linux)
+        if: matrix.name == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+
+      - name: Install LLVM (macOS)
+        if: matrix.name == 'darwin'
+        run: brew install llvm
+
+      - name: Install LLVM (Windows)
+        if: matrix.name == 'windows'
+        run: choco install llvm
 
       - name: Setup Android SDK
         if: matrix.android
