@@ -3,6 +3,8 @@ plugins {
     kotlin("android")
 }
 
+version = "0.1.0-alpha1"
+
 android {
     namespace = "ai.xybrid"
     compileSdk = 34
