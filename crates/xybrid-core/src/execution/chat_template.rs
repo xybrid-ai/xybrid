@@ -503,4 +503,76 @@ mod tests {
         let format: ChatTemplateFormat = Default::default();
         assert_eq!(format, ChatTemplateFormat::ChatML);
     }
+
+    // =========================================================================
+    // Regression: Double-Formatting Detection
+    // =========================================================================
+    //
+    // Bug: execute_with_context() formats the prompt with ChatTemplateFormatter,
+    // then passes the formatted string to execute() → execute_llm() →
+    // adapter.execute() → backend.generate(), where llama.cpp formats it AGAIN.
+    //
+    // This test simulates what happens when an already-formatted prompt is
+    // wrapped as a ChatMessage::user() and formatted a second time: the result
+    // contains nested/doubled chat template markers.
+
+    #[test]
+    fn test_double_formatting_produces_nested_markers_chatml() {
+        // Step 1: Simulate what execute_with_context() does — format a conversation
+        let system = text_envelope("You are a helpful assistant.", MessageRole::System);
+        let user = text_envelope("Hello!", MessageRole::User);
+        let messages = vec![&system, &user];
+
+        let first_pass = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::ChatML);
+
+        // first_pass now looks like:
+        // <|im_start|>system\nYou are a helpful assistant.<|im_end|>\n
+        // <|im_start|>user\nHello!<|im_end|>\n
+        // <|im_start|>assistant\n
+
+        // Step 2: Simulate what adapter.execute() does — wrap the formatted string
+        // as a single user message and format again
+        let rewrapped = text_envelope(&first_pass, MessageRole::User);
+        let second_messages = vec![&rewrapped];
+
+        let second_pass = ChatTemplateFormatter::format(&second_messages, ChatTemplateFormat::ChatML);
+
+        // If double-formatting occurs, the second pass wraps the already-formatted
+        // prompt inside another <|im_start|>user\n...<|im_end|>\n block.
+        // The content of the user message now CONTAINS <|im_start|> markers.
+
+        // Count how many times <|im_start|> appears — should be 3 from first pass
+        // plus 2 from second pass (the outer user + assistant) = 5 total
+        let marker_count = second_pass.matches("<|im_start|>").count();
+
+        // A correctly formatted prompt has at most N+1 markers (one per message + assistant).
+        // For a single user message, that's 2: user + assistant.
+        // If we see more, formatting was applied to already-formatted text.
+        assert!(
+            marker_count > 2,
+            "Double-formatting SHOULD produce nested markers (found {}). \
+             If this test fails, the double-formatting bug has been fixed.",
+            marker_count
+        );
+    }
+
+    #[test]
+    fn test_double_formatting_produces_nested_markers_gemma() {
+        let system = text_envelope("You are helpful.", MessageRole::System);
+        let user = text_envelope("Hi!", MessageRole::User);
+        let messages = vec![&system, &user];
+
+        let first_pass = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::Gemma);
+        let rewrapped = text_envelope(&first_pass, MessageRole::User);
+        let second_messages = vec![&rewrapped];
+        let second_pass = ChatTemplateFormatter::format(&second_messages, ChatTemplateFormat::Gemma);
+
+        let marker_count = second_pass.matches("<start_of_turn>").count();
+        assert!(
+            marker_count > 2,
+            "Double-formatting SHOULD produce nested markers (found {}). \
+             If this test fails, the double-formatting bug has been fixed.",
+            marker_count
+        );
+    }
 }
