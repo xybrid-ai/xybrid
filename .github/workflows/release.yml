@@ -297,13 +297,8 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           mkdir -p dist
-          # Find and package the native library
-          if [ -d "bindings/flutter/rust/target" ]; then
-            cd bindings/flutter/rust/target
-          else
-            cd target
-          fi
-          find . -name "*xybrid_flutter_ffi*" -type f | head -20 | tar -czvf ../../../../dist/xybrid-flutter-${{ matrix.platform }}-${VERSION}.tar.gz -T -
+          # Find native library in both possible locations
+          find bindings/flutter/rust/target target -name "*xybrid_flutter_ffi*" -type f 2>/dev/null | head -20 | tar -czvf dist/xybrid-flutter-${{ matrix.platform }}-${VERSION}.tar.gz -T -
 
       - name: Prepare artifact with version (Windows)
         if: runner.os == 'Windows'
