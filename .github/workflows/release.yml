@@ -208,6 +208,102 @@ jobs:
           if-no-files-found: warn
 
   #
+  # Flutter precompiled binaries (uploaded to separate precompiled_<hash> release)
+  # These are auto-downloaded by cargokit when users don't have Rust installed
+  #
+  precompile-flutter:
+    name: Precompile Flutter (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: darwin
+            os: macos-14
+            # buildableTargets() on macOS auto-detects all Darwin targets:
+            # aarch64-apple-darwin, x86_64-apple-darwin,
+            # aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+            rust_targets: >-
+              aarch64-apple-darwin,
+              x86_64-apple-darwin,
+              aarch64-apple-ios,
+              aarch64-apple-ios-sim,
+              x86_64-apple-ios
+            android: false
+
+          - name: linux
+            os: ubuntu-latest
+            rust_targets: >-
+              x86_64-unknown-linux-gnu,
+              aarch64-linux-android,
+              armv7-linux-androideabi,
+              x86_64-linux-android
+            android: true
+
+          - name: windows
+            os: windows-latest
+            rust_targets: x86_64-pc-windows-msvc
+            android: false
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: precompile-flutter-${{ matrix.name }}
+
+      - uses: dart-lang/setup-dart@v1
+
+      - name: Install LLVM (Linux)
+        if: matrix.name == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+
+      - name: Install LLVM (macOS)
+        if: matrix.name == 'darwin'
+        run: brew install llvm
+
+      - name: Install LLVM (Windows)
+        if: matrix.name == 'windows'
+        run: choco install llvm
+
+      - name: Setup Android SDK
+        if: matrix.android
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        if: matrix.android
+        run: |
+          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Install cargo-ndk
+        if: matrix.android
+        run: cargo install cargo-ndk
+
+      - name: Install build tool dependencies
+        working-directory: bindings/flutter/cargokit/build_tool
+        run: dart pub get
+
+      - name: Precompile and upload binaries
+        working-directory: bindings/flutter/cargokit/build_tool
+        shell: bash
+        env:
+          PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS="--repository ${{ github.repository }} --manifest-dir ${{ github.workspace }}/bindings/flutter/rust --verbose"
+          if [ "${{ matrix.android }}" = "true" ]; then
+            ARGS="$ARGS --android-sdk-location $ANDROID_HOME --android-ndk-version ${{ env.NDK_VERSION }} --android-min-sdk-version 28"
+          fi
+          dart run bin/build_tool.dart precompile-binaries $ARGS
+
+  #
   # CLI builds (cross-platform matrix)
   #
   build-cli:

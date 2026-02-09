@@ -1,0 +1,3 @@
+precompiled_binaries:
+  url_prefix: "https://github.com/xybrid-ai/xybrid/releases/download/precompiled_"
+  public_key: "14760da065378524cf5fab49ba5843ced517eb2e791eccacb35dabbbcf3b2569"
