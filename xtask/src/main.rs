@@ -316,6 +316,10 @@ enum Commands {
         /// Override the version (defaults to Cargo.toml version or git tag)
         #[arg(long)]
         version: Option<String>,
+
+        /// Skip FRB codegen (use when bindings were already validated)
+        #[arg(long)]
+        skip_frb_codegen: bool,
     },
 
     /// Install required Rust cross-compilation targets for iOS, macOS, and Android
@@ -517,10 +521,11 @@ fn main() -> Result<()> {
             release,
             debug,
             version,
+            skip_frb_codegen,
         } => {
             let is_release = !debug && release;
             let ver = get_version(version.as_deref());
-            build_flutter(platform, is_release, &ver)?;
+            build_flutter(platform, is_release, &ver, skip_frb_codegen)?;
         }
         Commands::SetupTargets => {
             setup_targets()?;
@@ -1503,7 +1508,7 @@ fn run_frb_codegen() -> Result<()> {
 }
 
 /// Build Flutter native libraries for a specific platform
-fn build_flutter(platform: FlutterPlatform, release: bool, version: &str) -> Result<()> {
+fn build_flutter(platform: FlutterPlatform, release: bool, version: &str, skip_frb_codegen: bool) -> Result<()> {
     let profile = if release { "release" } else { "debug" };
 
     println!(
@@ -1525,8 +1530,13 @@ fn build_flutter(platform: FlutterPlatform, release: bool, version: &str) -> Res
         );
     }
 
-    // Run FRB codegen first
-    run_frb_codegen()?;
+    // Run FRB codegen first (unless already validated externally)
+    if !skip_frb_codegen {
+        run_frb_codegen()?;
+    } else {
+        println!("Skipping FRB codegen (--skip-frb-codegen)");
+        println!();
+    }
 
     // Get the targets to build
     let targets = platform.rust_targets();
@@ -2053,11 +2063,11 @@ fn run_platform_build(platform: BuildPlatform, release: bool, version: &str) -> 
     match platform {
         BuildPlatform::XCFramework => build_xcframework(release, version),
         BuildPlatform::Android => build_android(release, vec![], version),
-        BuildPlatform::FlutterIos => build_flutter(FlutterPlatform::Ios, release, version),
-        BuildPlatform::FlutterAndroid => build_flutter(FlutterPlatform::Android, release, version),
-        BuildPlatform::FlutterMacos => build_flutter(FlutterPlatform::Macos, release, version),
-        BuildPlatform::FlutterWindows => build_flutter(FlutterPlatform::Windows, release, version),
-        BuildPlatform::FlutterLinux => build_flutter(FlutterPlatform::Linux, release, version),
+        BuildPlatform::FlutterIos => build_flutter(FlutterPlatform::Ios, release, version, false),
+        BuildPlatform::FlutterAndroid => build_flutter(FlutterPlatform::Android, release, version, false),
+        BuildPlatform::FlutterMacos => build_flutter(FlutterPlatform::Macos, release, version, false),
+        BuildPlatform::FlutterWindows => build_flutter(FlutterPlatform::Windows, release, version, false),
+        BuildPlatform::FlutterLinux => build_flutter(FlutterPlatform::Linux, release, version, false),
     }
 }
 

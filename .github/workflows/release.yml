@@ -12,6 +12,7 @@ env:
   # NDK version - r26b is stable and widely supported
   NDK_VERSION: "26.1.10909125"
   FLUTTER_VERSION: "3.24.0"
+  FRB_VERSION: "2.11.1"
 
 permissions:
   contents: write
@@ -219,7 +220,23 @@ jobs:
         run: choco install llvm
 
       - name: Install flutter_rust_bridge_codegen
-        run: cargo install flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen@${{ env.FRB_VERSION }}
+
+      - name: Run FRB codegen
+        working-directory: bindings/flutter
+        run: flutter_rust_bridge_codegen generate
+
+      - name: Check FRB bindings are up-to-date
+        run: |
+          if ! git diff --exit-code bindings/flutter/lib/src/rust/; then
+            echo ""
+            echo "ERROR: Flutter Rust Bridge bindings are out of date."
+            echo "A Rust API change was committed without regenerating Dart bindings."
+            echo ""
+            echo "Fix: run 'flutter_rust_bridge_codegen generate' in bindings/flutter/ and commit the result."
+            exit 1
+          fi
+          echo "FRB bindings are up-to-date."
 
       - name: Force dynamic CRT on Windows (required for cdylib DLL linking)
         if: matrix.platform == 'windows'
@@ -229,7 +246,7 @@ jobs:
           echo "CXXFLAGS=/MD" >> $GITHUB_ENV
 
       - name: Build Flutter native library
-        run: cargo xtask build-flutter --platform ${{ matrix.platform }} --release
+        run: cargo xtask build-flutter --platform ${{ matrix.platform }} --release --skip-frb-codegen
 
       - name: Prepare artifact with version (Unix)
         if: runner.os != 'Windows'
