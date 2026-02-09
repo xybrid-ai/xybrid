@@ -78,6 +78,13 @@ jobs:
       - name: Install flutter_rust_bridge_codegen
         run: cargo install flutter_rust_bridge_codegen@${{ env.FRB_VERSION }}
 
+      - name: Force dynamic CRT on Windows (required for cdylib DLL linking)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          echo "CFLAGS=/MD" >> $GITHUB_ENV
+          echo "CXXFLAGS=/MD" >> $GITHUB_ENV
+
       - name: Build Flutter native library
         run: cargo xtask build-flutter --platform ${{ matrix.platform }} --release
 
