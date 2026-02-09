@@ -443,7 +443,7 @@ impl FlutterPlatform {
                 "armv7-linux-androideabi",
                 "x86_64-linux-android",
             ],
-            FlutterPlatform::Macos => vec!["aarch64-apple-darwin", "x86_64-apple-darwin"],
+            FlutterPlatform::Macos => vec!["aarch64-apple-darwin"],
             FlutterPlatform::Windows => vec!["x86_64-pc-windows-msvc"],
             FlutterPlatform::Linux => vec!["x86_64-unknown-linux-gnu"],
         }
@@ -884,9 +884,8 @@ fn generate_bindings(language: BindingsLanguage, out_dir: Option<PathBuf>) -> Re
 /// Apple target architectures for XCFramework
 const IOS_ARM64: &str = "aarch64-apple-ios";
 const IOS_SIM_ARM64: &str = "aarch64-apple-ios-sim";
-const IOS_SIM_X86_64: &str = "x86_64-apple-ios";
 const MACOS_ARM64: &str = "aarch64-apple-darwin";
-const MACOS_X86_64: &str = "x86_64-apple-darwin";
+// x86_64 Apple targets dropped — ort-sys v2.0.0-rc.11 has no prebuilt binaries for Intel Mac/iOS Simulator
 
 /// Build Apple XCFramework for iOS and macOS platforms
 fn build_xcframework(release: bool, version: &str) -> Result<()> {
@@ -925,13 +924,11 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
 
     println!();
 
-    // Define targets
+    // Define targets (Apple Silicon only — Intel Mac dropped)
     let targets = [
         (IOS_ARM64, "iOS arm64"),
         (IOS_SIM_ARM64, "iOS Simulator arm64"),
-        (IOS_SIM_X86_64, "iOS Simulator x86_64"),
         (MACOS_ARM64, "macOS arm64"),
-        (MACOS_X86_64, "macOS x86_64"),
     ];
 
     let mut built_targets: Vec<(&str, &str)> = Vec::new();
@@ -985,7 +982,6 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
 
     let has_ios_device = built_targets.iter().any(|(t, _)| *t == IOS_ARM64);
     let has_ios_sim_arm64 = built_targets.iter().any(|(t, _)| *t == IOS_SIM_ARM64);
-    let has_ios_sim_x86 = built_targets.iter().any(|(t, _)| *t == IOS_SIM_X86_64);
 
     println!();
     println!("Creating XCFramework...");
@@ -1008,53 +1004,8 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
             .context("Failed to remove existing XCFramework symlink")?;
     }
 
-    // Create lipo'd iOS Simulator library if both sim targets were built
-    let ios_sim_lib_path = if has_ios_sim_arm64 && has_ios_sim_x86 {
-        let ios_sim_dir = PathBuf::from(format!("target/ios-simulator-universal/{}", profile));
-        std::fs::create_dir_all(&ios_sim_dir)
-            .context("Failed to create iOS Simulator universal directory")?;
-
-        let ios_sim_lib = ios_sim_dir.join("libxybrid_uniffi.a");
-        let sim_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_SIM_ARM64, profile);
-        let sim_x86_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_SIM_X86_64, profile);
-
-        println!("  Creating universal iOS Simulator library...");
-        let lipo_status = Command::new("lipo")
-            .args(["-create", "-output"])
-            .arg(&ios_sim_lib)
-            .arg(&sim_arm64_lib)
-            .arg(&sim_x86_lib)
-            .status()
-            .context("Failed to run lipo for iOS Simulator")?;
-
-        if !lipo_status.success() {
-            anyhow::bail!("lipo failed for iOS Simulator libraries");
-        }
-        Some(ios_sim_lib)
-    } else {
-        None
-    };
-
-    // Create lipo'd macOS library (combine arm64 and x86_64)
-    let macos_dir = PathBuf::from(format!("target/macos-universal/{}", profile));
-    std::fs::create_dir_all(&macos_dir).context("Failed to create macOS universal directory")?;
-
-    let macos_lib = macos_dir.join("libxybrid_uniffi.a");
+    // macOS arm64 library (single arch, no lipo needed)
     let macos_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", MACOS_ARM64, profile);
-    let macos_x86_lib = format!("target/{}/{}/libxybrid_uniffi.a", MACOS_X86_64, profile);
-
-    println!("  Creating universal macOS library...");
-    let lipo_status = Command::new("lipo")
-        .args(["-create", "-output"])
-        .arg(&macos_lib)
-        .arg(&macos_arm64_lib)
-        .arg(&macos_x86_lib)
-        .status()
-        .context("Failed to run lipo for macOS")?;
-
-    if !lipo_status.success() {
-        anyhow::bail!("lipo failed for macOS libraries");
-    }
 
     // Create XCFramework using xcodebuild with available slices
     println!("  Packaging XCFramework...");
@@ -1069,13 +1020,14 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
         arch_descriptions.push("iOS arm64");
     }
 
-    if let Some(ref sim_lib) = ios_sim_lib_path {
-        xcbuild.arg("-library").arg(sim_lib);
-        arch_descriptions.push("iOS Simulator arm64 + x86_64 (universal)");
+    if has_ios_sim_arm64 {
+        let sim_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", IOS_SIM_ARM64, profile);
+        xcbuild.arg("-library").arg(&sim_arm64_lib);
+        arch_descriptions.push("iOS Simulator arm64");
     }
 
-    xcbuild.arg("-library").arg(&macos_lib);
-    arch_descriptions.push("macOS arm64 + x86_64 (universal)");
+    xcbuild.arg("-library").arg(&macos_arm64_lib);
+    arch_descriptions.push("macOS arm64");
 
     xcbuild.arg("-output").arg(&xcframework_path);
 
@@ -1110,8 +1062,8 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
 fn build_xcframework_macos_only(release: bool, version: &str) -> Result<()> {
     let profile = if release { "release" } else { "debug" };
 
-    // Build for macOS targets only
-    let targets = [(MACOS_ARM64, "macOS arm64"), (MACOS_X86_64, "macOS x86_64")];
+    // Build for macOS arm64 only
+    let targets = [(MACOS_ARM64, "macOS arm64")];
 
     for (target, description) in targets.iter() {
         // Resolve platform preset for this target (will be platform-macos)
@@ -1161,33 +1113,15 @@ fn build_xcframework_macos_only(release: bool, version: &str) -> Result<()> {
             .context("Failed to remove existing XCFramework symlink")?;
     }
 
-    // Create lipo'd macOS library (combine arm64 and x86_64)
-    let macos_dir = PathBuf::from(format!("target/macos-universal/{}", profile));
-    std::fs::create_dir_all(&macos_dir).context("Failed to create macOS universal directory")?;
-
-    let macos_lib = macos_dir.join("libxybrid_uniffi.a");
+    // macOS arm64 library (single arch, no lipo needed)
     let macos_arm64_lib = format!("target/{}/{}/libxybrid_uniffi.a", MACOS_ARM64, profile);
-    let macos_x86_lib = format!("target/{}/{}/libxybrid_uniffi.a", MACOS_X86_64, profile);
-
-    println!("  Creating universal macOS library...");
-    let lipo_status = Command::new("lipo")
-        .args(["-create", "-output"])
-        .arg(&macos_lib)
-        .arg(&macos_arm64_lib)
-        .arg(&macos_x86_lib)
-        .status()
-        .context("Failed to run lipo for macOS")?;
-
-    if !lipo_status.success() {
-        anyhow::bail!("lipo failed for macOS libraries");
-    }
 
     // Create XCFramework with macOS only
     println!("  Packaging XCFramework...");
     let xcbuild_status = Command::new("xcodebuild")
         .arg("-create-xcframework")
         .arg("-library")
-        .arg(&macos_lib)
+        .arg(&macos_arm64_lib)
         .arg("-output")
         .arg(&xcframework_path)
         .status()
@@ -1757,13 +1691,11 @@ fn get_flutter_lib_name(target: &str) -> &'static str {
 
 /// All required targets for cross-compilation
 const ALL_TARGETS: &[(&str, &str)] = &[
-    // iOS targets
+    // iOS targets (Apple Silicon only)
     ("aarch64-apple-ios", "iOS arm64"),
-    ("x86_64-apple-ios", "iOS Simulator x86_64"),
     ("aarch64-apple-ios-sim", "iOS Simulator arm64"),
-    // macOS targets
+    // macOS targets (Apple Silicon only — ort-sys has no x86_64 prebuilt binaries)
     ("aarch64-apple-darwin", "macOS arm64"),
-    ("x86_64-apple-darwin", "macOS x86_64"),
     // Android targets
     ("aarch64-linux-android", "Android arm64-v8a"),
     ("armv7-linux-androideabi", "Android armeabi-v7a"),
@@ -1831,12 +1763,10 @@ fn setup_targets() -> Result<()> {
     println!();
     println!("  iOS:");
     println!("    - aarch64-apple-ios (device)");
-    println!("    - x86_64-apple-ios (simulator x86_64)");
     println!("    - aarch64-apple-ios-sim (simulator arm64)");
     println!();
     println!("  macOS:");
     println!("    - aarch64-apple-darwin (arm64)");
-    println!("    - x86_64-apple-darwin (x86_64)");
     println!();
     println!("  Android:");
     println!("    - aarch64-linux-android (arm64-v8a)");

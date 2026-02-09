@@ -83,9 +83,7 @@ jobs:
           targets: >-
             aarch64-apple-ios,
             aarch64-apple-ios-sim,
-            x86_64-apple-ios,
-            aarch64-apple-darwin,
-            x86_64-apple-darwin
+            aarch64-apple-darwin
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -187,138 +185,6 @@ jobs:
           if-no-files-found: error
 
   #
-  # Flutter native libraries build (matrix for multiple platforms)
-  #
-  build-flutter:
-    name: Build Flutter (${{ matrix.platform }})
-    needs: [check-version]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux
-            os: ubuntu-latest
-            rust_targets: x86_64-unknown-linux-gnu
-          - platform: macos
-            os: macos-14
-            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
-          - platform: windows
-            os: windows-latest
-            rust_targets: x86_64-pc-windows-msvc
-
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_targets }}
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: release-flutter-${{ matrix.platform }}
-
-      - name: Install Flutter SDK
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-
-      - name: Install LLVM (Linux)
-        if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
-
-      - name: Install LLVM (macOS)
-        if: matrix.platform == 'macos'
-        run: brew install llvm
-
-      - name: Install LLVM (Windows)
-        if: matrix.platform == 'windows'
-        run: choco install llvm
-
-      - name: Cache FRB codegen binary
-        id: cache-frb
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/flutter_rust_bridge_codegen
-            ~/.cargo/bin/flutter_rust_bridge_codegen.exe
-          key: frb-codegen-${{ runner.os }}-${{ env.FRB_VERSION }}
-
-      - name: Install flutter_rust_bridge_codegen
-        if: steps.cache-frb.outputs.cache-hit != 'true'
-        run: cargo install flutter_rust_bridge_codegen@${{ env.FRB_VERSION }}
-
-      - name: Run FRB codegen
-        working-directory: bindings/flutter
-        run: flutter_rust_bridge_codegen generate
-
-      - name: Check FRB bindings are up-to-date
-        run: |
-          if ! git diff --exit-code bindings/flutter/lib/src/rust/; then
-            echo ""
-            echo "ERROR: Flutter Rust Bridge bindings are out of date."
-            echo "A Rust API change was committed without regenerating Dart bindings."
-            echo ""
-            echo "Fix: run 'flutter_rust_bridge_codegen generate' in bindings/flutter/ and commit the result."
-            exit 1
-          fi
-          echo "FRB bindings are up-to-date."
-
-      - name: Force dynamic CRT on Windows (required for cdylib DLL linking)
-        if: matrix.platform == 'windows'
-        shell: bash
-        run: |
-          echo "CFLAGS=/MD" >> $GITHUB_ENV
-          echo "CXXFLAGS=/MD" >> $GITHUB_ENV
-
-      - name: Build Flutter native library
-        run: cargo xtask build-flutter --platform ${{ matrix.platform }} --release --skip-frb-codegen
-
-      - name: Prepare artifact with version (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          mkdir -p dist
-          # Find native library in both possible locations
-          find bindings/flutter/rust/target target -name "*xybrid_flutter_ffi*" -type f 2>/dev/null | head -20 | tar -czvf dist/xybrid-flutter-${{ matrix.platform }}-${VERSION}.tar.gz -T -
-
-      - name: Prepare artifact with version (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $version = $env:GITHUB_REF -replace 'refs/tags/', ''
-          New-Item -ItemType Directory -Force -Path dist
-          $files = Get-ChildItem -Path . -Recurse -Filter "*xybrid_flutter_ffi*" -File | Select-Object -First 20
-          if ($files) {
-            Compress-Archive -Path $files.FullName -DestinationPath "dist/xybrid-flutter-windows-$version.zip"
-          }
-
-      - name: Upload Flutter artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: flutter-${{ matrix.platform }}
-          path: dist/xybrid-flutter-*
-          if-no-files-found: warn
-
-  #
   # Flutter precompiled binaries (uploaded to separate precompiled_<hash> release)
   # These are auto-downloaded by cargokit when users don't have Rust installed
   #
@@ -331,15 +197,11 @@ jobs:
         include:
           - name: darwin
             os: macos-14
-            # buildableTargets() on macOS auto-detects all Darwin targets:
-            # aarch64-apple-darwin, x86_64-apple-darwin,
-            # aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+            # Apple Silicon only (Intel Mac dropped — ort-sys has no x86_64 prebuilt binaries)
             rust_targets: >-
               aarch64-apple-darwin,
-              x86_64-apple-darwin,
               aarch64-apple-ios,
-              aarch64-apple-ios-sim,
-              x86_64-apple-ios
+              aarch64-apple-ios-sim
             android: false
 
           - name: linux
@@ -452,12 +314,6 @@ jobs:
             artifact: xybrid
             features: platform-macos
 
-          - name: macos-x86_64
-            os: macos-13
-            target: x86_64-apple-darwin
-            artifact: xybrid
-            features: platform-macos
-
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -525,7 +381,7 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [build-apple, build-android, build-flutter, build-cli]
+    needs: [build-apple, build-android, build-cli]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -569,9 +425,7 @@ jobs:
           echo "- \`xybrid-android-${CURRENT_TAG}.zip\` - Native .so files for all ABIs" >> CHANGELOG_RELEASE.md
           echo "" >> CHANGELOG_RELEASE.md
           echo "**Flutter**" >> CHANGELOG_RELEASE.md
-          echo "- \`xybrid-flutter-linux-${CURRENT_TAG}.tar.gz\` - Linux native library" >> CHANGELOG_RELEASE.md
-          echo "- \`xybrid-flutter-macos-${CURRENT_TAG}.tar.gz\` - macOS native library" >> CHANGELOG_RELEASE.md
-          echo "- \`xybrid-flutter-windows-${CURRENT_TAG}.zip\` - Windows native library" >> CHANGELOG_RELEASE.md
+          echo "- Precompiled native libraries auto-downloaded by cargokit (no Rust toolchain required)" >> CHANGELOG_RELEASE.md
           echo "" >> CHANGELOG_RELEASE.md
           echo "**CLI**" >> CHANGELOG_RELEASE.md
           echo "- Cross-platform binaries for macOS (arm64, x86_64), Linux (x86_64), and Windows (x86_64)" >> CHANGELOG_RELEASE.md

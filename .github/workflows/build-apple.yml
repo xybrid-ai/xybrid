@@ -23,9 +23,7 @@ jobs:
           targets: >-
             aarch64-apple-ios,
             aarch64-apple-ios-sim,
-            x86_64-apple-ios,
-            aarch64-apple-darwin,
-            x86_64-apple-darwin
+            aarch64-apple-darwin
 
       # Rust caching with Swatinem/rust-cache
       # Cache key is based on Cargo.lock hash (automatic) + workflow-specific prefix
@@ -59,10 +57,10 @@ jobs:
           echo "Verifying architectures..."
           # Check iOS device library
           file "$XCFW_PATH/ios-arm64/libxybrid_uniffi.a" || true
-          # Check iOS simulator library (universal)
-          file "$XCFW_PATH/ios-arm64_x86_64-simulator/libxybrid_uniffi.a" || true
-          # Check macOS library (universal)
-          file "$XCFW_PATH/macos-arm64_x86_64/libxybrid_uniffi.a" || true
+          # Check iOS simulator library (arm64)
+          file "$XCFW_PATH/ios-arm64-simulator/libxybrid_uniffi.a" || true
+          # Check macOS library (arm64)
+          file "$XCFW_PATH/macos-arm64/libxybrid_uniffi.a" || true
 
       - name: Upload XCFramework artifact
         uses: actions/upload-artifact@v4
