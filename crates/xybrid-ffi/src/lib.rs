@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 // Import SDK types
 use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
-use xybrid_sdk::{InferenceResult, ConversationContext, ModelLoader, XybridModel};
+use xybrid_sdk::{InferenceResult, ConversationContext, ModelLoader, PartialToken, XybridModel};
 
 // ============================================================================
 // Opaque Handle Types (US-009)
@@ -161,6 +161,132 @@ pub(crate) type BoxedResult = Box<ResultData>;
 
 /// Type alias for a boxed context.
 pub(crate) type BoxedContext = Box<ContextData>;
+
+// ============================================================================
+// Callback Types
+// ============================================================================
+
+/// Callback function type for streaming inference.
+///
+/// This callback is invoked for each token generated during streaming inference.
+/// All string parameters are null-terminated UTF-8 and valid only for the duration
+/// of the callback invocation. The caller must copy any data they want to retain.
+///
+/// # Parameters
+///
+/// - `token`: The generated token text
+/// - `token_id`: The raw token ID (-1 if not available)
+/// - `index`: Zero-based index of this token in the generation sequence
+/// - `cumulative_text`: All generated text so far (concatenation of all tokens)
+/// - `finish_reason`: Reason for stopping, or null if generation is still in progress
+/// - `user_data`: The opaque pointer passed to `xybrid_model_run_streaming`
+pub type XybridStreamCallback = Option<
+    unsafe extern "C" fn(
+        token: *const c_char,
+        token_id: i64,
+        index: u32,
+        cumulative_text: *const c_char,
+        finish_reason: *const c_char,
+        user_data: *mut c_void,
+    ),
+>;
+
+// ============================================================================
+// Internal Helpers
+// ============================================================================
+
+/// Send-safe wrapper for streaming callback context.
+///
+/// # Safety
+/// The caller must ensure that `user_data` is valid for the duration of
+/// the streaming call and that no data races occur. Function pointers are
+/// inherently thread-safe (just addresses).
+struct StreamCallbackCtx {
+    callback: unsafe extern "C" fn(*const c_char, i64, u32, *const c_char, *const c_char, *mut c_void),
+    user_data: *mut c_void,
+}
+unsafe impl Send for StreamCallbackCtx {}
+unsafe impl Sync for StreamCallbackCtx {}
+
+impl StreamCallbackCtx {
+    unsafe fn invoke(&self, token: &PartialToken) {
+        let c_token = CString::new(token.token.as_str()).unwrap_or_default();
+        let c_cumulative = CString::new(token.cumulative_text.as_str()).unwrap_or_default();
+        let c_finish = token.finish_reason.as_ref().map(|r| CString::new(r.as_str()).unwrap_or_default());
+
+        (self.callback)(
+            c_token.as_ptr(),
+            token.token_id.unwrap_or(-1),
+            token.index as u32,
+            c_cumulative.as_ptr(),
+            c_finish.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            self.user_data,
+        );
+    }
+}
+
+/// Convert EnvelopeData to SDK Envelope.
+fn envelope_data_to_sdk(data: &EnvelopeData) -> Envelope {
+    match data {
+        EnvelopeData::Audio {
+            bytes,
+            sample_rate,
+            channels,
+        } => {
+            let mut metadata = HashMap::new();
+            metadata.insert("sample_rate".to_string(), sample_rate.to_string());
+            metadata.insert("channels".to_string(), channels.to_string());
+            Envelope {
+                kind: EnvelopeKind::Audio(bytes.clone()),
+                metadata,
+            }
+        }
+        EnvelopeData::Text {
+            text,
+            voice_id,
+            speed,
+            role,
+        } => {
+            let mut metadata = HashMap::new();
+            if let Some(v) = voice_id {
+                metadata.insert("voice_id".to_string(), v.clone());
+            }
+            if let Some(s) = speed {
+                metadata.insert("speed".to_string(), s.to_string());
+            }
+            let mut envelope = Envelope {
+                kind: EnvelopeKind::Text(text.clone()),
+                metadata,
+            };
+            if let Some(r) = role {
+                envelope = envelope.with_role(*r);
+            }
+            envelope
+        }
+    }
+}
+
+/// Convert SDK InferenceResult to FFI ResultData.
+fn inference_result_to_data(result: &xybrid_sdk::InferenceResult) -> ResultData {
+    ResultData {
+        success: true,
+        error: None,
+        output_type: match result.text() {
+            Some(_) => "text".to_string(),
+            None => match result.audio_bytes() {
+                Some(_) => "audio".to_string(),
+                None => match result.embedding() {
+                    Some(_) => "embedding".to_string(),
+                    None => "unknown".to_string(),
+                },
+            },
+        },
+        text: result.text().map(|s| s.to_string()),
+        embedding: result.embedding().map(|e| e.to_vec()),
+        audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
+        latency_ms: result.latency_ms(),
+    }
+}
 
 // ============================================================================
 // Handle Conversion Utilities
@@ -1488,43 +1614,7 @@ pub unsafe extern "C" fn xybrid_model_run(
     };
 
     // Convert EnvelopeData to SDK Envelope
-    let sdk_envelope = match envelope_data {
-        EnvelopeData::Audio {
-            bytes,
-            sample_rate,
-            channels,
-        } => {
-            let mut metadata = HashMap::new();
-            metadata.insert("sample_rate".to_string(), sample_rate.to_string());
-            metadata.insert("channels".to_string(), channels.to_string());
-            Envelope {
-                kind: EnvelopeKind::Audio(bytes.clone()),
-                metadata,
-            }
-        }
-        EnvelopeData::Text {
-            text,
-            voice_id,
-            speed,
-            role,
-        } => {
-            let mut metadata = HashMap::new();
-            if let Some(v) = voice_id {
-                metadata.insert("voice_id".to_string(), v.clone());
-            }
-            if let Some(s) = speed {
-                metadata.insert("speed".to_string(), s.to_string());
-            }
-            let mut envelope = Envelope {
-                kind: EnvelopeKind::Text(text.clone()),
-                metadata,
-            };
-            if let Some(r) = role {
-                envelope = envelope.with_role(*r);
-            }
-            envelope
-        }
-    };
+    let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
     // Run inference using the SDK
     let inference_result = match model_state.model.run(&sdk_envelope) {
@@ -1545,26 +1635,7 @@ pub unsafe extern "C" fn xybrid_model_run(
     };
 
     // Convert InferenceResult to ResultData
-    let result = ResultData {
-        success: true,
-        error: None,
-        output_type: match inference_result.text() {
-            Some(_) => "text".to_string(),
-            None => match inference_result.audio_bytes() {
-                Some(_) => "audio".to_string(),
-                None => match inference_result.embedding() {
-                    Some(_) => "embedding".to_string(),
-                    None => "unknown".to_string(),
-                },
-            },
-        },
-        text: inference_result.text().map(|s| s.to_string()),
-        embedding: inference_result.embedding().map(|e| e.to_vec()),
-        audio_bytes: inference_result.audio_bytes().map(|b| b.to_vec()),
-        latency_ms: inference_result.latency_ms(),
-    };
-
-    XybridResultHandle::from_boxed(Box::new(result))
+    XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&inference_result)))
 }
 
 /// Run inference on a model with conversation context.
@@ -1660,43 +1731,7 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
     };
 
     // Convert EnvelopeData to SDK Envelope
-    let sdk_envelope = match envelope_data {
-        EnvelopeData::Audio {
-            bytes,
-            sample_rate,
-            channels,
-        } => {
-            let mut metadata = HashMap::new();
-            metadata.insert("sample_rate".to_string(), sample_rate.to_string());
-            metadata.insert("channels".to_string(), channels.to_string());
-            Envelope {
-                kind: EnvelopeKind::Audio(bytes.clone()),
-                metadata,
-            }
-        }
-        EnvelopeData::Text {
-            text,
-            voice_id,
-            speed,
-            role,
-        } => {
-            let mut metadata = HashMap::new();
-            if let Some(v) = voice_id {
-                metadata.insert("voice_id".to_string(), v.clone());
-            }
-            if let Some(s) = speed {
-                metadata.insert("speed".to_string(), s.to_string());
-            }
-            let mut envelope = Envelope {
-                kind: EnvelopeKind::Text(text.clone()),
-                metadata,
-            };
-            if let Some(r) = role {
-                envelope = envelope.with_role(*r);
-            }
-            envelope
-        }
-    };
+    let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
     // Run inference with context using the SDK
     let inference_result = match model_state.model.run_with_context(&sdk_envelope, &ctx_data.context) {
@@ -1717,26 +1752,7 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
     };
 
     // Convert InferenceResult to ResultData
-    let result = ResultData {
-        success: true,
-        error: None,
-        output_type: match inference_result.text() {
-            Some(_) => "text".to_string(),
-            None => match inference_result.audio_bytes() {
-                Some(_) => "audio".to_string(),
-                None => match inference_result.embedding() {
-                    Some(_) => "embedding".to_string(),
-                    None => "unknown".to_string(),
-                },
-            },
-        },
-        text: inference_result.text().map(|s| s.to_string()),
-        embedding: inference_result.embedding().map(|e| e.to_vec()),
-        audio_bytes: inference_result.audio_bytes().map(|b| b.to_vec()),
-        latency_ms: inference_result.latency_ms(),
-    };
-
-    XybridResultHandle::from_boxed(Box::new(result))
+    XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&inference_result)))
 }
 
 /// Get the model ID of a loaded model.
@@ -1798,9 +1814,8 @@ pub unsafe extern "C" fn xybrid_model_id(model: *mut XybridModelHandle) -> *mut 
 /// Returns 1 if the model supports true token-by-token streaming (LLM models
 /// with GGUF format when LLM features are enabled), 0 otherwise.
 ///
-/// Note: `xybrid_model_run_streaming()` (when implemented) will work for all
-/// models, but only LLM models get true token-by-token streaming; others emit
-/// a single result.
+/// Note: `xybrid_model_run_streaming()` works for all models, but only LLM
+/// models get true token-by-token streaming; others emit a single result.
 ///
 /// # Parameters
 ///
@@ -1838,6 +1853,229 @@ pub unsafe extern "C" fn xybrid_model_supports_token_streaming(
             }
         }
         None => 0,
+    }
+}
+
+/// Run streaming inference on a model with the given input envelope.
+///
+/// This function blocks until inference is complete. For each token generated,
+/// the callback is invoked with the token data. After all tokens are emitted,
+/// the function returns a result handle with the final output.
+///
+/// For non-LLM models, a single callback invocation occurs with the complete result.
+///
+/// # Parameters
+///
+/// - `model`: A handle to the loaded model.
+/// - `envelope`: A handle to the input envelope.
+/// - `callback`: Function pointer invoked for each generated token.
+/// - `user_data`: Opaque pointer passed through to every callback invocation.
+///
+/// # Returns
+///
+/// A handle to the final result, or null on failure.
+/// On failure, call `xybrid_last_error()` to get the error message.
+///
+/// # Thread Safety
+///
+/// The callback is invoked from the calling thread. The caller must ensure
+/// that `user_data` is valid for the duration of the call.
+///
+/// # Example (C)
+///
+/// ```c
+/// void on_token(const char* token, int64_t token_id, uint32_t index,
+///               const char* cumulative, const char* finish, void* ctx) {
+///     printf("%s", token);
+///     fflush(stdout);
+/// }
+///
+/// XybridResultHandle* result = xybrid_model_run_streaming(
+///     model, envelope, on_token, NULL);
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_run_streaming(
+    model: *mut XybridModelHandle,
+    envelope: *mut XybridEnvelopeHandle,
+    callback: XybridStreamCallback,
+    user_data: *mut c_void,
+) -> *mut XybridResultHandle {
+    clear_last_error();
+
+    // Validate handles
+    if model.is_null() {
+        set_last_error("model handle is null");
+        return std::ptr::null_mut();
+    }
+    if envelope.is_null() {
+        set_last_error("envelope handle is null");
+        return std::ptr::null_mut();
+    }
+    let callback_fn = match callback {
+        Some(f) => f,
+        None => {
+            set_last_error("callback is null");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let model_state = match XybridModelHandle::as_ref(model) {
+        Some(state) => state,
+        None => {
+            set_last_error("invalid model handle");
+            return std::ptr::null_mut();
+        }
+    };
+    let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
+        Some(data) => data,
+        None => {
+            set_last_error("invalid envelope handle");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let sdk_envelope = envelope_data_to_sdk(envelope_data);
+
+    // Wrap callback + user_data in a Send-safe context
+    let ctx = StreamCallbackCtx { callback: callback_fn, user_data };
+
+    // Build the on_token closure that bridges to the C callback
+    let on_token = move |token: PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        unsafe { ctx.invoke(&token) };
+        Ok(())
+    };
+
+    // Call the SDK streaming method
+    match model_state.model.run_streaming(&sdk_envelope, on_token) {
+        Ok(result) => {
+            XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&result)))
+        }
+        Err(e) => {
+            let result = ResultData {
+                success: false,
+                error: Some(format!("Streaming inference failed: {}", e)),
+                output_type: "".to_string(),
+                text: None,
+                embedding: None,
+                audio_bytes: None,
+                latency_ms: 0,
+            };
+            XybridResultHandle::from_boxed(Box::new(result))
+        }
+    }
+}
+
+/// Run streaming inference on a model with conversation context.
+///
+/// Same as `xybrid_model_run_streaming` but includes conversation history
+/// for multi-turn LLM interactions.
+///
+/// # Parameters
+///
+/// - `model`: A handle to the loaded model.
+/// - `envelope`: A handle to the input envelope (current user message).
+/// - `context`: A handle to the conversation context.
+/// - `callback`: Function pointer invoked for each generated token.
+/// - `user_data`: Opaque pointer passed through to every callback invocation.
+///
+/// # Returns
+///
+/// A handle to the final result, or null on failure.
+/// The envelope and context are NOT consumed - they can be reused.
+///
+/// # Example (C)
+///
+/// ```c
+/// XybridContextHandle* ctx = xybrid_context_new();
+/// xybrid_context_set_system(ctx, "You are a helpful assistant.");
+///
+/// XybridEnvelopeHandle* msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+/// xybrid_context_push(ctx, msg);
+///
+/// XybridResultHandle* result = xybrid_model_run_streaming_with_context(
+///     model, msg, ctx, on_token, NULL);
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
+    model: *mut XybridModelHandle,
+    envelope: *mut XybridEnvelopeHandle,
+    context: *mut XybridContextHandle,
+    callback: XybridStreamCallback,
+    user_data: *mut c_void,
+) -> *mut XybridResultHandle {
+    clear_last_error();
+
+    // Validate all handles
+    if model.is_null() {
+        set_last_error("model handle is null");
+        return std::ptr::null_mut();
+    }
+    if envelope.is_null() {
+        set_last_error("envelope handle is null");
+        return std::ptr::null_mut();
+    }
+    if context.is_null() {
+        set_last_error("context handle is null");
+        return std::ptr::null_mut();
+    }
+    let callback_fn = match callback {
+        Some(f) => f,
+        None => {
+            set_last_error("callback is null");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let model_state = match XybridModelHandle::as_ref(model) {
+        Some(state) => state,
+        None => {
+            set_last_error("invalid model handle");
+            return std::ptr::null_mut();
+        }
+    };
+    let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
+        Some(data) => data,
+        None => {
+            set_last_error("invalid envelope handle");
+            return std::ptr::null_mut();
+        }
+    };
+    let ctx_data = match XybridContextHandle::as_ref(context) {
+        Some(data) => data,
+        None => {
+            set_last_error("invalid context handle");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let sdk_envelope = envelope_data_to_sdk(envelope_data);
+
+    // Wrap callback + user_data in a Send-safe context
+    let cb_ctx = StreamCallbackCtx { callback: callback_fn, user_data };
+
+    // Build the on_token closure that bridges to the C callback
+    let on_token = move |token: PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        unsafe { cb_ctx.invoke(&token) };
+        Ok(())
+    };
+
+    // Call the SDK streaming method with context
+    match model_state.model.run_streaming_with_context(&sdk_envelope, &ctx_data.context, on_token) {
+        Ok(result) => {
+            XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&result)))
+        }
+        Err(e) => {
+            let result = ResultData {
+                success: false,
+                error: Some(format!("Streaming inference with context failed: {}", e)),
+                output_type: "".to_string(),
+                text: None,
+                embedding: None,
+                audio_bytes: None,
+                latency_ms: 0,
+            };
+            XybridResultHandle::from_boxed(Box::new(result))
+        }
     }
 }
 

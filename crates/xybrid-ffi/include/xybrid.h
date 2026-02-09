@@ -114,6 +114,29 @@ typedef struct XybridResultHandle {
 } XybridResultHandle;
 
 /*
+ Callback function type for streaming inference.
+
+ This callback is invoked for each token generated during streaming inference.
+ All string parameters are null-terminated UTF-8 and valid only for the duration
+ of the callback invocation. The caller must copy any data they want to retain.
+
+ # Parameters
+
+ - `token`: The generated token text
+ - `token_id`: The raw token ID (-1 if not available)
+ - `index`: Zero-based index of this token in the generation sequence
+ - `cumulative_text`: All generated text so far (concatenation of all tokens)
+ - `finish_reason`: Reason for stopping, or null if generation is still in progress
+ - `user_data`: The opaque pointer passed to `xybrid_model_run_streaming`
+ */
+typedef void (*XybridStreamCallback)(const char *token,
+                                     int64_t token_id,
+                                     uint32_t index,
+                                     const char *cumulative_text,
+                                     const char *finish_reason,
+                                     void *user_data);
+
+/*
  Initialize the xybrid library.
 
  This function should be called once before using any other xybrid functions.
@@ -717,9 +740,8 @@ char *xybrid_model_id(struct XybridModelHandle *model);
  Returns 1 if the model supports true token-by-token streaming (LLM models
  with GGUF format when LLM features are enabled), 0 otherwise.
 
- Note: `xybrid_model_run_streaming()` (when implemented) will work for all
- models, but only LLM models get true token-by-token streaming; others emit
- a single result.
+ Note: `xybrid_model_run_streaming()` works for all models, but only LLM
+ models get true token-by-token streaming; others emit a single result.
 
  # Parameters
 
@@ -741,6 +763,88 @@ char *xybrid_model_id(struct XybridModelHandle *model);
  ```
  */
 int32_t xybrid_model_supports_token_streaming(struct XybridModelHandle *model);
+
+/*
+ Run streaming inference on a model with the given input envelope.
+
+ This function blocks until inference is complete. For each token generated,
+ the callback is invoked with the token data. After all tokens are emitted,
+ the function returns a result handle with the final output.
+
+ For non-LLM models, a single callback invocation occurs with the complete result.
+
+ # Parameters
+
+ - `model`: A handle to the loaded model.
+ - `envelope`: A handle to the input envelope.
+ - `callback`: Function pointer invoked for each generated token.
+ - `user_data`: Opaque pointer passed through to every callback invocation.
+
+ # Returns
+
+ A handle to the final result, or null on failure.
+ On failure, call `xybrid_last_error()` to get the error message.
+
+ # Thread Safety
+
+ The callback is invoked from the calling thread. The caller must ensure
+ that `user_data` is valid for the duration of the call.
+
+ # Example (C)
+
+ ```c
+ void on_token(const char* token, int64_t token_id, uint32_t index,
+               const char* cumulative, const char* finish, void* ctx) {
+     printf("%s", token);
+     fflush(stdout);
+ }
+
+ XybridResultHandle* result = xybrid_model_run_streaming(
+     model, envelope, on_token, NULL);
+ ```
+ */
+struct XybridResultHandle *xybrid_model_run_streaming(struct XybridModelHandle *model,
+                                                      struct XybridEnvelopeHandle *envelope,
+                                                      XybridStreamCallback callback,
+                                                      void *user_data);
+
+/*
+ Run streaming inference on a model with conversation context.
+
+ Same as `xybrid_model_run_streaming` but includes conversation history
+ for multi-turn LLM interactions.
+
+ # Parameters
+
+ - `model`: A handle to the loaded model.
+ - `envelope`: A handle to the input envelope (current user message).
+ - `context`: A handle to the conversation context.
+ - `callback`: Function pointer invoked for each generated token.
+ - `user_data`: Opaque pointer passed through to every callback invocation.
+
+ # Returns
+
+ A handle to the final result, or null on failure.
+ The envelope and context are NOT consumed - they can be reused.
+
+ # Example (C)
+
+ ```c
+ XybridContextHandle* ctx = xybrid_context_new();
+ xybrid_context_set_system(ctx, "You are a helpful assistant.");
+
+ XybridEnvelopeHandle* msg = xybrid_envelope_text_with_role("Hello!", XYBRID_ROLE_USER);
+ xybrid_context_push(ctx, msg);
+
+ XybridResultHandle* result = xybrid_model_run_streaming_with_context(
+     model, msg, ctx, on_token, NULL);
+ ```
+ */
+struct XybridResultHandle *xybrid_model_run_streaming_with_context(struct XybridModelHandle *model,
+                                                                   struct XybridEnvelopeHandle *envelope,
+                                                                   struct XybridContextHandle *context,
+                                                                   XybridStreamCallback callback,
+                                                                   void *user_data);
 
 /*
  Free a model handle.
