@@ -316,15 +316,22 @@ fn compile_llama_cpp() {
     println!("cargo:rustc-link-lib=static=ggml-cpu");
 
     // Build our C++ wrapper (C++17 required by llama.cpp headers)
-    cc::Build::new()
+    let mut wrapper_build = cc::Build::new();
+    wrapper_build
         .cpp(true)
         .std("c++17")
         .file(&wrapper_path)
         .include(llama_cpp_dir.join("include"))
         .include(llama_cpp_dir.join("ggml/include"))
         .include(dst.join("include"))
-        .opt_level(3)
-        .compile("llama_wrapper");
+        .opt_level(3);
+
+    // Windows MSVC: use dynamic CRT (/MD) to match cdylib targets (Flutter/Unity FFI)
+    if target.contains("windows") && target.contains("msvc") {
+        wrapper_build.static_crt(false);
+    }
+
+    wrapper_build.compile("llama_wrapper");
 
     // Platform-specific linking
     if target_os == "android" {
