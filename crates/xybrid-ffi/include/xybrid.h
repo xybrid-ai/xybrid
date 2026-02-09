@@ -137,6 +137,16 @@ typedef void (*XybridStreamCallback)(const char *token,
                                      void *user_data);
 
 /*
+ Opaque handle to a loaded bundle.
+
+ This handle is created by `xybrid_bundle_open` and must be freed with
+ `xybrid_bundle_free`.
+ */
+typedef struct XybridBundleHandle {
+  void *_0;
+} XybridBundleHandle;
+
+/*
  Initialize the xybrid library.
 
  This function should be called once before using any other xybrid functions.
@@ -995,5 +1005,173 @@ uint32_t xybrid_result_latency_ms(struct XybridResultHandle *result);
  ```
  */
 void xybrid_result_free(struct XybridResultHandle *handle);
+
+/*
+ Open a .xyb bundle file and return a handle.
+
+ Loads the bundle into memory (decompresses zstd, parses tar, validates manifest).
+ The returned handle can be used with other `xybrid_bundle_*` functions.
+
+ # Parameters
+
+ - `path`: Null-terminated UTF-8 path to the .xyb file.
+
+ # Returns
+
+ A handle to the opened bundle, or null on error (check `xybrid_last_error()`).
+
+ # Example (C)
+
+ ```c
+ XybridBundleHandle* bundle = xybrid_bundle_open("/path/to/model.xyb");
+ if (!bundle) {
+     fprintf(stderr, "Failed: %s\n", xybrid_last_error());
+ }
+ ```
+ */
+struct XybridBundleHandle *xybrid_bundle_open(const char *path);
+
+/*
+ Get the manifest JSON from an opened bundle.
+
+ Returns the full manifest as a JSON string. The manifest contains:
+ `model_id`, `version`, `target`, `hash`, `files`, `has_metadata`.
+
+ The returned string must be freed with `xybrid_free_string()`.
+
+ # Parameters
+
+ - `handle`: A handle to an opened bundle.
+
+ # Returns
+
+ A newly allocated null-terminated JSON string, or null on error.
+ The caller must free the returned string with `xybrid_free_string()`.
+ */
+char *xybrid_bundle_manifest_json(struct XybridBundleHandle *handle);
+
+/*
+ Get the model_metadata.json content from an opened bundle.
+
+ Returns the content of the `model_metadata.json` file inside the bundle,
+ or null if the bundle does not contain one.
+
+ The returned string must be freed with `xybrid_free_string()`.
+
+ # Parameters
+
+ - `handle`: A handle to an opened bundle.
+
+ # Returns
+
+ A newly allocated null-terminated JSON string, or null if not present or on error.
+ Check `xybrid_last_error()` to distinguish "not present" (no error) from failure.
+ */
+char *xybrid_bundle_metadata_json(struct XybridBundleHandle *handle);
+
+/*
+ Extract all files from a bundle to a directory.
+
+ Creates the output directory if it doesn't exist. Extracts all files
+ from the bundle, preserving relative paths.
+
+ # Parameters
+
+ - `handle`: A handle to an opened bundle.
+ - `output_dir`: Null-terminated UTF-8 path to the output directory.
+
+ # Returns
+
+ - `0` on success
+ - Non-zero on failure (check `xybrid_last_error()`)
+ */
+int32_t xybrid_bundle_extract(struct XybridBundleHandle *handle, const char *output_dir);
+
+/*
+ Get the model ID from an opened bundle's manifest.
+
+ The returned pointer uses thread-local storage and is valid until the next
+ call to this function on the same thread. Do NOT free it.
+
+ # Parameters
+
+ - `handle`: A handle to an opened bundle.
+
+ # Returns
+
+ A pointer to the model ID string, or null on error.
+ */
+const char *xybrid_bundle_model_id(struct XybridBundleHandle *handle);
+
+/*
+ Get the version from an opened bundle's manifest.
+
+ The returned pointer uses thread-local storage and is valid until the next
+ call to this function on the same thread. Do NOT free it.
+ */
+const char *xybrid_bundle_version(struct XybridBundleHandle *handle);
+
+/*
+ Get the target platform from an opened bundle's manifest.
+
+ The returned pointer uses thread-local storage and is valid until the next
+ call to this function on the same thread. Do NOT free it.
+ */
+const char *xybrid_bundle_target(struct XybridBundleHandle *handle);
+
+/*
+ Get the SHA-256 hash from an opened bundle's manifest.
+
+ The returned pointer uses thread-local storage and is valid until the next
+ call to this function on the same thread. Do NOT free it.
+ */
+const char *xybrid_bundle_hash(struct XybridBundleHandle *handle);
+
+/*
+ Check if the bundle contains a model_metadata.json file.
+
+ # Returns
+
+ - `1` if the bundle has model_metadata.json
+ - `0` if not, or if the handle is null/invalid
+ */
+int32_t xybrid_bundle_has_metadata(struct XybridBundleHandle *handle);
+
+/*
+ Get the number of files in the bundle.
+
+ # Returns
+
+ The file count, or 0 if the handle is null/invalid.
+ */
+uint32_t xybrid_bundle_file_count(struct XybridBundleHandle *handle);
+
+/*
+ Get the filename at a given index in the bundle's file list.
+
+ The returned pointer uses thread-local storage and is valid until the next
+ call to this function on the same thread. Do NOT free it.
+
+ # Parameters
+
+ - `handle`: A handle to an opened bundle.
+ - `index`: Zero-based index into the file list.
+
+ # Returns
+
+ A pointer to the filename string, or null if index is out of bounds.
+ */
+const char *xybrid_bundle_file_name(struct XybridBundleHandle *handle, uint32_t index);
+
+/*
+ Free a bundle handle.
+
+ After calling this function, the handle is no longer valid.
+
+ # Parameters
+
+ - `handle`: A handle to the bundle to free. May be null (no-op).
+ */
+void xybrid_bundle_free(struct XybridBundleHandle *handle);
 
 #endif /* XYBRID_H */

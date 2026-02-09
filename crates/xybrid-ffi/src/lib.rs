@@ -2323,6 +2323,458 @@ pub unsafe extern "C" fn xybrid_result_free(handle: *mut XybridResultHandle) {
     }
 }
 
+// ============================================================================
+// C ABI Bundle Functions
+// ============================================================================
+//
+// These functions allow C consumers to inspect .xyb bundle files (tar + zstd)
+// without needing zstd decompression on the consumer side. The Rust bundler
+// handles all archive operations.
+
+/// Opaque handle to a loaded bundle.
+///
+/// This handle is created by `xybrid_bundle_open` and must be freed with
+/// `xybrid_bundle_free`.
+#[repr(C)]
+pub struct XybridBundleHandle(*mut c_void);
+
+/// Internal bundle state.
+pub(crate) struct BundleState {
+    pub bundle: xybrid_sdk::bundler::XyBundle,
+}
+
+/// Type alias for a boxed bundle.
+pub(crate) type BoxedBundle = Box<BundleState>;
+
+impl XybridBundleHandle {
+    /// Create a handle from a boxed bundle (takes ownership).
+    pub(crate) fn from_boxed(bundle: BoxedBundle) -> *mut Self {
+        let ptr = Box::into_raw(bundle) as *mut c_void;
+        Box::into_raw(Box::new(XybridBundleHandle(ptr)))
+    }
+
+    /// Convert handle back to boxed bundle (takes ownership of handle).
+    pub(crate) unsafe fn into_boxed(handle: *mut Self) -> Option<BoxedBundle> {
+        if handle.is_null() {
+            return None;
+        }
+        let wrapper = Box::from_raw(handle);
+        if wrapper.0.is_null() {
+            return None;
+        }
+        Some(Box::from_raw(wrapper.0 as *mut BundleState))
+    }
+
+    /// Borrow the bundle state from a handle.
+    pub(crate) unsafe fn as_ref<'a>(handle: *mut Self) -> Option<&'a BundleState> {
+        if handle.is_null() {
+            return None;
+        }
+        let wrapper = &*handle;
+        if wrapper.0.is_null() {
+            return None;
+        }
+        Some(&*(wrapper.0 as *const BundleState))
+    }
+}
+
+/// Open a .xyb bundle file and return a handle.
+///
+/// Loads the bundle into memory (decompresses zstd, parses tar, validates manifest).
+/// The returned handle can be used with other `xybrid_bundle_*` functions.
+///
+/// # Parameters
+///
+/// - `path`: Null-terminated UTF-8 path to the .xyb file.
+///
+/// # Returns
+///
+/// A handle to the opened bundle, or null on error (check `xybrid_last_error()`).
+///
+/// # Example (C)
+///
+/// ```c
+/// XybridBundleHandle* bundle = xybrid_bundle_open("/path/to/model.xyb");
+/// if (!bundle) {
+///     fprintf(stderr, "Failed: %s\n", xybrid_last_error());
+/// }
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_open(path: *const c_char) -> *mut XybridBundleHandle {
+    clear_last_error();
+
+    if path.is_null() {
+        set_last_error("path is null");
+        return std::ptr::null_mut();
+    }
+
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("path is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    if path_str.is_empty() {
+        set_last_error("path is empty");
+        return std::ptr::null_mut();
+    }
+
+    match xybrid_sdk::bundler::XyBundle::load(path_str) {
+        Ok(bundle) => {
+            let state = Box::new(BundleState { bundle });
+            XybridBundleHandle::from_boxed(state)
+        }
+        Err(e) => {
+            set_last_error(&format!("Failed to open bundle: {}", e));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Get the manifest JSON from an opened bundle.
+///
+/// Returns the full manifest as a JSON string. The manifest contains:
+/// `model_id`, `version`, `target`, `hash`, `files`, `has_metadata`.
+///
+/// The returned string must be freed with `xybrid_free_string()`.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to an opened bundle.
+///
+/// # Returns
+///
+/// A newly allocated null-terminated JSON string, or null on error.
+/// The caller must free the returned string with `xybrid_free_string()`.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_manifest_json(
+    handle: *mut XybridBundleHandle,
+) -> *mut c_char {
+    clear_last_error();
+
+    let state = match XybridBundleHandle::as_ref(handle) {
+        Some(s) => s,
+        None => {
+            set_last_error("bundle handle is null or invalid");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let manifest = state.bundle.manifest();
+    match serde_json::to_string(manifest) {
+        Ok(json) => match CString::new(json) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => {
+                set_last_error("manifest JSON contains null bytes");
+                std::ptr::null_mut()
+            }
+        },
+        Err(e) => {
+            set_last_error(&format!("Failed to serialize manifest: {}", e));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Get the model_metadata.json content from an opened bundle.
+///
+/// Returns the content of the `model_metadata.json` file inside the bundle,
+/// or null if the bundle does not contain one.
+///
+/// The returned string must be freed with `xybrid_free_string()`.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to an opened bundle.
+///
+/// # Returns
+///
+/// A newly allocated null-terminated JSON string, or null if not present or on error.
+/// Check `xybrid_last_error()` to distinguish "not present" (no error) from failure.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_metadata_json(
+    handle: *mut XybridBundleHandle,
+) -> *mut c_char {
+    clear_last_error();
+
+    let state = match XybridBundleHandle::as_ref(handle) {
+        Some(s) => s,
+        None => {
+            set_last_error("bundle handle is null or invalid");
+            return std::ptr::null_mut();
+        }
+    };
+
+    match state.bundle.get_metadata_json() {
+        Ok(Some(json)) => match CString::new(json) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => {
+                set_last_error("metadata JSON contains null bytes");
+                std::ptr::null_mut()
+            }
+        },
+        Ok(None) => {
+            // Not an error — bundle just doesn't have model_metadata.json
+            std::ptr::null_mut()
+        }
+        Err(e) => {
+            set_last_error(&format!("Failed to read metadata: {}", e));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Extract all files from a bundle to a directory.
+///
+/// Creates the output directory if it doesn't exist. Extracts all files
+/// from the bundle, preserving relative paths.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to an opened bundle.
+/// - `output_dir`: Null-terminated UTF-8 path to the output directory.
+///
+/// # Returns
+///
+/// - `0` on success
+/// - Non-zero on failure (check `xybrid_last_error()`)
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_extract(
+    handle: *mut XybridBundleHandle,
+    output_dir: *const c_char,
+) -> i32 {
+    clear_last_error();
+
+    let state = match XybridBundleHandle::as_ref(handle) {
+        Some(s) => s,
+        None => {
+            set_last_error("bundle handle is null or invalid");
+            return -1;
+        }
+    };
+
+    if output_dir.is_null() {
+        set_last_error("output_dir is null");
+        return -1;
+    }
+
+    let dir_str = match CStr::from_ptr(output_dir).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("output_dir is not valid UTF-8");
+            return -1;
+        }
+    };
+
+    match state.bundle.extract_to(dir_str) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(&format!("Failed to extract bundle: {}", e));
+            -1
+        }
+    }
+}
+
+/// Get the model ID from an opened bundle's manifest.
+///
+/// The returned pointer uses thread-local storage and is valid until the next
+/// call to this function on the same thread. Do NOT free it.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to an opened bundle.
+///
+/// # Returns
+///
+/// A pointer to the model ID string, or null on error.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_model_id(
+    handle: *mut XybridBundleHandle,
+) -> *const c_char {
+    // Read-only accessor — don't clear last error
+    let state = match XybridBundleHandle::as_ref(handle) {
+        Some(s) => s,
+        None => return std::ptr::null(),
+    };
+
+    thread_local! {
+        static BUNDLE_MODEL_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
+    }
+    BUNDLE_MODEL_ID.with(|e| {
+        *e.borrow_mut() = CString::new(state.bundle.manifest().model_id.as_str()).ok();
+        match e.borrow().as_ref() {
+            Some(cstr) => cstr.as_ptr(),
+            None => std::ptr::null(),
+        }
+    })
+}
+
+/// Get the version from an opened bundle's manifest.
+///
+/// The returned pointer uses thread-local storage and is valid until the next
+/// call to this function on the same thread. Do NOT free it.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_version(
+    handle: *mut XybridBundleHandle,
+) -> *const c_char {
+    let state = match XybridBundleHandle::as_ref(handle) {
+        Some(s) => s,
+        None => return std::ptr::null(),
+    };
+
+    thread_local! {
+        static BUNDLE_VERSION: RefCell<Option<CString>> = const { RefCell::new(None) };
+    }
+    BUNDLE_VERSION.with(|e| {
+        *e.borrow_mut() = CString::new(state.bundle.manifest().version.as_str()).ok();
+        match e.borrow().as_ref() {
+            Some(cstr) => cstr.as_ptr(),
+            None => std::ptr::null(),
+        }
+    })
+}
+
+/// Get the target platform from an opened bundle's manifest.
+///
+/// The returned pointer uses thread-local storage and is valid until the next
+/// call to this function on the same thread. Do NOT free it.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_target(
+    handle: *mut XybridBundleHandle,
+) -> *const c_char {
+    let state = match XybridBundleHandle::as_ref(handle) {
+        Some(s) => s,
+        None => return std::ptr::null(),
+    };
+
+    thread_local! {
+        static BUNDLE_TARGET: RefCell<Option<CString>> = const { RefCell::new(None) };
+    }
+    BUNDLE_TARGET.with(|e| {
+        *e.borrow_mut() = CString::new(state.bundle.manifest().target.as_str()).ok();
+        match e.borrow().as_ref() {
+            Some(cstr) => cstr.as_ptr(),
+            None => std::ptr::null(),
+        }
+    })
+}
+
+/// Get the SHA-256 hash from an opened bundle's manifest.
+///
+/// The returned pointer uses thread-local storage and is valid until the next
+/// call to this function on the same thread. Do NOT free it.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_hash(
+    handle: *mut XybridBundleHandle,
+) -> *const c_char {
+    let state = match XybridBundleHandle::as_ref(handle) {
+        Some(s) => s,
+        None => return std::ptr::null(),
+    };
+
+    thread_local! {
+        static BUNDLE_HASH: RefCell<Option<CString>> = const { RefCell::new(None) };
+    }
+    BUNDLE_HASH.with(|e| {
+        *e.borrow_mut() = CString::new(state.bundle.manifest().hash.as_str()).ok();
+        match e.borrow().as_ref() {
+            Some(cstr) => cstr.as_ptr(),
+            None => std::ptr::null(),
+        }
+    })
+}
+
+/// Check if the bundle contains a model_metadata.json file.
+///
+/// # Returns
+///
+/// - `1` if the bundle has model_metadata.json
+/// - `0` if not, or if the handle is null/invalid
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_has_metadata(
+    handle: *mut XybridBundleHandle,
+) -> i32 {
+    let state = match XybridBundleHandle::as_ref(handle) {
+        Some(s) => s,
+        None => return 0,
+    };
+
+    if state.bundle.manifest().has_metadata { 1 } else { 0 }
+}
+
+/// Get the number of files in the bundle.
+///
+/// # Returns
+///
+/// The file count, or 0 if the handle is null/invalid.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_file_count(
+    handle: *mut XybridBundleHandle,
+) -> u32 {
+    let state = match XybridBundleHandle::as_ref(handle) {
+        Some(s) => s,
+        None => return 0,
+    };
+
+    state.bundle.manifest().files.len() as u32
+}
+
+/// Get the filename at a given index in the bundle's file list.
+///
+/// The returned pointer uses thread-local storage and is valid until the next
+/// call to this function on the same thread. Do NOT free it.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to an opened bundle.
+/// - `index`: Zero-based index into the file list.
+///
+/// # Returns
+///
+/// A pointer to the filename string, or null if index is out of bounds.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_file_name(
+    handle: *mut XybridBundleHandle,
+    index: u32,
+) -> *const c_char {
+    let state = match XybridBundleHandle::as_ref(handle) {
+        Some(s) => s,
+        None => return std::ptr::null(),
+    };
+
+    let files = &state.bundle.manifest().files;
+    if (index as usize) >= files.len() {
+        return std::ptr::null();
+    }
+
+    thread_local! {
+        static BUNDLE_FILE_NAME: RefCell<Option<CString>> = const { RefCell::new(None) };
+    }
+    BUNDLE_FILE_NAME.with(|e| {
+        *e.borrow_mut() = CString::new(files[index as usize].as_str()).ok();
+        match e.borrow().as_ref() {
+            Some(cstr) => cstr.as_ptr(),
+            None => std::ptr::null(),
+        }
+    })
+}
+
+/// Free a bundle handle.
+///
+/// After calling this function, the handle is no longer valid.
+///
+/// # Parameters
+///
+/// - `handle`: A handle to the bundle to free. May be null (no-op).
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_bundle_free(handle: *mut XybridBundleHandle) {
+    if !handle.is_null() {
+        let _ = XybridBundleHandle::into_boxed(handle);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

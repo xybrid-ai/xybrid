@@ -8854,6 +8854,7 @@ dependencies = [
  "cbindgen",
  "csbindgen",
  "libc",
+ "serde_json",
  "xybrid-sdk",
 ]
 

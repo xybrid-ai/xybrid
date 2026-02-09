@@ -10,6 +10,7 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 libc = "0.2"
+serde_json = "1.0"
 xybrid-sdk = { path = "../xybrid-sdk", default-features = false }
 
 [build-dependencies]
