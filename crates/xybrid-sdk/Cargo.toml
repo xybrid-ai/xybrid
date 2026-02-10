@@ -48,8 +48,8 @@ platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-co
 # macOS: CoreML + Metal + llama.cpp
 platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/llm-llamacpp"]
 
-# Desktop (Linux/Windows): CPU with mistral.rs + llama.cpp
-platform-desktop = ["xybrid-core/ort-download", "xybrid-core/llm-mistral", "xybrid-core/llm-llamacpp"]
+# Desktop (Linux/Windows): CPU with llama.cpp
+platform-desktop = ["xybrid-core/ort-download", "xybrid-core/llm-llamacpp"]
 
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 

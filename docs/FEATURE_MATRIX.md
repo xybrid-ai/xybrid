@@ -49,7 +49,7 @@ This document provides a comprehensive reference for all feature flags, platform
 | **platform-android** | Android preset | `ort-dynamic`, `llm-llamacpp` |
 | **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `llm-llamacpp` |
 | **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `llm-llamacpp` |
-| **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-mistral`, `llm-llamacpp` |
+| **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-llamacpp` |
 | **ort-download** | Forward to core | `xybrid-core/ort-download` |
 | **ort-dynamic** | Forward to core | `xybrid-core/ort-dynamic` |
 | **ort-coreml** | Forward to core | `xybrid-core/ort-coreml` |
@@ -95,7 +95,7 @@ Platform presets are the **single source of truth** for platform-specific featur
 | **platform-android** | Android (all ABIs) | `ort-dynamic`, `llm-llamacpp` | Dynamic ORT loading for AAR distribution; llama.cpp has runtime SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
 | **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `candle-metal`, `llm-llamacpp` | Static ORT linking; CoreML for ANE acceleration; Metal for GPU |
 | **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `candle-metal`, `llm-llamacpp` | Same as iOS - unified Apple platform features |
-| **platform-desktop** | Linux, Windows | `ort-download`, `llm-mistral`, `llm-llamacpp` | Static ORT linking; both LLM backends available |
+| **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp` | Static ORT linking; llama.cpp for LLM inference (unified across all platforms) |
 
 ### Why llm-mistral is NOT on Android
 

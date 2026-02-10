@@ -34,7 +34,7 @@ llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
 platform-android = ["ort-dynamic", "llm-llamacpp"]
 platform-ios = ["ort-download", "ort-coreml", "candle-metal", "llm-llamacpp"]
 platform-macos = ["ort-download", "ort-coreml", "candle-metal", "llm-llamacpp"]
-platform-desktop = ["ort-download", "llm-mistral", "llm-llamacpp"]
+platform-desktop = ["ort-download", "llm-llamacpp"]
 
 [dependencies]
 xybrid-core = { path = "../xybrid-core", default-features = false }
