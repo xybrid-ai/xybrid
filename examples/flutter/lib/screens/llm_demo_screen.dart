@@ -82,6 +82,7 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   XybridModel? _model;
 
   /// The model ID used for LLM.
+  // static const _llmModelId = 'phi4-mini';
   static const _llmModelId = 'gemma-3-1b';
 
   /// Streaming response text.
