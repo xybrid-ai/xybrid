@@ -158,6 +158,7 @@ extern "C" {
         max_tokens: c_int,
         temperature: c_float,
         top_p: c_float,
+        min_p: c_float,
         top_k: c_int,
         repeat_penalty: c_float,
         seed: u32,
@@ -176,6 +177,7 @@ extern "C" {
         max_tokens: c_int,
         temperature: c_float,
         top_p: c_float,
+        min_p: c_float,
         top_k: c_int,
         repeat_penalty: c_float,
         seed: u32,
@@ -625,6 +627,7 @@ impl Default for SamplingParams {
 /// * `max_tokens` - Maximum tokens to generate
 /// * `temperature` - Sampling temperature (0 = greedy)
 /// * `top_p` - Top-p (nucleus) sampling threshold
+/// * `min_p` - Min-p sampling threshold (0.0 = disabled, 0.05 = recommended)
 /// * `top_k` - Top-k sampling (0 = disabled)
 /// * `repeat_penalty` - Repetition penalty (1.0 = disabled, > 1.0 = penalize)
 /// * `stop_sequences` - Optional stop sequences (as strings)
@@ -639,6 +642,7 @@ pub fn llama_generate_with_stops(
     max_tokens: usize,
     temperature: f32,
     top_p: f32,
+    min_p: f32,
     top_k: usize,
     repeat_penalty: f32,
     stop_sequences: &[String],
@@ -702,6 +706,7 @@ pub fn llama_generate_with_stops(
             max_tokens as c_int,
             temperature,
             top_p,
+            min_p,
             top_k as c_int,
             repeat_penalty,
             seed,
@@ -725,7 +730,7 @@ pub fn llama_generate_with_stops(
 /// Generate tokens using autoregressive decoding (without stop sequences).
 ///
 /// This is a convenience wrapper around `llama_generate_with_stops` for
-/// backwards compatibility. Uses default repetition penalty of 1.1.
+/// backwards compatibility. Uses default repetition penalty of 1.1 and min_p of 0.05.
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_generate(
     ctx: &LlamaContext,
@@ -736,7 +741,7 @@ pub fn llama_generate(
     top_p: f32,
     top_k: usize,
 ) -> Result<Vec<i32>, AdapterError> {
-    llama_generate_with_stops(ctx, model, input_tokens, max_tokens, temperature, top_p, top_k, 1.1, &[])
+    llama_generate_with_stops(ctx, model, input_tokens, max_tokens, temperature, top_p, 0.05, top_k, 1.1, &[])
 }
 
 /// Context passed through the C callback to the Rust closure.
@@ -792,6 +797,7 @@ where
 /// * `max_tokens` - Maximum tokens to generate
 /// * `temperature` - Sampling temperature (0 = greedy)
 /// * `top_p` - Top-p (nucleus) sampling threshold
+/// * `min_p` - Min-p sampling threshold (0.0 = disabled, 0.05 = recommended)
 /// * `top_k` - Top-k sampling (0 = disabled)
 /// * `repeat_penalty` - Repetition penalty (1.0 = disabled)
 /// * `stop_sequences` - Optional stop sequences (as strings)
@@ -807,6 +813,7 @@ pub fn llama_generate_streaming<F>(
     max_tokens: usize,
     temperature: f32,
     top_p: f32,
+    min_p: f32,
     top_k: usize,
     repeat_penalty: f32,
     stop_sequences: &[String],
@@ -868,6 +875,7 @@ where
             max_tokens as c_int,
             temperature,
             top_p,
+            min_p,
             top_k as c_int,
             repeat_penalty,
             seed,
@@ -1006,6 +1014,7 @@ pub fn llama_generate_with_stops(
     _max_tokens: usize,
     _temperature: f32,
     _top_p: f32,
+    _min_p: f32,
     _top_k: usize,
     _repeat_penalty: f32,
     _stop_sequences: &[String],
@@ -1038,6 +1047,7 @@ pub fn llama_generate_streaming<F>(
     _max_tokens: usize,
     _temperature: f32,
     _top_p: f32,
+    _min_p: f32,
     _top_k: usize,
     _repeat_penalty: f32,
     _stop_sequences: &[String],

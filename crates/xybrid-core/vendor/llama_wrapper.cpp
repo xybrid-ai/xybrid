@@ -329,6 +329,7 @@ void llama_batch_free_c(llama_batch batch) {
 llama_sampler* llama_sampler_chain_create_c(
     float temperature,
     float top_p,
+    float min_p,
     int top_k,
     float repeat_penalty,
     int penalty_last_n,
@@ -338,7 +339,7 @@ llama_sampler* llama_sampler_chain_create_c(
     llama_sampler_chain_params chain_params = llama_sampler_chain_default_params();
     llama_sampler* chain = llama_sampler_chain_init(chain_params);
 
-    // Add samplers in order: penalties -> top_k -> top_p -> temp -> dist
+    // Add samplers in order: penalties -> top_k -> top_p -> min_p -> temp -> dist
     // Repetition penalty must come first to modify logits before sampling
     if (repeat_penalty != 1.0f && penalty_last_n > 0) {
         llama_sampler_chain_add(chain, llama_sampler_init_penalties(
@@ -354,6 +355,11 @@ llama_sampler* llama_sampler_chain_create_c(
     }
     if (top_p > 0.0f && top_p < 1.0f) {
         llama_sampler_chain_add(chain, llama_sampler_init_top_p(top_p, 1));
+    }
+    // min_p: prune tokens with probability < min_p * max_probability.
+    // More adaptive than top_p — aggressive when confident, permissive when uncertain.
+    if (min_p > 0.0f && min_p < 1.0f) {
+        llama_sampler_chain_add(chain, llama_sampler_init_min_p(min_p, 1));
     }
     if (temperature > 0.0f) {
         llama_sampler_chain_add(chain, llama_sampler_init_temp(temperature));
@@ -434,6 +440,7 @@ static bool check_stop_sequences(
  * @param max_tokens  Maximum tokens to generate
  * @param temperature Sampling temperature (0 = greedy)
  * @param top_p       Top-p (nucleus) sampling threshold
+ * @param min_p       Min-p sampling threshold (0.0 = disabled, 0.05 = default)
  * @param top_k       Top-k sampling (0 = disabled)
  * @param repeat_penalty Repetition penalty (1.0 = disabled, > 1.0 = penalize)
  * @param seed        Random seed for sampling
@@ -451,6 +458,7 @@ int llama_generate_c(
     int max_tokens,
     float temperature,
     float top_p,
+    float min_p,
     int top_k,
     float repeat_penalty,
     uint32_t seed,
@@ -476,7 +484,7 @@ int llama_generate_c(
     // Create sampler chain with repetition penalty
     // penalty_last_n = 64 is a reasonable default (consider last 64 tokens for penalty)
     llama_sampler* sampler = llama_sampler_chain_create_c(
-        temperature, top_p, top_k, repeat_penalty, 64, seed
+        temperature, top_p, min_p, top_k, repeat_penalty, 64, seed
     );
     if (!sampler) {
         return -2;
@@ -614,6 +622,7 @@ typedef int (*token_callback_t)(int32_t token_id, const char* token_text, void* 
  * @param max_tokens  Maximum tokens to generate
  * @param temperature Sampling temperature (0 = greedy)
  * @param top_p       Top-p (nucleus) sampling threshold
+ * @param min_p       Min-p sampling threshold (0.0 = disabled, 0.05 = default)
  * @param top_k       Top-k sampling (0 = disabled)
  * @param repeat_penalty Repetition penalty (1.0 = disabled)
  * @param seed        Random seed for sampling
@@ -633,6 +642,7 @@ int llama_generate_streaming_c(
     int max_tokens,
     float temperature,
     float top_p,
+    float min_p,
     int top_k,
     float repeat_penalty,
     uint32_t seed,
@@ -658,7 +668,7 @@ int llama_generate_streaming_c(
 
     // Create sampler chain with repetition penalty
     llama_sampler* sampler = llama_sampler_chain_create_c(
-        temperature, top_p, top_k, repeat_penalty, 64, seed
+        temperature, top_p, min_p, top_k, repeat_penalty, 64, seed
     );
     if (!sampler) {
         return -2;

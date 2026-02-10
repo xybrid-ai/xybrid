@@ -309,6 +309,9 @@ impl LlmRuntimeAdapter {
         if let Some(top_p) = metadata.get("top_p").and_then(|s| s.parse().ok()) {
             config.top_p = top_p;
         }
+        if let Some(min_p) = metadata.get("min_p").and_then(|s| s.parse().ok()) {
+            config.min_p = min_p;
+        }
         if let Some(top_k) = metadata.get("top_k").and_then(|s| s.parse().ok()) {
             config.top_k = top_k;
         }

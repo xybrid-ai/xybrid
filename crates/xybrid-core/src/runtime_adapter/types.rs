@@ -136,6 +136,15 @@ pub struct GenerationConfig {
     #[serde(default = "default_top_p")]
     pub top_p: f32,
 
+    /// Min-p sampling threshold. Default: 0.05
+    ///
+    /// Prunes tokens with probability below `min_p * max_probability`.
+    /// This is more adaptive than top_p: for confident predictions it
+    /// aggressively prunes, for uncertain ones it keeps more candidates.
+    /// Set to 0.0 to disable.
+    #[serde(default = "default_min_p")]
+    pub min_p: f32,
+
     /// Top-k sampling (0 = disabled). Default: 40
     #[serde(default = "default_top_k")]
     pub top_k: usize,
@@ -161,6 +170,10 @@ fn default_top_p() -> f32 {
     0.9
 }
 
+fn default_min_p() -> f32 {
+    0.05
+}
+
 fn default_top_k() -> usize {
     40
 }
@@ -175,6 +188,7 @@ impl Default for GenerationConfig {
             max_tokens: default_max_tokens(),
             temperature: default_temperature(),
             top_p: default_top_p(),
+            min_p: default_min_p(),
             top_k: default_top_k(),
             repetition_penalty: default_repetition_penalty(),
             stop_sequences: Vec::new(),
@@ -435,6 +449,7 @@ mod tests {
         assert_eq!(config.max_tokens, 256);
         assert!((config.temperature - 0.7).abs() < f32::EPSILON);
         assert!((config.top_p - 0.9).abs() < f32::EPSILON);
+        assert!((config.min_p - 0.05).abs() < f32::EPSILON);
         assert_eq!(config.top_k, 40);
         assert!((config.repetition_penalty - 1.1).abs() < f32::EPSILON);
         assert!(config.stop_sequences.is_empty());

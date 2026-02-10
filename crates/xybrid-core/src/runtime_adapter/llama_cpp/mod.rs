@@ -231,6 +231,7 @@ impl LlmBackend for LlamaCppBackend {
             config.max_tokens,
             config.temperature,
             config.top_p,
+            config.min_p,
             config.top_k,
             config.repetition_penalty,
             &config.stop_sequences,
@@ -416,6 +417,7 @@ impl LlmBackend for LlamaCppBackend {
             config.max_tokens,
             config.temperature,
             config.top_p,
+            config.min_p,
             config.top_k,
             config.repetition_penalty,
             &streaming_stop_patterns, // Pass full stop patterns to C layer
