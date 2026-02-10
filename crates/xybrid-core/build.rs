@@ -330,13 +330,10 @@ fn compile_llama_cpp() {
         .include(dst.join("include"))
         .opt_level(3);
 
-    // Windows MSVC: use static CRT (/MT) to match esaxx-rs (via tokenizers) which
-    // hardcodes static_crt(true). Mixing /MT and /MD objects triggers LNK2038 for
-    // exe targets. For cdylib (DLL) targets the linker is lenient about CRT mixing,
-    // so /MT objects in a DLL work fine.
-    if target.contains("windows") && target.contains("msvc") {
-        wrapper_build.static_crt(true);
-    }
+    // Windows MSVC CRT: Do NOT call static_crt() — let the cc crate auto-detect from
+    // CARGO_CFG_TARGET_FEATURE. When crt-static is set (CLI via RUSTFLAGS), cc uses /MT.
+    // When not set (Flutter cdylib default), cc uses /MD. This keeps wrapper in sync with
+    // both llama.cpp (CMake) and esaxx-rs automatically.
 
     wrapper_build.compile("llama_wrapper");
 

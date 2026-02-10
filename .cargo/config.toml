@@ -1,10 +1,12 @@
 [alias]
 xtask = "run --package xtask --"
 
-# Windows MSVC: C++ objects (esaxx-rs, llama_wrapper) are compiled with /MT (static CRT),
-# but Rust itself uses /MD (dynamic CRT → MSVCRT.lib). Both /MT and /MD pull in different
-# CRT libraries which conflict. Strip the static CRT lib so all CRT symbols resolve from
-# the dynamic CRT provided by Rust.
+# Windows MSVC: esaxx-rs (via tokenizers) hardcodes static_crt(true) producing /MT objects.
+# For cdylib (DLL) targets where everything else is /MD, the linker tolerates the metadata
+# mismatch but having both LIBCMT.lib (static) and MSVCRT.lib (dynamic) causes symbol
+# conflicts. Strip the static CRT lib so all symbols resolve from the dynamic CRT.
+# For exe targets (CLI), use RUSTFLAGS="-C target-feature=+crt-static" to make everything
+# /MT instead (this overrides these rustflags, so NODEFAULTLIB is not applied).
 # See: https://github.com/Narsil/esaxx-rs/issues/11
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "link-args=/NODEFAULTLIB:LIBCMT"]

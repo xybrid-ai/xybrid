@@ -46,7 +46,10 @@ mel_spec = "0.2"  # For mel spectrogram computation (audio preprocessing)
 num-complex = "0.4"  # Required by mel_spec for Complex numbers
 rustfft = "6.2"  # For custom Whisper-compatible FFT (Slaney mel scale)
 image = "0.25"  # For image resizing and processing
-tokenizers = "0.19"  # For text tokenization (BERT, GPT, etc.)
+# Disable default features to exclude esaxx_fast (esaxx-rs/cpp) which hardcodes
+# static_crt(true) on MSVC, producing /MT objects that conflict with ORT's /MD.
+# We only run tokenizer models, we don't train them — esaxx-rs is only for BPE training.
+tokenizers = { version = "0.19", default-features = false, features = ["onig"] }
 hound = "3.5"  # For WAV file reading (audio preprocessing)
 cmudict-fast = "0.8"  # For CMU pronouncing dictionary (TTS phonemization)
 lazy_static = "1.4"  # For static CMU dictionary initialization
