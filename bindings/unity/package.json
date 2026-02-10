@@ -1,6 +1,6 @@
 {
   "name": "ai.xybrid.sdk",
-  "version": "0.1.0-alpha2",
+  "version": "0.1.0-alpha3-rc1",
   "displayName": "Xybrid SDK",
   "description": "On-device ML inference SDK for Unity - hybrid cloud-edge orchestration",
   "unity": "2021.3",
