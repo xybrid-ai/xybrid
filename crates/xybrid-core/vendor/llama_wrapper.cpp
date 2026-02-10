@@ -748,6 +748,13 @@ int llama_generate_streaming_c(
         output_tokens[n_generated] = new_token;
         n_generated++;
 
+        // Check for end-of-generation BEFORE emitting to callback.
+        // This prevents EOG tokens (e.g. <|im_end|>, <end_of_turn>, <|eot_id|>)
+        // from leaking into the output as literal text.
+        if (llama_vocab_is_eog(vocab, new_token)) {
+            break;
+        }
+
         // Call streaming callback if provided
         if (callback) {
             // Convert token to text
@@ -764,11 +771,6 @@ int llama_generate_streaming_c(
                 stopped_by_callback = true;
                 break;
             }
-        }
-
-        // Check for end-of-generation (covers ALL EOG tokens, not just primary EOS).
-        if (llama_vocab_is_eog(vocab, new_token)) {
-            break;
         }
 
         // Check for stop sequences
