@@ -42,6 +42,16 @@ unsafe impl Send for LlamaModel {}
 #[cfg(feature = "llm-llamacpp")]
 unsafe impl Sync for LlamaModel {}
 
+#[cfg(feature = "llm-llamacpp")]
+impl Drop for LlamaModel {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { llama_free_model_c(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
+
 /// Opaque handle to a llama context.
 ///
 /// # Safety
@@ -61,6 +71,16 @@ pub struct LlamaContext {
 unsafe impl Send for LlamaContext {}
 // NOTE: Sync intentionally NOT implemented. llama_decode() mutates internal
 // state and is not thread-safe. Use Mutex for shared access.
+
+#[cfg(feature = "llm-llamacpp")]
+impl Drop for LlamaContext {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { llama_free_c(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
 
 // =============================================================================
 // FFI Declarations
@@ -89,6 +109,7 @@ extern "C" {
         n_ctx: c_int,
         n_threads: c_int,
         n_batch: c_int,
+        flash_attn: bool,
     ) -> *mut c_void;
     fn llama_free_c(ctx: *mut c_void);
     fn llama_kv_cache_clear_c(ctx: *mut c_void);
@@ -257,11 +278,16 @@ pub fn llama_load_model_from_file(
     Ok(LlamaModel { ptr })
 }
 
-/// Free a loaded model
+/// Free a loaded model.
+///
+/// Note: `LlamaModel` implements `Drop`, so this is only needed if you want
+/// to free the model explicitly before the end of scope.
 #[cfg(feature = "llm-llamacpp")]
-pub fn llama_free_model(model: LlamaModel) {
-    unsafe {
-        llama_free_model_c(model.ptr);
+pub fn llama_free_model(mut model: LlamaModel) {
+    // Mark as null so Drop doesn't double-free.
+    if !model.ptr.is_null() {
+        unsafe { llama_free_model_c(model.ptr) };
+        model.ptr = std::ptr::null_mut();
     }
 }
 
@@ -272,12 +298,14 @@ pub fn llama_free_model(model: LlamaModel) {
 /// * `n_ctx` - Context length (tokens)
 /// * `n_threads` - Number of threads for inference (0 = auto-detect)
 /// * `n_batch` - Batch size for prompt processing (0 = default 512)
+/// * `flash_attn` - Enable flash attention (2-4x speedup on longer contexts)
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_new_context_with_model(
     model: &LlamaModel,
     n_ctx: usize,
     n_threads: usize,
     n_batch: usize,
+    flash_attn: bool,
 ) -> Result<LlamaContext, AdapterError> {
     let ptr = unsafe {
         llama_new_context_with_model_c(
@@ -285,6 +313,7 @@ pub fn llama_new_context_with_model(
             n_ctx as c_int,
             n_threads as c_int,
             n_batch as c_int,
+            flash_attn,
         )
     };
 
@@ -297,11 +326,16 @@ pub fn llama_new_context_with_model(
     Ok(LlamaContext { ptr })
 }
 
-/// Free a context
+/// Free a context.
+///
+/// Note: `LlamaContext` implements `Drop`, so this is only needed if you want
+/// to free the context explicitly before the end of scope.
 #[cfg(feature = "llm-llamacpp")]
-pub fn llama_free(ctx: LlamaContext) {
-    unsafe {
-        llama_free_c(ctx.ptr);
+pub fn llama_free(mut ctx: LlamaContext) {
+    // Mark as null so Drop doesn't double-free.
+    if !ctx.ptr.is_null() {
+        unsafe { llama_free_c(ctx.ptr) };
+        ctx.ptr = std::ptr::null_mut();
     }
 }
 
@@ -361,15 +395,28 @@ pub fn llama_format_chat(
         return Err(AdapterError::InvalidInput("Empty messages".to_string()));
     }
 
-    // Convert messages to C strings
+    // Convert messages to C strings — reject null bytes instead of silently dropping content
     let roles: Vec<CString> = messages
         .iter()
-        .map(|m| CString::new(m.role.as_str()).unwrap_or_else(|_| CString::new("user").unwrap()))
-        .collect();
+        .map(|m| {
+            CString::new(m.role.as_str()).map_err(|_| {
+                AdapterError::InvalidInput(format!(
+                    "Chat message role '{}' contains null byte",
+                    m.role
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let contents: Vec<CString> = messages
         .iter()
-        .map(|m| CString::new(m.content.as_str()).unwrap_or_else(|_| CString::new("").unwrap()))
-        .collect();
+        .map(|m| {
+            CString::new(m.content.as_str()).map_err(|_| {
+                AdapterError::InvalidInput(
+                    "Chat message content contains null byte".to_string(),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     let role_ptrs: Vec<*const c_char> = roles.iter().map(|s| s.as_ptr()).collect();
     let content_ptrs: Vec<*const c_char> = contents.iter().map(|s| s.as_ptr()).collect();
@@ -581,8 +628,27 @@ pub fn llama_detokenize(model: &LlamaModel, tokens: &[i32]) -> Result<String, Ad
             )
         };
 
-        if len > 0 && (len as usize) < buf.len() {
-            if let Ok(piece) = std::str::from_utf8(&buf[..len as usize]) {
+        if len > 0 {
+            let len_usize = len as usize;
+            if len_usize >= buf.len() {
+                // Token didn't fit — resize and retry
+                buf.resize(len_usize + 1, 0);
+                let retry_len = unsafe {
+                    llama_token_to_piece_c(
+                        model.ptr,
+                        token,
+                        buf.as_mut_ptr() as *mut c_char,
+                        buf.len() as c_int,
+                        0,
+                        true,
+                    )
+                };
+                if retry_len > 0 {
+                    if let Ok(piece) = std::str::from_utf8(&buf[..retry_len as usize]) {
+                        result.push_str(piece);
+                    }
+                }
+            } else if let Ok(piece) = std::str::from_utf8(&buf[..len_usize]) {
                 result.push_str(piece);
             }
         }
@@ -681,7 +747,7 @@ pub fn llama_generate_with_stops(
     // Use current time as seed for sampling
     let seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as u32)
+        .map(|d| d.as_nanos() as u32)
         .unwrap_or(42);
 
     // Use stop_lens.len() (filtered count) not stop_sequences.len() (original count).
@@ -844,7 +910,7 @@ where
     // Use current time as seed for sampling
     let seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as u32)
+        .map(|d| d.as_nanos() as u32)
         .unwrap_or(42);
 
     // Use stop_lens.len() (filtered count) not stop_sequences.len() (original count).
@@ -887,6 +953,15 @@ where
         )
     };
 
+    // Check for hard error codes FIRST — these are never callback-stop.
+    // -1 = invalid args, -2 = sampler creation failed, -3 = decode failed, -4 = input too long.
+    if result >= -4 && result <= -1 {
+        return Err(AdapterError::RuntimeError(format!(
+            "Generation failed with error code {}",
+            result
+        )));
+    }
+
     // Check for callback error
     if let Some(err) = streaming_ctx.error {
         return Err(AdapterError::RuntimeError(format!(
@@ -895,19 +970,13 @@ where
         )));
     }
 
-    // Negative result means stopped by callback, but absolute value is token count
+    // Negative result (other than hard errors) means stopped by callback,
+    // absolute value is token count.
     let (n_generated, stopped_by_callback) = if result < 0 {
         ((-result) as usize, true)
     } else {
         (result as usize, false)
     };
-
-    if result == -1 || result == -2 || result == -3 {
-        return Err(AdapterError::RuntimeError(format!(
-            "Generation failed with error code {}",
-            result
-        )));
-    }
 
     output_tokens.truncate(n_generated);
     Ok((output_tokens, stopped_by_callback))
@@ -956,6 +1025,7 @@ pub fn llama_new_context_with_model(
     _n_ctx: usize,
     _n_threads: usize,
     _n_batch: usize,
+    _flash_attn: bool,
 ) -> Result<LlamaContext, AdapterError> {
     Err(AdapterError::RuntimeError(
         "llm-llamacpp feature not enabled".to_string(),

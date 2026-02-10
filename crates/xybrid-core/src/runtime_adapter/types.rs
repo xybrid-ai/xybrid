@@ -273,6 +273,11 @@ pub struct LlmConfig {
     /// Batch size for prompt processing. 0 = default (512).
     #[serde(default)]
     pub n_batch: usize,
+
+    /// Enable flash attention for faster inference on longer contexts.
+    /// Can provide 2-4x speedup. Default: true.
+    #[serde(default = "default_flash_attn")]
+    pub flash_attn: bool,
 }
 
 fn default_context_length() -> usize {
@@ -280,6 +285,10 @@ fn default_context_length() -> usize {
 }
 
 fn default_paged_attention() -> bool {
+    true
+}
+
+fn default_flash_attn() -> bool {
     true
 }
 
@@ -301,6 +310,7 @@ impl Default for LlmConfig {
             logging: false,
             n_threads: 0, // 0 = auto-detect
             n_batch: 0,   // 0 = default (512)
+            flash_attn: default_flash_attn(),
         }
     }
 }

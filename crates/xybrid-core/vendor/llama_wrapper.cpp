@@ -119,12 +119,13 @@ llama_context* llama_new_context_with_model_c(
     llama_model* model,
     int n_ctx,
     int n_threads,
-    int n_batch
-    
+    int n_batch,
+    bool flash_attn
 ) {
     llama_context_params params = llama_context_default_params();
     params.n_ctx = static_cast<uint32_t>(n_ctx);
     params.n_batch = static_cast<uint32_t>(n_batch > 0 ? n_batch : 512);
+    params.flash_attn = flash_attn;
     // Use provided thread count, or fall back to hardware concurrency
     int actual_threads = n_threads > 0 ? n_threads : std::thread::hardware_concurrency();
     if (actual_threads == 0) actual_threads = 4;  // Fallback if detection fails
@@ -712,8 +713,8 @@ int llama_generate_streaming_c(
         }
     }
 
-    // Buffer for token text conversion
-    char token_buf[256];
+    // Buffer for token text conversion (1024 to handle merged/multi-byte tokens)
+    char token_buf[1024];
 
     // Generation loop
     while (n_generated < max_tokens) {

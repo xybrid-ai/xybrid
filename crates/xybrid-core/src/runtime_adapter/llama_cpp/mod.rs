@@ -31,6 +31,20 @@ use crate::runtime_adapter::llm::{
 };
 use crate::runtime_adapter::AdapterError;
 use std::sync::Mutex;
+#[cfg(feature = "llm-llamacpp")]
+use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "llm-llamacpp")]
+use std::sync::Once;
+
+/// Ensures llama_backend_init() is called exactly once, regardless of how many
+/// LlamaCppBackend instances are created.
+#[cfg(feature = "llm-llamacpp")]
+static BACKEND_INIT: Once = Once::new();
+
+/// Tracks the number of live LlamaCppBackend instances. When the last one drops,
+/// llama_backend_free() is called to clean up global state.
+#[cfg(feature = "llm-llamacpp")]
+static BACKEND_REFCOUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// LlamaCppBackend - LLM inference using llama.cpp.
 ///
@@ -71,8 +85,11 @@ pub struct LlamaCppBackend {
 impl LlamaCppBackend {
     /// Create a new LlamaCppBackend.
     pub fn new() -> LlmResult<Self> {
-        // Initialize llama.cpp backend
-        sys::llama_backend_init();
+        // Initialize llama.cpp backend exactly once (idempotent via Once).
+        BACKEND_INIT.call_once(|| {
+            sys::llama_backend_init();
+        });
+        BACKEND_REFCOUNT.fetch_add(1, Ordering::Relaxed);
 
         Ok(Self {
             model: None,
@@ -85,15 +102,16 @@ impl LlamaCppBackend {
 #[cfg(feature = "llm-llamacpp")]
 impl Drop for LlamaCppBackend {
     fn drop(&mut self) {
-        // Free context first, then model.
+        // Drop context first, then model (order matters: context references model).
+        // LlamaContext and LlamaModel implement Drop, so take() + drop handles cleanup.
         // get_mut() doesn't lock — safe because Drop has &mut self.
-        if let Some(ctx) = self.context.get_mut().unwrap().take() {
-            sys::llama_free(ctx);
+        let _ = self.context.get_mut().unwrap().take(); // drops LlamaContext
+        let _ = self.model.take(); // drops LlamaModel
+
+        // Free the global backend when the last instance is dropped.
+        if BACKEND_REFCOUNT.fetch_sub(1, Ordering::AcqRel) == 1 {
+            sys::llama_backend_free();
         }
-        if let Some(model) = self.model.take() {
-            sys::llama_free_model(model);
-        }
-        // Note: Don't call llama_backend_free here as other instances may exist
     }
 }
 
@@ -160,6 +178,7 @@ impl LlmBackend for LlamaCppBackend {
             config.context_length,
             config.n_threads,
             config.n_batch,
+            config.flash_attn,
         )
         .map_err(|e| AdapterError::RuntimeError(format!("Failed to create context: {}", e)))?;
 
@@ -175,12 +194,10 @@ impl LlmBackend for LlamaCppBackend {
     }
 
     fn unload(&mut self) -> LlmResult<()> {
-        if let Some(ctx) = self.context.get_mut().unwrap().take() {
-            sys::llama_free(ctx);
-        }
-        if let Some(model) = self.model.take() {
-            sys::llama_free_model(model);
-        }
+        // Drop context first, then model (order matters).
+        // LlamaContext and LlamaModel implement Drop, so take() handles cleanup.
+        let _ = self.context.get_mut().unwrap().take();
+        let _ = self.model.take();
         self.config = None;
         Ok(())
     }
@@ -314,8 +331,56 @@ impl LlmBackend for LlamaCppBackend {
     }
 
     fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput> {
-        let messages = vec![ChatMessage::user(prompt)];
-        self.generate(&messages, config)
+        let model = self.model.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
+        })?;
+        let ctx_guard = self.context.lock().map_err(|_| {
+            AdapterError::RuntimeError("Context mutex poisoned".to_string())
+        })?;
+        let context = ctx_guard.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No context. Call load() first.".to_string())
+        })?;
+
+        sys::llama_kv_cache_clear(context);
+
+        // Tokenize directly — no chat template formatting.
+        let tokens = sys::llama_tokenize(model, prompt, true)?;
+
+        let n_ctx = sys::llama_n_ctx(context);
+        if tokens.len() >= n_ctx {
+            return Err(AdapterError::InvalidInput(format!(
+                "Input too long: {} tokens exceeds context window of {} tokens.",
+                tokens.len(), n_ctx
+            )));
+        }
+
+        let start = std::time::Instant::now();
+
+        let output_tokens = sys::llama_generate_with_stops(
+            context, model, &tokens,
+            config.max_tokens, config.temperature, config.top_p,
+            config.min_p, config.top_k, config.repetition_penalty,
+            &config.stop_sequences,
+        )?;
+
+        let elapsed = start.elapsed();
+        let text = sys::llama_detokenize(model, &output_tokens)?;
+        let text = text.trim().to_string();
+
+        let tokens_generated = output_tokens.len();
+        let tokens_per_second = if elapsed.as_secs_f32() > 0.0 {
+            tokens_generated as f32 / elapsed.as_secs_f32()
+        } else {
+            0.0
+        };
+
+        Ok(GenerationOutput {
+            text,
+            tokens_generated,
+            generation_time_ms: elapsed.as_millis() as u64,
+            tokens_per_second,
+            finish_reason: "length".to_string(),
+        })
     }
 
     fn generate_streaming(
@@ -377,28 +442,12 @@ impl LlmBackend for LlamaCppBackend {
             patterns
         };
 
-        // Partial stop markers that can appear without a leading "<".
-        // When a model is prompted with ChatML but doesn't natively use it
-        // (e.g., Gemma with ChatML fallback), it may generate malformed stop
-        // tokens like "|im_end|>" without the "<". We need to hold back
-        // prefixes of these markers too, so they aren't emitted before the
-        // full marker is accumulated and caught.
-        let partial_holdback_patterns: Vec<&str> = vec![
-            "|im_end|>",
-            "|im_start|>",
-            "|endoftext|>",
-            "end_of_turn>",
-        ];
-
-        // Helper: find if text ends with a PREFIX of any stop pattern
-        // Returns the position where the potential stop sequence starts, or None
+        // Helper: find if text ends with a PREFIX of any stop pattern.
+        // Returns the position where the potential stop sequence starts, or None.
+        // This holds back partial matches so they aren't emitted before the
+        // full pattern is accumulated and caught.
         let find_potential_stop_start = |text: &str| -> Option<usize> {
-            // Check both full stop patterns and partial holdback patterns
-            let full_iter = streaming_stop_patterns.iter().map(|s| s.as_str());
-            let partial_iter = partial_holdback_patterns.iter().copied();
-
-            for pattern in full_iter.chain(partial_iter) {
-                // Check if text ends with any prefix of this pattern
+            for pattern in &streaming_stop_patterns {
                 for prefix_len in 1..=pattern.len() {
                     let prefix = &pattern[..prefix_len];
                     if text.ends_with(prefix) {
@@ -436,20 +485,6 @@ impl LlmBackend for LlamaCppBackend {
                         hit_stop_pattern = true;
                         // Truncate the cumulative text at the stop pattern
                         if let Some(pos) = cumulative_text.find(pattern.as_str()) {
-                            cumulative_text.truncate(pos);
-                        }
-                        return Ok(());
-                    }
-                }
-
-                // Also check for partial/corrupted stop tokens (missing leading "<")
-                // This handles cases where the model generates malformed stop tokens
-                let partial_stop_markers = ["|im_end|>", "im_end|>", "end_of_turn>", "_of_turn>"];
-                for marker in partial_stop_markers {
-                    if cumulative_text.contains(marker) {
-                        log::debug!(target: "xybrid_core", "Streaming: detected partial stop marker '{}', stopping", marker);
-                        hit_stop_pattern = true;
-                        if let Some(pos) = cumulative_text.find(marker) {
                             cumulative_text.truncate(pos);
                         }
                         return Ok(());
@@ -502,56 +537,22 @@ impl LlmBackend for LlamaCppBackend {
             finish_reason = "stop".to_string();
         }
 
-        // Clean up partial/corrupted stop tokens that may appear at the end
-        // This handles cases where the model generates parts of stop tokens
-        // that don't exactly match the full pattern (e.g., "|im_end|>" without "<")
-        let partial_stop_fragments = [
-            // ChatML partial fragments
-            "|im_end|>",
-            "im_end|>",
-            "_end|>",
-            "end|>",
-            "nd|>",
-            "d|>",
-            "|>",
-            "<|im_end",
-            "<|im_en",
-            "<|im_e",
-            "<|im_",
-            "<|im",
-            "<|i",
-            "<|",
-            // Gemma partial fragments
-            "end_of_turn>",
-            "_of_turn>",
-            "of_turn>",
-            "f_turn>",
-            "_turn>",
-            "turn>",
-            "urn>",
-            "rn>",
-            "n>",
-            "<end_of_turn",
-            "<end_of_tur",
-            "<end_of_tu",
-            "<end_of_t",
-            "<end_of_",
-            "<end_of",
-            "<end_o",
-            "<end_",
-            "<end",
-            // Common end markers
-            "</s",
-            "<s>",
-            "|endoftext|>",
-            "endoftext|>",
-        ];
-
-        for fragment in partial_stop_fragments {
-            if text.ends_with(fragment) {
-                log::debug!(target: "xybrid_core", "Cleaning up partial stop token: '{}'", fragment);
-                text.truncate(text.len() - fragment.len());
-                finish_reason = "stop".to_string();
+        // Clean up trailing partial stop tokens.
+        // With llama_vocab_is_eog() catching model stop tokens at the C layer,
+        // we only need to check for partial prefixes of our known stop patterns.
+        for pattern in &streaming_stop_patterns {
+            // Check if text ends with any suffix that is a prefix of a stop pattern.
+            // E.g., text ending with "<|im_" when the stop pattern is "<|im_end|>".
+            for prefix_len in 1..pattern.len() {
+                let prefix = &pattern[..prefix_len];
+                if text.ends_with(prefix) {
+                    log::debug!(target: "xybrid_core", "Cleaning up partial stop token: '{}'", prefix);
+                    text.truncate(text.len() - prefix_len);
+                    finish_reason = "stop".to_string();
+                    break;
+                }
+            }
+            if finish_reason == "stop" {
                 break;
             }
         }
