@@ -499,6 +499,10 @@ int llama_generate_c(
     int n_generated = 0;
     int n_cur = 0;  // Current position in context
 
+    // Pre-allocate candidates buffer once — reused every token.
+    // Avoids ~128KB alloc/free per token (n_vocab * sizeof(llama_token_data)).
+    llama_token_data* candidates_data = new llama_token_data[n_vocab];
+
     // Process input tokens in chunks of n_batch.
     // Previously tried to decode all tokens in one call, which failed when
     // n_input > n_batch (default 512).
@@ -519,6 +523,7 @@ int llama_generate_c(
         }
 
         if (llama_decode(ctx, batch) != 0) {
+            delete[] candidates_data;
             llama_batch_free(batch);
             llama_sampler_free(sampler);
             return -3;
@@ -533,10 +538,8 @@ int llama_generate_c(
             break;
         }
 
-        // Create token data array for sampling
+        // Fill candidates from logits (reuses pre-allocated buffer)
         llama_token_data_array candidates;
-        llama_token_data* candidates_data = new llama_token_data[n_vocab];
-
         for (int i = 0; i < n_vocab; i++) {
             candidates_data[i].id = i;
             candidates_data[i].logit = logits[i];
@@ -552,7 +555,6 @@ int llama_generate_c(
         llama_sampler_apply(sampler, &candidates);
 
         llama_token new_token = candidates.data[candidates.selected].id;
-        delete[] candidates_data;
 
         // Accept token in sampler (for repetition penalty etc)
         llama_sampler_accept(sampler, new_token);
@@ -588,6 +590,7 @@ int llama_generate_c(
         }
     }
 
+    delete[] candidates_data;
     llama_batch_free(batch);
     llama_sampler_free(sampler);
 
@@ -682,6 +685,9 @@ int llama_generate_streaming_c(
     int n_cur = 0;  // Current position in context
     bool stopped_by_callback = false;
 
+    // Pre-allocate candidates buffer once — reused every token.
+    llama_token_data* candidates_data = new llama_token_data[n_vocab];
+
     // Process input tokens in chunks of n_batch.
     for (int chunk_start = 0; chunk_start < n_input; chunk_start += n_batch) {
         int chunk_end = chunk_start + n_batch;
@@ -699,6 +705,7 @@ int llama_generate_streaming_c(
         }
 
         if (llama_decode(ctx, batch) != 0) {
+            delete[] candidates_data;
             llama_batch_free(batch);
             llama_sampler_free(sampler);
             return -3;
@@ -716,10 +723,8 @@ int llama_generate_streaming_c(
             break;
         }
 
-        // Create token data array for sampling
+        // Fill candidates from logits (reuses pre-allocated buffer)
         llama_token_data_array candidates;
-        llama_token_data* candidates_data = new llama_token_data[n_vocab];
-
         for (int i = 0; i < n_vocab; i++) {
             candidates_data[i].id = i;
             candidates_data[i].logit = logits[i];
@@ -735,7 +740,6 @@ int llama_generate_streaming_c(
         llama_sampler_apply(sampler, &candidates);
 
         llama_token new_token = candidates.data[candidates.selected].id;
-        delete[] candidates_data;
 
         // Accept token in sampler (for repetition penalty etc)
         llama_sampler_accept(sampler, new_token);
@@ -788,6 +792,7 @@ int llama_generate_streaming_c(
         }
     }
 
+    delete[] candidates_data;
     llama_batch_free(batch);
     llama_sampler_free(sampler);
 
