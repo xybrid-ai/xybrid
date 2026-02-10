@@ -80,9 +80,14 @@ jobs:
         if: matrix.platform == 'macos'
         run: brew install llvm
 
-      - name: Install LLVM (Windows)
+      - name: Install LLVM and NASM (Windows)
         if: matrix.platform == 'windows'
-        run: choco install llvm
+        run: choco install llvm nasm
+
+      - name: Add NASM to PATH (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
 
       # Cache the FRB codegen binary to avoid compiling from source every run
       - name: Cache FRB codegen binary

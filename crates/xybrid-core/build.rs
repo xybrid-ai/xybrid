@@ -229,7 +229,11 @@ fn compile_llama_cpp() {
             .define("GGML_NATIVE", "OFF") // Don't optimize for build machine
             .define("GGML_METAL", "OFF")
             .define("GGML_CUDA", "OFF")
-            .define("GGML_VULKAN", "OFF");
+            .define("GGML_VULKAN", "OFF")
+            .define("GGML_CPU_HBM", "OFF")
+            // Disable llamafile SGEMM — its FP16 NEON intrinsics (vld1q_f16) require
+            // armv8.2-a+fp16 which the NDK doesn't enable by default
+            .define("GGML_LLAMAFILE", "OFF");
 
         // Find NDK path from multiple sources
         let ndk_result = find_android_ndk();

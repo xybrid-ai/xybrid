@@ -234,8 +234,12 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
 
-      - name: Install LLVM
-        run: choco install llvm
+      - name: Install LLVM and NASM
+        run: choco install llvm nasm
+
+      - name: Add NASM to PATH
+        shell: bash
+        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
 
       - name: Install build tool dependencies
         working-directory: bindings/flutter/cargokit/build_tool
@@ -286,6 +290,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: test-cli-windows
+
+      - name: Install LLVM and NASM
+        run: choco install llvm nasm
+
+      - name: Add NASM to PATH
+        shell: bash
+        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
 
       - name: Build CLI
         run: cargo build --release -p xybrid-cli --target x86_64-pc-windows-msvc --features platform-desktop

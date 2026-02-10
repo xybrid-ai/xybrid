@@ -255,9 +255,14 @@ jobs:
         if: matrix.name == 'darwin'
         run: brew install llvm
 
-      - name: Install LLVM (Windows)
+      - name: Install LLVM and NASM (Windows)
         if: matrix.name == 'windows'
-        run: choco install llvm
+        run: choco install llvm nasm
+
+      - name: Add NASM to PATH (Windows)
+        if: matrix.name == 'windows'
+        shell: bash
+        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
 
       - name: Setup Android SDK
         if: matrix.android
