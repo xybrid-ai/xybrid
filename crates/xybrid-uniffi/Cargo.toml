@@ -6,7 +6,7 @@ description = "UniFFI bindings for xybrid-sdk (Swift/Kotlin)"
 
 [lib]
 name = "xybrid_uniffi"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "staticlib"]
 
 [[bin]]
 name = "uniffi-bindgen"

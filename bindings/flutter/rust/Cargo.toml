@@ -41,11 +41,11 @@ ort = { version = "2.0.0-rc.11", default-features = false, features = ["ndarray"
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-macos"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# SDK preset handles: ort-download, llm-mistral, llm-llamacpp
+# SDK preset handles: ort-download, llm-llamacpp
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-desktop"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# SDK preset handles: ort-download, llm-mistral, llm-llamacpp
+# SDK preset handles: ort-download, llm-llamacpp
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-desktop"] }
 
 [features]

@@ -1,0 +1,302 @@
+name: Test CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to test'
+        required: true
+        type: choice
+        options:
+          - apple
+          - darwin-precompile
+          - linux-precompile
+          - windows-precompile
+          - windows-cli
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  NDK_VERSION: "26.1.10909125"
+  FLUTTER_VERSION: "3.35.7"
+  FRB_VERSION: "2.11.1"
+
+permissions:
+  contents: write
+
+jobs:
+  #
+  # Apple XCFramework build
+  #
+  build-apple:
+    name: Build Apple XCFramework
+    if: inputs.platform == 'apple'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            aarch64-apple-ios,
+            aarch64-apple-ios-sim,
+            aarch64-apple-darwin
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: test-apple
+
+      - name: Build XCFramework
+        run: cargo xtask build-xcframework --release
+
+      - name: Verify XCFramework
+        run: |
+          XCFW_PATH="bindings/apple/XCFrameworks/XybridFFI.xcframework"
+          if [ ! -d "$XCFW_PATH" ]; then
+            echo "Error: XCFramework not found at $XCFW_PATH"
+            exit 1
+          fi
+          echo "XCFramework contents:"
+          ls -la "$XCFW_PATH"
+          echo ""
+          echo "Verifying architectures..."
+          file "$XCFW_PATH/ios-arm64/libxybrid_uniffi.a" || true
+          file "$XCFW_PATH/ios-arm64-simulator/libxybrid_uniffi.a" || true
+          file "$XCFW_PATH/macos-arm64/libxybrid_uniffi.a" || true
+
+  #
+  # Precompile Flutter (darwin)
+  #
+  precompile-darwin:
+    name: Precompile Flutter (darwin)
+    if: inputs.platform == 'darwin-precompile'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            aarch64-apple-darwin,
+            aarch64-apple-ios,
+            aarch64-apple-ios-sim
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: test-precompile-darwin
+
+      - uses: dart-lang/setup-dart@v1
+
+      - name: Install LLVM
+        run: brew install llvm
+
+      - name: Install build tool dependencies
+        working-directory: bindings/flutter/cargokit/build_tool
+        run: dart pub get
+
+      - name: Precompile and upload binaries
+        working-directory: bindings/flutter/cargokit/build_tool
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS="--repository ${{ github.repository }} --manifest-dir ${{ github.workspace }}/bindings/flutter/rust --verbose"
+          dart run bin/build_tool.dart precompile-binaries $ARGS
+
+  #
+  # Precompile Flutter (linux + android)
+  #
+  precompile-linux:
+    name: Precompile Flutter (linux)
+    if: inputs.platform == 'linux-precompile'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            x86_64-unknown-linux-gnu,
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: test-precompile-linux
+
+      - uses: dart-lang/setup-dart@v1
+
+      - name: Install LLVM
+        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Install build tool dependencies
+        working-directory: bindings/flutter/cargokit/build_tool
+        run: dart pub get
+
+      - name: Precompile and upload binaries
+        working-directory: bindings/flutter/cargokit/build_tool
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS="--repository ${{ github.repository }} --manifest-dir ${{ github.workspace }}/bindings/flutter/rust --verbose --android-sdk-location $ANDROID_HOME --android-ndk-version ${{ env.NDK_VERSION }} --android-min-sdk-version 28"
+          dart run bin/build_tool.dart precompile-binaries $ARGS
+
+  #
+  # Precompile Flutter (windows)
+  #
+  precompile-windows:
+    name: Precompile Flutter (windows)
+    if: inputs.platform == 'windows-precompile'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: test-precompile-windows
+
+      - uses: dart-lang/setup-dart@v1
+
+      - name: Install LLVM and NASM
+        run: choco install llvm nasm
+
+      - name: Add NASM to PATH
+        shell: bash
+        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
+
+      - name: Install build tool dependencies
+        working-directory: bindings/flutter/cargokit/build_tool
+        run: dart pub get
+
+      - name: Force dynamic CRT on Windows
+        shell: bash
+        run: |
+          echo "CFLAGS=/MD" >> $GITHUB_ENV
+          echo "CXXFLAGS=/MD" >> $GITHUB_ENV
+
+      - name: Precompile and upload binaries
+        working-directory: bindings/flutter/cargokit/build_tool
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS="--repository ${{ github.repository }} --manifest-dir ${{ github.workspace }}/bindings/flutter/rust --verbose"
+          dart run bin/build_tool.dart precompile-binaries $ARGS
+
+  #
+  # CLI (windows)
+  #
+  build-cli-windows:
+    name: Build CLI (windows)
+    if: inputs.platform == 'windows-cli'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test-cli-windows
+
+      - name: Install LLVM and NASM
+        run: choco install llvm nasm
+
+      - name: Add NASM to PATH
+        shell: bash
+        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
+
+      - name: Build CLI
+        run: cargo build --release -p xybrid-cli --target x86_64-pc-windows-msvc --features platform-desktop

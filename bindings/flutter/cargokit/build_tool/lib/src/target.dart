@@ -55,11 +55,6 @@ class Target {
       flutter: 'linux-arm64',
     ),
     Target(
-      rust: 'x86_64-apple-darwin',
-      darwinPlatform: 'macosx',
-      darwinArch: 'x86_64',
-    ),
-    Target(
       rust: 'aarch64-apple-darwin',
       darwinPlatform: 'macosx',
       darwinArch: 'arm64',
@@ -73,11 +68,6 @@ class Target {
       rust: 'aarch64-apple-ios-sim',
       darwinPlatform: 'iphonesimulator',
       darwinArch: 'arm64',
-    ),
-    Target(
-      rust: 'x86_64-apple-ios',
-      darwinPlatform: 'iphonesimulator',
-      darwinArch: 'x86_64',
     ),
   ];
 
