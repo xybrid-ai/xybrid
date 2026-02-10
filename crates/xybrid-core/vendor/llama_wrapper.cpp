@@ -206,6 +206,23 @@ int32_t llama_token_nl_c(const llama_model* model) {
     return llama_vocab_nl(vocab);
 }
 
+/**
+ * Check if a token is an end-of-generation token.
+ *
+ * Unlike llama_token_eos_c() which returns the primary EOS token,
+ * this checks ALL end-of-generation tokens registered in the model vocabulary.
+ * Modern models have multiple EOG tokens:
+ *   - Llama 3: <|eot_id|> (128009) + <|end_of_text|> (128001)
+ *   - Gemma: <end_of_turn> (107)
+ *   - Qwen: <|im_end|> + <|endoftext|>
+ *
+ * @return true if the token is any end-of-generation token
+ */
+bool llama_vocab_is_eog_c(const llama_model* model, int32_t token) {
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+    return llama_vocab_is_eog(vocab, token);
+}
+
 int llama_n_vocab_c(const llama_model* model) {
     const llama_vocab* vocab = llama_model_get_vocab(model);
     return llama_vocab_n_tokens(vocab);
@@ -454,7 +471,6 @@ int llama_generate_c(
     }
 
     const llama_vocab* vocab = llama_model_get_vocab(model);
-    const llama_token eos_token = llama_vocab_eos(vocab);
     const int n_vocab = llama_vocab_n_tokens(vocab);
 
     // Create sampler chain with repetition penalty
@@ -537,8 +553,9 @@ int llama_generate_c(
         output_tokens[n_generated] = new_token;
         n_generated++;
 
-        // Check for EOS
-        if (new_token == eos_token) {
+        // Check for end-of-generation (covers ALL EOG tokens, not just primary EOS).
+        // Llama 3: <|eot_id|> + <|end_of_text|>, Gemma: <end_of_turn>, Qwen: <|im_end|>, etc.
+        if (llama_vocab_is_eog(vocab, new_token)) {
             break;
         }
 
@@ -637,7 +654,6 @@ int llama_generate_streaming_c(
     }
 
     const llama_vocab* vocab = llama_model_get_vocab(model);
-    const llama_token eos_token = llama_vocab_eos(vocab);
     const int n_vocab = llama_vocab_n_tokens(vocab);
 
     // Create sampler chain with repetition penalty
@@ -736,8 +752,8 @@ int llama_generate_streaming_c(
             }
         }
 
-        // Check for EOS
-        if (new_token == eos_token) {
+        // Check for end-of-generation (covers ALL EOG tokens, not just primary EOS).
+        if (llama_vocab_is_eog(vocab, new_token)) {
             break;
         }
 

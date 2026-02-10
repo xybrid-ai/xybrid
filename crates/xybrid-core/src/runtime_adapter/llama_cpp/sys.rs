@@ -117,6 +117,9 @@ extern "C" {
     fn llama_token_bos_c(model: *const c_void) -> i32;
     fn llama_token_eos_c(model: *const c_void) -> i32;
 
+    // End-of-generation check (covers ALL EOG tokens, not just primary EOS)
+    fn llama_vocab_is_eog_c(model: *const c_void, token: i32) -> bool;
+
     // Model info
     fn llama_n_vocab_c(model: *const c_void) -> c_int;
     fn llama_n_ctx_c(ctx: *const c_void) -> c_int;
@@ -318,6 +321,17 @@ pub fn llama_token_bos(model: &LlamaModel) -> i32 {
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_token_eos(model: &LlamaModel) -> i32 {
     unsafe { llama_token_eos_c(model.ptr) }
+}
+
+/// Check if a token is an end-of-generation token.
+///
+/// Unlike `llama_token_eos()` which returns the primary EOS token,
+/// this checks ALL end-of-generation tokens registered in the model vocabulary.
+/// Modern models have multiple EOG tokens (e.g., Llama 3: `<|eot_id|>` + `<|end_of_text|>`,
+/// Gemma: `<end_of_turn>`, Qwen: `<|im_end|>` + `<|endoftext|>`).
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_vocab_is_eog(model: &LlamaModel, token: i32) -> bool {
+    unsafe { llama_vocab_is_eog_c(model.ptr, token) }
 }
 
 /// Get vocabulary size
