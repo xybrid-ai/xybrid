@@ -115,6 +115,7 @@ jobs:
         run: flutter_rust_bridge_codegen generate
 
       - name: Check FRB bindings are up-to-date
+        shell: bash
         run: |
           if ! git diff --exit-code bindings/flutter/lib/src/rust/; then
             echo ""
