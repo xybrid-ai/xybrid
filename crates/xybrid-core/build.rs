@@ -330,9 +330,12 @@ fn compile_llama_cpp() {
         .include(dst.join("include"))
         .opt_level(3);
 
-    // Windows MSVC: use dynamic CRT (/MD) to match cdylib targets (Flutter/Unity FFI)
+    // Windows MSVC: use static CRT (/MT) to match esaxx-rs (via tokenizers) which
+    // hardcodes static_crt(true). Mixing /MT and /MD objects triggers LNK2038 for
+    // exe targets. For cdylib (DLL) targets the linker is lenient about CRT mixing,
+    // so /MT objects in a DLL work fine.
     if target.contains("windows") && target.contains("msvc") {
-        wrapper_build.static_crt(false);
+        wrapper_build.static_crt(true);
     }
 
     wrapper_build.compile("llama_wrapper");

@@ -1,10 +1,10 @@
 [alias]
 xtask = "run --package xtask --"
 
-# Windows MSVC: esaxx-rs (via tokenizers) hardcodes static_crt(true) in its build.rs,
-# producing /MT objects. Our cdylib targets (Flutter FFI, Unity FFI) require /MD (dynamic CRT).
-# This causes LNK2038 "RuntimeLibrary mismatch" at link time.
-# Workaround: tell the linker to ignore the conflicting static CRT default lib.
+# Windows MSVC: C++ objects (esaxx-rs, llama_wrapper) are compiled with /MT (static CRT),
+# but Rust itself uses /MD (dynamic CRT → MSVCRT.lib). Both /MT and /MD pull in different
+# CRT libraries which conflict. Strip the static CRT lib so all CRT symbols resolve from
+# the dynamic CRT provided by Rust.
 # See: https://github.com/Narsil/esaxx-rs/issues/11
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "link-args=/NODEFAULTLIB:LIBCMT"]
