@@ -42,7 +42,16 @@ unsafe impl Send for LlamaModel {}
 #[cfg(feature = "llm-llamacpp")]
 unsafe impl Sync for LlamaModel {}
 
-/// Opaque handle to a llama context
+/// Opaque handle to a llama context.
+///
+/// # Safety
+///
+/// `LlamaContext` is `Send` but NOT `Sync`. The underlying llama.cpp context
+/// mutates internal state (KV cache, scratch buffers) during `llama_decode()`,
+/// so concurrent access from multiple threads is undefined behavior.
+///
+/// Callers that need shared access (e.g., `LlamaCppBackend` behind `&self`)
+/// must wrap `LlamaContext` in a `Mutex` to serialize access.
 #[cfg(feature = "llm-llamacpp")]
 pub struct LlamaContext {
     ptr: *mut c_void,
@@ -50,8 +59,8 @@ pub struct LlamaContext {
 
 #[cfg(feature = "llm-llamacpp")]
 unsafe impl Send for LlamaContext {}
-#[cfg(feature = "llm-llamacpp")]
-unsafe impl Sync for LlamaContext {}
+// NOTE: Sync intentionally NOT implemented. llama_decode() mutates internal
+// state and is not thread-safe. Use Mutex for shared access.
 
 // =============================================================================
 // FFI Declarations

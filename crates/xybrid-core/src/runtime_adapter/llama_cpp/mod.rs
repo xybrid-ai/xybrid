@@ -30,6 +30,7 @@ use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
 };
 use crate::runtime_adapter::AdapterError;
+use std::sync::Mutex;
 
 /// LlamaCppBackend - LLM inference using llama.cpp.
 ///
@@ -56,8 +57,12 @@ use crate::runtime_adapter::AdapterError;
 pub struct LlamaCppBackend {
     /// Pointer to loaded model (llama_model*)
     model: Option<sys::LlamaModel>,
-    /// Pointer to context (llama_context*)
-    context: Option<sys::LlamaContext>,
+    /// Pointer to context (llama_context*).
+    ///
+    /// Wrapped in Mutex because llama_decode() mutates internal state and is
+    /// not thread-safe. The LlmBackend trait requires Send + Sync, and
+    /// generate() takes &self, so we need a Mutex to serialize context access.
+    context: Mutex<Option<sys::LlamaContext>>,
     /// Current configuration
     config: Option<LlmConfig>,
 }
@@ -71,7 +76,7 @@ impl LlamaCppBackend {
 
         Ok(Self {
             model: None,
-            context: None,
+            context: Mutex::new(None),
             config: None,
         })
     }
@@ -80,8 +85,9 @@ impl LlamaCppBackend {
 #[cfg(feature = "llm-llamacpp")]
 impl Drop for LlamaCppBackend {
     fn drop(&mut self) {
-        // Free context first, then model
-        if let Some(ctx) = self.context.take() {
+        // Free context first, then model.
+        // get_mut() doesn't lock — safe because Drop has &mut self.
+        if let Some(ctx) = self.context.get_mut().unwrap().take() {
             sys::llama_free(ctx);
         }
         if let Some(model) = self.model.take() {
@@ -158,18 +164,18 @@ impl LlmBackend for LlamaCppBackend {
         .map_err(|e| AdapterError::RuntimeError(format!("Failed to create context: {}", e)))?;
 
         self.model = Some(model);
-        self.context = Some(context);
+        *self.context.get_mut().unwrap() = Some(context);
         self.config = Some(config.clone());
 
         Ok(())
     }
 
     fn is_loaded(&self) -> bool {
-        self.model.is_some() && self.context.is_some()
+        self.model.is_some() && self.context.lock().unwrap().is_some()
     }
 
     fn unload(&mut self) -> LlmResult<()> {
-        if let Some(ctx) = self.context.take() {
+        if let Some(ctx) = self.context.get_mut().unwrap().take() {
             sys::llama_free(ctx);
         }
         if let Some(model) = self.model.take() {
@@ -187,7 +193,10 @@ impl LlmBackend for LlamaCppBackend {
         let model = self.model.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
         })?;
-        let context = self.context.as_ref().ok_or_else(|| {
+        let ctx_guard = self.context.lock().map_err(|_| {
+            AdapterError::RuntimeError("Context mutex poisoned".to_string())
+        })?;
+        let context = ctx_guard.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No context. Call load() first.".to_string())
         })?;
 
@@ -320,7 +329,10 @@ impl LlmBackend for LlamaCppBackend {
         let model = self.model.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
         })?;
-        let context = self.context.as_ref().ok_or_else(|| {
+        let ctx_guard = self.context.lock().map_err(|_| {
+            AdapterError::RuntimeError("Context mutex poisoned".to_string())
+        })?;
+        let context = ctx_guard.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No context. Call load() first.".to_string())
         })?;
 
