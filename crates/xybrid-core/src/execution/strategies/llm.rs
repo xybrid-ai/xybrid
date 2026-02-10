@@ -304,6 +304,7 @@ impl LlmInference for DefaultLlmInference {
             top_k: params.top_k,
             repetition_penalty: 1.1,
             stop_sequences: params.stop_sequences.clone(),
+            ..Default::default()
         };
 
         debug!(
