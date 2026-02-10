@@ -201,6 +201,17 @@ impl LlmBackend for LlamaCppBackend {
         // Tokenize
         let tokens = sys::llama_tokenize(model, &prompt, true)?;
 
+        // Validate: input tokens must fit within the context window with room to generate
+        let n_ctx = sys::llama_n_ctx(context);
+        if tokens.len() >= n_ctx {
+            return Err(AdapterError::InvalidInput(format!(
+                "Input too long: {} tokens exceeds context window of {} tokens. \
+                 Reduce the prompt size or conversation history.",
+                tokens.len(),
+                n_ctx
+            )));
+        }
+
         let start = std::time::Instant::now();
 
         // Generate with stop sequences for early termination
@@ -321,6 +332,17 @@ impl LlmBackend for LlamaCppBackend {
 
         // Tokenize
         let tokens = sys::llama_tokenize(model, &prompt, true)?;
+
+        // Validate: input tokens must fit within the context window with room to generate
+        let n_ctx = sys::llama_n_ctx(context);
+        if tokens.len() >= n_ctx {
+            return Err(AdapterError::InvalidInput(format!(
+                "Input too long: {} tokens exceeds context window of {} tokens. \
+                 Reduce the prompt size or conversation history.",
+                tokens.len(),
+                n_ctx
+            )));
+        }
 
         let start = std::time::Instant::now();
 

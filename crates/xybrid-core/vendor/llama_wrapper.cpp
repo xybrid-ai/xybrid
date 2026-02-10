@@ -445,6 +445,14 @@ int llama_generate_c(
         return -1;
     }
 
+    // Validate input tokens fit within context window.
+    // n_input must be strictly less than n_ctx to leave room for at least 1 generated token.
+    const int n_ctx = llama_n_ctx(ctx);
+    if (n_input >= n_ctx) {
+        fprintf(stderr, "llama_generate_c: input tokens (%d) >= context window (%d)\n", n_input, n_ctx);
+        return -4;  // Input too long for context window
+    }
+
     const llama_vocab* vocab = llama_model_get_vocab(model);
     const llama_token eos_token = llama_vocab_eos(vocab);
     const int n_vocab = llama_vocab_n_tokens(vocab);
@@ -458,30 +466,39 @@ int llama_generate_c(
         return -2;
     }
 
-    // Create batch for decoding
-    llama_batch batch = llama_batch_init(512, 0, 1);
+    // Use a batch sized to n_batch (the decode limit per call, default 512).
+    // Input tokens are processed in chunks of n_batch to avoid exceeding
+    // llama_decode's per-call limit.
+    const int n_batch = llama_n_batch(ctx);
+    llama_batch batch = llama_batch_init(n_batch > 0 ? n_batch : 512, 0, 1);
 
     int n_generated = 0;
     int n_cur = 0;  // Current position in context
 
-    // First, process all input tokens
-    batch.n_tokens = 0;
-    for (int i = 0; i < n_input; i++) {
-        batch.token[batch.n_tokens] = input_tokens[i];
-        batch.pos[batch.n_tokens] = n_cur;
-        batch.n_seq_id[batch.n_tokens] = 1;
-        batch.seq_id[batch.n_tokens][0] = 0;
-        // Only request logits for the last input token
-        batch.logits[batch.n_tokens] = (i == n_input - 1) ? 1 : 0;
-        batch.n_tokens++;
-        n_cur++;
-    }
+    // Process input tokens in chunks of n_batch.
+    // Previously tried to decode all tokens in one call, which failed when
+    // n_input > n_batch (default 512).
+    for (int chunk_start = 0; chunk_start < n_input; chunk_start += n_batch) {
+        int chunk_end = chunk_start + n_batch;
+        if (chunk_end > n_input) chunk_end = n_input;
 
-    // Decode input tokens
-    if (llama_decode(ctx, batch) != 0) {
-        llama_batch_free(batch);
-        llama_sampler_free(sampler);
-        return -3;
+        batch.n_tokens = 0;
+        for (int i = chunk_start; i < chunk_end; i++) {
+            batch.token[batch.n_tokens] = input_tokens[i];
+            batch.pos[batch.n_tokens] = n_cur;
+            batch.n_seq_id[batch.n_tokens] = 1;
+            batch.seq_id[batch.n_tokens][0] = 0;
+            // Only request logits for the very last input token
+            batch.logits[batch.n_tokens] = (i == n_input - 1) ? 1 : 0;
+            batch.n_tokens++;
+            n_cur++;
+        }
+
+        if (llama_decode(ctx, batch) != 0) {
+            llama_batch_free(batch);
+            llama_sampler_free(sampler);
+            return -3;
+        }
     }
 
     // Generation loop
@@ -612,6 +629,13 @@ int llama_generate_streaming_c(
         return -1;
     }
 
+    // Validate input tokens fit within context window.
+    const int n_ctx = llama_n_ctx(ctx);
+    if (n_input >= n_ctx) {
+        fprintf(stderr, "llama_generate_streaming_c: input tokens (%d) >= context window (%d)\n", n_input, n_ctx);
+        return -4;  // Input too long for context window
+    }
+
     const llama_vocab* vocab = llama_model_get_vocab(model);
     const llama_token eos_token = llama_vocab_eos(vocab);
     const int n_vocab = llama_vocab_n_tokens(vocab);
@@ -624,30 +648,35 @@ int llama_generate_streaming_c(
         return -2;
     }
 
-    // Create batch for decoding
-    llama_batch batch = llama_batch_init(512, 0, 1);
+    // Use a batch sized to n_batch (the decode limit per call, default 512).
+    const int n_batch = llama_n_batch(ctx);
+    llama_batch batch = llama_batch_init(n_batch > 0 ? n_batch : 512, 0, 1);
 
     int n_generated = 0;
     int n_cur = 0;  // Current position in context
     bool stopped_by_callback = false;
 
-    // First, process all input tokens
-    batch.n_tokens = 0;
-    for (int i = 0; i < n_input; i++) {
-        batch.token[batch.n_tokens] = input_tokens[i];
-        batch.pos[batch.n_tokens] = n_cur;
-        batch.n_seq_id[batch.n_tokens] = 1;
-        batch.seq_id[batch.n_tokens][0] = 0;
-        batch.logits[batch.n_tokens] = (i == n_input - 1) ? 1 : 0;
-        batch.n_tokens++;
-        n_cur++;
-    }
+    // Process input tokens in chunks of n_batch.
+    for (int chunk_start = 0; chunk_start < n_input; chunk_start += n_batch) {
+        int chunk_end = chunk_start + n_batch;
+        if (chunk_end > n_input) chunk_end = n_input;
 
-    // Decode input tokens
-    if (llama_decode(ctx, batch) != 0) {
-        llama_batch_free(batch);
-        llama_sampler_free(sampler);
-        return -3;
+        batch.n_tokens = 0;
+        for (int i = chunk_start; i < chunk_end; i++) {
+            batch.token[batch.n_tokens] = input_tokens[i];
+            batch.pos[batch.n_tokens] = n_cur;
+            batch.n_seq_id[batch.n_tokens] = 1;
+            batch.seq_id[batch.n_tokens][0] = 0;
+            batch.logits[batch.n_tokens] = (i == n_input - 1) ? 1 : 0;
+            batch.n_tokens++;
+            n_cur++;
+        }
+
+        if (llama_decode(ctx, batch) != 0) {
+            llama_batch_free(batch);
+            llama_sampler_free(sampler);
+            return -3;
+        }
     }
 
     // Buffer for token text conversion

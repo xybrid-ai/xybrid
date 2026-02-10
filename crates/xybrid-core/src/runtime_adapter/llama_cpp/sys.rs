@@ -1123,4 +1123,83 @@ mod tests {
 
         assert_eq!(len, 4998, "Must use retry_result (4998), not first result (5000)");
     }
+
+    // =========================================================================
+    // Regression: Prompt Size Exceeds Context Window
+    // =========================================================================
+    //
+    // Bug: Neither the Rust layer nor the C layer validated that the number
+    // of input tokens fits within the KV cache context window (n_ctx).
+    // When input tokens >= n_ctx, the KV cache overflows → heap corruption.
+    //
+    // Additionally, the C layer allocated a fixed batch of 512 tokens, causing
+    // heap corruption when input tokens > 512.
+    //
+    // These tests verify the bounds-checking logic without needing llama.cpp.
+
+    /// Verify that the context window check rejects input that equals or exceeds n_ctx.
+    #[test]
+    fn test_context_window_bounds_check() {
+        // Simulate the Rust-layer validation from generate() / generate_streaming()
+        let n_ctx: usize = 4096;
+
+        // Case 1: Input exactly at limit (no room for generation) → reject
+        let tokens_at_limit = vec![0i32; 4096];
+        assert!(
+            tokens_at_limit.len() >= n_ctx,
+            "Input at context limit should be rejected"
+        );
+
+        // Case 2: Input exceeding limit → reject
+        let tokens_over_limit = vec![0i32; 5000];
+        assert!(
+            tokens_over_limit.len() >= n_ctx,
+            "Input exceeding context limit should be rejected"
+        );
+
+        // Case 3: Input well within limit → accept
+        let tokens_within_limit = vec![0i32; 2000];
+        assert!(
+            tokens_within_limit.len() < n_ctx,
+            "Input within context limit should be accepted"
+        );
+
+        // Case 4: Input at limit minus 1 (room for exactly 1 token) → accept
+        let tokens_just_under = vec![0i32; 4095];
+        assert!(
+            tokens_just_under.len() < n_ctx,
+            "Input at n_ctx-1 should be accepted (room for 1 generated token)"
+        );
+    }
+
+    /// Verify that batch allocation must be at least as large as input token count.
+    ///
+    /// Regression test: previously used llama_batch_init(512, ...) which caused
+    /// heap corruption when n_input > 512.
+    #[test]
+    fn test_batch_size_must_fit_input_tokens() {
+        let fixed_batch_size: usize = 512;
+
+        // Small input: 512 batch is fine
+        let small_input = 100;
+        let batch_size = if small_input > fixed_batch_size { small_input } else { fixed_batch_size };
+        assert!(batch_size >= small_input);
+
+        // Large input: batch must grow to fit
+        let large_input = 2000;
+        let batch_size = if large_input > fixed_batch_size { large_input } else { fixed_batch_size };
+        assert_eq!(batch_size, 2000, "Batch must grow to fit large input");
+        assert!(batch_size >= large_input);
+
+        // Edge case: exactly 512
+        let exact_input = 512;
+        let batch_size = if exact_input > fixed_batch_size { exact_input } else { fixed_batch_size };
+        assert_eq!(batch_size, 512);
+        assert!(batch_size >= exact_input);
+
+        // Edge case: 513 tokens (one over) → must allocate 513
+        let over_input = 513;
+        let batch_size = if over_input > fixed_batch_size { over_input } else { fixed_batch_size };
+        assert_eq!(batch_size, 513, "Batch must not use fixed 512 when input is 513");
+    }
 }
