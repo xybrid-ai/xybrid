@@ -3,7 +3,7 @@ plugins {
     kotlin("android")
 }
 
-version = "0.1.0-alpha1"
+version = "0.1.0-alpha2"
 
 android {
     namespace = "ai.xybrid"
