@@ -125,7 +125,7 @@ llama_context* llama_new_context_with_model_c(
     llama_context_params params = llama_context_default_params();
     params.n_ctx = static_cast<uint32_t>(n_ctx);
     params.n_batch = static_cast<uint32_t>(n_batch > 0 ? n_batch : 512);
-    params.flash_attn = flash_attn;
+    params.flash_attn_type = flash_attn ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
     // Use provided thread count, or fall back to hardware concurrency
     int actual_threads = n_threads > 0 ? n_threads : std::thread::hardware_concurrency();
     if (actual_threads == 0) actual_threads = 4;  // Fallback if detection fails
