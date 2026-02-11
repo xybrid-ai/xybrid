@@ -169,19 +169,49 @@ fn compile_llama_cpp() {
     let wrapper_path = manifest_dir.join("vendor/llama_wrapper.cpp");
 
     // Check if llama.cpp is vendored
-    if !llama_cpp_dir.exists() {
-        println!("cargo:warning=================================================================");
-        println!("cargo:warning=ERROR: llama.cpp not found!");
-        println!("cargo:warning=================================================================");
-        println!("cargo:warning=Expected location: {}", llama_cpp_dir.display());
-        println!("cargo:warning=");
-        println!("cargo:warning=To fix this, run:");
-        println!("cargo:warning=  git clone --depth 1 https://github.com/ggerganov/llama.cpp {}", llama_cpp_dir.display());
-        println!("cargo:warning=");
-        println!("cargo:warning=Or disable the llm-llamacpp feature:");
-        println!("cargo:warning=  cargo build --no-default-features");
-        println!("cargo:warning=================================================================");
-        process::exit(1);
+    // When consumed as a git dependency (e.g., Flutter pub cache), git submodules
+    // are not initialized — the directory exists but is empty (no CMakeLists.txt).
+    let cmake_lists = llama_cpp_dir.join("CMakeLists.txt");
+    if !cmake_lists.exists() {
+        println!("cargo:warning=llama.cpp submodule not initialized, cloning...");
+
+        // Remove the empty stub directory if it exists (git submodule placeholder)
+        if llama_cpp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&llama_cpp_dir);
+        }
+
+        let status = process::Command::new("git")
+            .args([
+                "clone",
+                "--depth",
+                "1",
+                "https://github.com/ggerganov/llama.cpp",
+                &llama_cpp_dir.to_string_lossy(),
+            ])
+            .status();
+
+        match status {
+            Ok(s) if s.success() => {
+                println!("cargo:warning=llama.cpp cloned successfully");
+            }
+            _ => {
+                println!("cargo:warning=================================================================");
+                println!("cargo:warning=ERROR: Failed to clone llama.cpp!");
+                println!("cargo:warning=================================================================");
+                println!("cargo:warning=Expected location: {}", llama_cpp_dir.display());
+                println!("cargo:warning=");
+                println!("cargo:warning=To fix this manually, run:");
+                println!(
+                    "cargo:warning=  git clone --depth 1 https://github.com/ggerganov/llama.cpp {}",
+                    llama_cpp_dir.display()
+                );
+                println!("cargo:warning=");
+                println!("cargo:warning=Or disable the llm-llamacpp feature:");
+                println!("cargo:warning=  cargo build --no-default-features");
+                println!("cargo:warning=================================================================");
+                process::exit(1);
+            }
+        }
     }
 
     // Check if CMake is available
