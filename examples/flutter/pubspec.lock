@@ -978,7 +978,7 @@ packages:
       path: "../../bindings/flutter"
       relative: true
     source: path
-    version: "0.1.0-alpha1"
+    version: "0.1.0-alpha3-rc1"
   yaml:
     dependency: transitive
     description:
