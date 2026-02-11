@@ -107,8 +107,9 @@ jobs:
         if: matrix.platform == 'windows'
         shell: bash
         run: |
-          echo "CFLAGS=/MD" >> $GITHUB_ENV
-          echo "CXXFLAGS=/MD" >> $GITHUB_ENV
+          # Use -MD not /MD — Git Bash mangles /MD to C:/Program Files/Git/MD
+          echo "CFLAGS=-MD" >> $GITHUB_ENV
+          echo "CXXFLAGS=-MD" >> $GITHUB_ENV
 
       - name: Run FRB codegen
         working-directory: bindings/flutter
