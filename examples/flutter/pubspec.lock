@@ -975,10 +975,12 @@ packages:
   xybrid_flutter:
     dependency: "direct main"
     description:
-      path: "../../bindings/flutter"
-      relative: true
-    source: path
-    version: "0.1.0-alpha3-rc1"
+      path: "bindings/flutter"
+      ref: master
+      resolved-ref: "7cdcedd5b76f25628ddba30dae0280565583f6b3"
+      url: "https://github.com/xybrid-ai/xybrid.git"
+    source: git
+    version: "0.1.0-alpha3-rc2"
   yaml:
     dependency: transitive
     description:
