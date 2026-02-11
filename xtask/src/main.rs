@@ -771,6 +771,24 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
     std::fs::create_dir_all(&unity_plugins_dir)
         .with_context(|| format!("Failed to create Unity plugins directory: {:?}", unity_plugins_dir))?;
 
+    // Ensure the platform folder has a .meta file (Unity requires it)
+    let folder_meta = PathBuf::from("bindings/unity/Runtime/Plugins")
+        .join(format!("{}.meta", platform_dir));
+    if !folder_meta.exists() {
+        let guid = format!("{:032x}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
+        std::fs::write(
+            &folder_meta,
+            format!(
+                "fileFormatVersion: 2\nguid: {}\nfolderAsset: yes\nDefaultImporter:\n  externalObjects: {{}}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n",
+                guid
+            ),
+        )?;
+        println!("  ✓ Created folder .meta: {}", folder_meta.display());
+    }
+
     // Copy the dynamic library
     let src = PathBuf::from(dylib_path);
     if !src.exists() {
@@ -785,6 +803,21 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
 
     println!("  ✓ Deployed to: {}", dst.display());
 
+    // Generate .meta for the dylib if missing (Unity requires it for plugin import settings)
+    let meta_path = dst.with_extension(format!(
+        "{}.meta",
+        dst.extension().unwrap_or_default().to_str().unwrap_or("")
+    ));
+    if !meta_path.exists() {
+        let guid = format!("{:032x}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
+        let meta_content = generate_plugin_meta(&guid, platform_dir);
+        std::fs::write(&meta_path, meta_content)?;
+        println!("  ✓ Created plugin .meta: {}", meta_path.display());
+    }
+
     // Also copy the C header
     let header_src = PathBuf::from("crates/xybrid-ffi/include/xybrid.h");
     if header_src.exists() {
@@ -798,6 +831,27 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Generate a Unity .meta file for a native plugin with correct platform settings
+fn generate_plugin_meta(guid: &str, platform_dir: &str) -> String {
+    match platform_dir {
+        "macOS" => format!(
+            "fileFormatVersion: 2\nguid: {guid}\nPluginImporter:\n  externalObjects: {{}}\n  serializedVersion: 3\n  iconMap: {{}}\n  executionOrder: {{}}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 1\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n    Any:\n      enabled: 0\n      settings:\n        Exclude Editor: 0\n        Exclude Linux64: 1\n        Exclude OSXUniversal: 0\n        Exclude WebGL: 1\n        Exclude Win: 1\n        Exclude Win64: 1\n    Editor:\n      enabled: 1\n      settings:\n        CPU: AnyCPU\n        DefaultValueInitialized: true\n        OS: AnyOS\n    OSXUniversal:\n      enabled: 1\n      settings:\n        CPU: AnyCPU\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n"
+        ),
+        "iOS" => format!(
+            "fileFormatVersion: 2\nguid: {guid}\nPluginImporter:\n  externalObjects: {{}}\n  serializedVersion: 3\n  iconMap: {{}}\n  executionOrder: {{}}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 1\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n    Any:\n      enabled: 0\n      settings:\n        Exclude Editor: 1\n        Exclude Linux64: 1\n        Exclude OSXUniversal: 1\n        Exclude WebGL: 1\n        Exclude Win: 1\n        Exclude Win64: 1\n    Editor:\n      enabled: 0\n      settings:\n        CPU: AnyCPU\n        DefaultValueInitialized: true\n        OS: AnyOS\n    iOS:\n      enabled: 1\n      settings:\n        AddToEmbeddedBinaries: false\n        CPU: ARM64\n        CompileFlags:\n        FrameworkDependencies:\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n"
+        ),
+        "Android" => format!(
+            "fileFormatVersion: 2\nguid: {guid}\nPluginImporter:\n  externalObjects: {{}}\n  serializedVersion: 3\n  iconMap: {{}}\n  executionOrder: {{}}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 1\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n    Any:\n      enabled: 0\n      settings:\n        Exclude Editor: 1\n        Exclude Linux64: 1\n        Exclude OSXUniversal: 1\n        Exclude WebGL: 1\n        Exclude Win: 1\n        Exclude Win64: 1\n    Android:\n      enabled: 1\n      settings:\n        CPU: ARM64\n    Editor:\n      enabled: 0\n      settings:\n        CPU: AnyCPU\n        DefaultValueInitialized: true\n        OS: AnyOS\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n"
+        ),
+        "Windows" => format!(
+            "fileFormatVersion: 2\nguid: {guid}\nPluginImporter:\n  externalObjects: {{}}\n  serializedVersion: 3\n  iconMap: {{}}\n  executionOrder: {{}}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 1\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n    Any:\n      enabled: 0\n      settings:\n        Exclude Editor: 0\n        Exclude Linux64: 1\n        Exclude OSXUniversal: 1\n        Exclude WebGL: 1\n        Exclude Win: 0\n        Exclude Win64: 0\n    Editor:\n      enabled: 1\n      settings:\n        CPU: AnyCPU\n        DefaultValueInitialized: true\n        OS: Windows\n    Win:\n      enabled: 1\n      settings:\n        CPU: x86\n    Win64:\n      enabled: 1\n      settings:\n        CPU: x86_64\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n"
+        ),
+        _ => format!(
+            "fileFormatVersion: 2\nguid: {guid}\nPluginImporter:\n  externalObjects: {{}}\n  serializedVersion: 3\n  iconMap: {{}}\n  executionOrder: {{}}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 1\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n    Any:\n      enabled: 0\n      settings:\n        Exclude Editor: 0\n        Exclude Linux64: 0\n        Exclude OSXUniversal: 1\n        Exclude WebGL: 1\n        Exclude Win: 1\n        Exclude Win64: 1\n    Editor:\n      enabled: 1\n      settings:\n        CPU: AnyCPU\n        DefaultValueInitialized: true\n        OS: AnyOS\n    Linux64:\n      enabled: 1\n      settings:\n        CPU: x86_64\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n"
+        ),
+    }
 }
 
 /// Generate Swift/Kotlin bindings using uniffi-bindgen
