@@ -12,7 +12,11 @@ Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.1.0
+  xybrid_flutter:
+    git:
+      url: https://github.com/xybrid-ai/xybrid.git
+      ref: main
+      path: bindings/flutter
 ```
 
 ```bash
