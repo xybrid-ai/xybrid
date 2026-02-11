@@ -732,18 +732,33 @@ fn build_ffi(
 
     // Deploy to Unity if requested
     if deploy_unity {
-        deploy_ffi_to_unity(&dylib_path)?;
+        deploy_ffi_to_unity(&dylib_path, target.as_deref())?;
     }
 
     Ok(())
 }
 
 /// Deploy the built xybrid-ffi library to the Unity bindings directory
-fn deploy_ffi_to_unity(dylib_path: &str) -> Result<()> {
+fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
     println!("\nDeploying to Unity...");
 
-    // Determine the platform subdirectory
-    let platform_dir = if cfg!(target_os = "macos") {
+    // Determine the platform subdirectory from the cross-compilation target,
+    // falling back to the host platform if no target was specified.
+    let platform_dir = if let Some(t) = target {
+        if t.contains("apple-ios") {
+            "iOS"
+        } else if t.contains("apple-darwin") || t.contains("apple-macos") {
+            "macOS"
+        } else if t.contains("android") {
+            "Android"
+        } else if t.contains("windows") {
+            "Windows"
+        } else if t.contains("linux") {
+            "Linux"
+        } else {
+            anyhow::bail!("Unknown target platform for Unity deployment: {}", t);
+        }
+    } else if cfg!(target_os = "macos") {
         "macOS"
     } else if cfg!(target_os = "windows") {
         "Windows"
