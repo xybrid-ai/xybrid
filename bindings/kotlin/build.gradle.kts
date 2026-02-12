@@ -1,8 +1,7 @@
 plugins {
     id("com.android.library")
     kotlin("android")
-    `maven-publish`
-    signing
+    id("com.vanniktech.maven.publish")
 }
 
 group = "ai.xybrid"
@@ -47,6 +46,12 @@ android {
             jniLibs.srcDirs("libs")
         }
     }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
 }
 
 dependencies {
@@ -58,67 +63,33 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }
 
-android {
-    publishing {
-        singleVariant("release") {
-            withSourcesJar()
-        }
-    }
-}
+mavenPublishing {
+    publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
+    signAllPublications()
 
-afterEvaluate {
-    publishing {
-        publications {
-            create<MavenPublication>("release") {
-                from(components["release"])
+    coordinates("ai.xybrid", "xybrid-kotlin", version.toString())
 
-                groupId = "ai.xybrid"
-                artifactId = "xybrid-kotlin"
-                version = project.version.toString()
+    pom {
+        name.set("Xybrid Kotlin SDK")
+        description.set("On-device ML inference for Android")
+        url.set("https://github.com/xybrid-ai/xybrid")
 
-                pom {
-                    name.set("Xybrid Kotlin SDK")
-                    description.set("On-device ML inference for Android")
-                    url.set("https://github.com/xybrid-ai/xybrid")
-
-                    licenses {
-                        license {
-                            name.set("Apache-2.0")
-                            url.set("https://www.apache.org/licenses/LICENSE-2.0")
-                        }
-                    }
-                    scm {
-                        url.set("https://github.com/xybrid-ai/xybrid")
-                        connection.set("scm:git:git://github.com/xybrid-ai/xybrid.git")
-                    }
-                    developers {
-                        developer {
-                            id.set("xybrid-ai")
-                            name.set("Xybrid AI")
-                        }
-                    }
-                }
+        licenses {
+            license {
+                name.set("Apache-2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0")
             }
         }
-
-        repositories {
-            maven {
-                name = "sonatype"
-                url = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-                credentials {
-                    username = findProperty("ossrhUsername") as String? ?: ""
-                    password = findProperty("ossrhPassword") as String? ?: ""
-                }
+        scm {
+            url.set("https://github.com/xybrid-ai/xybrid")
+            connection.set("scm:git:git://github.com/xybrid-ai/xybrid.git")
+            developerConnection.set("scm:git:ssh://git@github.com/xybrid-ai/xybrid.git")
+        }
+        developers {
+            developer {
+                id.set("xybrid-ai")
+                name.set("Xybrid AI")
             }
         }
-    }
-
-    signing {
-        val signingKey = findProperty("signingKey") as String?
-        val signingPassword = findProperty("signingPassword") as String?
-        if (signingKey != null) {
-            useInMemoryPgpKeys(signingKey, signingPassword)
-        }
-        sign(publishing.publications["release"])
     }
 }
