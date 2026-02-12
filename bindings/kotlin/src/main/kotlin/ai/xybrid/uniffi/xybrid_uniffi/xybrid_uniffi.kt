@@ -31,6 +31,9 @@ import java.nio.charset.CodingErrorAction
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.resume
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 // This is a helper for safely working with byte buffers returned from the Rust code.
 // A rust-owned buffer is represented by its capacity, its current length, and a
@@ -379,24 +382,25 @@ internal interface _UniFFILib : Library {
             .also { lib: _UniFFILib ->
                 uniffiCheckContractApiVersion(lib)
                 uniffiCheckApiChecksums(lib)
+                uniffiRustFutureContinuationCallback.register(lib)
                 }
         }
     }
 
     fun uniffi_xybrid_uniffi_fn_free_xybridmodel(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
-    fun uniffi_xybrid_uniffi_fn_method_xybridmodel_model_id(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
-    ): RustBuffer.ByValue
-    fun uniffi_xybrid_uniffi_fn_method_xybridmodel_run(`ptr`: Pointer,`envelope`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
-    ): RustBuffer.ByValue
+    fun uniffi_xybrid_uniffi_fn_method_xybridmodel_run(`ptr`: Pointer,`envelope`: RustBuffer.ByValue,
+    ): Pointer
     fun uniffi_xybrid_uniffi_fn_free_xybridmodelloader(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_bundle(`path`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Pointer
     fun uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_registry(`modelId`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Pointer
-    fun uniffi_xybrid_uniffi_fn_method_xybridmodelloader_load(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    fun uniffi_xybrid_uniffi_fn_method_xybridmodelloader_load(`ptr`: Pointer,
     ): Pointer
+    fun uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(`cacheDir`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Unit
     fun ffi_xybrid_uniffi_rustbuffer_alloc(`size`: Int,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_xybrid_uniffi_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,_uniffi_out_err: RustCallStatus, 
@@ -511,7 +515,7 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun ffi_xybrid_uniffi_rust_future_complete_void(`handle`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
-    fun uniffi_xybrid_uniffi_checksum_method_xybridmodel_model_id(
+    fun uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir(
     ): Short
     fun uniffi_xybrid_uniffi_checksum_method_xybridmodel_run(
     ): Short
@@ -538,13 +542,13 @@ private fun uniffiCheckContractApiVersion(lib: _UniFFILib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
-    if (lib.uniffi_xybrid_uniffi_checksum_method_xybridmodel_model_id() != 24415.toShort()) {
+    if (lib.uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir() != 59754.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_xybrid_uniffi_checksum_method_xybridmodel_run() != 61096.toShort()) {
+    if (lib.uniffi_xybrid_uniffi_checksum_method_xybridmodel_run() != 58716.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_xybrid_uniffi_checksum_method_xybridmodelloader_load() != 56505.toShort()) {
+    if (lib.uniffi_xybrid_uniffi_checksum_method_xybridmodelloader_load() != 43654.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle() != 7105.toShort()) {
@@ -556,6 +560,50 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
 }
 
 // Async support
+// Async return type handlers
+
+internal const val UNIFFI_RUST_FUTURE_POLL_READY = 0.toShort()
+internal const val UNIFFI_RUST_FUTURE_POLL_MAYBE_READY = 1.toShort()
+
+internal val uniffiContinuationHandleMap = UniFfiHandleMap<CancellableContinuation<Short>>()
+
+// FFI type for Rust future continuations
+internal object uniffiRustFutureContinuationCallback: UniFffiRustFutureContinuationCallbackType {
+    override fun callback(continuationHandle: USize, pollResult: Short) {
+        uniffiContinuationHandleMap.remove(continuationHandle)?.resume(pollResult)
+    }
+
+    internal fun register(lib: _UniFFILib) {
+        lib.ffi_xybrid_uniffi_rust_future_continuation_callback_set(this)
+    }
+}
+
+internal suspend fun<T, F, E: Exception> uniffiRustCallAsync(
+    rustFuture: Pointer,
+    pollFunc: (Pointer, USize) -> Unit,
+    completeFunc: (Pointer, RustCallStatus) -> F,
+    freeFunc: (Pointer) -> Unit,
+    liftFunc: (F) -> T,
+    errorHandler: CallStatusErrorHandler<E>
+): T {
+    try {
+        do {
+            val pollResult = suspendCancellableCoroutine<Short> { continuation ->
+                pollFunc(
+                    rustFuture,
+                    uniffiContinuationHandleMap.insert(continuation)
+                )
+            }
+        } while (pollResult != UNIFFI_RUST_FUTURE_POLL_READY);
+
+        return liftFunc(
+            rustCallWithError(errorHandler, { status -> completeFunc(rustFuture, status) })
+        )
+    } finally {
+        freeFunc(rustFuture)
+    }
+}
+
 
 // Public interface members begin here.
 
@@ -577,6 +625,26 @@ public object FfiConverterUInt: FfiConverter<UInt, Int> {
 
     override fun write(value: UInt, buf: ByteBuffer) {
         buf.putInt(value.toInt())
+    }
+}
+
+public object FfiConverterULong: FfiConverter<ULong, Long> {
+    override fun lift(value: Long): ULong {
+        return value.toULong()
+    }
+
+    override fun read(buf: ByteBuffer): ULong {
+        return lift(buf.getLong())
+    }
+
+    override fun lower(value: ULong): Long {
+        return value.toLong()
+    }
+
+    override fun allocationSize(value: ULong) = 8
+
+    override fun write(value: ULong, buf: ByteBuffer) {
+        buf.putLong(value.toLong())
     }
 }
 
@@ -874,9 +942,8 @@ abstract class FFIObject(
 }
 
 public interface XybridModelInterface {
-    
-    fun `modelId`(): String@Throws(XybridException::class)
-    fun `run`(`envelope`: XybridEnvelope): XybridResult
+    @Throws(XybridException::class)
+    suspend fun `run`(`envelope`: XybridEnvelope): XybridResult
     companion object
 }
 
@@ -898,29 +965,26 @@ class XybridModel(
         }
     }
 
-    override fun `modelId`(): String =
-        callWithPointer {
-    rustCall() { _status ->
-    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_method_xybridmodel_model_id(it,
-        
-        _status)
-}
-        }.let {
-            FfiConverterString.lift(it)
-        }
     
-    
-    @Throws(XybridException::class)override fun `run`(`envelope`: XybridEnvelope): XybridResult =
-        callWithPointer {
-    rustCallWithError(XybridException) { _status ->
-    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_method_xybridmodel_run(it,
-        FfiConverterTypeXybridEnvelope.lower(`envelope`),
-        _status)
-}
-        }.let {
-            FfiConverterTypeXybridResult.lift(it)
-        }
-    
+    @Throws(XybridException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `run`(`envelope`: XybridEnvelope) : XybridResult {
+        return uniffiRustCallAsync(
+            callWithPointer { thisPtr ->
+                _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_method_xybridmodel_run(
+                    thisPtr,
+                    FfiConverterTypeXybridEnvelope.lower(`envelope`),
+                )
+            },
+            { future, continuation -> _UniFFILib.INSTANCE.ffi_xybrid_uniffi_rust_future_poll_rust_buffer(future, continuation) },
+            { future, continuation -> _UniFFILib.INSTANCE.ffi_xybrid_uniffi_rust_future_complete_rust_buffer(future, continuation) },
+            { future -> _UniFFILib.INSTANCE.ffi_xybrid_uniffi_rust_future_free_rust_buffer(future) },
+            // lift function
+            { FfiConverterTypeXybridResult.lift(it) },
+            // Error FFI converter
+            XybridException.ErrorHandler,
+        )
+    }
     
 
     
@@ -955,7 +1019,7 @@ public object FfiConverterTypeXybridModel: FfiConverter<XybridModel, Pointer> {
 
 public interface XybridModelLoaderInterface {
     @Throws(XybridException::class)
-    fun `load`(): XybridModel
+    suspend fun `load`(): XybridModel
     companion object
 }
 
@@ -978,17 +1042,25 @@ class XybridModelLoader(
     }
 
     
-    @Throws(XybridException::class)override fun `load`(): XybridModel =
-        callWithPointer {
-    rustCallWithError(XybridException) { _status ->
-    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_method_xybridmodelloader_load(it,
-        
-        _status)
-}
-        }.let {
-            FfiConverterTypeXybridModel.lift(it)
-        }
-    
+    @Throws(XybridException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `load`() : XybridModel {
+        return uniffiRustCallAsync(
+            callWithPointer { thisPtr ->
+                _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_method_xybridmodelloader_load(
+                    thisPtr,
+                    
+                )
+            },
+            { future, continuation -> _UniFFILib.INSTANCE.ffi_xybrid_uniffi_rust_future_poll_pointer(future, continuation) },
+            { future, continuation -> _UniFFILib.INSTANCE.ffi_xybrid_uniffi_rust_future_complete_pointer(future, continuation) },
+            { future -> _UniFFILib.INSTANCE.ffi_xybrid_uniffi_rust_future_free_pointer(future) },
+            // lift function
+            { FfiConverterTypeXybridModel.lift(it) },
+            // Error FFI converter
+            XybridException.ErrorHandler,
+        )
+    }
     
 
     companion object {
@@ -1034,11 +1106,9 @@ public object FfiConverterTypeXybridModelLoader: FfiConverter<XybridModelLoader,
 
 data class XybridResult (
     var `success`: Boolean, 
-    var `error`: String?, 
-    var `outputType`: String, 
     var `text`: String?, 
-    var `embedding`: List<Float>?, 
     var `audioBytes`: ByteArray?, 
+    var `embedding`: List<Float>?, 
     var `latencyMs`: UInt
 ) {
     
@@ -1050,31 +1120,25 @@ public object FfiConverterTypeXybridResult: FfiConverterRustBuffer<XybridResult>
         return XybridResult(
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalString.read(buf),
-            FfiConverterString.read(buf),
-            FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalSequenceFloat.read(buf),
             FfiConverterOptionalByteArray.read(buf),
+            FfiConverterOptionalSequenceFloat.read(buf),
             FfiConverterUInt.read(buf),
         )
     }
 
     override fun allocationSize(value: XybridResult) = (
             FfiConverterBoolean.allocationSize(value.`success`) +
-            FfiConverterOptionalString.allocationSize(value.`error`) +
-            FfiConverterString.allocationSize(value.`outputType`) +
             FfiConverterOptionalString.allocationSize(value.`text`) +
-            FfiConverterOptionalSequenceFloat.allocationSize(value.`embedding`) +
             FfiConverterOptionalByteArray.allocationSize(value.`audioBytes`) +
+            FfiConverterOptionalSequenceFloat.allocationSize(value.`embedding`) +
             FfiConverterUInt.allocationSize(value.`latencyMs`)
     )
 
     override fun write(value: XybridResult, buf: ByteBuffer) {
             FfiConverterBoolean.write(value.`success`, buf)
-            FfiConverterOptionalString.write(value.`error`, buf)
-            FfiConverterString.write(value.`outputType`, buf)
             FfiConverterOptionalString.write(value.`text`, buf)
-            FfiConverterOptionalSequenceFloat.write(value.`embedding`, buf)
             FfiConverterOptionalByteArray.write(value.`audioBytes`, buf)
+            FfiConverterOptionalSequenceFloat.write(value.`embedding`, buf)
             FfiConverterUInt.write(value.`latencyMs`, buf)
     }
 }
@@ -1191,31 +1255,92 @@ sealed class XybridException: Exception() {
     // Each variant is a nested class
     
     class ModelNotFound(
-        val `modelId`: String
+        val `msg`: String
         ) : XybridException() {
         override val message
-            get() = "modelId=${ `modelId` }"
+            get() = "message=${ `msg` }"
     }
     
-    class InferenceFailed(
-        val `message`: String
+    class LoadException(
+        val `msg`: String
         ) : XybridException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "message=${ `msg` }"
     }
     
-    class InvalidInput(
-        val `message`: String
+    class InferenceException(
+        val `msg`: String
         ) : XybridException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "message=${ `msg` }"
+    }
+    
+    class StreamingNotSupported(
+        ) : XybridException() {
+        override val message
+            get() = ""
+    }
+    
+    class NotLoaded(
+        ) : XybridException() {
+        override val message
+            get() = ""
+    }
+    
+    class ConfigException(
+        val `msg`: String
+        ) : XybridException() {
+        override val message
+            get() = "message=${ `msg` }"
+    }
+    
+    class NetworkException(
+        val `msg`: String
+        ) : XybridException() {
+        override val message
+            get() = "message=${ `msg` }"
     }
     
     class IoException(
-        val `message`: String
+        val `msg`: String
         ) : XybridException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "message=${ `msg` }"
+    }
+    
+    class CacheException(
+        val `msg`: String
+        ) : XybridException() {
+        override val message
+            get() = "message=${ `msg` }"
+    }
+    
+    class PipelineException(
+        val `msg`: String
+        ) : XybridException() {
+        override val message
+            get() = "message=${ `msg` }"
+    }
+    
+    class CircuitOpen(
+        val `msg`: String
+        ) : XybridException() {
+        override val message
+            get() = "message=${ `msg` }"
+    }
+    
+    class RateLimited(
+        val `retryAfterSecs`: ULong
+        ) : XybridException() {
+        override val message
+            get() = "retryAfterSecs=${ `retryAfterSecs` }"
+    }
+    
+    class Timeout(
+        val `timeoutMs`: ULong
+        ) : XybridException() {
+        override val message
+            get() = "timeoutMs=${ `timeoutMs` }"
     }
     
 
@@ -1234,14 +1359,37 @@ public object FfiConverterTypeXybridError : FfiConverterRustBuffer<XybridExcepti
             1 -> XybridException.ModelNotFound(
                 FfiConverterString.read(buf),
                 )
-            2 -> XybridException.InferenceFailed(
+            2 -> XybridException.LoadException(
                 FfiConverterString.read(buf),
                 )
-            3 -> XybridException.InvalidInput(
+            3 -> XybridException.InferenceException(
                 FfiConverterString.read(buf),
                 )
-            4 -> XybridException.IoException(
+            4 -> XybridException.StreamingNotSupported()
+            5 -> XybridException.NotLoaded()
+            6 -> XybridException.ConfigException(
                 FfiConverterString.read(buf),
+                )
+            7 -> XybridException.NetworkException(
+                FfiConverterString.read(buf),
+                )
+            8 -> XybridException.IoException(
+                FfiConverterString.read(buf),
+                )
+            9 -> XybridException.CacheException(
+                FfiConverterString.read(buf),
+                )
+            10 -> XybridException.PipelineException(
+                FfiConverterString.read(buf),
+                )
+            11 -> XybridException.CircuitOpen(
+                FfiConverterString.read(buf),
+                )
+            12 -> XybridException.RateLimited(
+                FfiConverterULong.read(buf),
+                )
+            13 -> XybridException.Timeout(
+                FfiConverterULong.read(buf),
                 )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
@@ -1252,22 +1400,65 @@ public object FfiConverterTypeXybridError : FfiConverterRustBuffer<XybridExcepti
             is XybridException.ModelNotFound -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4
-                + FfiConverterString.allocationSize(value.`modelId`)
+                + FfiConverterString.allocationSize(value.`msg`)
             )
-            is XybridException.InferenceFailed -> (
+            is XybridException.LoadException -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`msg`)
             )
-            is XybridException.InvalidInput -> (
+            is XybridException.InferenceException -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is XybridException.StreamingNotSupported -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+            )
+            is XybridException.NotLoaded -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+            )
+            is XybridException.ConfigException -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is XybridException.NetworkException -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+                + FfiConverterString.allocationSize(value.`msg`)
             )
             is XybridException.IoException -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is XybridException.CacheException -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is XybridException.PipelineException -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is XybridException.CircuitOpen -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is XybridException.RateLimited -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+                + FfiConverterULong.allocationSize(value.`retryAfterSecs`)
+            )
+            is XybridException.Timeout -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+                + FfiConverterULong.allocationSize(value.`timeoutMs`)
             )
         }
     }
@@ -1276,22 +1467,65 @@ public object FfiConverterTypeXybridError : FfiConverterRustBuffer<XybridExcepti
         when(value) {
             is XybridException.ModelNotFound -> {
                 buf.putInt(1)
-                FfiConverterString.write(value.`modelId`, buf)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.InferenceFailed -> {
+            is XybridException.LoadException -> {
                 buf.putInt(2)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.InvalidInput -> {
+            is XybridException.InferenceException -> {
                 buf.putInt(3)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is XybridException.StreamingNotSupported -> {
+                buf.putInt(4)
+                Unit
+            }
+            is XybridException.NotLoaded -> {
+                buf.putInt(5)
+                Unit
+            }
+            is XybridException.ConfigException -> {
+                buf.putInt(6)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is XybridException.NetworkException -> {
+                buf.putInt(7)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
             is XybridException.IoException -> {
-                buf.putInt(4)
-                FfiConverterString.write(value.`message`, buf)
+                buf.putInt(8)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is XybridException.CacheException -> {
+                buf.putInt(9)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is XybridException.PipelineException -> {
+                buf.putInt(10)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is XybridException.CircuitOpen -> {
+                buf.putInt(11)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is XybridException.RateLimited -> {
+                buf.putInt(12)
+                FfiConverterULong.write(value.`retryAfterSecs`, buf)
+                Unit
+            }
+            is XybridException.Timeout -> {
+                buf.putInt(13)
+                FfiConverterULong.write(value.`timeoutMs`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -1439,4 +1673,16 @@ public object FfiConverterSequenceFloat: FfiConverterRustBuffer<List<Float>> {
         }
     }
 }
+
+
+
+
+
+fun `initSdkCacheDir`(`cacheDir`: String) =
+    
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(FfiConverterString.lower(`cacheDir`),_status)
+}
+
+
 

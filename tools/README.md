@@ -94,6 +94,7 @@ Generates platform-specific bindings from xybrid-uniffi using uniffi-bindgen.
 ```bash
 cargo xtask generate-bindings
 cargo xtask generate-bindings --language swift
+cargo xtask generate-bindings --language kotlin
 cargo xtask generate-bindings --language kotlin --out-dir ./my-bindings
 ```
 
@@ -103,7 +104,12 @@ cargo xtask generate-bindings --language kotlin --out-dir ./my-bindings
 
 **Default output locations:**
 - Swift: `bindings/apple/Sources/Xybrid/`
-- Kotlin: `bindings/kotlin/src/main/kotlin/ai/xybrid/`
+- Kotlin: `bindings/kotlin/src/main/kotlin/ai/xybrid/uniffi/xybrid_uniffi/`
+
+**Kotlin post-processing** (automatic when `--out-dir` is not specified):
+- Renames `message` fields to `msg` in exception classes (avoids conflict with `Exception.message`)
+- Removes `@JvmOverloads` annotations (incompatible with UInt parameters)
+- Copies binding to `bindings/kotlin/src/main/kotlin/ai/xybrid/` with rewritten package declaration
 
 ### `build-xcframework` - Build Apple XCFramework (macOS only)
 
@@ -132,11 +138,18 @@ cargo xtask build-xcframework --debug --version 1.0.0
 
 ### `build-android` - Build Android .so Files
 
-Builds native .so files for Android ABIs.
+Builds native .so files for Android ABIs. With `--bindgen`, also generates Kotlin bindings first (one-command workflow).
 
 ```bash
+# Cross-compile only (bindings already generated)
 cargo xtask build-android --release
+
+# Full workflow: generate Kotlin bindings + cross-compile (recommended)
+cargo xtask build-android --release --bindgen
+
+# Specific ABIs
 cargo xtask build-android --abi arm64-v8a --abi x86_64
+
 cargo xtask build-android --debug --version 1.0.0
 ```
 
@@ -145,11 +158,18 @@ cargo xtask build-android --debug --version 1.0.0
 - `--debug` - Build in debug mode (overrides --release)
 - `--abi <abi>` - Build specific ABI(s): `armeabi-v7a`, `arm64-v8a`, `x86_64` (default: all)
 - `--version <ver>` - Override version
+- `--bindgen` - Generate Kotlin bindings before cross-compiling. This:
+  1. Builds the host dylib (`xybrid-uniffi` with `platform-macos`)
+  2. Runs `uniffi-bindgen` to generate `.kt` files
+  3. Applies Kotlin compatibility fixes (renames conflicting `message` fields, removes `@JvmOverloads`)
+  4. Copies bindings to the package location with correct package declaration
 
 **Requirements:**
 - cargo-ndk (`cargo install cargo-ndk`) or `ANDROID_NDK_HOME` environment variable
 
-**Output:** `bindings/kotlin/libs/<abi>/libxybrid_uniffi.so`
+**Output:**
+- `bindings/kotlin/libs/<abi>/libxybrid_uniffi.so` (native libraries)
+- With `--bindgen`: also generates `bindings/kotlin/src/main/kotlin/ai/xybrid/` (Kotlin sources)
 
 ### `build-flutter` - Build Flutter Native Libraries
 
@@ -245,6 +265,9 @@ cargo xtask setup-targets
 
 # Build for Android (requires NDK)
 cargo xtask build-android --release
+
+# Build for Android with Kotlin binding generation (one-command workflow)
+cargo xtask build-android --release --bindgen
 
 # Build for Apple platforms (macOS only)
 cargo xtask build-xcframework --release

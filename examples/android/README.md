@@ -1,14 +1,15 @@
 # Xybrid Android Example
 
-This is a native Android example app demonstrating how to integrate the Xybrid SDK using Kotlin and Jetpack Compose.
+This is a native Android example app demonstrating how to integrate the Xybrid SDK using Kotlin and Jetpack Compose. It loads a model from a local bundle directory and runs real TTS inference via `TemplateExecutor`.
 
 ## Features
 
 - **SDK Initialization**: Shows proper SDK startup flow with loading and error states
-- **Model Loading**: Demonstrates loading models from the Xybrid registry
-- **TTS Inference**: Shows text-to-speech inference with result display and latency metrics
+- **Model Loading**: Loads models from a local bundle path using `XybridModelLoader.fromBundle()`
+- **TTS Inference**: Runs text-to-speech inference with result display and latency metrics from `XybridResult.latencyMs`
+- **Error Handling**: Displays `XybridException` messages (ModelNotFound, InferenceFailed, InvalidInput, IoException)
 - **Jetpack Compose UI**: Modern declarative UI with Material 3 design
-- **Proper Async Handling**: Uses Kotlin coroutines for async operations
+- **Proper Async Handling**: Uses Kotlin coroutines for all SDK operations on `Dispatchers.IO`
 
 ## Prerequisites
 
@@ -17,114 +18,102 @@ This is a native Android example app demonstrating how to integrate the Xybrid S
 | Android Studio | Hedgehog (2023.1.1) or later | [Download](https://developer.android.com/studio) |
 | JDK | 11+ | Included with Android Studio |
 | Android SDK | API 28+ (Android 9.0) | Via SDK Manager |
+| Rust toolchain | With Android targets | For building native libraries |
+| Android NDK | r26+ | For cross-compilation |
 
 ## Quick Start
 
-### 1. Clone and Open
-
-```bash
-# Clone the repository
-git clone https://github.com/xybrid-ai/xybrid.git
-cd xybrid/examples/android
-
-# Open in Android Studio
-open -a "Android Studio" .
-```
-
-### 2. Configure SDK Path
-
-When opening in Android Studio, it will automatically configure `local.properties` with your SDK path. For command-line builds, set `ANDROID_HOME`:
-
-```bash
-export ANDROID_HOME="$HOME/Library/Android/sdk"  # macOS
-# export ANDROID_HOME="$HOME/Android/Sdk"        # Linux
-```
-
-### 3. Build and Run
-
-**Android Studio:**
-1. Wait for Gradle sync to complete
-2. Select a device or emulator (API 28+)
-3. Click **Run** (Shift+F10)
-
-**Command Line:**
-```bash
-./gradlew assembleDebug
-# APK will be at: app/build/outputs/apk/debug/app-debug.apk
-
-# Install to connected device
-adb install app/build/outputs/apk/debug/app-debug.apk
-```
-
-## Enabling Xybrid SDK
-
-The example app includes simulated SDK calls by default. To use the real SDK:
-
 ### 1. Build Native Libraries
 
-The Xybrid SDK requires native `.so` libraries for Android. Build them with:
+The Xybrid SDK requires native `.so` libraries for Android:
 
 ```bash
 # From the xybrid repo root
 cargo xtask build-android
 ```
 
-This requires:
-- Rust toolchain with Android targets
-- Android NDK (r26+)
-- `cargo-ndk` tool
+This builds `libxybrid_uniffi.so` and bundles `libonnxruntime.so` + `libc++_shared.so` from `vendor/ort-android/` for each ABI (arm64-v8a, x86_64).
 
 See [bindings/kotlin/README.md](../../bindings/kotlin/README.md) for detailed build instructions.
 
-### 2. Enable SDK Dependency
+### 2. Open and Build
 
-**In `settings.gradle.kts`**, uncomment:
-```kotlin
-include(":xybrid")
-project(":xybrid").projectDir = file("../../bindings/kotlin")
+```bash
+cd xybrid/examples/android
+open -a "Android Studio" .
 ```
 
-**In `app/build.gradle.kts`**, uncomment:
-```kotlin
-implementation(project(":xybrid"))
+Or build from the command line:
+
+```bash
+./gradlew assembleDebug
 ```
 
-### 3. Update Application Code
+### 3. Obtain Model Files
 
-In `XybridExampleApp.kt`, uncomment the SDK imports and replace the simulated calls:
+The app loads models from the device filesystem. You need to place model files on the device before running inference.
 
-```kotlin
-// Replace this:
-withContext(Dispatchers.IO) {
-    kotlinx.coroutines.delay(500)
-}
+**Option A: Push from fixtures (recommended for development)**
 
-// With real SDK calls:
-import ai.xybrid.XybridModelLoader
-import ai.xybrid.Envelope
+If you have model files in the repo's `fixtures/models/` directory:
 
-val loader = XybridModelLoader.fromRegistry(modelId)
-val model = loader.load()
-val envelope = Envelope.text(inputText)
-val result = model.run(envelope)
+```bash
+# Push a model directory to the device/emulator
+adb push ../../integration-tests/fixtures/models/kokoro-82m /data/local/tmp/models/kokoro-82m
 ```
+
+Then update the model path in the app to `/data/local/tmp/models/kokoro-82m`.
+
+**Option B: Push to app-private storage**
+
+```bash
+# Get the app's files directory path (after installing the app)
+adb shell run-as ai.xybrid.example mkdir -p files/models/kokoro-82m
+
+# Push model files
+adb push model_metadata.json /sdcard/tmp_model/
+adb push model.onnx /sdcard/tmp_model/
+adb push tokens.txt /sdcard/tmp_model/
+adb push voices.bin /sdcard/tmp_model/
+
+# Copy into app storage
+adb shell run-as ai.xybrid.example cp /sdcard/tmp_model/* files/models/kokoro-82m/
+```
+
+The app defaults to `<app-files-dir>/models/kokoro-82m` — you can edit the path in the UI.
+
+**Required model files** (for kokoro-82m TTS):
+- `model_metadata.json` — Execution configuration
+- `model.onnx` — ONNX model file
+- `tokens.txt` — Phoneme token vocabulary
+- `voices.bin` — Voice embeddings
+
+### 4. Run the App
+
+1. Select a device or emulator (API 28+)
+2. Click **Run** (Shift+F10)
+3. Tap **Initialize SDK**
+4. Enter the model bundle path (or use the default)
+5. Tap **Load Model**
+6. Enter text and tap **Run Inference**
 
 ## SDK Usage Patterns
 
-### Model Loading
+### Model Loading (from bundle)
 
 ```kotlin
 import ai.xybrid.XybridModelLoader
 import ai.xybrid.XybridException
+import ai.xybrid.displayMessage
 
 try {
-    val loader = XybridModelLoader.fromRegistry("kokoro-82m")
+    val loader = XybridModelLoader.fromBundle("/path/to/model/directory")
     val model = loader.load()
     // Model ready for inference
 } catch (e: XybridException.ModelNotFound) {
-    println("Model not found: ${e.modelId}")
+    println("Model not found: ${e.displayMessage}")
 } catch (e: XybridException.IoException) {
-    println("Network error: ${e.message}")
+    println("I/O error: ${e.displayMessage}")
 }
 ```
 
@@ -141,28 +130,8 @@ val envelope = Envelope.text(
 
 val result = model.run(envelope)
 if (result.success) {
-    val audioBytes = result.audioBytes
-    val latencyMs = result.latencyMs
-    // Play audio with MediaPlayer or ExoPlayer
-}
-```
-
-### Speech Recognition (ASR)
-
-```kotlin
-import ai.xybrid.Envelope
-
-val audioBytes: ByteArray = recordAudio()  // Your audio recording code
-val envelope = Envelope.audio(
-    bytes = audioBytes,
-    sampleRate = 16000u,  // 16kHz for Whisper
-    channels = 1u          // Mono audio
-)
-
-val result = model.run(envelope)
-if (result.success) {
-    val transcription = result.text
-    println("Transcribed: $transcription")
+    val audioBytes = result.audioBytes   // PCM audio data
+    val latencyMs = result.latencyMs     // Inference latency
 }
 ```
 
@@ -171,17 +140,17 @@ if (result.success) {
 ```kotlin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ai.xybrid.displayMessage
 
-suspend fun loadModel(modelId: String): XybridModel? {
-    return withContext(Dispatchers.IO) {
+suspend fun loadAndRun(path: String, text: String) {
+    withContext(Dispatchers.IO) {
         try {
-            val loader = XybridModelLoader.fromRegistry(modelId)
-            loader.load()
+            val loader = XybridModelLoader.fromBundle(path)
+            val model = loader.load()
+            val result = model.run(Envelope.text(text))
+            // Handle result...
         } catch (e: XybridException) {
-            withContext(Dispatchers.Main) {
-                showError(e.displayMessage)
-            }
-            null
+            println("Error: ${e.displayMessage}")
         }
     }
 }
@@ -195,13 +164,13 @@ android/
 │   ├── src/main/
 │   │   ├── java/ai/xybrid/example/
 │   │   │   ├── MainActivity.kt         # Activity entry point
-│   │   │   ├── XybridExampleApp.kt      # Main Compose UI
+│   │   │   ├── XybridExampleApp.kt      # Main Compose UI with real SDK calls
 │   │   │   └── ui/theme/                # Material 3 theme
 │   │   ├── res/                         # Android resources
 │   │   └── AndroidManifest.xml
 │   └── build.gradle.kts                 # App module build config
 ├── build.gradle.kts                     # Root build config
-├── settings.gradle.kts                  # Module includes
+├── settings.gradle.kts                  # Module includes (Xybrid SDK enabled)
 ├── gradle.properties                    # Gradle settings
 └── README.md                            # This file
 ```
@@ -216,17 +185,25 @@ Set `ANDROID_HOME` environment variable or let Android Studio configure it autom
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 ```
 
-### Build Fails: "minSdk is too high"
-
-Ensure your emulator or device runs Android 9.0 (API 28) or later.
-
 ### UnsatisfiedLinkError at Runtime
 
-Native libraries aren't built or included. Follow "Enabling Xybrid SDK" steps above to build them.
+Native libraries aren't built or included. Build them with:
+
+```bash
+cargo xtask build-android
+```
+
+### Model Not Found Error
+
+Ensure the model directory exists on the device and contains `model_metadata.json`. Check with:
+
+```bash
+adb shell ls -la /data/local/tmp/models/kokoro-82m/
+```
 
 ### Gradle Sync Failed
 
-1. File → Invalidate Caches / Restart
+1. File > Invalidate Caches / Restart
 2. Delete `.gradle` and `build` directories
 3. Sync Project with Gradle Files
 

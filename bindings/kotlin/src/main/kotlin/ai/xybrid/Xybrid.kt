@@ -7,6 +7,55 @@
 
 package ai.xybrid
 
+import android.content.Context
+import java.io.File
+
+// -- SDK Initialization --
+
+/**
+ * Main entry point for the Xybrid SDK.
+ *
+ * Call [Xybrid.init] once before using any other Xybrid functionality.
+ *
+ * ```kotlin
+ * class MyApplication : Application() {
+ *     override fun onCreate() {
+ *         super.onCreate()
+ *         Xybrid.init(this)
+ *     }
+ * }
+ * ```
+ */
+object Xybrid {
+    @Volatile
+    private var initialized = false
+
+    /**
+     * Initialize the Xybrid runtime.
+     *
+     * This must be called once before using any Xybrid functionality.
+     * It is safe to call multiple times — subsequent calls are no-ops.
+     *
+     * Typically called from `Application.onCreate()` or `Activity.onCreate()`.
+     *
+     * @param context Android context (application or activity).
+     */
+    @JvmStatic
+    fun init(context: Context) {
+        if (initialized) return
+        synchronized(this) {
+            if (initialized) return
+            val cacheDir = File(context.filesDir, "xybrid/models")
+            initSdkCacheDir(cacheDir.absolutePath)
+            initialized = true
+        }
+    }
+
+    /** Returns `true` if [init] has been called successfully. */
+    @JvmStatic
+    val isInitialized: Boolean get() = initialized
+}
+
 // -- Public Type Aliases --
 
 /** Loads ML models from the registry or local bundles. */
@@ -14,9 +63,6 @@ typealias ModelLoader = XybridModelLoader
 
 /** A loaded model ready for inference. */
 typealias Model = XybridModel
-
-/** Input data for model inference. Use [Envelope] factory methods. */
-typealias Envelope = XybridEnvelope
 
 /** The result of a model inference operation. */
 typealias Result = XybridResult
@@ -43,7 +89,6 @@ object Envelope {
      * @param channels Number of audio channels (default: 1)
      */
     @JvmStatic
-    @JvmOverloads
     fun audio(bytes: ByteArray, sampleRate: UInt = 16000u, channels: UInt = 1u): XybridEnvelope =
         XybridEnvelope.Audio(bytes, sampleRate, channels)
 
@@ -70,9 +115,4 @@ object Envelope {
 
 /** User-friendly error message for display. */
 val XybridException.displayMessage: String
-    get() = when (this) {
-        is XybridException.ModelNotFound -> "Model not found: $modelId"
-        is XybridException.InferenceFailed -> "Inference failed: $message"
-        is XybridException.InvalidInput -> "Invalid input: $message"
-        is XybridException.IoException -> "I/O error: $message"
-    }
+    get() = message ?: "Unknown error"

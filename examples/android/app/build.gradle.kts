@@ -57,8 +57,7 @@ android {
 
 dependencies {
     // Xybrid SDK (local project dependency)
-    // Note: Uncomment after building native libraries with: cargo xtask build-android
-    // implementation(project(":xybrid"))
+    implementation(project(":xybrid"))
 
     // Kotlin coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

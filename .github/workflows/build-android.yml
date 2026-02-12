@@ -97,6 +97,30 @@ jobs:
           echo "All .so files verified:"
           find "$SO_BASE_PATH" -name "*.so" -exec ls -la {} \;
 
+      - name: Verify ORT libraries
+        run: |
+          SO_BASE_PATH="bindings/kotlin/libs"
+          ABIS=("arm64-v8a" "x86_64")
+          ORT_LIBS=("libonnxruntime.so" "libc++_shared.so")
+
+          echo "Checking ORT libraries in Kotlin SDK..."
+          for abi in "${ABIS[@]}"; do
+            for lib in "${ORT_LIBS[@]}"; do
+              LIB_PATH="$SO_BASE_PATH/$abi/$lib"
+              if [ ! -f "$LIB_PATH" ]; then
+                echo "Error: ORT library not found at $LIB_PATH"
+                exit 1
+              fi
+              echo "OK: $LIB_PATH"
+              file "$LIB_PATH"
+            done
+          done
+
+          echo ""
+          echo "All ORT libraries verified:"
+          ls -la "$SO_BASE_PATH"/arm64-v8a/
+          ls -la "$SO_BASE_PATH"/x86_64/
+
       - name: Upload Android .so artifacts
         uses: actions/upload-artifact@v4
         with:

@@ -1,23 +1,14 @@
 # Xybrid Kotlin Binding (Android)
 
-> **Status**: Active - UniFFI bindings generated
+> **Status**: Active - Real inference via TemplateExecutor
 
-This directory contains the Android library for Xybrid, providing native Kotlin/Java support via UniFFI-generated bindings.
+This directory contains the Android library for Xybrid, providing native Kotlin/Java support via UniFFI-generated bindings. The SDK supports real ML inference (TTS, ASR, embeddings) on-device via ONNX Runtime.
 
 ## Installation
 
-### Gradle (Maven Central) - Coming Soon
-
-```kotlin
-// In your app's build.gradle.kts
-dependencies {
-    implementation("ai.xybrid:xybrid:0.1.0")
-}
-```
-
 ### Local Development
 
-For local development, add this module as a project dependency:
+Add this module as a project dependency:
 
 ```kotlin
 // In your settings.gradle.kts
@@ -174,12 +165,28 @@ kotlin/
 │   ├── armeabi-v7a/
 │   │   └── libxybrid_uniffi.so
 │   ├── arm64-v8a/
-│   │   └── libxybrid_uniffi.so
+│   │   ├── libxybrid_uniffi.so
+│   │   ├── libonnxruntime.so            # ORT shared library (symlink → vendor/)
+│   │   └── libc++_shared.so             # C++ runtime (symlink → vendor/)
 │   └── x86_64/
-│       └── libxybrid_uniffi.so
+│       ├── libxybrid_uniffi.so
+│       ├── libonnxruntime.so            # ORT shared library (symlink → vendor/)
+│       └── libc++_shared.so             # C++ runtime (symlink → vendor/)
 └── src/main/kotlin/ai/xybrid/
     └── xybrid_uniffi.kt                 # UniFFI-generated bindings
 ```
+
+## Native Dependencies
+
+The SDK bundles ONNX Runtime (`libonnxruntime.so`) and the C++ shared library (`libc++_shared.so`) alongside `libxybrid_uniffi.so`. These are included automatically in the AAR — no manual setup required.
+
+| Library | Purpose | Source |
+|---------|---------|--------|
+| `libxybrid_uniffi.so` | Xybrid Rust SDK via UniFFI | Built from `crates/xybrid-uniffi/` |
+| `libonnxruntime.so` | ONNX Runtime inference engine | Vendored at `vendor/ort-android/` |
+| `libc++_shared.so` | C++ standard library runtime | Vendored at `vendor/ort-android/` |
+
+ORT libraries are symlinked from the shared `vendor/ort-android/` directory (matching the iOS pattern with `vendor/ort-ios/`). When building with `cargo xtask build-android`, ORT libraries are automatically copied to the output directory.
 
 ## FFI Strategy
 
@@ -290,18 +297,26 @@ After a successful build:
 ```
 bindings/kotlin/libs/
 ├── arm64-v8a/
-│   └── libxybrid_uniffi.so
+│   ├── libxybrid_uniffi.so
+│   ├── libonnxruntime.so         # Bundled from vendor/ort-android/
+│   └── libc++_shared.so          # Bundled from vendor/ort-android/
 ├── armeabi-v7a/
 │   └── libxybrid_uniffi.so
 ├── x86_64/
-│   └── libxybrid_uniffi.so
+│   ├── libxybrid_uniffi.so
+│   ├── libonnxruntime.so         # Bundled from vendor/ort-android/
+│   └── libc++_shared.so          # Bundled from vendor/ort-android/
 └── {version}/                    # Versioned copy
     ├── arm64-v8a/
-    │   └── libxybrid_uniffi.so
+    │   ├── libxybrid_uniffi.so
+    │   ├── libonnxruntime.so
+    │   └── libc++_shared.so
     ├── armeabi-v7a/
     │   └── libxybrid_uniffi.so
     └── x86_64/
-        └── libxybrid_uniffi.so
+        ├── libxybrid_uniffi.so
+        ├── libonnxruntime.so
+        └── libc++_shared.so
 ```
 
 ### Troubleshooting

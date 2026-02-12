@@ -20,6 +20,5 @@ rootProject.name = "XybridExample"
 include(":app")
 
 // Include Xybrid SDK as a local project module
-// Note: Uncomment after building native libraries with: cargo xtask build-android
-// include(":xybrid")
-// project(":xybrid").projectDir = file("../../bindings/kotlin")
+include(":xybrid")
+project(":xybrid").projectDir = file("../../bindings/kotlin")

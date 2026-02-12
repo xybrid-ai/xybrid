@@ -304,6 +304,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-compat"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1ba85bc55464dcbf728b56d97e119d673f4cf9062be330a9a26f3acf504a590"
+dependencies = [
+ "futures-core",
+ "futures-io",
+ "once_cell",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7708,6 +7721,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6121a127a3af1665cd90d12dd2b3683c2643c5103281d0fed5838324ca1fad5b"
 dependencies = [
  "anyhow",
+ "async-compat",
  "bytes",
  "camino",
  "log",
@@ -8890,6 +8904,8 @@ dependencies = [
 name = "xybrid-uniffi"
 version = "0.1.0-alpha3-rc2"
 dependencies = [
+ "serde_json",
+ "thiserror 1.0.69",
  "uniffi",
  "xybrid-sdk",
 ]

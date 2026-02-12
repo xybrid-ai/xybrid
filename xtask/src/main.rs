@@ -86,6 +86,21 @@ fn resolve_ort_lib_location(target: &str) -> Option<PathBuf> {
     None
 }
 
+/// Resolves the ORT Android shared library directory.
+///
+/// Checks for vendor/ort-android/ which should contain per-ABI subdirectories
+/// (arm64-v8a/, x86_64/) with libonnxruntime.so and libc++_shared.so.
+///
+/// Returns None if the directory doesn't exist.
+fn resolve_ort_android_libs() -> Option<PathBuf> {
+    let vendor_path = PathBuf::from("vendor/ort-android");
+    if vendor_path.is_dir() {
+        Some(vendor_path)
+    } else {
+        None
+    }
+}
+
 /// Maps a Rust target triple to the appropriate xybrid platform preset feature.
 ///
 /// Platform presets configure ORT execution providers and LLM backends correctly
@@ -297,6 +312,10 @@ enum Commands {
         /// Override the version (defaults to Cargo.toml version or git tag)
         #[arg(long)]
         version: Option<String>,
+
+        /// Generate Kotlin bindings before cross-compiling (builds host dylib, runs uniffi-bindgen, applies fixes)
+        #[arg(long)]
+        bindgen: bool,
     },
 
     /// Build Flutter native libraries for a specific platform
@@ -511,9 +530,13 @@ fn main() -> Result<()> {
             debug,
             abi,
             version,
+            bindgen,
         } => {
             let is_release = !debug && release;
             let ver = get_version(version.as_deref());
+            if bindgen {
+                generate_kotlin_bindings()?;
+            }
             build_android(is_release, abi, &ver)?;
         }
         Commands::BuildFlutter {
@@ -944,11 +967,138 @@ fn generate_bindings(language: BindingsLanguage, out_dir: Option<PathBuf>) -> Re
             }
         }
 
+        // For Kotlin, apply compatibility fixes and copy to ai.xybrid package
+        if lang == "kotlin" && out_dir.is_none() {
+            let generated_file = output
+                .join("uniffi")
+                .join("xybrid_uniffi")
+                .join("xybrid_uniffi.kt");
+            if generated_file.exists() {
+                fix_kotlin_bindings(&generated_file)?;
+                copy_kotlin_binding_to_package()?;
+                fix_kotlin_bindings(&PathBuf::from(KOTLIN_PACKAGE_BINDING))?;
+            }
+        }
+
         println!("✓ {} bindings generated to {:?}", lang, output);
     }
 
     Ok(())
 }
+
+/// Apply post-generation fixes to UniFFI-generated Kotlin bindings.
+///
+/// UniFFI generates code with known Kotlin compatibility issues:
+/// 1. Exception subclasses with `message` constructor params conflict with
+///    `Exception.message` — rename to `msg` and update all references.
+/// 2. `@JvmOverloads` on functions with UInt/ULong params causes compiler errors.
+///
+/// This function is idempotent — applying it to already-fixed files is safe.
+fn fix_kotlin_bindings(file_path: &Path) -> Result<()> {
+    println!("  Applying Kotlin binding fixes to {:?}...", file_path);
+
+    let content = std::fs::read_to_string(file_path)
+        .with_context(|| format!("Failed to read {:?}", file_path))?;
+
+    let mut fixed = content.clone();
+
+    // Fix 1: Rename `message` constructor params to `msg` in exception subclasses.
+    // This avoids conflict with Exception.message property.
+    fixed = fixed.replace("val `message`: String", "val `msg`: String");
+
+    // Fix references in FfiConverter allocationSize() and write()
+    fixed = fixed.replace("value.`message`", "value.`msg`");
+
+    // Fix the override val message getter
+    fixed = fixed.replace(
+        "\"message=${ `message` }\"",
+        "\"message=${ `msg` }\"",
+    );
+
+    // Fix 2: Remove @JvmOverloads from generated code (UInt/ULong incompatibility).
+    // The hand-written Xybrid.kt has its own @JvmOverloads where appropriate.
+    fixed = fixed.replace("@JvmOverloads\n", "");
+
+    if fixed != content {
+        std::fs::write(file_path, &fixed)
+            .with_context(|| format!("Failed to write fixed bindings to {:?}", file_path))?;
+        println!("  ✓ Kotlin binding fixes applied");
+    } else {
+        println!("  ✓ No fixes needed (already clean)");
+    }
+
+    Ok(())
+}
+
+/// Copy the UniFFI-generated Kotlin binding to the ai.xybrid package location.
+///
+/// UniFFI generates to `uniffi/xybrid_uniffi/xybrid_uniffi.kt` (package `uniffi.xybrid_uniffi`).
+/// The Android build also needs a copy at `xybrid_uniffi.kt` (package `ai.xybrid`).
+fn copy_kotlin_binding_to_package() -> Result<()> {
+    let src = PathBuf::from(KOTLIN_UNIFFI_BINDING);
+    let dst = PathBuf::from(KOTLIN_PACKAGE_BINDING);
+
+    if !src.exists() {
+        anyhow::bail!(
+            "UniFFI-generated Kotlin binding not found at {:?}.\n\
+             Run `cargo xtask generate-bindings --language kotlin` first.",
+            src
+        );
+    }
+
+    println!("  Copying Kotlin binding to ai.xybrid package...");
+
+    let content = std::fs::read_to_string(&src)
+        .with_context(|| format!("Failed to read {:?}", src))?;
+
+    // Replace the package declaration for the ai.xybrid copy
+    let repackaged = content.replacen(
+        "package uniffi.xybrid_uniffi",
+        "package ai.xybrid",
+        1,
+    );
+
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {:?}", parent))?;
+    }
+
+    std::fs::write(&dst, &repackaged)
+        .with_context(|| format!("Failed to write {:?}", dst))?;
+
+    println!("  ✓ Copied to {:?}", dst);
+    Ok(())
+}
+
+/// Generate Kotlin bindings, apply fixes, and copy to both package locations.
+///
+/// This is the complete Kotlin bindgen pipeline:
+/// 1. Build host dylib (xybrid-uniffi with host platform preset)
+/// 2. Run uniffi-bindgen to generate Kotlin code
+/// 3. Apply conflict fixes (message→msg, @JvmOverloads removal)
+/// 4. Copy to the ai.xybrid package location with rewritten package declaration
+fn generate_kotlin_bindings() -> Result<()> {
+    println!("=== Generating Kotlin Bindings ===");
+    println!();
+
+    // Steps 1 + 2: Build host dylib and run uniffi-bindgen
+    // generate_bindings() now handles Kotlin post-processing internally
+    generate_bindings(BindingsLanguage::Kotlin, None)?;
+
+    println!();
+    println!("✓ Kotlin bindings ready!");
+    println!("  UniFFI package: {}", KOTLIN_UNIFFI_BINDING);
+    println!("  App package:    {}", KOTLIN_PACKAGE_BINDING);
+    println!();
+
+    Ok(())
+}
+
+/// Kotlin binding file paths (UniFFI generates to the first, second is a repackaged copy)
+const KOTLIN_UNIFFI_BINDING: &str =
+    "bindings/kotlin/src/main/kotlin/ai/xybrid/uniffi/xybrid_uniffi/xybrid_uniffi.kt";
+const KOTLIN_PACKAGE_BINDING: &str =
+    "bindings/kotlin/src/main/kotlin/ai/xybrid/xybrid_uniffi.kt";
 
 /// Apple target architectures for XCFramework
 const IOS_ARM64: &str = "aarch64-apple-ios";
@@ -1290,33 +1440,26 @@ fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<
             continue;
         }
 
-        // Copy the .so file to bindings/kotlin/libs/{version}/{abi}/
+        // Copy the .so file to bindings/kotlin/libs/{abi}/
+        // NOTE: We only write to the flat ABI directory (not versioned subdirs)
+        // because Gradle's jniLibs.srcDirs("libs") recursively scans all subdirs
+        // and versioned dirs like libs/{version}/{abi}/ cause duplicate .so conflicts.
         let profile_dir = if release { "release" } else { "debug" };
         let src_path = PathBuf::from(format!(
             "target/{}/{}/libxybrid_uniffi.so",
             target, profile_dir
         ));
 
-        // Versioned output path: bindings/kotlin/libs/{version}/{abi}/
-        let versioned_dir = PathBuf::from(format!("bindings/kotlin/libs/{}/{}", version, ndk_arch));
-        std::fs::create_dir_all(&versioned_dir)
-            .with_context(|| format!("Failed to create directory: {:?}", versioned_dir))?;
+        let output_dir = PathBuf::from(format!("bindings/kotlin/libs/{}", ndk_arch));
+        std::fs::create_dir_all(&output_dir)
+            .with_context(|| format!("Failed to create directory: {:?}", output_dir))?;
 
-        let versioned_path = versioned_dir.join("libxybrid_uniffi.so");
-
-        // Also maintain backwards-compatible path: bindings/kotlin/libs/{abi}/
-        let compat_dir = PathBuf::from(format!("bindings/kotlin/libs/{}", ndk_arch));
-        std::fs::create_dir_all(&compat_dir)
-            .with_context(|| format!("Failed to create directory: {:?}", compat_dir))?;
-
-        let compat_path = compat_dir.join("libxybrid_uniffi.so");
+        let output_path = output_dir.join("libxybrid_uniffi.so");
 
         if src_path.exists() {
-            std::fs::copy(&src_path, &versioned_path)
-                .with_context(|| format!("Failed to copy {:?} to {:?}", src_path, versioned_path))?;
-            std::fs::copy(&src_path, &compat_path)
-                .with_context(|| format!("Failed to copy {:?} to {:?}", src_path, compat_path))?;
-            println!("  ✓ {} -> {:?}", ndk_arch, versioned_path);
+            std::fs::copy(&src_path, &output_path)
+                .with_context(|| format!("Failed to copy {:?} to {:?}", src_path, output_path))?;
+            println!("  ✓ {} -> {:?}", ndk_arch, output_path);
             built_abis.push(ndk_arch.to_string());
         } else {
             eprintln!("  ✗ Library not found at {:?}", src_path);
@@ -1329,10 +1472,62 @@ fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<
         anyhow::bail!("No ABIs were built successfully");
     }
 
+    // Bundle ORT Android libraries alongside libxybrid_uniffi.so
+    let ort_libs = ["libonnxruntime.so", "libc++_shared.so"];
+    if let Some(ort_android_path) = resolve_ort_android_libs() {
+        println!("Bundling ORT Android libraries...");
+        for abi_name in &built_abis {
+            let ort_abi_dir = ort_android_path.join(abi_name);
+            if !ort_abi_dir.is_dir() {
+                eprintln!(
+                    "  ⚠ ORT libraries not found for {} at {:?}, skipping",
+                    abi_name, ort_abi_dir
+                );
+                continue;
+            }
+
+            println!(
+                "  Bundling ORT Android libraries from vendor/ort-android/{}/",
+                abi_name
+            );
+
+            let output_dir = PathBuf::from(format!("bindings/kotlin/libs/{}", abi_name));
+
+            for lib_name in &ort_libs {
+                let src = ort_abi_dir.join(lib_name);
+                if !src.exists() {
+                    eprintln!("  ⚠ {} not found at {:?}", lib_name, src);
+                    continue;
+                }
+
+                let dst = output_dir.join(lib_name);
+
+                // If the destination is a symlink (e.g., pointing back to vendor/),
+                // remove it first. Otherwise std::fs::copy follows the symlink and
+                // truncates the source file to 0 bytes before reading it, destroying
+                // the vendor copy.
+                if dst.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+                    std::fs::remove_file(&dst).with_context(|| {
+                        format!("Failed to remove symlink at {:?}", dst)
+                    })?;
+                }
+
+                std::fs::copy(&src, &dst).with_context(|| {
+                    format!("Failed to copy {} to {:?}", lib_name, output_dir)
+                })?;
+            }
+            println!("  ✓ {} ORT libraries bundled", abi_name);
+        }
+    } else {
+        eprintln!("ORT Android libraries not found at vendor/ort-android/.");
+        eprintln!("  Run the vendoring setup first.");
+        eprintln!("  The AAR will be missing libonnxruntime.so and libc++_shared.so.");
+    }
+
+    println!();
     println!("✓ Android build successful!");
     println!("  Version: {}", version);
-    println!("  Versioned output: bindings/kotlin/libs/{}/", version);
-    println!("  Compat output:    bindings/kotlin/libs/");
+    println!("  Output: bindings/kotlin/libs/{{abi}}/");
     println!();
     println!("ABIs built:");
     for abi in &built_abis {
