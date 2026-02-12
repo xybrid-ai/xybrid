@@ -20,7 +20,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(feature = "llm-llamacpp"))]
     {
         eprintln!("This example requires the llm-llamacpp feature.");
-        eprintln!("Run with: cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp");
+        eprintln!(
+            "Run with: cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp"
+        );
         return Ok(());
     }
 

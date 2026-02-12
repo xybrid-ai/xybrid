@@ -60,7 +60,11 @@ fn test_execute_with_context_no_crash() {
     // This previously crashed with SIGSEGV or heap corruption
     let result = executor.execute_with_context(&metadata, &input, &ctx);
 
-    assert!(result.is_ok(), "execute_with_context failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "execute_with_context failed: {:?}",
+        result.err()
+    );
 
     let output = result.unwrap();
     assert!(output.is_assistant_message());
@@ -111,17 +115,13 @@ fn test_execute_with_context_multi_turn_no_crash() {
 
     // Push a previous turn
     ctx.push(
-        Envelope::new(EnvelopeKind::Text("What is 2+2?".to_string()))
-            .with_role(MessageRole::User),
+        Envelope::new(EnvelopeKind::Text("What is 2+2?".to_string())).with_role(MessageRole::User),
     );
-    ctx.push(
-        Envelope::new(EnvelopeKind::Text("4".to_string()))
-            .with_role(MessageRole::Assistant),
-    );
+    ctx.push(Envelope::new(EnvelopeKind::Text("4".to_string())).with_role(MessageRole::Assistant));
 
     // New user message
-    let input = Envelope::new(EnvelopeKind::Text("And 3+3?".to_string()))
-        .with_role(MessageRole::User);
+    let input =
+        Envelope::new(EnvelopeKind::Text("And 3+3?".to_string())).with_role(MessageRole::User);
 
     let result = executor.execute_with_context(&metadata, &input, &ctx);
 
@@ -159,8 +159,8 @@ fn test_execute_streaming_with_context_no_crash() {
         )
         .with_max_history_len(20);
 
-    let input = Envelope::new(EnvelopeKind::Text("Say hello.".to_string()))
-        .with_role(MessageRole::User);
+    let input =
+        Envelope::new(EnvelopeKind::Text("Say hello.".to_string())).with_role(MessageRole::User);
 
     let mut tokens_received = 0u32;
 
@@ -187,10 +187,7 @@ fn test_execute_streaming_with_context_no_crash() {
     if let EnvelopeKind::Text(text) = &output.kind {
         assert!(!text.is_empty());
         assert!(tokens_received > 0, "Should have received streaming tokens");
-        println!(
-            "Streaming response ({} tokens): {}",
-            tokens_received, text
-        );
+        println!("Streaming response ({} tokens): {}", tokens_received, text);
     }
 }
 

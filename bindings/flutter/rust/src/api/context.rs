@@ -70,7 +70,8 @@ impl FfiConversationContext {
     pub fn set_system(&self, text: String) {
         use xybrid_core::ir::{Envelope, EnvelopeKind};
 
-        let system_envelope = Envelope::new(EnvelopeKind::Text(text)).with_role(MessageRole::System);
+        let system_envelope =
+            Envelope::new(EnvelopeKind::Text(text)).with_role(MessageRole::System);
 
         if let Ok(mut ctx) = self.0.write() {
             // We need to recreate with system since with_system consumes self

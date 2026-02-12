@@ -310,8 +310,8 @@ fn adapter_is_send_sync() {
 
 #[test]
 fn adapter_can_be_shared_across_threads() {
-    use xybrid_core::runtime_adapter::OnnxRuntimeAdapter;
     use std::thread;
+    use xybrid_core::runtime_adapter::OnnxRuntimeAdapter;
 
     let adapter = Arc::new(OnnxRuntimeAdapter::new());
 

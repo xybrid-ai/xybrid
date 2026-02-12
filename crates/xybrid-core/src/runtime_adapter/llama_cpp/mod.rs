@@ -30,9 +30,9 @@ use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
 };
 use crate::runtime_adapter::AdapterError;
-use std::sync::Mutex;
 #[cfg(feature = "llm-llamacpp")]
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 #[cfg(feature = "llm-llamacpp")]
 use std::sync::Once;
 
@@ -210,9 +210,10 @@ impl LlmBackend for LlamaCppBackend {
         let model = self.model.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
         })?;
-        let ctx_guard = self.context.lock().map_err(|_| {
-            AdapterError::RuntimeError("Context mutex poisoned".to_string())
-        })?;
+        let ctx_guard = self
+            .context
+            .lock()
+            .map_err(|_| AdapterError::RuntimeError("Context mutex poisoned".to_string()))?;
         let context = ctx_guard.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No context. Call load() first.".to_string())
         })?;
@@ -276,13 +277,21 @@ impl LlmBackend for LlamaCppBackend {
         let mut finish_reason = "length".to_string();
 
         // Build list of patterns to check - include config stop sequences plus common markers
-        let mut stop_patterns: Vec<&str> = config.stop_sequences.iter().map(|s| s.as_str()).collect();
+        let mut stop_patterns: Vec<&str> =
+            config.stop_sequences.iter().map(|s| s.as_str()).collect();
         // Always check for these common markers even if not in config
         // Note: <end_of_turn> is Gemma's stop token, <|im_end|> is ChatML (Qwen, Phi)
         // Also include partial markers without "<" for models using ChatML fallback
         let extra_patterns = [
-            "<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>", "<end_of_turn>",
-            "|im_end|>", "|im_start|>", "|endoftext|>", "end_of_turn>",
+            "<|im_end|>",
+            "<|im_start|>",
+            "<|endoftext|>",
+            "</s>",
+            "<end_of_turn>",
+            "|im_end|>",
+            "|im_start|>",
+            "|endoftext|>",
+            "end_of_turn>",
         ];
         for p in &extra_patterns {
             if !stop_patterns.contains(p) {
@@ -334,9 +343,10 @@ impl LlmBackend for LlamaCppBackend {
         let model = self.model.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
         })?;
-        let ctx_guard = self.context.lock().map_err(|_| {
-            AdapterError::RuntimeError("Context mutex poisoned".to_string())
-        })?;
+        let ctx_guard = self
+            .context
+            .lock()
+            .map_err(|_| AdapterError::RuntimeError("Context mutex poisoned".to_string()))?;
         let context = ctx_guard.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No context. Call load() first.".to_string())
         })?;
@@ -350,16 +360,23 @@ impl LlmBackend for LlamaCppBackend {
         if tokens.len() >= n_ctx {
             return Err(AdapterError::InvalidInput(format!(
                 "Input too long: {} tokens exceeds context window of {} tokens.",
-                tokens.len(), n_ctx
+                tokens.len(),
+                n_ctx
             )));
         }
 
         let start = std::time::Instant::now();
 
         let output_tokens = sys::llama_generate_with_stops(
-            context, model, &tokens,
-            config.max_tokens, config.temperature, config.top_p,
-            config.min_p, config.top_k, config.repetition_penalty,
+            context,
+            model,
+            &tokens,
+            config.max_tokens,
+            config.temperature,
+            config.top_p,
+            config.min_p,
+            config.top_k,
+            config.repetition_penalty,
             &config.stop_sequences,
         )?;
 
@@ -395,9 +412,10 @@ impl LlmBackend for LlamaCppBackend {
         let model = self.model.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
         })?;
-        let ctx_guard = self.context.lock().map_err(|_| {
-            AdapterError::RuntimeError("Context mutex poisoned".to_string())
-        })?;
+        let ctx_guard = self
+            .context
+            .lock()
+            .map_err(|_| AdapterError::RuntimeError("Context mutex poisoned".to_string()))?;
         let context = ctx_guard.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No context. Call load() first.".to_string())
         })?;
@@ -434,7 +452,13 @@ impl LlmBackend for LlamaCppBackend {
         // Note: <end_of_turn> is Gemma's stop token, <|im_end|> is ChatML (Qwen, Phi)
         let streaming_stop_patterns: Vec<String> = {
             let mut patterns: Vec<String> = config.stop_sequences.clone();
-            for p in ["<|im_end|>", "<|im_start|>", "<|endoftext|>", "</s>", "<end_of_turn>"] {
+            for p in [
+                "<|im_end|>",
+                "<|im_start|>",
+                "<|endoftext|>",
+                "</s>",
+                "<end_of_turn>",
+            ] {
                 if !patterns.iter().any(|s| s == p) {
                     patterns.push(p.to_string());
                 }
@@ -492,8 +516,8 @@ impl LlmBackend for LlamaCppBackend {
                 }
 
                 // Find the safe portion to emit (excluding potential stop sequence starts)
-                let safe_end = find_potential_stop_start(&cumulative_text)
-                    .unwrap_or(cumulative_text.len());
+                let safe_end =
+                    find_potential_stop_start(&cumulative_text).unwrap_or(cumulative_text.len());
 
                 // Only emit if we have new safe content
                 if safe_end > last_emitted_len {
@@ -502,7 +526,8 @@ impl LlmBackend for LlamaCppBackend {
                         safe_text.to_string(),
                         token_index,
                         cumulative_text[..safe_end].to_string(),
-                    ).with_token_id(token_id as i64);
+                    )
+                    .with_token_id(token_id as i64);
 
                     last_emitted_len = safe_end;
                     token_index += 1;
@@ -519,7 +544,11 @@ impl LlmBackend for LlamaCppBackend {
         let mut text = sys::llama_detokenize(model, &output_tokens)?;
 
         // Apply stop sequence truncation (safety net - streaming callback already truncated)
-        let mut finish_reason = if hit_stop_pattern { "stop".to_string() } else { "length".to_string() };
+        let mut finish_reason = if hit_stop_pattern {
+            "stop".to_string()
+        } else {
+            "length".to_string()
+        };
 
         // Use streaming_stop_patterns (already built above) for final text cleanup
         let mut earliest_pos: Option<usize> = None;
@@ -568,11 +597,8 @@ impl LlmBackend for LlamaCppBackend {
 
         // Send final token with finish reason
         if token_index > 0 {
-            let final_partial = PartialToken::new(
-                String::new(),
-                token_index,
-                text.clone(),
-            ).with_finish_reason(&finish_reason);
+            let final_partial = PartialToken::new(String::new(), token_index, text.clone())
+                .with_finish_reason(&finish_reason);
 
             // Ignore error on final notification - generation is complete
             let _ = on_token(final_partial);
@@ -612,8 +638,7 @@ pub struct LlamaCppBackend;
 impl LlamaCppBackend {
     pub fn new() -> LlmResult<Self> {
         Err(AdapterError::RuntimeError(
-            "llm-llamacpp feature not enabled. Build with --features llm-llamacpp"
-                .to_string(),
+            "llm-llamacpp feature not enabled. Build with --features llm-llamacpp".to_string(),
         ))
     }
 }

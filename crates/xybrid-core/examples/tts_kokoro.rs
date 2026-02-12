@@ -20,8 +20,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use xybrid_core::execution::ModelMetadata;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::execution::TemplateExecutor;
+use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::testing::model_fixtures;
 
 /// Simple CLI argument parser for the example
@@ -72,7 +72,11 @@ fn parse_args() -> Args {
         i += 1;
     }
 
-    Args { text, voice_id, list_voices }
+    Args {
+        text,
+        voice_id,
+        list_voices,
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -108,8 +112,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!();
 
         // Group by language
-        let us_voices: Vec<_> = voices.iter().filter(|v| v.language.as_deref() == Some("en-US")).collect();
-        let gb_voices: Vec<_> = voices.iter().filter(|v| v.language.as_deref() == Some("en-GB")).collect();
+        let us_voices: Vec<_> = voices
+            .iter()
+            .filter(|v| v.language.as_deref() == Some("en-US"))
+            .collect();
+        let gb_voices: Vec<_> = voices
+            .iter()
+            .filter(|v| v.language.as_deref() == Some("en-GB"))
+            .collect();
 
         println!("   🇺🇸 American English ({}):", us_voices.len());
         print_voice_group(&us_voices, 6);
@@ -135,12 +145,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        metadata.default_voice()
+        metadata
+            .default_voice()
             .ok_or("No default voice configured")?
             .clone()
     };
 
-    println!("🎙️  Selected Voice: {} ({})", selected_voice.name, selected_voice.id);
+    println!(
+        "🎙️  Selected Voice: {} ({})",
+        selected_voice.name, selected_voice.id
+    );
     if let Some(ref gender) = selected_voice.gender {
         print!("    Gender: {}", gender);
     }
@@ -187,9 +201,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  Result");
             println!("═══════════════════════════════════════════════════════");
             println!();
-            println!("✅ Generated {:.2}s of audio ({} bytes)", duration_secs, audio_bytes.len());
+            println!(
+                "✅ Generated {:.2}s of audio ({} bytes)",
+                duration_secs,
+                audio_bytes.len()
+            );
             println!("   Processing time: {:?}", elapsed);
-            println!("   Real-time factor: {:.1}x", duration_secs / elapsed.as_secs_f32());
+            println!(
+                "   Real-time factor: {:.1}x",
+                duration_secs / elapsed.as_secs_f32()
+            );
             println!();
 
             // Save to WAV file with voice name
@@ -199,7 +220,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("💾 Saved: {}", output_path.display());
             println!();
-            println!("🎵 Play: afplay {} (macOS) or aplay {} (Linux)", output_filename, output_filename);
+            println!(
+                "🎵 Play: afplay {} (macOS) or aplay {} (Linux)",
+                output_filename, output_filename
+            );
         }
         _ => {
             return Err("Expected audio output".into());
@@ -213,7 +237,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("  Female voices:");
     println!("    cargo run -p xybrid-core --example tts_kokoro -- --voice af_bella");
-    println!("    cargo run -p xybrid-core --example tts_kokoro -- --voice af_nicole  # whisper style");
+    println!(
+        "    cargo run -p xybrid-core --example tts_kokoro -- --voice af_nicole  # whisper style"
+    );
     println!();
     println!("  Male voices:");
     println!("    cargo run -p xybrid-core --example tts_kokoro -- --voice am_adam");
@@ -232,17 +258,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Print a group of voices in a compact format
 fn print_voice_group(voices: &[&&xybrid_core::execution::template::VoiceInfo], max_show: usize) {
-    let females: Vec<_> = voices.iter().filter(|v| v.gender.as_deref() == Some("female")).collect();
-    let males: Vec<_> = voices.iter().filter(|v| v.gender.as_deref() == Some("male")).collect();
+    let females: Vec<_> = voices
+        .iter()
+        .filter(|v| v.gender.as_deref() == Some("female"))
+        .collect();
+    let males: Vec<_> = voices
+        .iter()
+        .filter(|v| v.gender.as_deref() == Some("male"))
+        .collect();
 
     if !females.is_empty() {
-        let names: Vec<_> = females.iter().take(max_show).map(|v| format!("{}", v.name)).collect();
-        let suffix = if females.len() > max_show { format!(" +{}", females.len() - max_show) } else { String::new() };
+        let names: Vec<_> = females
+            .iter()
+            .take(max_show)
+            .map(|v| format!("{}", v.name))
+            .collect();
+        let suffix = if females.len() > max_show {
+            format!(" +{}", females.len() - max_show)
+        } else {
+            String::new()
+        };
         println!("      ♀ {}{}", names.join(", "), suffix);
     }
     if !males.is_empty() {
-        let names: Vec<_> = males.iter().take(max_show).map(|v| format!("{}", v.name)).collect();
-        let suffix = if males.len() > max_show { format!(" +{}", males.len() - max_show) } else { String::new() };
+        let names: Vec<_> = males
+            .iter()
+            .take(max_show)
+            .map(|v| format!("{}", v.name))
+            .collect();
+        let suffix = if males.len() > max_show {
+            format!(" +{}", males.len() - max_show)
+        } else {
+            String::new()
+        };
         println!("      ♂ {}{}", names.join(", "), suffix);
     }
 }
@@ -261,8 +309,14 @@ fn print_voice_catalog(metadata: &ModelMetadata) {
     println!();
 
     // Group by language
-    let us_voices: Vec<_> = voices.iter().filter(|v| v.language.as_deref() == Some("en-US")).collect();
-    let gb_voices: Vec<_> = voices.iter().filter(|v| v.language.as_deref() == Some("en-GB")).collect();
+    let us_voices: Vec<_> = voices
+        .iter()
+        .filter(|v| v.language.as_deref() == Some("en-US"))
+        .collect();
+    let gb_voices: Vec<_> = voices
+        .iter()
+        .filter(|v| v.language.as_deref() == Some("en-GB"))
+        .collect();
 
     if !us_voices.is_empty() {
         println!("🇺🇸 American English ({} voices)", us_voices.len());
@@ -270,7 +324,8 @@ fn print_voice_catalog(metadata: &ModelMetadata) {
         println!("{:<15} {:<12} {:<8} {}", "ID", "Name", "Gender", "Style");
         println!("─────────────────────────────────────────────────────");
         for v in us_voices {
-            println!("{:<15} {:<12} {:<8} {}",
+            println!(
+                "{:<15} {:<12} {:<8} {}",
                 v.id,
                 v.name,
                 v.gender.as_deref().unwrap_or("-"),
@@ -286,7 +341,8 @@ fn print_voice_catalog(metadata: &ModelMetadata) {
         println!("{:<15} {:<12} {:<8} {}", "ID", "Name", "Gender", "Style");
         println!("─────────────────────────────────────────────────────");
         for v in gb_voices {
-            println!("{:<15} {:<12} {:<8} {}",
+            println!(
+                "{:<15} {:<12} {:<8} {}",
                 v.id,
                 v.name,
                 v.gender.as_deref().unwrap_or("-"),

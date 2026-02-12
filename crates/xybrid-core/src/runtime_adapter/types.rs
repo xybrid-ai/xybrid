@@ -73,7 +73,8 @@ pub type StreamingError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// This is a boxed function that receives partial tokens during streaming generation.
 /// Return `Ok(())` to continue generation, or `Err(...)` to stop.
-pub type StreamingCallback<'a> = Box<dyn FnMut(PartialToken) -> Result<(), StreamingError> + Send + 'a>;
+pub type StreamingCallback<'a> =
+    Box<dyn FnMut(PartialToken) -> Result<(), StreamingError> + Send + 'a>;
 
 // =============================================================================
 // Chat Message
@@ -388,8 +389,8 @@ mod tests {
 
     #[test]
     fn test_partial_token_with_token_id() {
-        let token = PartialToken::new("world".to_string(), 1, "hello world".to_string())
-            .with_token_id(42);
+        let token =
+            PartialToken::new("world".to_string(), 1, "hello world".to_string()).with_token_id(42);
         assert_eq!(token.token_id, Some(42));
     }
 
@@ -500,8 +501,7 @@ mod tests {
 
     #[test]
     fn test_llm_config_with_chat_template() {
-        let config = LlmConfig::new("/path/to/model.gguf")
-            .with_chat_template("chatml".to_string());
+        let config = LlmConfig::new("/path/to/model.gguf").with_chat_template("chatml".to_string());
         assert_eq!(config.chat_template, Some("chatml".to_string()));
     }
 }

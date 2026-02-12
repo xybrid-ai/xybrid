@@ -132,9 +132,9 @@ pub use xybrid_core::runtime_adapter::types::{PartialToken, StreamingCallback, S
 
 // Backwards compatibility re-exports
 #[doc(hidden)]
-pub use xybrid_core::execution::template as execution_template;
-#[doc(hidden)]
 pub use xybrid_core::execution as template_executor;
+#[doc(hidden)]
+pub use xybrid_core::execution::template as execution_template;
 
 // SDK types (new API)
 pub use benchmark::{compare_benchmarks, BenchmarkResult, ExecutionProviderInfo};
@@ -144,32 +144,32 @@ pub use llm::{
     LlmClientConfig, MessageRole, TokenUsage,
 };
 pub use model::SdkError;
-pub use platform::current_platform;
 pub use model::{ModelLoader, SdkResult, StreamConfig, StreamEvent, StreamToken, XybridModel};
+pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
 // Pipeline API (PipelineRef → Pipeline)
 pub use pipeline::{
-    DownloadProgress,
-    Pipeline,
-    PipelineExecutionResult,
-    PipelineInputType,
-    PipelineRef,
-    StageInfo,
-    StageStatus,
-    StageTarget,
-    StageTiming as PipelineStageTiming, // Alias to avoid conflict with legacy StageTiming
-    Xybrid,
     // Config types for FFI bindings (Flutter, Kotlin, Swift)
     AudioInputConfig,
     AudioSampleFormat,
     ConfigOutputType,
-    InputConfig,
-    InputType,
-    PipelineSource,
-    TextInputConfig,
+    DownloadProgress,
     // FFI result types for platform bindings (Flutter, Kotlin, Swift)
     FfiPipelineExecutionResult,
     FfiStageExecutionResult,
+    InputConfig,
+    InputType,
+    Pipeline,
+    PipelineExecutionResult,
+    PipelineInputType,
+    PipelineRef,
+    PipelineSource,
+    StageInfo,
+    StageStatus,
+    StageTarget,
+    StageTiming as PipelineStageTiming, // Alias to avoid conflict with legacy StageTiming
+    TextInputConfig,
+    Xybrid,
 };
 pub use result::{InferenceResult, OutputType};
 pub use source::ModelSource;

@@ -72,7 +72,11 @@ impl FfiStageExecutionResult {
     /// * `stage_id` - Stage identifier
     /// * `target` - Execution target (e.g., "device", "cloud")
     /// * `latency_ms` - Execution latency in milliseconds
-    pub fn executed(stage_id: impl Into<String>, target: impl Into<String>, latency_ms: u32) -> Self {
+    pub fn executed(
+        stage_id: impl Into<String>,
+        target: impl Into<String>,
+        latency_ms: u32,
+    ) -> Self {
         Self {
             stage_id: stage_id.into(),
             executed: true,

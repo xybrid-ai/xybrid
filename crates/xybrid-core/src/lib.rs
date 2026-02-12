@@ -94,10 +94,7 @@ compile_error!(
 );
 
 // candle-cuda requires NVIDIA CUDA which is not available on Apple platforms.
-#[cfg(all(
-    feature = "candle-cuda",
-    any(target_os = "macos", target_os = "ios")
-))]
+#[cfg(all(feature = "candle-cuda", any(target_os = "macos", target_os = "ios")))]
 compile_error!(
     "Invalid feature combination: `candle-cuda` is not supported on macOS or iOS.\n\n\
     Reason: CUDA is NVIDIA's GPU framework and is not available on Apple platforms \

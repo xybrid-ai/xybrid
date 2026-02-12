@@ -445,9 +445,7 @@ impl CacheManager {
         let metadata_json = bundle
             .get_metadata_json()
             .map_err(|e| SdkError::CacheError(format!("Failed to read bundle metadata: {}", e)))?
-            .ok_or_else(|| {
-                SdkError::CacheError("Bundle has no model_metadata.json".to_string())
-            })?;
+            .ok_or_else(|| SdkError::CacheError("Bundle has no model_metadata.json".to_string()))?;
 
         let metadata: ModelMetadata = serde_json::from_str(&metadata_json)
             .map_err(|e| SdkError::CacheError(format!("Failed to parse model metadata: {}", e)))?;
@@ -475,9 +473,9 @@ impl CacheManager {
             metadata.model_id,
             extract_dir.display()
         );
-        bundle.extract_to(&extract_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to extract bundle: {}", e))
-        })?;
+        bundle
+            .extract_to(&extract_dir)
+            .map_err(|e| SdkError::CacheError(format!("Failed to extract bundle: {}", e)))?;
 
         Ok(extract_dir)
     }
@@ -534,9 +532,9 @@ impl CacheManager {
             model_id,
             extract_dir.display()
         );
-        bundle.extract_to(&extract_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to extract bundle: {}", e))
-        })?;
+        bundle
+            .extract_to(&extract_dir)
+            .map_err(|e| SdkError::CacheError(format!("Failed to extract bundle: {}", e)))?;
 
         Ok(extract_dir)
     }

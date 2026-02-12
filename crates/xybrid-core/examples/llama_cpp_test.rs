@@ -79,9 +79,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("📊 Stats:");
     println!("   Tokens generated: {}", output.tokens_generated);
-    println!("   Time: {:.2}s ({:.2} tokens/sec)",
+    println!(
+        "   Time: {:.2}s ({:.2} tokens/sec)",
         elapsed.as_secs_f32(),
-        output.tokens_per_second);
+        output.tokens_per_second
+    );
     println!("   Finish reason: {}", output.finish_reason);
     println!();
 
@@ -93,5 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(feature = "llm-llamacpp"))]
 fn main() {
     eprintln!("This example requires the `llm-llamacpp` feature.");
-    eprintln!("Run with: cargo run --example llama_cpp_test -p xybrid-core --features llm-llamacpp");
+    eprintln!(
+        "Run with: cargo run --example llama_cpp_test -p xybrid-core --features llm-llamacpp"
+    );
 }

@@ -46,9 +46,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use xybrid_core::bundler::XyBundle;
 use xybrid_core::context::{DeviceMetrics, StageDescriptor};
+use xybrid_core::conversation::ConversationContext;
 use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::execution_template::ModelMetadata;
-use xybrid_core::conversation::ConversationContext;
 use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
 use xybrid_core::orchestrator::policy_engine::PolicyEngine;
 use xybrid_core::orchestrator::routing_engine::{LocalAvailability, RoutingEngine};
@@ -639,7 +639,10 @@ fn handle_repl_command(
     let mut stages: Vec<StageDescriptor> = Vec::new();
 
     if let Some(ref config) = pipeline_config {
-        println!("📋 Pipeline: {}", config.name.as_deref().unwrap_or("unnamed"));
+        println!(
+            "📋 Pipeline: {}",
+            config.name.as_deref().unwrap_or("unnamed")
+        );
         for stage_config in &config.stages {
             let model_id = stage_config.model_id();
             let mut desc = StageDescriptor::new(&model_id);
@@ -653,8 +656,10 @@ fn handle_repl_command(
                     let pb = ProgressBar::new(resolved.size_bytes);
                     pb.set_style(
                         ProgressStyle::default_bar()
-                            .template("{spinner:.green} {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes}")
-                            .unwrap()
+                            .template(
+                                "{spinner:.green} {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes}",
+                            )
+                            .unwrap(),
                     );
                     pb.set_message(model_id.clone());
                     // Use fetch_extracted to download AND extract (single source of truth)
@@ -686,7 +691,7 @@ fn handle_repl_command(
             pb.set_style(
                 ProgressStyle::default_bar()
                     .template("{spinner:.green} {msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes}")
-                    .unwrap()
+                    .unwrap(),
             );
             pb.set_message(model_id.clone());
             // Use fetch_extracted to download AND extract (single source of truth)
@@ -726,7 +731,7 @@ fn handle_repl_command(
                     println!("📋 System prompt: {}", prompt);
                     ctx = ctx.with_system(
                         Envelope::new(EnvelopeKind::Text(prompt.clone()))
-                            .with_role(MessageRole::System)
+                            .with_role(MessageRole::System),
                     );
                 }
                 conversation_context = Some(ctx);
@@ -848,14 +853,19 @@ fn handle_repl_command(
 
         // Add voice_id if provided
         if let Some(ref voice_id) = voice {
-            input.metadata.insert("voice_id".to_string(), voice_id.clone());
+            input
+                .metadata
+                .insert("voice_id".to_string(), voice_id.clone());
         }
 
         // Push user message to conversation context (for LLM models)
         if let Some(ref mut ctx) = conversation_context {
             ctx.push(input.clone());
             if verbose > 1 {
-                println!("📝 Added user message to context (total: {} messages)", ctx.history().len());
+                println!(
+                    "📝 Added user message to context (total: {} messages)",
+                    ctx.history().len()
+                );
             }
         }
 
@@ -869,7 +879,10 @@ fn handle_repl_command(
             if stream && !can_stream {
                 eprintln!("⚠️  Streaming conditions not met:");
                 eprintln!("   - stages.len() = {} (need 1)", stages.len());
-                eprintln!("   - bundle_path = {:?}", stages.get(0).map(|s| &s.bundle_path));
+                eprintln!(
+                    "   - bundle_path = {:?}",
+                    stages.get(0).map(|s| &s.bundle_path)
+                );
             }
             can_stream
         };
@@ -937,8 +950,9 @@ fn handle_repl_command(
                                 // Push assistant response to conversation context
                                 if let Some(ref mut ctx) = conversation_context {
                                     if let Ok(text) = accumulated_text.lock() {
-                                        let assistant_response = Envelope::new(EnvelopeKind::Text(text.clone()))
-                                            .with_role(MessageRole::Assistant);
+                                        let assistant_response =
+                                            Envelope::new(EnvelopeKind::Text(text.clone()))
+                                                .with_role(MessageRole::Assistant);
                                         ctx.push(assistant_response);
                                         if verbose > 1 {
                                             println!("📝 Added assistant response to context (total: {} messages)", ctx.history().len());
@@ -963,7 +977,8 @@ fn handle_repl_command(
                     }
                 } else {
                     // Fall back to loading the model if not pre-loaded
-                    let model_result = if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
+                    let model_result = if bundle_path.extension().map_or(false, |ext| ext == "xyb")
+                    {
                         ModelLoader::from_bundle(&bundle_path).and_then(|loader| loader.load())
                     } else {
                         ModelLoader::from_directory(&bundle_path).and_then(|loader| loader.load())
@@ -1003,8 +1018,9 @@ fn handle_repl_command(
 
                                         if let Some(ref mut ctx) = conversation_context {
                                             if let Ok(text) = accumulated_text.lock() {
-                                                let assistant_response = Envelope::new(EnvelopeKind::Text(text.clone()))
-                                                    .with_role(MessageRole::Assistant);
+                                                let assistant_response =
+                                                    Envelope::new(EnvelopeKind::Text(text.clone()))
+                                                        .with_role(MessageRole::Assistant);
                                                 ctx.push(assistant_response);
                                             }
                                         }
@@ -1025,7 +1041,10 @@ fn handle_repl_command(
                             }
                         }
                         Err(e) => {
-                            eprintln!("⚠️  Failed to load model: {}, falling back to batch mode", e);
+                            eprintln!(
+                                "⚠️  Failed to load model: {}, falling back to batch mode",
+                                e
+                            );
                         }
                     }
                 }
@@ -1046,8 +1065,9 @@ fn handle_repl_command(
 
                             // Push assistant response to conversation context (for LLM models)
                             if let Some(ref mut ctx) = conversation_context {
-                                let assistant_response = Envelope::new(EnvelopeKind::Text(text.clone()))
-                                    .with_role(MessageRole::Assistant);
+                                let assistant_response =
+                                    Envelope::new(EnvelopeKind::Text(text.clone()))
+                                        .with_role(MessageRole::Assistant);
                                 ctx.push(assistant_response);
                                 if verbose > 1 {
                                     println!("📝 Added assistant response to context (total: {} messages)", ctx.history().len());
@@ -2120,24 +2140,27 @@ fn run_pipeline(
                 if let Some(last_result) = results.last() {
                     match &last_result.output.kind {
                         EnvelopeKind::Text(text) => {
-                            fs::write(path, text)
-                                .with_context(|| format!("Failed to write output to {}", path.display()))?;
+                            fs::write(path, text).with_context(|| {
+                                format!("Failed to write output to {}", path.display())
+                            })?;
                             println!();
                             println!("💾 Output saved to: {}", path.display());
                         }
                         EnvelopeKind::Audio(data) => {
                             // Save as WAV file with proper headers
                             // Default to 24kHz mono (common TTS sample rate)
-                            save_wav_file(path, data, 24000, 1)
-                                .with_context(|| format!("Failed to write audio to {}", path.display()))?;
+                            save_wav_file(path, data, 24000, 1).with_context(|| {
+                                format!("Failed to write audio to {}", path.display())
+                            })?;
                             println!();
                             println!("💾 Audio saved to: {}", path.display());
                         }
                         EnvelopeKind::Embedding(vec) => {
                             let json = serde_json::to_string_pretty(vec)
                                 .context("Failed to serialize embedding")?;
-                            fs::write(path, json)
-                                .with_context(|| format!("Failed to write embedding to {}", path.display()))?;
+                            fs::write(path, json).with_context(|| {
+                                format!("Failed to write embedding to {}", path.display())
+                            })?;
                             println!();
                             println!("💾 Embedding saved to: {}", path.display());
                         }
@@ -2218,8 +2241,7 @@ fn run_bundle(
 
     // Extract bundle using unified CacheManager (single source of truth for extraction)
     println!("📂 Loading and extracting bundle...");
-    let cache = xybrid_sdk::cache::CacheManager::new()
-        .context("Failed to create cache manager")?;
+    let cache = xybrid_sdk::cache::CacheManager::new().context("Failed to create cache manager")?;
     let extract_dir = cache
         .ensure_extracted(bundle_path)
         .context("Failed to extract bundle")?;
@@ -2370,8 +2392,8 @@ fn run_bundle(
             }
             // Save embedding as JSON if path provided
             if let Some(path) = output_path {
-                let json = serde_json::to_string_pretty(vec)
-                    .context("Failed to serialize embedding")?;
+                let json =
+                    serde_json::to_string_pretty(vec).context("Failed to serialize embedding")?;
                 fs::write(path, json)
                     .with_context(|| format!("Failed to write embedding to {}", path.display()))?;
                 println!();
@@ -2497,9 +2519,10 @@ fn run_model(
         None
     };
 
-    let resolved = client
-        .resolve(model_id, platform)
-        .context(format!("Failed to resolve model '{}' from registry", model_id))?;
+    let resolved = client.resolve(model_id, platform).context(format!(
+        "Failed to resolve model '{}' from registry",
+        model_id
+    ))?;
 
     println!("📦 Resolved variant:");
     println!("   Repository: {}", resolved.hf_repo);
@@ -2536,7 +2559,10 @@ fn run_model(
                 let bytes_done = (progress * resolved.size_bytes as f32) as u64;
                 pb.set_position(bytes_done);
             })
-            .context(format!("Failed to fetch model '{}' from registry", model_id))?;
+            .context(format!(
+                "Failed to fetch model '{}' from registry",
+                model_id
+            ))?;
 
         pb.finish_with_message(format!("✅ Downloaded {}", model_id));
         path
@@ -2548,8 +2574,7 @@ fn run_model(
 
     // Extract bundle using unified CacheManager (single source of truth for extraction)
     println!("📂 Loading and extracting bundle...");
-    let cache = xybrid_sdk::cache::CacheManager::new()
-        .context("Failed to create cache manager")?;
+    let cache = xybrid_sdk::cache::CacheManager::new().context("Failed to create cache manager")?;
     let extract_dir = cache
         .ensure_extracted(&bundle_path)
         .context("Failed to extract bundle")?;
@@ -2700,8 +2725,8 @@ fn run_model(
             }
             // Save embedding as JSON if path provided
             if let Some(path) = output_path {
-                let json = serde_json::to_string_pretty(vec)
-                    .context("Failed to serialize embedding")?;
+                let json =
+                    serde_json::to_string_pretty(vec).context("Failed to serialize embedding")?;
                 fs::write(path, json)
                     .with_context(|| format!("Failed to write embedding to {}", path.display()))?;
                 println!();
@@ -2914,9 +2939,7 @@ fn handle_models_command(command: ModelsCommand) -> Result<()> {
 
             Ok(())
         }
-        ModelsCommand::Voices { model_id } => {
-            handle_voices_command(&client, &model_id)
-        }
+        ModelsCommand::Voices { model_id } => handle_voices_command(&client, &model_id),
     }
 }
 
@@ -3130,12 +3153,12 @@ fn load_metadata_from_bundle(bundle_path: &Path) -> Result<ModelMetadata> {
         let bundle = XyBundle::load(bundle_path)?;
 
         // Use the bundle's get_metadata_json method
-        let metadata_json = bundle
-            .get_metadata_json()?
-            .ok_or_else(|| anyhow::anyhow!(
+        let metadata_json = bundle.get_metadata_json()?.ok_or_else(|| {
+            anyhow::anyhow!(
                 "model_metadata.json not found in bundle at {}",
                 bundle_path.display()
-            ))?;
+            )
+        })?;
 
         let metadata: ModelMetadata = serde_json::from_str(&metadata_json)?;
         return Ok(metadata);

@@ -141,7 +141,12 @@ impl Default for AudioInputConfig {
 
 impl AudioInputConfig {
     /// Create a new AudioInputConfig with custom settings.
-    pub fn new(sample_rate: u32, channels: u32, format: AudioSampleFormat, streaming: bool) -> Self {
+    pub fn new(
+        sample_rate: u32,
+        channels: u32,
+        format: AudioSampleFormat,
+        streaming: bool,
+    ) -> Self {
         Self {
             sample_rate,
             channels,
@@ -351,9 +356,15 @@ mod tests {
 
     #[test]
     fn test_all_input_types() {
-        assert_eq!(serde_json::to_string(&InputType::Audio).unwrap(), "\"Audio\"");
+        assert_eq!(
+            serde_json::to_string(&InputType::Audio).unwrap(),
+            "\"Audio\""
+        );
         assert_eq!(serde_json::to_string(&InputType::Text).unwrap(), "\"Text\"");
-        assert_eq!(serde_json::to_string(&InputType::Image).unwrap(), "\"Image\"");
+        assert_eq!(
+            serde_json::to_string(&InputType::Image).unwrap(),
+            "\"Image\""
+        );
         assert_eq!(
             serde_json::to_string(&InputType::Embedding).unwrap(),
             "\"Embedding\""
@@ -362,14 +373,26 @@ mod tests {
 
     #[test]
     fn test_all_output_types() {
-        assert_eq!(serde_json::to_string(&OutputType::Text).unwrap(), "\"Text\"");
+        assert_eq!(
+            serde_json::to_string(&OutputType::Text).unwrap(),
+            "\"Text\""
+        );
         assert_eq!(
             serde_json::to_string(&OutputType::Embedding).unwrap(),
             "\"Embedding\""
         );
-        assert_eq!(serde_json::to_string(&OutputType::Audio).unwrap(), "\"Audio\"");
-        assert_eq!(serde_json::to_string(&OutputType::Image).unwrap(), "\"Image\"");
-        assert_eq!(serde_json::to_string(&OutputType::Json).unwrap(), "\"Json\"");
+        assert_eq!(
+            serde_json::to_string(&OutputType::Audio).unwrap(),
+            "\"Audio\""
+        );
+        assert_eq!(
+            serde_json::to_string(&OutputType::Image).unwrap(),
+            "\"Image\""
+        );
+        assert_eq!(
+            serde_json::to_string(&OutputType::Json).unwrap(),
+            "\"Json\""
+        );
     }
 
     #[test]

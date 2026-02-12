@@ -258,10 +258,7 @@ impl TemplateExecutor {
                 );
 
                 // Extract backend hint from metadata (e.g., "llamacpp" for Gemma 3)
-                let backend_hint = metadata
-                    .metadata
-                    .get("backend")
-                    .and_then(|v| v.as_str());
+                let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
                 // LLM execution via LlmRuntimeAdapter
                 return self.execute_llm(
@@ -275,7 +272,8 @@ impl TemplateExecutor {
             #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
             ExecutionTemplate::Gguf { .. } => {
                 return Err(AdapterError::RuntimeError(
-                    "GGUF/LLM execution requires the 'llm-mistral' or 'llm-llamacpp' feature".to_string(),
+                    "GGUF/LLM execution requires the 'llm-mistral' or 'llm-llamacpp' feature"
+                        .to_string(),
                 ));
             }
         };
@@ -494,10 +492,7 @@ impl TemplateExecutor {
                 chat_messages.len()
             );
 
-            let backend_hint = metadata
-                .metadata
-                .get("backend")
-                .and_then(|v| v.as_str());
+            let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
             let mut result = self.execute_llm_with_messages(
                 model_file,
@@ -566,10 +561,7 @@ impl TemplateExecutor {
                 context_length,
             } = &metadata.execution_template
             {
-                let backend_hint = metadata
-                    .metadata
-                    .get("backend")
-                    .and_then(|v| v.as_str());
+                let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
                 return self.execute_llm_streaming(
                     model_file,
@@ -702,10 +694,7 @@ impl TemplateExecutor {
                 );
 
                 // Execute streaming with ChatMessages directly
-                let backend_hint = metadata
-                    .metadata
-                    .get("backend")
-                    .and_then(|v| v.as_str());
+                let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
                 let result = self.execute_llm_streaming_with_messages(
                     model_file,
@@ -779,8 +768,8 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let mut config = LlmConfig::new(model_path_str.clone())
-                .with_context_length(context_length);
+            let mut config =
+                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
 
             if let Some(template) = chat_template {
                 let template_path = Path::new(&self.base_path).join(template);
@@ -812,16 +801,26 @@ impl TemplateExecutor {
 
         // Parse generation config from metadata
         let mut gen_config = GenerationConfig::default();
-        if let Some(max_tokens) = input.metadata.get("max_tokens").and_then(|s| s.parse().ok()) {
+        if let Some(max_tokens) = input
+            .metadata
+            .get("max_tokens")
+            .and_then(|s| s.parse().ok())
+        {
             gen_config.max_tokens = max_tokens;
         }
-        if let Some(temperature) = input.metadata.get("temperature").and_then(|s| s.parse().ok()) {
+        if let Some(temperature) = input
+            .metadata
+            .get("temperature")
+            .and_then(|s| s.parse().ok())
+        {
             gen_config.temperature = temperature;
         }
 
         // Execute with streaming
         let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            adapter.backend().generate_streaming(&messages, &gen_config, on_token)?
+            adapter
+                .backend()
+                .generate_streaming(&messages, &gen_config, on_token)?
         } else {
             return Err(AdapterError::RuntimeError(
                 "LLM adapter cache unexpectedly empty".to_string(),
@@ -890,8 +889,7 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone())
-                .with_context_length(context_length);
+            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model(&config.model_path)?;
@@ -975,8 +973,7 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone())
-                .with_context_length(context_length);
+            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model(&config.model_path)?;
@@ -988,7 +985,9 @@ impl TemplateExecutor {
 
         // Execute with streaming - pass ChatMessages directly to backend
         let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            adapter.backend().generate_streaming(messages, &gen_config, on_token)?
+            adapter
+                .backend()
+                .generate_streaming(messages, &gen_config, on_token)?
         } else {
             return Err(AdapterError::RuntimeError(
                 "LLM adapter cache unexpectedly empty".to_string(),
@@ -1075,8 +1074,8 @@ impl TemplateExecutor {
         // Load model if needed (cache miss or different model)
         if need_load {
             // Create LLM config
-            let mut config = LlmConfig::new(model_path_str.clone())
-                .with_context_length(context_length);
+            let mut config =
+                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
 
             if let Some(template) = chat_template {
                 let template_path = Path::new(&self.base_path).join(template);
@@ -1096,7 +1095,9 @@ impl TemplateExecutor {
             adapter.execute(input)?
         } else {
             // This should never happen, but handle gracefully
-            return Err(AdapterError::RuntimeError("LLM adapter cache unexpectedly empty".to_string()));
+            return Err(AdapterError::RuntimeError(
+                "LLM adapter cache unexpectedly empty".to_string(),
+            ));
         };
 
         info!(
@@ -1554,8 +1555,8 @@ impl Default for TemplateExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::template::PreprocessingStep;
+    use super::*;
 
     // ============================================================================
     // Constructor Tests
@@ -1676,7 +1677,8 @@ mod tests {
 
     #[test]
     fn test_chunk_text_splits_long_sentence_at_comma() {
-        let text = "This is a very long sentence, with a comma in the middle, that exceeds the limit.";
+        let text =
+            "This is a very long sentence, with a comma in the middle, that exceeds the limit.";
         let chunks = TemplateExecutor::chunk_text_for_tts(text, 40);
         // Should split at commas when sentence exceeds limit
         assert!(chunks.len() >= 2);
@@ -1705,7 +1707,8 @@ mod tests {
 
     #[test]
     fn test_chunk_text_preserves_content() {
-        let text = "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.";
+        let text =
+            "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.";
         let chunks = TemplateExecutor::chunk_text_for_tts(text, 50);
         let rejoined: String = chunks.join(" ");
         // All words should be preserved (though spacing might differ slightly)
@@ -1720,25 +1723,27 @@ mod tests {
 
     #[test]
     fn test_is_tts_model_with_phonemize_step() {
-        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx")
-            .with_preprocessing(PreprocessingStep::Phonemize {
+        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx").with_preprocessing(
+            PreprocessingStep::Phonemize {
                 tokens_file: "tokens.txt".to_string(),
                 backend: Default::default(),
                 dict_file: None,
                 language: None,
                 add_padding: true,
                 normalize_text: false,
-            });
+            },
+        );
         assert!(TemplateExecutor::is_tts_model(&metadata));
     }
 
     #[test]
     fn test_is_tts_model_without_phonemize() {
-        let metadata = ModelMetadata::onnx("test-asr", "1.0", "model.onnx")
-            .with_preprocessing(PreprocessingStep::AudioDecode {
+        let metadata = ModelMetadata::onnx("test-asr", "1.0", "model.onnx").with_preprocessing(
+            PreprocessingStep::AudioDecode {
                 sample_rate: 16000,
                 channels: 1,
-            });
+            },
+        );
         assert!(!TemplateExecutor::is_tts_model(&metadata));
     }
 
@@ -1768,8 +1773,8 @@ mod tests {
 
     #[test]
     fn test_is_tts_model_with_mel_spectrogram_is_not_tts() {
-        let metadata = ModelMetadata::onnx("test-asr", "1.0", "model.onnx")
-            .with_preprocessing(PreprocessingStep::MelSpectrogram {
+        let metadata = ModelMetadata::onnx("test-asr", "1.0", "model.onnx").with_preprocessing(
+            PreprocessingStep::MelSpectrogram {
                 preset: Some("whisper".to_string()),
                 n_mels: 80,
                 sample_rate: 16000,
@@ -1777,7 +1782,8 @@ mod tests {
                 hop_length: 160,
                 mel_scale: Default::default(),
                 max_frames: Some(3000),
-            });
+            },
+        );
         assert!(!TemplateExecutor::is_tts_model(&metadata));
     }
 
@@ -1799,8 +1805,7 @@ mod tests {
         );
 
         ctx.push(
-            Envelope::new(EnvelopeKind::Text("Hello!".to_string()))
-                .with_role(MessageRole::User),
+            Envelope::new(EnvelopeKind::Text("Hello!".to_string())).with_role(MessageRole::User),
         );
         ctx.push(
             Envelope::new(EnvelopeKind::Text("Hi there!".to_string()))
@@ -1828,8 +1833,8 @@ mod tests {
     fn test_execute_with_context_uses_chat_template_formatter() {
         // Test that ChatTemplateFormatter correctly formats context + input
 
-        use crate::conversation::ConversationContext;
         use super::super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
+        use crate::conversation::ConversationContext;
 
         let mut ctx = ConversationContext::new().with_system(
             Envelope::new(EnvelopeKind::Text("You are helpful.".to_string()))
@@ -1837,8 +1842,7 @@ mod tests {
         );
 
         ctx.push(
-            Envelope::new(EnvelopeKind::Text("Hello!".to_string()))
-                .with_role(MessageRole::User),
+            Envelope::new(EnvelopeKind::Text("Hello!".to_string())).with_role(MessageRole::User),
         );
         ctx.push(
             Envelope::new(EnvelopeKind::Text("Hi there!".to_string()))
@@ -1880,8 +1884,8 @@ mod tests {
     fn test_execute_with_context_preserves_input_content() {
         // Verify that the input content is included in the formatted prompt
 
-        use crate::conversation::ConversationContext;
         use super::super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
+        use crate::conversation::ConversationContext;
 
         let ctx = ConversationContext::new();
         let input = Envelope::new(EnvelopeKind::Text("What is 2+2?".to_string()))
@@ -1900,12 +1904,12 @@ mod tests {
     fn test_execute_with_context_with_empty_context() {
         // Test behavior with empty context (no system, no history)
 
-        use crate::conversation::ConversationContext;
         use super::super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
+        use crate::conversation::ConversationContext;
 
         let ctx = ConversationContext::new();
-        let input = Envelope::new(EnvelopeKind::Text("Hello!".to_string()))
-            .with_role(MessageRole::User);
+        let input =
+            Envelope::new(EnvelopeKind::Text("Hello!".to_string())).with_role(MessageRole::User);
 
         let mut messages: Vec<&Envelope> = ctx.context_for_llm();
         messages.push(&input);
@@ -1923,25 +1927,22 @@ mod tests {
     fn test_execute_with_context_llama_format() {
         // Test with Llama format instead of ChatML
 
-        use crate::conversation::ConversationContext;
         use super::super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
+        use crate::conversation::ConversationContext;
 
         let mut ctx = ConversationContext::new().with_system(
             Envelope::new(EnvelopeKind::Text("Be concise.".to_string()))
                 .with_role(MessageRole::System),
         );
 
-        ctx.push(
-            Envelope::new(EnvelopeKind::Text("Hi!".to_string()))
-                .with_role(MessageRole::User),
-        );
+        ctx.push(Envelope::new(EnvelopeKind::Text("Hi!".to_string())).with_role(MessageRole::User));
         ctx.push(
             Envelope::new(EnvelopeKind::Text("Hello!".to_string()))
                 .with_role(MessageRole::Assistant),
         );
 
-        let input = Envelope::new(EnvelopeKind::Text("Bye!".to_string()))
-            .with_role(MessageRole::User);
+        let input =
+            Envelope::new(EnvelopeKind::Text("Bye!".to_string())).with_role(MessageRole::User);
 
         let mut messages: Vec<&Envelope> = ctx.context_for_llm();
         messages.push(&input);
@@ -1961,9 +1962,18 @@ mod tests {
 
         use super::super::chat_template::ChatTemplateFormat;
 
-        assert_eq!(ChatTemplateFormat::from_str("chatml"), Some(ChatTemplateFormat::ChatML));
-        assert_eq!(ChatTemplateFormat::from_str("llama"), Some(ChatTemplateFormat::Llama));
-        assert_eq!(ChatTemplateFormat::from_str("llama2"), Some(ChatTemplateFormat::Llama));
+        assert_eq!(
+            ChatTemplateFormat::from_str("chatml"),
+            Some(ChatTemplateFormat::ChatML)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("llama"),
+            Some(ChatTemplateFormat::Llama)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("llama2"),
+            Some(ChatTemplateFormat::Llama)
+        );
         assert_eq!(ChatTemplateFormat::from_str("unknown"), None);
 
         // Default should be ChatML when None

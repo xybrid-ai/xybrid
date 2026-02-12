@@ -126,9 +126,8 @@ pub trait LlmBackend: Send + Sync {
         };
 
         let mut callback = on_token;
-        callback(partial).map_err(|e| {
-            AdapterError::RuntimeError(format!("Streaming callback error: {}", e))
-        })?;
+        callback(partial)
+            .map_err(|e| AdapterError::RuntimeError(format!("Streaming callback error: {}", e)))?;
 
         Ok(output)
     }
@@ -481,12 +480,26 @@ mod tests {
         struct MockBackend;
 
         impl LlmBackend for MockBackend {
-            fn name(&self) -> &str { "mock" }
-            fn supported_formats(&self) -> Vec<&'static str> { vec!["test"] }
-            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> { Ok(()) }
-            fn is_loaded(&self) -> bool { true }
-            fn unload(&mut self) -> LlmResult<()> { Ok(()) }
-            fn generate(&self, _messages: &[ChatMessage], _config: &GenerationConfig) -> LlmResult<GenerationOutput> {
+            fn name(&self) -> &str {
+                "mock"
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["test"]
+            }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                Ok(())
+            }
+            fn is_loaded(&self) -> bool {
+                true
+            }
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+            fn generate(
+                &self,
+                _messages: &[ChatMessage],
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
                 Ok(GenerationOutput {
                     text: "Test response".to_string(),
                     tokens_generated: 2,
@@ -495,7 +508,11 @@ mod tests {
                     finish_reason: "stop".to_string(),
                 })
             }
-            fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput> {
+            fn generate_raw(
+                &self,
+                prompt: &str,
+                config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
                 self.generate(&[ChatMessage::user(prompt)], config)
             }
             // Uses default generate_streaming implementation
@@ -535,12 +552,26 @@ mod tests {
         struct MockBackend;
 
         impl LlmBackend for MockBackend {
-            fn name(&self) -> &str { "mock" }
-            fn supported_formats(&self) -> Vec<&'static str> { vec!["test"] }
-            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> { Ok(()) }
-            fn is_loaded(&self) -> bool { true }
-            fn unload(&mut self) -> LlmResult<()> { Ok(()) }
-            fn generate(&self, _messages: &[ChatMessage], _config: &GenerationConfig) -> LlmResult<GenerationOutput> {
+            fn name(&self) -> &str {
+                "mock"
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["test"]
+            }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                Ok(())
+            }
+            fn is_loaded(&self) -> bool {
+                true
+            }
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+            fn generate(
+                &self,
+                _messages: &[ChatMessage],
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
                 Ok(GenerationOutput {
                     text: "Test".to_string(),
                     tokens_generated: 1,
@@ -549,7 +580,11 @@ mod tests {
                     finish_reason: "stop".to_string(),
                 })
             }
-            fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput> {
+            fn generate_raw(
+                &self,
+                prompt: &str,
+                config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
                 self.generate(&[ChatMessage::user(prompt)], config)
             }
         }
@@ -562,9 +597,7 @@ mod tests {
         let result = backend.generate_streaming(
             &messages,
             &config,
-            Box::new(|_token| {
-                Err("User cancelled".into())
-            }),
+            Box::new(|_token| Err("User cancelled".into())),
         );
 
         assert!(result.is_err());

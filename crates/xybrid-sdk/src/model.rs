@@ -646,7 +646,12 @@ impl XybridModel {
         self.handle
             .read()
             .ok()
-            .map(|h| matches!(h.metadata.execution_template, ExecutionTemplate::Gguf { .. }))
+            .map(|h| {
+                matches!(
+                    h.metadata.execution_template,
+                    ExecutionTemplate::Gguf { .. }
+                )
+            })
             .unwrap_or(false)
     }
 
@@ -833,9 +838,10 @@ impl XybridModel {
             }
 
             let metadata = guard.metadata.clone();
-            let _ = guard.executor.execute(&metadata, &warmup_input).map_err(|e| {
-                SdkError::InferenceError(format!("Warmup failed: {}", e))
-            })?;
+            let _ = guard
+                .executor
+                .execute(&metadata, &warmup_input)
+                .map_err(|e| SdkError::InferenceError(format!("Warmup failed: {}", e)))?;
 
             let elapsed = start.elapsed();
             log::info!(
@@ -1065,7 +1071,10 @@ impl XybridModel {
         mut on_token: F,
     ) -> SdkResult<InferenceResult>
     where
-        F: FnMut(xybrid_core::runtime_adapter::types::PartialToken) -> Result<(), Box<dyn std::error::Error + Send + Sync>> + Send,
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
     {
         use xybrid_core::execution::ExecutionTemplate;
         use xybrid_core::runtime_adapter::types::PartialToken;
@@ -1089,8 +1098,15 @@ impl XybridModel {
             // True streaming with context for LLM models
             handle
                 .executor
-                .execute_streaming_with_context(&metadata, envelope, context, Box::new(&mut on_token))
-                .map_err(|e| SdkError::InferenceError(format!("Streaming execution failed: {}", e)))?
+                .execute_streaming_with_context(
+                    &metadata,
+                    envelope,
+                    context,
+                    Box::new(&mut on_token),
+                )
+                .map_err(|e| {
+                    SdkError::InferenceError(format!("Streaming execution failed: {}", e))
+                })?
         } else {
             // For non-LLM models: run with context and emit single "token" with full result
             let result = handle
@@ -1171,9 +1187,16 @@ impl XybridModel {
     ///     Ok(())
     /// })?;
     /// ```
-    pub fn run_streaming<F>(&self, envelope: &Envelope, mut on_token: F) -> SdkResult<InferenceResult>
+    pub fn run_streaming<F>(
+        &self,
+        envelope: &Envelope,
+        mut on_token: F,
+    ) -> SdkResult<InferenceResult>
     where
-        F: FnMut(xybrid_core::runtime_adapter::types::PartialToken) -> Result<(), Box<dyn std::error::Error + Send + Sync>> + Send,
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
     {
         use xybrid_core::execution::ExecutionTemplate;
         use xybrid_core::runtime_adapter::types::PartialToken;
@@ -1198,7 +1221,9 @@ impl XybridModel {
             handle
                 .executor
                 .execute_streaming(&metadata, envelope, Box::new(&mut on_token))
-                .map_err(|e| SdkError::InferenceError(format!("Streaming execution failed: {}", e)))?
+                .map_err(|e| {
+                    SdkError::InferenceError(format!("Streaming execution failed: {}", e))
+                })?
         } else {
             // For non-LLM models: run batch and emit single "token" with full result
             let result = handle
@@ -1327,7 +1352,8 @@ impl XybridModel {
                                     finish_reason: token.finish_reason.clone(),
                                 };
                                 // Ignore send errors (receiver dropped)
-                                let _ = tx_for_callback.blocking_send(StreamEvent::Token(stream_token));
+                                let _ =
+                                    tx_for_callback.blocking_send(StreamEvent::Token(stream_token));
                                 Ok(())
                             }),
                         )
@@ -1336,10 +1362,9 @@ impl XybridModel {
                         })?
                 } else {
                     // Non-LLM: batch execution, emit single token
-                    let result = guard
-                        .executor
-                        .execute(&metadata, &envelope)
-                        .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+                    let result = guard.executor.execute(&metadata, &envelope).map_err(|e| {
+                        SdkError::InferenceError(format!("Execution failed: {}", e))
+                    })?;
 
                     // Emit single token with full result
                     if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
@@ -1387,13 +1412,17 @@ impl XybridModel {
             // Send completion or error event
             match result {
                 Ok(Ok(inference_result)) => {
-                    let _ = tx_completion.send(StreamEvent::Complete(inference_result)).await;
+                    let _ = tx_completion
+                        .send(StreamEvent::Complete(inference_result))
+                        .await;
                 }
                 Ok(Err(e)) => {
                     let _ = tx_completion.send(StreamEvent::Error(e.to_string())).await;
                 }
                 Err(e) => {
-                    let _ = tx_completion.send(StreamEvent::Error(format!("Task failed: {}", e))).await;
+                    let _ = tx_completion
+                        .send(StreamEvent::Error(format!("Task failed: {}", e)))
+                        .await;
                 }
             }
         });
@@ -1415,7 +1444,12 @@ impl XybridModel {
             self.handle
                 .read()
                 .ok()
-                .map(|h| matches!(h.metadata.execution_template, ExecutionTemplate::Gguf { .. }))
+                .map(|h| {
+                    matches!(
+                        h.metadata.execution_template,
+                        ExecutionTemplate::Gguf { .. }
+                    )
+                })
                 .unwrap_or(false)
         }
         #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]

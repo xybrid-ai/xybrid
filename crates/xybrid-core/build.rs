@@ -78,7 +78,12 @@ fn find_android_ndk() -> NdkDetectionResult {
 
     // 2. Try to extract from CC environment variable (set by cargo/cmake)
     // e.g., CC=/path/to/ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang
-    for var in ["CC_aarch64-linux-android", "CC_aarch64_linux_android", "TARGET_CC", "CC"] {
+    for var in [
+        "CC_aarch64-linux-android",
+        "CC_aarch64_linux_android",
+        "TARGET_CC",
+        "CC",
+    ] {
         if let Ok(cc_path) = env::var(var) {
             // Extract NDK path: go up from .../toolchains/llvm/prebuilt/.../bin/clang
             if cc_path.contains("/ndk/") {
@@ -198,7 +203,10 @@ fn compile_llama_cpp() {
                 println!("cargo:warning=================================================================");
                 println!("cargo:warning=ERROR: Failed to clone llama.cpp!");
                 println!("cargo:warning=================================================================");
-                println!("cargo:warning=Expected location: {}", llama_cpp_dir.display());
+                println!(
+                    "cargo:warning=Expected location: {}",
+                    llama_cpp_dir.display()
+                );
                 println!("cargo:warning=");
                 println!("cargo:warning=To fix this manually, run:");
                 println!(
@@ -279,7 +287,8 @@ fn compile_llama_cpp() {
             }
 
             // Set Android-specific CMake variables
-            let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "aarch64".to_string());
+            let target_arch =
+                env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "aarch64".to_string());
             let android_abi = match target_arch.as_str() {
                 "aarch64" => "arm64-v8a",
                 "arm" => "armeabi-v7a",
@@ -292,9 +301,13 @@ fn compile_llama_cpp() {
             cmake_config.define("ANDROID_STL", "c++_shared");
             cmake_config.define("ANDROID_NDK", ndk);
         } else {
-            println!("cargo:warning=================================================================");
+            println!(
+                "cargo:warning================================================================="
+            );
             println!("cargo:warning=ERROR: Android NDK not found!");
-            println!("cargo:warning=================================================================");
+            println!(
+                "cargo:warning================================================================="
+            );
             println!("cargo:warning=Paths tried:");
             for path in &ndk_result.tried_paths {
                 println!("cargo:warning=  - {}", path);
@@ -304,8 +317,12 @@ fn compile_llama_cpp() {
             println!("cargo:warning=  export ANDROID_NDK_HOME=/path/to/android-ndk");
             println!("cargo:warning=  export ANDROID_HOME=/path/to/android-sdk  (with ndk/ subdirectory)");
             println!("cargo:warning=");
-            println!("cargo:warning=Or install Android Studio which sets up the NDK automatically.");
-            println!("cargo:warning=================================================================");
+            println!(
+                "cargo:warning=Or install Android Studio which sets up the NDK automatically."
+            );
+            println!(
+                "cargo:warning================================================================="
+            );
             process::exit(1);
         }
     } else if target_os == "macos" || target_os == "ios" {

@@ -129,8 +129,7 @@ impl BenchmarkResult {
         let p95_idx = ((sorted.len() as f64) * 0.95).ceil() as usize - 1;
         let p95 = sorted.get(p95_idx).copied().unwrap_or(max);
 
-        let variance =
-            sorted.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / sorted.len() as f64;
+        let variance = sorted.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / sorted.len() as f64;
         let std_dev = variance.sqrt();
 
         Self {
@@ -251,8 +250,8 @@ impl ExecutionProviderInfo {
         };
 
         let coreml_available = cfg!(feature = "ort-coreml");
-        let apple_silicon = cfg!(any(target_os = "ios", target_os = "macos"))
-            && cfg!(target_arch = "aarch64");
+        let apple_silicon =
+            cfg!(any(target_os = "ios", target_os = "macos")) && cfg!(target_arch = "aarch64");
 
         let (name, description) = if coreml_available && apple_silicon {
             (
@@ -395,12 +394,8 @@ mod tests {
 
     #[test]
     fn test_benchmark_result_single_value() {
-        let result = BenchmarkResult::from_times(
-            "test".to_string(),
-            "cpu".to_string(),
-            vec![42.0],
-            42.0,
-        );
+        let result =
+            BenchmarkResult::from_times("test".to_string(), "cpu".to_string(), vec![42.0], 42.0);
 
         assert_eq!(result.iterations, 1);
         assert_eq!(result.mean_ms, 42.0);

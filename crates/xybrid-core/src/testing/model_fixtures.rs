@@ -305,7 +305,9 @@ pub fn pipelines_dir() -> Option<PathBuf> {
 /// }
 /// ```
 pub fn pipeline(filename: &str) -> Option<PathBuf> {
-    pipelines_dir().map(|d| d.join(filename)).filter(|p| p.exists())
+    pipelines_dir()
+        .map(|d| d.join(filename))
+        .filter(|p| p.exists())
 }
 
 #[cfg(test)]

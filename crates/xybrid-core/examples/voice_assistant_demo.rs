@@ -30,8 +30,8 @@ use std::time::{Duration, Instant};
 
 use xybrid_core::cloud::{Cloud, CloudConfig, CompletionRequest};
 use xybrid_core::execution::ModelMetadata;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::execution::TemplateExecutor;
+use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::testing::model_fixtures;
 
 /// Latency tracking for each pipeline stage

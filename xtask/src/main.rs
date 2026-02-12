@@ -69,17 +69,11 @@ fn resolve_ort_lib_location(target: &str) -> Option<PathBuf> {
 
     // Check vendored location (must return absolute path since ort-sys build script
     // runs from a different working directory)
-    let vendor_path = PathBuf::from(format!(
-        "vendor/ort-ios/onnxruntime.xcframework/{}",
-        subdir
-    ));
+    let vendor_path = PathBuf::from(format!("vendor/ort-ios/onnxruntime.xcframework/{}", subdir));
     let vendor_lib = vendor_path.join("libonnxruntime.a");
     if vendor_lib.exists() {
         let abs_path = vendor_path.canonicalize().unwrap_or(vendor_path);
-        println!(
-            "Using ORT iOS library: {}",
-            abs_path.display()
-        );
+        println!("Using ORT iOS library: {}", abs_path.display());
         return Some(abs_path);
     }
 
@@ -791,17 +785,25 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
 
     // Unity native plugins directory
     let unity_plugins_dir = PathBuf::from("bindings/unity/Runtime/Plugins").join(platform_dir);
-    std::fs::create_dir_all(&unity_plugins_dir)
-        .with_context(|| format!("Failed to create Unity plugins directory: {:?}", unity_plugins_dir))?;
+    std::fs::create_dir_all(&unity_plugins_dir).with_context(|| {
+        format!(
+            "Failed to create Unity plugins directory: {:?}",
+            unity_plugins_dir
+        )
+    })?;
 
     // Ensure the platform folder has a .meta file (Unity requires it)
-    let folder_meta = PathBuf::from("bindings/unity/Runtime/Plugins")
-        .join(format!("{}.meta", platform_dir));
+    let folder_meta =
+        PathBuf::from("bindings/unity/Runtime/Plugins").join(format!("{}.meta", platform_dir));
     if !folder_meta.exists() {
-        let guid = format!("{:032x}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
+        let guid = format!(
+            "{:032x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+                & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+        );
         std::fs::write(
             &folder_meta,
             format!(
@@ -821,8 +823,7 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
     let lib_name = src.file_name().unwrap();
     let dst = unity_plugins_dir.join(lib_name);
 
-    std::fs::copy(&src, &dst)
-        .with_context(|| format!("Failed to copy library to {:?}", dst))?;
+    std::fs::copy(&src, &dst).with_context(|| format!("Failed to copy library to {:?}", dst))?;
 
     println!("  ✓ Deployed to: {}", dst.display());
 
@@ -832,10 +833,14 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
         dst.extension().unwrap_or_default().to_str().unwrap_or("")
     ));
     if !meta_path.exists() {
-        let guid = format!("{:032x}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
+        let guid = format!(
+            "{:032x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+                & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+        );
         let meta_content = generate_plugin_meta(&guid, platform_dir);
         std::fs::write(&meta_path, meta_content)?;
         println!("  ✓ Created plugin .meta: {}", meta_path.display());
@@ -1010,10 +1015,7 @@ fn fix_kotlin_bindings(file_path: &Path) -> Result<()> {
     fixed = fixed.replace("value.`message`", "value.`msg`");
 
     // Fix the override val message getter
-    fixed = fixed.replace(
-        "\"message=${ `message` }\"",
-        "\"message=${ `msg` }\"",
-    );
+    fixed = fixed.replace("\"message=${ `message` }\"", "\"message=${ `msg` }\"");
 
     // Fix 2: Remove @JvmOverloads from generated code (UInt/ULong incompatibility).
     // The hand-written Xybrid.kt has its own @JvmOverloads where appropriate.
@@ -1048,23 +1050,18 @@ fn copy_kotlin_binding_to_package() -> Result<()> {
 
     println!("  Copying Kotlin binding to ai.xybrid package...");
 
-    let content = std::fs::read_to_string(&src)
-        .with_context(|| format!("Failed to read {:?}", src))?;
+    let content =
+        std::fs::read_to_string(&src).with_context(|| format!("Failed to read {:?}", src))?;
 
     // Replace the package declaration for the ai.xybrid copy
-    let repackaged = content.replacen(
-        "package uniffi.xybrid_uniffi",
-        "package ai.xybrid",
-        1,
-    );
+    let repackaged = content.replacen("package uniffi.xybrid_uniffi", "package ai.xybrid", 1);
 
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create directory {:?}", parent))?;
     }
 
-    std::fs::write(&dst, &repackaged)
-        .with_context(|| format!("Failed to write {:?}", dst))?;
+    std::fs::write(&dst, &repackaged).with_context(|| format!("Failed to write {:?}", dst))?;
 
     println!("  ✓ Copied to {:?}", dst);
     Ok(())
@@ -1097,8 +1094,7 @@ fn generate_kotlin_bindings() -> Result<()> {
 /// Kotlin binding file paths (UniFFI generates to the first, second is a repackaged copy)
 const KOTLIN_UNIFFI_BINDING: &str =
     "bindings/kotlin/src/main/kotlin/ai/xybrid/uniffi/xybrid_uniffi/xybrid_uniffi.kt";
-const KOTLIN_PACKAGE_BINDING: &str =
-    "bindings/kotlin/src/main/kotlin/ai/xybrid/xybrid_uniffi.kt";
+const KOTLIN_PACKAGE_BINDING: &str = "bindings/kotlin/src/main/kotlin/ai/xybrid/xybrid_uniffi.kt";
 
 /// Apple target architectures for XCFramework
 const IOS_ARM64: &str = "aarch64-apple-ios";
@@ -1114,7 +1110,10 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
 
     let profile = if release { "release" } else { "debug" };
 
-    println!("Building XCFramework ({} mode, version {})...", profile, version);
+    println!(
+        "Building XCFramework ({} mode, version {})...",
+        profile, version
+    );
     println!();
 
     // Check for ONNX Runtime iOS library using the unified resolution
@@ -1398,7 +1397,10 @@ fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<
         abis
     };
 
-    println!("Building Android .so files ({} mode, version {})...", profile, version);
+    println!(
+        "Building Android .so files ({} mode, version {})...",
+        profile, version
+    );
     println!();
 
     // Check for ANDROID_NDK_HOME or try to detect cargo-ndk
@@ -1506,15 +1508,17 @@ fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<
                 // remove it first. Otherwise std::fs::copy follows the symlink and
                 // truncates the source file to 0 bytes before reading it, destroying
                 // the vendor copy.
-                if dst.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-                    std::fs::remove_file(&dst).with_context(|| {
-                        format!("Failed to remove symlink at {:?}", dst)
-                    })?;
+                if dst
+                    .symlink_metadata()
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false)
+                {
+                    std::fs::remove_file(&dst)
+                        .with_context(|| format!("Failed to remove symlink at {:?}", dst))?;
                 }
 
-                std::fs::copy(&src, &dst).with_context(|| {
-                    format!("Failed to copy {} to {:?}", lib_name, output_dir)
-                })?;
+                std::fs::copy(&src, &dst)
+                    .with_context(|| format!("Failed to copy {} to {:?}", lib_name, output_dir))?;
             }
             println!("  ✓ {} ORT libraries bundled", abi_name);
         }
@@ -1706,7 +1710,12 @@ fn run_frb_codegen() -> Result<()> {
 }
 
 /// Build Flutter native libraries for a specific platform
-fn build_flutter(platform: FlutterPlatform, release: bool, version: &str, skip_frb_codegen: bool) -> Result<()> {
+fn build_flutter(
+    platform: FlutterPlatform,
+    release: bool,
+    version: &str,
+    skip_frb_codegen: bool,
+) -> Result<()> {
     let profile = if release { "release" } else { "debug" };
 
     println!(
@@ -1816,10 +1825,7 @@ fn build_flutter_native(target: &str, release: bool, features: &str) -> Result<(
     // Set ORT_LIB_LOCATION and fp16 rustflags for iOS targets
     if is_ios_target(target) {
         if let Some(ort_lib_path) = resolve_ort_lib_location(target) {
-            println!(
-                "  Using ORT iOS library: {}",
-                ort_lib_path.display()
-            );
+            println!("  Using ORT iOS library: {}", ort_lib_path.display());
             cmd.env("ORT_LIB_LOCATION", &ort_lib_path);
         } else {
             // Warn but don't bail - Flutter iOS via xtask is less common than via flutter build ios
@@ -2112,7 +2118,10 @@ fn build_all(release: bool, parallel: bool, version: &str) -> Result<()> {
 
     let profile = if release { "release" } else { "debug" };
 
-    println!("Building all platforms ({} mode, version {})...", profile, version);
+    println!(
+        "Building all platforms ({} mode, version {})...",
+        profile, version
+    );
     println!();
 
     // Categorize platforms into buildable and skipped
@@ -2179,9 +2188,13 @@ fn build_all(release: bool, parallel: bool, version: &str) -> Result<()> {
     } else {
         // Sequential builds
         for platform in &buildable {
-            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            );
             println!("Building {}...", platform.name());
-            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            );
             println!();
 
             match run_platform_build(*platform, release, version) {
@@ -2258,10 +2271,18 @@ fn run_platform_build(platform: BuildPlatform, release: bool, version: &str) -> 
         BuildPlatform::XCFramework => build_xcframework(release, version),
         BuildPlatform::Android => build_android(release, vec![], version),
         BuildPlatform::FlutterIos => build_flutter(FlutterPlatform::Ios, release, version, false),
-        BuildPlatform::FlutterAndroid => build_flutter(FlutterPlatform::Android, release, version, false),
-        BuildPlatform::FlutterMacos => build_flutter(FlutterPlatform::Macos, release, version, false),
-        BuildPlatform::FlutterWindows => build_flutter(FlutterPlatform::Windows, release, version, false),
-        BuildPlatform::FlutterLinux => build_flutter(FlutterPlatform::Linux, release, version, false),
+        BuildPlatform::FlutterAndroid => {
+            build_flutter(FlutterPlatform::Android, release, version, false)
+        }
+        BuildPlatform::FlutterMacos => {
+            build_flutter(FlutterPlatform::Macos, release, version, false)
+        }
+        BuildPlatform::FlutterWindows => {
+            build_flutter(FlutterPlatform::Windows, release, version, false)
+        }
+        BuildPlatform::FlutterLinux => {
+            build_flutter(FlutterPlatform::Linux, release, version, false)
+        }
     }
 }
 
@@ -2318,21 +2339,23 @@ struct Sha256 {
 
 impl Sha256 {
     const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
     ];
 
     fn new() -> Self {
         Self {
             state: [
-                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-                0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+                0x5be0cd19,
             ],
             buffer: Vec::new(),
             total_len: 0,
@@ -2365,7 +2388,10 @@ impl Sha256 {
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
             let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
         }
 
         let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = self.state;
@@ -2374,7 +2400,11 @@ impl Sha256 {
         for i in 0..64 {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let ch = (e & f) ^ ((!e) & g);
-            let temp1 = h.wrapping_add(s1).wrapping_add(ch).wrapping_add(Self::K[i]).wrapping_add(w[i]);
+            let temp1 = h
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(Self::K[i])
+                .wrapping_add(w[i]);
             let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
             let maj = (a & b) ^ (a & c) ^ (b & c);
             let temp2 = s0.wrapping_add(maj);
@@ -2520,10 +2550,9 @@ fn package_artifacts(
         packages,
     };
     let manifest_path = output_dir.join("manifest.json");
-    let manifest_json = serde_json::to_string_pretty(&manifest)
-        .context("Failed to serialize manifest")?;
-    std::fs::write(&manifest_path, &manifest_json)
-        .context("Failed to write manifest.json")?;
+    let manifest_json =
+        serde_json::to_string_pretty(&manifest).context("Failed to serialize manifest")?;
+    std::fs::write(&manifest_path, &manifest_json).context("Failed to write manifest.json")?;
     println!("  ✓ {}", manifest_path.display());
 
     // Print summary
@@ -2604,7 +2633,12 @@ fn package_xcframework(version: &str, output_dir: &Path) -> Result<Option<Packag
     let size = std::fs::metadata(&output_path)?.len();
     let sha256 = calculate_sha256(&output_path)?;
 
-    println!("  ✓ {} ({} bytes, sha256: {}...)", filename, size, &sha256[..16]);
+    println!(
+        "  ✓ {} ({} bytes, sha256: {}...)",
+        filename,
+        size,
+        &sha256[..16]
+    );
 
     Ok(Some(PackageInfo {
         name: "XybridFFI.xcframework".to_string(),
@@ -2685,7 +2719,12 @@ fn package_android(version: &str, output_dir: &Path) -> Result<Option<PackageInf
     let size = std::fs::metadata(&output_path)?.len();
     let sha256 = calculate_sha256(&output_path)?;
 
-    println!("  ✓ {} ({} bytes, sha256: {}...)", filename, size, &sha256[..16]);
+    println!(
+        "  ✓ {} ({} bytes, sha256: {}...)",
+        filename,
+        size,
+        &sha256[..16]
+    );
 
     Ok(Some(PackageInfo {
         name: "xybrid-android".to_string(),
@@ -2734,8 +2773,8 @@ fn package_flutter(version: &str, output_dir: &Path) -> Result<Option<PackageInf
         .arg("--exclude=build")
         .arg("--exclude=.packages")
         .arg("--exclude=pubspec.lock")
-        .arg("--exclude=lib/src/rust")  // Exclude FRB-generated code
-        .arg("--exclude=rust/target")   // Exclude Rust build artifacts
+        .arg("--exclude=lib/src/rust") // Exclude FRB-generated code
+        .arg("--exclude=rust/target") // Exclude Rust build artifacts
         .arg("-C")
         .arg(parent)
         .arg("flutter")
@@ -2749,7 +2788,12 @@ fn package_flutter(version: &str, output_dir: &Path) -> Result<Option<PackageInf
     let size = std::fs::metadata(&output_path)?.len();
     let sha256 = calculate_sha256(&output_path)?;
 
-    println!("  ✓ {} ({} bytes, sha256: {}...)", filename, size, &sha256[..16]);
+    println!(
+        "  ✓ {} ({} bytes, sha256: {}...)",
+        filename,
+        size,
+        &sha256[..16]
+    );
 
     Ok(Some(PackageInfo {
         name: "xybrid-flutter".to_string(),
@@ -2895,7 +2939,8 @@ mod tests {
         // We can only verify that the function runs without error and returns the correct type.
         // If vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a exists, it's Some.
         // Otherwise, it's None.
-        let vendor_lib = PathBuf::from("vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a");
+        let vendor_lib =
+            PathBuf::from("vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a");
         if vendor_lib.exists() {
             assert!(result.is_some());
             assert!(result.unwrap().ends_with("ios-arm64"));

@@ -1170,24 +1170,26 @@ impl Xybrid {
         if handle.stage_descriptors.len() == 1 {
             let stage_name = handle.stage_descriptors[0].name.clone();
             if let Some(bundle_path) = handle.bundle_paths.get(&stage_name) {
-                let bundle_path = bundle_path.clone();  // Clone to avoid borrow issues
+                let bundle_path = bundle_path.clone(); // Clone to avoid borrow issues
                 let metadata_path = bundle_path.join("model_metadata.json");
                 if metadata_path.exists() {
-                    let metadata_str = std::fs::read_to_string(&metadata_path)
-                        .map_err(|e| SdkError::PipelineError(format!("Failed to read metadata: {}", e)))?;
-                    let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
-                        .map_err(|e| SdkError::PipelineError(format!("Failed to parse metadata: {}", e)))?;
+                    let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
+                        SdkError::PipelineError(format!("Failed to read metadata: {}", e))
+                    })?;
+                    let metadata: ModelMetadata =
+                        serde_json::from_str(&metadata_str).map_err(|e| {
+                            SdkError::PipelineError(format!("Failed to parse metadata: {}", e))
+                        })?;
 
                     // Check if this is an LLM model
                     if matches!(
                         metadata.execution_template,
                         xybrid_core::execution::ExecutionTemplate::Gguf { .. }
                     ) {
-                        drop(handle);  // Release lock before executor call
+                        drop(handle); // Release lock before executor call
 
-                        let mut executor = TemplateExecutor::with_base_path(
-                            bundle_path.to_str().unwrap_or("")
-                        );
+                        let mut executor =
+                            TemplateExecutor::with_base_path(bundle_path.to_str().unwrap_or(""));
 
                         let start_time = std::time::Instant::now();
                         let output = executor

@@ -52,7 +52,10 @@ fn generate_c_header(crate_path: &PathBuf) {
     match result {
         Ok(bindings) => {
             bindings.write_to_file(&output_path);
-            println!("cargo:warning=Generated C header: {}", output_path.display());
+            println!(
+                "cargo:warning=Generated C header: {}",
+                output_path.display()
+            );
         }
         Err(e) => {
             eprintln!("Warning: cbindgen failed: {}", e);

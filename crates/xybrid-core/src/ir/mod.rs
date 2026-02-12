@@ -64,16 +64,34 @@ mod tests {
 
     #[test]
     fn test_message_role_serialization_lowercase() {
-        assert_eq!(serde_json::to_string(&MessageRole::System).unwrap(), "\"system\"");
-        assert_eq!(serde_json::to_string(&MessageRole::User).unwrap(), "\"user\"");
-        assert_eq!(serde_json::to_string(&MessageRole::Assistant).unwrap(), "\"assistant\"");
+        assert_eq!(
+            serde_json::to_string(&MessageRole::System).unwrap(),
+            "\"system\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MessageRole::User).unwrap(),
+            "\"user\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MessageRole::Assistant).unwrap(),
+            "\"assistant\""
+        );
     }
 
     #[test]
     fn test_message_role_deserialization_lowercase() {
-        assert_eq!(serde_json::from_str::<MessageRole>("\"system\"").unwrap(), MessageRole::System);
-        assert_eq!(serde_json::from_str::<MessageRole>("\"user\"").unwrap(), MessageRole::User);
-        assert_eq!(serde_json::from_str::<MessageRole>("\"assistant\"").unwrap(), MessageRole::Assistant);
+        assert_eq!(
+            serde_json::from_str::<MessageRole>("\"system\"").unwrap(),
+            MessageRole::System
+        );
+        assert_eq!(
+            serde_json::from_str::<MessageRole>("\"user\"").unwrap(),
+            MessageRole::User
+        );
+        assert_eq!(
+            serde_json::from_str::<MessageRole>("\"assistant\"").unwrap(),
+            MessageRole::Assistant
+        );
     }
 
     #[test]

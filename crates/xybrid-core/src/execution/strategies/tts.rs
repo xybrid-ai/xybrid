@@ -347,15 +347,16 @@ mod tests {
 
     #[test]
     fn test_is_tts_model_with_phonemize() {
-        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx")
-            .with_preprocessing(PreprocessingStep::Phonemize {
+        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx").with_preprocessing(
+            PreprocessingStep::Phonemize {
                 tokens_file: "tokens.txt".to_string(),
                 backend: Default::default(),
                 dict_file: None,
                 language: None,
                 add_padding: true,
                 normalize_text: false,
-            });
+            },
+        );
 
         assert!(TtsStrategy::is_tts_model(&metadata));
     }
@@ -370,15 +371,16 @@ mod tests {
     fn test_can_handle_tts() {
         let strategy = TtsStrategy::new();
 
-        let tts_metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx")
-            .with_preprocessing(PreprocessingStep::Phonemize {
+        let tts_metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx").with_preprocessing(
+            PreprocessingStep::Phonemize {
                 tokens_file: "tokens.txt".to_string(),
                 backend: Default::default(),
                 dict_file: None,
                 language: None,
                 add_padding: true,
                 normalize_text: false,
-            });
+            },
+        );
 
         assert!(strategy.can_handle(&tts_metadata));
     }
@@ -605,6 +607,9 @@ mod tests {
         // ModelGraph templates should not be handled by TTS strategy
         let metadata = ModelMetadata::model_graph("test", "1.0", vec![], vec![]);
         let result = TtsStrategy::get_model_file(&metadata);
-        assert!(result.is_err(), "ModelGraph should not be supported for TTS");
+        assert!(
+            result.is_err(),
+            "ModelGraph should not be supported for TTS"
+        );
     }
 }

@@ -58,9 +58,9 @@ impl LogLevel {
     pub fn to_llamacpp_verbosity(&self) -> i32 {
         match self {
             LogLevel::Quiet => 0,
-            LogLevel::Normal => 0,           // Suppress library logs at normal level
-            LogLevel::Verbose => 2,          // Show warnings and errors
-            LogLevel::VeryVerbose => 4,      // Show all library logs
+            LogLevel::Normal => 0,  // Suppress library logs at normal level
+            LogLevel::Verbose => 2, // Show warnings and errors
+            LogLevel::VeryVerbose => 4, // Show all library logs
         }
     }
 

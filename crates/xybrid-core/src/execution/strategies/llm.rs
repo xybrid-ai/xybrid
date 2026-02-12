@@ -98,7 +98,10 @@ impl LlmGenerationParams {
     /// Create params with ChatML stop sequences (for Qwen, Phi, etc.)
     pub fn with_chatml_stops() -> Self {
         Self {
-            stop_sequences: CHATML_STOP_SEQUENCES.iter().map(|s| s.to_string()).collect(),
+            stop_sequences: CHATML_STOP_SEQUENCES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             ..Default::default()
         }
     }
@@ -129,7 +132,10 @@ impl LlmGenerationParams {
             || model_lower.contains("yi-")
             || model_lower.contains("deepseek")
         {
-            return CHATML_STOP_SEQUENCES.iter().map(|s| s.to_string()).collect();
+            return CHATML_STOP_SEQUENCES
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
         }
 
         // Llama format models
@@ -142,7 +148,10 @@ impl LlmGenerationParams {
         }
 
         // Default: use ChatML as it's most common
-        CHATML_STOP_SEQUENCES.iter().map(|s| s.to_string()).collect()
+        CHATML_STOP_SEQUENCES
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     }
 }
 
@@ -269,8 +278,8 @@ impl LlmInference for DefaultLlmInference {
         use crate::runtime_adapter::RuntimeAdapter;
 
         // Create LLM config
-        let mut llm_config = LlmConfig::new(&config.model_path)
-            .with_context_length(config.context_length);
+        let mut llm_config =
+            LlmConfig::new(&config.model_path).with_context_length(config.context_length);
 
         if let Some(template) = &config.chat_template {
             llm_config = llm_config.with_chat_template(template);
@@ -293,9 +302,10 @@ impl LlmInference for DefaultLlmInference {
     fn generate(&self, prompt: &str, params: &LlmGenerationParams) -> ExecutorResult<String> {
         use crate::runtime_adapter::llm::GenerationConfig;
 
-        let adapter = self.adapter.as_ref().ok_or_else(|| {
-            AdapterError::RuntimeError("No model loaded".to_string())
-        })?;
+        let adapter = self
+            .adapter
+            .as_ref()
+            .ok_or_else(|| AdapterError::RuntimeError("No model loaded".to_string()))?;
 
         let gen_config = GenerationConfig {
             max_tokens: params.max_tokens,
@@ -314,11 +324,8 @@ impl LlmInference for DefaultLlmInference {
             gen_config.stop_sequences
         );
 
-        let output = adapter.generate_with_config(
-            prompt,
-            params.system_prompt.as_deref(),
-            &gen_config,
-        )?;
+        let output =
+            adapter.generate_with_config(prompt, params.system_prompt.as_deref(), &gen_config)?;
 
         Ok(output.text)
     }
@@ -433,10 +440,8 @@ impl<I: LlmInference> LlmStrategy<I> {
             } => {
                 let model_path = Path::new(base_path).join(model_file);
 
-                let mut config = LlmModelConfig::new(
-                    model_path.to_string_lossy().to_string(),
-                    *context_length,
-                );
+                let mut config =
+                    LlmModelConfig::new(model_path.to_string_lossy().to_string(), *context_length);
 
                 if let Some(template) = chat_template {
                     let template_path = Path::new(base_path).join(template);
@@ -496,9 +501,10 @@ impl<I: LlmInference + 'static> ExecutionStrategy for LlmStrategy<I> {
         }
 
         // Load model if needed
-        let mut inference = self.inference.lock().map_err(|e| {
-            AdapterError::RuntimeError(format!("Failed to acquire lock: {}", e))
-        })?;
+        let mut inference = self
+            .inference
+            .lock()
+            .map_err(|e| AdapterError::RuntimeError(format!("Failed to acquire lock: {}", e)))?;
 
         if !inference.is_loaded() {
             debug!(target: "xybrid_core", "Loading LLM model: {}", config.model_path);
@@ -624,7 +630,9 @@ mod tests {
             *self.last_params.lock().unwrap() = Some(params.clone());
 
             if self.should_fail_generate {
-                return Err(AdapterError::RuntimeError("Mock generate failure".to_string()));
+                return Err(AdapterError::RuntimeError(
+                    "Mock generate failure".to_string(),
+                ));
             }
 
             Ok(self.response.clone())
@@ -760,7 +768,10 @@ mod tests {
     #[test]
     fn test_parse_stop_sequences_from_metadata() {
         let mut metadata = HashMap::new();
-        metadata.insert("stop_sequences".to_string(), "<|im_end|>,<|im_start|>".to_string());
+        metadata.insert(
+            "stop_sequences".to_string(),
+            "<|im_end|>,<|im_start|>".to_string(),
+        );
 
         let params = LlmGenerationParams::from_envelope_metadata(&metadata);
 
@@ -772,7 +783,10 @@ mod tests {
     #[test]
     fn test_parse_stop_sequences_with_spaces() {
         let mut metadata = HashMap::new();
-        metadata.insert("stop_sequences".to_string(), " STOP , END , HALT ".to_string());
+        metadata.insert(
+            "stop_sequences".to_string(),
+            " STOP , END , HALT ".to_string(),
+        );
 
         let params = LlmGenerationParams::from_envelope_metadata(&metadata);
 
@@ -922,8 +936,8 @@ mod tests {
     #[test]
     fn test_extract_gguf_config() {
         let metadata = create_gguf_metadata();
-        let config = LlmStrategy::<MockLlmInference>::extract_gguf_config(&metadata, "/base")
-            .unwrap();
+        let config =
+            LlmStrategy::<MockLlmInference>::extract_gguf_config(&metadata, "/base").unwrap();
 
         assert!(config.model_path.contains("model.gguf"));
         assert!(config.chat_template.is_some());
@@ -938,8 +952,8 @@ mod tests {
             serde_json::Value::String("llamacpp".to_string()),
         );
 
-        let config = LlmStrategy::<MockLlmInference>::extract_gguf_config(&metadata, "/base")
-            .unwrap();
+        let config =
+            LlmStrategy::<MockLlmInference>::extract_gguf_config(&metadata, "/base").unwrap();
 
         assert_eq!(config.backend_hint, Some("llamacpp".to_string()));
     }
@@ -1109,7 +1123,10 @@ mod tests {
         let last_params = inference.last_params.lock().unwrap();
         let params = last_params.as_ref().unwrap();
 
-        assert!(!params.stop_sequences.is_empty(), "Stop sequences should be auto-detected for Qwen");
+        assert!(
+            !params.stop_sequences.is_empty(),
+            "Stop sequences should be auto-detected for Qwen"
+        );
         assert!(
             params.stop_sequences.contains(&"<|im_end|>".to_string()),
             "Should contain ChatML stop token"

@@ -7,8 +7,8 @@
 use ndarray::Array4;
 use std::collections::HashMap;
 use xybrid_core::execution::ModelMetadata;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::execution::TemplateExecutor;
+use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::testing::model_fixtures;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

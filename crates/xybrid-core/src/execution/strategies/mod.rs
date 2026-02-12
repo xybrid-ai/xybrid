@@ -147,15 +147,16 @@ mod tests {
     #[test]
     fn test_resolver_selects_tts_for_phonemize() {
         let resolver = StrategyResolver::new();
-        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx")
-            .with_preprocessing(PreprocessingStep::Phonemize {
+        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx").with_preprocessing(
+            PreprocessingStep::Phonemize {
                 tokens_file: "tokens.txt".to_string(),
                 backend: Default::default(),
                 dict_file: None,
                 language: None,
                 add_padding: true,
                 normalize_text: false,
-            });
+            },
+        );
 
         let strategy = resolver.resolve(&metadata);
         assert!(strategy.is_some());

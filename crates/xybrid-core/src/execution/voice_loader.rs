@@ -125,9 +125,7 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
     fn resolve_voice_path(&self, metadata: &ModelMetadata) -> ExecutorResult<Option<PathBuf>> {
         if let Some(voice_config) = &metadata.voices {
             match &voice_config.format {
-                VoiceFormat::Embedded { file, .. } => {
-                    Ok(Some(self.base_path.join(file)))
-                }
+                VoiceFormat::Embedded { file, .. } => Ok(Some(self.base_path.join(file))),
                 VoiceFormat::PerModel { .. } | VoiceFormat::Cloning { .. } => {
                     Err(AdapterError::InvalidInput(
                         "Only embedded voice format is currently supported".to_string(),
@@ -214,11 +212,8 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
     ) -> ExecutorResult<&'a VoiceInfo> {
         if let Some(vid) = voice_id {
             metadata.get_voice(vid).ok_or_else(|| {
-                let available: Vec<_> = voice_config
-                    .catalog
-                    .iter()
-                    .map(|v| v.id.as_str())
-                    .collect();
+                let available: Vec<_> =
+                    voice_config.catalog.iter().map(|v| v.id.as_str()).collect();
                 AdapterError::InvalidInput(format!(
                     "Voice '{}' not found. Available voices: {:?}",
                     vid, available

@@ -53,7 +53,6 @@ pub struct SdkCacheProvider {
 }
 
 impl SdkCacheProvider {
-    
     /*/// Creates a new SDK cache provider with default cache location.
     pub fn new() -> Result<Self, SdkError> {
         let cache = CacheManager::new()?;

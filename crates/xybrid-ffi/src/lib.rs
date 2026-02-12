@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 // Import SDK types
 use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
-use xybrid_sdk::{InferenceResult, ConversationContext, ModelLoader, PartialToken, XybridModel};
+use xybrid_sdk::{ConversationContext, InferenceResult, ModelLoader, PartialToken, XybridModel};
 
 // ============================================================================
 // Opaque Handle Types (US-009)
@@ -203,7 +203,8 @@ pub type XybridStreamCallback = Option<
 /// the streaming call and that no data races occur. Function pointers are
 /// inherently thread-safe (just addresses).
 struct StreamCallbackCtx {
-    callback: unsafe extern "C" fn(*const c_char, i64, u32, *const c_char, *const c_char, *mut c_void),
+    callback:
+        unsafe extern "C" fn(*const c_char, i64, u32, *const c_char, *const c_char, *mut c_void),
     user_data: *mut c_void,
 }
 unsafe impl Send for StreamCallbackCtx {}
@@ -213,7 +214,10 @@ impl StreamCallbackCtx {
     unsafe fn invoke(&self, token: &PartialToken) {
         let c_token = CString::new(token.token.as_str()).unwrap_or_default();
         let c_cumulative = CString::new(token.cumulative_text.as_str()).unwrap_or_default();
-        let c_finish = token.finish_reason.as_ref().map(|r| CString::new(r.as_str()).unwrap_or_default());
+        let c_finish = token
+            .finish_reason
+            .as_ref()
+            .map(|r| CString::new(r.as_str()).unwrap_or_default());
 
         (self.callback)(
             c_token.as_ptr(),
@@ -637,11 +641,9 @@ pub extern "C" fn xybrid_version() -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn xybrid_last_error() -> *const c_char {
-    LAST_ERROR.with(|e| {
-        match e.borrow().as_ref() {
-            Some(cstr) => cstr.as_ptr(),
-            None => std::ptr::null(),
-        }
+    LAST_ERROR.with(|e| match e.borrow().as_ref() {
+        Some(cstr) => cstr.as_ptr(),
+        None => std::ptr::null(),
     })
 }
 
@@ -1204,7 +1206,8 @@ pub unsafe extern "C" fn xybrid_context_set_system(
     };
 
     // Create system envelope
-    let system_envelope = Envelope::new(EnvelopeKind::Text(text_str)).with_role(MessageRole::System);
+    let system_envelope =
+        Envelope::new(EnvelopeKind::Text(text_str)).with_role(MessageRole::System);
 
     // Rebuild context with system (preserving ID and max_history_len)
     let id = ctx_data.context.id().to_string();
@@ -1773,7 +1776,10 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
         let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
         // Run inference with context using the SDK
-        let inference_result = match model_state.model.run_with_context(&sdk_envelope, &ctx_data.context) {
+        let inference_result = match model_state
+            .model
+            .run_with_context(&sdk_envelope, &ctx_data.context)
+        {
             Ok(result) => result,
             Err(e) => {
                 // Return error result
@@ -1798,7 +1804,10 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
         Ok(ptr) => ptr,
         Err(panic_info) => {
             let msg = panic_payload_to_string(&panic_info);
-            set_last_error(&format!("Internal panic in xybrid_model_run_with_context: {}", msg));
+            set_last_error(&format!(
+                "Internal panic in xybrid_model_run_with_context: {}",
+                msg
+            ));
             let result = ResultData {
                 success: false,
                 error: Some(format!("Internal panic: {}", msg)),
@@ -1997,13 +2006,17 @@ pub unsafe extern "C" fn xybrid_model_run_streaming(
         let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
         // Wrap callback + user_data in a Send-safe context
-        let ctx = StreamCallbackCtx { callback: callback_fn, user_data };
+        let ctx = StreamCallbackCtx {
+            callback: callback_fn,
+            user_data,
+        };
 
         // Build the on_token closure that bridges to the C callback
-        let on_token = move |token: PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            unsafe { ctx.invoke(&token) };
-            Ok(())
-        };
+        let on_token =
+            move |token: PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                unsafe { ctx.invoke(&token) };
+                Ok(())
+            };
 
         // Call the SDK streaming method
         match model_state.model.run_streaming(&sdk_envelope, on_token) {
@@ -2029,7 +2042,10 @@ pub unsafe extern "C" fn xybrid_model_run_streaming(
         Ok(ptr) => ptr,
         Err(panic_info) => {
             let msg = panic_payload_to_string(&panic_info);
-            set_last_error(&format!("Internal panic in xybrid_model_run_streaming: {}", msg));
+            set_last_error(&format!(
+                "Internal panic in xybrid_model_run_streaming: {}",
+                msg
+            ));
             let result = ResultData {
                 success: false,
                 error: Some(format!("Internal panic: {}", msg)),
@@ -2132,16 +2148,24 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
         let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
         // Wrap callback + user_data in a Send-safe context
-        let cb_ctx = StreamCallbackCtx { callback: callback_fn, user_data };
-
-        // Build the on_token closure that bridges to the C callback
-        let on_token = move |token: PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            unsafe { cb_ctx.invoke(&token) };
-            Ok(())
+        let cb_ctx = StreamCallbackCtx {
+            callback: callback_fn,
+            user_data,
         };
 
+        // Build the on_token closure that bridges to the C callback
+        let on_token =
+            move |token: PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                unsafe { cb_ctx.invoke(&token) };
+                Ok(())
+            };
+
         // Call the SDK streaming method with context
-        match model_state.model.run_streaming_with_context(&sdk_envelope, &ctx_data.context, on_token) {
+        match model_state.model.run_streaming_with_context(
+            &sdk_envelope,
+            &ctx_data.context,
+            on_token,
+        ) {
             Ok(result) => {
                 XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&result)))
             }
@@ -2164,7 +2188,10 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
         Ok(ptr) => ptr,
         Err(panic_info) => {
             let msg = panic_payload_to_string(&panic_info);
-            set_last_error(&format!("Internal panic in xybrid_model_run_streaming_with_context: {}", msg));
+            set_last_error(&format!(
+                "Internal panic in xybrid_model_run_streaming_with_context: {}",
+                msg
+            ));
             let result = ResultData {
                 success: false,
                 error: Some(format!("Internal panic: {}", msg)),
@@ -2690,9 +2717,7 @@ pub unsafe extern "C" fn xybrid_bundle_extract(
 ///
 /// A pointer to the model ID string, or null on error.
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_bundle_model_id(
-    handle: *mut XybridBundleHandle,
-) -> *const c_char {
+pub unsafe extern "C" fn xybrid_bundle_model_id(handle: *mut XybridBundleHandle) -> *const c_char {
     // Read-only accessor — don't clear last error
     let state = match XybridBundleHandle::as_ref(handle) {
         Some(s) => s,
@@ -2716,9 +2741,7 @@ pub unsafe extern "C" fn xybrid_bundle_model_id(
 /// The returned pointer uses thread-local storage and is valid until the next
 /// call to this function on the same thread. Do NOT free it.
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_bundle_version(
-    handle: *mut XybridBundleHandle,
-) -> *const c_char {
+pub unsafe extern "C" fn xybrid_bundle_version(handle: *mut XybridBundleHandle) -> *const c_char {
     let state = match XybridBundleHandle::as_ref(handle) {
         Some(s) => s,
         None => return std::ptr::null(),
@@ -2741,9 +2764,7 @@ pub unsafe extern "C" fn xybrid_bundle_version(
 /// The returned pointer uses thread-local storage and is valid until the next
 /// call to this function on the same thread. Do NOT free it.
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_bundle_target(
-    handle: *mut XybridBundleHandle,
-) -> *const c_char {
+pub unsafe extern "C" fn xybrid_bundle_target(handle: *mut XybridBundleHandle) -> *const c_char {
     let state = match XybridBundleHandle::as_ref(handle) {
         Some(s) => s,
         None => return std::ptr::null(),
@@ -2766,9 +2787,7 @@ pub unsafe extern "C" fn xybrid_bundle_target(
 /// The returned pointer uses thread-local storage and is valid until the next
 /// call to this function on the same thread. Do NOT free it.
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_bundle_hash(
-    handle: *mut XybridBundleHandle,
-) -> *const c_char {
+pub unsafe extern "C" fn xybrid_bundle_hash(handle: *mut XybridBundleHandle) -> *const c_char {
     let state = match XybridBundleHandle::as_ref(handle) {
         Some(s) => s,
         None => return std::ptr::null(),
@@ -2793,15 +2812,17 @@ pub unsafe extern "C" fn xybrid_bundle_hash(
 /// - `1` if the bundle has model_metadata.json
 /// - `0` if not, or if the handle is null/invalid
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_bundle_has_metadata(
-    handle: *mut XybridBundleHandle,
-) -> i32 {
+pub unsafe extern "C" fn xybrid_bundle_has_metadata(handle: *mut XybridBundleHandle) -> i32 {
     let state = match XybridBundleHandle::as_ref(handle) {
         Some(s) => s,
         None => return 0,
     };
 
-    if state.bundle.manifest().has_metadata { 1 } else { 0 }
+    if state.bundle.manifest().has_metadata {
+        1
+    } else {
+        0
+    }
 }
 
 /// Get the number of files in the bundle.
@@ -2810,9 +2831,7 @@ pub unsafe extern "C" fn xybrid_bundle_has_metadata(
 ///
 /// The file count, or 0 if the handle is null/invalid.
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_bundle_file_count(
-    handle: *mut XybridBundleHandle,
-) -> u32 {
+pub unsafe extern "C" fn xybrid_bundle_file_count(handle: *mut XybridBundleHandle) -> u32 {
     let state = match XybridBundleHandle::as_ref(handle) {
         Some(s) => s,
         None => return 0,
@@ -3556,8 +3575,7 @@ mod tests {
                 return;
             }
 
-            let envelope =
-                xybrid_envelope_audio(audio_bytes.as_ptr(), audio_bytes.len(), 16000, 1);
+            let envelope = xybrid_envelope_audio(audio_bytes.as_ptr(), audio_bytes.len(), 16000, 1);
             assert!(!envelope.is_null());
 
             let result = xybrid_model_run(model, envelope);
@@ -3739,7 +3757,10 @@ mod tests {
     fn test_model_supports_token_streaming_null_handle() {
         unsafe {
             // Null handle should return 0
-            assert_eq!(xybrid_model_supports_token_streaming(std::ptr::null_mut()), 0);
+            assert_eq!(
+                xybrid_model_supports_token_streaming(std::ptr::null_mut()),
+                0
+            );
         }
     }
 

@@ -94,8 +94,7 @@ fn test_wav2vec2_vocab_loading() {
     };
 
     let vocab_path = model_dir.join("vocab.json");
-    let vocab_content =
-        std::fs::read_to_string(&vocab_path).expect("Failed to read vocab.json");
+    let vocab_content = std::fs::read_to_string(&vocab_path).expect("Failed to read vocab.json");
 
     let vocab: serde_json::Value =
         serde_json::from_str(&vocab_content).expect("Failed to parse vocab.json");
@@ -104,11 +103,16 @@ fn test_wav2vec2_vocab_loading() {
     assert!(vocab.is_object(), "Vocab should be an object");
 
     let vocab_obj = vocab.as_object().unwrap();
-    assert!(vocab_obj.len() >= 30, "Vocab should have at least 30 entries");
+    assert!(
+        vocab_obj.len() >= 30,
+        "Vocab should have at least 30 entries"
+    );
 
     // Check for common characters
-    assert!(vocab_obj.contains_key("<pad>") || vocab_obj.contains_key("|"),
-        "Vocab should have padding token");
+    assert!(
+        vocab_obj.contains_key("<pad>") || vocab_obj.contains_key("|"),
+        "Vocab should have padding token"
+    );
 
     println!("Vocabulary loaded:");
     println!("  Total tokens: {}", vocab_obj.len());

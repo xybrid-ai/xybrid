@@ -267,14 +267,14 @@ impl Envelope {
     /// assert_eq!(plain.role(), None);
     /// ```
     pub fn role(&self) -> Option<super::MessageRole> {
-        self.metadata.get(Self::ROLE_METADATA_KEY).and_then(|s| {
-            match s.as_str() {
+        self.metadata
+            .get(Self::ROLE_METADATA_KEY)
+            .and_then(|s| match s.as_str() {
                 "system" => Some(super::MessageRole::System),
                 "user" => Some(super::MessageRole::User),
                 "assistant" => Some(super::MessageRole::Assistant),
                 _ => None,
-            }
-        })
+            })
     }
 
     /// Returns `true` if this envelope has the User message role.
@@ -620,8 +620,8 @@ mod tests {
 
     #[test]
     fn test_envelope_with_local_id() {
-        let envelope = Envelope::new(EnvelopeKind::Text("test".to_string()))
-            .with_local_id("custom-id-123");
+        let envelope =
+            Envelope::new(EnvelopeKind::Text("test".to_string())).with_local_id("custom-id-123");
 
         assert_eq!(envelope.local_id(), "custom-id-123");
     }
@@ -742,8 +742,8 @@ mod tests {
     fn test_envelope_with_role_user() {
         use super::super::MessageRole;
 
-        let envelope = Envelope::new(EnvelopeKind::Text("Hello".to_string()))
-            .with_role(MessageRole::User);
+        let envelope =
+            Envelope::new(EnvelopeKind::Text("Hello".to_string())).with_role(MessageRole::User);
 
         assert_eq!(envelope.role(), Some(MessageRole::User));
         assert!(envelope.is_user_message());
@@ -795,10 +795,18 @@ mod tests {
         use super::super::MessageRole;
 
         // Test round-trip: with_role -> role() returns correct value
-        for role in [MessageRole::System, MessageRole::User, MessageRole::Assistant] {
-            let envelope = Envelope::new(EnvelopeKind::Text("test".to_string()))
-                .with_role(role);
-            assert_eq!(envelope.role(), Some(role), "Round-trip failed for {:?}", role);
+        for role in [
+            MessageRole::System,
+            MessageRole::User,
+            MessageRole::Assistant,
+        ] {
+            let envelope = Envelope::new(EnvelopeKind::Text("test".to_string())).with_role(role);
+            assert_eq!(
+                envelope.role(),
+                Some(role),
+                "Round-trip failed for {:?}",
+                role
+            );
         }
     }
 
@@ -806,8 +814,8 @@ mod tests {
     fn test_envelope_role_metadata_key() {
         use super::super::MessageRole;
 
-        let envelope = Envelope::new(EnvelopeKind::Text("test".to_string()))
-            .with_role(MessageRole::User);
+        let envelope =
+            Envelope::new(EnvelopeKind::Text("test".to_string())).with_role(MessageRole::User);
 
         // Verify the metadata key is correctly set
         assert_eq!(
@@ -820,8 +828,8 @@ mod tests {
     fn test_envelope_role_serialization_roundtrip() -> Result<(), EnvelopeError> {
         use super::super::MessageRole;
 
-        let envelope = Envelope::new(EnvelopeKind::Text("Hello".to_string()))
-            .with_role(MessageRole::User);
+        let envelope =
+            Envelope::new(EnvelopeKind::Text("Hello".to_string())).with_role(MessageRole::User);
 
         // Binary roundtrip
         let bytes = envelope.to_bytes()?;

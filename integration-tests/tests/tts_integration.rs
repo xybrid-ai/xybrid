@@ -31,16 +31,12 @@ fn test_load_tokens_file() {
     };
 
     let tokens_path = model_dir.join("tokens.txt");
-    let tokens_content =
-        std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
+    let tokens_content = std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
 
     let tokens_map = xybrid_core::phonemizer::load_tokens_map(&tokens_content);
 
     // Verify some expected mappings
-    assert!(
-        tokens_map.contains_key(&'$'),
-        "Should have padding token $"
-    );
+    assert!(tokens_map.contains_key(&'$'), "Should have padding token $");
     assert!(
         tokens_map.contains_key(&'a'),
         "Should have lowercase letters"
@@ -66,8 +62,8 @@ fn test_phonemize_text() {
         return;
     };
 
-    let phonemizer = xybrid_core::phonemizer::Phonemizer::new(&dict_path)
-        .expect("Failed to create phonemizer");
+    let phonemizer =
+        xybrid_core::phonemizer::Phonemizer::new(&dict_path).expect("Failed to create phonemizer");
 
     // Test some common words
     let test_cases = [
@@ -109,13 +105,12 @@ fn test_phonemes_to_token_ids() {
 
     // Load tokens map
     let tokens_path = model_dir.join("tokens.txt");
-    let tokens_content =
-        std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
+    let tokens_content = std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
     let tokens_map = xybrid_core::phonemizer::load_tokens_map(&tokens_content);
 
     // Create phonemizer
-    let phonemizer = xybrid_core::phonemizer::Phonemizer::new(&dict_path)
-        .expect("Failed to create phonemizer");
+    let phonemizer =
+        xybrid_core::phonemizer::Phonemizer::new(&dict_path).expect("Failed to create phonemizer");
 
     // Convert text to token IDs
     let text = "Hello world";
@@ -289,7 +284,9 @@ fn test_voice_embedding_loader_npz() {
     }
 
     // Test count_voices
-    let count = loader.count_voices(&npz_path).expect("Failed to count voices");
+    let count = loader
+        .count_voices(&npz_path)
+        .expect("Failed to count voices");
     println!("  Voice count: {}", count);
     assert!(count > 0, "Should have at least one voice");
 }

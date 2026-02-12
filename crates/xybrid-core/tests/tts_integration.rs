@@ -285,7 +285,9 @@ fn test_voice_embedding_loader_2d_npz() {
     let loader = VoiceEmbeddingLoader::new(256);
 
     // Test loading by index
-    let embedding = loader.load(npz_path, 0).expect("Failed to load voice embedding by index");
+    let embedding = loader
+        .load(npz_path, 0)
+        .expect("Failed to load voice embedding by index");
     assert_eq!(embedding.len(), 256, "Embedding should have 256 dimensions");
 
     // Verify it's not all zeros
@@ -297,19 +299,24 @@ fn test_voice_embedding_loader_2d_npz() {
     println!("  First 5 values: {:?}", &embedding[..5]);
 
     // Test listing voice names
-    let names = loader.list_voice_names(npz_path).expect("Failed to list voice names");
+    let names = loader
+        .list_voice_names(npz_path)
+        .expect("Failed to list voice names");
     assert!(names.is_some(), "NPZ should have voice names");
     let names = names.unwrap();
     println!("  Voice names: {:?}", names);
     assert_eq!(names.len(), 8, "Should have 8 voices");
 
     // Test loading by name
-    let embedding_by_name = loader.load_npz_by_name(npz_path, "expr-voice-2-f", None)
+    let embedding_by_name = loader
+        .load_npz_by_name(npz_path, "expr-voice-2-f", None)
         .expect("Failed to load voice by name");
     assert_eq!(embedding_by_name.len(), 256);
     println!("  Successfully loaded 'expr-voice-2-f' by name");
 
     // Test count_voices
-    let count = loader.count_voices(npz_path).expect("Failed to count voices");
+    let count = loader
+        .count_voices(npz_path)
+        .expect("Failed to count voices");
     assert_eq!(count, 8, "Should count 8 voices");
 }

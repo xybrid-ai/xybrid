@@ -398,13 +398,7 @@ mod tests {
 
     #[test]
     fn test_stream_stats_with_audio() {
-        let stats = FfiStreamStats::with_audio(
-            FfiStreamState::Streaming,
-            16000,
-            15000,
-            5,
-            1000,
-        );
+        let stats = FfiStreamStats::with_audio(FfiStreamState::Streaming, 16000, 15000, 5, 1000);
         assert_eq!(stats.state, FfiStreamState::Streaming);
         assert_eq!(stats.samples_received, 16000);
         assert_eq!(stats.samples_processed, 15000);
@@ -419,25 +413,13 @@ mod tests {
         assert!((stats.processing_ratio() - 1.0).abs() < f64::EPSILON);
 
         // With samples
-        let stats = FfiStreamStats::with_audio(
-            FfiStreamState::Streaming,
-            100,
-            80,
-            1,
-            10,
-        );
+        let stats = FfiStreamStats::with_audio(FfiStreamState::Streaming, 100, 80, 1, 10);
         assert!((stats.processing_ratio() - 0.8).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_stream_stats_serialization() {
-        let stats = FfiStreamStats::with_audio(
-            FfiStreamState::Completed,
-            1000,
-            1000,
-            10,
-            5000,
-        );
+        let stats = FfiStreamStats::with_audio(FfiStreamState::Completed, 1000, 1000, 10, 5000);
         let json = serde_json::to_string(&stats).unwrap();
         assert!(json.contains("\"state\":\"Completed\""));
         assert!(json.contains("\"samples_received\":1000"));
@@ -482,15 +464,13 @@ mod tests {
 
     #[test]
     fn test_streaming_config_with_language() {
-        let config = FfiStreamingConfig::new("/path/to/model")
-            .with_language("de");
+        let config = FfiStreamingConfig::new("/path/to/model").with_language("de");
         assert_eq!(config.language, Some("de".to_string()));
     }
 
     #[test]
     fn test_streaming_config_with_vad_settings() {
-        let config = FfiStreamingConfig::new("/path/to/model")
-            .with_vad_settings(true, 0.8);
+        let config = FfiStreamingConfig::new("/path/to/model").with_vad_settings(true, 0.8);
         assert!(config.enable_vad);
         assert!((config.vad_threshold - 0.8).abs() < f32::EPSILON);
     }

@@ -195,11 +195,7 @@ impl VoiceEmbeddingLoader {
         if let Ok(voice_data) = result_2d {
             // 2D array: shape is (1, 256) or (N, 256)
             // Extract first row (index 0)
-            let embedding: Vec<f32> = voice_data
-                .row(0)
-                .iter()
-                .copied()
-                .collect();
+            let embedding: Vec<f32> = voice_data.row(0).iter().copied().collect();
 
             if embedding.len() != self.embedding_dim {
                 return Err(VoiceError::DimensionMismatch {

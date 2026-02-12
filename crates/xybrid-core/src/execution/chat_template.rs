@@ -478,21 +478,60 @@ mod tests {
 
     #[test]
     fn test_format_from_str() {
-        assert_eq!(ChatTemplateFormat::from_str("chatml"), Some(ChatTemplateFormat::ChatML));
-        assert_eq!(ChatTemplateFormat::from_str("ChatML"), Some(ChatTemplateFormat::ChatML));
-        assert_eq!(ChatTemplateFormat::from_str("chat_ml"), Some(ChatTemplateFormat::ChatML));
-        assert_eq!(ChatTemplateFormat::from_str("chat-ml"), Some(ChatTemplateFormat::ChatML));
+        assert_eq!(
+            ChatTemplateFormat::from_str("chatml"),
+            Some(ChatTemplateFormat::ChatML)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("ChatML"),
+            Some(ChatTemplateFormat::ChatML)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("chat_ml"),
+            Some(ChatTemplateFormat::ChatML)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("chat-ml"),
+            Some(ChatTemplateFormat::ChatML)
+        );
 
-        assert_eq!(ChatTemplateFormat::from_str("llama"), Some(ChatTemplateFormat::Llama));
-        assert_eq!(ChatTemplateFormat::from_str("Llama"), Some(ChatTemplateFormat::Llama));
-        assert_eq!(ChatTemplateFormat::from_str("llama2"), Some(ChatTemplateFormat::Llama));
-        assert_eq!(ChatTemplateFormat::from_str("llama-2"), Some(ChatTemplateFormat::Llama));
+        assert_eq!(
+            ChatTemplateFormat::from_str("llama"),
+            Some(ChatTemplateFormat::Llama)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("Llama"),
+            Some(ChatTemplateFormat::Llama)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("llama2"),
+            Some(ChatTemplateFormat::Llama)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("llama-2"),
+            Some(ChatTemplateFormat::Llama)
+        );
 
-        assert_eq!(ChatTemplateFormat::from_str("gemma"), Some(ChatTemplateFormat::Gemma));
-        assert_eq!(ChatTemplateFormat::from_str("Gemma"), Some(ChatTemplateFormat::Gemma));
-        assert_eq!(ChatTemplateFormat::from_str("gemma2"), Some(ChatTemplateFormat::Gemma));
-        assert_eq!(ChatTemplateFormat::from_str("gemma3"), Some(ChatTemplateFormat::Gemma));
-        assert_eq!(ChatTemplateFormat::from_str("gemma-3"), Some(ChatTemplateFormat::Gemma));
+        assert_eq!(
+            ChatTemplateFormat::from_str("gemma"),
+            Some(ChatTemplateFormat::Gemma)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("Gemma"),
+            Some(ChatTemplateFormat::Gemma)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("gemma2"),
+            Some(ChatTemplateFormat::Gemma)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("gemma3"),
+            Some(ChatTemplateFormat::Gemma)
+        );
+        assert_eq!(
+            ChatTemplateFormat::from_str("gemma-3"),
+            Some(ChatTemplateFormat::Gemma)
+        );
 
         assert_eq!(ChatTemplateFormat::from_str("unknown"), None);
         assert_eq!(ChatTemplateFormat::from_str(""), None);
@@ -535,7 +574,8 @@ mod tests {
         let rewrapped = text_envelope(&first_pass, MessageRole::User);
         let second_messages = vec![&rewrapped];
 
-        let second_pass = ChatTemplateFormatter::format(&second_messages, ChatTemplateFormat::ChatML);
+        let second_pass =
+            ChatTemplateFormatter::format(&second_messages, ChatTemplateFormat::ChatML);
 
         // If double-formatting occurs, the second pass wraps the already-formatted
         // prompt inside another <|im_start|>user\n...<|im_end|>\n block.
@@ -565,7 +605,8 @@ mod tests {
         let first_pass = ChatTemplateFormatter::format(&messages, ChatTemplateFormat::Gemma);
         let rewrapped = text_envelope(&first_pass, MessageRole::User);
         let second_messages = vec![&rewrapped];
-        let second_pass = ChatTemplateFormatter::format(&second_messages, ChatTemplateFormat::Gemma);
+        let second_pass =
+            ChatTemplateFormatter::format(&second_messages, ChatTemplateFormat::Gemma);
 
         let marker_count = second_pass.matches("<start_of_turn>").count();
         assert!(

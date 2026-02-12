@@ -27,8 +27,10 @@ pub trait InferenceSession: Send + Sync {
     /// # Returns
     ///
     /// Map of output names to tensor data
-    fn run(&self, inputs: HashMap<String, ArrayD<f32>>)
-        -> ExecutorResult<HashMap<String, ArrayD<f32>>>;
+    fn run(
+        &self,
+        inputs: HashMap<String, ArrayD<f32>>,
+    ) -> ExecutorResult<HashMap<String, ArrayD<f32>>>;
 
     /// Get the names of output tensors.
     fn output_names(&self) -> &[String];
@@ -93,9 +95,9 @@ impl SessionFactory for OnnxSessionFactory {
     type Session = OnnxInferenceSession;
 
     fn create(&self, model_path: &Path) -> ExecutorResult<Self::Session> {
-        let path_str = model_path.to_str().ok_or_else(|| {
-            AdapterError::InvalidInput("Invalid model path encoding".to_string())
-        })?;
+        let path_str = model_path
+            .to_str()
+            .ok_or_else(|| AdapterError::InvalidInput("Invalid model path encoding".to_string()))?;
 
         let session = ONNXSession::new(path_str, false, false)?;
         Ok(OnnxInferenceSession { session })
@@ -177,7 +179,9 @@ mod tests {
         }
 
         pub fn with_output(mut self, name: &str, tensor: ArrayD<f32>) -> Self {
-            self.session_template.outputs.insert(name.to_string(), tensor);
+            self.session_template
+                .outputs
+                .insert(name.to_string(), tensor);
             self
         }
     }

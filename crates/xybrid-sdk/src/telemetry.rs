@@ -524,10 +524,7 @@ fn send_batch_inner(
         events: events.to_vec(),
     };
 
-    let url = format!(
-        "{}/v1/events/batch",
-        config.endpoint.trim_end_matches('/')
-    );
+    let url = format!("{}/v1/events/batch", config.endpoint.trim_end_matches('/'));
 
     for attempt in 0..retry_policy.max_attempts {
         // Calculate delay for this attempt

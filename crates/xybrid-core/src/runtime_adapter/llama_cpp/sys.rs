@@ -97,10 +97,7 @@ extern "C" {
     fn llama_log_get_verbosity_c() -> c_int;
 
     // Model loading
-    fn llama_load_model_from_file_c(
-        path_model: *const c_char,
-        n_gpu_layers: c_int,
-    ) -> *mut c_void;
+    fn llama_load_model_from_file_c(path_model: *const c_char, n_gpu_layers: c_int) -> *mut c_void;
     fn llama_free_model_c(model: *mut c_void);
 
     // Context management
@@ -214,7 +211,8 @@ extern "C" {
 ///
 /// Return 0 to continue generation, non-zero to stop.
 #[cfg(feature = "llm-llamacpp")]
-pub type TokenCallback = extern "C" fn(token_id: i32, token_text: *const c_char, user_data: *mut c_void) -> c_int;
+pub type TokenCallback =
+    extern "C" fn(token_id: i32, token_text: *const c_char, user_data: *mut c_void) -> c_int;
 
 // =============================================================================
 // Safe Wrapper Functions
@@ -411,9 +409,7 @@ pub fn llama_format_chat(
         .iter()
         .map(|m| {
             CString::new(m.content.as_str()).map_err(|_| {
-                AdapterError::InvalidInput(
-                    "Chat message content contains null byte".to_string(),
-                )
+                AdapterError::InvalidInput("Chat message content contains null byte".to_string())
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -551,7 +547,9 @@ pub fn llama_tokenize(
     };
 
     if result < 0 {
-        return Err(AdapterError::RuntimeError("Tokenization failed".to_string()));
+        return Err(AdapterError::RuntimeError(
+            "Tokenization failed".to_string(),
+        ));
     }
 
     tokens.truncate(result as usize);
@@ -563,10 +561,7 @@ pub fn llama_tokenize(
 /// This is used for stop sequences like `<|im_end|>` which should be
 /// recognized as special tokens, not literal character sequences.
 #[cfg(feature = "llm-llamacpp")]
-pub fn llama_tokenize_special(
-    model: &LlamaModel,
-    text: &str,
-) -> Result<Vec<i32>, AdapterError> {
+pub fn llama_tokenize_special(model: &LlamaModel, text: &str) -> Result<Vec<i32>, AdapterError> {
     let c_text = CString::new(text)
         .map_err(|_| AdapterError::InvalidInput("Invalid text encoding".to_string()))?;
 
@@ -578,8 +573,8 @@ pub fn llama_tokenize_special(
             text.len() as c_int,
             ptr::null_mut(),
             0,
-            false,  // don't add BOS/EOS
-            true,   // parse_special = true for <|im_end|> etc.
+            false, // don't add BOS/EOS
+            true,  // parse_special = true for <|im_end|> etc.
         )
     };
 
@@ -597,13 +592,15 @@ pub fn llama_tokenize_special(
             text.len() as c_int,
             tokens.as_mut_ptr(),
             tokens.len() as c_int,
-            false,  // don't add BOS/EOS
-            true,   // parse_special = true
+            false, // don't add BOS/EOS
+            true,  // parse_special = true
         )
     };
 
     if result < 0 {
-        return Err(AdapterError::RuntimeError("Tokenization failed".to_string()));
+        return Err(AdapterError::RuntimeError(
+            "Tokenization failed".to_string(),
+        ));
     }
 
     tokens.truncate(result as usize);
@@ -624,7 +621,7 @@ pub fn llama_detokenize(model: &LlamaModel, tokens: &[i32]) -> Result<String, Ad
                 buf.as_mut_ptr() as *mut c_char,
                 buf.len() as c_int,
                 0,
-                true,  // special = true: render special tokens like <|im_end|> as text
+                true, // special = true: render special tokens like <|im_end|> as text
             )
         };
 
@@ -807,7 +804,18 @@ pub fn llama_generate(
     top_p: f32,
     top_k: usize,
 ) -> Result<Vec<i32>, AdapterError> {
-    llama_generate_with_stops(ctx, model, input_tokens, max_tokens, temperature, top_p, 0.05, top_k, 1.1, &[])
+    llama_generate_with_stops(
+        ctx,
+        model,
+        input_tokens,
+        max_tokens,
+        temperature,
+        top_p,
+        0.05,
+        top_k,
+        1.1,
+        &[],
+    )
 }
 
 /// Context passed through the C callback to the Rust closure.
@@ -843,10 +851,10 @@ where
 
     // Call the Rust closure
     match (ctx.callback)(token_id, text) {
-        Ok(()) => 0,  // Continue
+        Ok(()) => 0, // Continue
         Err(e) => {
             ctx.error = Some(e);
-            1  // Stop
+            1 // Stop
         }
     }
 }
@@ -1060,10 +1068,7 @@ pub fn llama_tokenize(
 }
 
 #[cfg(not(feature = "llm-llamacpp"))]
-pub fn llama_tokenize_special(
-    _model: &LlamaModel,
-    _text: &str,
-) -> Result<Vec<i32>, AdapterError> {
+pub fn llama_tokenize_special(_model: &LlamaModel, _text: &str) -> Result<Vec<i32>, AdapterError> {
     Err(AdapterError::RuntimeError(
         "llm-llamacpp feature not enabled".to_string(),
     ))
@@ -1160,9 +1165,9 @@ mod tests {
     fn test_stop_sequence_count_matches_filtered_lens() {
         // Simulate tokenization results: sequence [1] returns empty
         let tokenize_results: Vec<Vec<i32>> = vec![
-            vec![32000, 32001],  // <|im_end|> → 2 tokens
-            vec![],              // <|unknown_token|> → empty (filtered out)
-            vec![32002],         // <|end_of_text|> → 1 token
+            vec![32000, 32001], // <|im_end|> → 2 tokens
+            vec![],             // <|unknown_token|> → empty (filtered out)
+            vec![32002],        // <|end_of_text|> → 1 token
         ];
 
         // Reproduce the fixed logic: filter empties, then count from stop_lens
@@ -1219,12 +1224,15 @@ mod tests {
 
         // Fixed logic: use retry_result when resize path was taken
         let len = if result as usize >= buf_len {
-            retry_result as usize  // FIXED: use retry's value
+            retry_result as usize // FIXED: use retry's value
         } else {
             result as usize
         };
 
-        assert_eq!(len, 4998, "Must use retry_result (4998), not first result (5000)");
+        assert_eq!(
+            len, 4998,
+            "Must use retry_result (4998), not first result (5000)"
+        );
     }
 
     // =========================================================================
@@ -1285,24 +1293,43 @@ mod tests {
 
         // Small input: 512 batch is fine
         let small_input = 100;
-        let batch_size = if small_input > fixed_batch_size { small_input } else { fixed_batch_size };
+        let batch_size = if small_input > fixed_batch_size {
+            small_input
+        } else {
+            fixed_batch_size
+        };
         assert!(batch_size >= small_input);
 
         // Large input: batch must grow to fit
         let large_input = 2000;
-        let batch_size = if large_input > fixed_batch_size { large_input } else { fixed_batch_size };
+        let batch_size = if large_input > fixed_batch_size {
+            large_input
+        } else {
+            fixed_batch_size
+        };
         assert_eq!(batch_size, 2000, "Batch must grow to fit large input");
         assert!(batch_size >= large_input);
 
         // Edge case: exactly 512
         let exact_input = 512;
-        let batch_size = if exact_input > fixed_batch_size { exact_input } else { fixed_batch_size };
+        let batch_size = if exact_input > fixed_batch_size {
+            exact_input
+        } else {
+            fixed_batch_size
+        };
         assert_eq!(batch_size, 512);
         assert!(batch_size >= exact_input);
 
         // Edge case: 513 tokens (one over) → must allocate 513
         let over_input = 513;
-        let batch_size = if over_input > fixed_batch_size { over_input } else { fixed_batch_size };
-        assert_eq!(batch_size, 513, "Batch must not use fixed 512 when input is 513");
+        let batch_size = if over_input > fixed_batch_size {
+            over_input
+        } else {
+            fixed_batch_size
+        };
+        assert_eq!(
+            batch_size, 513,
+            "Batch must not use fixed 512 when input is 513"
+        );
     }
 }
