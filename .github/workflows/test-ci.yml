@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - apple
+          - publish-kotlin
           - darwin-precompile
           - linux-precompile
           - windows-precompile
@@ -301,3 +302,87 @@ jobs:
 
       - name: Build CLI
         run: cargo build --release -p xybrid-cli --target x86_64-pc-windows-msvc --features platform-desktop
+
+  #
+  # Publish Kotlin SDK (dry-run: build Android + assemble AAR, no actual publish)
+  #
+  publish-kotlin:
+    name: Publish Kotlin SDK (dry-run)
+    if: inputs.platform == 'publish-kotlin'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: test-publish-kotlin
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Build Android .so files
+        run: cargo xtask build-android --release
+
+      - name: Verify .so files
+        run: |
+          SO_BASE_PATH="bindings/kotlin/libs"
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            SO_PATH="$SO_BASE_PATH/$abi/libxybrid_uniffi.so"
+            if [ ! -f "$SO_PATH" ]; then
+              echo "Error: .so file not found at $SO_PATH"
+              exit 1
+            fi
+            echo "OK: $SO_PATH ($(du -h "$SO_PATH" | cut -f1))"
+          done
+
+      - name: Assemble Kotlin AAR (dry-run)
+        working-directory: bindings/kotlin
+        run: ./gradlew assembleRelease
+
+      - name: Verify AAR output
+        run: |
+          AAR_PATH=$(find bindings/kotlin/build -name "*.aar" | head -1)
+          if [ -z "$AAR_PATH" ]; then
+            echo "Error: No AAR file produced"
+            exit 1
+          fi
+          echo "AAR built successfully: $AAR_PATH ($(du -h "$AAR_PATH" | cut -f1))"
+          echo ""
+          echo "AAR contents:"
+          unzip -l "$AAR_PATH" | grep -E "\.so|\.jar|AndroidManifest" | head -20
