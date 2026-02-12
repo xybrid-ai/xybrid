@@ -13,6 +13,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square" alt="License"></a>
   <a href="https://github.com/xybrid-ai/xybrid/actions"><img src="https://img.shields.io/github/actions/workflow/status/xybrid-ai/xybrid/ci.yml?branch=main&style=flat-square" alt="Build Status"></a>
   <a href="https://github.com/xybrid-ai/xybrid/stargazers"><img src="https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square" alt="Stars"></a>
+  <a href="https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin"><img src="https://img.shields.io/maven-central/v/ai.xybrid/xybrid-kotlin?style=flat-square&label=Maven%20Central" alt="Maven Central"></a>
   <a href="https://discord.gg/cgd3tbFPWx"><img src="https://img.shields.io/discord/0?label=Discord&style=flat-square&color=5865F2" alt="Discord"></a>
 </p>
 
@@ -72,18 +73,55 @@ https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
 
 ## Quick Start
 
-Run a single model:
+See each SDK's README for platform-specific setup: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)
 
-```dart
-import 'package:xybrid_flutter/xybrid_flutter.dart';
+### Single Model
 
-await Xybrid.init();
-final model = await Xybrid.model(modelId: 'kokoro-82m').load();
-final result = await model.run(envelope: Envelope.text(text: 'Hello world'));
-// → 24kHz WAV audio output
+Run a model in one line from the CLI, or three lines from any SDK:
+
+**CLI:**
+```bash
+xybrid run kokoro-82m --input "Hello world" -o output.wav
 ```
 
-Or chain models into a pipeline — build a voice assistant in 3 lines of YAML:
+**Flutter:**
+```dart
+final model = await Xybrid.model(modelId: 'kokoro-82m').load();
+final result = await model.run(envelope: Envelope.text(text: 'Hello world'));
+// result → 24kHz WAV audio
+```
+
+**Kotlin:**
+```kotlin
+val model = Xybrid.model(modelId = "kokoro-82m").load()
+val result = model.run(envelope = XybridEnvelope.Text("Hello world"))
+// result → 24kHz WAV audio
+```
+
+**Swift:**
+```swift
+let model = try Xybrid.model(modelId: "kokoro-82m").load()
+let result = try model.run(envelope: .text("Hello world"))
+// result → 24kHz WAV audio
+```
+
+**Unity (C#):**
+```csharp
+var model = Xybrid.Model(modelId: "kokoro-82m").Load();
+var result = model.Run(envelope: Envelope.Text("Hello world"));
+// result → 24kHz WAV audio
+```
+
+**Rust:**
+```rust
+let model = Xybrid::model("kokoro-82m").load()?;
+let result = model.run(&Envelope::text("Hello world"))?;
+// result → 24kHz WAV audio
+```
+
+### Pipelines
+
+Chain models together — build a voice assistant in 3 lines of YAML:
 
 ```yaml
 # voice-assistant.yaml
@@ -94,20 +132,45 @@ stages:
   - model: kokoro-82m      # Text → speech
 ```
 
+**CLI:**
+```bash
+xybrid run voice-assistant.yaml --input question.wav -o response.wav
+```
+
+**Flutter:**
 ```dart
-// Run the pipeline from Flutter
 final pipeline = await Xybrid.pipeline(yamlContent: yamlString).load();
 await pipeline.loadModels();
 final result = await pipeline.run(envelope: Envelope.audio(bytes: audioBytes));
 ```
 
-```bash
-# Or from the CLI
-xybrid run voice-assistant.yaml --input question.wav -o response.wav
+**Kotlin:**
+```kotlin
+val pipeline = Xybrid.pipeline(yamlContent = yamlString).load()
+pipeline.loadModels()
+val result = pipeline.run(envelope = XybridEnvelope.Audio(bytes = audioBytes))
 ```
 
-See each SDK's README for platform-specific setup: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)
+**Swift:**
+```swift
+let pipeline = try Xybrid.pipeline(yamlContent: yamlString).load()
+try pipeline.loadModels()
+let result = try pipeline.run(envelope: .audio(bytes: audioBytes))
+```
 
+**Unity (C#):**
+```csharp
+var pipeline = Xybrid.Pipeline(yamlContent: yamlString).Load();
+pipeline.LoadModels();
+var result = pipeline.Run(envelope: Envelope.Audio(bytes: audioBytes));
+```
+
+**Rust:**
+```rust
+let pipeline = Xybrid::pipeline(&yaml_string).load()?;
+pipeline.load_models()?;
+let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+```
 ---
 
 ## Supported Models
