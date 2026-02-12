@@ -13,14 +13,14 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square" alt="License"></a>
   <a href="https://github.com/xybrid-ai/xybrid/actions"><img src="https://img.shields.io/github/actions/workflow/status/xybrid-ai/xybrid/ci.yml?branch=main&style=flat-square" alt="Build Status"></a>
   <a href="https://github.com/xybrid-ai/xybrid/stargazers"><img src="https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square" alt="Stars"></a>
-  <a href="https://discord.gg/xybrid"><img src="https://img.shields.io/discord/0?label=Discord&style=flat-square&color=5865F2" alt="Discord"></a>
+  <a href="https://discord.gg/cgd3tbFPWx"><img src="https://img.shields.io/discord/0?label=Discord&style=flat-square&color=5865F2" alt="Discord"></a>
 </p>
 
 <p align="center">
   <a href="https://docs.xybrid.dev">Documentation</a> ·
   <a href="#sdks">SDKs</a> ·
   <a href="#supported-models">Models</a> ·
-  <a href="https://discord.gg/xybrid">Discord</a> ·
+  <a href="https://discord.gg/cgd3tbFPWx">Discord</a> ·
   <a href="https://github.com/xybrid-ai/xybrid/issues">Issues</a>
 </p>
 
@@ -170,7 +170,7 @@ All models run entirely on-device. No cloud, no API keys required. Browse the fu
 ## Community
 
 - [Documentation](https://docs.xybrid.dev)
-- [Discord](https://discord.gg/xybrid)
+- [Discord](https://discord.gg/cgd3tbFPWx)
 - [GitHub Issues](https://github.com/xybrid-ai/xybrid/issues)
 
 ## Contributing

@@ -109,7 +109,7 @@ cargo fmt --all -- --check                # Format check
 
 ## Getting Help
 
-- **Questions?** Open a [GitHub Issue](https://github.com/xybrid-ai/xybrid/issues) or ask on [Discord](https://discord.gg/xybrid)
+- **Questions?** Open a [GitHub Issue](https://github.com/xybrid-ai/xybrid/issues) or ask on [Discord](https://discord.gg/cgd3tbFPWx)
 - **Bug reports** — use the [bug report template](https://github.com/xybrid-ai/xybrid/issues/new?template=bug_report.md)
 - **Feature requests** — use the [feature request template](https://github.com/xybrid-ai/xybrid/issues/new?template=feature_request.md)
 
