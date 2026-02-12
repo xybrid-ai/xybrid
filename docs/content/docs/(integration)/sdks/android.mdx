@@ -5,18 +5,13 @@ description: Native Android SDK for on-device ML inference
 
 The Android SDK provides native Kotlin bindings to the Xybrid runtime via UniFFI, enabling on-device ML inference in Android applications.
 
-<Callout type="info">
-The Android SDK is in early access. The API is stable but the package is not yet published to Maven Central. Install from source or use the [Flutter SDK](/docs/integrations/sdks/flutter) for cross-platform development.
-</Callout>
-
 ## Installation
 
-Add the Xybrid AAR and native libraries to your project:
+Add the Xybrid SDK from Maven Central:
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("net.java.dev.jna:jna:5.13.0@aar")
-    implementation(files("libs/xybrid.aar"))
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-alpha3")
 }
 ```
 

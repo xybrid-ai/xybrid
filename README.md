@@ -35,7 +35,7 @@ Xybrid is a **Rust-powered runtime** with native bindings for every major platfo
 | **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [See below](#install) | Available |
 | **[Unity](bindings/unity/)** | macOS, Windows, Linux | [See below](#install) | Available |
 | **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Coming Soon |
-| **[Kotlin](bindings/kotlin/)** | Android | Gradle | Coming Soon |
+| **[Kotlin](bindings/kotlin/)** | Android | Maven Central | Available |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | [Download binary](https://github.com/xybrid-ai/xybrid/releases) | Available |
 | **[Rust](crates/)** | All | `xybrid-core` / `xybrid-sdk` | Available |
 
@@ -52,6 +52,14 @@ dependencies:
       url: https://github.com/xybrid-ai/xybrid.git
       ref: main
       path: bindings/flutter
+```
+
+**Kotlin (Android)** — add to your `build.gradle.kts`:
+
+```kotlin
+dependencies {
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-alpha3")
+}
 ```
 
 **Unity** — Package Manager → Add from git URL:
