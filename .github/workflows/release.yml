@@ -185,6 +185,46 @@ jobs:
           if-no-files-found: error
 
   #
+  # Publish Kotlin SDK to Maven Central
+  #
+  publish-kotlin:
+    name: Publish Kotlin SDK
+    needs: [build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Download Android .so artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: android-libs
+          path: artifacts
+
+      - name: Extract .so files into Kotlin libs/
+        run: |
+          mkdir -p bindings/kotlin/libs
+          cd bindings/kotlin/libs
+          unzip -o ${{ github.workspace }}/artifacts/xybrid-android-*.zip
+
+      - name: Publish to Maven Central
+        working-directory: bindings/kotlin
+        run: ./gradlew publishReleasePublicationToSonatypeRepository
+        env:
+          ORG_GRADLE_PROJECT_ossrhUsername: ${{ secrets.OSSRH_USERNAME }}
+          ORG_GRADLE_PROJECT_ossrhPassword: ${{ secrets.OSSRH_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.GPG_PASSPHRASE }}
+
+  #
   # Flutter precompiled binaries (uploaded to separate precompiled_<hash> release)
   # These are auto-downloaded by cargokit when users don't have Rust installed
   #
