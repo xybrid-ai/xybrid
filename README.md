@@ -31,14 +31,14 @@
 
 Xybrid is a **Rust-powered runtime** with native bindings for every major platform. Pick your SDK:
 
-| SDK | Platforms | Install | Status |
-|-----|-----------|---------|--------|
-| **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [See below](#install) | Available |
-| **[Unity](bindings/unity/)** | macOS, Windows, Linux | [See below](#install) | Available |
-| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Coming Soon |
-| **[Kotlin](bindings/kotlin/)** | Android | Maven Central | Available |
-| **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | [Download binary](https://github.com/xybrid-ai/xybrid/releases) | Available |
-| **[Rust](crates/)** | All | `xybrid-core` / `xybrid-sdk` | Available |
+| SDK | Platforms | Install | Status | Sample |
+|-----|-----------|---------|--------|--------|
+| **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [See below](#install) | Available | [README](examples/flutter/README.md) |
+| **[Unity](bindings/unity/)** | macOS, Windows, Linux | [See below](#install) | Available | [Unity 3D AI tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
+| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Coming Soon | [README](examples/ios/README.md) |
+| **[Kotlin](bindings/kotlin/)** | Android | Maven Central | Available | [README](examples/android/README.md) |
+| **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | [Download binary](https://github.com/xybrid-ai/xybrid/releases) | Available | — |
+| **[Rust](crates/)** | All | `xybrid-core` / `xybrid-sdk` | Available | — |
 
 Every SDK wraps the same Rust core — identical model support and behavior across all platforms.
 

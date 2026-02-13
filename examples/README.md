@@ -4,12 +4,12 @@ Platform-specific reference implementations demonstrating how to integrate the X
 
 ## Quick Start
 
-| Platform | Directory | Command |
-|----------|-----------|---------|
-| [Flutter](#flutter) | `flutter/` | `cd flutter && flutter run` |
-| [iOS (Swift)](#ios-swift) | `ios/` | `open ios/XybridExample.xcodeproj` |
-| [Android (Kotlin)](#android-kotlin) | `android/` | `cd android && ./gradlew assembleDebug` |
-| [Unity](#unity) | `unity/` | Open in Unity Hub |
+| Platform | Directory | Command | Sample |
+|----------|-----------|---------|--------|
+| [Flutter](#flutter) | `flutter/` | `cd flutter && flutter run` | [README](flutter/README.md) |
+| [iOS (Swift)](#ios-swift) | `ios/` | `open ios/XybridExample.xcodeproj` | [README](ios/README.md) |
+| [Android (Kotlin)](#android-kotlin) | `android/` | `cd android && ./gradlew assembleDebug` | [README](android/README.md) |
+| [Unity](#unity) | `unity/` | Open in Unity Hub | [xybrid-unity-tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 
 ---
 
