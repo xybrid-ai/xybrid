@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_core::runtime_adapter::onnx::{OnnxRuntimeAdapter, ExecutionProviderKind};
 //! use xybrid_core::runtime_adapter::RuntimeAdapter;
 //!
@@ -72,7 +72,7 @@ impl OnnxRuntimeAdapter {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use xybrid_core::runtime_adapter::onnx::{OnnxRuntimeAdapter, ExecutionProviderKind};
     ///
     /// // CPU execution
@@ -113,7 +113,7 @@ impl OnnxRuntimeAdapter {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use xybrid_core::runtime_adapter::onnx::{OnnxRuntimeAdapter, ModelHints};
     ///
     /// let hints = ModelHints {

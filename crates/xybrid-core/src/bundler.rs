@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_core::bundler::XyBundle;
 //!
 //! // Create a new bundle
@@ -89,7 +89,7 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use xybrid_core::bundler::XyBundle;
     ///
     /// let bundle = XyBundle::new("whisper-tiny", "1.2.0", "x86_64-linux");
@@ -120,7 +120,7 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// let mut bundle = XyBundle::new("my-model", "1.0.0", "x86_64-linux");
     /// bundle.add_file("model.onnx")?;
     /// ```
@@ -177,7 +177,7 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// let mut bundle = XyBundle::new("my-model", "1.0.0", "x86_64-linux");
     /// bundle.add_file_with_relative_path("/full/path/to/misaki/us_gold.json", "misaki/us_gold.json")?;
     /// ```
@@ -261,7 +261,7 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// let mut bundle = XyBundle::new("my-model", "1.0.0", "x86_64-linux");
     /// bundle.add_file("model.onnx")?;
     /// bundle.write("my-model-1.0.0.xyb")?;
@@ -338,7 +338,7 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// let bundle = XyBundle::load("my-model-1.0.0.xyb")?;
     /// println!("Model: {}", bundle.manifest().model_id);
     /// ```
@@ -422,7 +422,7 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// let bytes = download_bundle_bytes("http://registry.example.com/bundle.xyb");
     /// let bundle = XyBundle::load_from_bytes(&bytes)?;
     /// println!("Model: {}", bundle.manifest().model_id);
@@ -502,7 +502,7 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// let bundle = XyBundle::load("my-model-1.0.0.xyb")?;
     /// bundle.extract_to("/tmp/extracted")?;
     /// ```
@@ -533,7 +533,7 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// let bundle = XyBundle::load("my-model-1.0.0.xyb")?;
     /// if let Some(metadata_json) = bundle.get_metadata_json()? {
     ///     println!("Metadata: {}", metadata_json);

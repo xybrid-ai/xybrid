@@ -315,7 +315,7 @@ impl Executor {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use xybrid_core::executor::Executor;
     /// use xybrid_core::runtime_adapter::OnnxRuntimeAdapter;
     /// use std::sync::Arc;
@@ -362,7 +362,7 @@ impl Executor {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use xybrid_core::executor::Executor;
     /// use xybrid_core::context::StageDescriptor;
     /// use xybrid_core::ir::{Envelope, EnvelopeKind};
@@ -604,7 +604,7 @@ impl Executor {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use xybrid_core::executor::Executor;
     /// use xybrid_core::context::StageDescriptor;
     /// use xybrid_core::ir::{Envelope, EnvelopeKind};

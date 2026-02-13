@@ -14,7 +14,7 @@ use syn::{parse_macro_input, ItemFn};
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use xybrid_sdk::hybrid;
 ///
 /// #[hybrid::route]

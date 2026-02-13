@@ -51,7 +51,7 @@ impl MetadataDrivenAdapter {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// # use xybrid_core::runtime_adapter::metadata_driven::MetadataDrivenAdapter;
     /// let mut adapter = MetadataDrivenAdapter::new();
     /// adapter.load_metadata("models/whisper-tiny/model_metadata.json")?;

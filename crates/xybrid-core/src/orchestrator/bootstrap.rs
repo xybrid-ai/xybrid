@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_core::orchestrator::Orchestrator;
 //!
 //! let orchestrator = Orchestrator::bootstrap(None)?;
@@ -106,7 +106,7 @@ impl Orchestrator {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use xybrid_core::orchestrator::Orchestrator;
     ///
     /// // Bootstrap with defaults

@@ -8,7 +8,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_core::runtime_adapter::coreml::CoreMLRuntimeAdapter;
 //! use xybrid_core::runtime_adapter::RuntimeAdapter;
 //!

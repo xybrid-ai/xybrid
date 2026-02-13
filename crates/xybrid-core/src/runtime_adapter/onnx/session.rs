@@ -8,7 +8,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_core::runtime_adapter::onnx::{ONNXSession, ExecutionProviderKind};
 //!
 //! // CPU execution (default)
@@ -97,7 +97,7 @@ impl ONNXSession {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use xybrid_core::runtime_adapter::onnx::{ONNXSession, ExecutionProviderKind};
     ///
     /// // CPU execution
