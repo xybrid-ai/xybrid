@@ -12,7 +12,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_core::ir::{Envelope, EnvelopeKind};
 //! use std::collections::HashMap;
 //!

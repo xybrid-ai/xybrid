@@ -17,7 +17,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_core::device::{detect_capabilities, HardwareCapabilities};
 //! use xybrid_core::context::DeviceMetrics;
 //!

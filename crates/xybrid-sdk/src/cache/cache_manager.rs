@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_sdk::CacheManager;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {

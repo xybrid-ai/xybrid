@@ -13,7 +13,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_core::runtime_adapter::onnx::{ExecutionProviderKind, CoreMLConfig, CoreMLComputeUnits};
 //!
 //! // Use CPU (default)

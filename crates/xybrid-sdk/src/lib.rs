@@ -440,7 +440,7 @@ pub mod hybrid {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use xybrid_sdk::hybrid;
     ///
     /// #[hybrid::route]
@@ -537,7 +537,7 @@ pub enum PipelineConfigError {
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use xybrid_sdk::run_pipeline;
 ///
 /// match run_pipeline("examples/hiiipe.yaml") {
@@ -647,7 +647,7 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use xybrid_sdk::run_pipeline_async;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {

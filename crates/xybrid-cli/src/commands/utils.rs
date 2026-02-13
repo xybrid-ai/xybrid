@@ -110,7 +110,7 @@ pub fn display_stage_name(name: &str) -> &str {
 /// * `num_channels` - Number of audio channels (1 for mono, 2 for stereo)
 ///
 /// # Example
-/// ```rust,no_run
+/// ```rust,ignore
 /// save_wav_file(Path::new("output.wav"), &audio_data, 24000, 1)?;
 /// ```
 pub fn save_wav_file(

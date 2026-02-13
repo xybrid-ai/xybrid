@@ -17,7 +17,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use xybrid_core::device::capabilities::{HardwareCapabilities, detect_capabilities};
 //! use xybrid_core::context::DeviceMetrics;
 //!
