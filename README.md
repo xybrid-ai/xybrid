@@ -5,7 +5,7 @@
 <h1 align="center">Xybrid</h1>
 
 <p align="center">
-  <strong>On-device AI for mobile, desktop, and edge.</strong><br/>
+  <strong>On-device AI for mobile, desktop, edge and game devs.</strong><br/>
   Run speech, language, and vision models locally — private, offline, fast.
 </p>
 
