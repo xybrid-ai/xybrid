@@ -271,7 +271,7 @@ fn print_voice_group(voices: &[&&xybrid_core::execution::template::VoiceInfo], m
         let names: Vec<_> = females
             .iter()
             .take(max_show)
-            .map(|v| format!("{}", v.name))
+            .map(|v| v.name.to_string())
             .collect();
         let suffix = if females.len() > max_show {
             format!(" +{}", females.len() - max_show)
@@ -284,7 +284,7 @@ fn print_voice_group(voices: &[&&xybrid_core::execution::template::VoiceInfo], m
         let names: Vec<_> = males
             .iter()
             .take(max_show)
-            .map(|v| format!("{}", v.name))
+            .map(|v| v.name.to_string())
             .collect();
         let suffix = if males.len() > max_show {
             format!(" +{}", males.len() - max_show)
@@ -321,7 +321,7 @@ fn print_voice_catalog(metadata: &ModelMetadata) {
     if !us_voices.is_empty() {
         println!("🇺🇸 American English ({} voices)", us_voices.len());
         println!("─────────────────────────────────────────────────────");
-        println!("{:<15} {:<12} {:<8} {}", "ID", "Name", "Gender", "Style");
+        println!("{:<15} {:<12} {:<8} Style", "ID", "Name", "Gender");
         println!("─────────────────────────────────────────────────────");
         for v in us_voices {
             println!(
@@ -338,7 +338,7 @@ fn print_voice_catalog(metadata: &ModelMetadata) {
     if !gb_voices.is_empty() {
         println!("🇬🇧 British English ({} voices)", gb_voices.len());
         println!("─────────────────────────────────────────────────────");
-        println!("{:<15} {:<12} {:<8} {}", "ID", "Name", "Gender", "Style");
+        println!("{:<15} {:<12} {:<8} Style", "ID", "Name", "Gender");
         println!("─────────────────────────────────────────────────────");
         for v in gb_voices {
             println!(

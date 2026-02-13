@@ -29,12 +29,16 @@ pub use standard::StandardStrategy;
 pub use tts::TtsStrategy;
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig, LlmStrategy};
+pub use llm::LlmStrategy;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[allow(unused_imports)]
+pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
 
-// Always export the types (needed for tests and type references)
+// Always compile the llm module (stubs when features disabled)
 #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
 mod llm;
 #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[allow(unused_imports)]
 pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig, LlmStrategy};
 
 use super::template::ModelMetadata;
@@ -106,6 +110,7 @@ pub struct StrategyResolver {
 
 impl StrategyResolver {
     /// Create a new resolver with the default strategies.
+    #[allow(clippy::vec_init_then_push)]
     pub fn new() -> Self {
         let mut strategies: Vec<Box<dyn ExecutionStrategy>> = vec![];
 

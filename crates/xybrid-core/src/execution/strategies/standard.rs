@@ -86,7 +86,7 @@ impl StandardStrategy {
         );
 
         let _preprocess_span = xybrid_trace::SpanGuard::new("preprocessing");
-        xybrid_trace::add_metadata("steps", &metadata.preprocessing.len().to_string());
+        xybrid_trace::add_metadata("steps", metadata.preprocessing.len().to_string());
 
         let mut data = PreprocessedData::from_envelope(input)?;
 
@@ -94,7 +94,7 @@ impl StandardStrategy {
             let step_name = step.step_name();
             debug!(target: "xybrid_core", "Applying preprocessing: {}", step_name);
 
-            let _step_span = xybrid_trace::SpanGuard::new(&format!("preprocessing:{}", step_name));
+            let _step_span = xybrid_trace::SpanGuard::new(format!("preprocessing:{}", step_name));
 
             data = preprocessing::apply_preprocessing_step(step, data, input, ctx.base_path)?;
         }
@@ -122,7 +122,7 @@ impl StandardStrategy {
         );
 
         let _postprocess_span = xybrid_trace::SpanGuard::new("postprocessing");
-        xybrid_trace::add_metadata("steps", &metadata.postprocessing.len().to_string());
+        xybrid_trace::add_metadata("steps", metadata.postprocessing.len().to_string());
 
         let mut data = outputs;
 
@@ -130,7 +130,7 @@ impl StandardStrategy {
             let step_name = step.step_name();
             debug!(target: "xybrid_core", "Applying postprocessing: {}", step_name);
 
-            let _step_span = xybrid_trace::SpanGuard::new(&format!("postprocessing:{}", step_name));
+            let _step_span = xybrid_trace::SpanGuard::new(format!("postprocessing:{}", step_name));
 
             data = postprocessing::apply_postprocessing_step(step, data, ctx.base_path)?;
         }
@@ -142,8 +142,8 @@ impl StandardStrategy {
     /// Execute BERT-style inference with token IDs.
     fn execute_bert(
         &self,
-        ctx: &ExecutionContext<'_>,
-        metadata: &ModelMetadata,
+        _ctx: &ExecutionContext<'_>,
+        _metadata: &ModelMetadata,
         preprocessed: &PreprocessedData,
         model_path: &std::path::Path,
     ) -> ExecutorResult<Envelope> {
@@ -168,7 +168,7 @@ impl StandardStrategy {
     fn execute_runtime(
         &self,
         ctx: &mut ExecutionContext<'_>,
-        metadata: &ModelMetadata,
+        _metadata: &ModelMetadata,
         preprocessed: PreprocessedData,
         runtime_type: &str,
         model_path: &std::path::Path,

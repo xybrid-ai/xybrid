@@ -55,31 +55,23 @@ impl OutputType {
 /// Audio sample format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum AudioSampleFormat {
     Pcm16,
     Pcm32,
+    #[default]
     Float32,
-}
-
-impl Default for AudioSampleFormat {
-    fn default() -> Self {
-        AudioSampleFormat::Float32
-    }
 }
 
 /// Image format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ImageFormat {
+    #[default]
     Rgb,
     Bgr,
     Grayscale,
-}
-
-impl Default for ImageFormat {
-    fn default() -> Self {
-        ImageFormat::Rgb
-    }
 }
 
 /// Audio input configuration for ASR and audio processing stages.
@@ -304,11 +296,13 @@ impl Default for StructuredOutputConfig {
 /// Unified output configuration with type tag.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
+#[derive(Default)]
 pub enum OutputConfig {
     Audio {
         #[serde(flatten)]
         config: AudioOutputConfig,
     },
+    #[default]
     Text,
     Image,
     Embedding {
@@ -331,12 +325,6 @@ impl OutputConfig {
             OutputConfig::Embedding { .. } => OutputType::Embedding,
             OutputConfig::Structured { .. } => OutputType::Structured,
         }
-    }
-}
-
-impl Default for OutputConfig {
-    fn default() -> Self {
-        OutputConfig::Text
     }
 }
 

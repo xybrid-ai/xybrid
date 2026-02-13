@@ -963,7 +963,7 @@ where
 
     // Check for hard error codes FIRST — these are never callback-stop.
     // -1 = invalid args, -2 = sampler creation failed, -3 = decode failed, -4 = input too long.
-    if result >= -4 && result <= -1 {
+    if (-4..=-1).contains(&result) {
         return Err(AdapterError::RuntimeError(format!(
             "Generation failed with error code {}",
             result

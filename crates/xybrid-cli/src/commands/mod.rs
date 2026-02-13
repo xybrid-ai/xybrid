@@ -21,6 +21,7 @@
 // Currently commands are still in main.rs
 // This module structure is prepared for incremental migration
 
+#[allow(dead_code)]
 pub mod utils;
 
 // Re-export utility functions for use in main.rs

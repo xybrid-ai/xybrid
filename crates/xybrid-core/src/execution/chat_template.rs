@@ -244,7 +244,6 @@ impl ChatTemplateFormatter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     fn text_envelope(text: &str, role: MessageRole) -> Envelope {
         Envelope::new(EnvelopeKind::Text(text.to_string())).with_role(role)

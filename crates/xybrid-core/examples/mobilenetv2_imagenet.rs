@@ -6,7 +6,6 @@
 
 use ndarray::Array4;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use xybrid_core::execution::ModelMetadata;
 use xybrid_core::execution::TemplateExecutor;
 use xybrid_core::ir::{Envelope, EnvelopeKind};

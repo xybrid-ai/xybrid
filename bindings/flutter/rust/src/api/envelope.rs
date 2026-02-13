@@ -1,7 +1,7 @@
 //! Envelope FFI wrappers for Flutter.
 use flutter_rust_bridge::frb;
 use std::collections::HashMap;
-use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 
 use super::context::FfiMessageRole;
 
@@ -79,6 +79,7 @@ impl FfiEnvelope {
     }
 
     /// Clone the inner envelope (for context operations).
+    #[allow(dead_code)]
     pub(crate) fn clone_envelope(&self) -> Envelope {
         self.0.clone()
     }

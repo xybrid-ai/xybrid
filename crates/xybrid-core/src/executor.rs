@@ -397,7 +397,7 @@ impl Executor {
 
             let output = adapter
                 .execute(input)
-                .map_err(|e| ExecutorError::AdapterError(e))?;
+                .map_err(ExecutorError::AdapterError)?;
 
             let latency_ms = start_time.elapsed().as_millis();
             let metadata = StageMetadata {
@@ -492,7 +492,7 @@ impl Executor {
 
                         let output = template_executor
                             .execute(&model_metadata, input)
-                            .map_err(|e| ExecutorError::AdapterError(e))?;
+                            .map_err(ExecutorError::AdapterError)?;
 
                         let latency_ms = start_time.elapsed().as_millis();
                         let metadata = StageMetadata {
@@ -786,7 +786,7 @@ impl Executor {
                     .ok_or_else(|| {
                         ExecutorError::AdapterNotFound("No adapters registered".to_string())
                     })
-                    .map(|k| k.clone())
+                    .cloned()
             }
             "cloud" => {
                 // Prefer cloud adapter if available
@@ -802,7 +802,7 @@ impl Executor {
                     .ok_or_else(|| {
                         ExecutorError::AdapterNotFound("No adapters registered".to_string())
                     })
-                    .map(|k| k.clone())
+                    .cloned()
             }
             "edge" => {
                 // Edge is similar to local, prefer ONNX
@@ -817,7 +817,7 @@ impl Executor {
                     .ok_or_else(|| {
                         ExecutorError::AdapterNotFound("No adapters registered".to_string())
                     })
-                    .map(|k| k.clone())
+                    .cloned()
             }
             _ => Err(ExecutorError::InvalidTarget(format!(
                 "Unknown target: {}",

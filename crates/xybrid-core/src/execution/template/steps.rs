@@ -379,17 +379,12 @@ pub enum TokenizerType {
 }
 
 /// Interpolation method for image resizing
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum InterpolationMethod {
     Nearest,
+    #[default]
     Bilinear,
     Bicubic,
-}
-
-impl Default for InterpolationMethod {
-    fn default() -> Self {
-        InterpolationMethod::Bilinear
-    }
 }
 
 // ============================================================================

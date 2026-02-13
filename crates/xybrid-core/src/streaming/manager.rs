@@ -371,8 +371,10 @@ mod tests {
 
     #[test]
     fn test_buffer_overflow() {
-        let mut config = StreamManagerConfig::default();
-        config.max_buffer_size = 2;
+        let config = StreamManagerConfig {
+            max_buffer_size: 2,
+            ..Default::default()
+        };
         let mut manager = StreamManager::with_config(config);
 
         let envelope = text_envelope("test");

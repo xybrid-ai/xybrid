@@ -165,7 +165,7 @@ mod tests {
         let wave = sine_wave(16000, 440.0, 0.1);
         assert_eq!(wave.len(), 1600);
         // Sine wave should have values between -1 and 1
-        assert!(wave.iter().all(|&x| x >= -1.0 && x <= 1.0));
+        assert!(wave.iter().all(|&x| (-1.0..=1.0).contains(&x)));
     }
 
     #[test]

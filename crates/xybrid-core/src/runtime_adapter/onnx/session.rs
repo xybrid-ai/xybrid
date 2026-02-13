@@ -359,7 +359,7 @@ impl ONNXSession {
             let array_d = if let Ok(output_array) = output_value.try_extract_array::<f32>() {
                 // Convert ndarray view to owned ArrayD
                 let shape = output_array.shape();
-                let dims: Vec<usize> = shape.iter().copied().collect();
+                let dims: Vec<usize> = shape.to_vec();
                 let owned_array = output_array.to_owned();
                 let data: Vec<f32> = owned_array.as_slice().unwrap().to_vec();
                 ArrayD::from_shape_vec(IxDyn(&dims), data).map_err(|e| {
@@ -368,7 +368,7 @@ impl ONNXSession {
             } else if let Ok(output_array) = output_value.try_extract_array::<i64>() {
                 // Convert i64 to f32 for uniform handling
                 let shape = output_array.shape();
-                let dims: Vec<usize> = shape.iter().copied().collect();
+                let dims: Vec<usize> = shape.to_vec();
                 let owned_array = output_array.to_owned();
                 let data: Vec<f32> = owned_array
                     .as_slice()

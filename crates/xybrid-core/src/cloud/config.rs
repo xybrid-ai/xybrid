@@ -5,21 +5,17 @@ use serde::{Deserialize, Serialize};
 /// Cloud execution backend.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CloudBackend {
     /// Route through Xybrid Gateway (default, recommended).
     /// Gateway handles authentication, rate limiting, and provider routing.
+    #[default]
     Gateway,
 
     /// Direct API calls (for development/testing only).
     /// Requires API keys in environment or config.
     /// NOT recommended for production mobile apps.
     Direct,
-}
-
-impl Default for CloudBackend {
-    fn default() -> Self {
-        CloudBackend::Gateway
-    }
 }
 
 /// Cloud client configuration.
@@ -145,8 +141,7 @@ impl CloudConfig {
     /// Resolve the API key from environment or config.
     pub fn resolve_api_key(&self) -> Option<String> {
         if let Some(ref key) = self.api_key {
-            if key.starts_with('$') {
-                let env_var = &key[1..];
+            if let Some(env_var) = key.strip_prefix('$') {
                 return std::env::var(env_var).ok();
             }
             return Some(key.clone());

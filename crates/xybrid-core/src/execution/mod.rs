@@ -67,14 +67,17 @@ pub use template::{
 
 // Data types (internal)
 pub(crate) mod types;
+#[allow(unused_imports)]
 pub(crate) use types::{ExecutorResult, PreprocessedData, RawOutputs};
 
 // Voice loader (mockable, internal)
 pub(crate) mod voice_loader;
+#[allow(unused_imports)]
 pub(crate) use voice_loader::{TtsVoiceLoader, VoiceEmbeddingSource};
 
 // Session factory (mockable, internal)
 pub(crate) mod session_factory;
+#[allow(unused_imports)]
 pub(crate) use session_factory::{InferenceSession, OnnxSessionFactory, SessionFactory};
 
 // Main executor
@@ -92,4 +95,5 @@ pub(crate) mod modes;
 
 // Execution strategies (modular execution paths, internal)
 pub(crate) mod strategies;
+#[allow(unused_imports)]
 pub(crate) use strategies::{ExecutionContext, ExecutionStrategy, StrategyResolver};

@@ -1,3 +1,20 @@
+// Allow dead code in alpha crate — many modules are scaffolded but not yet wired up.
+// TODO: Remove this as modules mature and are integrated.
+#![allow(dead_code)]
+// Pre-existing style lints — fix incrementally, not all at once.
+// TODO: Address these and remove the allows.
+#![allow(
+    clippy::too_many_arguments,
+    clippy::should_implement_trait,
+    clippy::match_like_matches_macro,
+    clippy::needless_range_loop,
+    clippy::manual_memcpy,
+    clippy::explicit_counter_loop,
+    clippy::unnecessary_unwrap,
+    clippy::while_let_loop,
+    clippy::wildcard_in_or_patterns
+)]
+
 //! Xybrid Core - The Rust orchestrator runtime for hybrid cloud-edge AI inference.
 //!
 //! ## Quick Start

@@ -66,7 +66,7 @@ impl CandleBackend {
         let model = self
             .whisper_model
             .as_mut()
-            .ok_or_else(|| BackendError::ModelNotLoaded)?;
+            .ok_or(BackendError::ModelNotLoaded)?;
 
         model
             .transcribe(mel)

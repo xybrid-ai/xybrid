@@ -20,11 +20,11 @@
 
 use log::{debug, info, warn};
 
-#[cfg(test)]
-use super::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
 use super::template::{ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage};
 use crate::conversation::ConversationContext;
-use crate::ir::{Envelope, EnvelopeKind, MessageRole};
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use crate::ir::EnvelopeKind;
+use crate::ir::{Envelope, MessageRole};
 use crate::runtime_adapter::{AdapterError, ModelRuntime};
 use crate::tracing as xybrid_trace;
 use ndarray::ArrayD;
@@ -39,9 +39,9 @@ use crate::runtime_adapter::onnx::{ONNXSession, OnnxRuntime};
 use crate::runtime_adapter::candle::CandleRuntime;
 
 // Always-available LLM types (defined in runtime_adapter/types.rs)
-use crate::runtime_adapter::types::{
-    ChatMessage, GenerationConfig, LlmConfig, PartialToken, StreamingCallback,
-};
+use crate::runtime_adapter::types::StreamingCallback;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use crate::runtime_adapter::types::{ChatMessage, GenerationConfig, LlmConfig};
 
 // LLM adapter implementation (only available with LLM features)
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -219,7 +219,7 @@ impl TemplateExecutor {
                 stages.len()
             );
             let _span = xybrid_trace::SpanGuard::new("model_graph_inference");
-            xybrid_trace::add_metadata("stages", &stages.len().to_string());
+            xybrid_trace::add_metadata("stages", stages.len().to_string());
 
             // Run preprocessing
             let preprocessed = self.run_preprocessing(metadata, input)?;
@@ -718,7 +718,7 @@ impl TemplateExecutor {
             let mut result = self.execute_streaming(metadata, input, on_token)?;
             result = result.with_role(MessageRole::Assistant);
 
-            return Ok(result);
+            Ok(result)
         }
 
         #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
@@ -875,7 +875,7 @@ impl TemplateExecutor {
 
         let _llm_span = xybrid_trace::SpanGuard::new("llm_inference_with_messages");
         xybrid_trace::add_metadata("model", model_file);
-        xybrid_trace::add_metadata("message_count", &messages.len().to_string());
+        xybrid_trace::add_metadata("message_count", messages.len().to_string());
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
@@ -959,7 +959,7 @@ impl TemplateExecutor {
 
         let _llm_span = xybrid_trace::SpanGuard::new("llm_inference_streaming_with_messages");
         xybrid_trace::add_metadata("model", model_file);
-        xybrid_trace::add_metadata("message_count", &messages.len().to_string());
+        xybrid_trace::add_metadata("message_count", messages.len().to_string());
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
@@ -1126,7 +1126,7 @@ impl TemplateExecutor {
         );
 
         let _preprocess_span = xybrid_trace::SpanGuard::new("preprocessing");
-        xybrid_trace::add_metadata("steps", &metadata.preprocessing.len().to_string());
+        xybrid_trace::add_metadata("steps", metadata.preprocessing.len().to_string());
 
         let mut data = PreprocessedData::from_envelope(input)?;
 
@@ -1134,7 +1134,7 @@ impl TemplateExecutor {
             let step_name = step.step_name();
             debug!(target: "xybrid_core", "Applying preprocessing: {}", step_name);
 
-            let _step_span = xybrid_trace::SpanGuard::new(&format!("preprocessing:{}", step_name));
+            let _step_span = xybrid_trace::SpanGuard::new(format!("preprocessing:{}", step_name));
 
             data = preprocessing::apply_preprocessing_step(step, data, input, &self.base_path)?;
         }
@@ -1271,7 +1271,7 @@ impl TemplateExecutor {
         );
 
         let _postprocess_span = xybrid_trace::SpanGuard::new("postprocessing");
-        xybrid_trace::add_metadata("steps", &metadata.postprocessing.len().to_string());
+        xybrid_trace::add_metadata("steps", metadata.postprocessing.len().to_string());
 
         let mut data = outputs;
 
@@ -1279,7 +1279,7 @@ impl TemplateExecutor {
             let step_name = step.step_name();
             debug!(target: "xybrid_core", "Applying postprocessing: {}", step_name);
 
-            let _step_span = xybrid_trace::SpanGuard::new(&format!("postprocessing:{}", step_name));
+            let _step_span = xybrid_trace::SpanGuard::new(format!("postprocessing:{}", step_name));
 
             data = postprocessing::apply_postprocessing_step(step, data, &self.base_path)?;
         }
@@ -1339,9 +1339,7 @@ impl TemplateExecutor {
         let mut current_chunk = String::new();
 
         // Split into sentences (keep delimiter)
-        let sentences: Vec<&str> = text
-            .split_inclusive(|c| c == '.' || c == '!' || c == '?')
-            .collect();
+        let sentences: Vec<&str> = text.split_inclusive(['.', '!', '?']).collect();
 
         for sentence in sentences {
             let sentence = sentence.trim();

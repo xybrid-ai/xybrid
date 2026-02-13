@@ -199,7 +199,7 @@ impl AudioEnvelope {
 
             pos += 8 + chunk_size;
             // Align to even boundary
-            if chunk_size % 2 != 0 {
+            if !chunk_size.is_multiple_of(2) {
                 pos += 1;
             }
         }

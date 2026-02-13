@@ -802,7 +802,6 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos()
-                & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
         );
         std::fs::write(
             &folder_meta,
@@ -839,7 +838,6 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos()
-                & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
         );
         let meta_content = generate_plugin_meta(&guid, platform_dir);
         std::fs::write(&meta_path, meta_content)?;
@@ -1154,11 +1152,9 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
     // Build for each target
     for (target, description) in targets.iter() {
         // For iOS targets, resolve ORT per-target (device vs simulator have different libs)
-        if is_ios_target(target) {
-            if resolve_ort_lib_location(target).is_none() {
-                println!("Skipping {} (no ORT library for this target)", description);
-                continue;
-            }
+        if is_ios_target(target) && resolve_ort_lib_location(target).is_none() {
+            println!("Skipping {} (no ORT library for this target)", description);
+            continue;
         }
 
         // Resolve platform preset for this target

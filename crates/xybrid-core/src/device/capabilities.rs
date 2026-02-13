@@ -456,7 +456,7 @@ mod tests {
         assert!(json.contains("\"battery_level\":85"));
 
         let parsed = HardwareCapabilities::from_json(&json).unwrap();
-        assert_eq!(parsed.has_gpu, true);
+        assert!(parsed.has_gpu);
         assert_eq!(parsed.battery_level, 85);
     }
 

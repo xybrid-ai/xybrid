@@ -109,10 +109,8 @@ impl Default for AudioFormat {
 /// The detected `AudioFormat` or an error if format cannot be determined.
 pub fn detect_format(data: &[u8]) -> Result<AudioFormat, AudioFormatError> {
     // Check for WAV format (RIFF header)
-    if data.len() >= 12 {
-        if &data[0..4] == b"RIFF" && &data[8..12] == b"WAVE" {
-            return Ok(AudioFormat::Wav);
-        }
+    if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WAVE" {
+        return Ok(AudioFormat::Wav);
     }
 
     // TODO: Add detection for other formats (MP3, OGG, FLAC, etc.)

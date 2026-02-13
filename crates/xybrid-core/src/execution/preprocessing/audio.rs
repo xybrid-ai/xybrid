@@ -69,8 +69,8 @@ pub fn mel_spectrogram_step(
 
     match data {
         PreprocessedData::AudioSamples(samples) => {
-            let mel = compute_mel_spectrogram(&samples, &config)
-                .map_err(|e| AdapterError::InvalidInput(e))?;
+            let mel =
+                compute_mel_spectrogram(&samples, &config).map_err(AdapterError::InvalidInput)?;
             Ok(PreprocessedData::Tensor(mel))
         }
         PreprocessedData::AudioBytes(bytes) => {

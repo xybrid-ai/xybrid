@@ -282,7 +282,7 @@ impl XyBundle {
 
         // Add manifest.json
         let manifest_json = serde_json::to_string_pretty(&self.manifest)
-            .map_err(|e| BundlerError::SerializationError(e))?;
+            .map_err(BundlerError::SerializationError)?;
         let mut manifest_header = tar::Header::new_gnu();
         manifest_header.set_path("manifest.json").map_err(|e| {
             BundlerError::ArchiveError(format!("Failed to set manifest path: {}", e))
@@ -319,7 +319,7 @@ impl XyBundle {
 
         zstd_writer
             .write_all(&tar_bytes)
-            .map_err(|e| BundlerError::IOError(e))?;
+            .map_err(BundlerError::IOError)?;
         zstd_writer.finish().map_err(|e| {
             BundlerError::ArchiveError(format!("Failed to finish zstd compression: {}", e))
         })?;
@@ -358,7 +358,7 @@ impl XyBundle {
         let mut tar_bytes = Vec::new();
         zstd_reader
             .read_to_end(&mut tar_bytes)
-            .map_err(|e| BundlerError::IOError(e))?;
+            .map_err(BundlerError::IOError)?;
 
         // Extract tar archive
         let mut tar = tar::Archive::new(tar_bytes.as_slice());
@@ -384,7 +384,7 @@ impl XyBundle {
             let mut contents = Vec::new();
             entry
                 .read_to_end(&mut contents)
-                .map_err(|e| BundlerError::IOError(e))?;
+                .map_err(BundlerError::IOError)?;
 
             if entry_path == "manifest.json" {
                 manifest = Some(serde_json::from_slice(&contents).map_err(|e| {
@@ -438,7 +438,7 @@ impl XyBundle {
         let mut tar_bytes = Vec::new();
         zstd_reader
             .read_to_end(&mut tar_bytes)
-            .map_err(|e| BundlerError::IOError(e))?;
+            .map_err(BundlerError::IOError)?;
 
         // Extract tar archive
         let mut tar = tar::Archive::new(tar_bytes.as_slice());
@@ -464,7 +464,7 @@ impl XyBundle {
             let mut contents = Vec::new();
             entry
                 .read_to_end(&mut contents)
-                .map_err(|e| BundlerError::IOError(e))?;
+                .map_err(BundlerError::IOError)?;
 
             if entry_path == "manifest.json" {
                 manifest = Some(serde_json::from_slice(&contents).map_err(|e| {
@@ -509,17 +509,17 @@ impl XyBundle {
     pub fn extract_to(&self, output_dir: impl AsRef<Path>) -> BundlerResult<()> {
         let output_dir = output_dir.as_ref();
 
-        fs::create_dir_all(output_dir).map_err(|e| BundlerError::IOError(e))?;
+        fs::create_dir_all(output_dir).map_err(BundlerError::IOError)?;
 
         for (file_path, contents) in &self.files {
             let full_path = output_dir.join(file_path);
 
             // Create parent directories if needed
             if let Some(parent) = full_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| BundlerError::IOError(e))?;
+                fs::create_dir_all(parent).map_err(BundlerError::IOError)?;
             }
 
-            fs::write(&full_path, contents).map_err(|e| BundlerError::IOError(e))?;
+            fs::write(&full_path, contents).map_err(BundlerError::IOError)?;
         }
 
         Ok(())

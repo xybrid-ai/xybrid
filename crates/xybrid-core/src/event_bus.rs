@@ -120,7 +120,7 @@ impl EventBus {
         let mut failed_ids = Vec::new();
 
         for (id, subscriber) in subscribers.iter() {
-            if let Err(_) = subscriber.sender.send(event.clone()) {
+            if subscriber.sender.send(event.clone()).is_err() {
                 // Receiver was dropped, mark for removal
                 failed_ids.push(*id);
             }
@@ -278,11 +278,10 @@ mod tests {
         let count = Arc::new(AtomicUsize::new(0));
         let count_clone = count.clone();
 
-        let _subscription_id = bus.subscribe_with_handler(move |event| match event {
-            OrchestratorEvent::StageComplete { .. } => {
+        let _subscription_id = bus.subscribe_with_handler(move |event| {
+            if let OrchestratorEvent::StageComplete { .. } = event {
                 count_clone.fetch_add(1, Ordering::SeqCst);
             }
-            _ => {}
         });
 
         bus.publish(OrchestratorEvent::StageComplete {

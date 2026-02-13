@@ -25,9 +25,10 @@ use serde::{Deserialize, Serialize};
 /// let state = FfiStreamState::Idle;
 /// assert_eq!(serde_json::to_string(&state).unwrap(), "\"Idle\"");
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FfiStreamState {
     /// Session created but not started
+    #[default]
     Idle,
     /// Actively receiving audio
     Streaming,
@@ -37,12 +38,6 @@ pub enum FfiStreamState {
     Completed,
     /// Error occurred
     Error,
-}
-
-impl Default for FfiStreamState {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 impl FfiStreamState {
@@ -85,7 +80,7 @@ impl FfiStreamState {
 /// };
 /// assert!(!result.is_stable);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FfiPartialResult {
     /// Current partial transcription text
     pub text: String,
@@ -93,16 +88,6 @@ pub struct FfiPartialResult {
     pub is_stable: bool,
     /// Chunk sequence number (increments with each audio chunk)
     pub chunk_index: u64,
-}
-
-impl Default for FfiPartialResult {
-    fn default() -> Self {
-        Self {
-            text: String::new(),
-            is_stable: false,
-            chunk_index: 0,
-        }
-    }
 }
 
 impl FfiPartialResult {

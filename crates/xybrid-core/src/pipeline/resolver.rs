@@ -258,13 +258,13 @@ impl TargetResolver {
     ) -> Result<ResolvedTarget, ResolutionError> {
         if !context.is_cloud_available(provider) {
             return Err(ResolutionError::IntegrationUnavailable(
-                provider.clone(),
+                *provider,
                 model.to_string(),
             ));
         }
 
         Ok(ResolvedTarget::integration(
-            provider.clone(),
+            *provider,
             model,
             "integration target resolved",
         ))
@@ -305,7 +305,7 @@ impl TargetResolver {
         if let Some(prov) = provider {
             if context.is_cloud_available(prov) {
                 return Ok(ResolvedTarget::integration(
-                    prov.clone(),
+                    *prov,
                     model,
                     "auto: integration available",
                 ));

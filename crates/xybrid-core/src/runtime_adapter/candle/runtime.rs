@@ -1,5 +1,5 @@
 use super::device::{select_device, DeviceSelection};
-use super::whisper::{WhisperConfig, WhisperModel, WhisperSize};
+use super::whisper::WhisperModel;
 use crate::audio::decode_wav_audio;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::{AdapterError, AdapterResult, ModelRuntime};
@@ -14,6 +14,12 @@ pub struct CandleRuntime {
     models: HashMap<String, WhisperModel>,
     /// Active model key (most recently loaded or used)
     active_model: Option<String>,
+}
+
+impl Default for CandleRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CandleRuntime {
@@ -78,7 +84,7 @@ impl ModelRuntime for CandleRuntime {
     }
 
     fn load(&mut self, model_path: &Path) -> AdapterResult<()> {
-        let path_str = model_path.to_string_lossy().to_string();
+        let _path_str = model_path.to_string_lossy().to_string();
 
         // If path is a file (e.g. model.safetensors), use parent dir
         let model_dir = if model_path.is_file() {
@@ -146,12 +152,12 @@ impl ModelRuntime for CandleRuntime {
 
                 Ok(Envelope::new(EnvelopeKind::Text(text)))
             }
-            EnvelopeKind::Embedding(mel) => {
+            EnvelopeKind::Embedding(_mel) => {
                 // Assume Mel spectrogram input [1, n_mels, n_frames] flattened
                 // We need to reconstruct Tensor from Vec<f32>
                 // Use helper from pcm_to_mel (but that does conversion)
                 // Need transcribe() method on model.
-                let tensor = model
+                let _tensor = model
                     .pcm_to_mel_tensor(&[]) // Hack/Stub? No, we need direct mel tensor creation
                     .map_err(|e| {
                         AdapterError::RuntimeError(format!(

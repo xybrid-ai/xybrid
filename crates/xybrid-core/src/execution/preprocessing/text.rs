@@ -204,8 +204,8 @@ pub fn normalize_text_for_tts(text: &str) -> String {
     let mut result = text.to_string();
 
     // Normalize quotes
-    result = result.replace('\u{2018}', "'").replace('\u{2019}', "'");
-    result = result.replace('\u{201C}', "\"").replace('\u{201D}', "\"");
+    result = result.replace(['\u{2018}', '\u{2019}'], "'");
+    result = result.replace(['\u{201C}', '\u{201D}'], "\"");
 
     // Expand common abbreviations
     result = result.replace("Dr.", "Doctor");
@@ -373,32 +373,32 @@ fn fallback_phonemize(word: &str) -> String {
     let mut result = String::new();
     for c in word.chars() {
         match c.to_ascii_lowercase() {
-            'a' => result.push_str("æ"),
-            'e' => result.push_str("ɛ"),
-            'i' => result.push_str("ɪ"),
-            'o' => result.push_str("ɑ"),
-            'u' => result.push_str("ʌ"),
-            'b' => result.push_str("b"),
-            'c' => result.push_str("k"),
-            'd' => result.push_str("d"),
-            'f' => result.push_str("f"),
-            'g' => result.push_str("ɡ"),
-            'h' => result.push_str("h"),
-            'j' => result.push_str("ʤ"),
-            'k' => result.push_str("k"),
-            'l' => result.push_str("l"),
-            'm' => result.push_str("m"),
-            'n' => result.push_str("n"),
-            'p' => result.push_str("p"),
-            'q' => result.push_str("k"),
-            'r' => result.push_str("ɹ"),
-            's' => result.push_str("s"),
-            't' => result.push_str("t"),
-            'v' => result.push_str("v"),
-            'w' => result.push_str("w"),
+            'a' => result.push('æ'),
+            'e' => result.push('ɛ'),
+            'i' => result.push('ɪ'),
+            'o' => result.push('ɑ'),
+            'u' => result.push('ʌ'),
+            'b' => result.push('b'),
+            'c' => result.push('k'),
+            'd' => result.push('d'),
+            'f' => result.push('f'),
+            'g' => result.push('ɡ'),
+            'h' => result.push('h'),
+            'j' => result.push('ʤ'),
+            'k' => result.push('k'),
+            'l' => result.push('l'),
+            'm' => result.push('m'),
+            'n' => result.push('n'),
+            'p' => result.push('p'),
+            'q' => result.push('k'),
+            'r' => result.push('ɹ'),
+            's' => result.push('s'),
+            't' => result.push('t'),
+            'v' => result.push('v'),
+            'w' => result.push('w'),
             'x' => result.push_str("ks"),
-            'y' => result.push_str("j"),
-            'z' => result.push_str("z"),
+            'y' => result.push('j'),
+            'z' => result.push('z'),
             _ => {} // Skip non-alphabetic characters
         }
     }

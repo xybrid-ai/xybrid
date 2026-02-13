@@ -120,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Show all probabilities
                 println!("   All probabilities:");
                 for (digit, prob) in output_data.iter().enumerate() {
-                    let bar_length = (prob * 50.0).min(50.0).max(0.0) as usize;
+                    let bar_length = (prob * 50.0).clamp(0.0, 50.0) as usize;
                     let bar: String = "█".repeat(bar_length);
                     println!(
                         "     {}: {:.4} ({:5.2}%) {}",

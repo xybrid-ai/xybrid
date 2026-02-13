@@ -56,7 +56,7 @@ fn run_streaming_example() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(feature = "llm-llamacpp")]
-fn run_with_model_dir(model_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn run_with_model_dir(model_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     // Load metadata
     let metadata_path = model_dir.join("model_metadata.json");
     println!("Loading metadata from: {}", metadata_path.display());

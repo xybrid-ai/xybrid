@@ -225,7 +225,7 @@ fn create_mel_filter_bank_slaney(
 
 /// Calculate reflect offset using transformers.js formula.
 fn calculate_reflect_offset(i: i32, w: i32) -> usize {
-    (((i + w) % (2 * w) - w).abs()) as usize
+    ((i + w) % (2 * w) - w).unsigned_abs() as usize
 }
 
 /// Apply reflect padding to audio signal.

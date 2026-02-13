@@ -255,7 +255,7 @@ impl WhisperModel {
     ///
     /// * `size` - Whisper model size
     /// * `device` - Device for inference
-    #[cfg(feature = "hf-hub")]
+    #[cfg(feature = "candle")]
     pub fn from_hf(size: WhisperSize, device: &Device) -> WhisperResult<Self> {
         use hf_hub::{api::sync::Api, Repo, RepoType};
 
@@ -263,7 +263,7 @@ impl WhisperModel {
         let repo = api.repo(Repo::new(size.hf_model_id().to_string(), RepoType::Model));
 
         // Download required files
-        let config_path = repo
+        let _config_path = repo
             .get("config.json")
             .map_err(|e| WhisperError::Config(format!("Failed to download config: {}", e)))?;
         let _tokenizer_path = repo

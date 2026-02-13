@@ -29,7 +29,7 @@ use crate::orchestrator::{
 };
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::runtime_adapter::CoreMLRuntimeAdapter;
-#[cfg(any(target_os = "android"))]
+#[cfg(target_os = "android")]
 use crate::runtime_adapter::ONNXMobileRuntimeAdapter;
 use crate::runtime_adapter::{OnnxRuntimeAdapter, RuntimeAdapter};
 use crate::streaming::manager::StreamManager;
@@ -157,7 +157,7 @@ impl Orchestrator {
             .as_ref()
             .and_then(|c| c.adapters.as_ref())
             .cloned()
-            .unwrap_or_else(|| AdapterConfig {
+            .unwrap_or(AdapterConfig {
                 local: true,
                 cloud: true,
                 mock: false,

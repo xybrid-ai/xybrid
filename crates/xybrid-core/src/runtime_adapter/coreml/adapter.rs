@@ -94,7 +94,7 @@ impl CoreMLRuntimeAdapter {
         if path.is_dir() {
             // .mlpackage is a directory bundle
             // Check for required structure (stub: just verify it exists)
-            if !path.extension().map_or(false, |ext| ext == "mlpackage") {
+            if path.extension().is_none_or(|ext| ext != "mlpackage") {
                 // Directory exists but might not be a valid .mlpackage
                 // For stub, we'll allow it
             }

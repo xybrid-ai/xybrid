@@ -9,6 +9,12 @@ pub struct OnnxRuntime {
     adapter: OnnxRuntimeAdapter,
 }
 
+impl Default for OnnxRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OnnxRuntime {
     pub fn new() -> Self {
         Self {

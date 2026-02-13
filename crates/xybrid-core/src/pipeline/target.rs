@@ -12,6 +12,7 @@ use std::fmt;
 /// Execution target for a pipeline stage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ExecutionTarget {
     /// On-device inference using .xyb bundle from registry.
     /// Requires model to be available for the current platform.
@@ -31,6 +32,7 @@ pub enum ExecutionTarget {
     /// - Device capabilities (GPU, NPU, memory)
     /// - Network conditions (latency, bandwidth)
     /// - User preferences (privacy mode, performance mode)
+    #[default]
     Auto,
 }
 
@@ -53,12 +55,6 @@ impl ExecutionTarget {
             ExecutionTarget::Cloud => "cloud",
             ExecutionTarget::Auto => "auto",
         }
-    }
-}
-
-impl Default for ExecutionTarget {
-    fn default() -> Self {
-        ExecutionTarget::Auto
     }
 }
 

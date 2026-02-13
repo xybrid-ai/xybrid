@@ -113,8 +113,10 @@ pub struct PipelineStage {
 /// Execution mode for a pipeline stage
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[derive(Default)]
 pub enum ExecutionMode {
     /// Run the model once (default)
+    #[default]
     SingleShot,
 
     /// Run the model in an autoregressive loop
@@ -148,25 +150,17 @@ pub enum ExecutionMode {
     },
 }
 
-impl Default for ExecutionMode {
-    fn default() -> Self {
-        ExecutionMode::SingleShot
-    }
-}
-
 /// Schedule for iterative refinement (diffusion models)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[derive(Default)]
 pub enum RefinementSchedule {
+    #[default]
     Linear,
     Cosine,
-    Custom { timesteps: Vec<f32> },
-}
-
-impl Default for RefinementSchedule {
-    fn default() -> Self {
-        RefinementSchedule::Linear
-    }
+    Custom {
+        timesteps: Vec<f32>,
+    },
 }
 
 // ============================================================================

@@ -477,11 +477,12 @@ mod tests {
         let handler: Arc<dyn ControlSyncHandler> = Arc::new(MockHandler::new(applied.clone()));
         let telemetry = Arc::new(Telemetry::with_enabled(false));
 
-        let mut config = ControlSyncConfig::default();
-        config.poll_interval = Duration::from_millis(25);
-        config.retry_backoff = Duration::from_millis(10);
-        config.max_retry_backoff = Duration::from_millis(40);
-        config.immediate_initial_sync = false;
+        let config = ControlSyncConfig {
+            poll_interval: Duration::from_millis(25),
+            retry_backoff: Duration::from_millis(10),
+            max_retry_backoff: Duration::from_millis(40),
+            immediate_initial_sync: false,
+        };
 
         let control_sync =
             ControlSync::new(config, provider, handler, telemetry).expect("spawn control sync");

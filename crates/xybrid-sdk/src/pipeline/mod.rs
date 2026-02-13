@@ -370,11 +370,11 @@ impl Pipeline {
                 let mut desc = StageDescriptor::new(name);
 
                 if let Some(target_str) = stage_config.target() {
-                    desc.target = Self::parse_target(&target_str);
+                    desc.target = Self::parse_target(target_str);
                 }
 
                 if let Some(provider_str) = stage_config.provider() {
-                    desc.provider = Self::parse_provider(&provider_str);
+                    desc.provider = Self::parse_provider(provider_str);
                     if desc.target.is_none() {
                         desc.target = Some(ExecutionTarget::Cloud);
                     }

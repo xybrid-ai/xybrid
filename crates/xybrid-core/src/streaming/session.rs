@@ -9,7 +9,7 @@ use crate::audio::samples_to_wav;
 use crate::audio::vad::{VadConfig, VadSession};
 use crate::execution::{ExecutionTemplate, ModelMetadata, TemplateExecutor};
 use crate::ir::{Envelope, EnvelopeKind};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 

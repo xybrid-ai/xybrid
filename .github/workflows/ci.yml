@@ -119,10 +119,6 @@ jobs:
             features: ort-download
             # Note: candle-metal and ort-coreml available but skipped for CI speed
 
-          # macOS x86_64
-          - os: macos-13
-            features: ort-download
-
           # Linux x86_64
           - os: ubuntu-latest
             features: ort-download
@@ -153,9 +149,6 @@ jobs:
         include:
           - os: macos-14
             target: aarch64-apple-darwin
-            features: platform-macos
-          - os: macos-13
-            target: x86_64-apple-darwin
             features: platform-macos
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu

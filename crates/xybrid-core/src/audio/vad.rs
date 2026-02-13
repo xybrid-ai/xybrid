@@ -53,11 +53,12 @@ pub enum VadError {
 pub type VadResult<T> = Result<T, VadError>;
 
 /// Supported sample rates for Silero VAD.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VadSampleRate {
     /// 8kHz sample rate (256 samples/frame, 32 context)
     Rate8k,
     /// 16kHz sample rate (512 samples/frame, 64 context)
+    #[default]
     Rate16k,
 }
 
@@ -89,12 +90,6 @@ impl VadSampleRate {
     /// Get frame duration in milliseconds.
     pub fn frame_duration_ms(&self) -> f32 {
         (self.frame_size() as f32 / self.as_hz() as f32) * 1000.0
-    }
-}
-
-impl Default for VadSampleRate {
-    fn default() -> Self {
-        VadSampleRate::Rate16k
     }
 }
 
@@ -168,7 +163,7 @@ struct VadState {
 impl VadState {
     fn new(context_size: usize) -> Self {
         Self {
-            state: vec![0.0; 2 * 1 * 128], // [2, 1, 128] flattened
+            state: vec![0.0; 2 * 128], // [2, 1, 128] flattened
             context: vec![0.0; context_size],
         }
     }
@@ -636,7 +631,7 @@ mod tests {
     #[test]
     fn test_vad_state() {
         let state = VadState::new(64);
-        assert_eq!(state.state.len(), 2 * 1 * 128);
+        assert_eq!(state.state.len(), 2 * 128);
         assert_eq!(state.context.len(), 64);
     }
 }

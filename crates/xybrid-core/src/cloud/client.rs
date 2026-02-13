@@ -273,7 +273,7 @@ impl Cloud {
 
                 match status {
                     429 => Err(CloudError::RateLimited { retry_after_secs }),
-                    502 | 503 | 504 => Err(CloudError::GatewayError(format!(
+                    502..=504 => Err(CloudError::GatewayError(format!(
                         "Gateway returned {}: {}",
                         status, message
                     ))),

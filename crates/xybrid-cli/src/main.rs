@@ -24,10 +24,10 @@
 //! | `pack` | Create a model bundle |
 //! | `deploy` | Deploy a bundle to the registry |
 
-#[macro_use]
-extern crate lazy_static;
+#![allow(clippy::too_many_arguments)]
 
 mod commands;
+#[allow(dead_code)]
 mod tracing_viz;
 
 // Import utility functions from commands module
@@ -38,14 +38,13 @@ use commands::{dir_size_bytes, display_stage_name, format_params, format_size, s
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::*;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use xybrid_core::bundler::XyBundle;
-use xybrid_core::context::{DeviceMetrics, StageDescriptor};
+use xybrid_core::context::StageDescriptor;
 use xybrid_core::conversation::ConversationContext;
 use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::execution_template::ModelMetadata;
@@ -713,11 +712,12 @@ fn handle_repl_command(
     // Detect if model is an LLM (GGUF) and create conversation context if so
     // This enables multi-turn conversation history for LLM models
     let mut conversation_context: Option<ConversationContext> = None;
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     let mut loaded_model: Option<xybrid_sdk::model::XybridModel> = None;
 
     if stages.len() == 1 && stages[0].bundle_path.is_some() {
         let bundle_path = PathBuf::from(stages[0].bundle_path.as_ref().unwrap());
-        let model_result = if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
+        let model_result = if bundle_path.extension().is_some_and(|ext| ext == "xyb") {
             ModelLoader::from_bundle(&bundle_path).and_then(|loader| loader.load())
         } else {
             ModelLoader::from_directory(&bundle_path).and_then(|loader| loader.load())
@@ -739,7 +739,10 @@ fn handle_repl_command(
                     println!("   (Use 'history' to view conversation, 'clear' to reset)");
                 }
             }
-            loaded_model = Some(model);
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            {
+                loaded_model = Some(model);
+            }
         }
     }
 
@@ -1423,11 +1426,7 @@ fn display_telemetry_table(entries: &[TelemetryLogEntry]) {
     let first_timestamp = entries.first().map(|e| e.timestamp).unwrap_or(0);
 
     for entry in entries {
-        let relative_timestamp = if entry.timestamp >= first_timestamp {
-            entry.timestamp - first_timestamp
-        } else {
-            0
-        };
+        let relative_timestamp = entry.timestamp.saturating_sub(first_timestamp);
         let timestamp_str = format_timestamp(relative_timestamp);
 
         // Color-coded severity
@@ -1571,14 +1570,14 @@ fn display_summary(entries: &[TelemetryLogEntry]) {
         let denied_count = policy_evals.len() - allowed_count;
         println!("{}", "Policy Evaluations:".bold());
         println!(
-            "  {} {}",
+            "  {} Allowed: {}",
             "•".bright_cyan(),
-            format!("Allowed: {}", allowed_count.to_string().bright_green())
+            allowed_count.to_string().bright_green()
         );
         println!(
-            "  {} {}",
+            "  {} Denied: {}",
             "•".bright_cyan(),
-            format!("Denied: {}", denied_count.to_string().bright_red())
+            denied_count.to_string().bright_red()
         );
         println!();
     }
@@ -3149,7 +3148,7 @@ fn load_metadata_from_bundle(bundle_path: &Path) -> Result<ModelMetadata> {
     }
 
     // Handle .xyb bundle - read directly from bundle
-    if bundle_path.extension().map_or(false, |ext| ext == "xyb") {
+    if bundle_path.extension().is_some_and(|ext| ext == "xyb") {
         let bundle = XyBundle::load(bundle_path)?;
 
         // Use the bundle's get_metadata_json method

@@ -319,7 +319,7 @@ impl RuntimeAdapter for OnnxRuntimeAdapter {
         }
 
         // Create ONNX Runtime session with configured execution provider
-        let session = ONNXSession::with_provider(path, self.execution_provider.clone())?;
+        let session = ONNXSession::with_provider(path, self.execution_provider)?;
 
         log::info!(
             "Loaded model '{}' with {} execution provider",
@@ -504,11 +504,12 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_select_optimal_provider() {
-        let provider = OnnxRuntimeAdapter::select_optimal_provider();
+        let _provider = OnnxRuntimeAdapter::select_optimal_provider();
         // On non-Apple platforms without ort-coreml feature, should be CPU
         #[cfg(not(all(feature = "ort-coreml", any(target_os = "macos", target_os = "ios"))))]
-        assert_eq!(provider, ExecutionProviderKind::Cpu);
+        assert_eq!(_provider, ExecutionProviderKind::Cpu);
     }
 
     #[test]

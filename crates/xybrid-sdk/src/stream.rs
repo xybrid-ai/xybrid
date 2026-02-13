@@ -6,7 +6,6 @@
 use crate::model::SdkError;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 use xybrid_core::streaming::{
     PartialResult as CorePartialResult, StreamConfig as CoreStreamConfig, StreamSession,
     StreamState as CoreStreamState, StreamStats as CoreStreamStats,
@@ -283,6 +282,7 @@ impl Clone for XybridStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn test_stream_state_conversion() {

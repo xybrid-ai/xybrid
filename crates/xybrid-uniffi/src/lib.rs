@@ -1,3 +1,5 @@
+#![allow(unpredictable_function_pointer_comparisons)]
+
 //! UniFFI bindings for xybrid-sdk.
 //!
 //! This crate exposes xybrid-sdk types and functions to Swift and Kotlin
@@ -235,7 +237,7 @@ impl XybridModelLoader {
     #[uniffi::constructor]
     pub fn from_registry(model_id: String) -> Arc<Self> {
         Arc::new(Self {
-            inner: CoreModelLoader::from_registry(&model_id.as_str()),
+            inner: CoreModelLoader::from_registry(model_id.as_str()),
         })
     }
 

@@ -411,7 +411,7 @@ impl Orchestrator {
         // Start top-level pipeline span
         let pipeline_name = stage_names.join(" → ");
         let _pipeline_span = trace::SpanGuard::new(format!("pipeline:{}", pipeline_name));
-        trace::add_metadata("stages", &stage_names.len().to_string());
+        trace::add_metadata("stages", stage_names.len().to_string());
 
         // Emit pipeline start event
         self.event_bus.publish(OrchestratorEvent::PipelineStart {
@@ -634,7 +634,7 @@ impl Orchestrator {
         // Start top-level pipeline span
         let pipeline_name = stage_names.join(" → ");
         let _pipeline_span = trace::SpanGuard::new(format!("pipeline:{}", pipeline_name));
-        trace::add_metadata("stages", &stage_names.len().to_string());
+        trace::add_metadata("stages", stage_names.len().to_string());
 
         // Emit pipeline start event
         self.event_bus.publish(OrchestratorEvent::PipelineStart {
@@ -723,7 +723,7 @@ impl Orchestrator {
     pub fn load_policies(&mut self, bundle_bytes: Vec<u8>) -> OrchestratorResult<()> {
         self.policy_engine
             .load_policies(bundle_bytes)
-            .map_err(|e| OrchestratorError::PolicyEvaluationFailed(e))
+            .map_err(OrchestratorError::PolicyEvaluationFailed)
     }
 
     /// Get a reference to the event bus for subscribing to events.

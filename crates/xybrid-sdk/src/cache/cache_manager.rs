@@ -560,10 +560,9 @@ impl CacheManager {
         let mut to_remove = Vec::new();
 
         for (key, entry) in &self.entries {
-            if entry.cache_type == CacheType::Cloud {
-                if (now - entry.cached_at) >= CLOUD_TTL_SECONDS {
-                    to_remove.push(key.clone());
-                }
+            if entry.cache_type == CacheType::Cloud && (now - entry.cached_at) >= CLOUD_TTL_SECONDS
+            {
+                to_remove.push(key.clone());
             }
         }
 

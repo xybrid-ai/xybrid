@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Determines how LLM requests are routed - either through the Xybrid Gateway
 /// (recommended for production) or directly to provider APIs (development only).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum LlmBackend {
     /// Route through Xybrid Gateway (default, recommended).
     ///
@@ -51,6 +51,7 @@ pub enum LlmBackend {
     /// - Secure API key management (keys never exposed to client)
     /// - Rate limiting and usage tracking
     /// - Multiple provider support (OpenAI, Anthropic, etc.)
+    #[default]
     Gateway,
 
     /// Direct API calls (development only - exposes API keys).
@@ -58,12 +59,6 @@ pub enum LlmBackend {
     /// **Warning**: Never ship production apps with API keys embedded in code.
     /// Use the Gateway backend for production, or fetch keys from a secure backend.
     Direct,
-}
-
-impl Default for LlmBackend {
-    fn default() -> Self {
-        LlmBackend::Gateway
-    }
 }
 
 // ============================================================================

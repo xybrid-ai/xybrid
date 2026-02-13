@@ -430,7 +430,7 @@ impl ModelLoader {
         );
 
         // Download bundle to temp file
-        let temp_dir = TempDir::new().map_err(|e| SdkError::IoError(e))?;
+        let temp_dir = TempDir::new().map_err(SdkError::IoError)?;
         let bundle_path = temp_dir.path().join(format!("{}.xyb", model_id));
 
         // Use blocking HTTP client
@@ -1346,7 +1346,7 @@ impl XybridModel {
                             Box::new(move |token: PartialToken| {
                                 let stream_token = StreamToken {
                                     token: token.token.clone(),
-                                    token_id: token.token_id.map(|id| id as i64),
+                                    token_id: token.token_id.map(|id| id),
                                     index: token.index,
                                     cumulative_text: token.cumulative_text.clone(),
                                     finish_reason: token.finish_reason.clone(),

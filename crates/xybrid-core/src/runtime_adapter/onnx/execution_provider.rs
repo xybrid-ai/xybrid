@@ -33,9 +33,10 @@ use std::fmt;
 /// Determines which hardware backend to use for model inference.
 /// If the selected provider is unavailable, ONNX Runtime automatically
 /// falls back to CPU execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExecutionProviderKind {
     /// CPU execution (default, always available)
+    #[default]
     Cpu,
 
     /// CoreML execution provider (macOS/iOS only)
@@ -47,12 +48,6 @@ pub enum ExecutionProviderKind {
     /// Requires the `ort-coreml` feature flag.
     #[cfg(feature = "ort-coreml")]
     CoreML(CoreMLConfig),
-}
-
-impl Default for ExecutionProviderKind {
-    fn default() -> Self {
-        Self::Cpu
-    }
 }
 
 impl fmt::Display for ExecutionProviderKind {
@@ -152,7 +147,7 @@ impl CoreMLConfig {
 /// The Neural Engine provides the best performance for ML workloads
 /// on supported devices (A12+ chips, M1+ Macs).
 #[cfg(feature = "ort-coreml")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CoreMLComputeUnits {
     /// CPU only - no hardware acceleration.
     ///
@@ -169,6 +164,7 @@ pub enum CoreMLComputeUnits {
     ///
     /// Uses Apple's Neural Engine for optimal ML inference performance.
     /// Available on A12+ (iPhone XS and later) and M1+ Macs.
+    #[default]
     CpuAndNeuralEngine,
 
     /// All available compute units.
@@ -176,14 +172,6 @@ pub enum CoreMLComputeUnits {
     /// Lets CoreML decide the optimal execution strategy based on
     /// the model and available hardware.
     All,
-}
-
-#[cfg(feature = "ort-coreml")]
-impl Default for CoreMLComputeUnits {
-    fn default() -> Self {
-        // Default to Neural Engine for best performance on Apple Silicon
-        Self::CpuAndNeuralEngine
-    }
 }
 
 #[cfg(feature = "ort-coreml")]
@@ -384,7 +372,7 @@ pub fn select_optimal_provider(hints: &ModelHints) -> ExecutionProviderKind {
         // Rule 6: Unknown model with static shapes and reasonable size → try CoreML
         if hints.static_shapes == Some(true) {
             if let Some(size) = hints.model_size_mb {
-                if size >= 1.0 && size <= 500.0 {
+                if (1.0..=500.0).contains(&size) {
                     return ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine());
                 }
             }

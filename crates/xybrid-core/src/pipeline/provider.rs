@@ -150,8 +150,7 @@ impl ProviderConfig {
     pub fn resolve_api_key(&self) -> Option<String> {
         if let Some(key) = &self.api_key {
             // Check if it's an environment variable reference
-            if key.starts_with('$') {
-                let env_var = &key[1..];
+            if let Some(env_var) = key.strip_prefix('$') {
                 return std::env::var(env_var).ok();
             }
             // Check if it's a Xybrid secrets reference
@@ -260,7 +259,7 @@ impl Default for AnthropicOptions {
 }
 
 /// ElevenLabs-specific options.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ElevenLabsOptions {
     /// Voice ID to use.
     #[serde(default)]
@@ -281,18 +280,6 @@ pub struct ElevenLabsOptions {
     /// Output format (e.g., "mp3_44100_128").
     #[serde(default)]
     pub output_format: Option<String>,
-}
-
-impl Default for ElevenLabsOptions {
-    fn default() -> Self {
-        Self {
-            voice_id: None,
-            model_id: None,
-            stability: None,
-            similarity_boost: None,
-            output_format: None,
-        }
-    }
 }
 
 /// Google-specific options.

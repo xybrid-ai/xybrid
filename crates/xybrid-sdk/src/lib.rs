@@ -1,3 +1,12 @@
+// Allow dead code in alpha crate — many modules are scaffolded but not yet wired up.
+#![allow(dead_code)]
+#![allow(
+    clippy::too_many_arguments,
+    clippy::ptr_arg,
+    clippy::map_identity,
+    clippy::while_let_loop
+)]
+
 //! Xybrid SDK - Developer-facing API for hybrid cloud-edge AI inference.
 //!
 //! This crate provides high-level abstractions for:
@@ -207,16 +216,10 @@ use std::sync::OnceLock;
 static SDK_CONFIG: OnceLock<SdkConfig> = OnceLock::new();
 
 /// SDK configuration options.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SdkConfig {
     /// Custom cache directory (required on Android, optional elsewhere)
     pub cache_dir: Option<std::path::PathBuf>,
-}
-
-impl Default for SdkConfig {
-    fn default() -> Self {
-        Self { cache_dir: None }
-    }
 }
 
 /// Initialize the SDK with a custom cache directory.

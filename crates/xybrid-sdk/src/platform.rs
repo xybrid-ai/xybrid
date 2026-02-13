@@ -49,46 +49,46 @@ fn detect_platform() -> &'static str {
     // iOS detection (must come before macOS since both are Apple platforms)
     #[cfg(all(target_os = "ios", target_arch = "aarch64"))]
     {
-        return "ios-arm64";
+        "ios-arm64"
     }
 
     // Android detection
     #[cfg(all(target_os = "android", target_arch = "aarch64"))]
     {
-        return "android-arm64";
+        "android-arm64"
     }
 
     #[cfg(all(target_os = "android", target_arch = "arm"))]
     {
-        return "android-arm";
+        "android-arm"
     }
 
     // macOS detection
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
-        return "macos-arm64";
+        "macos-arm64"
     }
 
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
     {
-        return "macos-x86_64";
+        "macos-x86_64"
     }
 
     // Linux detection
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        return "linux-x86_64";
+        "linux-x86_64"
     }
 
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     {
-        return "linux-arm64";
+        "linux-arm64"
     }
 
     // Windows detection
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
     {
-        return "windows-x86_64";
+        "windows-x86_64"
     }
 
     // Fallback for unknown platforms
@@ -103,7 +103,7 @@ fn detect_platform() -> &'static str {
         all(target_os = "windows", target_arch = "x86_64"),
     )))]
     {
-        return "unknown";
+        "unknown"
     }
 }
 

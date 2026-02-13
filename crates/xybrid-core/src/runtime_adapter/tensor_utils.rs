@@ -91,7 +91,7 @@ pub fn tensors_to_envelope(
     }
 
     // Use first output for now
-    let output_name = output_names.get(0).map(|s| s.as_str()).unwrap_or("output");
+    let output_name = output_names.first().map(|s| s.as_str()).unwrap_or("output");
     let output = outputs
         .get(output_name)
         .ok_or_else(|| AdapterError::InvalidInput(format!("Output '{}' not found", output_name)))?;
@@ -282,7 +282,7 @@ fn decode_audio_to_samples(audio_data: &[u8]) -> AdapterResult<Vec<f32>> {
         }
         Err(_) => {
             // Not a WAV file, try raw PCM (16-bit little-endian)
-            if audio_data.len() % 2 != 0 {
+            if !audio_data.len().is_multiple_of(2) {
                 return Err(AdapterError::InvalidInput(format!(
                     "Audio data length ({}) must be even for 16-bit PCM",
                     audio_data.len()
@@ -333,7 +333,7 @@ fn text_to_tensor(text: &str, target_shape: &[i64]) -> AdapterResult<ArrayD<f32>
 
     if has_dynamic {
         // For dynamic shapes, use the actual token count
-        let shape: Vec<usize> = if target_shape == &[-1] {
+        let shape: Vec<usize> = if target_shape == [-1] {
             vec![actual_size]
         } else if target_shape.len() == 2 {
             let batch = if target_shape[0] > 0 {
@@ -398,7 +398,7 @@ fn embedding_to_tensor(embedding: &[f32], target_shape: &[i64]) -> AdapterResult
         // - [1, -1] → [1, actual_size] (batch of 1)
         // - [-1, -1] → [1, actual_size] (assume batch=1)
 
-        let shape: Vec<usize> = if target_shape == &[-1] {
+        let shape: Vec<usize> = if target_shape == [-1] {
             // Single dynamic dimension: create 1D tensor
             vec![actual_size]
         } else if target_shape.len() == 2 {

@@ -188,7 +188,7 @@ impl SpanCollector {
         } else {
             0
         };
-        let bar_width = bar_width.max(1).min(50);
+        let bar_width = bar_width.clamp(1, 50);
 
         // Indentation
         let indent = "  ".repeat(depth);
@@ -203,7 +203,7 @@ impl SpanCollector {
             ('█', "red")
         };
 
-        let bar: String = std::iter::repeat(bar_char).take(bar_width).collect();
+        let bar: String = std::iter::repeat_n(bar_char, bar_width).collect();
         let colored_bar = match color {
             "green" => bar.bright_green(),
             "yellow" => bar.bright_yellow(),
@@ -246,8 +246,7 @@ impl SpanCollector {
         let events: Vec<serde_json::Value> = self
             .spans
             .iter()
-            .enumerate()
-            .flat_map(|(id, span)| {
+            .flat_map(|span| {
                 let mut events = vec![];
                 let name = &span.name;
                 let ts = 0; // Would need real timestamps

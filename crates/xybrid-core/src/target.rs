@@ -8,9 +8,10 @@
 use std::fmt;
 
 /// Supported target formats for model bundles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Target {
     /// ONNX Runtime (cross-platform, default fallback)
+    #[default]
     Onnx,
     /// Apple CoreML (iOS, macOS)
     CoreML,
@@ -64,12 +65,6 @@ impl Target {
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
-    }
-}
-
-impl Default for Target {
-    fn default() -> Self {
-        Target::Onnx
     }
 }
 

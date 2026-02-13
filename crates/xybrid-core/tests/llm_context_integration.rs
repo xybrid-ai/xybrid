@@ -11,14 +11,14 @@
 //! Run with:
 //!   cargo test -p xybrid-core --test llm_context_integration --features llm-llamacpp
 
-use std::path::PathBuf;
+use std::path::Path;
 use xybrid_core::conversation::ConversationContext;
 use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
 use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
 use xybrid_core::testing::model_fixtures;
 
 /// Helper to load model metadata from a fixture directory.
-fn load_metadata(model_dir: &PathBuf) -> ModelMetadata {
+fn load_metadata(model_dir: &Path) -> ModelMetadata {
     let metadata_path = model_dir.join("model_metadata.json");
     let content = std::fs::read_to_string(&metadata_path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {}", metadata_path.display(), e));

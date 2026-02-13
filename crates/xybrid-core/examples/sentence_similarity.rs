@@ -6,7 +6,6 @@
 //! - Comparing similar vs dissimilar sentence pairs
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use xybrid_core::execution::ModelMetadata;
 use xybrid_core::execution::TemplateExecutor;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
@@ -64,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
 
     // Test sentence pairs
-    let pairs = vec![
+    let pairs = [
         (
             "The cat sits on the mat.",
             "A feline rests on the rug.",

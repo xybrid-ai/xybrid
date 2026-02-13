@@ -92,14 +92,14 @@ impl CandleRuntimeAdapter {
     fn process_mel_input(
         &self,
         mel_data: &[f32],
-        metadata: &HashMap<String, String>,
+        _metadata: &HashMap<String, String>,
     ) -> AdapterResult<candle_core::Tensor> {
         // Try to get shape from metadata
         let n_mels = 80; // Whisper standard
         let n_frames = mel_data.len() / n_mels;
 
         // Validate shape
-        if mel_data.len() % n_mels != 0 {
+        if !mel_data.len().is_multiple_of(n_mels) {
             return Err(AdapterError::InvalidInput(format!(
                 "Mel spectrogram size {} is not divisible by n_mels {}",
                 mel_data.len(),
@@ -178,14 +178,14 @@ impl RuntimeAdapter for CandleRuntimeAdapter {
         // Get mutable reference to model
         // Note: We need interior mutability for autoregressive decoding
         // This is a design limitation - consider RefCell or Mutex
-        let model = self.models.get(model_id).ok_or_else(|| {
+        let _model = self.models.get(model_id).ok_or_else(|| {
             AdapterError::ModelNotLoaded(format!("Model '{}' not found", model_id))
         })?;
 
         match &input.kind {
             EnvelopeKind::Embedding(mel_data) => {
                 // Process pre-computed mel spectrogram
-                let mel = self.process_mel_input(mel_data, &input.metadata)?;
+                let _mel = self.process_mel_input(mel_data, &input.metadata)?;
 
                 // Note: We can't call encode() because it needs &mut self but we have &self
                 // This is a design limitation - RuntimeAdapter::execute takes &self
@@ -232,7 +232,7 @@ impl RuntimeAdapterExt for CandleRuntimeAdapter {
 
         // Temporarily set current model and execute
         // Note: This is a bit hacky - consider better design
-        let original_current = self.current_model.clone();
+        let _original_current = self.current_model.clone();
 
         // We can't actually change current_model without &mut self
         // For now, just verify the model exists and delegate to execute

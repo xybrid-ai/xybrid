@@ -438,7 +438,7 @@ impl ConditionEvaluator {
             return Some(Value::Number(n.into()));
         }
         if let Ok(n) = expr.parse::<f64>() {
-            return Some(serde_json::Number::from_f64(n).map(Value::Number)?);
+            return serde_json::Number::from_f64(n).map(Value::Number);
         }
 
         // Array literal

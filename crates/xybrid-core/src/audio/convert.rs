@@ -3,18 +3,13 @@
 use thiserror::Error;
 
 /// Resampling method for audio conversion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResampleMethod {
     /// Nearest neighbor (fast, low quality)
     NearestNeighbor,
     /// Linear interpolation (fast, medium quality)
+    #[default]
     Linear,
-}
-
-impl Default for ResampleMethod {
-    fn default() -> Self {
-        ResampleMethod::Linear
-    }
 }
 
 /// Resamples audio samples from one sample rate to another.
@@ -287,102 +282,6 @@ pub enum ConvertError {
     ConversionFailed(String),
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_resample_same_rate() {
-        let samples = vec![0.0f32, 0.5, 1.0, 0.5, 0.0];
-        let result = resample_audio(&samples, 16000, 16000, ResampleMethod::Linear).unwrap();
-        assert_eq!(result, samples);
-    }
-
-    #[test]
-    fn test_resample_downsample() {
-        let samples: Vec<f32> = (0..44100).map(|i| (i as f32 / 44100.0)).collect();
-        let result = resample_audio(&samples, 44100, 16000, ResampleMethod::Linear).unwrap();
-        // Should be approximately 16000 samples for 1 second
-        assert!((result.len() as i32 - 16000).abs() <= 1);
-    }
-
-    #[test]
-    fn test_resample_upsample() {
-        let samples: Vec<f32> = (0..16000).map(|i| (i as f32 / 16000.0)).collect();
-        let result = resample_audio(&samples, 16000, 44100, ResampleMethod::Linear).unwrap();
-        // Should be approximately 44100 samples for 1 second
-        assert!((result.len() as i32 - 44100).abs() <= 1);
-    }
-
-    #[test]
-    fn test_resample_invalid_rate() {
-        let samples = vec![0.0f32; 100];
-        let result = resample_audio(&samples, 0, 16000, ResampleMethod::Linear);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_normalize_pcm16_to_f32() {
-        // Test silence (0)
-        let silence = vec![0u8, 0];
-        let result = normalize_pcm16_to_f32(&silence);
-        assert_eq!(result.len(), 1);
-        assert!((result[0] - 0.0).abs() < 0.0001);
-
-        // Test max positive (32767 = 0x7FFF)
-        let max_positive = vec![0xFF, 0x7F];
-        let result = normalize_pcm16_to_f32(&max_positive);
-        assert!((result[0] - 1.0).abs() < 0.001);
-
-        // Test max negative (-32768 = 0x8000)
-        let max_negative = vec![0x00, 0x80];
-        let result = normalize_pcm16_to_f32(&max_negative);
-        assert!((result[0] - (-1.0)).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_f32_to_pcm16() {
-        let samples = vec![0.0f32, 1.0, -1.0];
-        let pcm = f32_to_pcm16(&samples);
-
-        assert_eq!(pcm.len(), 6);
-
-        // Silence
-        let silence = i16::from_le_bytes([pcm[0], pcm[1]]);
-        assert_eq!(silence, 0);
-
-        // Max positive
-        let max_pos = i16::from_le_bytes([pcm[2], pcm[3]]);
-        assert_eq!(max_pos, 32767);
-
-        // Max negative
-        let max_neg = i16::from_le_bytes([pcm[4], pcm[5]]);
-        assert_eq!(max_neg, -32767);
-    }
-
-    #[test]
-    fn test_stereo_to_mono() {
-        let stereo = vec![0.5f32, 0.3, 1.0, 0.0, -0.5, 0.5];
-        let mono = stereo_to_mono(&stereo);
-
-        assert_eq!(mono.len(), 3);
-        assert!((mono[0] - 0.4).abs() < 0.001); // (0.5 + 0.3) / 2
-        assert!((mono[1] - 0.5).abs() < 0.001); // (1.0 + 0.0) / 2
-        assert!((mono[2] - 0.0).abs() < 0.001); // (-0.5 + 0.5) / 2
-    }
-
-    #[test]
-    fn test_multichannel_to_mono() {
-        // Test with 4 channels
-        let multi = vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
-        let mono = multichannel_to_mono(&multi, 4);
-
-        assert_eq!(mono.len(), 2);
-        assert!((mono[0] - 0.25).abs() < 0.001); // (0.1 + 0.2 + 0.3 + 0.4) / 4
-        assert!((mono[1] - 0.65).abs() < 0.001); // (0.5 + 0.6 + 0.7 + 0.8) / 4
-    }
-}
-
 /// Prepares audio samples by converting channels and resampling if necessary.
 pub fn prepare_audio_samples(
     samples: Vec<f32>,
@@ -465,5 +364,101 @@ pub fn decode_wav_audio(
             "Failed to decode WAV audio: {}. Only WAV format is currently supported.",
             e
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resample_same_rate() {
+        let samples = vec![0.0f32, 0.5, 1.0, 0.5, 0.0];
+        let result = resample_audio(&samples, 16000, 16000, ResampleMethod::Linear).unwrap();
+        assert_eq!(result, samples);
+    }
+
+    #[test]
+    fn test_resample_downsample() {
+        let samples: Vec<f32> = (0..44100).map(|i| i as f32 / 44100.0).collect();
+        let result = resample_audio(&samples, 44100, 16000, ResampleMethod::Linear).unwrap();
+        // Should be approximately 16000 samples for 1 second
+        assert!((result.len() as i32 - 16000).abs() <= 1);
+    }
+
+    #[test]
+    fn test_resample_upsample() {
+        let samples: Vec<f32> = (0..16000).map(|i| i as f32 / 16000.0).collect();
+        let result = resample_audio(&samples, 16000, 44100, ResampleMethod::Linear).unwrap();
+        // Should be approximately 44100 samples for 1 second
+        assert!((result.len() as i32 - 44100).abs() <= 1);
+    }
+
+    #[test]
+    fn test_resample_invalid_rate() {
+        let samples = vec![0.0f32; 100];
+        let result = resample_audio(&samples, 0, 16000, ResampleMethod::Linear);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_normalize_pcm16_to_f32() {
+        // Test silence (0)
+        let silence = vec![0u8, 0];
+        let result = normalize_pcm16_to_f32(&silence);
+        assert_eq!(result.len(), 1);
+        assert!((result[0] - 0.0).abs() < 0.0001);
+
+        // Test max positive (32767 = 0x7FFF)
+        let max_positive = vec![0xFF, 0x7F];
+        let result = normalize_pcm16_to_f32(&max_positive);
+        assert!((result[0] - 1.0).abs() < 0.001);
+
+        // Test max negative (-32768 = 0x8000)
+        let max_negative = vec![0x00, 0x80];
+        let result = normalize_pcm16_to_f32(&max_negative);
+        assert!((result[0] - (-1.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_f32_to_pcm16() {
+        let samples = vec![0.0f32, 1.0, -1.0];
+        let pcm = f32_to_pcm16(&samples);
+
+        assert_eq!(pcm.len(), 6);
+
+        // Silence
+        let silence = i16::from_le_bytes([pcm[0], pcm[1]]);
+        assert_eq!(silence, 0);
+
+        // Max positive
+        let max_pos = i16::from_le_bytes([pcm[2], pcm[3]]);
+        assert_eq!(max_pos, 32767);
+
+        // Max negative
+        let max_neg = i16::from_le_bytes([pcm[4], pcm[5]]);
+        assert_eq!(max_neg, -32767);
+    }
+
+    #[test]
+    fn test_stereo_to_mono() {
+        let stereo = vec![0.5f32, 0.3, 1.0, 0.0, -0.5, 0.5];
+        let mono = stereo_to_mono(&stereo);
+
+        assert_eq!(mono.len(), 3);
+        assert!((mono[0] - 0.4).abs() < 0.001); // (0.5 + 0.3) / 2
+        assert!((mono[1] - 0.5).abs() < 0.001); // (1.0 + 0.0) / 2
+        assert!((mono[2] - 0.0).abs() < 0.001); // (-0.5 + 0.5) / 2
+    }
+
+    #[test]
+    fn test_multichannel_to_mono() {
+        // Test with 4 channels
+        let multi = vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
+        let mono = multichannel_to_mono(&multi, 4);
+
+        assert_eq!(mono.len(), 2);
+        assert!((mono[0] - 0.25).abs() < 0.001); // (0.1 + 0.2 + 0.3 + 0.4) / 4
+        assert!((mono[1] - 0.65).abs() < 0.001); // (0.5 + 0.6 + 0.7 + 0.8) / 4
     }
 }

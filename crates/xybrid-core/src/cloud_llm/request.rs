@@ -5,19 +5,15 @@ use serde::{Deserialize, Serialize};
 /// Role of a message in a conversation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Role {
     /// System message (sets behavior/context).
     System,
     /// User message.
+    #[default]
     User,
     /// Assistant response.
     Assistant,
-}
-
-impl Default for Role {
-    fn default() -> Self {
-        Role::User
-    }
 }
 
 /// A single message in a conversation.

@@ -371,7 +371,7 @@ impl RegistryClient {
                     retry_after_secs: 60,
                 }
             }
-            502 | 503 | 504 => SdkError::NetworkError(format!(
+            502..=504 => SdkError::NetworkError(format!(
                 "Registry {} failed with status {} (server error)",
                 operation, status
             )),
@@ -435,7 +435,7 @@ impl RegistryClient {
         let model_name = resolved
             .hf_repo
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or(&resolved.hf_repo);
 
         self.cache.cache_dir().join(model_name).join(&resolved.file)

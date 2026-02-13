@@ -35,11 +35,12 @@ fn test_event_stream_subscription() {
         let mut found_stage_start = false;
         for _ in 0..5 {
             if let Ok(event) = timeout(Duration::from_millis(200), event_stream.recv()).await {
-                if let Some(OrchestratorEvent::StageStart { stage_name }) = event {
-                    if stage_name == "test_stage" {
-                        found_stage_start = true;
-                        break;
-                    }
+                if matches!(
+                    event,
+                    Some(OrchestratorEvent::StageStart { stage_name }) if stage_name == "test_stage"
+                ) {
+                    found_stage_start = true;
+                    break;
                 }
             }
         }

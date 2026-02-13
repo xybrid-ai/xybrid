@@ -8,7 +8,7 @@ use super::stage::StageConfig;
 use serde::{Deserialize, Serialize};
 
 /// Pipeline metadata (name, version, description).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct PipelineMetadata {
     /// Pipeline name.
     #[serde(default)]
@@ -21,16 +21,6 @@ pub struct PipelineMetadata {
     /// Pipeline description.
     #[serde(default)]
     pub description: Option<String>,
-}
-
-impl Default for PipelineMetadata {
-    fn default() -> Self {
-        Self {
-            name: None,
-            version: None,
-            description: None,
-        }
-    }
 }
 
 /// Complete pipeline configuration.

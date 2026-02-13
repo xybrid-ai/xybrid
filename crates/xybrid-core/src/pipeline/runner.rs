@@ -159,6 +159,7 @@ pub enum OutputResultType {
 /// Typed output result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
+#[derive(Default)]
 pub enum OutputResult {
     /// Text output (e.g., from ASR, LLM).
     Text(String),
@@ -171,13 +172,8 @@ pub enum OutputResult {
     /// Structured JSON output.
     Json(Value),
     /// No output.
+    #[default]
     None,
-}
-
-impl Default for OutputResult {
-    fn default() -> Self {
-        OutputResult::None
-    }
 }
 
 /// Configuration for the pipeline runner.

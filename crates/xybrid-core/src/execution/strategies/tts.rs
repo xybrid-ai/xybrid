@@ -253,9 +253,7 @@ impl TtsStrategy {
         let mut current_chunk = String::new();
 
         // Split into sentences (keep delimiter)
-        let sentences: Vec<&str> = text
-            .split_inclusive(|c| c == '.' || c == '!' || c == '?')
-            .collect();
+        let sentences: Vec<&str> = text.split_inclusive(['.', '!', '?']).collect();
 
         for sentence in sentences {
             let sentence = sentence.trim();

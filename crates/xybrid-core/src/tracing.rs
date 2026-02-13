@@ -313,10 +313,10 @@ mod tests {
     fn test_span_collector() {
         let mut collector = SpanCollector::new();
 
-        let span1 = collector.start_span("parent");
+        let _span1 = collector.start_span("parent");
         collector.add_metadata("key1", "value1");
 
-        let span2 = collector.start_span("child");
+        let _span2 = collector.start_span("child");
         collector.add_metadata("key2", "value2");
         collector.end_span(); // end child
 

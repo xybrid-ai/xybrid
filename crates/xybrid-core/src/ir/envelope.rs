@@ -779,8 +779,6 @@ mod tests {
 
     #[test]
     fn test_envelope_without_role() {
-        use super::super::MessageRole;
-
         let envelope = Envelope::new(EnvelopeKind::Text("Plain message".to_string()));
 
         // Envelopes without a role return None (backwards compatible)

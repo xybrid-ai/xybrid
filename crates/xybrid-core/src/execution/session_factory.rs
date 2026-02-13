@@ -75,7 +75,7 @@ impl InferenceSession for OnnxInferenceSession {
         &self,
         inputs: HashMap<String, ArrayD<f32>>,
     ) -> ExecutorResult<HashMap<String, ArrayD<f32>>> {
-        self.session.run(inputs).map_err(|e| e)
+        self.session.run(inputs)
     }
 
     fn output_names(&self) -> &[String] {

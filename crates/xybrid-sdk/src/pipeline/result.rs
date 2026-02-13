@@ -50,7 +50,7 @@ use serde::{Deserialize, Serialize};
 /// };
 /// assert!(stage.executed);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct FfiStageExecutionResult {
     /// Stage identifier
     pub stage_id: String,
@@ -97,18 +97,6 @@ impl FfiStageExecutionResult {
             stage_id: stage_id.into(),
             executed: false,
             skip_reason: Some(reason.into()),
-            target: None,
-            latency_ms: 0,
-        }
-    }
-}
-
-impl Default for FfiStageExecutionResult {
-    fn default() -> Self {
-        Self {
-            stage_id: String::new(),
-            executed: false,
-            skip_reason: None,
             target: None,
             latency_ms: 0,
         }

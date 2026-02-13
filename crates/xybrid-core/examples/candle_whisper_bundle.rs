@@ -12,15 +12,13 @@
 //! cargo run --example candle_whisper_bundle --features candle
 //! ```
 
-use std::collections::HashMap;
-use std::path::PathBuf;
 #[cfg(feature = "candle")]
 use xybrid_core::testing::model_fixtures;
 
 #[cfg(feature = "candle")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::collections::HashMap;
     use xybrid_core::execution::ModelMetadata;
-    use xybrid_core::execution::TemplateExecutor;
     use xybrid_core::ir::{Envelope, EnvelopeKind};
 
     println!("=== Candle Whisper Bundle Example ===\n");

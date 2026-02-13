@@ -241,19 +241,19 @@ mod candle_tests {
 
     #[test]
     fn candle_adapter_conformance() {
-        let adapter = CandleRuntimeAdapter::new();
+        let adapter = CandleRuntimeAdapter::new().unwrap();
         adapter_conformance_suite(&adapter, "CandleRuntimeAdapter");
     }
 
     #[test]
     fn candle_adapter_mutable_conformance() {
-        let mut adapter = CandleRuntimeAdapter::new();
+        let mut adapter = CandleRuntimeAdapter::new().unwrap();
         adapter_mutable_conformance(&mut adapter, "CandleRuntimeAdapter");
     }
 
     #[test]
     fn candle_adapter_name() {
-        let adapter = CandleRuntimeAdapter::new();
+        let adapter = CandleRuntimeAdapter::new().unwrap();
         assert_eq!(adapter.name(), "candle");
     }
 }

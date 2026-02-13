@@ -274,16 +274,8 @@ impl Default for DefaultLlmInference {
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 impl LlmInference for DefaultLlmInference {
     fn load_model(&mut self, config: &LlmModelConfig) -> ExecutorResult<()> {
-        use crate::runtime_adapter::llm::{LlmConfig, LlmRuntimeAdapter};
+        use crate::runtime_adapter::llm::LlmRuntimeAdapter;
         use crate::runtime_adapter::RuntimeAdapter;
-
-        // Create LLM config
-        let mut llm_config =
-            LlmConfig::new(&config.model_path).with_context_length(config.context_length);
-
-        if let Some(template) = &config.chat_template {
-            llm_config = llm_config.with_chat_template(template);
-        }
 
         // Determine backend hint
         let hint = config
@@ -562,7 +554,6 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::Arc;
 
     // ========================================================================
     // Mock LLM Inference for Testing

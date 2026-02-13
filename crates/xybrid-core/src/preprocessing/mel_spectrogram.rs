@@ -62,8 +62,7 @@ impl MelSpectrogramStep {
 
     /// Process audio samples to mel spectrogram.
     pub fn process(&self, samples: &[f32]) -> AdapterResult<ArrayD<f32>> {
-        compute_whisper_mel(samples, &self.config.mel_config)
-            .map_err(|e| AdapterError::InvalidInput(e))
+        compute_whisper_mel(samples, &self.config.mel_config).map_err(AdapterError::InvalidInput)
     }
 
     /// Process audio bytes (WAV or raw PCM) to mel spectrogram.
@@ -97,7 +96,7 @@ pub fn audio_to_whisper_mel(audio_samples: &[f32]) -> AdapterResult<ArrayD<f32>>
     }
 
     let config = WhisperMelConfig::default();
-    compute_whisper_mel(audio_samples, &config).map_err(|e| AdapterError::InvalidInput(e))
+    compute_whisper_mel(audio_samples, &config).map_err(AdapterError::InvalidInput)
 }
 
 /// Convert audio bytes (WAV or raw PCM) to Whisper-compatible mel spectrogram.
@@ -120,7 +119,7 @@ pub fn audio_bytes_to_whisper_mel(audio_bytes: &[u8]) -> AdapterResult<ArrayD<f3
         parse_wav_to_samples(audio_bytes)?
     } else {
         // Treat as raw PCM
-        if audio_bytes.len() % 2 != 0 {
+        if !audio_bytes.len().is_multiple_of(2) {
             return Err(AdapterError::InvalidInput(
                 "Audio data length must be even for 16-bit PCM".to_string(),
             ));
@@ -201,7 +200,7 @@ fn parse_wav_to_samples(wav_bytes: &[u8]) -> AdapterResult<(Vec<f32>, u32)> {
 
         pos += 8 + chunk_size;
         // Align to word boundary
-        if chunk_size % 2 != 0 {
+        if !chunk_size.is_multiple_of(2) {
             pos += 1;
         }
     }
@@ -239,7 +238,7 @@ fn convert_pcm_to_f32(
                 // 8-bit PCM is unsigned, centered at 128
                 let mut sum = 0i32;
                 for ch in 0..num_channels as usize {
-                    let sample = (frame[ch] as i32 - 128) as i32;
+                    let sample = frame[ch] as i32 - 128;
                     sum += sample;
                 }
                 let mono = (sum / num_channels as i32) as f32 / 128.0;

@@ -452,7 +452,6 @@ impl RuntimeAdapterExt for LlmRuntimeAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::MessageRole;
 
     // Note: Tests for PartialToken, ChatMessage, GenerationConfig, and LlmConfig
     // are in runtime_adapter/types.rs since those types are now defined there.
