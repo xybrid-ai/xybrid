@@ -5,8 +5,9 @@
 <h1 align="center">Xybrid</h1>
 
 <p align="center">
-  <strong>On-device AI for mobile, desktop, and edge.</strong><br/>
-  Run speech, language, and vision models locally — private, offline, fast.
+  <strong>On-device AI for mobile, desktop, edge.</strong><br/>
+  Run speech, language, and vision models locally — private, offline, fast.<br/>
+  Perfect for any app including games 🕹️
 </p>
 
 <p align="center">
@@ -44,6 +45,12 @@ Every SDK wraps the same Rust core — identical model support and behavior acro
 
 ### Install
 
+**Unity** — Package Manager → Add from git URL:
+
+```
+https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
+```
+
 **Flutter** — add to your `pubspec.yaml`:
 
 ```yaml
@@ -61,12 +68,6 @@ dependencies:
 dependencies {
     implementation("ai.xybrid:xybrid-kotlin:0.1.0-alpha3")
 }
-```
-
-**Unity** — Package Manager → Add from git URL:
-
-```
-https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
 ```
 
 ---
