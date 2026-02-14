@@ -70,6 +70,9 @@ typealias Result = XybridResult
 /** Errors that can occur during model loading or inference. */
 typealias XybridError = XybridException
 
+/** Voice metadata for TTS models. */
+typealias VoiceInfo = XybridVoiceInfo
+
 // -- XybridResult Extensions --
 
 /** Returns `true` if inference failed. */
@@ -110,6 +113,14 @@ object Envelope {
     @JvmStatic
     fun embedding(data: List<Float>): XybridEnvelope = XybridEnvelope.Embedding(data)
 }
+
+// -- XybridVoiceInfo Extensions --
+
+/** Returns `true` if the voice gender is male. */
+val XybridVoiceInfo.isMale: Boolean get() = gender == "male"
+
+/** Returns `true` if the voice gender is female. */
+val XybridVoiceInfo.isFemale: Boolean get() = gender == "female"
 
 // -- XybridException Extensions --
 

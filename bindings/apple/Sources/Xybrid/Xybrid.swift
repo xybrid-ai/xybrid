@@ -29,6 +29,10 @@ public typealias Result = XybridResult
 /// Errors that can occur during model loading or inference.
 public typealias XybridSDKError = XybridError
 
+/// Voice metadata for TTS models.
+/// Describes a single voice available in a TTS model's voice catalog.
+public typealias VoiceInfo = XybridVoiceInfo
+
 // MARK: - XybridResult Extensions
 
 public extension XybridResult {
@@ -65,6 +69,16 @@ public extension XybridEnvelope {
     static func text(_ content: String, voice: String, speed: Double = 1.0) -> XybridEnvelope {
         return .text(text: content, voiceId: voice, speed: speed)
     }
+}
+
+// MARK: - XybridVoiceInfo Extensions
+
+public extension XybridVoiceInfo {
+    /// Returns `true` if the voice gender is male.
+    var isMale: Bool { gender == "male" }
+
+    /// Returns `true` if the voice gender is female.
+    var isFemale: Bool { gender == "female" }
 }
 
 // MARK: - XybridError Extensions
