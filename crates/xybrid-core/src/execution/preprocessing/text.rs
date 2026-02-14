@@ -385,9 +385,26 @@ fn number_to_words(n: u64) -> String {
     }
 
     let ones = [
-        "", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-        "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
-        "eighteen", "nineteen",
+        "",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "eleven",
+        "twelve",
+        "thirteen",
+        "fourteen",
+        "fifteen",
+        "sixteen",
+        "seventeen",
+        "eighteen",
+        "nineteen",
     ];
     let tens = [
         "", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
@@ -549,8 +566,8 @@ fn phonemize_with_misaki(
     for (i, word) in words.iter().enumerate() {
         // Check if this word is a phoneme link override (wrapped in sentinel chars)
         if word.starts_with(PHONEME_LINK_START) && word.ends_with(PHONEME_LINK_END) {
-            let phonemes = &word[PHONEME_LINK_START.len_utf8()
-                ..word.len() - PHONEME_LINK_END.len_utf8()];
+            let phonemes =
+                &word[PHONEME_LINK_START.len_utf8()..word.len() - PHONEME_LINK_END.len_utf8()];
             result.push_str(phonemes);
             if i < words.len() - 1 {
                 result.push(' ');
@@ -560,8 +577,7 @@ fn phonemize_with_misaki(
 
         // Also handle phoneme links that might be attached to punctuation
         if word.contains(PHONEME_LINK_START) {
-            for segment in word.split(|c: char| c == PHONEME_LINK_START || c == PHONEME_LINK_END)
-            {
+            for segment in word.split([PHONEME_LINK_START, PHONEME_LINK_END]) {
                 if segment.is_empty() {
                     continue;
                 }
@@ -576,8 +592,7 @@ fn phonemize_with_misaki(
         }
 
         // Extract leading and trailing punctuation, keeping the alphabetic core.
-        let trimmed_start =
-            word.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '\'');
+        let trimmed_start = word.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '\'');
         let leading_punct = &word[..word.len() - trimmed_start.len()];
         let clean_word =
             trimmed_start.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '\'');
@@ -599,11 +614,7 @@ fn phonemize_with_misaki(
                         // No explicit separator — parts are concatenated naturally
                     }
                     if !part.is_empty() {
-                        result.push_str(&phonemize_single_word(
-                            part,
-                            &gold_grown,
-                            &silver_grown,
-                        ));
+                        result.push_str(&phonemize_single_word(part, &gold_grown, &silver_grown));
                     }
                 }
             } else {
@@ -661,8 +672,7 @@ fn grow_dictionary(
             // Lowercase entry — generate Capitalized variant
             let mut chars = k.chars();
             if let Some(first) = chars.next() {
-                let capitalized: String =
-                    first.to_uppercase().chain(chars).collect();
+                let capitalized: String = first.to_uppercase().chain(chars).collect();
                 if capitalized != *k {
                     grown.entry(capitalized).or_insert_with(|| v.clone());
                 }
@@ -673,9 +683,7 @@ fn grow_dictionary(
             let first = chars.next().unwrap();
             let rest: String = chars.collect();
             if first.is_uppercase() && rest == rest.to_lowercase() {
-                grown
-                    .entry(lower)
-                    .or_insert_with(|| v.clone());
+                grown.entry(lower).or_insert_with(|| v.clone());
             }
         }
     }
@@ -758,8 +766,8 @@ fn stem_s(
     };
 
     stem.and_then(|s| {
-        let stem_ps = lookup_word_phonemes(&s, gold)
-            .or_else(|| lookup_word_phonemes(&s, silver))?;
+        let stem_ps =
+            lookup_word_phonemes(&s, gold).or_else(|| lookup_word_phonemes(&s, silver))?;
         // Apply -s suffix phoneme rule (matching official Misaki _s method)
         let last = stem_ps.chars().last()?;
         let suffix = if "ptkfθ".contains(last) {
@@ -806,15 +814,13 @@ fn stem_ed(
     };
 
     stem.and_then(|s| {
-        let stem_ps = lookup_word_phonemes(&s, gold)
-            .or_else(|| lookup_word_phonemes(&s, silver))?;
+        let stem_ps =
+            lookup_word_phonemes(&s, gold).or_else(|| lookup_word_phonemes(&s, silver))?;
         let last = stem_ps.chars().last()?;
         // Apply -ed suffix phoneme rule (matching official Misaki _ed method)
         let suffix = if "pkfθʃsʧ".contains(last) {
             "t"
-        } else if last == 'd' {
-            "ᵻd"
-        } else if last == 't' {
+        } else if last == 'd' || last == 't' {
             "ᵻd"
         } else {
             "d"
@@ -853,8 +859,8 @@ fn stem_ing(
     };
 
     stem.and_then(|s| {
-        let stem_ps = lookup_word_phonemes(&s, gold)
-            .or_else(|| lookup_word_phonemes(&s, silver))?;
+        let stem_ps =
+            lookup_word_phonemes(&s, gold).or_else(|| lookup_word_phonemes(&s, silver))?;
         Some(format!("{}ɪŋ", stem_ps))
     })
 }
@@ -999,11 +1005,11 @@ fn rule_based_g2p(word: &str) -> String {
         if remaining >= 3 {
             let matched = match (chars[i], chars[i + 1], chars[i + 2]) {
                 ('t', 'c', 'h') => {
-                    result.push_str("ʧ");
+                    result.push('ʧ');
                     true
                 }
                 ('d', 'g', 'e') => {
-                    result.push_str("ʤ");
+                    result.push('ʤ');
                     true
                 }
                 _ => false,
@@ -1140,11 +1146,11 @@ fn rule_based_g2p(word: &str) -> String {
                     true
                 }
                 ('e', 'r') => {
-                    result.push_str("ɚ");
+                    result.push('ɚ');
                     true
                 }
                 ('i', 'r') => {
-                    result.push_str("ɝ");
+                    result.push('ɝ');
                     true
                 }
                 ('o', 'r') => {
@@ -1152,7 +1158,7 @@ fn rule_based_g2p(word: &str) -> String {
                     true
                 }
                 ('u', 'r') => {
-                    result.push_str("ɝ");
+                    result.push('ɝ');
                     true
                 }
                 _ => false,
@@ -1182,7 +1188,7 @@ fn rule_based_g2p(word: &str) -> String {
             }
             // Soft c before e, i, y
             'c' => {
-                if next_ch.map_or(false, |&nc| "eiy".contains(nc)) {
+                if next_ch.is_some_and(|&nc| "eiy".contains(nc)) {
                     result.push('s');
                 } else {
                     result.push('k');
@@ -1190,8 +1196,8 @@ fn rule_based_g2p(word: &str) -> String {
             }
             // Soft g before e, i, y
             'g' => {
-                if next_ch.map_or(false, |&nc| "eiy".contains(nc)) {
-                    result.push_str("ʤ");
+                if next_ch.is_some_and(|&nc| "eiy".contains(nc)) {
+                    result.push('ʤ');
                 } else {
                     result.push('ɡ');
                 }
@@ -1200,7 +1206,7 @@ fn rule_based_g2p(word: &str) -> String {
             'd' => result.push('d'),
             'f' => result.push('f'),
             'h' => result.push('h'),
-            'j' => result.push_str("ʤ"),
+            'j' => result.push('ʤ'),
             'k' => result.push('k'),
             'l' => result.push('l'),
             'm' => result.push('m'),
@@ -1237,10 +1243,7 @@ mod tests {
             "Expected Unicode ellipsis (…), got: {}",
             result
         );
-        assert!(
-            !result.contains("..."),
-            "ASCII ellipsis should be replaced"
-        );
+        assert!(!result.contains("..."), "ASCII ellipsis should be replaced");
     }
 
     #[test]
@@ -1316,9 +1319,8 @@ mod tests {
             return crate_path.to_string();
         }
         // Try absolute path as last resort
-        let abs_path = env!("CARGO_MANIFEST_DIR").to_string()
-            + "/../../integration-tests/fixtures/models/kokoro-82m";
-        abs_path
+        env!("CARGO_MANIFEST_DIR").to_string()
+            + "/../../integration-tests/fixtures/models/kokoro-82m"
     }
 
     /// Load the Kokoro tokens vocabulary map.
@@ -1334,7 +1336,10 @@ mod tests {
     /// Check if Kokoro fixtures are available (skip tests gracefully if not).
     fn has_kokoro_fixtures() -> bool {
         let base = kokoro_fixture_path();
-        std::path::Path::new(&base).join("misaki").join("us_gold.json").exists()
+        std::path::Path::new(&base)
+            .join("misaki")
+            .join("us_gold.json")
+            .exists()
     }
 
     #[test]
@@ -1440,8 +1445,8 @@ mod tests {
             &PhonemizerBackend::MisakiDictionary,
             None,
             None,
-            true,  // add_padding
-            true,  // normalize_text
+            true, // add_padding
+            true, // normalize_text
         )
         .unwrap();
 
@@ -1571,11 +1576,7 @@ mod tests {
 
         // Verify padding tokens at start and end
         assert_eq!(ids[0], 0, "Should start with padding token");
-        assert_eq!(
-            ids[ids.len() - 1],
-            0,
-            "Should end with padding token"
-        );
+        assert_eq!(ids[ids.len() - 1], 0, "Should end with padding token");
     }
 
     #[test]

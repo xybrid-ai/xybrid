@@ -50,7 +50,12 @@ fn test_gemma_uses_correct_chat_template() {
     let gguf_path = std::fs::read_dir(&model_dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .find(|e| e.path().extension().map(|ext| ext == "gguf").unwrap_or(false))
+        .find(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "gguf")
+                .unwrap_or(false)
+        })
         .expect("No .gguf file found in model directory")
         .path();
 
@@ -134,7 +139,12 @@ fn test_gemma_tokenization_produces_correct_eog() {
     let gguf_path = std::fs::read_dir(&model_dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .find(|e| e.path().extension().map(|ext| ext == "gguf").unwrap_or(false))
+        .find(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "gguf")
+                .unwrap_or(false)
+        })
         .expect("No .gguf file found")
         .path();
 
@@ -173,7 +183,8 @@ fn test_gemma_tokenization_produces_correct_eog() {
         "Model generated {} tokens for a one-word answer — it probably isn't \
          recognizing the template boundaries due to incorrect tokenization.\n\
          Output: {:?}",
-        output.tokens_generated, output.text
+        output.tokens_generated,
+        output.text
     );
 
     assert_eq!(

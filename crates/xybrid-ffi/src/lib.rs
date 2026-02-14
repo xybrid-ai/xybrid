@@ -2789,9 +2789,7 @@ pub unsafe extern "C" fn xybrid_result_output_type(
 /// }
 /// ```
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_result_audio_data(
-    result: *mut XybridResultHandle,
-) -> *const u8 {
+pub unsafe extern "C" fn xybrid_result_audio_data(result: *mut XybridResultHandle) -> *const u8 {
     // Don't clear last error - this is a read-only accessor
     if result.is_null() {
         return std::ptr::null();
@@ -2825,9 +2823,7 @@ pub unsafe extern "C" fn xybrid_result_audio_data(
 /// printf("Audio output: %zu bytes\n", len);
 /// ```
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_result_audio_len(
-    result: *mut XybridResultHandle,
-) -> usize {
+pub unsafe extern "C" fn xybrid_result_audio_len(result: *mut XybridResultHandle) -> usize {
     // Don't clear last error - this is a read-only accessor
     if result.is_null() {
         return 0;
@@ -2906,9 +2902,7 @@ pub unsafe extern "C" fn xybrid_result_embedding_data(
 /// printf("Embedding dimension: %zu\n", len);
 /// ```
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_result_embedding_len(
-    result: *mut XybridResultHandle,
-) -> usize {
+pub unsafe extern "C" fn xybrid_result_embedding_len(result: *mut XybridResultHandle) -> usize {
     // Don't clear last error - this is a read-only accessor
     if result.is_null() {
         return 0;

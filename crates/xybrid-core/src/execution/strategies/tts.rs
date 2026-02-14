@@ -193,8 +193,7 @@ impl TtsStrategy {
 
         // Compute inter-chunk silence (e.g. 200ms at 24kHz = 4800 zero samples)
         let sample_rate = Self::get_sample_rate(metadata);
-        let silence_samples =
-            (sample_rate as usize * INTER_CHUNK_SILENCE_MS as usize) / 1000;
+        let silence_samples = (sample_rate as usize * INTER_CHUNK_SILENCE_MS as usize) / 1000;
 
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(
@@ -207,7 +206,7 @@ impl TtsStrategy {
 
             // Insert silence between chunks (not before the first one)
             if i > 0 && !all_audio.is_empty() {
-                all_audio.extend(std::iter::repeat(0.0f32).take(silence_samples));
+                all_audio.extend(std::iter::repeat_n(0.0f32, silence_samples));
             }
 
             // Create envelope for this chunk
@@ -233,8 +232,11 @@ impl TtsStrategy {
 
             // Load voice embedding (token-length-dependent for Kokoro-style voicepacks)
             let voice_loader = TtsVoiceLoader::new(ctx.base_path);
-            let voice_embedding =
-                voice_loader.load_for_token_count(metadata, &chunk_input, Some(phoneme_ids.len()))?;
+            let voice_embedding = voice_loader.load_for_token_count(
+                metadata,
+                &chunk_input,
+                Some(phoneme_ids.len()),
+            )?;
 
             // Run TTS inference
             let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
