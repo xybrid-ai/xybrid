@@ -62,16 +62,21 @@ fn find_models_dir() -> Option<PathBuf> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").ok()?;
     let manifest_path = PathBuf::from(&manifest_dir);
 
-    // Path is always relative to CARGO_MANIFEST_DIR (core/)
-    // core/ -> ../integration-tests/fixtures/models
-    let fixtures_path = manifest_path.join("../integration-tests/fixtures/models");
+    // Try relative paths from CARGO_MANIFEST_DIR
+    // 1. crates/xybrid-core/ -> ../../integration-tests/fixtures/models (workspace layout)
+    // 2. core/ -> ../integration-tests/fixtures/models (flat layout)
+    let candidates = [
+        manifest_path.join("../../integration-tests/fixtures/models"),
+        manifest_path.join("../integration-tests/fixtures/models"),
+    ];
 
-    if fixtures_path.exists() && fixtures_path.is_dir() {
-        // Canonicalize to get absolute path
-        if let Ok(canonical) = fixtures_path.canonicalize() {
-            return Some(canonical);
+    for fixtures_path in &candidates {
+        if fixtures_path.exists() && fixtures_path.is_dir() {
+            if let Ok(canonical) = fixtures_path.canonicalize() {
+                return Some(canonical);
+            }
+            return Some(fixtures_path.clone());
         }
-        return Some(fixtures_path);
     }
 
     None

@@ -268,6 +268,17 @@ int llama_chat_apply_template_c(
 }
 
 /**
+ * Get the model's chat template string from GGUF metadata.
+ *
+ * @param model  The llama model
+ * @return       The chat template string, or nullptr if not available
+ */
+const char* llama_model_chat_template_c(const llama_model* model) {
+    if (!model) return nullptr;
+    return llama_model_chat_template(model, nullptr);
+}
+
+/**
  * Format chat messages using the model's built-in chat template.
  *
  * @param model     The llama model (for extracting chat template metadata)
@@ -297,10 +308,15 @@ int llama_format_chat_with_model_c(
         messages[i].content = contents[i];
     }
 
-    // Get model's chat template from metadata
-    // Pass nullptr to use model's built-in template
+    // Extract the model's chat template from GGUF metadata.
+    // This returns the template embedded by the model author (e.g., Gemma uses
+    // <start_of_turn>/<end_of_turn>, Qwen uses ChatML <|im_start|>/<|im_end|>).
+    // If the model has no template, tmpl is nullptr and llama_chat_apply_template
+    // falls back to ChatML.
+    const char* tmpl = llama_model_chat_template(model, nullptr);
+
     int result = llama_chat_apply_template(
-        nullptr,  // Use model's default template
+        tmpl,     // Use model's template (nullptr = fallback to ChatML)
         messages.data(),
         n_msg,
         true,     // add_ass: add assistant start tag

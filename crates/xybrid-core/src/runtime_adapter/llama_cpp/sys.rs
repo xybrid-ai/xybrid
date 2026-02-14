@@ -138,6 +138,9 @@ extern "C" {
     // End-of-generation check (covers ALL EOG tokens, not just primary EOS)
     fn llama_vocab_is_eog_c(model: *const c_void, token: i32) -> bool;
 
+    // Model chat template from GGUF metadata
+    fn llama_model_chat_template_c(model: *const c_void) -> *const c_char;
+
     // Model info
     fn llama_n_vocab_c(model: *const c_void) -> c_int;
     fn llama_n_ctx_c(ctx: *const c_void) -> c_int;
@@ -380,6 +383,28 @@ pub fn llama_n_ctx(ctx: &LlamaContext) -> usize {
     unsafe { llama_n_ctx_c(ctx.ptr) as usize }
 }
 
+/// Get the model's chat template string from GGUF metadata.
+///
+/// Returns the model's built-in chat template, or None if the model
+/// doesn't have one embedded. This is used to apply the correct chat
+/// format for each model architecture.
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_model_chat_template(model: &LlamaModel) -> Option<String> {
+    let ptr = unsafe { llama_model_chat_template_c(model.ptr) };
+    if ptr.is_null() {
+        return None;
+    }
+    unsafe { std::ffi::CStr::from_ptr(ptr) }
+        .to_str()
+        .ok()
+        .map(|s| s.to_string())
+}
+
+#[cfg(not(feature = "llm-llamacpp"))]
+pub fn llama_model_chat_template(_model: &LlamaModel) -> Option<String> {
+    None
+}
+
 /// Format chat messages using the model's native chat template.
 ///
 /// This uses llama.cpp's built-in template system which automatically
@@ -558,10 +583,19 @@ pub fn llama_tokenize(
 
 /// Tokenize text with special token parsing enabled.
 ///
-/// This is used for stop sequences like `<|im_end|>` which should be
-/// recognized as special tokens, not literal character sequences.
+/// Special tokens like `<|im_end|>`, `<start_of_turn>`, `<end_of_turn>` are
+/// recognized and converted to their special token IDs instead of being
+/// tokenized as individual characters.
+///
+/// Use this for:
+/// - Chat-templated prompts (the template contains special tokens)
+/// - Stop sequences that reference special tokens
 #[cfg(feature = "llm-llamacpp")]
-pub fn llama_tokenize_special(model: &LlamaModel, text: &str) -> Result<Vec<i32>, AdapterError> {
+pub fn llama_tokenize_special(
+    model: &LlamaModel,
+    text: &str,
+    add_special: bool,
+) -> Result<Vec<i32>, AdapterError> {
     let c_text = CString::new(text)
         .map_err(|_| AdapterError::InvalidInput("Invalid text encoding".to_string()))?;
 
@@ -573,8 +607,8 @@ pub fn llama_tokenize_special(model: &LlamaModel, text: &str) -> Result<Vec<i32>
             text.len() as c_int,
             ptr::null_mut(),
             0,
-            false, // don't add BOS/EOS
-            true,  // parse_special = true for <|im_end|> etc.
+            add_special,
+            true, // parse_special = true
         )
     };
 
@@ -592,8 +626,8 @@ pub fn llama_tokenize_special(model: &LlamaModel, text: &str) -> Result<Vec<i32>
             text.len() as c_int,
             tokens.as_mut_ptr(),
             tokens.len() as c_int,
-            false, // don't add BOS/EOS
-            true,  // parse_special = true
+            add_special,
+            true, // parse_special = true
         )
     };
 
@@ -720,7 +754,7 @@ pub fn llama_generate_with_stops(
 
     for seq in stop_sequences {
         // Tokenize WITH special token parsing - stop sequences like <|im_end|> are special tokens
-        let tokens = llama_tokenize_special(model, seq)?;
+        let tokens = llama_tokenize_special(model, seq, false)?;
         log::debug!(
             target: "xybrid_core",
             "Tokenized stop sequence '{}' -> {:?} ({} tokens)",
@@ -905,7 +939,7 @@ where
     let mut stop_lens: Vec<c_int> = Vec::new();
 
     for seq in stop_sequences {
-        let tokens = llama_tokenize_special(model, seq)?;
+        let tokens = llama_tokenize_special(model, seq, false)?;
         if !tokens.is_empty() {
             stop_lens.push(tokens.len() as c_int);
             stop_tokens.extend(tokens);
@@ -1068,7 +1102,11 @@ pub fn llama_tokenize(
 }
 
 #[cfg(not(feature = "llm-llamacpp"))]
-pub fn llama_tokenize_special(_model: &LlamaModel, _text: &str) -> Result<Vec<i32>, AdapterError> {
+pub fn llama_tokenize_special(
+    _model: &LlamaModel,
+    _text: &str,
+    _add_special: bool,
+) -> Result<Vec<i32>, AdapterError> {
     Err(AdapterError::RuntimeError(
         "llm-llamacpp feature not enabled".to_string(),
     ))

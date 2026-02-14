@@ -225,8 +225,10 @@ impl LlmBackend for LlamaCppBackend {
         // Format messages into prompt using chat template
         let prompt = sys::llama_format_chat(model, messages)?;
 
-        // Tokenize
-        let tokens = sys::llama_tokenize(model, &prompt, true)?;
+        // Tokenize with special token parsing enabled — the chat template contains
+        // special tokens like <|im_start|>, <end_of_turn>, etc. that must be
+        // recognized as their special token IDs, not as individual characters.
+        let tokens = sys::llama_tokenize_special(model, &prompt, true)?;
 
         // Validate: input tokens must fit within the context window with room to generate
         let n_ctx = sys::llama_n_ctx(context);
@@ -426,8 +428,8 @@ impl LlmBackend for LlamaCppBackend {
         // Format messages into prompt using chat template
         let prompt = sys::llama_format_chat(model, messages)?;
 
-        // Tokenize
-        let tokens = sys::llama_tokenize(model, &prompt, true)?;
+        // Tokenize with special token parsing — chat template contains special tokens
+        let tokens = sys::llama_tokenize_special(model, &prompt, true)?;
 
         // Validate: input tokens must fit within the context window with room to generate
         let n_ctx = sys::llama_n_ctx(context);
