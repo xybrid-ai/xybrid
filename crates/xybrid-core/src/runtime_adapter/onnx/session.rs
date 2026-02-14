@@ -35,6 +35,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
+/// Metadata extracted from ONNX model inputs: (names, shapes, element types).
+type InputMetadata = (Vec<String>, Vec<Vec<i64>>, Vec<Option<TensorElementType>>);
+
 /// ONNX Runtime session wrapper.
 ///
 /// Manages an ONNX Runtime session, including:
@@ -216,9 +219,7 @@ impl ONNXSession {
     }
 
     /// Extracts input metadata from the session.
-    fn extract_input_metadata(
-        session: &Session,
-    ) -> AdapterResult<(Vec<String>, Vec<Vec<i64>>, Vec<Option<TensorElementType>>)> {
+    fn extract_input_metadata(session: &Session) -> AdapterResult<InputMetadata> {
         let mut input_names = Vec::new();
         let mut input_shapes = Vec::new();
         let mut input_dtypes = Vec::new();

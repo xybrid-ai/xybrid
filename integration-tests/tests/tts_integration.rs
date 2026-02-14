@@ -9,18 +9,6 @@
 //! Run with: cargo test -p integration-tests --test tts_integration
 
 use integration_tests::fixtures;
-use std::path::PathBuf;
-
-/// Get the path to the CMU dictionary
-fn get_cmudict_path() -> Option<PathBuf> {
-    if let Some(home) = dirs::home_dir() {
-        let dict_path = home.join(".xybrid/cmudict.dict");
-        if dict_path.exists() {
-            return Some(dict_path);
-        }
-    }
-    None
-}
 
 #[test]
 fn test_load_tokens_file() {
@@ -55,92 +43,9 @@ fn test_load_tokens_file() {
     }
 }
 
-#[test]
-fn test_phonemize_text() {
-    let Some(dict_path) = get_cmudict_path() else {
-        eprintln!("Skipping test: CMU dictionary not found at ~/.xybrid/cmudict.dict");
-        return;
-    };
-
-    let phonemizer =
-        xybrid_core::phonemizer::Phonemizer::new(&dict_path).expect("Failed to create phonemizer");
-
-    // Test some common words
-    let test_cases = [
-        ("hello", "hʌˈloʊ"),       // Should be close to /həˈloʊ/
-        ("world", "wˈɝld"),        // Should be close to /wɜːrld/
-        ("the", "ðə"),             // Should be /ðə/
-        ("computer", "kʌmpjˈutɝ"), // /kəmˈpjuːtər/
-    ];
-
-    for (word, _expected_pattern) in test_cases {
-        let phonemes = phonemizer.phonemize(word);
-        println!("{} -> {}", word, phonemes);
-        assert!(
-            !phonemes.is_empty(),
-            "Phonemes should not be empty for '{}'",
-            word
-        );
-    }
-
-    // Test a full sentence
-    let sentence = "Hello world, this is a test.";
-    let phonemes = phonemizer.phonemize(sentence);
-    println!("\nSentence: {}", sentence);
-    println!("Phonemes: {}", phonemes);
-    assert!(!phonemes.is_empty());
-}
-
-#[test]
-fn test_phonemes_to_token_ids() {
-    let Some(model_dir) = fixtures::model_if_available("kitten-tts-nano-0.2") else {
-        eprintln!("Skipping test: kitten-tts-nano-0.2 not downloaded");
-        return;
-    };
-
-    let Some(dict_path) = get_cmudict_path() else {
-        eprintln!("Skipping test: CMU dictionary not found");
-        return;
-    };
-
-    // Load tokens map
-    let tokens_path = model_dir.join("tokens.txt");
-    let tokens_content = std::fs::read_to_string(&tokens_path).expect("Failed to read tokens.txt");
-    let tokens_map = xybrid_core::phonemizer::load_tokens_map(&tokens_content);
-
-    // Create phonemizer
-    let phonemizer =
-        xybrid_core::phonemizer::Phonemizer::new(&dict_path).expect("Failed to create phonemizer");
-
-    // Convert text to token IDs
-    let text = "Hello world";
-    let token_ids = phonemizer.text_to_token_ids(text, &tokens_map, true);
-
-    println!("Text: {}", text);
-    println!("Token IDs: {:?}", token_ids);
-    println!("Token count: {}", token_ids.len());
-
-    // Should have at least: padding + some tokens + padding
-    assert!(
-        token_ids.len() >= 3,
-        "Should have at least 3 tokens (with padding)"
-    );
-
-    // First and last should be padding (0)
-    assert_eq!(token_ids[0], 0, "First token should be padding (0)");
-    assert_eq!(
-        *token_ids.last().unwrap(),
-        0,
-        "Last token should be padding (0)"
-    );
-
-    // Test without padding
-    let token_ids_no_pad = phonemizer.text_to_token_ids(text, &tokens_map, false);
-    assert!(
-        token_ids_no_pad.len() < token_ids.len(),
-        "Without padding should be shorter"
-    );
-}
+// NOTE: test_phonemize_text and test_phonemes_to_token_ids were removed.
+// Phonemizer backends (CMU, Misaki, espeak) are now internal to xybrid-core
+// and tested via crate-internal unit tests in preprocessing/text.rs.
 
 #[test]
 fn test_load_voice_embeddings_bin() {

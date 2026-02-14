@@ -4,8 +4,10 @@
 //! Requires espeak-ng to be installed on the system.
 
 use std::collections::HashMap;
+use std::process::Command;
 
 use crate::execution::types::ExecutorResult;
+use crate::runtime_adapter::AdapterError;
 
 use super::PhonemizerBackend;
 
@@ -33,8 +35,36 @@ impl EspeakBackend {
 
 impl PhonemizerBackend for EspeakBackend {
     fn phonemize(&self, text: &str, tokens_map: &HashMap<char, i64>) -> ExecutorResult<String> {
-        // Delegate to the existing implementation in text.rs
-        super::super::text::phonemize_with_espeak(text, &self.language, tokens_map)
+        // Call espeak-ng with IPA output
+        let output = Command::new("espeak-ng")
+            .args(["--ipa", "-q", "-v", &self.language])
+            .arg(text)
+            .output()
+            .map_err(|e| {
+                AdapterError::InvalidInput(format!(
+                    "Failed to run espeak-ng. Is it installed? Error: {}. \
+                    Install with: brew install espeak-ng (macOS) or apt-get install espeak-ng (Linux)",
+                    e
+                ))
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AdapterError::InvalidInput(format!(
+                "espeak-ng failed: {}",
+                stderr
+            )));
+        }
+
+        let phonemes = String::from_utf8_lossy(&output.stdout);
+
+        // Filter to only characters in vocabulary
+        let filtered: String = phonemes
+            .chars()
+            .filter(|c| tokens_map.contains_key(c))
+            .collect();
+
+        Ok(filtered.trim().to_string())
     }
 
     fn name(&self) -> &'static str {
