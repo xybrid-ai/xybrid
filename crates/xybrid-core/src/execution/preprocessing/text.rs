@@ -199,6 +199,12 @@ pub fn normalize_text_for_tts(text: &str) -> String {
     result = result.replace("Ms.", "Miss");
     result = result.replace("etc.", "etcetera");
 
+    // Expand currency ($X.XX → "X dollars and XX cents")
+    result = expand_currency(&result);
+
+    // Expand percentages (X% → "X percent")
+    result = expand_percentage(&result);
+
     // Expand numbers to words (basic support)
     result = expand_numbers(&result);
 
@@ -311,6 +317,81 @@ fn parse_phoneme_links(text: &str) -> String {
     }
 
     result.push_str(remaining);
+    result
+}
+
+/// Expand currency symbols for TTS.
+///
+/// Handles `$X.XX` → "X dollars and XX cents", `$X` → "X dollars".
+fn expand_currency(text: &str) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit() {
+            // Collect the number after $
+            let start = i + 1;
+            let mut end = start;
+            let mut has_dot = false;
+            while end < chars.len()
+                && (chars[end].is_ascii_digit() || (chars[end] == '.' && !has_dot))
+            {
+                if chars[end] == '.' {
+                    has_dot = true;
+                }
+                end += 1;
+            }
+            let num_str: String = chars[start..end].iter().collect();
+            if has_dot {
+                let parts: Vec<&str> = num_str.split('.').collect();
+                if parts.len() == 2 {
+                    let dollars = parts[0];
+                    let cents = parts[1];
+                    if cents == "00" {
+                        result.push_str(&format!("{} dollars", dollars));
+                    } else {
+                        result.push_str(&format!("{} dollars and {} cents", dollars, cents));
+                    }
+                } else {
+                    result.push_str(&format!("{} dollars", num_str));
+                }
+            } else {
+                result.push_str(&format!("{} dollars", num_str));
+            }
+            i = end;
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+/// Expand percentage symbols for TTS.
+///
+/// Handles `X%` → "X percent".
+fn expand_percentage(text: &str) -> String {
+    let mut result = String::new();
+    let words: Vec<&str> = text.split(' ').collect();
+
+    for (i, word) in words.iter().enumerate() {
+        if i > 0 {
+            result.push(' ');
+        }
+        if let Some(num_part) = word.strip_suffix('%') {
+            if !num_part.is_empty() && num_part.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                result.push_str(num_part);
+                result.push_str(" percent");
+            } else {
+                result.push_str(word);
+            }
+        } else {
+            result.push_str(word);
+        }
+    }
+
     result
 }
 
@@ -947,5 +1028,180 @@ mod tests {
             ids_norm,
             ids_no_norm
         );
+    }
+
+    // ============================================================================
+    // Text Normalization Edge Case Tests (US-003)
+    // ============================================================================
+
+    #[test]
+    fn test_normalize_currency_dollar() {
+        let result = normalize_text_for_tts("$3.50");
+        assert!(
+            !result.contains('$'),
+            "Dollar sign should be removed after normalization, got: {}",
+            result
+        );
+        assert!(
+            result.contains("three") || result.contains("3"),
+            "Currency amount should be expanded, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_normalize_percentage() {
+        let result = normalize_text_for_tts("100%");
+        assert!(
+            !result.contains('%'),
+            "Percent sign should be removed after normalization, got: {}",
+            result
+        );
+        assert!(
+            result.to_lowercase().contains("percent"),
+            "Percentage should be expanded to 'percent', got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_normalize_usa_abbreviation() {
+        // Should not crash and should produce some output
+        let result = normalize_text_for_tts("U.S.A.");
+        assert!(
+            !result.is_empty(),
+            "U.S.A. normalization should not produce empty string"
+        );
+    }
+
+    #[test]
+    fn test_normalize_dr_expansion() {
+        let result = normalize_text_for_tts("Dr.");
+        assert!(
+            result.contains("Doctor") || result.contains("doctor"),
+            "Dr. should expand to Doctor/doctor, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_normalize_smart_quotes() {
+        let input = "\u{201C}Hello\u{201D}";
+        let result = normalize_text_for_tts(input);
+        assert!(
+            result.contains('"'),
+            "Smart quotes should normalize to ASCII quotes, got: {}",
+            result
+        );
+        assert!(
+            !result.contains('\u{201C}') && !result.contains('\u{201D}'),
+            "Smart quotes should be replaced, got: {}",
+            result
+        );
+    }
+
+    // ============================================================================
+    // KittenTTS Token Mapping Validation (US-002)
+    // Verifies Misaki-produced phonemes map correctly to KittenTTS token IDs
+    // ============================================================================
+
+    /// Path to the KittenTTS model fixtures directory.
+    fn kittentts_fixture_path() -> String {
+        let workspace_path = "repos/xybrid/integration-tests/fixtures/models/kitten-tts-nano-0.2";
+        if std::path::Path::new(workspace_path).join("misaki").exists() {
+            return workspace_path.to_string();
+        }
+        let crate_path = "../../integration-tests/fixtures/models/kitten-tts-nano-0.2";
+        if std::path::Path::new(crate_path).join("misaki").exists() {
+            return crate_path.to_string();
+        }
+        env!("CARGO_MANIFEST_DIR").to_string()
+            + "/../../integration-tests/fixtures/models/kitten-tts-nano-0.2"
+    }
+
+    /// Check if KittenTTS fixtures are available.
+    fn has_kittentts_fixtures() -> bool {
+        let base = kittentts_fixture_path();
+        let p = std::path::Path::new(&base);
+        p.join("tokens.txt").exists() && p.join("misaki").join("us_gold.json").exists()
+    }
+
+    /// Load the KittenTTS tokens vocabulary map.
+    fn kittentts_vocab() -> HashMap<char, i64> {
+        use crate::phonemizer::load_tokens_map;
+        let base = kittentts_fixture_path();
+        let tokens_path = std::path::Path::new(&base).join("tokens.txt");
+        let tokens_content = std::fs::read_to_string(&tokens_path)
+            .unwrap_or_else(|e| panic!("Failed to read tokens.txt at {:?}: {}", tokens_path, e));
+        load_tokens_map(&tokens_content)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_kittentts_misaki_token_mapping_validation() {
+        if !has_kittentts_fixtures() {
+            eprintln!("Skipping: KittenTTS fixtures not found");
+            return;
+        }
+
+        let vocab = kittentts_vocab();
+        let base = kittentts_fixture_path();
+        let backend = MisakiBackend::new(base);
+
+        let test_phrases = [
+            "Hello world",
+            "The year was 1984",
+            "Dr. Smith has 3 cats",
+            "Good morning everyone",
+            "This costs five dollars",
+        ];
+
+        let mut all_unmapped: Vec<(String, Vec<char>)> = Vec::new();
+
+        for phrase in &test_phrases {
+            // Normalize text first (as the pipeline would)
+            let normalized = normalize_text_for_tts(phrase);
+            let phonemes = backend
+                .phonemize(&normalized, &vocab)
+                .unwrap_or_else(|e| panic!("Phonemization failed for '{}': {}", phrase, e));
+
+            assert!(
+                !phonemes.is_empty(),
+                "Phonemization of '{}' (normalized: '{}') produced empty output",
+                phrase,
+                normalized
+            );
+
+            // Check every character in phoneme output maps to a valid token ID
+            let unmapped: Vec<char> = phonemes
+                .chars()
+                .filter(|c| !vocab.contains_key(c) && *c != ' ')
+                .collect();
+
+            if !unmapped.is_empty() {
+                all_unmapped.push((phrase.to_string(), unmapped));
+            }
+        }
+
+        if !all_unmapped.is_empty() {
+            let details: Vec<String> = all_unmapped
+                .iter()
+                .map(|(phrase, chars)| {
+                    let char_details: Vec<String> = chars
+                        .iter()
+                        .map(|c| format!("'{}' (U+{:04X})", c, *c as u32))
+                        .collect();
+                    format!(
+                        "  '{}': unmapped chars: [{}]",
+                        phrase,
+                        char_details.join(", ")
+                    )
+                })
+                .collect();
+            panic!(
+                "Token mapping validation failed — phoneme characters not in tokens.txt:\n{}",
+                details.join("\n")
+            );
+        }
     }
 }

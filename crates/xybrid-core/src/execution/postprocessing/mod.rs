@@ -73,7 +73,13 @@ pub fn apply_postprocessing_step(
         PostprocessingStep::TTSAudioEncode {
             sample_rate,
             apply_postprocessing,
-        } => audio::tts_audio_encode_step(data, *sample_rate, *apply_postprocessing),
+            trim_trailing_silence,
+        } => audio::tts_audio_encode_step(
+            data,
+            *sample_rate,
+            *apply_postprocessing,
+            *trim_trailing_silence,
+        ),
     }
 }
 

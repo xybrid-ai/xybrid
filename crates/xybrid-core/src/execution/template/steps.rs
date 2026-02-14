@@ -290,6 +290,10 @@ pub enum PostprocessingStep {
         /// Whether to apply postprocessing (normalization, silence trimming)
         #[serde(default = "default_tts_postprocess")]
         apply_postprocessing: bool,
+
+        /// Whether to trim trailing near-silence from the waveform (default: false)
+        #[serde(default)]
+        trim_trailing_silence: bool,
     },
 
     /// Decode Whisper token IDs to text using HuggingFace tokenizer
