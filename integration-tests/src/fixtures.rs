@@ -35,7 +35,7 @@ pub fn model_available(model_name: &str) -> bool {
 ///
 /// Use this in tests that require models:
 /// ```rust,ignore
-/// let model_dir = require_model("kitten-tts");
+/// let model_dir = require_model("kitten-tts-nano-0.2");
 /// ```
 pub fn require_model(model_name: &str) -> PathBuf {
     let path = model_path(model_name);
@@ -52,8 +52,8 @@ pub fn require_model(model_name: &str) -> PathBuf {
 ///
 /// Use with early return in tests:
 /// ```rust,ignore
-/// let Some(model_dir) = model_if_available("kitten-tts") else {
-///     eprintln!("Skipping: kitten-tts not downloaded");
+/// let Some(model_dir) = model_if_available("kitten-tts-nano-0.2") else {
+///     eprintln!("Skipping: kitten-tts-nano-0.2 not downloaded");
 ///     return;
 /// };
 /// ```

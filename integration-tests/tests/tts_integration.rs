@@ -24,9 +24,9 @@ fn get_cmudict_path() -> Option<PathBuf> {
 
 #[test]
 fn test_load_tokens_file() {
-    let Some(model_dir) = fixtures::model_if_available("kitten-tts") else {
-        eprintln!("Skipping test: kitten-tts not downloaded");
-        eprintln!("Run: ./integration-tests/download.sh kitten-tts");
+    let Some(model_dir) = fixtures::model_if_available("kitten-tts-nano-0.2") else {
+        eprintln!("Skipping test: kitten-tts-nano-0.2 not downloaded");
+        eprintln!("Run: ./integration-tests/download.sh kitten-tts-nano-0.2");
         return;
     };
 
@@ -93,8 +93,8 @@ fn test_phonemize_text() {
 
 #[test]
 fn test_phonemes_to_token_ids() {
-    let Some(model_dir) = fixtures::model_if_available("kitten-tts") else {
-        eprintln!("Skipping test: kitten-tts not downloaded");
+    let Some(model_dir) = fixtures::model_if_available("kitten-tts-nano-0.2") else {
+        eprintln!("Skipping test: kitten-tts-nano-0.2 not downloaded");
         return;
     };
 
@@ -144,8 +144,8 @@ fn test_phonemes_to_token_ids() {
 
 #[test]
 fn test_load_voice_embeddings_bin() {
-    let Some(model_dir) = fixtures::model_if_available("kitten-tts") else {
-        eprintln!("Skipping test: kitten-tts not downloaded");
+    let Some(model_dir) = fixtures::model_if_available("kitten-tts-nano-0.2") else {
+        eprintln!("Skipping test: kitten-tts-nano-0.2 not downloaded");
         return;
     };
 
@@ -205,8 +205,8 @@ fn test_load_voice_embeddings_bin() {
 
 #[test]
 fn test_model_metadata_loading() {
-    let Some(model_dir) = fixtures::model_if_available("kitten-tts") else {
-        eprintln!("Skipping test: kitten-tts not downloaded");
+    let Some(model_dir) = fixtures::model_if_available("kitten-tts-nano-0.2") else {
+        eprintln!("Skipping test: kitten-tts-nano-0.2 not downloaded");
         return;
     };
 
@@ -218,8 +218,8 @@ fn test_model_metadata_loading() {
         serde_json::from_str(&metadata_content).expect("Failed to parse model_metadata.json");
 
     // Verify metadata structure
-    assert_eq!(metadata["model_id"], "kitten-tts-nano");
-    assert_eq!(metadata["version"], "0.1");
+    assert_eq!(metadata["model_id"], "kitten-tts-nano-0.2");
+    assert_eq!(metadata["version"], "1.0");
     assert!(metadata["preprocessing"].is_array());
 
     // Check preprocessing has Phonemize step

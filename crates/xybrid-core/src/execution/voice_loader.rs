@@ -8,7 +8,9 @@
 use log::debug;
 use std::path::{Path, PathBuf};
 
-use super::template::{ModelMetadata, VoiceConfig, VoiceFormat, VoiceInfo, VoiceLoader};
+use super::template::{
+    ModelMetadata, VoiceConfig, VoiceFormat, VoiceInfo, VoiceLoader, VoiceSelectionStrategy,
+};
 use super::types::ExecutorResult;
 use crate::ir::Envelope;
 use crate::runtime_adapter::AdapterError;
@@ -205,6 +207,10 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
     }
 
     /// Load voice embedding using structured voice config with optional token-length selection.
+    ///
+    /// Uses `selection_strategy` from metadata to decide how to load:
+    /// - `FixedIndex`: Load by catalog index (binary) or by name (NPZ)
+    /// - `TokenLength`: Load by name with token-length-aware selection (Kokoro-style)
     fn load_with_config_and_token_length(
         &self,
         voice_path: &Path,
@@ -218,59 +224,22 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
 
         debug!(
             target: "xybrid_core",
-            "Loading voice: {} (index: {:?}, token_count: {:?})",
+            "Loading voice: {} (index: {:?}, strategy: {:?}, token_count: {:?})",
             voice_info.id,
             voice_info.index,
+            voice_config.selection_strategy,
             token_count
         );
 
-        // Determine loader type and load
-        let is_npz = matches!(
-            &voice_config.format,
-            VoiceFormat::Embedded {
-                loader: VoiceLoader::NumpyNpz,
-                ..
-            }
-        );
-
-        if is_npz {
-            // For NPZ format, use token-length-aware loading if available
-            if let Some(tc) = token_count {
-                self.source
-                    .load_by_name_with_token_length(voice_path, &voice_info.id, tc)
-                    .map_err(|e| {
-                        AdapterError::RuntimeError(format!(
-                            "Failed to load voice '{}' by name: {}",
-                            voice_info.id, e
-                        ))
-                    })
-            } else {
-                self.source
-                    .load_by_name(voice_path, &voice_info.id)
-                    .map_err(|e| {
-                        AdapterError::RuntimeError(format!(
-                            "Failed to load voice '{}' by name: {}",
-                            voice_info.id, e
-                        ))
-                    })
-            }
-        } else if let Some(index) = voice_info.index {
-            // For binary format, auto-detect if file is actually NPZ and use token-length
-            let bytes = std::fs::read(voice_path).map_err(|e| {
-                AdapterError::RuntimeError(format!("Failed to read voice file: {}", e))
-            })?;
-            let is_actually_npz =
-                crate::tts::voice_embedding::VoiceEmbeddingLoader::detect_format(&bytes)
-                    == crate::tts::voice_embedding::VoiceFormat::Npz;
-
-            if is_actually_npz {
-                // File declared as binary but is actually NPZ — load by name with token length
+        match voice_config.selection_strategy {
+            VoiceSelectionStrategy::TokenLength => {
+                // Kokoro-style: select voice embedding slice by phoneme token count
                 let token_len = token_count
                     .map(|tc| tc.saturating_sub(2).min(509))
                     .unwrap_or(100);
                 debug!(
                     target: "xybrid_core",
-                    "Voice file is NPZ (not raw binary), loading '{}' at token_length={}",
+                    "TokenLength strategy: loading '{}' at token_length={}",
                     voice_info.id,
                     token_len
                 );
@@ -278,28 +247,51 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
                     .load_by_name_with_token_length(voice_path, &voice_info.id, token_len)
                     .map_err(|e| {
                         AdapterError::RuntimeError(format!(
-                            "Failed to load voice '{}' from NPZ: {}",
+                            "Failed to load voice '{}' with token length: {}",
                             voice_info.id, e
                         ))
                     })
-            } else {
-                self.source.load_by_index(voice_path, index).map_err(|e| {
-                    AdapterError::RuntimeError(format!(
-                        "Failed to load voice '{}' (index {}): {}",
-                        voice_info.id, index, e
-                    ))
-                })
             }
-        } else {
-            // Fallback: try by name
-            self.source
-                .load_by_name(voice_path, &voice_info.id)
-                .map_err(|e| {
-                    AdapterError::RuntimeError(format!(
-                        "Failed to load voice '{}' by name: {}",
-                        voice_info.id, e
-                    ))
-                })
+            VoiceSelectionStrategy::FixedIndex => {
+                // Determine loader type from config
+                let is_npz = matches!(
+                    &voice_config.format,
+                    VoiceFormat::Embedded {
+                        loader: VoiceLoader::NumpyNpz,
+                        ..
+                    }
+                );
+
+                if is_npz {
+                    // NPZ format: load by voice name
+                    self.source
+                        .load_by_name(voice_path, &voice_info.id)
+                        .map_err(|e| {
+                            AdapterError::RuntimeError(format!(
+                                "Failed to load voice '{}' by name: {}",
+                                voice_info.id, e
+                            ))
+                        })
+                } else if let Some(index) = voice_info.index {
+                    // Binary format: load by catalog index
+                    self.source.load_by_index(voice_path, index).map_err(|e| {
+                        AdapterError::RuntimeError(format!(
+                            "Failed to load voice '{}' (index {}): {}",
+                            voice_info.id, index, e
+                        ))
+                    })
+                } else {
+                    // Fallback: try by name
+                    self.source
+                        .load_by_name(voice_path, &voice_info.id)
+                        .map_err(|e| {
+                            AdapterError::RuntimeError(format!(
+                                "Failed to load voice '{}' by name: {}",
+                                voice_info.id, e
+                            ))
+                        })
+                }
+            }
         }
     }
 
@@ -418,7 +410,9 @@ mod tests {
     // ============================================================================
 
     fn create_test_metadata_with_voices() -> ModelMetadata {
-        use super::super::template::{VoiceConfig, VoiceFormat, VoiceInfo, VoiceLoader};
+        use super::super::template::{
+            VoiceConfig, VoiceFormat, VoiceInfo, VoiceLoader, VoiceSelectionStrategy,
+        };
 
         let mut metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx");
         metadata.voices = Some(VoiceConfig {
@@ -447,6 +441,7 @@ mod tests {
                     preview_url: None,
                 },
             ],
+            selection_strategy: VoiceSelectionStrategy::default(),
         });
         metadata
     }

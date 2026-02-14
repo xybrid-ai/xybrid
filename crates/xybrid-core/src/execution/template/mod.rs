@@ -24,4 +24,4 @@ pub use steps::{
 };
 
 // Re-export voice types
-pub use voice::{VoiceConfig, VoiceFormat, VoiceInfo, VoiceLoader};
+pub use voice::{VoiceConfig, VoiceFormat, VoiceInfo, VoiceLoader, VoiceSelectionStrategy};

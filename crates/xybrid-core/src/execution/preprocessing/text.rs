@@ -127,41 +127,16 @@ pub fn phonemize_step(
         text.clone()
     };
 
-    // Convert text to IPA phonemes based on backend
-    let phonemes = match backend {
-        PhonemizerBackend::CmuDictionary => {
-            use crate::phonemizer::Phonemizer;
+    // Derive base_path from tokens_path (go up one directory from tokens.txt)
+    let base_path = std::path::Path::new(tokens_path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .to_str()
+        .unwrap_or(".");
 
-            let phonemizer = if let Some(path) = dict_path {
-                Phonemizer::new(path).map_err(|e| {
-                    AdapterError::InvalidInput(format!(
-                        "Failed to load CMU dictionary from {}: {}",
-                        path, e
-                    ))
-                })?
-            } else {
-                Phonemizer::from_default_location().map_err(|e| {
-                    AdapterError::InvalidInput(format!("Failed to initialize phonemizer: {}", e))
-                })?
-            };
-
-            phonemizer.phonemize(&processed_text)
-        }
-        PhonemizerBackend::EspeakNG => {
-            phonemize_with_espeak(&processed_text, language.unwrap_or("en-us"), &tokens_map)?
-        }
-        PhonemizerBackend::MisakiDictionary => {
-            // Derive base_path from tokens_path (go up one directory from tokens.txt)
-            let tokens_dir = std::path::Path::new(tokens_path)
-                .parent()
-                .unwrap_or(std::path::Path::new("."));
-            phonemize_with_misaki(
-                &processed_text,
-                tokens_dir.to_str().unwrap_or("."),
-                &tokens_map,
-            )?
-        }
-    };
+    // Create the appropriate backend trait object and phonemize
+    let backend_impl = backend.create(base_path, dict_path, language);
+    let phonemes = backend_impl.phonemize(&processed_text, &tokens_map)?;
 
     // Convert phonemes to token IDs
     let mut ids: Vec<i64> = Vec::new();
@@ -469,7 +444,7 @@ fn number_to_words(n: u64) -> String {
 /// Requires espeak-ng to be installed on the system:
 /// - macOS: `brew install espeak-ng`
 /// - Linux: `apt-get install espeak-ng`
-fn phonemize_with_espeak(
+pub(crate) fn phonemize_with_espeak(
     text: &str,
     language: &str,
     vocab: &HashMap<char, i64>,
@@ -515,7 +490,7 @@ fn phonemize_with_espeak(
 /// - Morphological stemming for -s, -ed, -ing suffixes
 /// - Post-lookup replacement of ɾ→T and ʔ→t (the model was trained with these substitutions)
 /// - Support for explicit phoneme overrides via `[word](/phonemes/)` syntax
-fn phonemize_with_misaki(
+pub(crate) fn phonemize_with_misaki(
     text: &str,
     base_path: &str,
     vocab: &HashMap<char, i64>,
@@ -1589,5 +1564,145 @@ mod tests {
         assert!(ids.len() > 2, "Should produce phoneme tokens");
         assert_eq!(ids[0], 0, "Should start with padding");
         assert_eq!(ids[ids.len() - 1], 0, "Should end with padding");
+    }
+
+    // ============================================================================
+    // Backend-Agnostic Text Normalization Tests (US-011)
+    // ============================================================================
+
+    #[test]
+    fn test_normalize_expands_number_82() {
+        let result = normalize_text_for_tts("I have 82 items");
+        assert!(
+            result.contains("eighty two"),
+            "Expected '82' to be expanded to 'eighty two', got: {}",
+            result
+        );
+        assert!(
+            !result.contains("82"),
+            "Original '82' should be replaced, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_normalize_expands_various_numbers() {
+        assert_eq!(normalize_text_for_tts("0"), "zero");
+        assert!(normalize_text_for_tts("15 cats").contains("fifteen"));
+        assert!(normalize_text_for_tts("100 percent").contains("one hundred"));
+    }
+
+    /// Helper: run phonemize_step with a specific backend and normalize_text flag.
+    /// Returns (phonemes, ids) if fixtures are available, None otherwise.
+    fn run_phonemize_step_with_backend(
+        text: &str,
+        backend: &PhonemizerBackend,
+        normalize_text: bool,
+    ) -> Option<(String, Vec<i64>)> {
+        if !has_kokoro_fixtures() {
+            return None;
+        }
+        let base = kokoro_fixture_path();
+        let tokens_path = std::path::Path::new(&base)
+            .join("tokens.txt")
+            .to_string_lossy()
+            .to_string();
+
+        let dict_path = match backend {
+            PhonemizerBackend::CmuDictionary => None,
+            _ => None,
+        };
+
+        let result = phonemize_step(
+            PreprocessedData::Text(text.to_string()),
+            &tokens_path,
+            backend,
+            dict_path,
+            None,
+            true,
+            normalize_text,
+        )
+        .unwrap();
+
+        match result {
+            PreprocessedData::PhonemeIds { ids, phonemes, .. } => Some((phonemes, ids)),
+            _ => panic!("Expected PhonemeIds"),
+        }
+    }
+
+    #[test]
+    fn test_phonemize_step_cmu_normalize_true_expands_numbers() {
+        let Some((phonemes, ids)) =
+            run_phonemize_step_with_backend("82", &PhonemizerBackend::CmuDictionary, true)
+        else {
+            eprintln!("Skipping: Kokoro fixtures not found");
+            return;
+        };
+        // With normalize_text=true, "82" → "eighty two" → phonemes
+        // The phoneme output should be non-trivial (real words produce phonemes)
+        assert!(
+            !phonemes.is_empty(),
+            "CmuDictionary with normalize_text=true should produce phonemes for '82' (expanded to 'eighty two'), got empty"
+        );
+        // Should produce token IDs beyond just padding
+        assert!(
+            ids.len() > 2,
+            "CmuDictionary with normalize_text=true should produce token IDs for '82', got: {:?}",
+            ids
+        );
+    }
+
+    #[test]
+    fn test_phonemize_step_misaki_normalize_true_expands_numbers() {
+        let Some((phonemes, ids)) =
+            run_phonemize_step_with_backend("82", &PhonemizerBackend::MisakiDictionary, true)
+        else {
+            eprintln!("Skipping: Kokoro fixtures not found");
+            return;
+        };
+        // With normalize_text=true, "82" → "eighty two" → phonemes
+        assert!(
+            !phonemes.is_empty(),
+            "MisakiDictionary with normalize_text=true should produce phonemes for '82' (expanded to 'eighty two'), got empty"
+        );
+        assert!(
+            ids.len() > 2,
+            "MisakiDictionary with normalize_text=true should produce token IDs for '82', got: {:?}",
+            ids
+        );
+    }
+
+    #[test]
+    fn test_phonemize_step_normalize_false_does_not_expand_numbers() {
+        let Some((phonemes_no_norm, ids_no_norm)) =
+            run_phonemize_step_with_backend("82", &PhonemizerBackend::MisakiDictionary, false)
+        else {
+            eprintln!("Skipping: Kokoro fixtures not found");
+            return;
+        };
+        let Some((phonemes_norm, ids_norm)) =
+            run_phonemize_step_with_backend("82", &PhonemizerBackend::MisakiDictionary, true)
+        else {
+            return;
+        };
+
+        // With normalize_text=false, "82" is passed as-is to the phonemizer.
+        // It should either produce no phonemes (not a dictionary word) or
+        // produce different/fewer phonemes than the normalized version.
+        assert_ne!(
+            phonemes_no_norm, phonemes_norm,
+            "normalize_text=false should produce different phonemes than normalize_text=true for '82'. \
+             no_norm='{}', norm='{}'",
+            phonemes_no_norm, phonemes_norm
+        );
+
+        // The normalized version should produce more token IDs (real words have more phonemes)
+        assert!(
+            ids_norm.len() > ids_no_norm.len(),
+            "Normalized '82' (→ 'eighty two') should produce more tokens than raw '82'. \
+             norm_ids={:?}, no_norm_ids={:?}",
+            ids_norm,
+            ids_no_norm
+        );
     }
 }

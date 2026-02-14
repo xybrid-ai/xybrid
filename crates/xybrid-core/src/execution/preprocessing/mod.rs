@@ -11,6 +11,7 @@
 //! | [`tensor`] | `Normalize`, `Reshape` |
 
 pub mod audio;
+pub mod backends;
 pub mod image;
 pub mod tensor;
 pub mod text;

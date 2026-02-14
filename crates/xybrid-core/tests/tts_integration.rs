@@ -5,7 +5,7 @@
 //!
 //! ```bash
 //! # Download test models
-//! ./integration-tests/download.sh kitten-tts kokoro-82m
+//! ./integration-tests/download.sh kitten-tts-nano-0.2 kokoro-82m
 //!
 //! # Run TTS integration tests
 //! cargo test -p integration-tests --test tts_integration
@@ -26,15 +26,7 @@ use std::path::PathBuf;
 
 /// Get the path to the KittenTTS test model directory
 fn get_kitten_tts_dir() -> Option<PathBuf> {
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()?
-        .to_path_buf();
-    let model_dir = project_root.join("test_models/kitten-tts/kitten-nano-en-v0_1-fp16");
-    if model_dir.exists() {
-        Some(model_dir)
-    } else {
-        None
-    }
+    xybrid_core::testing::model_fixtures::model_path("kitten-tts-nano-0.2")
 }
 
 /// Get the path to the CMU dictionary
@@ -247,8 +239,8 @@ fn test_model_metadata_loading() {
         serde_json::from_str(&metadata_content).expect("Failed to parse model_metadata.json");
 
     // Verify metadata structure
-    assert_eq!(metadata["model_id"], "kitten-tts-nano");
-    assert_eq!(metadata["version"], "0.1");
+    assert_eq!(metadata["model_id"], "kitten-tts-nano-0.2");
+    assert_eq!(metadata["version"], "1.0");
     assert!(metadata["preprocessing"].is_array());
 
     // Check preprocessing has Phonemize step

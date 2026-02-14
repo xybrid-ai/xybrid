@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Load metadata (same pattern as wav2vec2_transcription.rs)
-    let model_dir = model_fixtures::require_model("kitten-tts");
+    let model_dir = model_fixtures::require_model("kitten-tts-nano-0.2");
     let metadata_path = model_dir.join("model_metadata.json");
 
     println!("📋 Loading metadata from: {}", metadata_path.display());

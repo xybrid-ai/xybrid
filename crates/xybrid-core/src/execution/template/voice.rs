@@ -128,6 +128,27 @@ pub struct VoiceInfo {
     pub preview_url: Option<String>,
 }
 
+/// Strategy for selecting voice embeddings at inference time.
+///
+/// Different TTS models use different voice selection mechanisms:
+/// - KittenTTS: Select by fixed catalog index
+/// - Kokoro: Select from voicepack by phoneme token count
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub enum VoiceSelectionStrategy {
+    /// Select voice by catalog index (default).
+    ///
+    /// Used by: KittenTTS and other models with simple voice catalogs.
+    /// The voice embedding is loaded at the catalog entry's fixed index.
+    #[default]
+    FixedIndex,
+
+    /// Select voice embedding slice by phoneme token count.
+    ///
+    /// Used by: Kokoro-style voicepacks (3D arrays, shape `[510, 1, 256]`).
+    /// The style vector is indexed by: `pack[min(max(token_count - 2, 0), 509)]`.
+    TokenLength,
+}
+
 /// Complete voice configuration for a TTS model.
 ///
 /// This struct describes all available voices for a TTS model,
@@ -140,6 +161,7 @@ pub struct VoiceInfo {
 ///   "file": "voices.bin",
 ///   "loader": "binary_f32_256",
 ///   "default": "af_bella",
+///   "selection_strategy": "FixedIndex",
 ///   "catalog": [
 ///     {"id": "af_bella", "name": "Bella", "gender": "female", "language": "en-US", "index": 0}
 ///   ]
@@ -156,6 +178,16 @@ pub struct VoiceConfig {
 
     /// Voice catalog with metadata
     pub catalog: Vec<VoiceInfo>,
+
+    /// How voice embeddings are selected at inference time.
+    ///
+    /// Defaults to `FixedIndex` if not specified (backwards compatible).
+    #[serde(default, skip_serializing_if = "is_default_strategy")]
+    pub selection_strategy: VoiceSelectionStrategy,
+}
+
+fn is_default_strategy(strategy: &VoiceSelectionStrategy) -> bool {
+    *strategy == VoiceSelectionStrategy::FixedIndex
 }
 
 #[cfg(test)]
@@ -190,6 +222,7 @@ mod tests {
                     preview_url: None,
                 },
             ],
+            selection_strategy: VoiceSelectionStrategy::default(),
         };
 
         let json = serde_json::to_string_pretty(&config).unwrap();

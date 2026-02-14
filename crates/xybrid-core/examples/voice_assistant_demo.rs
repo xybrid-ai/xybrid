@@ -279,11 +279,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("└─────────────────────────────────────────────────────────────────┘");
     println!();
 
-    let tts_model_dir = match model_fixtures::model_path("kitten-tts") {
+    let tts_model_dir = match model_fixtures::model_path("kitten-tts-nano-0.2") {
         Some(dir) => dir,
         None => {
             eprintln!("❌ KittenTTS model not found");
-            eprintln!("   Run: ./integration-tests/download.sh kitten-tts");
+            eprintln!("   Run: ./integration-tests/download.sh kitten-tts-nano-0.2");
             eprintln!("   Skipping TTS synthesis.");
             println!();
             print_summary(false);

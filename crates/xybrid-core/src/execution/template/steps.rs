@@ -133,7 +133,7 @@ pub enum PreprocessingStep {
         /// Path to tokens.txt or vocab file (maps IPA symbols to token IDs)
         tokens_file: String,
 
-        /// Phonemization backend to use (default: CmuDictionary)
+        /// Phonemization backend to use (default: MisakiDictionary)
         #[serde(default)]
         backend: PhonemizerBackend,
 
@@ -327,21 +327,50 @@ impl PostprocessingStep {
 /// Phonemizer backend for text-to-phoneme conversion
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum PhonemizerBackend {
-    /// CMU Pronouncing Dictionary (ARPABET -> IPA conversion)
-    /// Best for: KittenTTS, models trained on CMU phonemes
-    #[default]
+    /// Legacy. ARPABET-based. May produce lower quality for models trained on Misaki/espeak IPA.
     CmuDictionary,
 
-    /// espeak-ng TTS engine (direct IPA output)
-    /// Best for: Kokoro, Piper, models expecting espeak IPA
-    /// Requires espeak-ng to be installed on the system (`brew install espeak-ng`)
+    /// Multi-language. Requires espeak-ng system installation.
+    /// Install with: `brew install espeak-ng` (macOS) or `apt-get install espeak-ng` (Linux)
     EspeakNG,
 
-    /// Misaki dictionary-based phonemizer (IPA output, no system dependencies)
-    /// Best for: Kokoro on mobile/embedded where espeak-ng isn't available
+    /// Default. Pure Rust, no system dependencies. Recommended for all TTS models (Kokoro, KittenTTS).
     /// Uses bundled JSON dictionaries (us_gold.json + us_silver.json)
-    /// Falls back to basic letter-by-letter for OOD words
+    /// Falls back to rule-based G2P for out-of-vocabulary words
+    #[default]
     MisakiDictionary,
+}
+
+impl PhonemizerBackend {
+    /// Create a trait object for this backend variant.
+    ///
+    /// # Arguments
+    /// - `base_path`: Model directory path (used by MisakiDictionary for dictionary files)
+    /// - `dict_path`: Optional dictionary file path (used by CmuDictionary)
+    /// - `language`: Optional language code (used by EspeakNG, e.g. "en-us")
+    pub fn create(
+        &self,
+        base_path: &str,
+        dict_path: Option<&str>,
+        language: Option<&str>,
+    ) -> Box<dyn crate::execution::preprocessing::backends::PhonemizerBackend> {
+        use crate::execution::preprocessing::backends::{
+            CmuDictionaryBackend, EspeakBackend, MisakiBackend,
+        };
+
+        match self {
+            PhonemizerBackend::CmuDictionary => {
+                Box::new(CmuDictionaryBackend::new(dict_path.map(|s| s.to_string())))
+            }
+            PhonemizerBackend::MisakiDictionary => {
+                Box::new(MisakiBackend::new(base_path.to_string()))
+            }
+            PhonemizerBackend::EspeakNG => {
+                let lang = language.unwrap_or("en-us").to_string();
+                Box::new(EspeakBackend::new(lang))
+            }
+        }
+    }
 }
 
 /// Mel frequency scale type for mel spectrogram preprocessing.

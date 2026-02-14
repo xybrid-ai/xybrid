@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     publish_telemetry_event(test_event);
 
     // Try to run a simple TTS inference (if model is available)
-    if let Some(model_dir) = model_fixtures::model_or_skip("kitten-tts") {
+    if let Some(model_dir) = model_fixtures::model_or_skip("kitten-tts-nano-0.2") {
         println!("\nRunning TTS inference with telemetry...");
 
         let metadata_path = model_dir.join("model_metadata.json");

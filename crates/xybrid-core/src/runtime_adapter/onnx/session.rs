@@ -29,6 +29,7 @@ use super::execution_provider::ExecutionProviderKind;
 use crate::runtime_adapter::{AdapterError, AdapterResult};
 use ndarray::{ArrayD, IxDyn};
 use ort::session::{builder::GraphOptimizationLevel, Session};
+use ort::tensor::TensorElementType;
 use ort::value::Value;
 use std::collections::HashMap;
 use std::path::Path;
@@ -52,6 +53,8 @@ pub struct ONNXSession {
     input_shapes: Vec<Vec<i64>>,
     /// Output shapes (may contain dynamic dimensions)
     output_shapes: Vec<Vec<i64>>,
+    /// Input element types (e.g., Float32, Int64) from ONNX model metadata
+    input_dtypes: Vec<Option<TensorElementType>>,
     /// The execution provider used for this session
     execution_provider: ExecutionProviderKind,
 }
@@ -144,7 +147,7 @@ impl ONNXSession {
             .map_err(|e| AdapterError::RuntimeError(format!("Failed to load ONNX model: {}", e)))?;
 
         // Extract input/output metadata from session
-        let (input_names, input_shapes) = Self::extract_input_metadata(&session)?;
+        let (input_names, input_shapes, input_dtypes) = Self::extract_input_metadata(&session)?;
         let (output_names, output_shapes) = Self::extract_output_metadata(&session)?;
 
         log::info!(
@@ -159,6 +162,7 @@ impl ONNXSession {
             output_names,
             input_shapes,
             output_shapes,
+            input_dtypes,
             execution_provider,
         })
     }
@@ -212,28 +216,35 @@ impl ONNXSession {
     }
 
     /// Extracts input metadata from the session.
-    fn extract_input_metadata(session: &Session) -> AdapterResult<(Vec<String>, Vec<Vec<i64>>)> {
+    fn extract_input_metadata(
+        session: &Session,
+    ) -> AdapterResult<(Vec<String>, Vec<Vec<i64>>, Vec<Option<TensorElementType>>)> {
         let mut input_names = Vec::new();
         let mut input_shapes = Vec::new();
+        let mut input_dtypes = Vec::new();
 
-        // Access session.inputs directly - ort exposes inputs as Vec<Input>
-        // Each Input has a name field
+        // Access session.inputs directly - ort exposes inputs as Vec<Outlet>
+        // Each Outlet has name() and dtype() (ValueType with element type + shape)
         for input in session.inputs() {
             input_names.push(input.name().to_string());
-            // Note: ort's Input struct doesn't directly expose shapes
-            // Shapes may be dynamic or need to be inferred from the model
-            // For now, use placeholder shapes - we'll need to infer from actual model or use default
-            // TODO: Extract real shapes from model metadata if available
-            input_shapes.push(vec![-1]); // Placeholder: -1 indicates dynamic dimension
+
+            // Extract element type and shape from ValueType
+            if let Some(shape) = input.dtype().tensor_shape() {
+                input_shapes.push(shape.iter().copied().collect());
+            } else {
+                input_shapes.push(vec![-1]);
+            }
+            input_dtypes.push(input.dtype().tensor_type());
         }
 
         // If no inputs found, use placeholder
         if input_names.is_empty() {
             input_names.push("input".to_string());
             input_shapes.push(vec![1, 1, 16000]); // Placeholder shape for audio
+            input_dtypes.push(None);
         }
 
-        Ok((input_names, input_shapes))
+        Ok((input_names, input_shapes, input_dtypes))
     }
 
     /// Extracts output metadata from the session.
@@ -405,6 +416,11 @@ impl ONNXSession {
     /// Returns input shapes.
     pub fn input_shapes(&self) -> &[Vec<i64>] {
         &self.input_shapes
+    }
+
+    /// Returns input element types.
+    pub fn input_dtypes(&self) -> &[Option<TensorElementType>] {
+        &self.input_dtypes
     }
 
     /// Returns output shapes.
