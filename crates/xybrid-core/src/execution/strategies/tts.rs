@@ -12,7 +12,9 @@ use std::path::Path;
 
 use super::{ExecutionContext, ExecutionStrategy};
 use crate::execution::modes::execute_tts_inference;
-use crate::execution::template::{ExecutionTemplate, ModelMetadata, PreprocessingStep};
+use crate::execution::template::{
+    ExecutionTemplate, ModelMetadata, PostprocessingStep, PreprocessingStep,
+};
 use crate::execution::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use crate::execution::voice_loader::TtsVoiceLoader;
 use crate::execution::{postprocessing, preprocessing};
@@ -23,6 +25,9 @@ use crate::tracing as xybrid_trace;
 
 /// Maximum characters per TTS chunk (Kokoro's BERT encoder has ~512 token limit).
 const MAX_TTS_CHARS: usize = 350;
+
+/// Silence duration between audio chunks in milliseconds.
+const INTER_CHUNK_SILENCE_MS: u32 = 200;
 
 /// TTS execution strategy.
 ///
@@ -130,9 +135,10 @@ impl TtsStrategy {
             &phoneme_ids[..phoneme_ids.len().min(20)]
         );
 
-        // Load voice embedding
+        // Load voice embedding (token-length-dependent for Kokoro-style voicepacks)
         let voice_loader = TtsVoiceLoader::new(ctx.base_path);
-        let voice_embedding = voice_loader.load(metadata, input)?;
+        let voice_embedding =
+            voice_loader.load_for_token_count(metadata, input, Some(phoneme_ids.len()))?;
 
         // Create and run TTS session
         let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
@@ -185,6 +191,10 @@ impl TtsStrategy {
         let mut all_audio: Vec<f32> = Vec::new();
         let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
 
+        // Compute inter-chunk silence (e.g. 200ms at 24kHz = 4800 zero samples)
+        let sample_rate = Self::get_sample_rate(metadata);
+        let silence_samples = (sample_rate as usize * INTER_CHUNK_SILENCE_MS as usize) / 1000;
+
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(
                 target: "xybrid_core",
@@ -193,6 +203,11 @@ impl TtsStrategy {
                 chunks.len(),
                 chunk.len()
             );
+
+            // Insert silence between chunks (not before the first one)
+            if i > 0 && !all_audio.is_empty() {
+                all_audio.extend(std::iter::repeat_n(0.0f32, silence_samples));
+            }
 
             // Create envelope for this chunk
             let chunk_input = Envelope {
@@ -215,9 +230,13 @@ impl TtsStrategy {
                 phoneme_ids.len()
             );
 
-            // Load voice embedding
+            // Load voice embedding (token-length-dependent for Kokoro-style voicepacks)
             let voice_loader = TtsVoiceLoader::new(ctx.base_path);
-            let voice_embedding = voice_loader.load(metadata, input)?;
+            let voice_embedding = voice_loader.load_for_token_count(
+                metadata,
+                &chunk_input,
+                Some(phoneme_ids.len()),
+            )?;
 
             // Run TTS inference
             let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
@@ -241,6 +260,16 @@ impl TtsStrategy {
 
         // Run postprocessing on combined audio
         self.run_postprocessing(ctx, metadata, RawOutputs::TensorMap(combined_outputs))
+    }
+
+    /// Get the output sample rate from postprocessing metadata, defaulting to 24000 Hz.
+    fn get_sample_rate(metadata: &ModelMetadata) -> u32 {
+        for step in &metadata.postprocessing {
+            if let PostprocessingStep::TTSAudioEncode { sample_rate, .. } = step {
+                return *sample_rate;
+            }
+        }
+        24000
     }
 
     /// Split text into chunks at sentence boundaries.
