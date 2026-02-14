@@ -25,6 +25,18 @@ pub trait VoiceEmbeddingSource: Send + Sync {
 
     /// Load voice embedding by name from an NPZ file.
     fn load_by_name(&self, path: &Path, name: &str) -> Result<Vec<f32>, String>;
+
+    /// Load voice embedding by name with explicit token-length selection.
+    ///
+    /// For Kokoro-style voicepacks (3D arrays, shape `[510, 1, 256]`), the style
+    /// vector is indexed by token count: `pack[min(max(token_count - 2, 0), 509)]`.
+    /// This matches the official pipeline's `pack[len(ps)-1]` selection.
+    fn load_by_name_with_token_length(
+        &self,
+        path: &Path,
+        name: &str,
+        token_length: usize,
+    ) -> Result<Vec<f32>, String>;
 }
 
 /// Default implementation using the crate's VoiceEmbeddingLoader.
@@ -54,6 +66,18 @@ impl VoiceEmbeddingSource for DefaultVoiceSource {
         let loader = crate::tts::voice_embedding::VoiceEmbeddingLoader::new(self.embedding_dim);
         loader
             .load_npz_by_name(path, name, None)
+            .map_err(|e| e.to_string())
+    }
+
+    fn load_by_name_with_token_length(
+        &self,
+        path: &Path,
+        name: &str,
+        token_length: usize,
+    ) -> Result<Vec<f32>, String> {
+        let loader = crate::tts::voice_embedding::VoiceEmbeddingLoader::new(self.embedding_dim);
+        loader
+            .load_npz_by_name(path, name, Some(token_length))
             .map_err(|e| e.to_string())
     }
 }
@@ -95,6 +119,22 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
     /// 2. Default voice from ModelMetadata.voices.default
     /// 3. Index 0 (legacy fallback for models without voice config)
     pub fn load(&self, metadata: &ModelMetadata, input: &Envelope) -> ExecutorResult<Vec<f32>> {
+        self.load_for_token_count(metadata, input, None)
+    }
+
+    /// Load voice embedding with token-length-dependent selection.
+    ///
+    /// For Kokoro-style voicepacks, the style vector is selected based on the
+    /// number of phoneme tokens. This matches the official pipeline's behavior
+    /// of `pack[len(phonemes)-1]`.
+    ///
+    /// If `token_count` is None, falls back to the default selection (index 100).
+    pub fn load_for_token_count(
+        &self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        token_count: Option<usize>,
+    ) -> ExecutorResult<Vec<f32>> {
         // Step 1: Resolve voice file path
         let voice_path = match self.resolve_voice_path(metadata)? {
             Some(path) => path,
@@ -115,7 +155,13 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
 
         // Step 4: Load embedding based on config style
         if let Some(voice_config) = &metadata.voices {
-            self.load_with_config(&voice_path, voice_config, metadata, voice_id)
+            self.load_with_config_and_token_length(
+                &voice_path,
+                voice_config,
+                metadata,
+                voice_id,
+                token_count,
+            )
         } else {
             self.load_legacy(&voice_path, voice_id)
         }
@@ -155,14 +201,27 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
         metadata: &ModelMetadata,
         voice_id: Option<&String>,
     ) -> ExecutorResult<Vec<f32>> {
+        self.load_with_config_and_token_length(voice_path, voice_config, metadata, voice_id, None)
+    }
+
+    /// Load voice embedding using structured voice config with optional token-length selection.
+    fn load_with_config_and_token_length(
+        &self,
+        voice_path: &Path,
+        voice_config: &VoiceConfig,
+        metadata: &ModelMetadata,
+        voice_id: Option<&String>,
+        token_count: Option<usize>,
+    ) -> ExecutorResult<Vec<f32>> {
         // Resolve voice info
         let voice_info = self.resolve_voice_info(voice_config, metadata, voice_id)?;
 
         debug!(
             target: "xybrid_core",
-            "Loading voice: {} (index: {:?})",
+            "Loading voice: {} (index: {:?}, token_count: {:?})",
             voice_info.id,
-            voice_info.index
+            voice_info.index,
+            token_count
         );
 
         // Determine loader type and load
@@ -175,21 +234,62 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
         );
 
         if is_npz {
-            self.source
-                .load_by_name(voice_path, &voice_info.id)
-                .map_err(|e| {
+            // For NPZ format, use token-length-aware loading if available
+            if let Some(tc) = token_count {
+                self.source
+                    .load_by_name_with_token_length(voice_path, &voice_info.id, tc)
+                    .map_err(|e| {
+                        AdapterError::RuntimeError(format!(
+                            "Failed to load voice '{}' by name: {}",
+                            voice_info.id, e
+                        ))
+                    })
+            } else {
+                self.source
+                    .load_by_name(voice_path, &voice_info.id)
+                    .map_err(|e| {
+                        AdapterError::RuntimeError(format!(
+                            "Failed to load voice '{}' by name: {}",
+                            voice_info.id, e
+                        ))
+                    })
+            }
+        } else if let Some(index) = voice_info.index {
+            // For binary format, auto-detect if file is actually NPZ and use token-length
+            let bytes = std::fs::read(voice_path).map_err(|e| {
+                AdapterError::RuntimeError(format!("Failed to read voice file: {}", e))
+            })?;
+            let is_actually_npz =
+                crate::tts::voice_embedding::VoiceEmbeddingLoader::detect_format(&bytes)
+                    == crate::tts::voice_embedding::VoiceFormat::Npz;
+
+            if is_actually_npz {
+                // File declared as binary but is actually NPZ — load by name with token length
+                let token_len = token_count
+                    .map(|tc| tc.saturating_sub(2).min(509))
+                    .unwrap_or(100);
+                debug!(
+                    target: "xybrid_core",
+                    "Voice file is NPZ (not raw binary), loading '{}' at token_length={}",
+                    voice_info.id,
+                    token_len
+                );
+                self.source
+                    .load_by_name_with_token_length(voice_path, &voice_info.id, token_len)
+                    .map_err(|e| {
+                        AdapterError::RuntimeError(format!(
+                            "Failed to load voice '{}' from NPZ: {}",
+                            voice_info.id, e
+                        ))
+                    })
+            } else {
+                self.source.load_by_index(voice_path, index).map_err(|e| {
                     AdapterError::RuntimeError(format!(
-                        "Failed to load voice '{}' by name: {}",
-                        voice_info.id, e
+                        "Failed to load voice '{}' (index {}): {}",
+                        voice_info.id, index, e
                     ))
                 })
-        } else if let Some(index) = voice_info.index {
-            self.source.load_by_index(voice_path, index).map_err(|e| {
-                AdapterError::RuntimeError(format!(
-                    "Failed to load voice '{}' (index {}): {}",
-                    voice_info.id, index, e
-                ))
-            })
+            }
         } else {
             // Fallback: try by name
             self.source
@@ -300,6 +400,16 @@ mod tests {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| format!("Voice '{}' not found", name))
+        }
+
+        fn load_by_name_with_token_length(
+            &self,
+            _path: &Path,
+            name: &str,
+            _token_length: usize,
+        ) -> Result<Vec<f32>, String> {
+            // Mock ignores token_length, just returns by name
+            self.load_by_name(_path, name)
         }
     }
 
