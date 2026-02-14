@@ -409,6 +409,35 @@ struct XybridEnvelopeHandle *xybrid_envelope_audio(const uint8_t *bytes,
 struct XybridEnvelopeHandle *xybrid_envelope_text(const char *text);
 
 /*
+ Create an envelope containing text data with voice and speed options.
+
+ This function creates an envelope with a voice ID and optional speed multiplier,
+ used for TTS models that support multiple voices (e.g., Kokoro).
+
+ # Parameters
+
+ - `text`: A null-terminated UTF-8 string containing the text to process.
+ - `voice_id`: A null-terminated UTF-8 string containing the voice ID (e.g., "af_bella").
+   May be null to use the model's default voice.
+ - `speed`: Speech speed multiplier (1.0 = normal, 0.5 = half speed, 2.0 = double speed).
+   Use 0.0 or negative to use the default speed (1.0).
+
+ # Returns
+
+ A handle to the envelope, or null on failure.
+
+ # Example (C)
+
+ ```c
+ XybridEnvelopeHandle* envelope = xybrid_envelope_text_with_voice(
+     "Hello, world!", "af_bella", 1.0);
+ ```
+ */
+struct XybridEnvelopeHandle *xybrid_envelope_text_with_voice(const char *text,
+                                                             const char *voice_id,
+                                                             double speed);
+
+/*
  Free an envelope handle.
 
  This function frees the memory associated with an envelope handle.
@@ -775,6 +804,98 @@ char *xybrid_model_id(struct XybridModelHandle *model);
 int32_t xybrid_model_supports_token_streaming(struct XybridModelHandle *model);
 
 /*
+ Check if a model has voice support.
+
+ # Parameters
+
+ - `model`: A handle to the loaded model.
+
+ # Returns
+
+ - `1` if the model has voice configuration (TTS model with voices)
+ - `0` if not, or if the handle is null/invalid
+ */
+int32_t xybrid_model_has_voices(struct XybridModelHandle *model);
+
+/*
+ Get the number of voices available for this model.
+
+ # Parameters
+
+ - `model`: A handle to the loaded model.
+
+ # Returns
+
+ The number of voices, or 0 if the model has no voice support or the handle is invalid.
+ */
+uint32_t xybrid_model_voice_count(struct XybridModelHandle *model);
+
+/*
+ Get the default voice ID for this model.
+
+ # Parameters
+
+ - `model`: A handle to the loaded model.
+
+ # Returns
+
+ A pointer to a null-terminated string containing the default voice ID,
+ or null if the model has no voice support. The pointer is valid as long
+ as the model handle is alive. Do NOT free this pointer.
+ */
+const char *xybrid_model_default_voice_id(struct XybridModelHandle *model);
+
+/*
+ Get the voice ID at the given index.
+
+ # Parameters
+
+ - `model`: A handle to the loaded model.
+ - `index`: Zero-based index into the voice catalog.
+
+ # Returns
+
+ A pointer to a null-terminated string containing the voice ID,
+ or null if out of bounds or the model has no voices.
+ The pointer is valid as long as the model handle is alive. Do NOT free this pointer.
+ */
+const char *xybrid_model_voice_id(struct XybridModelHandle *model, uint32_t index);
+
+/*
+ Get the voice display name at the given index.
+
+ # Parameters
+
+ - `model`: A handle to the loaded model.
+ - `index`: Zero-based index into the voice catalog.
+
+ # Returns
+
+ A pointer to a null-terminated string containing the voice name,
+ or null if out of bounds or the model has no voices.
+ The pointer is valid as long as the model handle is alive. Do NOT free this pointer.
+ */
+const char *xybrid_model_voice_name(struct XybridModelHandle *model, uint32_t index);
+
+/*
+ Get the full voice metadata at the given index as a JSON string.
+
+ Returns a JSON object with fields: id, name, gender, language, style.
+ The caller MUST free the returned string with `xybrid_free_string`.
+
+ # Parameters
+
+ - `model`: A handle to the loaded model.
+ - `index`: Zero-based index into the voice catalog.
+
+ # Returns
+
+ A newly-allocated null-terminated JSON string, or null if out of bounds.
+ The caller must free this with `xybrid_free_string`.
+ */
+char *xybrid_model_voice_json(struct XybridModelHandle *model, uint32_t index);
+
+/*
  Run streaming inference on a model with the given input envelope.
 
  This function blocks until inference is complete. For each token generated,
@@ -984,6 +1105,140 @@ const char *xybrid_result_text(struct XybridResultHandle *result);
  ```
  */
 uint32_t xybrid_result_latency_ms(struct XybridResultHandle *result);
+
+/*
+ Get the output type from an inference result.
+
+ Returns a pointer to a null-terminated string containing the output type:
+ `"text"`, `"audio"`, `"embedding"`, or `"unknown"`.
+ The returned pointer uses thread-local storage and is valid until the next
+ call to this function on the same thread. Do NOT free it.
+
+ # Parameters
+
+ - `result`: A handle to the inference result.
+
+ # Returns
+
+ A pointer to the output type string, or null if the handle is null/invalid.
+
+ # Example (C)
+
+ ```c
+ const char* type = xybrid_result_output_type(result);
+ if (type != NULL && strcmp(type, "audio") == 0) {
+     const uint8_t* data = xybrid_result_audio_data(result);
+     size_t len = xybrid_result_audio_len(result);
+     // Process audio bytes...
+ }
+ ```
+ */
+const char *xybrid_result_output_type(struct XybridResultHandle *result);
+
+/*
+ Get the audio data pointer from an inference result.
+
+ Returns a pointer to the raw audio bytes (PCM 16-bit signed little-endian),
+ or null if the result does not contain audio. The returned pointer is valid
+ for the lifetime of the result handle.
+
+ Use `xybrid_result_audio_len` to get the byte count.
+
+ # Parameters
+
+ - `result`: A handle to the inference result.
+
+ # Returns
+
+ A pointer to the audio bytes, or null if no audio output.
+ The pointer is valid until the result handle is freed.
+
+ # Example (C)
+
+ ```c
+ const uint8_t* audio = xybrid_result_audio_data(result);
+ size_t len = xybrid_result_audio_len(result);
+ if (audio != NULL && len > 0) {
+     // Copy or play audio data (raw PCM, typically 24kHz mono)
+ }
+ ```
+ */
+const uint8_t *xybrid_result_audio_data(struct XybridResultHandle *result);
+
+/*
+ Get the length of audio data from an inference result.
+
+ Returns the number of audio bytes, or 0 if no audio output or null handle.
+
+ # Parameters
+
+ - `result`: A handle to the inference result.
+
+ # Returns
+
+ The number of audio bytes, or 0 if no audio output.
+
+ # Example (C)
+
+ ```c
+ size_t len = xybrid_result_audio_len(result);
+ printf("Audio output: %zu bytes\n", len);
+ ```
+ */
+uintptr_t xybrid_result_audio_len(struct XybridResultHandle *result);
+
+/*
+ Get the embedding data pointer from an inference result.
+
+ Returns a pointer to the embedding float array, or null if the result
+ does not contain an embedding. The returned pointer is valid for the
+ lifetime of the result handle.
+
+ Use `xybrid_result_embedding_len` to get the number of elements.
+
+ # Parameters
+
+ - `result`: A handle to the inference result.
+
+ # Returns
+
+ A pointer to the embedding float array, or null if no embedding output.
+ The pointer is valid until the result handle is freed.
+
+ # Example (C)
+
+ ```c
+ const float* emb = xybrid_result_embedding_data(result);
+ size_t len = xybrid_result_embedding_len(result);
+ if (emb != NULL && len > 0) {
+     printf("Embedding dimension: %zu\n", len);
+ }
+ ```
+ */
+const float *xybrid_result_embedding_data(struct XybridResultHandle *result);
+
+/*
+ Get the number of elements in the embedding from an inference result.
+
+ Returns the number of float elements in the embedding vector,
+ or 0 if no embedding output or null handle.
+
+ # Parameters
+
+ - `result`: A handle to the inference result.
+
+ # Returns
+
+ The number of embedding elements, or 0 if no embedding output.
+
+ # Example (C)
+
+ ```c
+ size_t len = xybrid_result_embedding_len(result);
+ printf("Embedding dimension: %zu\n", len);
+ ```
+ */
+uintptr_t xybrid_result_embedding_len(struct XybridResultHandle *result);
 
 /*
  Free an inference result handle.

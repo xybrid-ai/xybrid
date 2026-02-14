@@ -2,6 +2,7 @@
 // Wrapper for the output of model inference.
 
 using System;
+using System.Runtime.InteropServices;
 using Xybrid.Native;
 
 namespace Xybrid
@@ -23,6 +24,9 @@ namespace Xybrid
         private readonly string _error;
         private readonly string _text;
         private readonly uint _latencyMs;
+        private readonly OutputType _outputType;
+        private readonly byte[] _audioBytes;
+        private readonly float[] _embedding;
 
         /// <summary>
         /// Gets whether this result has been disposed.
@@ -40,7 +44,7 @@ namespace Xybrid
         public string Error => _error;
 
         /// <summary>
-        /// Gets the text output (for ASR models), or null if not applicable.
+        /// Gets the text output (for ASR or LLM models), or null if not applicable.
         /// </summary>
         public string Text => _text;
 
@@ -48,6 +52,32 @@ namespace Xybrid
         /// Gets the inference latency in milliseconds.
         /// </summary>
         public uint LatencyMs => _latencyMs;
+
+        /// <summary>
+        /// Gets the type of output produced by inference.
+        /// </summary>
+        public OutputType OutputType => _outputType;
+
+        /// <summary>
+        /// Gets the raw audio bytes (for TTS models), or null if not applicable.
+        /// Audio format is raw PCM 16-bit signed little-endian, typically 24kHz mono.
+        /// </summary>
+        public byte[] AudioBytes => _audioBytes;
+
+        /// <summary>
+        /// Gets the embedding vector (for embedding models), or null if not applicable.
+        /// </summary>
+        public float[] Embedding => _embedding;
+
+        /// <summary>
+        /// Gets whether this result contains audio data.
+        /// </summary>
+        public bool HasAudio => _audioBytes != null && _audioBytes.Length > 0;
+
+        /// <summary>
+        /// Gets whether this result contains an embedding.
+        /// </summary>
+        public bool HasEmbedding => _embedding != null && _embedding.Length > 0;
 
         internal unsafe InferenceResult(XybridResultHandle* handle)
         {
@@ -68,6 +98,35 @@ namespace Xybrid
                 byte* errorPtr = NativeMethods.xybrid_result_error(handle);
                 _error = NativeHelpers.FromUtf8Ptr(errorPtr);
                 _text = null;
+            }
+
+            // Cache output type
+            byte* outputTypePtr = NativeMethods.xybrid_result_output_type(handle);
+            string outputTypeStr = NativeHelpers.FromUtf8Ptr(outputTypePtr);
+            _outputType = ParseOutputType(outputTypeStr);
+
+            // Cache audio bytes
+            nuint audioLen = NativeMethods.xybrid_result_audio_len(handle);
+            if (audioLen > 0)
+            {
+                byte* audioPtr = NativeMethods.xybrid_result_audio_data(handle);
+                if (audioPtr != null)
+                {
+                    _audioBytes = new byte[(int)audioLen];
+                    Marshal.Copy((IntPtr)audioPtr, _audioBytes, 0, (int)audioLen);
+                }
+            }
+
+            // Cache embedding
+            nuint embLen = NativeMethods.xybrid_result_embedding_len(handle);
+            if (embLen > 0)
+            {
+                float* embPtr = NativeMethods.xybrid_result_embedding_data(handle);
+                if (embPtr != null)
+                {
+                    _embedding = new float[(int)embLen];
+                    Marshal.Copy((IntPtr)embPtr, _embedding, 0, (int)embLen);
+                }
             }
         }
 
@@ -114,11 +173,23 @@ namespace Xybrid
         {
             if (_success)
             {
-                return $"InferenceResult(Success, LatencyMs={_latencyMs}, Text=\"{_text ?? "null"}\")";
+                return $"InferenceResult(Success, OutputType={_outputType}, LatencyMs={_latencyMs}, " +
+                       $"Text=\"{_text ?? "null"}\", AudioBytes={_audioBytes?.Length ?? 0})";
             }
             else
             {
                 return $"InferenceResult(Failed, Error=\"{_error}\")";
+            }
+        }
+
+        private static OutputType ParseOutputType(string type)
+        {
+            switch (type)
+            {
+                case "text": return OutputType.Text;
+                case "audio": return OutputType.Audio;
+                case "embedding": return OutputType.Embedding;
+                default: return OutputType.Unknown;
             }
         }
     }

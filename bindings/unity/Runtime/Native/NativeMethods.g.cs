@@ -294,6 +294,34 @@ namespace Xybrid.Native
         internal static extern XybridEnvelopeHandle* xybrid_envelope_text(byte* text);
 
         /// <summary>
+        ///  Create an envelope containing text data with voice and speed options.
+        ///
+        ///  This function creates an envelope with a voice ID and optional speed multiplier,
+        ///  used for TTS models that support multiple voices (e.g., Kokoro).
+        ///
+        ///  # Parameters
+        ///
+        ///  - `text`: A null-terminated UTF-8 string containing the text to process.
+        ///  - `voice_id`: A null-terminated UTF-8 string containing the voice ID (e.g., "af_bella").
+        ///    May be null to use the model's default voice.
+        ///  - `speed`: Speech speed multiplier (1.0 = normal, 0.5 = half speed, 2.0 = double speed).
+        ///    Use 0.0 or negative to use the default speed (1.0).
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the envelope, or null on failure.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  XybridEnvelopeHandle* envelope = xybrid_envelope_text_with_voice(
+        ///      "Hello, world!", "af_bella", 1.0);
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_envelope_text_with_voice", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridEnvelopeHandle* xybrid_envelope_text_with_voice(byte* text, byte* voice_id, double speed);
+
+        /// <summary>
         ///  Free an envelope handle.
         ///
         ///  This function frees the memory associated with an envelope handle.
@@ -672,6 +700,104 @@ namespace Xybrid.Native
         internal static extern int xybrid_model_supports_token_streaming(XybridModelHandle* model);
 
         /// <summary>
+        ///  Check if a model has voice support.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `model`: A handle to the loaded model.
+        ///
+        ///  # Returns
+        ///
+        ///  - `1` if the model has voice configuration (TTS model with voices)
+        ///  - `0` if not, or if the handle is null/invalid
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_model_has_voices", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_model_has_voices(XybridModelHandle* model);
+
+        /// <summary>
+        ///  Get the number of voices available for this model.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `model`: A handle to the loaded model.
+        ///
+        ///  # Returns
+        ///
+        ///  The number of voices, or 0 if the model has no voice support or the handle is invalid.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_model_voice_count", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint xybrid_model_voice_count(XybridModelHandle* model);
+
+        /// <summary>
+        ///  Get the default voice ID for this model.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `model`: A handle to the loaded model.
+        ///
+        ///  # Returns
+        ///
+        ///  A pointer to a null-terminated string containing the default voice ID,
+        ///  or null if the model has no voice support. The pointer is valid as long
+        ///  as the model handle is alive. Do NOT free this pointer.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_model_default_voice_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_model_default_voice_id(XybridModelHandle* model);
+
+        /// <summary>
+        ///  Get the voice ID at the given index.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `model`: A handle to the loaded model.
+        ///  - `index`: Zero-based index into the voice catalog.
+        ///
+        ///  # Returns
+        ///
+        ///  A pointer to a null-terminated string containing the voice ID,
+        ///  or null if out of bounds or the model has no voices.
+        ///  The pointer is valid as long as the model handle is alive. Do NOT free this pointer.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_model_voice_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_model_voice_id(XybridModelHandle* model, uint index);
+
+        /// <summary>
+        ///  Get the voice display name at the given index.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `model`: A handle to the loaded model.
+        ///  - `index`: Zero-based index into the voice catalog.
+        ///
+        ///  # Returns
+        ///
+        ///  A pointer to a null-terminated string containing the voice name,
+        ///  or null if out of bounds or the model has no voices.
+        ///  The pointer is valid as long as the model handle is alive. Do NOT free this pointer.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_model_voice_name", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_model_voice_name(XybridModelHandle* model, uint index);
+
+        /// <summary>
+        ///  Get the full voice metadata at the given index as a JSON string.
+        ///
+        ///  Returns a JSON object with fields: id, name, gender, language, style.
+        ///  The caller MUST free the returned string with `xybrid_free_string`.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `model`: A handle to the loaded model.
+        ///  - `index`: Zero-based index into the voice catalog.
+        ///
+        ///  # Returns
+        ///
+        ///  A newly-allocated null-terminated JSON string, or null if out of bounds.
+        ///  The caller must free this with `xybrid_free_string`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_model_voice_json", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_model_voice_json(XybridModelHandle* model, uint index);
+
+        /// <summary>
         ///  Run streaming inference on a model with the given input envelope.
         ///
         ///  This function blocks until inference is complete. For each token generated,
@@ -881,6 +1007,145 @@ namespace Xybrid.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_result_latency_ms", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern uint xybrid_result_latency_ms(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get the output type from an inference result.
+        ///
+        ///  Returns a pointer to a null-terminated string containing the output type:
+        ///  `"text"`, `"audio"`, `"embedding"`, or `"unknown"`.
+        ///  The returned pointer uses thread-local storage and is valid until the next
+        ///  call to this function on the same thread. Do NOT free it.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `result`: A handle to the inference result.
+        ///
+        ///  # Returns
+        ///
+        ///  A pointer to the output type string, or null if the handle is null/invalid.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  const char* type = xybrid_result_output_type(result);
+        ///  if (type != NULL &amp;&amp; strcmp(type, "audio") == 0) {
+        ///      const uint8_t* data = xybrid_result_audio_data(result);
+        ///      size_t len = xybrid_result_audio_len(result);
+        ///      // Process audio bytes...
+        ///  }
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_output_type", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_result_output_type(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get the audio data pointer from an inference result.
+        ///
+        ///  Returns a pointer to the raw audio bytes (PCM 16-bit signed little-endian),
+        ///  or null if the result does not contain audio. The returned pointer is valid
+        ///  for the lifetime of the result handle.
+        ///
+        ///  Use `xybrid_result_audio_len` to get the byte count.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `result`: A handle to the inference result.
+        ///
+        ///  # Returns
+        ///
+        ///  A pointer to the audio bytes, or null if no audio output.
+        ///  The pointer is valid until the result handle is freed.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  const uint8_t* audio = xybrid_result_audio_data(result);
+        ///  size_t len = xybrid_result_audio_len(result);
+        ///  if (audio != NULL &amp;&amp; len &gt; 0) {
+        ///      // Copy or play audio data (raw PCM, typically 24kHz mono)
+        ///  }
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_audio_data", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_result_audio_data(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get the length of audio data from an inference result.
+        ///
+        ///  Returns the number of audio bytes, or 0 if no audio output or null handle.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `result`: A handle to the inference result.
+        ///
+        ///  # Returns
+        ///
+        ///  The number of audio bytes, or 0 if no audio output.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  size_t len = xybrid_result_audio_len(result);
+        ///  printf("Audio output: %zu bytes\n", len);
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_audio_len", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint xybrid_result_audio_len(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get the embedding data pointer from an inference result.
+        ///
+        ///  Returns a pointer to the embedding float array, or null if the result
+        ///  does not contain an embedding. The returned pointer is valid for the
+        ///  lifetime of the result handle.
+        ///
+        ///  Use `xybrid_result_embedding_len` to get the number of elements.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `result`: A handle to the inference result.
+        ///
+        ///  # Returns
+        ///
+        ///  A pointer to the embedding float array, or null if no embedding output.
+        ///  The pointer is valid until the result handle is freed.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  const float* emb = xybrid_result_embedding_data(result);
+        ///  size_t len = xybrid_result_embedding_len(result);
+        ///  if (emb != NULL &amp;&amp; len &gt; 0) {
+        ///      printf("Embedding dimension: %zu\n", len);
+        ///  }
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_embedding_data", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern float* xybrid_result_embedding_data(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get the number of elements in the embedding from an inference result.
+        ///
+        ///  Returns the number of float elements in the embedding vector,
+        ///  or 0 if no embedding output or null handle.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `result`: A handle to the inference result.
+        ///
+        ///  # Returns
+        ///
+        ///  The number of embedding elements, or 0 if no embedding output.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  size_t len = xybrid_result_embedding_len(result);
+        ///  printf("Embedding dimension: %zu\n", len);
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_embedding_len", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint xybrid_result_embedding_len(XybridResultHandle* result);
 
         /// <summary>
         ///  Free an inference result handle.

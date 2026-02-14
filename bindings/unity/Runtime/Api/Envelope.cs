@@ -71,6 +71,39 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Creates an envelope containing text data with voice and speed options for TTS.
+        /// </summary>
+        /// <param name="text">The text to synthesize.</param>
+        /// <param name="voiceId">Voice ID (e.g., "af_bella"). Pass null to use the model's default voice.</param>
+        /// <param name="speed">Speed multiplier (1.0 = normal, 0.5 = half speed, 2.0 = double).</param>
+        /// <returns>A new Envelope containing the text with voice options.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if text is null.</exception>
+        /// <exception cref="XybridException">Thrown if envelope creation fails.</exception>
+        public static unsafe Envelope Text(string text, string voiceId, double speed = 1.0)
+        {
+            if (text == null)
+            {
+                throw new ArgumentNullException(nameof(text));
+            }
+
+            byte[] textBytes = NativeHelpers.ToUtf8Bytes(text);
+            byte[] voiceBytes = voiceId != null ? NativeHelpers.ToUtf8Bytes(voiceId) : null;
+
+            fixed (byte* textPtr = textBytes)
+            fixed (byte* voicePtr = voiceBytes)
+            {
+                XybridEnvelopeHandle* handle = NativeMethods.xybrid_envelope_text_with_voice(
+                    textPtr, voicePtr, speed);
+                if (handle == null)
+                {
+                    NativeHelpers.ThrowLastError("Failed to create text envelope with voice");
+                }
+
+                return new Envelope(handle);
+            }
+        }
+
+        /// <summary>
         /// Creates an envelope containing text data with a message role.
         /// </summary>
         /// <param name="text">The text to process.</param>

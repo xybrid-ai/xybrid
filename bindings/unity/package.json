@@ -1,18 +1,25 @@
 {
   "name": "ai.xybrid.sdk",
-  "version": "0.1.0-alpha3",
+  "version": "0.1.0-alpha4",
   "displayName": "Xybrid SDK",
-  "description": "On-device ML inference SDK for Unity - hybrid cloud-edge orchestration",
+  "description": "On-device AI SDK for Unity - LLMs, voice, npc dialogs and more",
   "unity": "2021.3",
   "unityRelease": "0f1",
   "documentationUrl": "https://github.com/xybrid-ai/xybrid",
   "keywords": [
-    "ml",
-    "inference",
-    "edge",
+    "ai",
+    "on-device",
     "tts",
     "asr",
-    "on-device"
+    "ai-npc",
+    "voice-assistant",
+    "llama",
+    "gemma",
+    "openai",
+    "kimi",
+    "mistral",
+    "kokoro-82",
+    "npc-voice"
   ],
   "author": {
     "name": "Xybrid AI",

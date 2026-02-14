@@ -13,7 +13,7 @@ uniffi::setup_scaffolding!();
 use xybrid_sdk::{
     ir::{Envelope as CoreEnvelope, EnvelopeKind as CoreEnvelopeKind},
     InferenceResult as CoreInferenceResult, ModelLoader as CoreModelLoader, SdkError,
-    XybridModel as CoreXybridModel,
+    VoiceInfo as CoreVoiceInfo, XybridModel as CoreXybridModel,
 };
 
 /// Initialize the SDK cache directory.
@@ -143,6 +143,39 @@ impl XybridResult {
     }
 }
 
+/// Voice metadata for TTS models.
+///
+/// Describes a single voice available in a TTS model's voice catalog.
+/// Use `XybridModel.voices()` to list all available voices.
+///
+/// In Swift this becomes a `struct XybridVoiceInfo`.
+/// In Kotlin this becomes a `data class XybridVoiceInfo`.
+#[derive(uniffi::Record, Clone)]
+pub struct XybridVoiceInfo {
+    /// Unique voice identifier (e.g., "af_bella").
+    pub id: String,
+    /// Human-readable display name (e.g., "Bella").
+    pub name: String,
+    /// Gender: "male", "female", or "neutral".
+    pub gender: Option<String>,
+    /// BCP-47 language tag (e.g., "en-US", "en-GB").
+    pub language: Option<String>,
+    /// Style descriptor (e.g., "neutral", "cheerful").
+    pub style: Option<String>,
+}
+
+impl From<CoreVoiceInfo> for XybridVoiceInfo {
+    fn from(v: CoreVoiceInfo) -> Self {
+        Self {
+            id: v.id,
+            name: v.name,
+            gender: v.gender,
+            language: v.language,
+            style: v.style,
+        }
+    }
+}
+
 impl From<XybridEnvelope> for CoreEnvelope {
     fn from(envelope: XybridEnvelope) -> Self {
         match envelope {
@@ -189,6 +222,7 @@ pub struct XybridModel {
 
 #[uniffi::export(async_runtime = "tokio")]
 impl XybridModel {
+    /// Run inference on this model with the provided input envelope.
     pub async fn run(&self, envelope: XybridEnvelope) -> Result<XybridResult, XybridError> {
         let result = self
             .inner
@@ -196,6 +230,34 @@ impl XybridModel {
             .await
             .map_err(XybridError::from)?;
         Ok(XybridResult::from_inference_result(&result))
+    }
+
+    /// Get all available voices for this TTS model.
+    ///
+    /// Returns `None` for non-TTS models or models without voice configuration.
+    pub fn voices(&self) -> Option<Vec<XybridVoiceInfo>> {
+        self.inner
+            .voices()
+            .map(|vs| vs.into_iter().map(XybridVoiceInfo::from).collect())
+    }
+
+    /// Get the default voice ID for this TTS model.
+    ///
+    /// Returns `None` for non-TTS models or models without voice configuration.
+    pub fn default_voice_id(&self) -> Option<String> {
+        self.inner.voice_config().map(|vc| vc.default)
+    }
+
+    /// Check if this model has voice support.
+    pub fn has_voices(&self) -> bool {
+        self.inner.has_voices()
+    }
+
+    /// Get a specific voice by ID.
+    ///
+    /// Returns `None` if the voice is not found or the model has no voice support.
+    pub fn voice(&self, voice_id: String) -> Option<XybridVoiceInfo> {
+        self.inner.voice(&voice_id).map(XybridVoiceInfo::from)
     }
 }
 

@@ -121,6 +121,33 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Runs TTS inference and returns the raw audio bytes.
+        /// </summary>
+        /// <param name="text">The text to synthesize.</param>
+        /// <returns>Raw PCM audio bytes (16-bit signed little-endian, typically 24kHz mono).</returns>
+        /// <exception cref="InferenceException">Thrown if inference fails.</exception>
+        /// <exception cref="InvalidOperationException">Thrown if the result does not contain audio.</exception>
+        /// <remarks>
+        /// This is a convenience method for TTS models. For more control, use <see cref="Run"/>.
+        /// The returned bytes can be loaded into a Unity AudioClip via AudioClip.Create() + SetData().
+        /// </remarks>
+        public byte[] RunTts(string text)
+        {
+            using (var envelope = Envelope.Text(text))
+            using (var result = Run(envelope))
+            {
+                result.ThrowIfFailed();
+                if (!result.HasAudio)
+                {
+                    throw new InvalidOperationException(
+                        "Model did not produce audio output. " +
+                        $"Output type was: {result.OutputType}");
+                }
+                return result.AudioBytes;
+            }
+        }
+
+        /// <summary>
         /// Runs inference with conversation context.
         /// </summary>
         /// <param name="envelope">The input data for inference.</param>
@@ -188,6 +215,184 @@ namespace Xybrid
                 return result.Text;
             }
         }
+
+        // ================================================================
+        // Voice Discovery
+        // ================================================================
+
+        private VoiceInfo[] _cachedVoices;
+
+        /// <summary>
+        /// Gets whether this model has voice support (TTS models with voice catalog).
+        /// </summary>
+        public unsafe bool HasVoices
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return NativeMethods.xybrid_model_has_voices(_handle) != 0;
+            }
+        }
+
+        /// <summary>
+        /// Gets the number of voices available for this model.
+        /// </summary>
+        public unsafe int VoiceCount
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return (int)NativeMethods.xybrid_model_voice_count(_handle);
+            }
+        }
+
+        /// <summary>
+        /// Gets the default voice ID for this model, or null if not a TTS model.
+        /// </summary>
+        public unsafe string DefaultVoiceId
+        {
+            get
+            {
+                ThrowIfDisposed();
+                byte* ptr = NativeMethods.xybrid_model_default_voice_id(_handle);
+                return NativeHelpers.FromUtf8Ptr(ptr);
+            }
+        }
+
+        /// <summary>
+        /// Gets all available voices for this model.
+        /// Returns an empty array if the model has no voice support.
+        /// </summary>
+        /// <remarks>
+        /// The result is cached after the first call.
+        /// </remarks>
+        public unsafe VoiceInfo[] Voices
+        {
+            get
+            {
+                ThrowIfDisposed();
+                if (_cachedVoices != null)
+                {
+                    return _cachedVoices;
+                }
+
+                int count = VoiceCount;
+                if (count == 0)
+                {
+                    _cachedVoices = Array.Empty<VoiceInfo>();
+                    return _cachedVoices;
+                }
+
+                var voices = new VoiceInfo[count];
+                for (int i = 0; i < count; i++)
+                {
+                    byte* idPtr = NativeMethods.xybrid_model_voice_id(_handle, (uint)i);
+                    byte* namePtr = NativeMethods.xybrid_model_voice_name(_handle, (uint)i);
+                    string id = NativeHelpers.FromUtf8Ptr(idPtr);
+                    string name = NativeHelpers.FromUtf8Ptr(namePtr);
+
+                    // Parse full metadata from JSON for gender/language/style
+                    string gender = null;
+                    string language = null;
+                    string style = null;
+                    byte* jsonPtr = NativeMethods.xybrid_model_voice_json(_handle, (uint)i);
+                    if (jsonPtr != null)
+                    {
+                        string json = NativeHelpers.FromUtf8Ptr(jsonPtr);
+                        NativeMethods.xybrid_free_string(jsonPtr);
+                        // Simple JSON parsing for optional fields
+                        gender = ExtractJsonString(json, "gender");
+                        language = ExtractJsonString(json, "language");
+                        style = ExtractJsonString(json, "style");
+                    }
+
+                    voices[i] = new VoiceInfo(id, name, gender, language, style);
+                }
+
+                _cachedVoices = voices;
+                return _cachedVoices;
+            }
+        }
+
+        /// <summary>
+        /// Gets a specific voice by ID, or null if not found.
+        /// </summary>
+        /// <param name="voiceId">The voice identifier (e.g., "af_bella").</param>
+        /// <returns>The voice info, or null if the voice is not found.</returns>
+        public VoiceInfo GetVoice(string voiceId)
+        {
+            ThrowIfDisposed();
+            foreach (var voice in Voices)
+            {
+                if (voice.Id == voiceId)
+                {
+                    return voice;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Runs TTS inference with a specific voice and returns the raw audio bytes.
+        /// </summary>
+        /// <param name="text">The text to synthesize.</param>
+        /// <param name="voiceId">The voice ID to use (e.g., "af_bella").</param>
+        /// <param name="speed">Speed multiplier (1.0 = normal).</param>
+        /// <returns>Raw PCM audio bytes.</returns>
+        /// <exception cref="InferenceException">Thrown if inference fails.</exception>
+        /// <exception cref="InvalidOperationException">Thrown if the result does not contain audio.</exception>
+        public byte[] RunTts(string text, string voiceId, double speed = 1.0)
+        {
+            using (var envelope = Envelope.Text(text, voiceId, speed))
+            using (var result = Run(envelope))
+            {
+                result.ThrowIfFailed();
+                if (!result.HasAudio)
+                {
+                    throw new InvalidOperationException(
+                        "Model did not produce audio output. " +
+                        $"Output type was: {result.OutputType}");
+                }
+                return result.AudioBytes;
+            }
+        }
+
+        /// <summary>
+        /// Extracts a string value from a simple JSON object.
+        /// </summary>
+        private static string ExtractJsonString(string json, string key)
+        {
+            // Look for "key":"value" or "key": "value"
+            string pattern = $"\"{key}\"";
+            int keyIndex = json.IndexOf(pattern, StringComparison.Ordinal);
+            if (keyIndex < 0) return null;
+
+            int colonIndex = json.IndexOf(':', keyIndex + pattern.Length);
+            if (colonIndex < 0) return null;
+
+            // Skip whitespace after colon
+            int valueStart = colonIndex + 1;
+            while (valueStart < json.Length && json[valueStart] == ' ')
+                valueStart++;
+
+            if (valueStart >= json.Length) return null;
+
+            // Check for null
+            if (json.Length >= valueStart + 4 && json.Substring(valueStart, 4) == "null")
+                return null;
+
+            // Must be a quoted string
+            if (json[valueStart] != '"') return null;
+
+            int valueEnd = json.IndexOf('"', valueStart + 1);
+            if (valueEnd < 0) return null;
+
+            return json.Substring(valueStart + 1, valueEnd - valueStart - 1);
+        }
+
+        // ================================================================
+        // Streaming & Token Support
+        // ================================================================
 
         /// <summary>
         /// Gets whether this model supports true token-by-token streaming.

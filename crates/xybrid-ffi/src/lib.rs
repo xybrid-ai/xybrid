@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 // Import SDK types
 use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
-use xybrid_sdk::{ConversationContext, ModelLoader, PartialToken, XybridModel};
+use xybrid_sdk::{ConversationContext, ModelLoader, PartialToken, VoiceInfo, XybridModel};
 
 // ============================================================================
 // Opaque Handle Types (US-009)
@@ -106,6 +106,14 @@ pub(crate) struct ModelState {
     pub model: Arc<XybridModel>,
     /// The model ID for reference.
     pub model_id: String,
+    /// Cached voice catalog (populated at load time for stable FFI pointer lifetimes).
+    pub voices: Option<Vec<VoiceInfo>>,
+    /// Cached default voice ID.
+    pub default_voice_id: Option<CString>,
+    /// Cached voice IDs as CStrings for FFI access.
+    pub voice_id_cache: Vec<CString>,
+    /// Cached voice names as CStrings for FFI access.
+    pub voice_name_cache: Vec<CString>,
 }
 
 /// Internal envelope data.
@@ -881,10 +889,36 @@ pub unsafe extern "C" fn xybrid_model_loader_load(
 
     let model_id = loader_state.model_id.clone();
 
+    // Cache voice data for FFI access
+    let voices = xybrid_model.voices();
+    let default_voice_id = xybrid_model
+        .voice_config()
+        .and_then(|vc| CString::new(vc.default).ok());
+    let voice_id_cache = voices
+        .as_ref()
+        .map(|vs| {
+            vs.iter()
+                .map(|v| CString::new(v.id.as_str()).unwrap_or_default())
+                .collect()
+        })
+        .unwrap_or_default();
+    let voice_name_cache = voices
+        .as_ref()
+        .map(|vs| {
+            vs.iter()
+                .map(|v| CString::new(v.name.as_str()).unwrap_or_default())
+                .collect()
+        })
+        .unwrap_or_default();
+
     // Create model state
     let model = Box::new(ModelState {
         model: Arc::new(xybrid_model),
         model_id,
+        voices,
+        default_voice_id,
+        voice_id_cache,
+        voice_name_cache,
     });
 
     XybridModelHandle::from_boxed(model)
@@ -1041,6 +1075,74 @@ pub unsafe extern "C" fn xybrid_envelope_text(text: *const c_char) -> *mut Xybri
         text: text_str,
         voice_id: None,
         speed: None,
+        role: None,
+    });
+
+    XybridEnvelopeHandle::from_boxed(envelope)
+}
+
+/// Create an envelope containing text data with voice and speed options.
+///
+/// This function creates an envelope with a voice ID and optional speed multiplier,
+/// used for TTS models that support multiple voices (e.g., Kokoro).
+///
+/// # Parameters
+///
+/// - `text`: A null-terminated UTF-8 string containing the text to process.
+/// - `voice_id`: A null-terminated UTF-8 string containing the voice ID (e.g., "af_bella").
+///   May be null to use the model's default voice.
+/// - `speed`: Speech speed multiplier (1.0 = normal, 0.5 = half speed, 2.0 = double speed).
+///   Use 0.0 or negative to use the default speed (1.0).
+///
+/// # Returns
+///
+/// A handle to the envelope, or null on failure.
+///
+/// # Example (C)
+///
+/// ```c
+/// XybridEnvelopeHandle* envelope = xybrid_envelope_text_with_voice(
+///     "Hello, world!", "af_bella", 1.0);
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_envelope_text_with_voice(
+    text: *const c_char,
+    voice_id: *const c_char,
+    speed: f64,
+) -> *mut XybridEnvelopeHandle {
+    clear_last_error();
+
+    if text.is_null() {
+        set_last_error("text is null");
+        return std::ptr::null_mut();
+    }
+
+    let text_str = match CStr::from_ptr(text).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("text is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let voice = if voice_id.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(voice_id).to_str() {
+            Ok(s) => Some(s.to_string()),
+            Err(_) => {
+                set_last_error("voice_id is not valid UTF-8");
+                return std::ptr::null_mut();
+            }
+        }
+    };
+
+    let spd = if speed > 0.0 { Some(speed) } else { None };
+
+    let envelope = Box::new(EnvelopeData::Text {
+        text: text_str,
+        voice_id: voice,
+        speed: spd,
         role: None,
     });
 
@@ -1925,6 +2027,188 @@ pub unsafe extern "C" fn xybrid_model_supports_token_streaming(
     }
 }
 
+// ============================================================================
+// C ABI Voice Discovery Functions
+// ============================================================================
+//
+// These functions allow C consumers to query the voice catalog of TTS models.
+// Voice data is cached in ModelState at load time for stable FFI pointer lifetimes.
+
+/// Check if a model has voice support.
+///
+/// # Parameters
+///
+/// - `model`: A handle to the loaded model.
+///
+/// # Returns
+///
+/// - `1` if the model has voice configuration (TTS model with voices)
+/// - `0` if not, or if the handle is null/invalid
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_has_voices(model: *mut XybridModelHandle) -> i32 {
+    if model.is_null() {
+        return 0;
+    }
+    match XybridModelHandle::as_ref(model) {
+        Some(state) => {
+            if state.voices.is_some() {
+                1
+            } else {
+                0
+            }
+        }
+        None => 0,
+    }
+}
+
+/// Get the number of voices available for this model.
+///
+/// # Parameters
+///
+/// - `model`: A handle to the loaded model.
+///
+/// # Returns
+///
+/// The number of voices, or 0 if the model has no voice support or the handle is invalid.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_voice_count(model: *mut XybridModelHandle) -> u32 {
+    if model.is_null() {
+        return 0;
+    }
+    match XybridModelHandle::as_ref(model) {
+        Some(state) => state.voices.as_ref().map(|v| v.len() as u32).unwrap_or(0),
+        None => 0,
+    }
+}
+
+/// Get the default voice ID for this model.
+///
+/// # Parameters
+///
+/// - `model`: A handle to the loaded model.
+///
+/// # Returns
+///
+/// A pointer to a null-terminated string containing the default voice ID,
+/// or null if the model has no voice support. The pointer is valid as long
+/// as the model handle is alive. Do NOT free this pointer.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_default_voice_id(
+    model: *mut XybridModelHandle,
+) -> *const c_char {
+    if model.is_null() {
+        return std::ptr::null();
+    }
+    match XybridModelHandle::as_ref(model) {
+        Some(state) => state
+            .default_voice_id
+            .as_ref()
+            .map(|s| s.as_ptr())
+            .unwrap_or(std::ptr::null()),
+        None => std::ptr::null(),
+    }
+}
+
+/// Get the voice ID at the given index.
+///
+/// # Parameters
+///
+/// - `model`: A handle to the loaded model.
+/// - `index`: Zero-based index into the voice catalog.
+///
+/// # Returns
+///
+/// A pointer to a null-terminated string containing the voice ID,
+/// or null if out of bounds or the model has no voices.
+/// The pointer is valid as long as the model handle is alive. Do NOT free this pointer.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_voice_id(
+    model: *mut XybridModelHandle,
+    index: u32,
+) -> *const c_char {
+    if model.is_null() {
+        return std::ptr::null();
+    }
+    match XybridModelHandle::as_ref(model) {
+        Some(state) => state
+            .voice_id_cache
+            .get(index as usize)
+            .map(|s| s.as_ptr())
+            .unwrap_or(std::ptr::null()),
+        None => std::ptr::null(),
+    }
+}
+
+/// Get the voice display name at the given index.
+///
+/// # Parameters
+///
+/// - `model`: A handle to the loaded model.
+/// - `index`: Zero-based index into the voice catalog.
+///
+/// # Returns
+///
+/// A pointer to a null-terminated string containing the voice name,
+/// or null if out of bounds or the model has no voices.
+/// The pointer is valid as long as the model handle is alive. Do NOT free this pointer.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_voice_name(
+    model: *mut XybridModelHandle,
+    index: u32,
+) -> *const c_char {
+    if model.is_null() {
+        return std::ptr::null();
+    }
+    match XybridModelHandle::as_ref(model) {
+        Some(state) => state
+            .voice_name_cache
+            .get(index as usize)
+            .map(|s| s.as_ptr())
+            .unwrap_or(std::ptr::null()),
+        None => std::ptr::null(),
+    }
+}
+
+/// Get the full voice metadata at the given index as a JSON string.
+///
+/// Returns a JSON object with fields: id, name, gender, language, style.
+/// The caller MUST free the returned string with `xybrid_free_string`.
+///
+/// # Parameters
+///
+/// - `model`: A handle to the loaded model.
+/// - `index`: Zero-based index into the voice catalog.
+///
+/// # Returns
+///
+/// A newly-allocated null-terminated JSON string, or null if out of bounds.
+/// The caller must free this with `xybrid_free_string`.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_voice_json(
+    model: *mut XybridModelHandle,
+    index: u32,
+) -> *mut c_char {
+    if model.is_null() {
+        return std::ptr::null_mut();
+    }
+    match XybridModelHandle::as_ref(model) {
+        Some(state) => {
+            let voice = match state.voices.as_ref().and_then(|vs| vs.get(index as usize)) {
+                Some(v) => v,
+                None => return std::ptr::null_mut(),
+            };
+            match serde_json::to_string(voice) {
+                Ok(json) => match CString::new(json) {
+                    Ok(cs) => cs.into_raw(),
+                    Err(_) => std::ptr::null_mut(),
+                },
+                Err(_) => std::ptr::null_mut(),
+            }
+        }
+        None => std::ptr::null_mut(),
+    }
+}
+
 /// Run streaming inference on a model with the given input envelope.
 ///
 /// This function blocks until inference is complete. For each token generated,
@@ -2423,6 +2707,218 @@ pub unsafe extern "C" fn xybrid_result_latency_ms(result: *mut XybridResultHandl
 
     match XybridResultHandle::as_ref(result) {
         Some(data) => data.latency_ms,
+        None => 0,
+    }
+}
+
+/// Get the output type from an inference result.
+///
+/// Returns a pointer to a null-terminated string containing the output type:
+/// `"text"`, `"audio"`, `"embedding"`, or `"unknown"`.
+/// The returned pointer uses thread-local storage and is valid until the next
+/// call to this function on the same thread. Do NOT free it.
+///
+/// # Parameters
+///
+/// - `result`: A handle to the inference result.
+///
+/// # Returns
+///
+/// A pointer to the output type string, or null if the handle is null/invalid.
+///
+/// # Example (C)
+///
+/// ```c
+/// const char* type = xybrid_result_output_type(result);
+/// if (type != NULL && strcmp(type, "audio") == 0) {
+///     const uint8_t* data = xybrid_result_audio_data(result);
+///     size_t len = xybrid_result_audio_len(result);
+///     // Process audio bytes...
+/// }
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_output_type(
+    result: *mut XybridResultHandle,
+) -> *const c_char {
+    // Don't clear last error - this is a read-only accessor
+    if result.is_null() {
+        return std::ptr::null();
+    }
+
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => {
+            thread_local! {
+                static RESULT_OUTPUT_TYPE: RefCell<Option<CString>> = const { RefCell::new(None) };
+            }
+            RESULT_OUTPUT_TYPE.with(|e| {
+                *e.borrow_mut() = CString::new(data.output_type.as_str()).ok();
+                match e.borrow().as_ref() {
+                    Some(cstr) => cstr.as_ptr(),
+                    None => std::ptr::null(),
+                }
+            })
+        }
+        None => std::ptr::null(),
+    }
+}
+
+/// Get the audio data pointer from an inference result.
+///
+/// Returns a pointer to the raw audio bytes (PCM 16-bit signed little-endian),
+/// or null if the result does not contain audio. The returned pointer is valid
+/// for the lifetime of the result handle.
+///
+/// Use `xybrid_result_audio_len` to get the byte count.
+///
+/// # Parameters
+///
+/// - `result`: A handle to the inference result.
+///
+/// # Returns
+///
+/// A pointer to the audio bytes, or null if no audio output.
+/// The pointer is valid until the result handle is freed.
+///
+/// # Example (C)
+///
+/// ```c
+/// const uint8_t* audio = xybrid_result_audio_data(result);
+/// size_t len = xybrid_result_audio_len(result);
+/// if (audio != NULL && len > 0) {
+///     // Copy or play audio data (raw PCM, typically 24kHz mono)
+/// }
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_audio_data(
+    result: *mut XybridResultHandle,
+) -> *const u8 {
+    // Don't clear last error - this is a read-only accessor
+    if result.is_null() {
+        return std::ptr::null();
+    }
+
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => match &data.audio_bytes {
+            Some(bytes) => bytes.as_ptr(),
+            None => std::ptr::null(),
+        },
+        None => std::ptr::null(),
+    }
+}
+
+/// Get the length of audio data from an inference result.
+///
+/// Returns the number of audio bytes, or 0 if no audio output or null handle.
+///
+/// # Parameters
+///
+/// - `result`: A handle to the inference result.
+///
+/// # Returns
+///
+/// The number of audio bytes, or 0 if no audio output.
+///
+/// # Example (C)
+///
+/// ```c
+/// size_t len = xybrid_result_audio_len(result);
+/// printf("Audio output: %zu bytes\n", len);
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_audio_len(
+    result: *mut XybridResultHandle,
+) -> usize {
+    // Don't clear last error - this is a read-only accessor
+    if result.is_null() {
+        return 0;
+    }
+
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => match &data.audio_bytes {
+            Some(bytes) => bytes.len(),
+            None => 0,
+        },
+        None => 0,
+    }
+}
+
+/// Get the embedding data pointer from an inference result.
+///
+/// Returns a pointer to the embedding float array, or null if the result
+/// does not contain an embedding. The returned pointer is valid for the
+/// lifetime of the result handle.
+///
+/// Use `xybrid_result_embedding_len` to get the number of elements.
+///
+/// # Parameters
+///
+/// - `result`: A handle to the inference result.
+///
+/// # Returns
+///
+/// A pointer to the embedding float array, or null if no embedding output.
+/// The pointer is valid until the result handle is freed.
+///
+/// # Example (C)
+///
+/// ```c
+/// const float* emb = xybrid_result_embedding_data(result);
+/// size_t len = xybrid_result_embedding_len(result);
+/// if (emb != NULL && len > 0) {
+///     printf("Embedding dimension: %zu\n", len);
+/// }
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_embedding_data(
+    result: *mut XybridResultHandle,
+) -> *const f32 {
+    // Don't clear last error - this is a read-only accessor
+    if result.is_null() {
+        return std::ptr::null();
+    }
+
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => match &data.embedding {
+            Some(emb) => emb.as_ptr(),
+            None => std::ptr::null(),
+        },
+        None => std::ptr::null(),
+    }
+}
+
+/// Get the number of elements in the embedding from an inference result.
+///
+/// Returns the number of float elements in the embedding vector,
+/// or 0 if no embedding output or null handle.
+///
+/// # Parameters
+///
+/// - `result`: A handle to the inference result.
+///
+/// # Returns
+///
+/// The number of embedding elements, or 0 if no embedding output.
+///
+/// # Example (C)
+///
+/// ```c
+/// size_t len = xybrid_result_embedding_len(result);
+/// printf("Embedding dimension: %zu\n", len);
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_embedding_len(
+    result: *mut XybridResultHandle,
+) -> usize {
+    // Don't clear last error - this is a read-only accessor
+    if result.is_null() {
+        return 0;
+    }
+
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => match &data.embedding {
+            Some(emb) => emb.len(),
+            None => 0,
+        },
         None => 0,
     }
 }
@@ -4032,6 +4528,93 @@ mod tests {
             xybrid_envelope_free(envelope);
             xybrid_model_free(model);
             xybrid_model_loader_free(loader);
+        }
+    }
+
+    // ================================================================
+    // Tests for xybrid_result_output_type
+    // ================================================================
+
+    #[test]
+    fn test_result_output_type_null_handle() {
+        unsafe {
+            let ptr = xybrid_result_output_type(std::ptr::null_mut());
+            assert!(ptr.is_null());
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires real model from registry
+    fn test_result_output_type_with_model() {
+        let model_id = CString::new("kokoro-82m").unwrap();
+        let text = CString::new("Hello").unwrap();
+
+        unsafe {
+            let loader = xybrid_model_loader_from_registry(model_id.as_ptr());
+            let model = xybrid_model_loader_load(loader);
+            if model.is_null() {
+                xybrid_model_loader_free(loader);
+                return;
+            }
+
+            let envelope = xybrid_envelope_text(text.as_ptr());
+            let result = xybrid_model_run(model, envelope);
+
+            if xybrid_result_success(result) == 1 {
+                let output_type = xybrid_result_output_type(result);
+                assert!(!output_type.is_null());
+                let type_str = CStr::from_ptr(output_type).to_str().unwrap();
+                assert!(
+                    type_str == "text" || type_str == "audio" || type_str == "embedding",
+                    "Unexpected output type: {}",
+                    type_str
+                );
+            }
+
+            xybrid_result_free(result);
+            xybrid_envelope_free(envelope);
+            xybrid_model_free(model);
+            xybrid_model_loader_free(loader);
+        }
+    }
+
+    // ================================================================
+    // Tests for xybrid_result_audio_data / xybrid_result_audio_len
+    // ================================================================
+
+    #[test]
+    fn test_result_audio_data_null_handle() {
+        unsafe {
+            let ptr = xybrid_result_audio_data(std::ptr::null_mut());
+            assert!(ptr.is_null());
+        }
+    }
+
+    #[test]
+    fn test_result_audio_len_null_handle() {
+        unsafe {
+            let len = xybrid_result_audio_len(std::ptr::null_mut());
+            assert_eq!(len, 0);
+        }
+    }
+
+    // ================================================================
+    // Tests for xybrid_result_embedding_data / xybrid_result_embedding_len
+    // ================================================================
+
+    #[test]
+    fn test_result_embedding_data_null_handle() {
+        unsafe {
+            let ptr = xybrid_result_embedding_data(std::ptr::null_mut());
+            assert!(ptr.is_null());
+        }
+    }
+
+    #[test]
+    fn test_result_embedding_len_null_handle() {
+        unsafe {
+            let len = xybrid_result_embedding_len(std::ptr::null_mut());
+            assert_eq!(len, 0);
         }
     }
 }
