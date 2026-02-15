@@ -18,6 +18,77 @@ use crate::runtime_adapter::AdapterError;
 /// Default embedding dimension for voice vectors.
 pub const DEFAULT_EMBEDDING_DIM: usize = 256;
 
+/// A single component of a compound voice ID (e.g., "af_sarah" with weight 0.4).
+#[derive(Debug, Clone, PartialEq)]
+struct VoiceComponent {
+    name: String,
+    weight: f32,
+}
+
+/// Parse a compound voice ID like "af_sarah.4+af_nicole.6" into components.
+///
+/// Returns `None` if the string doesn't contain `+` (not a compound ID) or if
+/// parsing fails (malformed syntax), allowing fallback to single voice behavior.
+fn parse_compound_voice_id(voice_id: &str) -> Option<Vec<VoiceComponent>> {
+    if !voice_id.contains('+') {
+        return None;
+    }
+
+    let parts: Vec<&str> = voice_id.split('+').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let mut components = Vec::with_capacity(parts.len());
+    for part in &parts {
+        let part = part.trim();
+        if part.is_empty() {
+            return None;
+        }
+
+        // Split on last '.' to get (name, weight_digit)
+        if let Some(dot_pos) = part.rfind('.') {
+            let name = &part[..dot_pos];
+            let weight_str = &part[dot_pos + 1..];
+
+            if name.is_empty() {
+                return None;
+            }
+
+            // Weight must be a single digit 0-9
+            if weight_str.len() == 1 {
+                if let Some(digit) = weight_str.chars().next().and_then(|c| c.to_digit(10)) {
+                    components.push(VoiceComponent {
+                        name: name.to_string(),
+                        weight: digit as f32 * 0.1,
+                    });
+                    continue;
+                }
+            }
+            // Failed to parse weight — malformed
+            return None;
+        }
+        // No dot found — malformed compound syntax
+        return None;
+    }
+
+    // Normalize weights to sum to 1.0
+    let total: f32 = components.iter().map(|c| c.weight).sum();
+    if total > 0.0 && (total - 1.0).abs() > f32::EPSILON {
+        for component in &mut components {
+            component.weight /= total;
+        }
+    } else if total == 0.0 {
+        // All weights are zero — distribute equally
+        let equal = 1.0 / components.len() as f32;
+        for component in &mut components {
+            component.weight = equal;
+        }
+    }
+
+    Some(components)
+}
+
 /// Trait for loading voice embeddings.
 ///
 /// This trait enables mocking voice loading in tests without file system access.
@@ -155,7 +226,20 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
         // Step 3: Get voice_id from envelope metadata
         let voice_id = input.metadata.get("voice_id");
 
-        // Step 4: Load embedding based on config style
+        // Step 3.5: Check for compound voice ID (e.g., "af_sarah.4+af_nicole.6")
+        if let Some(vid) = voice_id {
+            if let Some(components) = parse_compound_voice_id(vid) {
+                debug!(
+                    target: "xybrid_core",
+                    "Compound voice ID detected: {} ({} components)",
+                    vid,
+                    components.len()
+                );
+                return self.load_blended_voice(&voice_path, &components, metadata, token_count);
+            }
+        }
+
+        // Step 4: Load embedding based on config style (single voice)
         if let Some(voice_config) = &metadata.voices {
             self.load_with_config_and_token_length(
                 &voice_path,
@@ -343,6 +427,60 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
             self.source.load_by_index(voice_path, 0)
         }
         .map_err(|e| AdapterError::RuntimeError(format!("Failed to load voice embedding: {}", e)))
+    }
+
+    /// Load and blend multiple voice embeddings for compound voice IDs.
+    ///
+    /// Each component voice is loaded individually via the existing voice resolution
+    /// path, then embeddings are combined via element-wise weighted sum.
+    fn load_blended_voice(
+        &self,
+        voice_path: &Path,
+        components: &[VoiceComponent],
+        metadata: &ModelMetadata,
+        token_count: Option<usize>,
+    ) -> ExecutorResult<Vec<f32>> {
+        let mut blended: Option<Vec<f32>> = None;
+
+        for component in components {
+            let voice_id_str = component.name.clone();
+
+            // Load via the existing path — config-aware or legacy
+            let embedding = if let Some(voice_config) = &metadata.voices {
+                self.load_with_config_and_token_length(
+                    voice_path,
+                    voice_config,
+                    metadata,
+                    Some(&voice_id_str),
+                    token_count,
+                )?
+            } else {
+                self.load_legacy(voice_path, Some(&voice_id_str))?
+            };
+
+            match &mut blended {
+                None => {
+                    // First component: scale by weight
+                    blended = Some(embedding.iter().map(|&v| v * component.weight).collect());
+                }
+                Some(acc) => {
+                    if acc.len() != embedding.len() {
+                        return Err(AdapterError::RuntimeError(format!(
+                            "Voice embedding dimension mismatch: expected {}, got {} for '{}'",
+                            acc.len(),
+                            embedding.len(),
+                            component.name
+                        )));
+                    }
+                    for (a, &e) in acc.iter_mut().zip(embedding.iter()) {
+                        *a += e * component.weight;
+                    }
+                }
+            }
+        }
+
+        blended
+            .ok_or_else(|| AdapterError::RuntimeError("No voice components to blend".to_string()))
     }
 }
 
@@ -586,5 +724,191 @@ mod tests {
         let result = loader.load(&metadata, &input).unwrap();
         assert_eq!(result.len(), DEFAULT_EMBEDDING_DIM);
         assert!(result.iter().all(|&v| v == 0.0));
+    }
+
+    // ============================================================================
+    // Compound Voice ID Parsing Tests
+    // ============================================================================
+
+    #[test]
+    fn test_parse_compound_two_voices() {
+        let result = parse_compound_voice_id("af_sarah.4+af_nicole.6").unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "af_sarah");
+        assert_eq!(result[1].name, "af_nicole");
+        assert!((result[0].weight - 0.4).abs() < f32::EPSILON);
+        assert!((result[1].weight - 0.6).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_compound_three_voices() {
+        let result = parse_compound_voice_id("af_heart.3+af_sarah.3+am_adam.4").unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].name, "af_heart");
+        assert_eq!(result[1].name, "af_sarah");
+        assert_eq!(result[2].name, "am_adam");
+        assert!((result[0].weight - 0.3).abs() < f32::EPSILON);
+        assert!((result[1].weight - 0.3).abs() < f32::EPSILON);
+        assert!((result[2].weight - 0.4).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_compound_weight_normalization() {
+        // Weights sum to 0.5, should be normalized to 1.0
+        let result = parse_compound_voice_id("af_sarah.2+af_nicole.3").unwrap();
+        assert_eq!(result.len(), 2);
+        // 0.2 / 0.5 = 0.4, 0.3 / 0.5 = 0.6
+        assert!((result[0].weight - 0.4).abs() < 1e-6);
+        assert!((result[1].weight - 0.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_parse_compound_zero_weights_distribute_equally() {
+        let result = parse_compound_voice_id("af_sarah.0+af_nicole.0").unwrap();
+        assert_eq!(result.len(), 2);
+        assert!((result[0].weight - 0.5).abs() < f32::EPSILON);
+        assert!((result[1].weight - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_single_voice_returns_none() {
+        // No '+' means not a compound voice — return None
+        assert!(parse_compound_voice_id("af_sarah").is_none());
+    }
+
+    #[test]
+    fn test_parse_malformed_no_weight_returns_none() {
+        assert!(parse_compound_voice_id("af_sarah+af_nicole").is_none());
+    }
+
+    #[test]
+    fn test_parse_malformed_multi_digit_weight_returns_none() {
+        assert!(parse_compound_voice_id("af_sarah.40+af_nicole.60").is_none());
+    }
+
+    #[test]
+    fn test_parse_malformed_empty_name_returns_none() {
+        assert!(parse_compound_voice_id(".4+af_nicole.6").is_none());
+    }
+
+    #[test]
+    fn test_parse_malformed_empty_part_returns_none() {
+        assert!(parse_compound_voice_id("af_sarah.4++af_nicole.6").is_none());
+    }
+
+    #[test]
+    fn test_parse_malformed_non_digit_weight_returns_none() {
+        assert!(parse_compound_voice_id("af_sarah.x+af_nicole.6").is_none());
+    }
+
+    // ============================================================================
+    // Compound Voice Blending Tests (with Mock)
+    // ============================================================================
+
+    #[test]
+    fn test_load_blended_voice_two_voices() {
+        // voice_a = [1.0, 0.0, 0.0], voice_b = [0.0, 1.0, 0.0]
+        // 40% a + 60% b = [0.4, 0.6, 0.0]
+        let source = MockVoiceSource::new()
+            .with_voice_by_name("voice_a", vec![1.0, 0.0, 0.0])
+            .with_voice_by_name("voice_b", vec![0.0, 1.0, 0.0]);
+        let loader = TtsVoiceLoader::with_source("/models", source);
+
+        let components = vec![
+            VoiceComponent {
+                name: "voice_a".to_string(),
+                weight: 0.4,
+            },
+            VoiceComponent {
+                name: "voice_b".to_string(),
+                weight: 0.6,
+            },
+        ];
+
+        // Use legacy path (no voice config) for simplicity
+        let metadata = ModelMetadata::onnx("test", "1.0", "model.onnx");
+        let result = loader
+            .load_blended_voice(
+                Path::new("/models/voices.npz"),
+                &components,
+                &metadata,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(result.len(), 3);
+        assert!((result[0] - 0.4).abs() < f32::EPSILON);
+        assert!((result[1] - 0.6).abs() < f32::EPSILON);
+        assert!((result[2] - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_load_blended_voice_three_voices() {
+        let source = MockVoiceSource::new()
+            .with_voice_by_name("a", vec![1.0, 0.0, 0.0])
+            .with_voice_by_name("b", vec![0.0, 1.0, 0.0])
+            .with_voice_by_name("c", vec![0.0, 0.0, 1.0]);
+        let loader = TtsVoiceLoader::with_source("/models", source);
+
+        let components = vec![
+            VoiceComponent {
+                name: "a".to_string(),
+                weight: 0.2,
+            },
+            VoiceComponent {
+                name: "b".to_string(),
+                weight: 0.3,
+            },
+            VoiceComponent {
+                name: "c".to_string(),
+                weight: 0.5,
+            },
+        ];
+
+        let metadata = ModelMetadata::onnx("test", "1.0", "model.onnx");
+        let result = loader
+            .load_blended_voice(
+                Path::new("/models/voices.npz"),
+                &components,
+                &metadata,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(result.len(), 3);
+        assert!((result[0] - 0.2).abs() < f32::EPSILON);
+        assert!((result[1] - 0.3).abs() < f32::EPSILON);
+        assert!((result[2] - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_load_blended_voice_dimension_mismatch() {
+        let source = MockVoiceSource::new()
+            .with_voice_by_name("a", vec![1.0, 0.0])
+            .with_voice_by_name("b", vec![0.0, 1.0, 0.0]); // Different dim
+        let loader = TtsVoiceLoader::with_source("/models", source);
+
+        let components = vec![
+            VoiceComponent {
+                name: "a".to_string(),
+                weight: 0.5,
+            },
+            VoiceComponent {
+                name: "b".to_string(),
+                weight: 0.5,
+            },
+        ];
+
+        let metadata = ModelMetadata::onnx("test", "1.0", "model.onnx");
+        let result = loader.load_blended_voice(
+            Path::new("/models/voices.npz"),
+            &components,
+            &metadata,
+            None,
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("dimension mismatch"));
     }
 }

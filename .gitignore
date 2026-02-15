@@ -33,3 +33,5 @@ rust-project.json
 
 # Test artifacts
 *.log
+
+*.wav

@@ -70,6 +70,7 @@ pub fn apply_preprocessing_step(
             language,
             add_padding,
             normalize_text,
+            silence_tokens,
         } => {
             let tokens_path = resolve_file_path(base_path, tokens_file);
             let dict_path = dict_file.as_ref().map(|p| resolve_file_path(base_path, p));
@@ -81,6 +82,7 @@ pub fn apply_preprocessing_step(
                 language.as_deref(),
                 *add_padding,
                 *normalize_text,
+                silence_tokens.unwrap_or(0),
             )
         }
 

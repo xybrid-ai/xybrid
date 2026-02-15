@@ -1326,10 +1326,21 @@ impl TemplateExecutor {
         }
     }
 
+    /// Break words used as secondary split points for center-break chunking.
+    const BREAK_WORDS: &'static [&'static str] = &[
+        "and", "or", "but", "because", "if", "however", "which", "when", "where", "while",
+        "although", "since", "unless", "after", "before", "that",
+    ];
+
     /// Split text into chunks at sentence boundaries for TTS.
     ///
-    /// This ensures each chunk is within the model's token limit while
-    /// preserving natural speech breaks.
+    /// Uses a center-break algorithm for oversized sentences: splits at the
+    /// natural break point nearest to the center of the text, with priority
+    /// (1) comma, (2) break word, (3) whitespace. Recursive splitting handles
+    /// chunks that remain too long (max depth 3).
+    ///
+    /// A post-pass migrates trailing break words from the end of one chunk
+    /// to the start of the next chunk for more natural prosody.
     fn chunk_text_for_tts(text: &str, max_chars: usize) -> Vec<String> {
         if text.len() <= max_chars {
             return vec![text.to_string()];
@@ -1347,7 +1358,6 @@ impl TemplateExecutor {
                 continue;
             }
 
-            // If single sentence is too long, split at commas or spaces
             if sentence.len() > max_chars {
                 // Flush current chunk first
                 if !current_chunk.is_empty() {
@@ -1355,17 +1365,18 @@ impl TemplateExecutor {
                     current_chunk = String::new();
                 }
 
-                // Split long sentence at commas or spaces
-                let mut remaining = sentence;
-                while remaining.len() > max_chars {
-                    let split_at = remaining[..max_chars]
-                        .rfind(|c: char| c == ',' || c.is_whitespace())
-                        .unwrap_or(max_chars);
-                    chunks.push(remaining[..split_at].trim().to_string());
-                    remaining = remaining[split_at..].trim_start_matches(',').trim();
-                }
-                if !remaining.is_empty() {
-                    current_chunk = remaining.to_string();
+                // Center-break split with recursive depth
+                let mut sub_chunks = Vec::new();
+                Self::center_break_split(sentence, max_chars, 0, &mut sub_chunks);
+
+                // Add all sub-chunks except the last to output, keep last as current
+                if let Some(last) = sub_chunks.pop() {
+                    for sc in sub_chunks {
+                        if !sc.is_empty() {
+                            chunks.push(sc);
+                        }
+                    }
+                    current_chunk = last;
                 }
             } else if current_chunk.len() + sentence.len() + 1 > max_chars {
                 // Current chunk would exceed limit, start new chunk
@@ -1387,7 +1398,147 @@ impl TemplateExecutor {
             chunks.push(current_chunk.trim().to_string());
         }
 
+        // Post-pass: migrate trailing break words
+        Self::migrate_trailing_break_words(&mut chunks);
+
         chunks
+    }
+
+    /// Recursively split text at the natural break point nearest to center.
+    ///
+    /// Priority: (1) comma nearest center, (2) break word nearest center,
+    /// (3) whitespace nearest center.
+    fn center_break_split(text: &str, max_chars: usize, depth: usize, out: &mut Vec<String>) {
+        const MAX_DEPTH: usize = 3;
+
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        if trimmed.len() <= max_chars || depth >= MAX_DEPTH {
+            out.push(trimmed.to_string());
+            return;
+        }
+
+        let center = trimmed.len() / 2;
+
+        // Priority 1: comma nearest center
+        if let Some(pos) = Self::find_nearest(trimmed, center, |i, _| {
+            trimmed.as_bytes().get(i) == Some(&b',')
+        }) {
+            let left = trimmed[..=pos].trim();
+            let right = trimmed[pos + 1..].trim();
+            Self::center_break_split(left, max_chars, depth + 1, out);
+            Self::center_break_split(right, max_chars, depth + 1, out);
+            return;
+        }
+
+        // Priority 2: break word nearest center (match at word boundary)
+        if let Some((word_start, word_len)) = Self::find_nearest_break_word(trimmed, center) {
+            let left = trimmed[..word_start].trim();
+            let right = trimmed[word_start + word_len..].trim();
+            // Include the break word with the right chunk (post-pass may move it)
+            let break_word = &trimmed[word_start..word_start + word_len];
+            Self::center_break_split(left, max_chars, depth + 1, out);
+            let right_with_word = format!("{} {}", break_word, right);
+            Self::center_break_split(right_with_word.trim(), max_chars, depth + 1, out);
+            return;
+        }
+
+        // Priority 3: whitespace nearest center
+        if let Some(pos) = Self::find_nearest(trimmed, center, |i, _| {
+            trimmed
+                .as_bytes()
+                .get(i)
+                .is_some_and(|b| b.is_ascii_whitespace())
+        }) {
+            let left = trimmed[..pos].trim();
+            let right = trimmed[pos + 1..].trim();
+            Self::center_break_split(left, max_chars, depth + 1, out);
+            Self::center_break_split(right, max_chars, depth + 1, out);
+            return;
+        }
+
+        // No split point found — push as-is
+        out.push(trimmed.to_string());
+    }
+
+    /// Find the position nearest to `center` where the predicate matches.
+    /// Searches outward from center in both directions simultaneously.
+    fn find_nearest<F>(text: &str, center: usize, pred: F) -> Option<usize>
+    where
+        F: Fn(usize, char) -> bool,
+    {
+        let len = text.len();
+        for offset in 0..len {
+            // Check right of center
+            let right = center + offset;
+            if right < len {
+                if let Some(ch) = text[right..].chars().next() {
+                    if pred(right, ch) {
+                        return Some(right);
+                    }
+                }
+            }
+            // Check left of center
+            if offset > 0 && offset <= center {
+                let left = center - offset;
+                if let Some(ch) = text[left..].chars().next() {
+                    if pred(left, ch) {
+                        return Some(left);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Find the break word nearest to center, returning (start_byte, word_byte_len).
+    fn find_nearest_break_word(text: &str, center: usize) -> Option<(usize, usize)> {
+        let lower = text.to_lowercase();
+        let mut best: Option<(usize, usize, usize)> = None; // (start, len, distance)
+
+        for word in Self::BREAK_WORDS {
+            let pattern = format!(" {} ", word);
+            let mut search_start = 0;
+            while let Some(pos) = lower[search_start..].find(&pattern) {
+                let abs_pos = search_start + pos + 1; // +1 to skip leading space
+                let dist = abs_pos.abs_diff(center);
+                if best.is_none() || dist < best.unwrap().2 {
+                    best = Some((abs_pos, word.len(), dist));
+                }
+                search_start = search_start + pos + 1;
+            }
+        }
+
+        best.map(|(start, len, _)| (start, len))
+    }
+
+    /// Post-pass: if a chunk ends with a break word, move it to the start of the next chunk.
+    fn migrate_trailing_break_words(chunks: &mut [String]) {
+        let mut i = 0;
+        while i + 1 < chunks.len() {
+            let ends_with_break = Self::BREAK_WORDS.iter().any(|w| {
+                let chunk = &chunks[i];
+                let lower = chunk.to_lowercase();
+                lower.ends_with(&format!(" {}", w)) || lower == *w
+            });
+
+            if ends_with_break {
+                // Find the break word at the end
+                let chunk = chunks[i].clone();
+                if let Some(last_space) = chunk.rfind(' ') {
+                    let word = &chunk[last_space + 1..];
+                    let lower_word = word.to_lowercase();
+                    if Self::BREAK_WORDS.contains(&lower_word.as_str()) {
+                        chunks[i] = chunk[..last_space].trim().to_string();
+                        chunks[i + 1] = format!("{} {}", word, chunks[i + 1]);
+                    }
+                }
+            }
+            i += 1;
+        }
     }
 
     /// Execute TTS with automatic chunking for long text.
@@ -1439,8 +1590,12 @@ impl TemplateExecutor {
         debug!(target: "xybrid_core", "TTS: Split into {} chunks", chunks.len());
 
         // Process each chunk and collect audio
-        let mut all_audio: Vec<f32> = Vec::new();
+        // Crossfade length: 480 samples (~20ms at 24kHz)
+        const CROSSFADE_SAMPLES: usize = 480;
+
+        let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
         let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        let speed = extract_tts_speed(input);
 
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(target: "xybrid_core", "TTS: Processing chunk {}/{}: {} chars", i + 1, chunks.len(), chunk.len());
@@ -1466,14 +1621,17 @@ impl TemplateExecutor {
             let voice_embedding = voice_loader.load(metadata, input)?;
 
             // Run TTS inference
-            let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
+            let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
 
             // Extract audio from outputs
             if let Some(audio_tensor) = raw_outputs.values().next() {
                 let chunk_audio: Vec<f32> = audio_tensor.iter().cloned().collect();
-                all_audio.extend(chunk_audio);
+                audio_chunks.push(chunk_audio);
             }
         }
+
+        // Concatenate chunks with crossfading
+        let all_audio = crossfade_audio_chunks(&audio_chunks, CROSSFADE_SAMPLES);
 
         debug!(target: "xybrid_core", "TTS: Total audio samples: {}", all_audio.len());
 
@@ -1529,7 +1687,8 @@ impl TemplateExecutor {
 
         // Create and run TTS session
         let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
-        let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
+        let speed = extract_tts_speed(input);
+        let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
 
         // Run postprocessing
         self.run_postprocessing(metadata, RawOutputs::TensorMap(raw_outputs))
@@ -1543,6 +1702,69 @@ impl TemplateExecutor {
             .iter()
             .any(|step| matches!(step, PreprocessingStep::Phonemize { .. }))
     }
+}
+
+/// Extract TTS speed from envelope metadata, clamped to [0.5, 2.0].
+///
+/// Reads the "speed" key from `envelope.metadata`. Returns 1.0 if absent or
+/// unparseable. Logs a warning if the value is outside the valid range.
+pub(crate) fn extract_tts_speed(envelope: &Envelope) -> f32 {
+    let speed = envelope
+        .metadata
+        .get("speed")
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(1.0);
+
+    if !(0.5..=2.0).contains(&speed) {
+        warn!(
+            "TTS speed {:.2} is outside valid range [0.5, 2.0], clamping",
+            speed
+        );
+        return speed.clamp(0.5, 2.0);
+    }
+
+    speed
+}
+
+/// Concatenate audio chunks with linear crossfading at boundaries.
+///
+/// Applies a linear crossfade of `crossfade_len` samples between adjacent chunks.
+/// Single-chunk input is returned as-is. Chunks shorter than `2 * crossfade_len`
+/// skip crossfading for that boundary (safety guard).
+fn crossfade_audio_chunks(chunks: &[Vec<f32>], crossfade_len: usize) -> Vec<f32> {
+    if chunks.is_empty() {
+        return Vec::new();
+    }
+    if chunks.len() == 1 {
+        return chunks[0].clone();
+    }
+
+    // Start with the first chunk
+    let mut result = chunks[0].clone();
+
+    for chunk in &chunks[1..] {
+        // Skip crossfading if either the current result tail or the new chunk head
+        // is too short for the crossfade
+        if result.len() < 2 * crossfade_len || chunk.len() < 2 * crossfade_len {
+            result.extend(chunk);
+            continue;
+        }
+
+        let overlap_start = result.len() - crossfade_len;
+
+        // Apply crossfade in the overlap region
+        for i in 0..crossfade_len {
+            let t = (i + 1) as f32 / (crossfade_len + 1) as f32;
+            let fade_out = 1.0 - t;
+            let fade_in = t;
+            result[overlap_start + i] = result[overlap_start + i] * fade_out + chunk[i] * fade_in;
+        }
+
+        // Append the rest of the new chunk (after the overlap region)
+        result.extend_from_slice(&chunk[crossfade_len..]);
+    }
+
+    result
 }
 
 impl Default for TemplateExecutor {
@@ -1631,9 +1853,10 @@ mod tests {
 
     #[test]
     fn test_chunk_text_short_input_unchanged() {
-        let text = "Hello world.";
+        // (a) text under 350 chars returns single chunk
+        let text = "Hello world, this is a short sentence that is well under the limit.";
         let chunks = TemplateExecutor::chunk_text_for_tts(text, 350);
-        assert_eq!(chunks, vec!["Hello world."]);
+        assert_eq!(chunks, vec![text]);
     }
 
     #[test]
@@ -1658,7 +1881,6 @@ mod tests {
     fn test_chunk_text_combines_short_sentences() {
         let text = "Hi. Hello. Hey there.";
         let chunks = TemplateExecutor::chunk_text_for_tts(text, 50);
-        // All sentences fit in one chunk
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0], "Hi. Hello. Hey there.");
     }
@@ -1674,20 +1896,96 @@ mod tests {
     }
 
     #[test]
-    fn test_chunk_text_splits_long_sentence_at_comma() {
-        let text =
-            "This is a very long sentence, with a comma in the middle, that exceeds the limit.";
-        let chunks = TemplateExecutor::chunk_text_for_tts(text, 40);
-        // Should split at commas when sentence exceeds limit
-        assert!(chunks.len() >= 2);
-        assert!(chunks.iter().all(|c| c.len() <= 40));
+    fn test_chunk_text_center_break_comma() {
+        // (b) 350+ char text with comma splits at comma nearest center
+        // Build a long sentence with a comma near the center
+        let left = "The quick brown fox jumped over the lazy dog and ran across the wide green meadow towards the old wooden fence in the distance while the birds sang their morning songs above the tall oak trees lining the path";
+        let right = " and then it stopped to rest under the shade of a willow tree by the river where the water flowed gently over smooth stones and the fish swam lazily in the warm afternoon sun as clouds drifted slowly overhead";
+        let text = format!("{},{}", left, right);
+        assert!(
+            text.len() > 350,
+            "Test text must exceed 350 chars, got {}",
+            text.len()
+        );
+
+        let chunks = TemplateExecutor::chunk_text_for_tts(&text, 350);
+        assert!(chunks.len() >= 2, "Should split into at least 2 chunks");
+        // The first chunk should end with a comma (split at comma nearest center)
+        assert!(
+            chunks[0].ends_with(','),
+            "First chunk should end at comma, got: '{}'",
+            chunks[0]
+        );
     }
 
     #[test]
-    fn test_chunk_text_splits_long_sentence_at_space() {
-        let text = "Thisisaverylongwordwithoutspaces but then some normal words follow here.";
-        let chunks = TemplateExecutor::chunk_text_for_tts(text, 30);
-        assert!(chunks.len() >= 2);
+    fn test_chunk_text_center_break_word() {
+        // (c) 350+ char text with break word and no comma splits at break word nearest center
+        let text = "The quick brown fox jumped over the lazy dog running across the wide green meadow towards the old wooden fence in the distance while birds sang their morning songs above the tall oak trees however the gentle breeze carried the sweet scent of wildflowers across the rolling hills and through the valleys where deer grazed peacefully in the golden light of the setting sun painting everything in warm hues";
+        assert!(
+            text.len() > 350,
+            "Test text must exceed 350 chars, got {}",
+            text.len()
+        );
+        // Verify no commas in the text
+        assert!(!text.contains(','), "Test text should have no commas");
+
+        let chunks = TemplateExecutor::chunk_text_for_tts(text, 350);
+        assert!(chunks.len() >= 2, "Should split into at least 2 chunks");
+        // After post-pass migration, chunks[1] should start with the break word "however"
+        let second_lower = chunks[1].to_lowercase();
+        let starts_with_break = TemplateExecutor::BREAK_WORDS
+            .iter()
+            .any(|w| second_lower.starts_with(w));
+        assert!(
+            starts_with_break,
+            "Second chunk should start with a break word after post-pass, got: '{}'",
+            &chunks[1][..chunks[1].len().min(40)]
+        );
+    }
+
+    #[test]
+    fn test_chunk_text_center_break_whitespace() {
+        // (d) 350+ char text with only whitespace splits at space nearest center
+        // No commas, no break words — only plain words
+        let text = "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq rrrr ssss tttt uuuu vvvv wwww xxxx yyyy zzzz aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq rrrr ssss tttt uuuu vvvv wwww xxxx yyyy zzzz aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq rrrr ssss tttt uuuu";
+        assert!(
+            text.len() > 350,
+            "Test text must exceed 350 chars, got {}",
+            text.len()
+        );
+        assert!(!text.contains(','), "No commas");
+
+        let chunks = TemplateExecutor::chunk_text_for_tts(text, 350);
+        assert!(chunks.len() >= 2, "Should split into at least 2 chunks");
+        // Each chunk should be trimmed and non-empty
+        for chunk in &chunks {
+            assert!(!chunk.is_empty(), "Chunks should not be empty");
+            assert_eq!(chunk.as_str(), chunk.trim(), "Chunks should be trimmed");
+        }
+    }
+
+    #[test]
+    fn test_chunk_text_multi_sentence_long_first() {
+        // (e) multi-sentence text where first sentence >350 chars gets center-break split
+        //     while short second sentence stays intact
+        let long_sentence = "The magnificent cathedral stood tall against the stormy sky its ancient stone walls bearing witness to centuries of history while gargoyles perched on every corner watched over the bustling city below where merchants sold their wares in the cobblestone market square filled with the aroma of freshly baked bread and exotic spices brought by traders from distant lands across vast oceans and treacherous mountain passes.";
+        let short_sentence = " A bird sang nearby.";
+        let text = format!("{}{}", long_sentence, short_sentence);
+        assert!(
+            long_sentence.len() > 350,
+            "First sentence must exceed 350 chars"
+        );
+
+        let chunks = TemplateExecutor::chunk_text_for_tts(&text, 350);
+        assert!(chunks.len() >= 2, "Should split into at least 2 chunks");
+        // The last chunk should contain the short sentence
+        let last = chunks.last().unwrap();
+        assert!(
+            last.contains("A bird sang nearby"),
+            "Short sentence should be intact in last chunk, got: '{}'",
+            last
+        );
     }
 
     #[test]
@@ -1699,7 +1997,6 @@ mod tests {
     #[test]
     fn test_chunk_text_whitespace_only() {
         let chunks = TemplateExecutor::chunk_text_for_tts("   ", 350);
-        // Should handle gracefully - either empty or trimmed
         assert!(chunks.is_empty() || chunks.iter().all(|c| c.trim().is_empty()));
     }
 
@@ -1709,10 +2006,33 @@ mod tests {
             "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.";
         let chunks = TemplateExecutor::chunk_text_for_tts(text, 50);
         let rejoined: String = chunks.join(" ");
-        // All words should be preserved (though spacing might differ slightly)
         assert!(rejoined.contains("quick"));
         assert!(rejoined.contains("fox"));
         assert!(rejoined.contains("liquor"));
+    }
+
+    #[test]
+    fn test_chunk_text_post_pass_break_word_migration() {
+        // Verify the post-pass migration: if chunk ends with break word, it moves to next chunk
+        // Use a shorter max to make behavior predictable
+        let text =
+            "The fox ran fast and the dog chased it quickly through the woods and over the hill.";
+        let chunks = TemplateExecutor::chunk_text_for_tts(text, 30);
+        // No chunk should end with a standalone break word (post-pass moves them)
+        for (i, chunk) in chunks.iter().enumerate() {
+            if i + 1 < chunks.len() {
+                let lower = chunk.to_lowercase();
+                for w in TemplateExecutor::BREAK_WORDS {
+                    assert!(
+                        !lower.ends_with(&format!(" {}", w)),
+                        "Chunk {} should not end with break word '{}': '{}'",
+                        i,
+                        w,
+                        chunk
+                    );
+                }
+            }
+        }
     }
 
     // ============================================================================
@@ -1729,6 +2049,7 @@ mod tests {
                 language: None,
                 add_padding: true,
                 normalize_text: false,
+                silence_tokens: None,
             },
         );
         assert!(TemplateExecutor::is_tts_model(&metadata));
@@ -1765,6 +2086,7 @@ mod tests {
                 language: None,
                 add_padding: true,
                 normalize_text: false,
+                silence_tokens: None,
             });
         assert!(TemplateExecutor::is_tts_model(&metadata));
     }
@@ -1977,5 +2299,107 @@ mod tests {
         // Default should be ChatML when None
         let default: ChatTemplateFormat = Default::default();
         assert_eq!(default, ChatTemplateFormat::ChatML);
+    }
+
+    // ============================================================================
+    // Crossfade Tests
+    // ============================================================================
+
+    #[test]
+    fn test_crossfade_empty_chunks() {
+        let chunks: Vec<Vec<f32>> = vec![];
+        let result = crossfade_audio_chunks(&chunks, 480);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_crossfade_single_chunk_unchanged() {
+        let chunk = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let result = crossfade_audio_chunks(std::slice::from_ref(&chunk), 480);
+        assert_eq!(result, chunk);
+    }
+
+    #[test]
+    fn test_crossfade_two_chunks() {
+        let crossfade_len = 4;
+        // Chunk A: 10 samples of 1.0
+        let chunk_a = vec![1.0; 10];
+        // Chunk B: 10 samples of 0.0
+        let chunk_b = vec![0.0; 10];
+
+        let result = crossfade_audio_chunks(&[chunk_a, chunk_b], crossfade_len);
+
+        // Result length: 10 + 10 - 4 (overlap) = 16
+        assert_eq!(result.len(), 16);
+
+        // First 6 samples: unchanged from chunk_a (before overlap)
+        for &v in &result[..6] {
+            assert!((v - 1.0).abs() < 1e-6);
+        }
+
+        // Overlap region (4 samples): linear blend from 1.0 to 0.0
+        // t = (i+1) / (crossfade_len+1), fade_out = 1-t, fade_in = t
+        // result[6+i] = 1.0 * (1-t) + 0.0 * t = 1-t
+        for i in 0..crossfade_len {
+            let t = (i + 1) as f32 / (crossfade_len + 1) as f32;
+            let expected = 1.0 - t;
+            assert!(
+                (result[6 + i] - expected).abs() < 1e-6,
+                "at overlap index {i}: got {}, expected {expected}",
+                result[6 + i]
+            );
+        }
+
+        // Last 6 samples: from chunk_b after overlap
+        for &v in &result[10..] {
+            assert!((v - 0.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_crossfade_three_chunks() {
+        let crossfade_len = 2;
+        let chunk_a = vec![1.0; 8];
+        let chunk_b = vec![0.5; 8];
+        let chunk_c = vec![0.0; 8];
+
+        let result = crossfade_audio_chunks(&[chunk_a, chunk_b, chunk_c], crossfade_len);
+
+        // Length: 8 + (8 - 2) + (8 - 2) = 20
+        assert_eq!(result.len(), 20);
+    }
+
+    #[test]
+    fn test_crossfade_short_chunk_skips_crossfade() {
+        let crossfade_len = 4;
+        // Chunk too short (len < 2 * crossfade_len = 8)
+        let chunk_a = vec![1.0; 10];
+        let chunk_b = vec![0.5; 6]; // Too short for crossfade
+
+        let result = crossfade_audio_chunks(&[chunk_a, chunk_b], crossfade_len);
+
+        // Should be simple concatenation (no crossfade)
+        assert_eq!(result.len(), 16);
+        assert!((result[9] - 1.0).abs() < 1e-6);
+        assert!((result[10] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_crossfade_preserves_total_energy() {
+        // When both chunks have the same constant value, crossfade should preserve it
+        let crossfade_len = 4;
+        let chunk_a = vec![0.5; 10];
+        let chunk_b = vec![0.5; 10];
+
+        let result = crossfade_audio_chunks(&[chunk_a, chunk_b], crossfade_len);
+
+        // In the overlap region: 0.5 * fade_out + 0.5 * fade_in = 0.5 * (fade_out + fade_in) = 0.5
+        // since fade_out + fade_in = 1.0
+        for &v in &result {
+            assert!(
+                (v - 0.5).abs() < 1e-6,
+                "expected 0.5, got {v} — crossfade should preserve constant signal"
+            );
+        }
     }
 }
