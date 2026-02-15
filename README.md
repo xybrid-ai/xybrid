@@ -47,7 +47,7 @@ Every SDK wraps the same Rust core — identical model support and behavior acro
 
 **Unity** — Package Manager → Add from git URL:
 
-```
+```unity
 https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
 ```
 
@@ -64,7 +64,7 @@ dependencies:
 
 **Kotlin (Android)** — add to your `build.gradle.kts`:
 
-```kotlin
+```gradle
 dependencies {
     implementation("ai.xybrid:xybrid-kotlin:0.1.0-alpha3")
 }
@@ -81,7 +81,7 @@ See each SDK's README for platform-specific setup: [Flutter](bindings/flutter/) 
 Run a model in one line from the CLI, or three lines from any SDK:
 
 **CLI:**
-```bash
+```sh
 xybrid run kokoro-82m --input "Hello world" -o output.wav
 ```
 
@@ -134,7 +134,7 @@ stages:
 ```
 
 **CLI:**
-```bash
+```sh
 xybrid run voice-assistant.yaml --input question.wav -o response.wav
 ```
 
