@@ -89,7 +89,9 @@ fn parse_args() -> Args {
                 println!("Usage: tts_kokoro [OPTIONS] [TEXT]");
                 println!();
                 println!("Options:");
-                println!("  --voice, -v <ID>      Select voice (e.g., af_bella, af_heart.5+am_adam.5)");
+                println!(
+                    "  --voice, -v <ID>      Select voice (e.g., af_bella, af_heart.5+am_adam.5)"
+                );
                 println!("  --silence-tokens, -s <N>  Prepend N silence tokens before speech (default: from model config)");
                 println!("  --speed <FLOAT>       Speech speed 0.5-2.0 (default: 1.0)");
                 println!("  --long-text           Use a built-in 400+ char paragraph (tests center-break + crossfade)");
@@ -143,10 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Override silence_tokens in Phonemize step if requested
     if let Some(st) = args.silence_tokens {
         for step in &mut metadata.preprocessing {
-            if let PreprocessingStep::Phonemize {
-                silence_tokens, ..
-            } = step
-            {
+            if let PreprocessingStep::Phonemize { silence_tokens, .. } = step {
                 *silence_tokens = Some(st);
             }
         }
@@ -191,10 +190,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Determine which voice to use
     // Compound voice IDs (e.g., "af_heart.5+am_adam.5") bypass catalog lookup
-    let is_compound = args
-        .voice_id
-        .as_ref()
-        .is_some_and(|vid| vid.contains('+'));
+    let is_compound = args.voice_id.as_ref().is_some_and(|vid| vid.contains('+'));
 
     let voice_id_for_envelope = if is_compound {
         let vid = args.voice_id.as_ref().unwrap();
@@ -330,7 +326,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("    cargo run -p xybrid-core --example tts_kokoro -- --voice bf_emma");
     println!();
     println!("  Voice mixing:");
-    println!("    cargo run -p xybrid-core --example tts_kokoro -- --voice \"af_heart.5+am_adam.5\"");
+    println!(
+        "    cargo run -p xybrid-core --example tts_kokoro -- --voice \"af_heart.5+am_adam.5\""
+    );
     println!("    cargo run -p xybrid-core --example tts_kokoro -- --voice \"af_bella.3+af_nicole.3+af_heart.4\"");
     println!();
     println!("  Silence tokens (smooth plosive onsets):");
@@ -349,7 +347,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("  Combine options:");
     println!("    cargo run -p xybrid-core --example tts_kokoro -- -v af_bella -s 2 --speed 0.9 \"Hello world\"");
-    println!("    cargo run -p xybrid-core --example tts_kokoro -- --long-text --speed 0.8 -v am_adam");
+    println!(
+        "    cargo run -p xybrid-core --example tts_kokoro -- --long-text --speed 0.8 -v am_adam"
+    );
     println!();
     println!("  List all voices:");
     println!("    cargo run -p xybrid-core --example tts_kokoro -- --list-voices");
