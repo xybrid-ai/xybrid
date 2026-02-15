@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::{ExecutionContext, ExecutionStrategy};
+use crate::execution::executor::extract_tts_speed;
 use crate::execution::modes::execute_tts_inference;
 use crate::execution::template::{
     ExecutionTemplate, ModelMetadata, PostprocessingStep, PreprocessingStep,
@@ -142,7 +143,8 @@ impl TtsStrategy {
 
         // Create and run TTS session
         let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
-        let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
+        let speed = extract_tts_speed(input);
+        let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
 
         // Run postprocessing
         self.run_postprocessing(ctx, metadata, RawOutputs::TensorMap(raw_outputs))
@@ -190,6 +192,7 @@ impl TtsStrategy {
         // Process each chunk and collect audio
         let mut all_audio: Vec<f32> = Vec::new();
         let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        let speed = extract_tts_speed(input);
 
         // Compute inter-chunk silence (e.g. 200ms at 24kHz = 4800 zero samples)
         let sample_rate = Self::get_sample_rate(metadata);
@@ -239,7 +242,7 @@ impl TtsStrategy {
             )?;
 
             // Run TTS inference
-            let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding)?;
+            let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
 
             // Extract audio from outputs
             if let Some(audio_tensor) = raw_outputs.values().next() {
@@ -382,6 +385,7 @@ mod tests {
                 language: None,
                 add_padding: true,
                 normalize_text: false,
+                silence_tokens: None,
             },
         );
 
@@ -406,6 +410,7 @@ mod tests {
                 language: None,
                 add_padding: true,
                 normalize_text: false,
+                silence_tokens: None,
             },
         );
 

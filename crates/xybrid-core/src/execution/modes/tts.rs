@@ -28,6 +28,7 @@ pub fn execute_tts_inference(
     session: &ONNXSession,
     phoneme_ids: &[i64],
     voice_embedding: Vec<f32>,
+    speed: f32,
 ) -> ExecutorResult<HashMap<String, ArrayD<f32>>> {
     let input_names = session.input_names();
     let input_shapes = session.input_shapes();
@@ -83,7 +84,7 @@ pub fn execute_tts_inference(
                 value_inputs.insert(input_name.clone(), val);
             }
             TtsInputKind::Speed => {
-                let arr = Array1::<f32>::from_vec(vec![1.0]);
+                let arr = Array1::<f32>::from_vec(vec![speed]);
                 let val: Value = Value::from_array(arr)
                     .map_err(|e| {
                         AdapterError::InvalidInput(format!(

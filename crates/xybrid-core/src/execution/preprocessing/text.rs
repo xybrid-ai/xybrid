@@ -80,6 +80,10 @@ pub fn tokenize_step(
     })
 }
 
+/// Silence token ID in the Kokoro vocabulary.
+/// Used by `silence_tokens` to prepend silence before speech onset.
+const KOKORO_SILENCE_TOKEN_ID: i64 = 30;
+
 /// Phonemize text input for TTS models.
 ///
 /// Converts English text to IPA phonemes using either CMU Dictionary or espeak-ng,
@@ -93,6 +97,7 @@ pub fn tokenize_step(
 /// - `language`: Language code for espeak-ng (e.g., "en-us", "en-gb")
 /// - `add_padding`: Whether to add padding tokens (0) at start and end
 /// - `normalize_text`: Whether to normalize text before phonemization
+/// - `silence_tokens`: Number of silence tokens (ID 30) to prepend before speech onset
 pub fn phonemize_step(
     data: PreprocessedData,
     tokens_path: &str,
@@ -101,6 +106,7 @@ pub fn phonemize_step(
     language: Option<&str>,
     add_padding: bool,
     normalize_text: bool,
+    silence_tokens: u8,
 ) -> ExecutorResult<PreprocessedData> {
     use crate::phonemizer::load_tokens_map;
 
@@ -142,6 +148,14 @@ pub fn phonemize_step(
 
     if add_padding {
         ids.push(0); // Start padding token
+    }
+
+    // Prepend silence tokens for plosive onset smoothing
+    if silence_tokens > 0 {
+        ids.extend(std::iter::repeat_n(
+            KOKORO_SILENCE_TOKEN_ID,
+            silence_tokens as usize,
+        ));
     }
 
     for c in phonemes.chars() {
@@ -187,6 +201,15 @@ pub fn normalize_text_for_tts(text: &str) -> String {
     // to use directly instead of dictionary lookup.
     // e.g. "[Kokoro](/kˈOkəɹO/)" → "\x01kˈOkəɹO\x02"
     result = parse_phoneme_links(&result);
+
+    // Map CJK punctuation to ASCII equivalents
+    result = result.replace('\u{3001}', ", "); // 、 → comma+space
+    result = result.replace('\u{3002}', ". "); // 。 → period+space
+    result = result.replace('\u{FF01}', "! "); // ！ → exclamation+space
+    result = result.replace('\u{FF0C}', ", "); // ， → comma+space
+    result = result.replace('\u{FF1A}', ": "); // ： → colon+space
+    result = result.replace('\u{FF1B}', "; "); // ； → semicolon+space
+    result = result.replace('\u{FF1F}', "? "); // ？ → question+space
 
     // Normalize quotes
     result = result.replace(['\u{2018}', '\u{2019}'], "'");
@@ -595,6 +618,24 @@ mod tests {
         assert_eq!(result, "Doctor Smith and Mister Jones");
     }
 
+    #[test]
+    fn test_cjk_punctuation_normalization() {
+        // U+3001 (、) -> ', '
+        assert_eq!(normalize_text_for_tts("hello\u{3001}world"), "hello, world");
+        // U+3002 (。) -> '. '
+        assert_eq!(normalize_text_for_tts("hello\u{3002}world"), "hello. world");
+        // U+FF01 (！) -> '! '
+        assert_eq!(normalize_text_for_tts("hello\u{FF01}world"), "hello! world");
+        // U+FF0C (，) -> ', '
+        assert_eq!(normalize_text_for_tts("hello\u{FF0C}world"), "hello, world");
+        // U+FF1A (：) -> ': '
+        assert_eq!(normalize_text_for_tts("hello\u{FF1A}world"), "hello: world");
+        // U+FF1B (；) -> '; '
+        assert_eq!(normalize_text_for_tts("hello\u{FF1B}world"), "hello; world");
+        // U+FF1F (？) -> '? '
+        assert_eq!(normalize_text_for_tts("hello\u{FF1F}world"), "hello? world");
+    }
+
     // ============================================================================
     // Misaki Phonemizer Punctuation Preservation Tests
     // (Requires fixture dictionaries)
@@ -746,6 +787,7 @@ mod tests {
             None,
             true, // add_padding
             true, // normalize_text
+            0,    // silence_tokens
         )
         .unwrap();
 
@@ -945,6 +987,7 @@ mod tests {
             None,
             true,
             normalize_text,
+            0, // silence_tokens
         )
         .unwrap();
 

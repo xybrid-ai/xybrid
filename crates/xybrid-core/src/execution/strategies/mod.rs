@@ -160,6 +160,7 @@ mod tests {
                 language: None,
                 add_padding: true,
                 normalize_text: false,
+                silence_tokens: None,
             },
         );
 

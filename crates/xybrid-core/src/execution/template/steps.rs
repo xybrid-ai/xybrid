@@ -155,6 +155,12 @@ pub enum PreprocessingStep {
         /// Applies text cleanup (quotes, abbreviations, etc.) before phonemization
         #[serde(default)]
         normalize_text: bool,
+
+        /// Number of silence tokens to prepend before speech onset (default: None/0).
+        /// Helps smooth plosive-initial words (e.g., "b", "p", "t" sounds).
+        /// Uses token ID 30 (Kokoro silence token).
+        #[serde(default)]
+        silence_tokens: Option<u8>,
     },
 }
 
