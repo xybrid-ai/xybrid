@@ -180,37 +180,40 @@ All models run entirely on-device. No cloud, no API keys required. Browse the fu
 
 ### Speech-to-Text
 
-| Model | Size | Description |
-|-------|------|-------------|
-| Whisper Tiny | ~89 MB | Real-time English transcription |
-| Wav2Vec2 Base | ~231 MB | English ASR |
+| Model | Params | Format | Description |
+|-------|--------|--------|-------------|
+| Whisper Tiny | 39M | SafeTensors | Multilingual transcription (Candle runtime) |
+| Wav2Vec2 Base | 95M | ONNX | English ASR with CTC decoding |
 
 ### Text-to-Speech
 
-| Model | Size | Description |
-|-------|------|-------------|
-| Kokoro 82M | ~183 MB | 24 natural voices |
-| KittenTTS Nano | ~19 MB | Lightweight, fast |
+| Model | Params | Format | Description |
+|-------|--------|--------|-------------|
+| Kokoro 82M | 82M | ONNX | High-quality, 24 natural voices |
+| KittenTTS Nano | 15M | ONNX | Ultra-lightweight, 8 voices |
 
 ### Language Models
 
-| Model | Size | Description |
-|-------|------|-------------|
-| Gemma 3 1B | ~786 MB | Google's compact LLM |
-| Llama 3.2 1B | ~791 MB | Meta's general purpose |
-| Mistral 7B | ~4.3 GB | High-quality reasoning |
-| Phi-4 Mini | ~8.7 GB | Microsoft's compact reasoning LLM |
-| Qwen 2.5 0.5B | ~477 MB | Smallest on-device chat |
-| SmolLM2 360M | ~267 MB | Ultra-lightweight |
+| Model | Params | Format | Description |
+|-------|--------|--------|-------------|
+| Gemma 3 1B | 1B | GGUF Q4_K_M | Google's mobile-optimized LLM |
+| Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta's general purpose, 128K context |
+| Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | Compact on-device chat |
+| SmolLM2 360M | 360M | GGUF Q4_K_M | Best tiny LLM, excellent quality/size ratio |
 
 ### Coming Soon
 
-| Model | Type | Status |
-|-------|------|--------|
-| Qwen3 0.6B | LLM | Planned |
-| Whisper Tiny CoreML | ASR | Planned |
-| Nomic Embed Text v1.5 | Embeddings | Blocked |
-| Chatterbox Turbo | TTS | Blocked |
+| Model | Type | Params | Priority | Status |
+|-------|------|--------|----------|--------|
+| Phi-4 Mini | LLM | 3.8B | P2 | Spec Ready (first multi-quant: Q4, Q8, FP16) |
+| Qwen3 0.6B | LLM | 600M | P2 | Planned |
+| Trinity Nano | LLM (MoE) | 6B (1B active) | P2 | Planned |
+| LFM2 700M | LLM | 700M | P2 | Planned |
+| Nomic Embed Text v1.5 | Embeddings | 137M | P1 | Blocked (needs Tokenize/MeanPool steps) |
+| LFM2-VL 450M | Vision | 450M | P2 | Planned |
+| Whisper Tiny CoreML | ASR | 39M | P2 | Planned |
+| Qwen3-TTS 0.6B | TTS | 600M | P2 | Blocked (needs custom SafeTensors runtime) |
+| Chatterbox Turbo | TTS | 350M | P3 | Blocked (needs ModelGraph template) |
 
 ---
 
