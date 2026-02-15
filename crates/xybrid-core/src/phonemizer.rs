@@ -148,21 +148,24 @@ pub fn postprocess_tts_audio(samples: &[f32], sample_rate: u32) -> Vec<f32> {
 
 /// Load token mapping from a tokens.txt file
 ///
-/// Format: Each line is "TOKEN ID" (space-separated)
+/// Format: Each line is "CHARACTER ID" where CHARACTER is a single Unicode character
+/// (including space, combining marks, etc.) followed by whitespace and the integer ID.
 pub fn load_tokens_map(tokens_content: &str) -> HashMap<char, i64> {
     let mut map = HashMap::new();
 
     for line in tokens_content.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 {
-            let token = parts[0];
-            if let Ok(id) = parts[1].parse::<i64>() {
-                // Handle single character tokens
-                if let Some(c) = token.chars().next() {
-                    if token.chars().count() == 1 {
-                        map.insert(c, id);
-                    }
-                }
+        if line.is_empty() {
+            continue;
+        }
+        // Parse as: first char = token, remaining (trimmed) = ID.
+        // This correctly handles the space character entry ("  16")
+        // and combining characters like U+0303 ("̃ 17").
+        let mut chars = line.chars();
+        if let Some(token_char) = chars.next() {
+            let remaining: String = chars.collect();
+            let id_str = remaining.trim();
+            if let Ok(id) = id_str.parse::<i64>() {
+                map.insert(token_char, id);
             }
         }
     }
@@ -182,5 +185,23 @@ mod tests {
         assert_eq!(map.get(&';'), Some(&1));
         assert_eq!(map.get(&'a'), Some(&43));
         assert_eq!(map.get(&'b'), Some(&44));
+    }
+
+    #[test]
+    fn test_load_tokens_map_handles_space_character() {
+        // Space entry: " 16" (space char followed by space and ID)
+        let tokens_content = "; 1\n 16\nA 24\n";
+        let map = load_tokens_map(tokens_content);
+        assert_eq!(map.get(&' '), Some(&16), "Space character should map to 16");
+        assert_eq!(map.get(&';'), Some(&1));
+        assert_eq!(map.get(&'A'), Some(&24));
+    }
+
+    #[test]
+    fn test_load_tokens_map_handles_empty_lines() {
+        let tokens_content = "a 1\n\nb 2\n";
+        let map = load_tokens_map(tokens_content);
+        assert_eq!(map.get(&'a'), Some(&1));
+        assert_eq!(map.get(&'b'), Some(&2));
     }
 }
