@@ -368,13 +368,18 @@ jobs:
     needs: [precompile-flutter]
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
+      id-token: write   # OIDC token exchange with pub.dev
+      contents: read     # Required by actions/checkout
     steps:
       - uses: actions/checkout@v4
 
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Verify package before publish
+        working-directory: bindings/flutter
+        run: dart pub publish --dry-run
 
       - name: Publish to pub.dev
         working-directory: bindings/flutter

@@ -55,11 +55,7 @@ https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
 
 ```yaml
 dependencies:
-  xybrid_flutter:
-    git:
-      url: https://github.com/xybrid-ai/xybrid.git
-      ref: main
-      path: bindings/flutter
+  xybrid_flutter: ^0.1.0
 ```
 
 **Kotlin (Android)** — add to your `build.gradle.kts`:
