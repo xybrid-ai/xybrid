@@ -1,6 +1,6 @@
 name: xybrid_flutter
 description: "Xybrid Flutter SDK — run ML models on-device or in the cloud with intelligent hybrid routing and streaming inference."
-version: 0.1.0-alpha5
+version: 0.1.0-alpha6
 homepage: https://github.com/xybrid-ai/xybrid
 repository: https://github.com/xybrid-ai/xybrid
 issue_tracker: https://github.com/xybrid-ai/xybrid/issues

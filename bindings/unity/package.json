@@ -1,6 +1,6 @@
 {
   "name": "ai.xybrid.sdk",
-  "version": "0.1.0-alpha5",
+  "version": "0.1.0-alpha6",
   "displayName": "Xybrid SDK",
   "description": "On-device AI SDK for Unity - LLMs, voice, npc dialogs and more",
   "unity": "2021.3",
