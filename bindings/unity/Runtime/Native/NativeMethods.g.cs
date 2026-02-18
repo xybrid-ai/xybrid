@@ -554,6 +554,97 @@ namespace Xybrid.Native
         internal static extern XybridEnvelopeHandle* xybrid_envelope_text_with_role(byte* text, int role);
 
         /// <summary>
+        ///  Create a new generation config with all fields unset (model defaults will be used).
+        ///
+        ///  Call setter functions (e.g. `xybrid_generation_config_set_temperature`) to
+        ///  override specific fields, then pass the handle to a run function.
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_new", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridGenerationConfigHandle* xybrid_generation_config_new();
+
+        /// <summary>
+        ///  Create a greedy decoding config (deterministic, temperature=0).
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_greedy", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridGenerationConfigHandle* xybrid_generation_config_greedy();
+
+        /// <summary>
+        ///  Create a creative generation config (higher temperature).
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_creative", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridGenerationConfigHandle* xybrid_generation_config_creative();
+
+        /// <summary>
+        ///  Set the maximum number of tokens to generate.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_set_max_tokens", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_generation_config_set_max_tokens(XybridGenerationConfigHandle* config, uint max_tokens);
+
+        /// <summary>
+        ///  Set the sampling temperature (0.0 = deterministic, higher = more random).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_set_temperature", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_generation_config_set_temperature(XybridGenerationConfigHandle* config, float temperature);
+
+        /// <summary>
+        ///  Set the top-p (nucleus) sampling threshold.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_set_top_p", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_generation_config_set_top_p(XybridGenerationConfigHandle* config, float top_p);
+
+        /// <summary>
+        ///  Set the min-p sampling threshold.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_set_min_p", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_generation_config_set_min_p(XybridGenerationConfigHandle* config, float min_p);
+
+        /// <summary>
+        ///  Set top-k sampling (0 = disabled).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_set_top_k", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_generation_config_set_top_k(XybridGenerationConfigHandle* config, uint top_k);
+
+        /// <summary>
+        ///  Set the repetition penalty (1.0 = disabled).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_set_repetition_penalty", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_generation_config_set_repetition_penalty(XybridGenerationConfigHandle* config, float repetition_penalty);
+
+        /// <summary>
+        ///  Add a stop sequence.
+        ///
+        ///  Can be called multiple times to add multiple stop sequences.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `config`: A handle to the generation config.
+        ///  - `stop`: A null-terminated UTF-8 string.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_add_stop", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_generation_config_add_stop(XybridGenerationConfigHandle* config, byte* stop);
+
+        /// <summary>
+        ///  Free a generation config handle.
+        ///
+        ///  After calling this function, the handle must not be used again.
+        ///  Passing null is a safe no-op.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_generation_config_free(XybridGenerationConfigHandle* config);
+
+        /// <summary>
         ///  Run inference on a model with the given input envelope.
         ///
         ///  This function executes inference using the loaded model and returns
@@ -591,7 +682,7 @@ namespace Xybrid.Native
         ///  ```
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_model_run", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern XybridResultHandle* xybrid_model_run(XybridModelHandle* model, XybridEnvelopeHandle* envelope);
+        internal static extern XybridResultHandle* xybrid_model_run(XybridModelHandle* model, XybridEnvelopeHandle* envelope, XybridGenerationConfigHandle* config);
 
         /// <summary>
         ///  Run inference on a model with conversation context.
@@ -637,7 +728,7 @@ namespace Xybrid.Native
         ///  ```
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_model_run_with_context", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern XybridResultHandle* xybrid_model_run_with_context(XybridModelHandle* model, XybridEnvelopeHandle* envelope, XybridContextHandle* context);
+        internal static extern XybridResultHandle* xybrid_model_run_with_context(XybridModelHandle* model, XybridEnvelopeHandle* envelope, XybridContextHandle* context, XybridGenerationConfigHandle* config);
 
         /// <summary>
         ///  Get the model ID of a loaded model.
@@ -837,7 +928,7 @@ namespace Xybrid.Native
         ///  ```
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_model_run_streaming", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern XybridResultHandle* xybrid_model_run_streaming(XybridModelHandle* model, XybridEnvelopeHandle* envelope, xybrid_model_run_streaming_callback_delegate callback, void* user_data);
+        internal static extern XybridResultHandle* xybrid_model_run_streaming(XybridModelHandle* model, XybridEnvelopeHandle* envelope, XybridGenerationConfigHandle* config, xybrid_model_run_streaming_callback_delegate callback, void* user_data);
 
         /// <summary>
         ///  Run streaming inference on a model with conversation context.
@@ -872,7 +963,7 @@ namespace Xybrid.Native
         ///  ```
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_model_run_streaming_with_context", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern XybridResultHandle* xybrid_model_run_streaming_with_context(XybridModelHandle* model, XybridEnvelopeHandle* envelope, XybridContextHandle* context, xybrid_model_run_streaming_with_context_callback_delegate callback, void* user_data);
+        internal static extern XybridResultHandle* xybrid_model_run_streaming_with_context(XybridModelHandle* model, XybridEnvelopeHandle* envelope, XybridContextHandle* context, XybridGenerationConfigHandle* config, xybrid_model_run_streaming_with_context_callback_delegate callback, void* user_data);
 
         /// <summary>
         ///  Free a model handle.
@@ -1409,6 +1500,19 @@ namespace Xybrid.Native
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct XybridContextHandle
+    {
+        public void* Item1;
+    }
+
+    /// <summary>
+    ///  Opaque handle to a generation config.
+    ///
+    ///  This handle is created by `xybrid_generation_config_new` (or a preset
+    ///  like `xybrid_generation_config_greedy`) and must be freed with
+    ///  `xybrid_generation_config_free`.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct XybridGenerationConfigHandle
     {
         public void* Item1;
     }

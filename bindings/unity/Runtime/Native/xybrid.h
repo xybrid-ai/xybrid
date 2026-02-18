@@ -104,6 +104,17 @@ typedef struct XybridContextHandle {
 } XybridContextHandle;
 
 /*
+ Opaque handle to a generation config.
+
+ This handle is created by `xybrid_generation_config_new` (or a preset
+ like `xybrid_generation_config_greedy`) and must be freed with
+ `xybrid_generation_config_free`.
+ */
+typedef struct XybridGenerationConfigHandle {
+  void *_0;
+} XybridGenerationConfigHandle;
+
+/*
  Opaque handle to an inference result.
 
  This handle is created by `xybrid_model_run` and must be freed with
@@ -659,6 +670,91 @@ void xybrid_context_free(struct XybridContextHandle *handle);
 struct XybridEnvelopeHandle *xybrid_envelope_text_with_role(const char *text, int32_t role);
 
 /*
+ Create a new generation config with all fields unset (model defaults will be used).
+
+ Call setter functions (e.g. `xybrid_generation_config_set_temperature`) to
+ override specific fields, then pass the handle to a run function.
+
+ # Returns
+
+ A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
+ */
+struct XybridGenerationConfigHandle *xybrid_generation_config_new(void);
+
+/*
+ Create a greedy decoding config (deterministic, temperature=0).
+
+ # Returns
+
+ A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
+ */
+struct XybridGenerationConfigHandle *xybrid_generation_config_greedy(void);
+
+/*
+ Create a creative generation config (higher temperature).
+
+ # Returns
+
+ A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
+ */
+struct XybridGenerationConfigHandle *xybrid_generation_config_creative(void);
+
+/*
+ Set the maximum number of tokens to generate.
+ */
+void xybrid_generation_config_set_max_tokens(struct XybridGenerationConfigHandle *config,
+                                             uint32_t max_tokens);
+
+/*
+ Set the sampling temperature (0.0 = deterministic, higher = more random).
+ */
+void xybrid_generation_config_set_temperature(struct XybridGenerationConfigHandle *config,
+                                              float temperature);
+
+/*
+ Set the top-p (nucleus) sampling threshold.
+ */
+void xybrid_generation_config_set_top_p(struct XybridGenerationConfigHandle *config, float top_p);
+
+/*
+ Set the min-p sampling threshold.
+ */
+void xybrid_generation_config_set_min_p(struct XybridGenerationConfigHandle *config, float min_p);
+
+/*
+ Set top-k sampling (0 = disabled).
+ */
+void xybrid_generation_config_set_top_k(struct XybridGenerationConfigHandle *config,
+                                        uint32_t top_k);
+
+/*
+ Set the repetition penalty (1.0 = disabled).
+ */
+void xybrid_generation_config_set_repetition_penalty(struct XybridGenerationConfigHandle *config,
+                                                     float repetition_penalty);
+
+/*
+ Add a stop sequence.
+
+ Can be called multiple times to add multiple stop sequences.
+
+ # Parameters
+
+ - `config`: A handle to the generation config.
+ - `stop`: A null-terminated UTF-8 string.
+ */
+void xybrid_generation_config_add_stop(struct XybridGenerationConfigHandle *config,
+                                       const char *stop);
+
+/*
+ Free a generation config handle.
+
+ After calling this function, the handle must not be used again.
+ Passing null is a safe no-op.
+ */
+void xybrid_generation_config_free(struct XybridGenerationConfigHandle *config);
+
+/*
  Run inference on a model with the given input envelope.
 
  This function executes inference using the loaded model and returns
@@ -696,7 +792,8 @@ struct XybridEnvelopeHandle *xybrid_envelope_text_with_role(const char *text, in
  ```
  */
 struct XybridResultHandle *xybrid_model_run(struct XybridModelHandle *model,
-                                            struct XybridEnvelopeHandle *envelope);
+                                            struct XybridEnvelopeHandle *envelope,
+                                            struct XybridGenerationConfigHandle *config);
 
 /*
  Run inference on a model with conversation context.
@@ -743,7 +840,8 @@ struct XybridResultHandle *xybrid_model_run(struct XybridModelHandle *model,
  */
 struct XybridResultHandle *xybrid_model_run_with_context(struct XybridModelHandle *model,
                                                          struct XybridEnvelopeHandle *envelope,
-                                                         struct XybridContextHandle *context);
+                                                         struct XybridContextHandle *context,
+                                                         struct XybridGenerationConfigHandle *config);
 
 /*
  Get the model ID of a loaded model.
@@ -936,6 +1034,7 @@ char *xybrid_model_voice_json(struct XybridModelHandle *model, uint32_t index);
  */
 struct XybridResultHandle *xybrid_model_run_streaming(struct XybridModelHandle *model,
                                                       struct XybridEnvelopeHandle *envelope,
+                                                      struct XybridGenerationConfigHandle *config,
                                                       XybridStreamCallback callback,
                                                       void *user_data);
 
@@ -974,6 +1073,7 @@ struct XybridResultHandle *xybrid_model_run_streaming(struct XybridModelHandle *
 struct XybridResultHandle *xybrid_model_run_streaming_with_context(struct XybridModelHandle *model,
                                                                    struct XybridEnvelopeHandle *envelope,
                                                                    struct XybridContextHandle *context,
+                                                                   struct XybridGenerationConfigHandle *config,
                                                                    XybridStreamCallback callback,
                                                                    void *user_data);
 
