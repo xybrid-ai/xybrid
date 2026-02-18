@@ -32,7 +32,9 @@ use std::sync::Arc;
 
 // Import SDK types
 use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
-use xybrid_sdk::{ConversationContext, ModelLoader, PartialToken, VoiceInfo, XybridModel};
+use xybrid_sdk::{
+    ConversationContext, GenerationConfig, ModelLoader, PartialToken, VoiceInfo, XybridModel,
+};
 
 // ============================================================================
 // Opaque Handle Types (US-009)
@@ -83,6 +85,14 @@ pub struct XybridResultHandle(*mut c_void);
 /// `xybrid_context_free`.
 #[repr(C)]
 pub struct XybridContextHandle(*mut c_void);
+
+/// Opaque handle to a generation config.
+///
+/// This handle is created by `xybrid_generation_config_new` (or a preset
+/// like `xybrid_generation_config_greedy`) and must be freed with
+/// `xybrid_generation_config_free`.
+#[repr(C)]
+pub struct XybridGenerationConfigHandle(*mut c_void);
 
 // ============================================================================
 // Internal Boxed Types
@@ -158,6 +168,17 @@ pub(crate) struct ContextData {
     pub context: ConversationContext,
 }
 
+/// Internal generation config data.
+pub(crate) struct GenerationConfigData {
+    pub max_tokens: Option<usize>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub min_p: Option<f32>,
+    pub top_k: Option<usize>,
+    pub repetition_penalty: Option<f32>,
+    pub stop_sequences: Vec<String>,
+}
+
 /// Type alias for a boxed loader.
 pub(crate) type BoxedLoader = Box<LoaderState>;
 
@@ -172,6 +193,9 @@ pub(crate) type BoxedResult = Box<ResultData>;
 
 /// Type alias for a boxed context.
 pub(crate) type BoxedContext = Box<ContextData>;
+
+/// Type alias for a boxed generation config.
+pub(crate) type BoxedGenerationConfig = Box<GenerationConfigData>;
 
 // ============================================================================
 // Callback Types
@@ -513,6 +537,86 @@ impl XybridContextHandle {
         }
         Some(&mut *(wrapper.0 as *mut ContextData))
     }
+}
+
+impl XybridGenerationConfigHandle {
+    /// Create a handle from a boxed generation config (takes ownership).
+    pub(crate) fn from_boxed(config: BoxedGenerationConfig) -> *mut Self {
+        let ptr = Box::into_raw(config) as *mut c_void;
+        Box::into_raw(Box::new(XybridGenerationConfigHandle(ptr)))
+    }
+
+    /// Convert handle back to boxed config (takes ownership of handle).
+    ///
+    /// # Safety
+    /// The handle must be valid and not already freed.
+    pub(crate) unsafe fn into_boxed(handle: *mut Self) -> Option<BoxedGenerationConfig> {
+        if handle.is_null() {
+            return None;
+        }
+        let wrapper = Box::from_raw(handle);
+        if wrapper.0.is_null() {
+            return None;
+        }
+        Some(Box::from_raw(wrapper.0 as *mut GenerationConfigData))
+    }
+
+    /// Borrow the config data from a handle.
+    ///
+    /// # Safety
+    /// The handle must be valid and not already freed.
+    pub(crate) unsafe fn as_ref<'a>(handle: *mut Self) -> Option<&'a GenerationConfigData> {
+        if handle.is_null() {
+            return None;
+        }
+        let wrapper = &*handle;
+        if wrapper.0.is_null() {
+            return None;
+        }
+        Some(&*(wrapper.0 as *const GenerationConfigData))
+    }
+
+    /// Mutably borrow the config data from a handle.
+    ///
+    /// # Safety
+    /// The handle must be valid and not already freed.
+    pub(crate) unsafe fn as_mut<'a>(handle: *mut Self) -> Option<&'a mut GenerationConfigData> {
+        if handle.is_null() {
+            return None;
+        }
+        let wrapper = &*handle;
+        if wrapper.0.is_null() {
+            return None;
+        }
+        Some(&mut *(wrapper.0 as *mut GenerationConfigData))
+    }
+}
+
+/// Convert GenerationConfigData to SDK GenerationConfig.
+fn generation_config_data_to_sdk(data: &GenerationConfigData) -> GenerationConfig {
+    let mut config = GenerationConfig::default();
+    if let Some(v) = data.max_tokens {
+        config.max_tokens = v;
+    }
+    if let Some(v) = data.temperature {
+        config.temperature = v;
+    }
+    if let Some(v) = data.top_p {
+        config.top_p = v;
+    }
+    if let Some(v) = data.min_p {
+        config.min_p = v;
+    }
+    if let Some(v) = data.top_k {
+        config.top_k = v;
+    }
+    if let Some(v) = data.repetition_penalty {
+        config.repetition_penalty = v;
+    }
+    if !data.stop_sequences.is_empty() {
+        config.stop_sequences = data.stop_sequences.clone();
+    }
+    config
 }
 
 /// Library version string.
@@ -1659,6 +1763,173 @@ pub unsafe extern "C" fn xybrid_envelope_text_with_role(
 }
 
 // ============================================================================
+// C ABI Generation Config Functions
+// ============================================================================
+//
+// These functions allow C consumers to create and configure generation
+// parameters for LLM inference (temperature, top-p, max tokens, etc.).
+
+/// Create a new generation config with all fields unset (model defaults will be used).
+///
+/// Call setter functions (e.g. `xybrid_generation_config_set_temperature`) to
+/// override specific fields, then pass the handle to a run function.
+///
+/// # Returns
+///
+/// A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
+#[no_mangle]
+pub extern "C" fn xybrid_generation_config_new() -> *mut XybridGenerationConfigHandle {
+    let config = Box::new(GenerationConfigData {
+        max_tokens: None,
+        temperature: None,
+        top_p: None,
+        min_p: None,
+        top_k: None,
+        repetition_penalty: None,
+        stop_sequences: Vec::new(),
+    });
+    XybridGenerationConfigHandle::from_boxed(config)
+}
+
+/// Create a greedy decoding config (deterministic, temperature=0).
+///
+/// # Returns
+///
+/// A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
+#[no_mangle]
+pub extern "C" fn xybrid_generation_config_greedy() -> *mut XybridGenerationConfigHandle {
+    let config = Box::new(GenerationConfigData {
+        max_tokens: None,
+        temperature: Some(0.0),
+        top_p: Some(1.0),
+        min_p: None,
+        top_k: Some(0),
+        repetition_penalty: None,
+        stop_sequences: Vec::new(),
+    });
+    XybridGenerationConfigHandle::from_boxed(config)
+}
+
+/// Create a creative generation config (higher temperature).
+///
+/// # Returns
+///
+/// A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
+#[no_mangle]
+pub extern "C" fn xybrid_generation_config_creative() -> *mut XybridGenerationConfigHandle {
+    let config = Box::new(GenerationConfigData {
+        max_tokens: None,
+        temperature: Some(0.9),
+        top_p: Some(0.95),
+        min_p: None,
+        top_k: Some(50),
+        repetition_penalty: None,
+        stop_sequences: Vec::new(),
+    });
+    XybridGenerationConfigHandle::from_boxed(config)
+}
+
+/// Set the maximum number of tokens to generate.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_generation_config_set_max_tokens(
+    config: *mut XybridGenerationConfigHandle,
+    max_tokens: u32,
+) {
+    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+        data.max_tokens = Some(max_tokens as usize);
+    }
+}
+
+/// Set the sampling temperature (0.0 = deterministic, higher = more random).
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_generation_config_set_temperature(
+    config: *mut XybridGenerationConfigHandle,
+    temperature: f32,
+) {
+    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+        data.temperature = Some(temperature);
+    }
+}
+
+/// Set the top-p (nucleus) sampling threshold.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_generation_config_set_top_p(
+    config: *mut XybridGenerationConfigHandle,
+    top_p: f32,
+) {
+    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+        data.top_p = Some(top_p);
+    }
+}
+
+/// Set the min-p sampling threshold.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_generation_config_set_min_p(
+    config: *mut XybridGenerationConfigHandle,
+    min_p: f32,
+) {
+    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+        data.min_p = Some(min_p);
+    }
+}
+
+/// Set top-k sampling (0 = disabled).
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_generation_config_set_top_k(
+    config: *mut XybridGenerationConfigHandle,
+    top_k: u32,
+) {
+    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+        data.top_k = Some(top_k as usize);
+    }
+}
+
+/// Set the repetition penalty (1.0 = disabled).
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_generation_config_set_repetition_penalty(
+    config: *mut XybridGenerationConfigHandle,
+    repetition_penalty: f32,
+) {
+    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+        data.repetition_penalty = Some(repetition_penalty);
+    }
+}
+
+/// Add a stop sequence.
+///
+/// Can be called multiple times to add multiple stop sequences.
+///
+/// # Parameters
+///
+/// - `config`: A handle to the generation config.
+/// - `stop`: A null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_generation_config_add_stop(
+    config: *mut XybridGenerationConfigHandle,
+    stop: *const c_char,
+) {
+    if stop.is_null() {
+        return;
+    }
+    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+        if let Ok(s) = CStr::from_ptr(stop).to_str() {
+            data.stop_sequences.push(s.to_string());
+        }
+    }
+}
+
+/// Free a generation config handle.
+///
+/// After calling this function, the handle must not be used again.
+/// Passing null is a safe no-op.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_generation_config_free(config: *mut XybridGenerationConfigHandle) {
+    if !config.is_null() {
+        let _ = XybridGenerationConfigHandle::into_boxed(config);
+    }
+}
+
+// ============================================================================
 // C ABI Inference Functions (US-013)
 // ============================================================================
 //
@@ -1703,6 +1974,7 @@ pub unsafe extern "C" fn xybrid_envelope_text_with_role(
 pub unsafe extern "C" fn xybrid_model_run(
     model: *mut XybridModelHandle,
     envelope: *mut XybridEnvelopeHandle,
+    config: *mut XybridGenerationConfigHandle,
 ) -> *mut XybridResultHandle {
     clear_last_error();
 
@@ -1741,8 +2013,15 @@ pub unsafe extern "C" fn xybrid_model_run(
         // Convert EnvelopeData to SDK Envelope
         let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
+        // Convert optional generation config
+        let sdk_config = if config.is_null() {
+            None
+        } else {
+            XybridGenerationConfigHandle::as_ref(config).map(generation_config_data_to_sdk)
+        };
+
         // Run inference using the SDK
-        let inference_result = match model_state.model.run(&sdk_envelope, None) {
+        let inference_result = match model_state.model.run(&sdk_envelope, sdk_config.as_ref()) {
             Ok(result) => result,
             Err(e) => {
                 // Return error result
@@ -1828,6 +2107,7 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
     model: *mut XybridModelHandle,
     envelope: *mut XybridEnvelopeHandle,
     context: *mut XybridContextHandle,
+    config: *mut XybridGenerationConfigHandle,
 ) -> *mut XybridResultHandle {
     clear_last_error();
 
@@ -1879,27 +2159,34 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
         // Convert EnvelopeData to SDK Envelope
         let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
+        // Convert optional generation config
+        let sdk_config = if config.is_null() {
+            None
+        } else {
+            XybridGenerationConfigHandle::as_ref(config).map(generation_config_data_to_sdk)
+        };
+
         // Run inference with context using the SDK
-        let inference_result =
-            match model_state
-                .model
-                .run_with_context(&sdk_envelope, &ctx_data.context, None)
-            {
-                Ok(result) => result,
-                Err(e) => {
-                    // Return error result
-                    let result = ResultData {
-                        success: false,
-                        error: Some(format!("Inference failed: {}", e)),
-                        output_type: "".to_string(),
-                        text: None,
-                        embedding: None,
-                        audio_bytes: None,
-                        latency_ms: 0,
-                    };
-                    return XybridResultHandle::from_boxed(Box::new(result));
-                }
-            };
+        let inference_result = match model_state.model.run_with_context(
+            &sdk_envelope,
+            &ctx_data.context,
+            sdk_config.as_ref(),
+        ) {
+            Ok(result) => result,
+            Err(e) => {
+                // Return error result
+                let result = ResultData {
+                    success: false,
+                    error: Some(format!("Inference failed: {}", e)),
+                    output_type: "".to_string(),
+                    text: None,
+                    embedding: None,
+                    audio_bytes: None,
+                    latency_ms: 0,
+                };
+                return XybridResultHandle::from_boxed(Box::new(result));
+            }
+        };
 
         // Convert InferenceResult to ResultData
         XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&inference_result)))
@@ -2251,6 +2538,7 @@ pub unsafe extern "C" fn xybrid_model_voice_json(
 pub unsafe extern "C" fn xybrid_model_run_streaming(
     model: *mut XybridModelHandle,
     envelope: *mut XybridEnvelopeHandle,
+    config: *mut XybridGenerationConfigHandle,
     callback: XybridStreamCallback,
     user_data: *mut c_void,
 ) -> *mut XybridResultHandle {
@@ -2305,10 +2593,17 @@ pub unsafe extern "C" fn xybrid_model_run_streaming(
                 Ok(())
             };
 
+        // Convert optional generation config
+        let sdk_config = if config.is_null() {
+            None
+        } else {
+            XybridGenerationConfigHandle::as_ref(config).map(generation_config_data_to_sdk)
+        };
+
         // Call the SDK streaming method
         match model_state
             .model
-            .run_streaming(&sdk_envelope, None, on_token)
+            .run_streaming(&sdk_envelope, sdk_config.as_ref(), on_token)
         {
             Ok(result) => {
                 XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&result)))
@@ -2385,6 +2680,7 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
     model: *mut XybridModelHandle,
     envelope: *mut XybridEnvelopeHandle,
     context: *mut XybridContextHandle,
+    config: *mut XybridGenerationConfigHandle,
     callback: XybridStreamCallback,
     user_data: *mut c_void,
 ) -> *mut XybridResultHandle {
@@ -2450,11 +2746,18 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
                 Ok(())
             };
 
+        // Convert optional generation config
+        let sdk_config = if config.is_null() {
+            None
+        } else {
+            XybridGenerationConfigHandle::as_ref(config).map(generation_config_data_to_sdk)
+        };
+
         // Call the SDK streaming method with context
         match model_state.model.run_streaming_with_context(
             &sdk_envelope,
             &ctx_data.context,
-            None,
+            sdk_config.as_ref(),
             on_token,
         ) {
             Ok(result) => {

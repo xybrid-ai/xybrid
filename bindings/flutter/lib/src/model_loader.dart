@@ -8,6 +8,7 @@ import 'dart:async';
 
 import 'context.dart';
 import 'envelope.dart';
+import 'generation_config.dart';
 import 'llm.dart';
 import 'result.dart';
 import 'rust/api/model.dart';
@@ -135,10 +136,19 @@ class XybridModel {
   /// Returns [XybridResult] containing output text, audio, or embeddings
   /// depending on the model type.
   ///
+  /// Pass an optional [config] to control generation parameters (temperature,
+  /// top-p, etc.). When `null`, the model's default parameters are used.
+  ///
   /// Throws [XybridException] if inference fails.
-  Future<XybridResult> run(XybridEnvelope envelope) async {
+  Future<XybridResult> run(
+    XybridEnvelope envelope, {
+    GenerationConfig? config,
+  }) async {
     try {
-      final ffiResult = await inner.run(envelope: envelope.inner);
+      final ffiResult = await inner.run(
+        envelope: envelope.inner,
+        config: config?.toFfi(),
+      );
       return XybridResult.fromFfi(ffiResult);
     } catch (e) {
       throw XybridException('Inference failed: $e');
@@ -169,12 +179,14 @@ class XybridModel {
   /// ```
   Future<XybridResult> runWithContext(
     XybridEnvelope envelope,
-    ConversationContext context,
-  ) async {
+    ConversationContext context, {
+    GenerationConfig? config,
+  }) async {
     try {
       final ffiResult = await inner.runWithContext(
         envelope: envelope.inner,
         context: context.inner,
+        config: config?.toFfi(),
       );
       return XybridResult.fromFfi(ffiResult);
     } catch (e) {
@@ -204,10 +216,16 @@ class XybridModel {
   ///   }
   /// }
   /// ```
-  Stream<StreamToken> runStreaming(XybridEnvelope envelope) async* {
+  Stream<StreamToken> runStreaming(
+    XybridEnvelope envelope, {
+    GenerationConfig? config,
+  }) async* {
     try {
       // Use native streaming from FFI
-      final stream = inner.runStream(envelope: envelope.inner);
+      final stream = inner.runStream(
+        envelope: envelope.inner,
+        config: config?.toFfi(),
+      );
 
       var emittedFinal = false;
 
@@ -285,12 +303,14 @@ class XybridModel {
   /// ```
   Stream<StreamToken> runStreamingWithContext(
     XybridEnvelope envelope,
-    ConversationContext context,
-  ) async* {
+    ConversationContext context, {
+    GenerationConfig? config,
+  }) async* {
     try {
       final stream = inner.runStreamWithContext(
         envelope: envelope.inner,
         context: context.inner,
+        config: config?.toFfi(),
       );
 
       await for (final event in stream) {

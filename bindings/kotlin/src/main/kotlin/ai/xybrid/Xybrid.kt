@@ -73,6 +73,46 @@ typealias XybridError = XybridException
 /** Voice metadata for TTS models. */
 typealias VoiceInfo = XybridVoiceInfo
 
+/** LLM generation parameters (temperature, top-p, max tokens, etc.). */
+typealias GenerationConfig = XybridGenerationConfig
+
+// -- GenerationConfig Presets --
+
+/** Preset factory methods for [GenerationConfig]. */
+object GenerationConfigs {
+    /**
+     * Greedy decoding preset (deterministic, temperature=0).
+     *
+     * Produces the same output every time for the same input.
+     */
+    @JvmStatic
+    fun greedy() = XybridGenerationConfig(
+        maxTokens = null,
+        temperature = 0.0f,
+        topP = 1.0f,
+        minP = null,
+        topK = 0u,
+        repetitionPenalty = null,
+        stopSequences = null,
+    )
+
+    /**
+     * Creative generation preset (higher temperature).
+     *
+     * Produces more varied and creative output.
+     */
+    @JvmStatic
+    fun creative() = XybridGenerationConfig(
+        maxTokens = null,
+        temperature = 0.9f,
+        topP = 0.95f,
+        minP = null,
+        topK = 50u,
+        repetitionPenalty = null,
+        stopSequences = null,
+    )
+}
+
 // -- XybridResult Extensions --
 
 /** Returns `true` if inference failed. */

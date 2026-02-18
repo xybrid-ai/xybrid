@@ -11,6 +11,6 @@ pub mod sdk_client;
 // Re-export all public types for convenient access
 pub use context::{FfiConversationContext, FfiMessageRole};
 pub use envelope::FfiEnvelope;
-pub use model::{FfiModel, FfiModelLoader, FfiStreamEvent, FfiStreamToken};
+pub use model::{FfiGenerationConfig, FfiModel, FfiModelLoader, FfiStreamEvent, FfiStreamToken};
 pub use pipeline::FfiPipeline;
 pub use result::FfiResult;

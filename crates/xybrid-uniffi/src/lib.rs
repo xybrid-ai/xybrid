@@ -86,6 +86,58 @@ impl From<SdkError> for XybridError {
     }
 }
 
+/// Generation parameters for LLM inference.
+///
+/// All fields are optional. When `None`, the model's default value is used.
+///
+/// In Kotlin: `XybridGenerationConfig(temperature = 0.3f, maxTokens = 512u)`
+/// In Swift: `XybridGenerationConfig(temperature: 0.3, maxTokens: 512)`
+#[derive(uniffi::Record, Clone)]
+pub struct XybridGenerationConfig {
+    /// Maximum tokens to generate. Default: 2048
+    pub max_tokens: Option<u32>,
+    /// Sampling temperature (0.0 = deterministic, higher = more random). Default: 0.7
+    pub temperature: Option<f32>,
+    /// Top-p (nucleus) sampling threshold. Default: 0.9
+    pub top_p: Option<f32>,
+    /// Min-p sampling threshold. Default: 0.05
+    pub min_p: Option<f32>,
+    /// Top-k sampling (0 = disabled). Default: 40
+    pub top_k: Option<u32>,
+    /// Repetition penalty (1.0 = disabled). Default: 1.1
+    pub repetition_penalty: Option<f32>,
+    /// Stop sequences. When `None` or empty, only EOS token stops generation.
+    pub stop_sequences: Option<Vec<String>>,
+}
+
+impl XybridGenerationConfig {
+    fn to_sdk(&self) -> xybrid_sdk::GenerationConfig {
+        let mut config = xybrid_sdk::GenerationConfig::default();
+        if let Some(v) = self.max_tokens {
+            config.max_tokens = v as usize;
+        }
+        if let Some(v) = self.temperature {
+            config.temperature = v;
+        }
+        if let Some(v) = self.top_p {
+            config.top_p = v;
+        }
+        if let Some(v) = self.min_p {
+            config.min_p = v;
+        }
+        if let Some(v) = self.top_k {
+            config.top_k = v as usize;
+        }
+        if let Some(v) = self.repetition_penalty {
+            config.repetition_penalty = v;
+        }
+        if let Some(ref v) = self.stop_sequences {
+            config.stop_sequences = v.clone();
+        }
+        config
+    }
+}
+
 /// Envelope type for passing data to xybrid models.
 ///
 /// This enum represents the different types of input that can be passed
@@ -223,10 +275,18 @@ pub struct XybridModel {
 #[uniffi::export(async_runtime = "tokio")]
 impl XybridModel {
     /// Run inference on this model with the provided input envelope.
-    pub async fn run(&self, envelope: XybridEnvelope) -> Result<XybridResult, XybridError> {
+    ///
+    /// Pass an optional `config` to control generation parameters (temperature, top-p, etc.).
+    /// When `None`, the model's default parameters are used.
+    pub async fn run(
+        &self,
+        envelope: XybridEnvelope,
+        config: Option<XybridGenerationConfig>,
+    ) -> Result<XybridResult, XybridError> {
+        let sdk_config = config.as_ref().map(|c| c.to_sdk());
         let result = self
             .inner
-            .run_async(&envelope.into())
+            .run_async(&envelope.into(), sdk_config.as_ref())
             .await
             .map_err(XybridError::from)?;
         Ok(XybridResult::from_inference_result(&result))

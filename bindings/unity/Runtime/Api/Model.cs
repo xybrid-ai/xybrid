@@ -51,6 +51,7 @@ namespace Xybrid
         /// Runs inference on this model with the provided input envelope.
         /// </summary>
         /// <param name="envelope">The input data for inference.</param>
+        /// <param name="config">Optional generation config for LLM parameters. Pass null for model defaults.</param>
         /// <returns>The inference result.</returns>
         /// <exception cref="ArgumentNullException">Thrown if envelope is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model or the envelope is disposed.</exception>
@@ -59,7 +60,7 @@ namespace Xybrid
         /// The envelope is not consumed - it can be reused for multiple inferences.
         /// Remember to dispose the returned <see cref="InferenceResult"/> when done.
         /// </remarks>
-        public unsafe InferenceResult Run(Envelope envelope)
+        public unsafe InferenceResult Run(Envelope envelope, GenerationConfig config = null)
         {
             ThrowIfDisposed();
 
@@ -73,7 +74,9 @@ namespace Xybrid
                 throw new ObjectDisposedException(nameof(envelope));
             }
 
-            XybridResultHandle* resultHandle = NativeMethods.xybrid_model_run(_handle, envelope.Handle);
+            var configHandle = config != null ? config.Handle : null;
+            XybridResultHandle* resultHandle = NativeMethods.xybrid_model_run(
+                _handle, envelope.Handle, configHandle);
             if (resultHandle == null)
             {
                 NativeHelpers.ThrowLastError("Failed to run inference");
@@ -152,6 +155,7 @@ namespace Xybrid
         /// </summary>
         /// <param name="envelope">The input data for inference.</param>
         /// <param name="context">The conversation context with history.</param>
+        /// <param name="config">Optional generation config for LLM parameters. Pass null for model defaults.</param>
         /// <returns>The inference result.</returns>
         /// <remarks>
         /// The context provides conversation history which is formatted into the prompt
@@ -161,7 +165,7 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope or context is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model, envelope, or context is disposed.</exception>
         /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
-        public unsafe InferenceResult Run(Envelope envelope, ConversationContext context)
+        public unsafe InferenceResult Run(Envelope envelope, ConversationContext context, GenerationConfig config = null)
         {
             ThrowIfDisposed();
 
@@ -185,8 +189,9 @@ namespace Xybrid
                 throw new ObjectDisposedException(nameof(context));
             }
 
+            var configHandle = config != null ? config.Handle : null;
             XybridResultHandle* resultHandle = NativeMethods.xybrid_model_run_with_context(
-                _handle, envelope.Handle, context.Handle);
+                _handle, envelope.Handle, context.Handle, configHandle);
             if (resultHandle == null)
             {
                 NativeHelpers.ThrowLastError("Failed to run inference with context");
@@ -416,6 +421,7 @@ namespace Xybrid
         /// </summary>
         /// <param name="envelope">The input data for inference.</param>
         /// <param name="onToken">Callback invoked for each token. Called on the calling thread.</param>
+        /// <param name="config">Optional generation config for LLM parameters. Pass null for model defaults.</param>
         /// <returns>The final inference result after all tokens are emitted.</returns>
         /// <remarks>
         /// This method blocks until inference is complete. For LLM models, the callback
@@ -425,7 +431,7 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope or onToken is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model or the envelope is disposed.</exception>
         /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
-        public unsafe InferenceResult RunStreaming(Envelope envelope, Action<StreamToken> onToken)
+        public unsafe InferenceResult RunStreaming(Envelope envelope, Action<StreamToken> onToken, GenerationConfig config = null)
         {
             ThrowIfDisposed();
 
@@ -436,6 +442,8 @@ namespace Xybrid
             if (envelope.IsDisposed)
                 throw new ObjectDisposedException(nameof(envelope));
 
+            var configHandle = config != null ? config.Handle : null;
+
             // Pin the managed callback so it survives the native call
             var gcHandle = GCHandle.Alloc(onToken);
             try
@@ -443,6 +451,7 @@ namespace Xybrid
                 XybridResultHandle* resultHandle = NativeMethods.xybrid_model_run_streaming(
                     _handle,
                     envelope.Handle,
+                    configHandle,
                     StreamCallbackTrampoline,
                     (void*)GCHandle.ToIntPtr(gcHandle));
 
@@ -465,11 +474,12 @@ namespace Xybrid
         /// <param name="envelope">The input data for inference.</param>
         /// <param name="context">The conversation context with history.</param>
         /// <param name="onToken">Callback invoked for each token.</param>
+        /// <param name="config">Optional generation config for LLM parameters. Pass null for model defaults.</param>
         /// <returns>The final inference result after all tokens are emitted.</returns>
         /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model, envelope, or context is disposed.</exception>
         /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
-        public unsafe InferenceResult RunStreaming(Envelope envelope, ConversationContext context, Action<StreamToken> onToken)
+        public unsafe InferenceResult RunStreaming(Envelope envelope, ConversationContext context, Action<StreamToken> onToken, GenerationConfig config = null)
         {
             ThrowIfDisposed();
 
@@ -484,6 +494,7 @@ namespace Xybrid
             if (context.IsDisposed)
                 throw new ObjectDisposedException(nameof(context));
 
+            var configHandle = config != null ? config.Handle : null;
             var gcHandle = GCHandle.Alloc(onToken);
             try
             {
@@ -491,6 +502,7 @@ namespace Xybrid
                     _handle,
                     envelope.Handle,
                     context.Handle,
+                    configHandle,
                     StreamCallbackTrampolineWithContext,
                     (void*)GCHandle.ToIntPtr(gcHandle));
 

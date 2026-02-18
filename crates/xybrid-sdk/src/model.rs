@@ -1473,12 +1473,17 @@ impl XybridModel {
     }
 
     /// Run batch inference asynchronously.
-    pub async fn run_async(&self, envelope: &Envelope) -> SdkResult<InferenceResult> {
+    pub async fn run_async(
+        &self,
+        envelope: &Envelope,
+        config: Option<&GenerationConfig>,
+    ) -> SdkResult<InferenceResult> {
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
         let version = self.version.clone();
         let output_type = self.output_type;
         let envelope = envelope.clone();
+        let config = config.cloned();
 
         tokio::task::spawn_blocking(move || {
             let start = Instant::now();
@@ -1494,7 +1499,7 @@ impl XybridModel {
             let metadata = guard.metadata.clone();
             let output = guard
                 .executor
-                .execute(&metadata, &envelope, None)
+                .execute(&metadata, &envelope, config.as_ref())
                 .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
 
             let latency_ms = start.elapsed().as_millis() as u32;

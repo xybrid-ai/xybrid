@@ -12,20 +12,18 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridSdkClient>>
 abstract class XybridSdkClient implements RustOpaqueInterface {
-  static void initSdkCacheDir({required String cacheDir}) => XybridRustLib
-      .instance
-      .api
-      .crateApiSdkClientXybridSdkClientInitSdkCacheDir(cacheDir: cacheDir);
+  static void initSdkCacheDir({required String cacheDir}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientInitSdkCacheDir(cacheDir: cacheDir);
 
   /// Check if a model is cached locally (extracted and ready to use).
   ///
   /// This is a pure filesystem check — no network access required.
   /// Returns `true` if the model has been downloaded and extracted
   /// at `~/.xybrid/cache/extracted/{model_id}/model_metadata.json`.
-  static bool isModelCached({required String modelId}) => XybridRustLib
-      .instance
-      .api
-      .crateApiSdkClientXybridSdkClientIsModelCached(modelId: modelId);
+  static bool isModelCached({required String modelId}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientIsModelCached(modelId: modelId);
 
   static void setApiKey({required String apiKey}) => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientSetApiKey(apiKey: apiKey);

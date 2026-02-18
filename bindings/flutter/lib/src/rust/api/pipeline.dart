@@ -18,26 +18,23 @@ abstract class FfiPipeline implements RustOpaqueInterface {
   ///
   /// Note: Currently delegates to from_file as bundles are YAML-based.
   /// In future, this may support additional bundle formats (e.g., .xpkg).
-  static FfiPipeline fromBundle({required String path}) => XybridRustLib
-      .instance
-      .api
-      .crateApiPipelineFfiPipelineFromBundle(path: path);
+  static FfiPipeline fromBundle({required String path}) =>
+      XybridRustLib.instance.api
+          .crateApiPipelineFfiPipelineFromBundle(path: path);
 
   /// Load a pipeline from a YAML file path.
   ///
   /// Reads the file, parses the YAML, and resolves all model references.
-  static FfiPipeline fromFile({required String path}) => XybridRustLib
-      .instance
-      .api
-      .crateApiPipelineFfiPipelineFromFile(path: path);
+  static FfiPipeline fromFile({required String path}) =>
+      XybridRustLib.instance.api
+          .crateApiPipelineFfiPipelineFromFile(path: path);
 
   /// Load a pipeline from a YAML string.
   ///
   /// Parses the YAML and resolves all model references via the registry.
-  static FfiPipeline fromYaml({required String yaml}) => XybridRustLib
-      .instance
-      .api
-      .crateApiPipelineFfiPipelineFromYaml(yaml: yaml);
+  static FfiPipeline fromYaml({required String yaml}) =>
+      XybridRustLib.instance.api
+          .crateApiPipelineFfiPipelineFromYaml(yaml: yaml);
 
   /// Get the pipeline name (if specified in YAML).
   String? name();

@@ -1,12 +1,89 @@
 //! Model loading FFI wrappers for Flutter.
 use flutter_rust_bridge::frb;
 use std::sync::Arc;
-use xybrid_sdk::{ModelLoader, XybridModel};
+use xybrid_sdk::{GenerationConfig, ModelLoader, XybridModel};
 
 use crate::frb_generated::StreamSink;
 
 use super::context::FfiConversationContext;
 use super::result::FfiResult;
+
+/// Generation parameters for LLM inference.
+///
+/// All fields are optional. When `None`, the model's default value is used.
+/// This is non-opaque so FRB auto-generates a plain Dart data class.
+pub struct FfiGenerationConfig {
+    /// Maximum tokens to generate. Default: 2048
+    pub max_tokens: Option<u32>,
+    /// Sampling temperature (0.0 = deterministic, higher = more random). Default: 0.7
+    pub temperature: Option<f32>,
+    /// Top-p (nucleus) sampling threshold. Default: 0.9
+    pub top_p: Option<f32>,
+    /// Min-p sampling threshold. Default: 0.05
+    pub min_p: Option<f32>,
+    /// Top-k sampling (0 = disabled). Default: 40
+    pub top_k: Option<u32>,
+    /// Repetition penalty (1.0 = disabled). Default: 1.1
+    pub repetition_penalty: Option<f32>,
+    /// Stop sequences. When `None` or empty, only EOS token stops generation.
+    pub stop_sequences: Option<Vec<String>>,
+}
+
+impl FfiGenerationConfig {
+    /// Create a greedy decoding config (deterministic, temperature=0).
+    #[frb(sync)]
+    pub fn greedy() -> FfiGenerationConfig {
+        FfiGenerationConfig {
+            max_tokens: None,
+            temperature: Some(0.0),
+            top_p: Some(1.0),
+            min_p: None,
+            top_k: Some(0),
+            repetition_penalty: None,
+            stop_sequences: None,
+        }
+    }
+
+    /// Create a creative generation config (higher temperature).
+    #[frb(sync)]
+    pub fn creative() -> FfiGenerationConfig {
+        FfiGenerationConfig {
+            max_tokens: None,
+            temperature: Some(0.9),
+            top_p: Some(0.95),
+            min_p: None,
+            top_k: Some(50),
+            repetition_penalty: None,
+            stop_sequences: None,
+        }
+    }
+
+    pub(crate) fn to_sdk(&self) -> GenerationConfig {
+        let mut config = GenerationConfig::default();
+        if let Some(v) = self.max_tokens {
+            config.max_tokens = v as usize;
+        }
+        if let Some(v) = self.temperature {
+            config.temperature = v;
+        }
+        if let Some(v) = self.top_p {
+            config.top_p = v;
+        }
+        if let Some(v) = self.min_p {
+            config.min_p = v;
+        }
+        if let Some(v) = self.top_k {
+            config.top_k = v as usize;
+        }
+        if let Some(v) = self.repetition_penalty {
+            config.repetition_penalty = v;
+        }
+        if let Some(ref v) = self.stop_sequences {
+            config.stop_sequences = v.clone();
+        }
+        config
+    }
+}
 
 /// Event emitted during model loading with progress.
 #[derive(Clone)]
@@ -128,10 +205,18 @@ impl FfiModelLoader {
 
 impl FfiModel {
     /// Run batch inference (non-streaming).
-    pub fn run(&self, envelope: super::envelope::FfiEnvelope) -> Result<FfiResult, String> {
+    ///
+    /// Pass an optional `config` to control generation parameters.
+    /// When `None`, the model's default parameters are used.
+    pub fn run(
+        &self,
+        envelope: super::envelope::FfiEnvelope,
+        config: Option<FfiGenerationConfig>,
+    ) -> Result<FfiResult, String> {
+        let sdk_config = config.as_ref().map(|c| c.to_sdk());
         let result = self
             .0
-            .run(&envelope.into_envelope(), None)
+            .run(&envelope.into_envelope(), sdk_config.as_ref())
             .map_err(|e| e.to_string())?;
         Ok(FfiResult::from_inference_result(&result))
     }
@@ -144,15 +229,20 @@ impl FfiModel {
     /// - `FfiStreamEvent::Error` if an error occurs
     ///
     /// For non-LLM models, a single Token event is emitted with the full result.
+    ///
+    /// Pass an optional `config` to control generation parameters.
+    /// When `None`, the model's default parameters are used.
     pub fn run_stream(
         &self,
         envelope: super::envelope::FfiEnvelope,
+        config: Option<FfiGenerationConfig>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         use tokio_stream::StreamExt;
 
         let model = self.0.clone();
         let env = envelope.into_envelope();
+        let sdk_config = config.map(|c| c.to_sdk());
 
         // Spawn a background thread with its own Tokio runtime
         // (same pattern as load_with_progress which works)
@@ -172,7 +262,7 @@ impl FfiModel {
             };
 
             rt.block_on(async move {
-                let mut stream = model.run_stream(env, None);
+                let mut stream = model.run_stream(env, sdk_config);
 
                 while let Some(event) = stream.next().await {
                     let ffi_event = FfiStreamEvent::from(event);
@@ -201,11 +291,16 @@ impl FfiModel {
     ///
     /// Note: The context is NOT automatically updated with the result.
     /// Call `context.push_text(result.text(), FfiMessageRole::Assistant)` to add the response.
+    ///
+    /// Pass an optional `config` to control generation parameters.
+    /// When `None`, the model's default parameters are used.
     pub fn run_with_context(
         &self,
         envelope: super::envelope::FfiEnvelope,
         context: &FfiConversationContext,
+        config: Option<FfiGenerationConfig>,
     ) -> Result<FfiResult, String> {
+        let sdk_config = config.as_ref().map(|c| c.to_sdk());
         let ctx_guard = context
             .0
             .read()
@@ -213,7 +308,7 @@ impl FfiModel {
 
         let result = self
             .0
-            .run_with_context(&envelope.into_envelope(), &ctx_guard, None)
+            .run_with_context(&envelope.into_envelope(), &ctx_guard, sdk_config.as_ref())
             .map_err(|e| e.to_string())?;
 
         Ok(FfiResult::from_inference_result(&result))
@@ -228,15 +323,20 @@ impl FfiModel {
     /// - `FfiStreamEvent::Token` for each generated token (LLM models)
     /// - `FfiStreamEvent::Complete` when inference finishes
     /// - `FfiStreamEvent::Error` if an error occurs
+    ///
+    /// Pass an optional `config` to control generation parameters.
+    /// When `None`, the model's default parameters are used.
     pub fn run_stream_with_context(
         &self,
         envelope: super::envelope::FfiEnvelope,
         context: &FfiConversationContext,
+        config: Option<FfiGenerationConfig>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let ctx = context.0.clone();
+        let sdk_config = config.map(|c| c.to_sdk());
 
         // Spawn a background thread
         std::thread::spawn(move || {
@@ -256,18 +356,19 @@ impl FfiModel {
             let mut token_index = 0u32;
 
             // Use callback-based streaming
-            let result = model.run_streaming_with_context(&env, &ctx_guard, None, |token| {
-                let ffi_token = FfiStreamToken {
-                    token: token.token.clone(),
-                    token_id: token.token_id,
-                    index: token_index,
-                    cumulative_text: token.cumulative_text.clone(),
-                    finish_reason: token.finish_reason.clone(),
-                };
-                token_index += 1;
-                let _ = sink.add(FfiStreamEvent::Token(ffi_token));
-                Ok(())
-            });
+            let result =
+                model.run_streaming_with_context(&env, &ctx_guard, sdk_config.as_ref(), |token| {
+                    let ffi_token = FfiStreamToken {
+                        token: token.token.clone(),
+                        token_id: token.token_id,
+                        index: token_index,
+                        cumulative_text: token.cumulative_text.clone(),
+                        finish_reason: token.finish_reason.clone(),
+                    };
+                    token_index += 1;
+                    let _ = sink.add(FfiStreamEvent::Token(ffi_token));
+                    Ok(())
+                });
 
             match result {
                 Ok(inference_result) => {

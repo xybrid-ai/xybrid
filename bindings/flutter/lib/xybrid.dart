@@ -68,10 +68,12 @@
 /// - [XybridPipeline] - Multi-stage inference pipeline
 /// - [ConversationContext] - Multi-turn conversation memory for LLMs
 /// - [MessageRole] - Message role for conversation turns
+/// - [GenerationConfig] - LLM generation parameters (temperature, top-p, etc.)
 library;
 
 export 'src/context.dart' show ConversationContext, MessageRole;
 export 'src/envelope.dart' show XybridEnvelope;
+export 'src/generation_config.dart' show GenerationConfig;
 export 'src/llm.dart' show StreamToken;
 export 'src/model_loader.dart'
     show XybridModelLoader, XybridModel, XybridException, LoadEvent, LoadProgress, LoadComplete, LoadError;

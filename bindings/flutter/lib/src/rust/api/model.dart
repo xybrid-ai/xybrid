@@ -15,12 +15,17 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
 part 'model.freezed.dart';
 
+// These functions are ignored because they are not marked as `pub`: `to_sdk`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>
 abstract class FfiModel implements RustOpaqueInterface {
   /// Run batch inference (non-streaming).
-  Future<FfiResult> run({required FfiEnvelope envelope});
+  ///
+  /// Pass an optional `config` to control generation parameters.
+  /// When `None`, the model's default parameters are used.
+  Future<FfiResult> run(
+      {required FfiEnvelope envelope, FfiGenerationConfig? config});
 
   /// Run inference with streaming output.
   ///
@@ -30,7 +35,11 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// For non-LLM models, a single Token event is emitted with the full result.
-  Stream<FfiStreamEvent> runStream({required FfiEnvelope envelope});
+  ///
+  /// Pass an optional `config` to control generation parameters.
+  /// When `None`, the model's default parameters are used.
+  Stream<FfiStreamEvent> runStream(
+      {required FfiEnvelope envelope, FfiGenerationConfig? config});
 
   /// Run inference with streaming output and conversation context.
   ///
@@ -41,10 +50,13 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
   /// - `FfiStreamEvent::Complete` when inference finishes
   /// - `FfiStreamEvent::Error` if an error occurs
-  Stream<FfiStreamEvent> runStreamWithContext({
-    required FfiEnvelope envelope,
-    required FfiConversationContext context,
-  });
+  ///
+  /// Pass an optional `config` to control generation parameters.
+  /// When `None`, the model's default parameters are used.
+  Stream<FfiStreamEvent> runStreamWithContext(
+      {required FfiEnvelope envelope,
+      required FfiConversationContext context,
+      FfiGenerationConfig? config});
 
   /// Run inference with conversation context.
   ///
@@ -53,23 +65,24 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Note: The context is NOT automatically updated with the result.
   /// Call `context.push_text(result.text(), FfiMessageRole::Assistant)` to add the response.
-  Future<FfiResult> runWithContext({
-    required FfiEnvelope envelope,
-    required FfiConversationContext context,
-  });
+  ///
+  /// Pass an optional `config` to control generation parameters.
+  /// When `None`, the model's default parameters are used.
+  Future<FfiResult> runWithContext(
+      {required FfiEnvelope envelope,
+      required FfiConversationContext context,
+      FfiGenerationConfig? config});
 }
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>>
 abstract class FfiModelLoader implements RustOpaqueInterface {
-  static FfiModelLoader fromBundle({required String path}) => XybridRustLib
-      .instance
-      .api
-      .crateApiModelFfiModelLoaderFromBundle(path: path);
+  static FfiModelLoader fromBundle({required String path}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromBundle(path: path);
 
-  static FfiModelLoader fromRegistry({required String modelId}) => XybridRustLib
-      .instance
-      .api
-      .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);
+  static FfiModelLoader fromRegistry({required String modelId}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);
 
   /// Load the model without progress updates.
   Future<FfiModel> load();
@@ -85,18 +98,90 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   Stream<FfiLoadEvent> loadWithProgress();
 }
 
+/// Generation parameters for LLM inference.
+///
+/// All fields are optional. When `None`, the model's default value is used.
+/// This is non-opaque so FRB auto-generates a plain Dart data class.
+class FfiGenerationConfig {
+  /// Maximum tokens to generate. Default: 2048
+  final int? maxTokens;
+
+  /// Sampling temperature (0.0 = deterministic, higher = more random). Default: 0.7
+  final double? temperature;
+
+  /// Top-p (nucleus) sampling threshold. Default: 0.9
+  final double? topP;
+
+  /// Min-p sampling threshold. Default: 0.05
+  final double? minP;
+
+  /// Top-k sampling (0 = disabled). Default: 40
+  final int? topK;
+
+  /// Repetition penalty (1.0 = disabled). Default: 1.1
+  final double? repetitionPenalty;
+
+  /// Stop sequences. When `None` or empty, only EOS token stops generation.
+  final List<String>? stopSequences;
+
+  const FfiGenerationConfig({
+    this.maxTokens,
+    this.temperature,
+    this.topP,
+    this.minP,
+    this.topK,
+    this.repetitionPenalty,
+    this.stopSequences,
+  });
+
+  /// Create a creative generation config (higher temperature).
+  static FfiGenerationConfig creative() =>
+      XybridRustLib.instance.api.crateApiModelFfiGenerationConfigCreative();
+
+  /// Create a greedy decoding config (deterministic, temperature=0).
+  static FfiGenerationConfig greedy() =>
+      XybridRustLib.instance.api.crateApiModelFfiGenerationConfigGreedy();
+
+  @override
+  int get hashCode =>
+      maxTokens.hashCode ^
+      temperature.hashCode ^
+      topP.hashCode ^
+      minP.hashCode ^
+      topK.hashCode ^
+      repetitionPenalty.hashCode ^
+      stopSequences.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiGenerationConfig &&
+          runtimeType == other.runtimeType &&
+          maxTokens == other.maxTokens &&
+          temperature == other.temperature &&
+          topP == other.topP &&
+          minP == other.minP &&
+          topK == other.topK &&
+          repetitionPenalty == other.repetitionPenalty &&
+          stopSequences == other.stopSequences;
+}
+
 @freezed
 sealed class FfiLoadEvent with _$FfiLoadEvent {
   const FfiLoadEvent._();
 
   /// Download progress update (0.0 to 1.0)
-  const factory FfiLoadEvent.progress(double field0) = FfiLoadEvent_Progress;
+  const factory FfiLoadEvent.progress(
+    double field0,
+  ) = FfiLoadEvent_Progress;
 
   /// Model loaded successfully - contains the model handle ID
   const factory FfiLoadEvent.complete() = FfiLoadEvent_Complete;
 
   /// An error occurred during loading
-  const factory FfiLoadEvent.error(String field0) = FfiLoadEvent_Error;
+  const factory FfiLoadEvent.error(
+    String field0,
+  ) = FfiLoadEvent_Error;
 }
 
 @freezed
@@ -104,15 +189,19 @@ sealed class FfiStreamEvent with _$FfiStreamEvent {
   const FfiStreamEvent._();
 
   /// A token was generated
-  const factory FfiStreamEvent.token(FfiStreamToken field0) =
-      FfiStreamEvent_Token;
+  const factory FfiStreamEvent.token(
+    FfiStreamToken field0,
+  ) = FfiStreamEvent_Token;
 
   /// Inference completed with final result
-  const factory FfiStreamEvent.complete(FfiResult field0) =
-      FfiStreamEvent_Complete;
+  const factory FfiStreamEvent.complete(
+    FfiResult field0,
+  ) = FfiStreamEvent_Complete;
 
   /// An error occurred
-  const factory FfiStreamEvent.error(String field0) = FfiStreamEvent_Error;
+  const factory FfiStreamEvent.error(
+    String field0,
+  ) = FfiStreamEvent_Error;
 }
 
 /// Token received during streaming inference.
