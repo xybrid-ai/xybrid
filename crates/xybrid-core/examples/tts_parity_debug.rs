@@ -259,8 +259,8 @@ fn normalize_text_for_tts(text: &str) -> String {
     let mut s = text.to_string();
 
     // Smart quotes
-    s = s.replace('\u{201c}', "\"").replace('\u{201d}', "\"");
-    s = s.replace('\u{2018}', "'").replace('\u{2019}', "'");
+    s = s.replace(['\u{201c}', '\u{201d}'], "\"");
+    s = s.replace(['\u{2018}', '\u{2019}'], "'");
 
     // Abbreviations
     let abbrevs = [
@@ -607,7 +607,7 @@ fn run_onnx_inference(
 
     let outputs = session.run(SessionInputs::from(ort_inputs))?;
     let output_tensor = outputs[0].try_extract_tensor::<f32>()?;
-    Ok(output_tensor.1.iter().copied().collect())
+    Ok(output_tensor.1.to_vec())
 }
 
 // =============================================================================

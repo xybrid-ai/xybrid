@@ -7,10 +7,12 @@
 pub mod cmu;
 pub mod espeak;
 pub mod misaki;
+pub mod openphonemizer;
 
 pub use cmu::CmuDictionaryBackend;
 pub use espeak::EspeakBackend;
 pub use misaki::MisakiBackend;
+pub use openphonemizer::OpenPhonemizerBackend;
 
 use std::collections::HashMap;
 

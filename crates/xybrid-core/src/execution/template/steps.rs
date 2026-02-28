@@ -349,6 +349,12 @@ pub enum PhonemizerBackend {
     /// Falls back to rule-based G2P for out-of-vocabulary words
     #[default]
     MisakiDictionary,
+
+    /// Hybrid dictionary + ONNX neural G2P fallback. No system dependencies.
+    /// Uses a ~274k word dictionary for fast lookup and a small ONNX model (~59MB)
+    /// for unknown words via CTC decoding.
+    /// Requires `open-phonemizer.onnx` and `dictionary.json` in the model directory.
+    OpenPhonemizer,
 }
 
 impl PhonemizerBackend {
@@ -365,7 +371,7 @@ impl PhonemizerBackend {
         language: Option<&str>,
     ) -> Box<dyn crate::execution::preprocessing::backends::PhonemizerBackend> {
         use crate::execution::preprocessing::backends::{
-            CmuDictionaryBackend, EspeakBackend, MisakiBackend,
+            CmuDictionaryBackend, EspeakBackend, MisakiBackend, OpenPhonemizerBackend,
         };
 
         match self {
@@ -378,6 +384,9 @@ impl PhonemizerBackend {
             PhonemizerBackend::EspeakNG => {
                 let lang = language.unwrap_or("en-us").to_string();
                 Box::new(EspeakBackend::new(lang))
+            }
+            PhonemizerBackend::OpenPhonemizer => {
+                Box::new(OpenPhonemizerBackend::new(base_path.to_string()))
             }
         }
     }

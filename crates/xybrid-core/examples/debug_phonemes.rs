@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load and display tokens map
     let tokens_content = std::fs::read_to_string(&tokens_path)?;
     let tokens_map = load_tokens_map(&tokens_content);
-    let reverse_map: HashMap<i64, char> = tokens_map.iter().map(|(&c, &id)| (id, c)).collect();
+    let _reverse_map: HashMap<i64, char> = tokens_map.iter().map(|(&c, &id)| (id, c)).collect();
 
     // Load metadata
     let metadata: ModelMetadata =
