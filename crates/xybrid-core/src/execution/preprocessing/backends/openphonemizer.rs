@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use ort::session::{Session, builder::GraphOptimizationLevel};
+use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
 use regex::Regex;
 
@@ -31,8 +31,9 @@ const CHAR_REPEATS: usize = 3;
 const MAX_INPUT_LEN: usize = 64;
 
 /// Punctuation that attaches to the preceding word (no leading space).
-const PUNCTUATION_BEFORE: &[&str] =
-    &[".", ",", "!", "?", ";", ":", ")", "]", "}", "\u{00BB}", "\u{201D}"];
+const PUNCTUATION_BEFORE: &[&str] = &[
+    ".", ",", "!", "?", ";", ":", ")", "]", "}", "\u{00BB}", "\u{201D}",
+];
 
 /// Punctuation that attaches to the following word (no trailing space).
 const PUNCTUATION_AFTER: &[&str] = &["(", "[", "{", "\u{00AB}", "\u{201C}"];
@@ -312,9 +313,7 @@ impl OpenPhonemizerBackend {
 
 impl PhonemizerBackend for OpenPhonemizerBackend {
     fn phonemize(&self, text: &str, tokens_map: &HashMap<char, i64>) -> ExecutorResult<String> {
-        let state = self
-            .state
-            .get_or_init(|| Self::init_state(&self.base_path));
+        let state = self.state.get_or_init(|| Self::init_state(&self.base_path));
 
         let state = state.as_ref().map_err(|e| {
             AdapterError::InvalidInput(format!("OpenPhonemizer initialization failed: {e}"))

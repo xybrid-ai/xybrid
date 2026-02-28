@@ -51,7 +51,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tokens_path = model_path.join("tokens.txt");
     let tokens_content = std::fs::read_to_string(&tokens_path)?;
     let tokens_map = load_tokens_map(&tokens_content);
-    println!("Loaded {} tokens from {}", tokens_map.len(), tokens_path.display());
+    println!(
+        "Loaded {} tokens from {}",
+        tokens_map.len(),
+        tokens_path.display()
+    );
 
     // Load voice embedding
     let voices_path = model_path.join("voices.npz");
@@ -168,7 +172,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let speed_with_prior = speed * 0.8; // KittenTTS nano default prior
         result.insert(
             "stage_e_speed".to_string(),
-            serde_json::Value::Number(serde_json::Number::from_f64(speed_with_prior as f64).unwrap()),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(speed_with_prior as f64).unwrap(),
+            ),
         );
         result.insert(
             "stage_e_speed_no_prior".to_string(),
@@ -179,8 +185,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Stage F: ONNX inference
         let onnx_path = model_path.join("model.onnx");
         if onnx_path.exists() {
-            match run_onnx_inference(&onnx_path, &ids_with_end, &voice_embedding, speed_with_prior)
-            {
+            match run_onnx_inference(
+                &onnx_path,
+                &ids_with_end,
+                &voice_embedding,
+                speed_with_prior,
+            ) {
                 Ok(raw_waveform) => {
                     let rms = compute_rms(&raw_waveform);
                     result.insert(
@@ -199,9 +209,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                     result.insert(
                         "stage_f_raw_output_last_20".to_string(),
-                        floats_to_json(
-                            &raw_waveform[raw_waveform.len().saturating_sub(20)..],
-                        ),
+                        floats_to_json(&raw_waveform[raw_waveform.len().saturating_sub(20)..]),
                     );
 
                     // Trim last 5000 samples (KittenTTS style)
@@ -231,7 +239,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         24000,
                     )?;
 
-                    println!("  F. Raw output: {} samples, RMS={:.6}", raw_waveform.len(), rms);
+                    println!(
+                        "  F. Raw output: {} samples, RMS={:.6}",
+                        raw_waveform.len(),
+                        rms
+                    );
                     println!("  G. Trimmed:    {} samples", trimmed.len());
                 }
                 Err(e) => println!("  F. ONNX ERROR: {}", e),
@@ -280,8 +292,7 @@ fn normalize_text_for_tts(text: &str) -> String {
     }
 
     // Currency ($X.YY)
-    let re_currency =
-        regex::Regex::new(r"\$(\d+)\.(\d{2})").unwrap();
+    let re_currency = regex::Regex::new(r"\$(\d+)\.(\d{2})").unwrap();
     s = re_currency
         .replace_all(&s, |caps: &regex::Captures| {
             let dollars: u64 = caps[1].parse().unwrap_or(0);
@@ -347,8 +358,25 @@ fn num_to_words(n: u64) -> String {
         return "zero".to_string();
     }
     let ones = [
-        "", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-        "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+        "",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "eleven",
+        "twelve",
+        "thirteen",
+        "fourteen",
+        "fifteen",
+        "sixteen",
+        "seventeen",
+        "eighteen",
         "nineteen",
     ];
     let tens_words = [
@@ -392,7 +420,9 @@ fn num_to_words(n: u64) -> String {
 // Misaki phonemization (reimplemented matching Xybrid's MisakiBackend)
 // =============================================================================
 
-fn load_json_dict(path: &Path) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+fn load_json_dict(
+    path: &Path,
+) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
     if !path.exists() {
         return Ok(HashMap::new());
     }
@@ -523,7 +553,8 @@ fn phonemize_misaki(
         // Extract leading/trailing punctuation
         let trimmed_start = word.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '\'');
         let leading_punct = &word[..word.len() - trimmed_start.len()];
-        let clean_word = trimmed_start.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '\'');
+        let clean_word =
+            trimmed_start.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '\'');
         let trailing_punct = &trimmed_start[clean_word.len()..];
 
         // Emit leading punctuation if in vocab
@@ -582,7 +613,11 @@ fn run_onnx_inference(
     let mut session = Session::builder()?.commit_from_file(model_path)?;
 
     // Collect input names
-    let input_names: Vec<String> = session.inputs().iter().map(|i| i.name().to_string()).collect();
+    let input_names: Vec<String> = session
+        .inputs()
+        .iter()
+        .map(|i| i.name().to_string())
+        .collect();
     let mut ort_inputs: Vec<(String, ort::value::DynValue)> = Vec::new();
 
     for name in &input_names {
@@ -602,7 +637,10 @@ fn run_onnx_inference(
 
     // Sort to match session input order
     ort_inputs.sort_by_key(|(name, _)| {
-        input_names.iter().position(|n| n == name).unwrap_or(usize::MAX)
+        input_names
+            .iter()
+            .position(|n| n == name)
+            .unwrap_or(usize::MAX)
     });
 
     let outputs = session.run(SessionInputs::from(ort_inputs))?;

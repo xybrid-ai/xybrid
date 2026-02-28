@@ -144,8 +144,7 @@ impl TtsStrategy {
         // Create and run TTS session
         let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
         let speed = extract_tts_speed(input);
-        let mut raw_outputs =
-            execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
+        let mut raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
 
         // Trim trailing samples to remove artifacts
         let trim_count = metadata.trim_trailing_samples.unwrap_or(0);

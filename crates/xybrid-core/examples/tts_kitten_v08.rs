@@ -144,7 +144,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 format!(
                     "Voice '{}' not found. Available: {}",
                     name,
-                    voices.iter().map(|v| v.name.as_str()).collect::<Vec<_>>().join(", ")
+                    voices
+                        .iter()
+                        .map(|v| v.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             })?
     } else {
@@ -160,7 +164,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let effective_speed = args.speed.unwrap_or(speed_prior);
 
     println!("Voice: {} ({})", selected_voice.name, voice_id);
-    println!("Speed: {:.1}x{}", effective_speed, if args.speed.is_none() { " (speed prior)" } else { "" });
+    println!(
+        "Speed: {:.1}x{}",
+        effective_speed,
+        if args.speed.is_none() {
+            " (speed prior)"
+        } else {
+            ""
+        }
+    );
     println!("Text: \"{}\"", args.text);
     println!();
 
@@ -192,7 +204,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             println!();
             println!("Result:");
-            println!("  Audio: {:.2}s ({} bytes)", duration_secs, audio_bytes.len());
+            println!(
+                "  Audio: {:.2}s ({} bytes)",
+                duration_secs,
+                audio_bytes.len()
+            );
             println!("  Time: {:?}", elapsed);
             println!(
                 "  RTF: {:.1}x realtime",
@@ -201,7 +217,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!();
 
             // Save to WAV
-            let output_filename = format!("tts_kitten_v08_{}.wav", selected_voice.name.to_lowercase());
+            let output_filename =
+                format!("tts_kitten_v08_{}.wav", selected_voice.name.to_lowercase());
             let output_path = PathBuf::from(&output_filename);
             save_wav(&output_path, audio_bytes, sample_rate)?;
 

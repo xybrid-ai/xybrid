@@ -27,8 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _reverse_map: HashMap<i64, char> = tokens_map.iter().map(|(&c, &id)| (id, c)).collect();
 
     // Load metadata
-    let metadata: ModelMetadata =
-        serde_json::from_str(&std::fs::read_to_string(&metadata_path)?)?;
+    let metadata: ModelMetadata = serde_json::from_str(&std::fs::read_to_string(&metadata_path)?)?;
     println!(
         "Model: {} (max_chunk_chars: {:?}, trim_trailing_samples: {:?})",
         metadata.model_id, metadata.max_chunk_chars, metadata.trim_trailing_samples
@@ -42,7 +41,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Manual phonemization path: load misaki dictionaries and phonemize
     let misaki_dir = model_dir.join("misaki");
     if !misaki_dir.exists() {
-        println!("ERROR: misaki/ directory not found at {}", misaki_dir.display());
+        println!(
+            "ERROR: misaki/ directory not found at {}",
+            misaki_dir.display()
+        );
         return Ok(());
     }
 
@@ -62,7 +64,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let sample_rate = 24000;
             let num_samples = bytes.len() / 2;
             let duration = num_samples as f32 / sample_rate as f32;
-            println!("Output: {} bytes, {:.2}s at {}Hz", bytes.len(), duration, sample_rate);
+            println!(
+                "Output: {} bytes, {:.2}s at {}Hz",
+                bytes.len(),
+                duration,
+                sample_rate
+            );
         }
         other => println!("Unexpected output: {:?}", std::mem::discriminant(other)),
     }

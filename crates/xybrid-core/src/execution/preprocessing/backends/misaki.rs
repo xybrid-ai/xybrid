@@ -309,7 +309,8 @@ fn stem_suffix(
     let stem = &word[..word.len() - suffix.len()];
 
     // Try direct stem lookup
-    if let Some(ps) = lookup_word_phonemes(stem, gold).or_else(|| lookup_word_phonemes(stem, silver))
+    if let Some(ps) =
+        lookup_word_phonemes(stem, gold).or_else(|| lookup_word_phonemes(stem, silver))
     {
         return Some(format!("{}{}", ps, phoneme_suffix));
     }
@@ -810,9 +811,7 @@ fn rule_based_g2p(word: &str) -> String {
         let next_ch = chars.get(i + 1);
 
         // Check if this vowel is in the "long" position (VCe pattern)
-        let is_long_vowel = silent_e
-            && "aeiou".contains(c)
-            && i + 2 == n - 1; // vowel is 3rd-from-end in VCe
+        let is_long_vowel = silent_e && "aeiou".contains(c) && i + 2 == n - 1; // vowel is 3rd-from-end in VCe
 
         match c {
             'a' => {
