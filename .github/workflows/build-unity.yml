@@ -1,0 +1,420 @@
+name: Build Unity
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  NDK_VERSION: "26.1.10909125"
+
+permissions:
+  contents: write
+
+jobs:
+  #
+  # Version check - verify all package versions match the git tag
+  # (reuses the same logic as release.yml)
+  #
+  check-version:
+    name: Verify Version
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check versions match git tag
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          UNITY_VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
+          echo "Git tag version: $TAG_VERSION"
+          echo "Unity package:   $UNITY_VERSION"
+          if [ "$UNITY_VERSION" != "$TAG_VERSION" ]; then
+            echo ""
+            echo "ERROR: Version mismatch! Tag is v$TAG_VERSION but Unity package.json has $UNITY_VERSION"
+            echo "Run 'just bump-version $TAG_VERSION' and commit before tagging."
+            exit 1
+          fi
+          echo "Unity version matches v$TAG_VERSION"
+
+  #
+  # C# bindings sync check - verify NativeMethods.g.cs is up-to-date
+  #
+  check-csharp-bindings:
+    name: Check C# Bindings
+    needs: [check-version]
+    if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "unity-csharp-check"
+
+      - name: Regenerate C# bindings
+        run: cargo xtask build-ffi --csharp
+
+      - name: Check C# bindings are up-to-date
+        run: |
+          if ! git diff --exit-code bindings/unity/Runtime/Native/NativeMethods.g.cs; then
+            echo ""
+            echo "ERROR: C# bindings (NativeMethods.g.cs) are out of date."
+            echo "A Rust FFI change was committed without regenerating C# bindings."
+            echo ""
+            echo "Fix: run 'cargo xtask build-ffi --csharp' and commit the result."
+            exit 1
+          fi
+          echo "C# bindings are up-to-date."
+
+  #
+  # macOS native library builds (arm64 + x86_64)
+  #
+  build-unity-macos:
+    name: Build macOS Libraries
+    needs: [check-version]
+    if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            aarch64-apple-darwin,
+            x86_64-apple-darwin
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "unity-macos"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Build for aarch64-apple-darwin
+        run: cargo xtask build-ffi --target aarch64-apple-darwin --deploy-unity
+
+      - name: Build for x86_64-apple-darwin
+        run: cargo xtask build-ffi --target x86_64-apple-darwin --deploy-unity
+
+      - name: Verify deployed libraries
+        run: |
+          echo "macOS plugin directory:"
+          ls -la bindings/unity/Runtime/Plugins/macOS/ || echo "WARNING: macOS plugin directory not found"
+          echo ""
+          echo "Checking architectures:"
+          file bindings/unity/Runtime/Plugins/macOS/*.dylib || true
+
+      - name: Upload macOS plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-plugins-macos
+          path: bindings/unity/Runtime/Plugins/macOS/
+          if-no-files-found: error
+
+  #
+  # Windows native library build (x86_64)
+  #
+  build-unity-windows:
+    name: Build Windows Libraries
+    needs: [check-version]
+    if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "unity-windows"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Build for x86_64-pc-windows-msvc
+        run: cargo xtask build-ffi --target x86_64-pc-windows-msvc --deploy-unity
+
+      - name: Verify deployed libraries
+        shell: bash
+        run: |
+          echo "Windows plugin directory:"
+          ls -la bindings/unity/Runtime/Plugins/Windows/ || echo "WARNING: Windows plugin directory not found"
+
+      - name: Upload Windows plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-plugins-windows
+          path: bindings/unity/Runtime/Plugins/Windows/
+          if-no-files-found: error
+
+  #
+  # Linux native library build (x86_64)
+  #
+  build-unity-linux:
+    name: Build Linux Libraries
+    needs: [check-version]
+    if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "unity-linux"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Build for x86_64-unknown-linux-gnu
+        run: cargo xtask build-ffi --target x86_64-unknown-linux-gnu --deploy-unity
+
+      - name: Verify deployed libraries
+        run: |
+          echo "Linux plugin directory:"
+          ls -la bindings/unity/Runtime/Plugins/Linux/ || echo "WARNING: Linux plugin directory not found"
+
+      - name: Upload Linux plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-plugins-linux
+          path: bindings/unity/Runtime/Plugins/Linux/
+          if-no-files-found: error
+
+  #
+  # Android native library builds (arm64-v8a, armeabi-v7a, x86_64)
+  #
+  build-unity-android:
+    name: Build Android Libraries
+    needs: [check-version]
+    if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "unity-android"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          key: android-ndk-${{ env.NDK_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Set NDK environment
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Cache cargo-ndk
+        id: cache-cargo-ndk
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-ndk-${{ runner.os }}-
+
+      - name: Install cargo-ndk
+        if: steps.cache-cargo-ndk.outputs.cache-hit != 'true'
+        run: cargo install cargo-ndk
+
+      - name: Build for aarch64-linux-android
+        run: cargo xtask build-ffi --target aarch64-linux-android --deploy-unity
+
+      - name: Build for armv7-linux-androideabi
+        run: cargo xtask build-ffi --target armv7-linux-androideabi --deploy-unity
+
+      - name: Build for x86_64-linux-android
+        run: cargo xtask build-ffi --target x86_64-linux-android --deploy-unity
+
+      - name: Verify deployed libraries
+        run: |
+          echo "Android plugin directory:"
+          ABIS=("arm64-v8a" "armeabi-v7a" "x86_64")
+          for abi in "${ABIS[@]}"; do
+            ABI_DIR="bindings/unity/Runtime/Plugins/Android/$abi"
+            if [ ! -d "$ABI_DIR" ]; then
+              echo "ERROR: ABI directory not found: $ABI_DIR"
+              exit 1
+            fi
+            echo ""
+            echo "=== $abi ==="
+            ls -la "$ABI_DIR/"
+            file "$ABI_DIR/libxybrid_ffi.so"
+          done
+
+      - name: Upload Android plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-plugins-android
+          path: bindings/unity/Runtime/Plugins/Android/
+          if-no-files-found: error
+
+  #
+  # iOS native library build (arm64 static)
+  #
+  build-unity-ios:
+    name: Build iOS Libraries
+    needs: [check-version]
+    if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "unity-ios"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Verify ORT iOS library
+        run: |
+          if [ ! -f "vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a" ]; then
+            echo "ERROR: ORT iOS library not found at vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a"
+            echo "Ensure the ort-ios submodule is checked out correctly."
+            exit 1
+          fi
+          echo "ORT iOS library found."
+
+      - name: Build for aarch64-apple-ios
+        run: cargo xtask build-ffi --target aarch64-apple-ios --deploy-unity
+
+      - name: Verify deployed libraries
+        run: |
+          echo "iOS plugin directory:"
+          ls -la bindings/unity/Runtime/Plugins/iOS/ || echo "WARNING: iOS plugin directory not found"
+          echo ""
+          echo "Checking file type:"
+          file bindings/unity/Runtime/Plugins/iOS/*.a || true
+
+      - name: Upload iOS plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-plugins-ios
+          path: bindings/unity/Runtime/Plugins/iOS/
+          if-no-files-found: error

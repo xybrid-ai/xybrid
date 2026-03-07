@@ -357,6 +357,25 @@ enum Commands {
         version: Option<String>,
     },
 
+    /// Build xybrid-ffi for Unity target platforms
+    ///
+    /// Convenience wrapper around build-ffi that orchestrates builds for all Unity-supported
+    /// platforms. By default, builds for the host platform only. Use --all-platforms to build
+    /// all targets available on the current host OS.
+    BuildUnity {
+        /// Build all Unity target platforms available on the current host OS
+        #[arg(long)]
+        all_platforms: bool,
+
+        /// Generate C# bindings (NativeMethods.g.cs) via csbindgen
+        #[arg(long)]
+        csharp: bool,
+
+        /// Copy built libraries to bindings/unity/Runtime/Plugins/<Platform>/
+        #[arg(long)]
+        deploy: bool,
+    },
+
     /// Package build artifacts for distribution (creates dist/ with .zip files and checksums)
     Package {
         /// Override the version (defaults to Cargo.toml version or git tag)
@@ -557,6 +576,13 @@ fn main() -> Result<()> {
             let ver = get_version(version.as_deref());
             build_all(is_release, parallel, &ver)?;
         }
+        Commands::BuildUnity {
+            all_platforms,
+            csharp,
+            deploy,
+        } => {
+            build_unity(all_platforms, csharp, deploy)?;
+        }
         Commands::Package {
             version,
             output_dir,
@@ -755,6 +781,103 @@ fn build_ffi(
     Ok(())
 }
 
+/// All Unity target platforms with their Rust target triples.
+const UNITY_TARGETS: &[(&str, &str)] = &[
+    ("macOS arm64", "aarch64-apple-darwin"),
+    ("macOS x86_64", "x86_64-apple-darwin"),
+    ("Windows x86_64", "x86_64-pc-windows-msvc"),
+    ("Linux x86_64", "x86_64-unknown-linux-gnu"),
+    ("iOS arm64", "aarch64-apple-ios"),
+    ("Android arm64", "aarch64-linux-android"),
+    ("Android armv7", "armv7-linux-androideabi"),
+    ("Android x86_64", "x86_64-linux-android"),
+];
+
+/// Returns the Unity targets that can be built on the current host OS.
+fn unity_targets_for_host() -> Vec<&'static str> {
+    let host = std::env::consts::OS;
+    UNITY_TARGETS
+        .iter()
+        .filter(|(_, triple)| match host {
+            "macos" => triple.contains("apple"),
+            "linux" => triple.contains("linux") || triple.contains("android"),
+            "windows" => triple.contains("windows"),
+            _ => false,
+        })
+        .map(|(_, triple)| *triple)
+        .collect()
+}
+
+/// Build xybrid-ffi for Unity target platforms.
+///
+/// Orchestrates calls to `build_ffi()` for each target. By default, builds only
+/// for the host platform. With `--all-platforms`, builds all targets available
+/// on the current host OS.
+fn build_unity(all_platforms: bool, csharp: bool, deploy: bool) -> Result<()> {
+    println!("Building xybrid-ffi for Unity...\n");
+
+    if all_platforms {
+        let buildable = unity_targets_for_host();
+        let skipped: Vec<_> = UNITY_TARGETS
+            .iter()
+            .filter(|(_, triple)| !buildable.contains(triple))
+            .collect();
+
+        println!("All Unity targets:");
+        for (name, triple) in UNITY_TARGETS {
+            let available = buildable.contains(triple);
+            println!(
+                "  {} {} ({})",
+                if available { "✓" } else { "✗" },
+                name,
+                triple,
+            );
+        }
+        println!();
+
+        if !skipped.is_empty() {
+            println!(
+                "Skipping {} target(s) not available on this host OS.\n",
+                skipped.len()
+            );
+        }
+
+        if buildable.is_empty() {
+            anyhow::bail!("No Unity targets can be built on this host OS");
+        }
+
+        for (i, target) in buildable.iter().enumerate() {
+            println!(
+                "--- [{}/{}] Building for {} ---",
+                i + 1,
+                buildable.len(),
+                target
+            );
+            build_ffi(
+                Some(target.to_string()),
+                true, // always release for Unity
+                None, // auto-detect preset
+                csharp && i == 0, // only generate C# on first build
+                deploy,
+            )?;
+            println!();
+        }
+    } else {
+        // Build for host platform only
+        println!("Building for host platform (use --all-platforms for all targets)\n");
+        build_ffi(
+            None,    // host platform
+            true,    // always release
+            None,    // auto-detect preset
+            csharp,
+            deploy,
+        )?;
+    }
+
+    println!("✓ Unity build complete!");
+    Ok(())
+}
+
 /// Deploy the built xybrid-ffi library to the Unity bindings directory
 fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
     println!("\nDeploying to Unity...");
@@ -783,8 +906,26 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
         "Linux"
     };
 
-    // Unity native plugins directory
-    let unity_plugins_dir = PathBuf::from("bindings/unity/Runtime/Plugins").join(platform_dir);
+    // For Android, Unity expects ABI-specific subdirectories under Android/
+    let android_abi = if platform_dir == "Android" {
+        target.and_then(|t| match t {
+            "aarch64-linux-android" => Some("arm64-v8a"),
+            "armv7-linux-androideabi" => Some("armeabi-v7a"),
+            "x86_64-linux-android" => Some("x86_64"),
+            _ => None,
+        })
+    } else {
+        None
+    };
+
+    // Unity native plugins directory (with ABI subdir for Android)
+    let unity_plugins_dir = if let Some(abi) = android_abi {
+        PathBuf::from("bindings/unity/Runtime/Plugins")
+            .join(platform_dir)
+            .join(abi)
+    } else {
+        PathBuf::from("bindings/unity/Runtime/Plugins").join(platform_dir)
+    };
     std::fs::create_dir_all(&unity_plugins_dir).with_context(|| {
         format!(
             "Failed to create Unity plugins directory: {:?}",
@@ -811,6 +952,31 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
             ),
         )?;
         println!("  ✓ Created folder .meta: {}", folder_meta.display());
+    }
+
+    // For Android ABI subdirectories, also create a .meta for the ABI folder
+    if let Some(abi) = android_abi {
+        let abi_meta = PathBuf::from("bindings/unity/Runtime/Plugins")
+            .join(platform_dir)
+            .join(format!("{}.meta", abi));
+        if !abi_meta.exists() {
+            let guid = format!(
+                "{:032x}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+                    + 1 // offset to avoid guid collision with parent
+            );
+            std::fs::write(
+                &abi_meta,
+                format!(
+                    "fileFormatVersion: 2\nguid: {}\nfolderAsset: yes\nDefaultImporter:\n  externalObjects: {{}}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n",
+                    guid
+                ),
+            )?;
+            println!("  ✓ Created ABI folder .meta: {}", abi_meta.display());
+        }
     }
 
     // Copy the dynamic library
@@ -842,6 +1008,30 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
         let meta_content = generate_plugin_meta(&guid, platform_dir);
         std::fs::write(&meta_path, meta_content)?;
         println!("  ✓ Created plugin .meta: {}", meta_path.display());
+    }
+
+    // Bundle ORT Android .so files alongside libxybrid_ffi.so (Android only)
+    if let Some(abi) = android_abi {
+        if let Some(ort_android_path) = resolve_ort_android_libs() {
+            let ort_abi_dir = ort_android_path.join(abi);
+            if ort_abi_dir.is_dir() {
+                for lib_name in &["libonnxruntime.so", "libc++_shared.so"] {
+                    let src = ort_abi_dir.join(lib_name);
+                    if src.exists() {
+                        let dst = unity_plugins_dir.join(lib_name);
+                        std::fs::copy(&src, &dst).with_context(|| {
+                            format!("Failed to copy ORT library {} to {:?}", lib_name, dst)
+                        })?;
+                        println!("  ✓ Bundled ORT: {}", dst.display());
+                    }
+                }
+            } else {
+                eprintln!(
+                    "  Warning: ORT Android libs not found for ABI {} at {:?}",
+                    abi, ort_abi_dir
+                );
+            }
+        }
     }
 
     // Also copy the C header
