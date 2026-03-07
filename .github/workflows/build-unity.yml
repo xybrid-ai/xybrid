@@ -104,9 +104,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: >-
-            aarch64-apple-darwin,
-            x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -127,18 +125,17 @@ jobs:
           cache-all-crates: "true"
           save-if: "true"
 
+      # Note: Only building arm64. ORT does not provide prebuilt binaries for x86_64-apple-darwin.
+      # Intel Macs can run arm64 binaries via Rosetta 2.
       - name: Build for aarch64-apple-darwin
         run: cargo xtask build-ffi --target aarch64-apple-darwin --deploy-unity
-
-      - name: Build for x86_64-apple-darwin
-        run: cargo xtask build-ffi --target x86_64-apple-darwin --deploy-unity
 
       - name: Verify deployed libraries
         run: |
           echo "macOS plugin directory:"
           ls -la bindings/unity/Runtime/Plugins/macOS/ || echo "WARNING: macOS plugin directory not found"
           echo ""
-          echo "Checking architectures:"
+          echo "Checking architecture:"
           file bindings/unity/Runtime/Plugins/macOS/*.dylib || true
 
       - name: Upload macOS plugins

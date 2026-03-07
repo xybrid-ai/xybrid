@@ -702,51 +702,58 @@ fn build_ffi(
     );
     println!("  Features: {}", features_str);
 
-    let mut cmd = Command::new("cargo");
-    cmd.arg("build").arg("-p").arg("xybrid-ffi");
+    // Android targets use cargo-ndk (same as Kotlin/Flutter CI) which handles
+    // all NDK toolchain setup (CC, CXX, linker, cmake, PATH).
+    let is_android = target.as_deref().is_some_and(|t| t.contains("android"));
 
-    // Pass all features
-    cmd.arg("--features").arg(&features_str);
+    if is_android {
+        build_ffi_android(target.as_deref().unwrap(), release, &features_str)?;
+    } else {
+        let mut cmd = Command::new("cargo");
+        cmd.arg("build").arg("-p").arg("xybrid-ffi");
+        cmd.arg("--features").arg(&features_str);
 
-    if release {
-        cmd.arg("--release");
-    }
+        if release {
+            cmd.arg("--release");
+        }
 
-    if let Some(ref t) = target {
-        cmd.arg("--target").arg(t);
+        if let Some(ref t) = target {
+            cmd.arg("--target").arg(t);
 
-        // For iOS targets, resolve and set ORT_LIB_LOCATION + fp16 rustflags
-        if is_ios_target(t) {
-            if let Some(ort_path) = resolve_ort_lib_location(t) {
-                cmd.env("ORT_LIB_LOCATION", &ort_path);
-            } else {
-                anyhow::bail!(
-                    "ORT iOS library not found. To build for iOS, either:\n\
-                     1. Place the ORT iOS xcframework at vendor/ort-ios/onnxruntime.xcframework/\n\
-                     2. Set ORT_LIB_LOCATION env var to a directory containing libonnxruntime.a\n\n\
-                     Download from: https://huggingface.co/csukuangfj/ios-onnxruntime"
-                );
+            // For iOS targets, resolve and set ORT_LIB_LOCATION + fp16 rustflags
+            if is_ios_target(t) {
+                if let Some(ort_path) = resolve_ort_lib_location(t) {
+                    cmd.env("ORT_LIB_LOCATION", &ort_path);
+                } else {
+                    anyhow::bail!(
+                        "ORT iOS library not found. To build for iOS, either:\n\
+                         1. Place the ORT iOS xcframework at vendor/ort-ios/onnxruntime.xcframework/\n\
+                         2. Set ORT_LIB_LOCATION env var to a directory containing libonnxruntime.a\n\n\
+                         Download from: https://huggingface.co/csukuangfj/ios-onnxruntime"
+                    );
+                }
+                set_ios_rustflags(&mut cmd, t);
             }
-            set_ios_rustflags(&mut cmd, t);
+        }
+
+        let status = cmd.status().context("Failed to run cargo build")?;
+
+        if !status.success() {
+            anyhow::bail!("cargo build failed");
         }
     }
 
-    let status = cmd.status().context("Failed to run cargo build")?;
-
-    if !status.success() {
-        anyhow::bail!("cargo build failed");
-    }
-
-    // Print output location
+    // Print output location — use the target triple (not host OS) to determine lib extension
     let profile = if release { "release" } else { "debug" };
-    let dylib_name = if cfg!(target_os = "macos") {
+    let target_str = target.as_deref().unwrap_or("");
+    let dylib_name = if target_str.contains("apple") || (target_str.is_empty() && cfg!(target_os = "macos")) {
         "libxybrid_ffi.dylib"
-    } else if cfg!(target_os = "windows") {
+    } else if target_str.contains("windows") || (target_str.is_empty() && cfg!(target_os = "windows")) {
         "xybrid_ffi.dll"
     } else {
         "libxybrid_ffi.so"
     };
-    let staticlib_name = if cfg!(target_os = "windows") {
+    let staticlib_name = if target_str.contains("windows") || (target_str.is_empty() && cfg!(target_os = "windows")) {
         "xybrid_ffi.lib"
     } else {
         "libxybrid_ffi.a"
@@ -783,8 +790,9 @@ fn build_ffi(
 
 /// All Unity target platforms with their Rust target triples.
 const UNITY_TARGETS: &[(&str, &str)] = &[
+    // Note: x86_64-apple-darwin omitted — ORT has no prebuilt binaries for Intel Mac.
+    // Intel Macs can run arm64 binaries via Rosetta 2.
     ("macOS arm64", "aarch64-apple-darwin"),
-    ("macOS x86_64", "x86_64-apple-darwin"),
     ("Windows x86_64", "x86_64-pc-windows-msvc"),
     ("Linux x86_64", "x86_64-unknown-linux-gnu"),
     ("iOS arm64", "aarch64-apple-ios"),
@@ -1722,6 +1730,52 @@ fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<
     println!("ABIs built:");
     for abi in &built_abis {
         println!("  - {}", abi);
+    }
+
+    Ok(())
+}
+
+/// Build xybrid-ffi for an Android target using cargo-ndk.
+///
+/// This uses the same cargo-ndk approach as the working Kotlin and Flutter
+/// Android CI workflows, which handles all NDK toolchain setup automatically
+/// (CC, CXX, linker, cmake, PATH, etc.).
+fn build_ffi_android(target: &str, release: bool, features: &str) -> Result<()> {
+    let has_cargo_ndk = Command::new("cargo")
+        .args(["ndk", "--version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !has_cargo_ndk {
+        anyhow::bail!(
+            "cargo-ndk is required for Android FFI builds.\n\
+             Install with: cargo install cargo-ndk\n\
+             Also ensure ANDROID_NDK_HOME is set."
+        );
+    }
+
+    println!("  Using cargo-ndk for Android cross-compilation");
+
+    let mut cmd = Command::new("cargo");
+    cmd.arg("ndk")
+        .arg("--target")
+        .arg(target)
+        .arg("--platform")
+        .arg("28")
+        .arg("build")
+        .arg("-p")
+        .arg("xybrid-ffi")
+        .arg("--features")
+        .arg(features);
+
+    if release {
+        cmd.arg("--release");
+    }
+
+    let status = cmd.status().context("Failed to run cargo ndk build")?;
+    if !status.success() {
+        anyhow::bail!("cargo ndk build failed for {}", target);
     }
 
     Ok(())
