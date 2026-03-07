@@ -418,3 +418,69 @@ jobs:
           name: unity-plugins-ios
           path: bindings/unity/Runtime/Plugins/iOS/
           if-no-files-found: error
+
+  #
+  # Package all platform plugins into a single Unity SDK archive
+  #
+  package-unity:
+    name: Package Unity SDK
+    needs: [check-csharp-bindings, build-unity-macos, build-unity-windows, build-unity-linux, build-unity-ios, build-unity-android]
+    if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all Unity plugin artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: unity-plugins-*
+          path: downloaded-plugins
+
+      - name: Assemble plugins into Unity package
+        run: |
+          # Create the target plugin directory
+          mkdir -p bindings/unity/Runtime/Plugins
+
+          # Move each platform's plugins into the correct directory
+          for platform_dir in downloaded-plugins/unity-plugins-*/; do
+            PLATFORM=$(basename "$platform_dir" | sed 's/unity-plugins-//')
+            echo "Assembling $PLATFORM plugins..."
+            mkdir -p "bindings/unity/Runtime/Plugins/$PLATFORM"
+            cp -r "$platform_dir"/* "bindings/unity/Runtime/Plugins/$PLATFORM/"
+          done
+
+          echo ""
+          echo "Final plugin directory structure:"
+          find bindings/unity/Runtime/Plugins -type f | sort
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Unity SDK version: $VERSION"
+
+      - name: Create SDK archive
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          tar -czf "xybrid-unity-sdk-${VERSION}.tar.gz" -C bindings unity
+          echo "Created xybrid-unity-sdk-${VERSION}.tar.gz"
+          ls -lh "xybrid-unity-sdk-${VERSION}.tar.gz"
+
+      - name: Upload Unity SDK package
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-sdk-package
+          path: xybrid-unity-sdk-*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          # Wait briefly for the release to be created by release.yml
+          # If it doesn't exist yet, gh release upload will fail gracefully
+          # and the artifact is still available via the CI artifact above
+          gh release upload "v${VERSION}" "xybrid-unity-sdk-${VERSION}.tar.gz" --clobber || echo "Release v${VERSION} not found yet — Unity SDK artifact is available as a CI artifact"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

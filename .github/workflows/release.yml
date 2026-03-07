@@ -488,6 +488,9 @@ jobs:
           echo "**Flutter**" >> CHANGELOG_RELEASE.md
           echo "- Precompiled native libraries auto-downloaded by cargokit (no Rust toolchain required)" >> CHANGELOG_RELEASE.md
           echo "" >> CHANGELOG_RELEASE.md
+          echo "**Unity**" >> CHANGELOG_RELEASE.md
+          echo "- \`xybrid-unity-sdk-${CURRENT_TAG}.tar.gz\` - Native plugins for all platforms (uploaded by Build Unity workflow)" >> CHANGELOG_RELEASE.md
+          echo "" >> CHANGELOG_RELEASE.md
           echo "**CLI**" >> CHANGELOG_RELEASE.md
           echo "- Cross-platform binaries for macOS (arm64, x86_64), Linux (x86_64), and Windows (x86_64)" >> CHANGELOG_RELEASE.md
           echo "" >> CHANGELOG_RELEASE.md
