@@ -1,0 +1,10 @@
+# Native libraries built by CI or local `cargo xtask build-ffi --deploy-unity`
+# Keep .meta files (Unity metadata) but ignore built binaries.
+*.so
+*.dll
+*.a
+*.dylib
+
+# ORT runtime libraries bundled for Android
+libc++_shared.so
+libonnxruntime.so
