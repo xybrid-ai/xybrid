@@ -746,14 +746,19 @@ fn build_ffi(
     // Print output location — use the target triple (not host OS) to determine lib extension
     let profile = if release { "release" } else { "debug" };
     let target_str = target.as_deref().unwrap_or("");
-    let dylib_name = if target_str.contains("apple") || (target_str.is_empty() && cfg!(target_os = "macos")) {
-        "libxybrid_ffi.dylib"
-    } else if target_str.contains("windows") || (target_str.is_empty() && cfg!(target_os = "windows")) {
-        "xybrid_ffi.dll"
-    } else {
-        "libxybrid_ffi.so"
-    };
-    let staticlib_name = if target_str.contains("windows") || (target_str.is_empty() && cfg!(target_os = "windows")) {
+    let dylib_name =
+        if target_str.contains("apple") || (target_str.is_empty() && cfg!(target_os = "macos")) {
+            "libxybrid_ffi.dylib"
+        } else if target_str.contains("windows")
+            || (target_str.is_empty() && cfg!(target_os = "windows"))
+        {
+            "xybrid_ffi.dll"
+        } else {
+            "libxybrid_ffi.so"
+        };
+    let staticlib_name = if target_str.contains("windows")
+        || (target_str.is_empty() && cfg!(target_os = "windows"))
+    {
         "xybrid_ffi.lib"
     } else {
         "libxybrid_ffi.a"
@@ -863,8 +868,8 @@ fn build_unity(all_platforms: bool, csharp: bool, deploy: bool) -> Result<()> {
             );
             build_ffi(
                 Some(target.to_string()),
-                true, // always release for Unity
-                None, // auto-detect preset
+                true,             // always release for Unity
+                None,             // auto-detect preset
                 csharp && i == 0, // only generate C# on first build
                 deploy,
             )?;
@@ -874,11 +879,10 @@ fn build_unity(all_platforms: bool, csharp: bool, deploy: bool) -> Result<()> {
         // Build for host platform only
         println!("Building for host platform (use --all-platforms for all targets)\n");
         build_ffi(
-            None,    // host platform
-            true,    // always release
-            None,    // auto-detect preset
-            csharp,
-            deploy,
+            None, // host platform
+            true, // always release
+            None, // auto-detect preset
+            csharp, deploy,
         )?;
     }
 
