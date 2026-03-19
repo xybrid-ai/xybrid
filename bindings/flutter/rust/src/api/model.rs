@@ -163,6 +163,22 @@ impl FfiModelLoader {
             .map_err(|e| e.to_string())
     }
 
+    #[frb(sync)]
+    pub fn from_directory(path: String) -> Result<FfiModelLoader, String> {
+        ModelLoader::from_directory(&path)
+            .map(FfiModelLoader)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Create a loader for a model from a HuggingFace Hub repository.
+    ///
+    /// Downloads model files from HuggingFace and caches them locally.
+    /// Requires the `huggingface` feature flag to be enabled.
+    #[frb(sync)]
+    pub fn from_huggingface(repo: String) -> FfiModelLoader {
+        FfiModelLoader(ModelLoader::from_huggingface(&repo))
+    }
+
     /// Load the model without progress updates.
     pub async fn load(&self) -> Result<FfiModel, String> {
         self.0

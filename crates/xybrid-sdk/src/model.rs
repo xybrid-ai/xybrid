@@ -59,6 +59,12 @@ pub enum StreamEvent {
 pub enum SdkError {
     #[error("Model not found: {0}")]
     ModelNotFound(String),
+    #[error("Directory not found: {0}")]
+    DirectoryNotFound(String),
+    #[error("model_metadata.json not found in directory: {0}")]
+    MetadataNotFound(String),
+    #[error("model_metadata.json is invalid: {0}")]
+    MetadataInvalid(String),
     #[error("Failed to load model: {0}")]
     LoadError(String),
     #[error("Inference failed: {0}")]
@@ -98,6 +104,9 @@ impl xybrid_core::http::RetryableError for SdkError {
 
             // Non-retryable errors (permanent failures)
             SdkError::ModelNotFound(_) => false,
+            SdkError::DirectoryNotFound(_) => false,
+            SdkError::MetadataNotFound(_) => false,
+            SdkError::MetadataInvalid(_) => false,
             SdkError::LoadError(_) => false,
             SdkError::InferenceError(_) => false,
             SdkError::StreamingNotSupported => false,
@@ -295,26 +304,79 @@ impl ModelLoader {
     }
 
     /// Create loader from local model directory.
+    ///
+    /// The directory must exist and contain a valid `model_metadata.json` file.
+    ///
+    /// # Errors
+    ///
+    /// - `SdkError::DirectoryNotFound` if the path does not exist
+    /// - `SdkError::MetadataNotFound` if `model_metadata.json` is missing
+    /// - `SdkError::MetadataInvalid` if `model_metadata.json` contains invalid JSON
     pub fn from_directory(path: impl Into<PathBuf>) -> SdkResult<Self> {
         let path: PathBuf = path.into();
         if !path.exists() {
-            return Err(SdkError::ModelNotFound(format!(
-                "Directory not found: {:?}",
-                path
-            )));
+            return Err(SdkError::DirectoryNotFound(
+                path.display().to_string(),
+            ));
         }
         let metadata_path = path.join("model_metadata.json");
         if !metadata_path.exists() {
-            return Err(SdkError::ConfigError(format!(
-                "model_metadata.json not found in {:?}",
-                path
-            )));
+            return Err(SdkError::MetadataNotFound(
+                path.display().to_string(),
+            ));
         }
+        // Validate that the metadata is valid JSON
+        let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
+            SdkError::MetadataInvalid(format!("failed to read model_metadata.json: {}", e))
+        })?;
+        let _metadata: xybrid_core::execution::ModelMetadata =
+            serde_json::from_str(&metadata_str).map_err(|e| {
+                SdkError::MetadataInvalid(format!("invalid model_metadata.json: {}", e))
+            })?;
         Ok(Self {
             source: ModelSource::directory(path),
             model_id: None,
             version: None,
         })
+    }
+
+    /// Create loader from a HuggingFace Hub repository.
+    ///
+    /// Downloads model files from the HuggingFace Hub and caches them locally.
+    /// Subsequent calls use the cached files. The repository must contain a
+    /// `model_metadata.json` for the model to be loadable (auto-generation
+    /// is planned for a future version).
+    ///
+    /// Requires the `huggingface` feature flag at load time.
+    /// The constructor itself is always available, but `load()` will return
+    /// `SdkError::ConfigError` if the feature is not enabled.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let loader = ModelLoader::from_huggingface("xybrid-ai/kokoro-82m");
+    /// let model = loader.load()?;
+    /// ```
+    pub fn from_huggingface(repo: &str) -> Self {
+        Self {
+            source: ModelSource::huggingface(repo),
+            model_id: Some(repo.to_string()),
+            version: None,
+        }
+    }
+
+    /// Create loader from a HuggingFace Hub repository with explicit revision.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let loader = ModelLoader::from_huggingface_with_revision("xybrid-ai/kokoro-82m", "v1.0")?;
+    /// let model = loader.load()?;
+    /// ```
+    pub fn from_huggingface_with_revision(repo: &str, revision: &str) -> Self {
+        Self {
+            source: ModelSource::huggingface_with_revision(repo, revision),
+            model_id: Some(repo.to_string()),
+            version: Some(revision.to_string()),
+        }
     }
 
     /// Get the model ID (if known).
@@ -374,6 +436,9 @@ impl ModelLoader {
             } => self.load_from_legacy_registry(url, model_id, version, platform.as_deref()),
             ModelSource::Bundle { path } => self.load_from_bundle(path),
             ModelSource::Directory { path } => self.load_from_directory(path),
+            ModelSource::HuggingFace { repo, revision } => {
+                self.load_from_huggingface(repo, revision.as_deref(), progress_callback)
+            }
         }
     }
 
@@ -476,6 +541,189 @@ impl ModelLoader {
             output_type,
             supports_streaming,
         })
+    }
+
+    /// Load a model from HuggingFace Hub.
+    ///
+    /// Downloads all model files to `~/.xybrid/cache/hf/{repo}/` and loads from there.
+    /// Uses hf-hub's built-in caching so subsequent calls are instant.
+    #[cfg(feature = "huggingface")]
+    fn load_from_huggingface<F>(
+        &self,
+        repo: &str,
+        revision: Option<&str>,
+        _progress_callback: F,
+    ) -> SdkResult<XybridModel>
+    where
+        F: Fn(f32),
+    {
+        use hf_hub::{api::sync::Api, Repo, RepoType};
+
+        // Determine our cache directory
+        let cache_dir = Self::hf_cache_dir(repo)?;
+
+        // Check if we already have a cached copy with model_metadata.json
+        let metadata_path = cache_dir.join("model_metadata.json");
+        if metadata_path.exists() {
+            log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
+            return self.load_from_directory(&cache_dir);
+        }
+
+        log::info!(target: "xybrid_sdk", "Downloading model from HuggingFace: {}", repo);
+
+        // Create HF API client
+        let api = Api::new().map_err(|e| {
+            SdkError::NetworkError(format!("Failed to create HuggingFace API client: {}", e))
+        })?;
+
+        // Create repo reference with optional revision
+        let hf_repo = if let Some(rev) = revision {
+            Repo::with_revision(repo.to_string(), RepoType::Model, rev.to_string())
+        } else {
+            Repo::new(repo.to_string(), RepoType::Model)
+        };
+        let repo_api = api.repo(hf_repo);
+
+        // Get repo info to list all files
+        let repo_info = repo_api.info().map_err(|e| {
+            SdkError::NetworkError(format!("Failed to get HuggingFace repo info for '{}': {}", repo, e))
+        })?;
+
+        let siblings = repo_info.siblings;
+        if siblings.is_empty() {
+            return Err(SdkError::LoadError(format!(
+                "HuggingFace repo '{}' has no files",
+                repo
+            )));
+        }
+
+        // Create cache directory
+        std::fs::create_dir_all(&cache_dir)?;
+
+        // Download each file and symlink/copy to our cache directory
+        let total_files = siblings.len();
+        for (i, sibling) in siblings.iter().enumerate() {
+            let filename = &sibling.rfilename;
+
+            // Skip directories and hidden files
+            if filename.starts_with('.') || filename.ends_with('/') {
+                continue;
+            }
+
+            log::debug!(target: "xybrid_sdk", "Downloading [{}/{}]: {}", i + 1, total_files, filename);
+
+            // Report approximate progress
+            _progress_callback((i as f32) / (total_files as f32));
+
+            // Download file (hf-hub caches internally)
+            let cached_path = repo_api.get(filename).map_err(|e| {
+                SdkError::NetworkError(format!(
+                    "Failed to download '{}' from '{}': {}",
+                    filename, repo, e
+                ))
+            })?;
+
+            // Create target path in our cache directory
+            let target_path = cache_dir.join(filename);
+
+            // Create parent directories if the file is in a subdirectory
+            if let Some(parent) = target_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+            // Skip if already exists in our cache
+            if target_path.exists() {
+                continue;
+            }
+
+            // Create symlink to hf-hub's cached file (avoids duplication)
+            #[cfg(unix)]
+            {
+                std::os::unix::fs::symlink(&cached_path, &target_path).map_err(|e| {
+                    SdkError::IoError(std::io::Error::other(format!(
+                        "Failed to symlink {} -> {}: {}",
+                        cached_path.display(),
+                        target_path.display(),
+                        e
+                    )))
+                })?;
+            }
+
+            // On Windows, copy the file instead
+            #[cfg(not(unix))]
+            {
+                std::fs::copy(&cached_path, &target_path)?;
+            }
+        }
+
+        // Report completion
+        _progress_callback(1.0);
+
+        // Auto-generate model_metadata.json if not provided by the repo
+        if !metadata_path.exists() {
+            log::info!(
+                target: "xybrid_sdk",
+                "No model_metadata.json in repo '{}', attempting auto-generation...",
+                repo
+            );
+            match crate::metadata_gen::generate_metadata(&cache_dir, repo) {
+                Ok(_metadata) => {
+                    log::info!(
+                        target: "xybrid_sdk",
+                        "Auto-generated model_metadata.json for '{}'. \
+                         Review and adjust if inference results are unexpected.",
+                        repo
+                    );
+                }
+                Err(e) => {
+                    return Err(SdkError::MetadataNotFound(format!(
+                        "HuggingFace repo '{}' does not contain model_metadata.json and \
+                         auto-generation failed: {}. \
+                         Create one manually — see docs/sdk/MODEL_METADATA.md",
+                        repo, e
+                    )));
+                }
+            }
+        }
+
+        log::info!(target: "xybrid_sdk", "Model cached at: {}", cache_dir.display());
+        self.load_from_directory(&cache_dir)
+    }
+
+    /// Not available without the `huggingface` feature.
+    #[cfg(not(feature = "huggingface"))]
+    fn load_from_huggingface<F>(
+        &self,
+        _repo: &str,
+        _revision: Option<&str>,
+        _progress_callback: F,
+    ) -> SdkResult<XybridModel>
+    where
+        F: Fn(f32),
+    {
+        Err(SdkError::ConfigError(
+            "HuggingFace loading requires the 'huggingface' feature flag. \
+             Enable it with: cargo build --features huggingface"
+                .to_string(),
+        ))
+    }
+
+    /// Get the cache directory for a HuggingFace repo.
+    ///
+    /// Returns `~/.xybrid/cache/hf/{sanitized_repo}/` or the SDK-configured cache path.
+    fn hf_cache_dir(repo: &str) -> SdkResult<PathBuf> {
+        let base_cache = if let Some(sdk_cache) = crate::get_sdk_cache_dir() {
+            sdk_cache.join("hf")
+        } else {
+            let home = dirs::home_dir().ok_or_else(|| {
+                SdkError::CacheError("Cannot determine home directory".to_string())
+            })?;
+            home.join(".xybrid").join("cache").join("hf")
+        };
+
+        // Sanitize repo name for filesystem (e.g., "xybrid-ai/kokoro-82m" -> "xybrid-ai--kokoro-82m")
+        let sanitized = repo.replace('/', "--");
+        Ok(base_cache.join(sanitized))
     }
 
     fn load_from_directory(&self, path: &PathBuf) -> SdkResult<XybridModel> {

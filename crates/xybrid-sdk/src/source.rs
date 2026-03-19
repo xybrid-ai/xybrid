@@ -4,6 +4,7 @@
 //! - Registry: Resolve via registry API and download from HuggingFace (recommended)
 //! - Bundle: Load from local .xyb file
 //! - Directory: Load from local model directory (development)
+//! - HuggingFace: Download directly from a HuggingFace Hub repository
 //! - LegacyRegistry: (deprecated) Direct URL-based download
 
 use std::path::PathBuf;
@@ -86,6 +87,28 @@ pub enum ModelSource {
     Directory {
         /// Path to model directory containing model_metadata.json
         path: PathBuf,
+    },
+
+    /// Load from HuggingFace Hub repository.
+    ///
+    /// Downloads model files from the HuggingFace Hub and caches them locally
+    /// at `~/.xybrid/cache/hf/{repo}/`. Subsequent calls use the cached files.
+    ///
+    /// The repository must contain a `model_metadata.json` file, or one will be
+    /// auto-generated in a future version.
+    ///
+    /// # Example
+    /// ```ignore
+    /// ModelSource::HuggingFace {
+    ///     repo: "xybrid-ai/kokoro-82m".to_string(),
+    ///     revision: None, // Uses default branch
+    /// }
+    /// ```
+    HuggingFace {
+        /// HuggingFace repository ID (e.g., "xybrid-ai/kokoro-82m")
+        repo: String,
+        /// Git revision (branch, tag, or commit hash). Uses default branch if None.
+        revision: Option<String>,
     },
 }
 
@@ -171,6 +194,25 @@ impl ModelSource {
         ModelSource::Directory { path: path.into() }
     }
 
+    /// Create a HuggingFace Hub source with default revision.
+    pub fn huggingface(repo: impl Into<String>) -> Self {
+        ModelSource::HuggingFace {
+            repo: repo.into(),
+            revision: None,
+        }
+    }
+
+    /// Create a HuggingFace Hub source with explicit revision.
+    pub fn huggingface_with_revision(
+        repo: impl Into<String>,
+        revision: impl Into<String>,
+    ) -> Self {
+        ModelSource::HuggingFace {
+            repo: repo.into(),
+            revision: Some(revision.into()),
+        }
+    }
+
     /// Get the source type as a string.
     #[allow(deprecated)]
     pub fn source_type(&self) -> &'static str {
@@ -179,6 +221,7 @@ impl ModelSource {
             ModelSource::LegacyRegistry { .. } => "legacy_registry",
             ModelSource::Bundle { .. } => "bundle",
             ModelSource::Directory { .. } => "directory",
+            ModelSource::HuggingFace { .. } => "huggingface",
         }
     }
 
@@ -188,6 +231,7 @@ impl ModelSource {
         match self {
             ModelSource::Registry { id, .. } => Some(id),
             ModelSource::LegacyRegistry { model_id, .. } => Some(model_id),
+            ModelSource::HuggingFace { repo, .. } => Some(repo),
             _ => None,
         }
     }
@@ -199,6 +243,7 @@ impl ModelSource {
     pub fn version(&self) -> Option<&str> {
         match self {
             ModelSource::LegacyRegistry { version, .. } => Some(version),
+            ModelSource::HuggingFace { revision, .. } => revision.as_deref(),
             _ => None,
         }
     }
@@ -282,6 +327,22 @@ mod tests {
     fn test_directory_source() {
         let source = ModelSource::directory("/tmp/test-model");
         assert_eq!(source.source_type(), "directory");
+    }
+
+    #[test]
+    fn test_huggingface_source() {
+        let source = ModelSource::huggingface("xybrid-ai/kokoro-82m");
+        assert_eq!(source.source_type(), "huggingface");
+        assert_eq!(source.model_id(), Some("xybrid-ai/kokoro-82m"));
+        assert_eq!(source.version(), None);
+    }
+
+    #[test]
+    fn test_huggingface_source_with_revision() {
+        let source = ModelSource::huggingface_with_revision("xybrid-ai/kokoro-82m", "v1.0");
+        assert_eq!(source.source_type(), "huggingface");
+        assert_eq!(source.model_id(), Some("xybrid-ai/kokoro-82m"));
+        assert_eq!(source.version(), Some("v1.0"));
     }
 
     #[test]

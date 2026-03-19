@@ -65,9 +65,9 @@
 /*
  Opaque handle to a model loader.
 
- This handle is created by `xybrid_model_loader_from_registry` or
- `xybrid_model_loader_from_bundle` and must be freed with
- `xybrid_model_loader_free`.
+ This handle is created by `xybrid_model_loader_from_registry`,
+ `xybrid_model_loader_from_bundle`, or `xybrid_model_loader_from_directory`
+ and must be freed with `xybrid_model_loader_free`.
  */
 typedef struct XybridModelLoaderHandle {
   void *_0;
@@ -304,15 +304,77 @@ struct XybridModelLoaderHandle *xybrid_model_loader_from_registry(const char *mo
 struct XybridModelLoaderHandle *xybrid_model_loader_from_bundle(const char *path);
 
 /*
+ Create a model loader from a local directory containing model files
+ and a `model_metadata.json`.
+
+ The directory must contain a valid `model_metadata.json` that describes
+ the model's execution template, preprocessing, and postprocessing steps.
+
+ # Parameters
+
+ - `path`: A null-terminated string containing the path to the model directory.
+
+ # Returns
+
+ A handle to the model loader, or null on failure.
+ On failure, call `xybrid_last_error()` to get the error message.
+
+ # Example (C)
+
+ ```c
+ XybridModelLoaderHandle* loader = xybrid_model_loader_from_directory("/path/to/model/dir");
+ if (loader == NULL) {
+     fprintf(stderr, "Failed: %s\n", xybrid_last_error());
+     return 1;
+ }
+ // Use loader...
+ xybrid_model_loader_free(loader);
+ ```
+ */
+struct XybridModelLoaderHandle *xybrid_model_loader_from_directory(const char *path);
+
+/*
+ Create a model loader from a HuggingFace Hub repository.
+
+ Downloads model files from HuggingFace and caches them locally.
+ Model metadata is auto-generated if not present in the repository.
+
+ Requires the `huggingface` feature flag to be enabled at compile time.
+
+ # Parameters
+
+ - `repo`: A null-terminated string containing the HuggingFace repository ID
+   (e.g., "xybrid-ai/kokoro-82m").
+
+ # Returns
+
+ A handle to the model loader, or null on failure.
+ On failure, call `xybrid_last_error()` to get the error message.
+
+ # Example (C)
+
+ ```c
+ XybridModelLoaderHandle* loader = xybrid_model_loader_from_huggingface("xybrid-ai/kokoro-82m");
+ if (loader == NULL) {
+     fprintf(stderr, "Failed: %s\n", xybrid_last_error());
+     return 1;
+ }
+ // Use loader...
+ xybrid_model_loader_free(loader);
+ ```
+ */
+struct XybridModelLoaderHandle *xybrid_model_loader_from_huggingface(const char *repo);
+
+/*
  Load a model using the loader.
 
- This function loads the model from the registry or local bundle,
+ This function loads the model from the registry, local bundle, or directory,
  depending on how the loader was created.
 
  # Parameters
 
- - `handle`: A handle to the model loader created by `xybrid_model_loader_from_registry`
-   or `xybrid_model_loader_from_bundle`.
+ - `handle`: A handle to the model loader created by `xybrid_model_loader_from_registry`,
+   `xybrid_model_loader_from_bundle`, or `xybrid_model_loader_from_directory`.
 
  # Returns
 

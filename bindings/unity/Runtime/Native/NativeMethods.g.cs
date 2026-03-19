@@ -177,6 +177,34 @@ namespace Xybrid.Native
         internal static extern XybridModelLoaderHandle* xybrid_model_loader_from_bundle(byte* path);
 
         /// <summary>
+        ///  Create a model loader from a local directory containing model files
+        ///  and a `model_metadata.json`.
+        ///
+        ///  The directory must contain a valid `model_metadata.json` that describes
+        ///  the model's execution template, preprocessing, and postprocessing steps.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `path`: A null-terminated string containing the path to the model directory.
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the model loader, or null on failure.
+        ///  On failure, call `xybrid_last_error()` to get the error message.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_model_loader_from_directory", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridModelLoaderHandle* xybrid_model_loader_from_directory(byte* path);
+
+        /// <summary>
+        ///  Create a model loader from a HuggingFace Hub repository.
+        ///
+        ///  Downloads model files from HuggingFace and caches them locally.
+        ///  Requires the `huggingface` feature flag at compile time.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_model_loader_from_huggingface", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridModelLoaderHandle* xybrid_model_loader_from_huggingface(byte* repo);
+
+        /// <summary>
         ///  Load a model using the loader.
         ///
         ///  This function loads the model from the registry or local bundle,

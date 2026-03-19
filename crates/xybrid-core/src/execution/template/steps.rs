@@ -4,12 +4,16 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+
 // ============================================================================
 // Preprocessing Steps
 // ============================================================================
 
 /// Preprocessing step applied before model execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 pub enum PreprocessingStep {
     /// Convert audio to mel spectrogram
@@ -186,6 +190,7 @@ impl PreprocessingStep {
 
 /// Postprocessing step applied after model execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 pub enum PostprocessingStep {
     /// Decode BPE tokens to text
@@ -336,6 +341,7 @@ impl PostprocessingStep {
 
 /// Phonemizer backend for text-to-phoneme conversion
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum PhonemizerBackend {
     /// Legacy. ARPABET-based. May produce lower quality for models trained on Misaki/espeak IPA.
     CmuDictionary,
@@ -397,6 +403,7 @@ impl PhonemizerBackend {
 /// Different models use different mel scale formulas. Using the wrong scale
 /// will produce incorrect mel spectrograms and poor model performance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum MelScaleType {
     /// Slaney mel scale (used by Whisper, transformers.js, librosa default).
@@ -415,6 +422,7 @@ pub enum MelScaleType {
 
 /// Tokenizer type for text preprocessing
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum TokenizerType {
     /// Byte-Pair Encoding (GPT-2, GPT-3, Whisper)
     BPE,
@@ -428,6 +436,7 @@ pub enum TokenizerType {
 
 /// Interpolation method for image resizing
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum InterpolationMethod {
     Nearest,
     #[default]

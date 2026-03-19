@@ -50,6 +50,7 @@ image = "0.25"  # For image resizing and processing
 # static_crt(true) on MSVC, producing /MT objects that conflict with ORT's /MD.
 # We only run tokenizer models, we don't train them — esaxx-rs is only for BPE training.
 tokenizers = { version = "0.19", default-features = false, features = ["onig"] }
+schemars = { version = "0.8", optional = true }  # JSON Schema generation for model_metadata.json
 hound = "3.5"  # For WAV file reading (audio preprocessing)
 cmudict-fast = "0.8"  # For CMU pronouncing dictionary (TTS phonemization)
 lazy_static = "1.4"  # For static CMU dictionary initialization
@@ -78,6 +79,9 @@ mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", branch = "
 
 [features]
 default = ["ort-download", "llm-llamacpp"]
+
+# JSON Schema generation for model_metadata.json
+schema = ["dep:schemars"]
 
 # ONNX Runtime
 ort-download = ["ort/download-binaries", "ort/tls-native"]  # Desktop/macOS/iOS: download prebuilt binaries

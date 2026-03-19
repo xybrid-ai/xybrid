@@ -91,6 +91,12 @@ extension XybridError: LocalizedError {
         switch self {
         case .ModelNotFound(let message):
             return "Model not found: \(message)"
+        case .DirectoryNotFound(let message):
+            return "Directory not found: \(message)"
+        case .MetadataNotFound(let message):
+            return "model_metadata.json not found: \(message)"
+        case .MetadataInvalid(let message):
+            return "model_metadata.json is invalid: \(message)"
         case .LoadError(let message):
             return "Load error: \(message)"
         case .InferenceError(let message):

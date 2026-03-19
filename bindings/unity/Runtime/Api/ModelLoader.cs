@@ -7,7 +7,7 @@ using Xybrid.Native;
 namespace Xybrid
 {
     /// <summary>
-    /// Loads models from the xybrid registry or local bundles.
+    /// Loads models from the xybrid registry, local bundles, or directories.
     /// </summary>
     /// <remarks>
     /// Use the static factory methods to create a loader, then call <see cref="Load"/>
@@ -81,6 +81,68 @@ namespace Xybrid
                 if (handle == null)
                 {
                     NativeHelpers.ThrowLastError($"Failed to create loader for bundle at '{path}'");
+                }
+
+                return new ModelLoader(handle);
+            }
+        }
+
+        /// <summary>
+        /// Creates a model loader from a local directory containing model files
+        /// and a <c>model_metadata.json</c>.
+        /// </summary>
+        /// <param name="directoryPath">Path to the directory containing model files and model_metadata.json.</param>
+        /// <returns>A new ModelLoader configured to load from the directory.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if directoryPath is null.</exception>
+        /// <exception cref="XybridException">Thrown if the directory does not exist, or the metadata is missing or invalid.</exception>
+        public static unsafe ModelLoader FromDirectory(string directoryPath)
+        {
+            if (directoryPath == null)
+            {
+                throw new ArgumentNullException(nameof(directoryPath));
+            }
+
+            byte[] pathBytes = NativeHelpers.ToUtf8Bytes(directoryPath);
+
+            fixed (byte* pathPtr = pathBytes)
+            {
+                XybridModelLoaderHandle* handle = NativeMethods.xybrid_model_loader_from_directory(pathPtr);
+                if (handle == null)
+                {
+                    NativeHelpers.ThrowLastError($"Failed to create loader from directory '{directoryPath}'");
+                }
+
+                return new ModelLoader(handle);
+            }
+        }
+
+        /// <summary>
+        /// Creates a model loader from a HuggingFace Hub repository.
+        /// Downloads model files from HuggingFace and caches them locally.
+        /// Model metadata is auto-generated if not present in the repository.
+        /// </summary>
+        /// <param name="repo">The HuggingFace repository ID (e.g., "xybrid-ai/kokoro-82m").</param>
+        /// <returns>A new ModelLoader configured to download from HuggingFace.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if repo is null.</exception>
+        /// <exception cref="XybridException">Thrown if loader creation fails.</exception>
+        /// <remarks>
+        /// Requires the <c>huggingface</c> feature flag to be enabled at compile time.
+        /// </remarks>
+        public static unsafe ModelLoader FromHuggingFace(string repo)
+        {
+            if (repo == null)
+            {
+                throw new ArgumentNullException(nameof(repo));
+            }
+
+            byte[] repoBytes = NativeHelpers.ToUtf8Bytes(repo);
+
+            fixed (byte* repoPtr = repoBytes)
+            {
+                XybridModelLoaderHandle* handle = NativeMethods.xybrid_model_loader_from_huggingface(repoPtr);
+                if (handle == null)
+                {
+                    NativeHelpers.ThrowLastError($"Failed to create loader for HuggingFace repo '{repo}'");
                 }
 
                 return new ModelLoader(handle);

@@ -52,9 +52,9 @@ use xybrid_sdk::{
 
 /// Opaque handle to a model loader.
 ///
-/// This handle is created by `xybrid_model_loader_from_registry` or
-/// `xybrid_model_loader_from_bundle` and must be freed with
-/// `xybrid_model_loader_free`.
+/// This handle is created by `xybrid_model_loader_from_registry`,
+/// `xybrid_model_loader_from_bundle`, or `xybrid_model_loader_from_directory`
+/// and must be freed with `xybrid_model_loader_free`.
 #[repr(C)]
 pub struct XybridModelLoaderHandle(*mut c_void);
 
@@ -933,15 +933,158 @@ pub unsafe extern "C" fn xybrid_model_loader_from_bundle(
     XybridModelLoaderHandle::from_boxed(loader)
 }
 
+/// Create a model loader from a local directory containing model files
+/// and a `model_metadata.json`.
+///
+/// The directory must contain a valid `model_metadata.json` that describes
+/// the model's execution template, preprocessing, and postprocessing steps.
+///
+/// # Parameters
+///
+/// - `path`: A null-terminated string containing the path to the model directory.
+///
+/// # Returns
+///
+/// A handle to the model loader, or null on failure.
+/// On failure, call `xybrid_last_error()` to get the error message.
+///
+/// # Example (C)
+///
+/// ```c
+/// XybridModelLoaderHandle* loader = xybrid_model_loader_from_directory("/path/to/model/dir");
+/// if (loader == NULL) {
+///     fprintf(stderr, "Failed: %s\n", xybrid_last_error());
+///     return 1;
+/// }
+/// // Use loader...
+/// xybrid_model_loader_free(loader);
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_loader_from_directory(
+    path: *const c_char,
+) -> *mut XybridModelLoaderHandle {
+    clear_last_error();
+
+    // Validate input
+    if path.is_null() {
+        set_last_error("path is null");
+        return std::ptr::null_mut();
+    }
+
+    // Convert C string to Rust string
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("path is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    if path_str.is_empty() {
+        set_last_error("path is empty");
+        return std::ptr::null_mut();
+    }
+
+    // Extract model ID from path (use the last path component)
+    let model_id = std::path::Path::new(&path_str)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&path_str)
+        .to_string();
+
+    // Create SDK ModelLoader from directory
+    let sdk_loader = match ModelLoader::from_directory(&path_str) {
+        Ok(loader) => loader,
+        Err(e) => {
+            set_last_error(&format!("Failed to create loader from directory: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+
+    // Create loader state
+    let loader = Box::new(LoaderState {
+        loader: sdk_loader,
+        model_id,
+    });
+
+    XybridModelLoaderHandle::from_boxed(loader)
+}
+
+/// Create a model loader from a HuggingFace Hub repository.
+///
+/// Downloads model files from HuggingFace and caches them locally.
+/// Model metadata is auto-generated if not present in the repository.
+///
+/// Requires the `huggingface` feature flag to be enabled at compile time.
+///
+/// # Parameters
+///
+/// - `repo`: A null-terminated string containing the HuggingFace repository ID
+///   (e.g., "xybrid-ai/kokoro-82m").
+///
+/// # Returns
+///
+/// A handle to the model loader, or null on failure.
+/// On failure, call `xybrid_last_error()` to get the error message.
+///
+/// # Example (C)
+///
+/// ```c
+/// XybridModelLoaderHandle* loader = xybrid_model_loader_from_huggingface("xybrid-ai/kokoro-82m");
+/// if (loader == NULL) {
+///     fprintf(stderr, "Failed: %s\n", xybrid_last_error());
+///     return 1;
+/// }
+/// // Use loader...
+/// xybrid_model_loader_free(loader);
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_model_loader_from_huggingface(
+    repo: *const c_char,
+) -> *mut XybridModelLoaderHandle {
+    clear_last_error();
+
+    // Validate input
+    if repo.is_null() {
+        set_last_error("repo is null");
+        return std::ptr::null_mut();
+    }
+
+    // Convert C string to Rust string
+    let repo_str = match CStr::from_ptr(repo).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("repo is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    if repo_str.is_empty() {
+        set_last_error("repo is empty");
+        return std::ptr::null_mut();
+    }
+
+    // Create SDK ModelLoader from HuggingFace
+    let sdk_loader = ModelLoader::from_huggingface(&repo_str);
+
+    // Create loader state
+    let loader = Box::new(LoaderState {
+        loader: sdk_loader,
+        model_id: repo_str,
+    });
+
+    XybridModelLoaderHandle::from_boxed(loader)
+}
+
 /// Load a model using the loader.
 ///
-/// This function loads the model from the registry or local bundle,
+/// This function loads the model from the registry, local bundle, or directory,
 /// depending on how the loader was created.
 ///
 /// # Parameters
 ///
-/// - `handle`: A handle to the model loader created by `xybrid_model_loader_from_registry`
-///   or `xybrid_model_loader_from_bundle`.
+/// - `handle`: A handle to the model loader created by `xybrid_model_loader_from_registry`,
+///   `xybrid_model_loader_from_bundle`, or `xybrid_model_loader_from_directory`.
 ///
 /// # Returns
 ///

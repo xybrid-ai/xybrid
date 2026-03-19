@@ -376,6 +376,13 @@ enum Commands {
         deploy: bool,
     },
 
+    /// Generate JSON Schema for model_metadata.json
+    GenerateSchema {
+        /// Output file path (default: docs/sdk/model_metadata.schema.json)
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+
     /// Package build artifacts for distribution (creates dist/ with .zip files and checksums)
     Package {
         /// Override the version (defaults to Cargo.toml version or git tag)
@@ -503,6 +510,27 @@ impl FlutterPlatform {
     }
 }
 
+fn generate_schema(output: Option<PathBuf>) -> Result<()> {
+    use schemars::schema_for;
+    use xybrid_core::execution::ModelMetadata;
+
+    let schema = schema_for!(ModelMetadata);
+    let json = serde_json::to_string_pretty(&schema).context("Failed to serialize schema")?;
+
+    let output_path = output.unwrap_or_else(|| PathBuf::from("docs/sdk/model_metadata.schema.json"));
+
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
+    }
+
+    std::fs::write(&output_path, &json)
+        .with_context(|| format!("Failed to write schema to {}", output_path.display()))?;
+
+    println!("Generated JSON Schema: {}", output_path.display());
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -582,6 +610,9 @@ fn main() -> Result<()> {
             deploy,
         } => {
             build_unity(all_platforms, csharp, deploy)?;
+        }
+        Commands::GenerateSchema { output } => {
+            generate_schema(output)?;
         }
         Commands::Package {
             version,

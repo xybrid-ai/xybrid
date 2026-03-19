@@ -4,6 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+
 /// Voice format describing how voices are stored and loaded.
 ///
 /// Different TTS models store voice embeddings in different formats:
@@ -11,6 +14,7 @@ use serde::{Deserialize, Serialize};
 /// - Piper: Each voice is a separate model file
 /// - Chatterbox: Voice cloning from reference audio
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "format")]
 pub enum VoiceFormat {
     /// Voices embedded in single file (Kokoro, KittenTTS)
@@ -75,6 +79,7 @@ pub enum VoiceFormat {
 ///
 /// Specifies how to parse the voice embedding file.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum VoiceLoader {
     /// Binary f32 embeddings, 256 dimensions
     ///
@@ -100,6 +105,7 @@ pub enum VoiceLoader {
 ///
 /// Each voice in a TTS model has an entry describing its properties.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct VoiceInfo {
     /// Unique identifier (used in API calls, e.g., "af_bella")
     pub id: String,
@@ -134,6 +140,7 @@ pub struct VoiceInfo {
 /// - KittenTTS: Select by fixed catalog index
 /// - Kokoro: Select from voicepack by phoneme token count
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum VoiceSelectionStrategy {
     /// Select voice by catalog index (default).
     ///
@@ -168,6 +175,7 @@ pub enum VoiceSelectionStrategy {
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct VoiceConfig {
     /// Voice storage format and location
     #[serde(flatten)]

@@ -80,6 +80,18 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromBundle(path: path);
 
+  static FfiModelLoader fromDirectory({required String path}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromDirectory(path: path);
+
+  /// Create a loader for a model from a HuggingFace Hub repository.
+  ///
+  /// Downloads model files from HuggingFace and caches them locally.
+  /// Requires the `huggingface` feature flag to be enabled.
+  static FfiModelLoader fromHuggingface({required String repo}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromHuggingface(repo: repo);
+
   static FfiModelLoader fromRegistry({required String modelId}) =>
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);

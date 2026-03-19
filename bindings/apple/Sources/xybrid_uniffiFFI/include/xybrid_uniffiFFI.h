@@ -79,6 +79,10 @@ void uniffi_xybrid_uniffi_fn_free_xybridmodelloader(void*_Nonnull ptr, RustCallS
 );
 void*_Nonnull uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_bundle(RustBuffer path, RustCallStatus *_Nonnull out_status
 );
+void*_Nonnull uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_directory(RustBuffer path, RustCallStatus *_Nonnull out_status
+);
+void*_Nonnull uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_huggingface(RustBuffer repo, RustCallStatus *_Nonnull out_status
+);
 void*_Nonnull uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_registry(RustBuffer model_id, RustCallStatus *_Nonnull out_status
 );
 void* _Nonnull uniffi_xybrid_uniffi_fn_method_xybridmodelloader_load(void*_Nonnull ptr
@@ -221,6 +225,12 @@ uint16_t uniffi_xybrid_uniffi_checksum_method_xybridmodelloader_load(void
     
 );
 uint16_t uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle(void
+    
+);
+uint16_t uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_directory(void
+    
+);
+uint16_t uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_huggingface(void
     
 );
 uint16_t uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_registry(void

@@ -59,6 +59,17 @@ classes:
         params: [{ name: path, type: String }]
         return: XybridModelLoader
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      fromDirectory:
+        static: true
+        params: [{ name: path, type: String }]
+        return: XybridModelLoader
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      fromHuggingFace:
+        static: true
+        params: [{ name: repo, type: String }]
+        return: XybridModelLoader
+        notes: "Requires huggingface feature flag. Downloads and caches model files from HuggingFace Hub."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       load:
         async: true
         return: XybridModel

@@ -36,6 +36,12 @@ fn init_sdk_cache_dir(cache_dir: String) {
 pub enum XybridError {
     #[error("Model not found: {message}")]
     ModelNotFound { message: String },
+    #[error("Directory not found: {message}")]
+    DirectoryNotFound { message: String },
+    #[error("model_metadata.json not found in directory: {message}")]
+    MetadataNotFound { message: String },
+    #[error("model_metadata.json is invalid: {message}")]
+    MetadataInvalid { message: String },
     #[error("Failed to load model: {message}")]
     LoadError { message: String },
     #[error("Inference failed: {message}")]
@@ -66,6 +72,9 @@ impl From<SdkError> for XybridError {
     fn from(e: SdkError) -> Self {
         match e {
             SdkError::ModelNotFound(s) => XybridError::ModelNotFound { message: s },
+            SdkError::DirectoryNotFound(s) => XybridError::DirectoryNotFound { message: s },
+            SdkError::MetadataNotFound(s) => XybridError::MetadataNotFound { message: s },
+            SdkError::MetadataInvalid(s) => XybridError::MetadataInvalid { message: s },
             SdkError::LoadError(s) => XybridError::LoadError { message: s },
             SdkError::InferenceError(s) => XybridError::InferenceError { message: s },
             SdkError::StreamingNotSupported => XybridError::StreamingNotSupported,
@@ -321,7 +330,7 @@ impl XybridModel {
     }
 }
 
-/// A model loader for loading xybrid models from registry or bundles.
+/// A model loader for loading xybrid models from registry, bundles, or directories.
 ///
 /// Use the constructors to create a loader pointing to a model source,
 /// then call `load()` to actually load the model for inference.
@@ -331,11 +340,15 @@ impl XybridModel {
 /// ```swift
 /// // Load from registry
 /// let loader = XybridModelLoader.fromRegistry(modelId: "whisper-tiny")
-/// let model = try loader.load()
+/// let model = try await loader.load()
 ///
 /// // Load from local bundle
 /// let bundleLoader = XybridModelLoader.fromBundle(path: "/path/to/model.xyb")
-/// let bundleModel = try bundleLoader.load()
+/// let bundleModel = try await bundleLoader.load()
+///
+/// // Load from a directory with model_metadata.json
+/// let dirLoader = try XybridModelLoader.fromDirectory(path: "/path/to/model/")
+/// let dirModel = try await dirLoader.load()
 /// ```
 #[derive(uniffi::Object)]
 pub struct XybridModelLoader {
@@ -376,6 +389,62 @@ impl XybridModelLoader {
     pub fn from_bundle(path: String) -> Arc<Self> {
         Arc::new(Self {
             inner: CoreModelLoader::from_bundle(&path).unwrap(),
+        })
+    }
+
+    /// Create a model loader that will load from a local directory containing
+    /// model files and a `model_metadata.json`.
+    ///
+    /// The directory must contain a valid `model_metadata.json` file that
+    /// describes the model's execution template, preprocessing, and
+    /// postprocessing steps.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The file path to the directory containing the model files.
+    ///
+    /// # Returns
+    ///
+    /// A new `XybridModelLoader` instance, or a `XybridError` if the
+    /// directory does not exist, or the metadata file is missing or invalid.
+    ///
+    /// # Example (Swift)
+    ///
+    /// ```swift
+    /// let loader = try XybridModelLoader.fromDirectory(path: "/path/to/model/")
+    /// let model = try await loader.load()
+    /// ```
+    #[uniffi::constructor]
+    pub fn from_directory(path: String) -> Result<Arc<Self>, XybridError> {
+        let inner = CoreModelLoader::from_directory(&path)?;
+        Ok(Arc::new(Self { inner }))
+    }
+
+    /// Create a model loader that will download from a HuggingFace Hub repository.
+    ///
+    /// Downloads model files from HuggingFace and caches them locally.
+    /// Model metadata is auto-generated if not present in the repository.
+    ///
+    /// Requires the `huggingface` feature flag.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo` - The HuggingFace repository ID (e.g., "xybrid-ai/kokoro-82m").
+    ///
+    /// # Returns
+    ///
+    /// A new `XybridModelLoader` instance configured to download from HuggingFace.
+    ///
+    /// # Example (Swift)
+    ///
+    /// ```swift
+    /// let loader = XybridModelLoader.fromHuggingface(repo: "xybrid-ai/kokoro-82m")
+    /// let model = try await loader.load()
+    /// ```
+    #[uniffi::constructor]
+    pub fn from_huggingface(repo: String) -> Arc<Self> {
+        Arc::new(Self {
+            inner: CoreModelLoader::from_huggingface(&repo),
         })
     }
 

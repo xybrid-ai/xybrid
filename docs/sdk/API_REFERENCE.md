@@ -127,6 +127,7 @@ class XybridModelLoader {
   // Factory methods
   factory XybridModelLoader.fromRegistry(String modelId);
   factory XybridModelLoader.fromBundle(String path);
+  factory XybridModelLoader.fromDirectory(String path);
 
   // Load the model
   Future<XybridModel> load();
@@ -143,10 +144,116 @@ class XybridModelLoader {
   companion object {
     fun fromRegistry(modelId: String): XybridModelLoader
     fun fromBundle(path: String): XybridModelLoader
+    fun fromDirectory(path: String): XybridModelLoader
   }
 
   suspend fun load(): XybridModel
 }
+```
+
+### C# (Unity)
+
+```csharp
+public class ModelLoader
+{
+    public static ModelLoader FromRegistry(string modelId);
+    public static ModelLoader FromBundle(string bundlePath);
+    public static ModelLoader FromDirectory(string directoryPath);
+    public InferenceResult Load();
+}
+```
+
+### `fromDirectory()`
+
+Loads a model from a local directory containing a `model_metadata.json` and its referenced model files. Use this for models not in the xybrid registry — for example, custom-trained models, models downloaded from HuggingFace, or models bundled directly with your app.
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `path` | `String` | Absolute path to a directory containing `model_metadata.json` and model files |
+
+**Returns:** `XybridModelLoader` — call `.load()` to get a ready-to-use `XybridModel`.
+
+**Errors:**
+
+| Error | When |
+|-------|------|
+| `DirectoryNotFound` | The specified path does not exist or is not a directory |
+| `MetadataNotFound` | No `model_metadata.json` file in the directory |
+| `MetadataInvalid` | `model_metadata.json` exists but contains invalid JSON |
+
+**Usage Example:**
+
+```dart
+// Dart / Flutter
+final loader = XybridModelLoader.fromDirectory('/path/to/my-model');
+final model = await loader.load();
+final result = await model.run(envelope: XybridEnvelope.text("Hello!"));
+```
+
+```kotlin
+// Kotlin / Android
+val loader = XybridModelLoader.fromDirectory("/data/local/tmp/my-model")
+val model = loader.load()
+val result = model.run(XybridEnvelope.text("Hello!"))
+```
+
+```swift
+// Swift / iOS
+let loader = try XybridModelLoader.fromDirectory(path: modelPath)
+let model = try await loader.load()
+let result = try await model.run(envelope: .text("Hello!"))
+```
+
+```csharp
+// C# / Unity
+var loader = ModelLoader.FromDirectory(Path.Combine(Application.streamingAssetsPath, "my-model"));
+using var result = loader.Load().Run(Envelope.Text("Hello!"));
+```
+
+### `fromHuggingFace()`
+
+Downloads a model from a HuggingFace Hub repository and caches it locally. Model metadata (`model_metadata.json`) is auto-generated from the model card and file inspection if not present in the repository.
+
+> **Note:** Requires the `huggingface` feature flag to be enabled at compile time.
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `repo` | `String` | HuggingFace repository ID (e.g., `"xybrid-ai/kokoro-82m"`) |
+
+**Returns:** `XybridModelLoader` — call `.load()` to download (if needed) and get a ready-to-use `XybridModel`.
+
+**Usage Example:**
+
+```dart
+// Dart / Flutter
+final loader = XybridModelLoader.fromHuggingFace('xybrid-ai/kokoro-82m');
+final model = await loader.load();
+final result = await model.run(envelope: XybridEnvelope.text("Hello!"));
+```
+
+```kotlin
+// Kotlin / Android
+val loader = XybridModelLoader.fromHuggingface(repo = "xybrid-ai/kokoro-82m")
+val model = loader.load()
+val result = model.run(XybridEnvelope.text("Hello!"))
+```
+
+```swift
+// Swift / iOS
+let loader = XybridModelLoader.fromHuggingface(repo: "xybrid-ai/kokoro-82m")
+let model = try await loader.load()
+let result = try await model.run(envelope: .text("Hello!"))
+```
+
+```csharp
+// C# / Unity
+var loader = ModelLoader.FromHuggingFace("xybrid-ai/kokoro-82m");
+using var model = loader.Load();
+var result = model.Run(Envelope.Text("Hello!"));
 ```
 
 ### Implementation Status
@@ -155,6 +262,8 @@ class XybridModelLoader {
 |--------|------|--------|-------|----|
 | `fromRegistry()` | ✅ | ✅ | ✅ | ✅ |
 | `fromBundle()` | ✅ | ✅ | ✅ | ✅ |
+| `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
+| `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
 

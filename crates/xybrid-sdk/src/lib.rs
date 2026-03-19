@@ -109,6 +109,7 @@ use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 pub mod benchmark;
 pub mod cache;
 pub mod llm;
+pub mod metadata_gen;
 pub mod model;
 pub mod pipeline;
 pub mod platform;

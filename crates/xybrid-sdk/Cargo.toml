@@ -24,6 +24,7 @@ tempfile = "3.10"
 uuid = { version = "1.0", features = ["v4", "v5", "serde"] }
 dirs = "5.0"
 sha2 = "0.10"
+hf-hub = { version = "0.5", optional = true }
 
 # Platform-specific dependencies (NOT features - those are in presets)
 # Android: rustls with ring backend (aws-lc-rs uses getentropy unavailable on API 24)
@@ -36,6 +37,9 @@ ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 
 [features]
 default = []
+
+# HuggingFace Hub integration (download models directly from HF repos)
+huggingface = ["dep:hf-hub"]
 
 # PLATFORM PRESETS (SINGLE SOURCE OF TRUTH)
 

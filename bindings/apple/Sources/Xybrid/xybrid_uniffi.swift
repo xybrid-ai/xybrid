@@ -587,6 +587,24 @@ public class XybridModelLoader: XybridModelLoaderProtocol {
 
     
 
+    public static func fromDirectory(path: String) throws -> XybridModelLoader {
+        return XybridModelLoader(unsafeFromRawPointer: try rustCallWithError(FfiConverterTypeXybridError.lift) {
+    uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_directory(
+        FfiConverterString.lower(path),$0)
+})
+    }
+
+    
+
+    public static func fromHuggingface(repo: String)  -> XybridModelLoader {
+        return XybridModelLoader(unsafeFromRawPointer: try! rustCall() {
+    uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_huggingface(
+        FfiConverterString.lower(repo),$0)
+})
+    }
+
+    
+
     public static func fromRegistry(modelId: String)  -> XybridModelLoader {
         return XybridModelLoader(unsafeFromRawPointer: try! rustCall() {
     uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_registry(
@@ -990,6 +1008,9 @@ public enum XybridError {
     
     
     case ModelNotFound(message: String)
+    case DirectoryNotFound(message: String)
+    case MetadataNotFound(message: String)
+    case MetadataInvalid(message: String)
     case LoadError(message: String)
     case InferenceError(message: String)
     case StreamingNotSupported
@@ -1022,36 +1043,45 @@ public struct FfiConverterTypeXybridError: FfiConverterRustBuffer {
         case 1: return .ModelNotFound(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 2: return .LoadError(
+        case 2: return .DirectoryNotFound(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 3: return .InferenceError(
+        case 3: return .MetadataNotFound(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 4: return .StreamingNotSupported
-        case 5: return .NotLoaded
-        case 6: return .ConfigError(
+        case 4: return .MetadataInvalid(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 7: return .NetworkError(
+        case 5: return .LoadError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 8: return .IoError(
+        case 6: return .InferenceError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 9: return .CacheError(
+        case 7: return .StreamingNotSupported
+        case 8: return .NotLoaded
+        case 9: return .ConfigError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 10: return .PipelineError(
+        case 10: return .NetworkError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 11: return .CircuitOpen(
+        case 11: return .IoError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 12: return .RateLimited(
+        case 12: return .CacheError(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 13: return .PipelineError(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 14: return .CircuitOpen(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 15: return .RateLimited(
             retryAfterSecs: try FfiConverterUInt64.read(from: &buf)
             )
-        case 13: return .Timeout(
+        case 16: return .Timeout(
             timeoutMs: try FfiConverterUInt64.read(from: &buf)
             )
 
@@ -1071,61 +1101,76 @@ public struct FfiConverterTypeXybridError: FfiConverterRustBuffer {
             FfiConverterString.write(message, into: &buf)
             
         
-        case let .LoadError(message):
+        case let .DirectoryNotFound(message):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(message, into: &buf)
             
         
-        case let .InferenceError(message):
+        case let .MetadataNotFound(message):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(message, into: &buf)
             
         
-        case .StreamingNotSupported:
+        case let .MetadataInvalid(message):
             writeInt(&buf, Int32(4))
+            FfiConverterString.write(message, into: &buf)
+            
         
-        
-        case .NotLoaded:
+        case let .LoadError(message):
             writeInt(&buf, Int32(5))
+            FfiConverterString.write(message, into: &buf)
+            
         
-        
-        case let .ConfigError(message):
+        case let .InferenceError(message):
             writeInt(&buf, Int32(6))
             FfiConverterString.write(message, into: &buf)
             
         
-        case let .NetworkError(message):
+        case .StreamingNotSupported:
             writeInt(&buf, Int32(7))
-            FfiConverterString.write(message, into: &buf)
-            
         
-        case let .IoError(message):
+        
+        case .NotLoaded:
             writeInt(&buf, Int32(8))
-            FfiConverterString.write(message, into: &buf)
-            
         
-        case let .CacheError(message):
+        
+        case let .ConfigError(message):
             writeInt(&buf, Int32(9))
             FfiConverterString.write(message, into: &buf)
             
         
-        case let .PipelineError(message):
+        case let .NetworkError(message):
             writeInt(&buf, Int32(10))
             FfiConverterString.write(message, into: &buf)
             
         
-        case let .CircuitOpen(message):
+        case let .IoError(message):
             writeInt(&buf, Int32(11))
             FfiConverterString.write(message, into: &buf)
             
         
-        case let .RateLimited(retryAfterSecs):
+        case let .CacheError(message):
             writeInt(&buf, Int32(12))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .PipelineError(message):
+            writeInt(&buf, Int32(13))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .CircuitOpen(message):
+            writeInt(&buf, Int32(14))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .RateLimited(retryAfterSecs):
+            writeInt(&buf, Int32(15))
             FfiConverterUInt64.write(retryAfterSecs, into: &buf)
             
         
         case let .Timeout(timeoutMs):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(16))
             FfiConverterUInt64.write(timeoutMs, into: &buf)
             
         }
@@ -1521,6 +1566,12 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle() != 7105) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_directory() != 8635) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_huggingface() != 19769) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_registry() != 17279) {

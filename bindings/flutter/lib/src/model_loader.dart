@@ -80,6 +80,30 @@ class XybridModelLoader {
     );
   }
 
+  /// Create a loader for a model from a local directory path.
+  ///
+  /// The [path] should point to a directory containing model_metadata.json
+  /// and all required model files.
+  /// Throws if the directory doesn't exist or metadata is missing/invalid.
+  factory XybridModelLoader.fromDirectory(String path) {
+    return XybridModelLoader._(
+      FfiModelLoader.fromDirectory(path: path),
+    );
+  }
+
+  /// Create a loader for a model from a HuggingFace Hub repository.
+  ///
+  /// Downloads model files from HuggingFace and caches them locally.
+  /// The [repo] should be a HuggingFace repo ID (e.g., "xybrid-ai/kokoro-82m").
+  /// Model metadata is auto-generated if not present in the repo.
+  ///
+  /// Requires the `huggingface` feature flag to be enabled in the Rust SDK.
+  factory XybridModelLoader.fromHuggingFace(String repo) {
+    return XybridModelLoader._(
+      FfiModelLoader.fromHuggingface(repo: repo),
+    );
+  }
+
   /// Load the model asynchronously.
   ///
   /// Downloads the model if loading from registry and not cached.

@@ -403,6 +403,10 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_bundle(`path`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Pointer
+    fun uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_directory(`path`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Pointer
+    fun uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_huggingface(`repo`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Pointer
     fun uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_registry(`modelId`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Pointer
     fun uniffi_xybrid_uniffi_fn_method_xybridmodelloader_load(`ptr`: Pointer,
@@ -539,6 +543,10 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle(
     ): Short
+    fun uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_directory(
+    ): Short
+    fun uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_huggingface(
+    ): Short
     fun uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_registry(
     ): Short
     fun ffi_xybrid_uniffi_uniffi_contract_version(
@@ -580,6 +588,12 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle() != 7105.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_directory() != 8635.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_huggingface() != 19769.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_registry() != 17279.toShort()) {
@@ -1145,6 +1159,16 @@ class XybridModelLoader(
     rustCall() { _status ->
     _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_bundle(FfiConverterString.lower(`path`),_status)
 })
+        fun `fromDirectory`(`path`: String): XybridModelLoader =
+            XybridModelLoader(
+    rustCallWithError(XybridException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_directory(FfiConverterString.lower(`path`),_status)
+})
+        fun `fromHuggingface`(`repo`: String): XybridModelLoader =
+            XybridModelLoader(
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_huggingface(FfiConverterString.lower(`repo`),_status)
+})
         fun `fromRegistry`(`modelId`: String): XybridModelLoader =
             XybridModelLoader(
     rustCall() { _status ->
@@ -1429,6 +1453,27 @@ sealed class XybridException: Exception() {
             get() = "message=${ `msg` }"
     }
     
+    class DirectoryNotFound(
+        val `msg`: String
+        ) : XybridException() {
+        override val message
+            get() = "message=${ `msg` }"
+    }
+    
+    class MetadataNotFound(
+        val `msg`: String
+        ) : XybridException() {
+        override val message
+            get() = "message=${ `msg` }"
+    }
+    
+    class MetadataInvalid(
+        val `msg`: String
+        ) : XybridException() {
+        override val message
+            get() = "message=${ `msg` }"
+    }
+    
     class LoadException(
         val `msg`: String
         ) : XybridException() {
@@ -1527,36 +1572,45 @@ public object FfiConverterTypeXybridError : FfiConverterRustBuffer<XybridExcepti
             1 -> XybridException.ModelNotFound(
                 FfiConverterString.read(buf),
                 )
-            2 -> XybridException.LoadException(
+            2 -> XybridException.DirectoryNotFound(
                 FfiConverterString.read(buf),
                 )
-            3 -> XybridException.InferenceException(
+            3 -> XybridException.MetadataNotFound(
                 FfiConverterString.read(buf),
                 )
-            4 -> XybridException.StreamingNotSupported()
-            5 -> XybridException.NotLoaded()
-            6 -> XybridException.ConfigException(
+            4 -> XybridException.MetadataInvalid(
                 FfiConverterString.read(buf),
                 )
-            7 -> XybridException.NetworkException(
+            5 -> XybridException.LoadException(
                 FfiConverterString.read(buf),
                 )
-            8 -> XybridException.IoException(
+            6 -> XybridException.InferenceException(
                 FfiConverterString.read(buf),
                 )
-            9 -> XybridException.CacheException(
+            7 -> XybridException.StreamingNotSupported()
+            8 -> XybridException.NotLoaded()
+            9 -> XybridException.ConfigException(
                 FfiConverterString.read(buf),
                 )
-            10 -> XybridException.PipelineException(
+            10 -> XybridException.NetworkException(
                 FfiConverterString.read(buf),
                 )
-            11 -> XybridException.CircuitOpen(
+            11 -> XybridException.IoException(
                 FfiConverterString.read(buf),
                 )
-            12 -> XybridException.RateLimited(
+            12 -> XybridException.CacheException(
+                FfiConverterString.read(buf),
+                )
+            13 -> XybridException.PipelineException(
+                FfiConverterString.read(buf),
+                )
+            14 -> XybridException.CircuitOpen(
+                FfiConverterString.read(buf),
+                )
+            15 -> XybridException.RateLimited(
                 FfiConverterULong.read(buf),
                 )
-            13 -> XybridException.Timeout(
+            16 -> XybridException.Timeout(
                 FfiConverterULong.read(buf),
                 )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
@@ -1566,6 +1620,21 @@ public object FfiConverterTypeXybridError : FfiConverterRustBuffer<XybridExcepti
     override fun allocationSize(value: XybridException): Int {
         return when(value) {
             is XybridException.ModelNotFound -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is XybridException.DirectoryNotFound -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is XybridException.MetadataNotFound -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is XybridException.MetadataInvalid -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4
                 + FfiConverterString.allocationSize(value.`msg`)
@@ -1638,61 +1707,76 @@ public object FfiConverterTypeXybridError : FfiConverterRustBuffer<XybridExcepti
                 FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.LoadException -> {
+            is XybridException.DirectoryNotFound -> {
                 buf.putInt(2)
                 FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.InferenceException -> {
+            is XybridException.MetadataNotFound -> {
                 buf.putInt(3)
                 FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.StreamingNotSupported -> {
+            is XybridException.MetadataInvalid -> {
                 buf.putInt(4)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.NotLoaded -> {
+            is XybridException.LoadException -> {
                 buf.putInt(5)
+                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.ConfigException -> {
+            is XybridException.InferenceException -> {
                 buf.putInt(6)
                 FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.NetworkException -> {
+            is XybridException.StreamingNotSupported -> {
                 buf.putInt(7)
-                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.IoException -> {
+            is XybridException.NotLoaded -> {
                 buf.putInt(8)
-                FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.CacheException -> {
+            is XybridException.ConfigException -> {
                 buf.putInt(9)
                 FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.PipelineException -> {
+            is XybridException.NetworkException -> {
                 buf.putInt(10)
                 FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.CircuitOpen -> {
+            is XybridException.IoException -> {
                 buf.putInt(11)
                 FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is XybridException.RateLimited -> {
+            is XybridException.CacheException -> {
                 buf.putInt(12)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is XybridException.PipelineException -> {
+                buf.putInt(13)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is XybridException.CircuitOpen -> {
+                buf.putInt(14)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is XybridException.RateLimited -> {
+                buf.putInt(15)
                 FfiConverterULong.write(value.`retryAfterSecs`, buf)
                 Unit
             }
             is XybridException.Timeout -> {
-                buf.putInt(13)
+                buf.putInt(16)
                 FfiConverterULong.write(value.`timeoutMs`, buf)
                 Unit
             }

@@ -7,6 +7,9 @@ use super::voice::{VoiceConfig, VoiceInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+
 // ============================================================================
 // Execution Templates
 // ============================================================================
@@ -15,6 +18,7 @@ use std::collections::HashMap;
 ///
 /// Variants are named by **format**, not by runtime implementation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 pub enum ExecutionTemplate {
     /// ONNX model execution via ONNX Runtime
@@ -84,6 +88,7 @@ pub enum ExecutionTemplate {
 
 /// A single stage in a pipeline execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct PipelineStage {
     /// Stage name (e.g., "encoder", "decoder", "vocoder")
     pub name: String,
@@ -112,6 +117,7 @@ pub struct PipelineStage {
 
 /// Execution mode for a pipeline stage
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 #[derive(Default)]
 pub enum ExecutionMode {
@@ -152,6 +158,7 @@ pub enum ExecutionMode {
 
 /// Schedule for iterative refinement (diffusion models)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 #[derive(Default)]
 pub enum RefinementSchedule {
@@ -169,6 +176,7 @@ pub enum RefinementSchedule {
 
 /// Complete model metadata describing execution strategy
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ModelMetadata {
     /// Model identifier
     pub model_id: String,
