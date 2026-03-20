@@ -8,11 +8,7 @@ use tempfile::TempDir;
 use xybrid_core::execution::ModelMetadata;
 
 /// Helper: write a minimal valid GGUF v3 file header.
-fn write_gguf_v3_header(
-    path: &std::path::Path,
-    architecture: &str,
-    context_length: u32,
-) {
+fn write_gguf_v3_header(path: &std::path::Path, architecture: &str, context_length: u32) {
     let mut f = std::fs::File::create(path).unwrap();
 
     // Magic: "GGUF"
@@ -66,11 +62,7 @@ A test model for metadata generation.
     .unwrap();
 
     // Write a minimal GGUF file
-    write_gguf_v3_header(
-        &dir.path().join("model-Q4_K_M.gguf"),
-        "llama",
-        8192,
-    );
+    write_gguf_v3_header(&dir.path().join("model-Q4_K_M.gguf"), "llama", 8192);
 
     // Generate metadata
     let metadata =
@@ -104,7 +96,10 @@ A test model for metadata generation.
         Some("text-generation")
     );
     assert_eq!(
-        metadata.metadata.get("architecture").and_then(|v| v.as_str()),
+        metadata
+            .metadata
+            .get("architecture")
+            .and_then(|v| v.as_str()),
         Some("llama")
     );
     assert_eq!(
@@ -112,11 +107,17 @@ A test model for metadata generation.
         Some("llamacpp")
     );
     assert_eq!(
-        metadata.metadata.get("auto_generated").and_then(|v| v.as_bool()),
+        metadata
+            .metadata
+            .get("auto_generated")
+            .and_then(|v| v.as_bool()),
         Some(true)
     );
     assert_eq!(
-        metadata.metadata.get("quantization").and_then(|v| v.as_str()),
+        metadata
+            .metadata
+            .get("quantization")
+            .and_then(|v| v.as_str()),
         Some("Q4_K_M")
     );
 
@@ -126,12 +127,15 @@ A test model for metadata generation.
 
     // Validate model_metadata.json was written to disk
     let metadata_path = dir.path().join("model_metadata.json");
-    assert!(metadata_path.exists(), "model_metadata.json should be written to disk");
+    assert!(
+        metadata_path.exists(),
+        "model_metadata.json should be written to disk"
+    );
 
     // Validate it round-trips through JSON
     let json = std::fs::read_to_string(&metadata_path).unwrap();
-    let parsed: ModelMetadata = serde_json::from_str(&json)
-        .expect("Generated model_metadata.json should be valid JSON");
+    let parsed: ModelMetadata =
+        serde_json::from_str(&json).expect("Generated model_metadata.json should be valid JSON");
     assert_eq!(parsed.model_id, "test-llama-model");
     assert_eq!(parsed.files, vec!["model-Q4_K_M.gguf"]);
 }
@@ -143,9 +147,8 @@ fn test_gguf_model_without_readme_uses_defaults() {
     // Only a GGUF file, no README
     write_gguf_v3_header(&dir.path().join("model.gguf"), "qwen2", 4096);
 
-    let metadata =
-        xybrid_sdk::metadata_gen::generate_metadata(dir.path(), "someone/qwen2-model")
-            .expect("should succeed even without README");
+    let metadata = xybrid_sdk::metadata_gen::generate_metadata(dir.path(), "someone/qwen2-model")
+        .expect("should succeed even without README");
 
     assert_eq!(metadata.model_id, "qwen2-model");
 
@@ -157,7 +160,10 @@ fn test_gguf_model_without_readme_uses_defaults() {
 
     // Architecture should still be detected from GGUF header
     assert_eq!(
-        metadata.metadata.get("architecture").and_then(|v| v.as_str()),
+        metadata
+            .metadata
+            .get("architecture")
+            .and_then(|v| v.as_str()),
         Some("qwen2")
     );
 }
@@ -187,17 +193,22 @@ fn test_onnx_model_with_task_produces_correct_steps() {
     // Dummy ONNX file
     std::fs::write(dir.path().join("model.onnx"), b"dummy onnx data").unwrap();
 
-    let metadata =
-        xybrid_sdk::metadata_gen::generate_metadata(dir.path(), "test-org/vision-model")
-            .expect("should succeed");
+    let metadata = xybrid_sdk::metadata_gen::generate_metadata(dir.path(), "test-org/vision-model")
+        .expect("should succeed");
 
     assert_eq!(metadata.model_id, "vision-model");
 
     // Should have Normalize preprocessing for image classification
-    assert!(!metadata.preprocessing.is_empty(), "Should have preprocessing steps");
+    assert!(
+        !metadata.preprocessing.is_empty(),
+        "Should have preprocessing steps"
+    );
 
     // Should have Argmax postprocessing
-    assert!(!metadata.postprocessing.is_empty(), "Should have postprocessing steps");
+    assert!(
+        !metadata.postprocessing.is_empty(),
+        "Should have postprocessing steps"
+    );
 
     // Should be an ONNX template
     match &metadata.execution_template {

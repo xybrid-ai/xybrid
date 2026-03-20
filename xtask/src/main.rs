@@ -517,7 +517,8 @@ fn generate_schema(output: Option<PathBuf>) -> Result<()> {
     let schema = schema_for!(ModelMetadata);
     let json = serde_json::to_string_pretty(&schema).context("Failed to serialize schema")?;
 
-    let output_path = output.unwrap_or_else(|| PathBuf::from("docs/sdk/model_metadata.schema.json"));
+    let output_path =
+        output.unwrap_or_else(|| PathBuf::from("docs/sdk/model_metadata.schema.json"));
 
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent)

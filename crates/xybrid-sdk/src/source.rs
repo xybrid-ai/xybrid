@@ -203,10 +203,7 @@ impl ModelSource {
     }
 
     /// Create a HuggingFace Hub source with explicit revision.
-    pub fn huggingface_with_revision(
-        repo: impl Into<String>,
-        revision: impl Into<String>,
-    ) -> Self {
+    pub fn huggingface_with_revision(repo: impl Into<String>, revision: impl Into<String>) -> Self {
         ModelSource::HuggingFace {
             repo: repo.into(),
             revision: Some(revision.into()),

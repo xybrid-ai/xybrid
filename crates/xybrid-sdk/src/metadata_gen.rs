@@ -59,7 +59,13 @@ pub fn generate_metadata(cache_dir: &Path, repo: &str) -> SdkResult<ModelMetadat
         .and_then(|f| inspect_onnx_model(&cache_dir.join(&f.filename)));
 
     // 4. Build metadata from collected info
-    let metadata = build_metadata(repo, &model_files, model_card.as_ref(), gguf_info.as_ref(), onnx_info.as_ref());
+    let metadata = build_metadata(
+        repo,
+        &model_files,
+        model_card.as_ref(),
+        gguf_info.as_ref(),
+        onnx_info.as_ref(),
+    );
 
     // 5. Write to cache directory
     let metadata_path = cache_dir.join("model_metadata.json");
@@ -361,8 +367,8 @@ fn infer_quantization_from_filename(filename: &str) -> Option<String> {
     let lower = filename.to_lowercase();
     // Common GGUF quantization patterns
     for q in &[
-        "q2_k", "q3_k_s", "q3_k_m", "q3_k_l", "q4_0", "q4_1", "q4_k_s", "q4_k_m",
-        "q5_0", "q5_1", "q5_k_s", "q5_k_m", "q6_k", "q8_0", "f16", "f32",
+        "q2_k", "q3_k_s", "q3_k_m", "q3_k_l", "q4_0", "q4_1", "q4_k_s", "q4_k_m", "q5_0", "q5_1",
+        "q5_k_s", "q5_k_m", "q6_k", "q8_0", "f16", "f32",
     ] {
         if lower.contains(q) {
             return Some(q.to_uppercase());
@@ -407,12 +413,8 @@ fn read_gguf_uint_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Opti
             reader.read_exact(&mut buf).ok()?;
             Some(u16::from_le_bytes(buf) as u64)
         }
-        GGUF_TYPE_UINT32 | GGUF_TYPE_INT32 => {
-            Some(read_u32_le(reader)? as u64)
-        }
-        GGUF_TYPE_UINT64 | GGUF_TYPE_INT64 => {
-            read_u64_le(reader)
-        }
+        GGUF_TYPE_UINT32 | GGUF_TYPE_INT32 => Some(read_u32_le(reader)? as u64),
+        GGUF_TYPE_UINT64 | GGUF_TYPE_INT64 => read_u64_le(reader),
         _ => {
             skip_gguf_value(reader, value_type);
             None
@@ -523,8 +525,18 @@ fn build_metadata(
 
     match primary.format {
         ModelFormat::Gguf => build_gguf_metadata(&model_id, repo, primary, &task, card, gguf_info),
-        ModelFormat::Onnx => build_onnx_metadata(&model_id, repo, primary, &task, card, onnx_info, model_files),
-        ModelFormat::SafeTensors => build_safetensors_metadata(&model_id, repo, primary, &task, card, model_files),
+        ModelFormat::Onnx => build_onnx_metadata(
+            &model_id,
+            repo,
+            primary,
+            &task,
+            card,
+            onnx_info,
+            model_files,
+        ),
+        ModelFormat::SafeTensors => {
+            build_safetensors_metadata(&model_id, repo, primary, &task, card, model_files)
+        }
     }
 }
 
@@ -538,23 +550,35 @@ fn build_gguf_metadata(
 ) -> ModelMetadata {
     use xybrid_core::execution::ExecutionTemplate;
 
-    let context_length = gguf_info
-        .and_then(|g| g.context_length)
-        .unwrap_or(4096) as usize;
+    let context_length = gguf_info.and_then(|g| g.context_length).unwrap_or(4096) as usize;
 
     let architecture = gguf_info
         .and_then(|g| g.architecture.clone())
         .unwrap_or_else(|| "unknown".to_string());
 
     let mut metadata_map = HashMap::new();
-    metadata_map.insert("task".to_string(), serde_json::Value::String(task.to_string()));
-    metadata_map.insert("architecture".to_string(), serde_json::Value::String(architecture.clone()));
-    metadata_map.insert("backend".to_string(), serde_json::Value::String("llamacpp".to_string()));
+    metadata_map.insert(
+        "task".to_string(),
+        serde_json::Value::String(task.to_string()),
+    );
+    metadata_map.insert(
+        "architecture".to_string(),
+        serde_json::Value::String(architecture.clone()),
+    );
+    metadata_map.insert(
+        "backend".to_string(),
+        serde_json::Value::String("llamacpp".to_string()),
+    );
     metadata_map.insert(
         "context_length".to_string(),
-        serde_json::json!(gguf_info.and_then(|g| g.context_length).unwrap_or(context_length as u64)),
+        serde_json::json!(gguf_info
+            .and_then(|g| g.context_length)
+            .unwrap_or(context_length as u64)),
     );
-    metadata_map.insert("source_repo".to_string(), serde_json::Value::String(repo.to_string()));
+    metadata_map.insert(
+        "source_repo".to_string(),
+        serde_json::Value::String(repo.to_string()),
+    );
     metadata_map.insert("auto_generated".to_string(), serde_json::Value::Bool(true));
 
     if let Some(q) = gguf_info.and_then(|g| g.quantization.clone()) {
@@ -563,13 +587,13 @@ fn build_gguf_metadata(
 
     if let Some(card) = card {
         if !card.languages.is_empty() {
-            metadata_map.insert(
-                "languages".to_string(),
-                serde_json::json!(card.languages),
-            );
+            metadata_map.insert("languages".to_string(), serde_json::json!(card.languages));
         }
         if let Some(license) = &card.license {
-            metadata_map.insert("license".to_string(), serde_json::Value::String(license.clone()));
+            metadata_map.insert(
+                "license".to_string(),
+                serde_json::Value::String(license.clone()),
+            );
         }
     }
 
@@ -606,8 +630,8 @@ fn build_onnx_metadata(
     onnx_info: Option<&OnnxInfo>,
     all_files: &[ModelFileInfo],
 ) -> ModelMetadata {
-    use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
     use xybrid_core::execution::template::TokenizerType;
+    use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     let mut preprocessing = Vec::new();
     let mut postprocessing = Vec::new();
@@ -700,8 +724,14 @@ fn build_onnx_metadata(
     }
 
     let mut metadata_map = HashMap::new();
-    metadata_map.insert("task".to_string(), serde_json::Value::String(task.to_string()));
-    metadata_map.insert("source_repo".to_string(), serde_json::Value::String(repo.to_string()));
+    metadata_map.insert(
+        "task".to_string(),
+        serde_json::Value::String(task.to_string()),
+    );
+    metadata_map.insert(
+        "source_repo".to_string(),
+        serde_json::Value::String(repo.to_string()),
+    );
     metadata_map.insert("auto_generated".to_string(), serde_json::Value::Bool(true));
 
     if let Some(info) = onnx_info {
@@ -755,17 +785,33 @@ fn build_safetensors_metadata(
     }
 
     let architecture = card
-        .and_then(|c| c.tags.iter().find(|t| {
-            matches!(
-                t.as_str(),
-                "whisper" | "llama" | "gpt2" | "bert" | "t5" | "mistral" | "phi" | "gemma" | "qwen"
-            )
-        }))
+        .and_then(|c| {
+            c.tags.iter().find(|t| {
+                matches!(
+                    t.as_str(),
+                    "whisper"
+                        | "llama"
+                        | "gpt2"
+                        | "bert"
+                        | "t5"
+                        | "mistral"
+                        | "phi"
+                        | "gemma"
+                        | "qwen"
+                )
+            })
+        })
         .cloned();
 
     let mut metadata_map = HashMap::new();
-    metadata_map.insert("task".to_string(), serde_json::Value::String(task.to_string()));
-    metadata_map.insert("source_repo".to_string(), serde_json::Value::String(repo.to_string()));
+    metadata_map.insert(
+        "task".to_string(),
+        serde_json::Value::String(task.to_string()),
+    );
+    metadata_map.insert(
+        "source_repo".to_string(),
+        serde_json::Value::String(repo.to_string()),
+    );
     metadata_map.insert("auto_generated".to_string(), serde_json::Value::Bool(true));
 
     let description = card
@@ -799,15 +845,15 @@ fn infer_steps_from_onnx(
     postprocessing: &mut Vec<xybrid_core::execution::PostprocessingStep>,
     files: &mut Vec<String>,
 ) {
-    use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
     use xybrid_core::execution::template::TokenizerType;
+    use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     let input_names: Vec<&str> = info.inputs.iter().map(|i| i.name.as_str()).collect();
 
     // Check for tokenized text inputs (input_ids, attention_mask)
-    let has_token_inputs = input_names.iter().any(|n| {
-        *n == "input_ids" || *n == "tokens" || *n == "token_ids"
-    });
+    let has_token_inputs = input_names
+        .iter()
+        .any(|n| *n == "input_ids" || *n == "tokens" || *n == "token_ids");
 
     if has_token_inputs {
         preprocessing.push(PreprocessingStep::Tokenize {
@@ -819,9 +865,9 @@ fn infer_steps_from_onnx(
     }
 
     // Check for audio inputs
-    let has_audio_inputs = input_names.iter().any(|n| {
-        n.contains("audio") || n.contains("waveform") || n.contains("mel")
-    });
+    let has_audio_inputs = input_names
+        .iter()
+        .any(|n| n.contains("audio") || n.contains("waveform") || n.contains("mel"));
 
     if has_audio_inputs {
         preprocessing.push(PreprocessingStep::AudioDecode {
@@ -853,9 +899,7 @@ fn infer_task_from_tags(card: Option<&HfModelCard>) -> Option<String> {
             "text-classification" | "sentiment-analysis" => {
                 return Some("text-classification".to_string())
             }
-            "token-classification" | "ner" => {
-                return Some("token-classification".to_string())
-            }
+            "token-classification" | "ner" => return Some("token-classification".to_string()),
             "image-classification" => return Some("image-classification".to_string()),
             "feature-extraction" | "sentence-similarity" => {
                 return Some("feature-extraction".to_string())
@@ -937,10 +981,7 @@ mod tests {
             infer_quantization_from_filename("model-F16.gguf"),
             Some("F16".to_string())
         );
-        assert_eq!(
-            infer_quantization_from_filename("model.gguf"),
-            None
-        );
+        assert_eq!(infer_quantization_from_filename("model.gguf"), None);
     }
 
     #[test]
@@ -1029,11 +1070,17 @@ mod tests {
             Some("text-generation")
         );
         assert_eq!(
-            metadata.metadata.get("architecture").and_then(|v| v.as_str()),
+            metadata
+                .metadata
+                .get("architecture")
+                .and_then(|v| v.as_str()),
             Some("qwen2")
         );
         assert_eq!(
-            metadata.metadata.get("auto_generated").and_then(|v| v.as_bool()),
+            metadata
+                .metadata
+                .get("auto_generated")
+                .and_then(|v| v.as_bool()),
             Some(true)
         );
 

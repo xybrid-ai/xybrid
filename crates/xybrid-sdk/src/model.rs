@@ -315,22 +315,18 @@ impl ModelLoader {
     pub fn from_directory(path: impl Into<PathBuf>) -> SdkResult<Self> {
         let path: PathBuf = path.into();
         if !path.exists() {
-            return Err(SdkError::DirectoryNotFound(
-                path.display().to_string(),
-            ));
+            return Err(SdkError::DirectoryNotFound(path.display().to_string()));
         }
         let metadata_path = path.join("model_metadata.json");
         if !metadata_path.exists() {
-            return Err(SdkError::MetadataNotFound(
-                path.display().to_string(),
-            ));
+            return Err(SdkError::MetadataNotFound(path.display().to_string()));
         }
         // Validate that the metadata is valid JSON
         let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
             SdkError::MetadataInvalid(format!("failed to read model_metadata.json: {}", e))
         })?;
-        let _metadata: xybrid_core::execution::ModelMetadata =
-            serde_json::from_str(&metadata_str).map_err(|e| {
+        let _metadata: xybrid_core::execution::ModelMetadata = serde_json::from_str(&metadata_str)
+            .map_err(|e| {
                 SdkError::MetadataInvalid(format!("invalid model_metadata.json: {}", e))
             })?;
         Ok(Self {
@@ -586,7 +582,10 @@ impl ModelLoader {
 
         // Get repo info to list all files
         let repo_info = repo_api.info().map_err(|e| {
-            SdkError::NetworkError(format!("Failed to get HuggingFace repo info for '{}': {}", repo, e))
+            SdkError::NetworkError(format!(
+                "Failed to get HuggingFace repo info for '{}': {}",
+                repo, e
+            ))
         })?;
 
         let siblings = repo_info.siblings;
