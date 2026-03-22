@@ -90,15 +90,19 @@ enum Commands {
         #[arg(value_name = "FILE")]
         config: PathBuf,
     },
-    /// Pre-download models from the registry
+    /// Pre-download models from the registry or HuggingFace
     Fetch {
         /// Path to pipeline configuration file (downloads all models)
-        #[arg(value_name = "FILE", conflicts_with = "model")]
+        #[arg(value_name = "FILE", conflicts_with_all = ["model", "huggingface"])]
         config: Option<PathBuf>,
 
-        /// Model ID to fetch (e.g., "kokoro-82m")
-        #[arg(short, long, value_name = "ID")]
+        /// Model ID to fetch from registry (e.g., "kokoro-82m")
+        #[arg(short, long, value_name = "ID", conflicts_with = "huggingface")]
         model: Option<String>,
+
+        /// HuggingFace repo to fetch (e.g., "DataikuNLP/kiji-pii-model-onnx")
+        #[arg(long, value_name = "REPO", conflicts_with = "model")]
+        huggingface: Option<String>,
 
         /// Target platform (auto-detected if not specified)
         #[arg(short, long, value_name = "PLATFORM")]
@@ -112,21 +116,30 @@ enum Commands {
     /// Run a pipeline from a configuration file, predefined pipeline name, or model ID
     Run {
         /// Path to the pipeline configuration file (YAML)
-        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["pipeline", "bundle", "model"])]
+        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["pipeline", "bundle", "model", "directory", "huggingface"])]
         config: Option<PathBuf>,
 
         /// Predefined pipeline name (e.g., "hiiipe")
-        #[arg(short, long, value_name = "NAME", conflicts_with_all = ["config", "bundle", "model"])]
+        #[arg(short, long, value_name = "NAME", conflicts_with_all = ["config", "bundle", "model", "directory", "huggingface"])]
         pipeline: Option<String>,
 
         /// Path to a .xyb bundle file for direct execution
-        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["config", "pipeline", "model"])]
+        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["config", "pipeline", "model", "directory", "huggingface"])]
         bundle: Option<PathBuf>,
 
         /// Model ID to run directly from registry (e.g., "kokoro-82m")
         /// Downloads the model if not cached, then runs inference
-        #[arg(short, long, value_name = "ID", conflicts_with_all = ["config", "pipeline", "bundle"])]
+        #[arg(short, long, value_name = "ID", conflicts_with_all = ["config", "pipeline", "bundle", "directory", "huggingface"])]
         model: Option<String>,
+
+        /// Path to a local model directory containing model_metadata.json
+        #[arg(short, long, value_name = "DIR", conflicts_with_all = ["config", "pipeline", "bundle", "model", "huggingface"])]
+        directory: Option<PathBuf>,
+
+        /// HuggingFace repo to run (e.g., "DataikuNLP/kiji-pii-model-onnx")
+        /// Downloads if not cached, auto-generates metadata if needed
+        #[arg(long, value_name = "REPO", conflicts_with_all = ["config", "pipeline", "bundle", "model", "directory"])]
+        huggingface: Option<String>,
 
         /// Dry run the pipeline without executing it
         #[arg(long, default_value = "false")]
@@ -329,15 +342,18 @@ fn run_command(cli: Cli) -> Result<()> {
         Commands::Fetch {
             config,
             model,
+            huggingface,
             platform,
         } => {
             if let Some(config_path) = config {
                 commands::fetch::handle_fetch_pipeline_command(&config_path, platform.as_deref())
             } else if let Some(model_id) = model {
                 commands::fetch::handle_fetch_command(&model_id, platform.as_deref())
+            } else if let Some(repo) = huggingface {
+                commands::fetch::handle_fetch_huggingface_command(&repo)
             } else {
                 Err(anyhow::anyhow!(
-                    "Either a pipeline config file or --model <id> must be specified"
+                    "Either a pipeline config file, --model <id>, or --huggingface <repo> must be specified"
                 ))
             }
         }
@@ -347,6 +363,8 @@ fn run_command(cli: Cli) -> Result<()> {
             pipeline,
             bundle,
             model,
+            directory,
+            huggingface,
             dry_run,
             policy,
             input_audio,
@@ -369,6 +387,32 @@ fn run_command(cli: Cli) -> Result<()> {
                     voice.as_deref(),
                     output.as_ref(),
                     target.as_deref(),
+                    dry_run,
+                    trace,
+                    trace_export.as_ref(),
+                );
+            }
+
+            if let Some(dir) = directory {
+                return commands::run::run_directory(
+                    &dir,
+                    input_audio.as_ref(),
+                    input_text.as_deref(),
+                    voice.as_deref(),
+                    output.as_ref(),
+                    dry_run,
+                    trace,
+                    trace_export.as_ref(),
+                );
+            }
+
+            if let Some(repo) = huggingface {
+                return commands::run::run_huggingface(
+                    &repo,
+                    input_audio.as_ref(),
+                    input_text.as_deref(),
+                    voice.as_deref(),
+                    output.as_ref(),
                     dry_run,
                     trace,
                     trace_export.as_ref(),

@@ -57,6 +57,59 @@ pub(crate) fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Re
     Ok(())
 }
 
+/// Handle `xybrid fetch --huggingface <repo>` command.
+///
+/// Downloads a model directly from HuggingFace Hub and auto-generates metadata.
+pub(crate) fn handle_fetch_huggingface_command(repo: &str) -> Result<()> {
+    println!(
+        "📥 Fetching from HuggingFace: {}",
+        repo.cyan().bold()
+    );
+    println!("{}", "=".repeat(60));
+    println!();
+
+    // Compute cache dir to check for auto-generated metadata after load
+    let sanitized = repo.replace('/', "--");
+    let cache_dir = dirs::home_dir()
+        .map(|h| h.join(".xybrid").join("cache").join("hf").join(&sanitized));
+
+    let loader = xybrid_sdk::ModelLoader::from_huggingface(repo);
+    let model = loader.load().context(format!(
+        "Failed to load model from HuggingFace repo '{}'",
+        repo
+    ))?;
+
+    println!("✅ Model downloaded successfully!");
+    println!("   Model ID: {}", model.model_id().cyan());
+    println!("   Version: {}", model.version());
+
+    if let Some(ref dir) = cache_dir {
+        println!("   Directory: {}", dir.display());
+
+        let metadata_path = dir.join("model_metadata.json");
+        if metadata_path.exists() {
+            if let Ok(content) = fs::read_to_string(&metadata_path) {
+                if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if metadata.get("auto_generated").and_then(|v| v.as_bool()) == Some(true) {
+                        println!();
+                        println!(
+                            "{}",
+                            "⚠️  model_metadata.json was auto-generated. Review and adjust if needed:"
+                                .yellow()
+                        );
+                        println!("   {}", metadata_path.display());
+                    }
+                }
+            }
+        }
+    }
+
+    println!();
+    println!("{}", "=".repeat(60));
+
+    Ok(())
+}
+
 /// Handle `xybrid fetch <pipeline.yaml>` command.
 ///
 /// Pre-downloads all models required by the pipeline.

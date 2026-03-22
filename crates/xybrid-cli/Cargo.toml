@@ -24,6 +24,9 @@ candle-hub = ["xybrid-sdk/candle-hub"]
 candle-metal = ["xybrid-sdk/candle-metal"]
 candle-cuda = ["xybrid-sdk/candle-cuda"]
 
+# HuggingFace direct loading
+huggingface = ["xybrid-sdk/huggingface"]
+
 # Local LLM inference
 llm-mistral = ["xybrid-sdk/llm-mistral"]
 llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]

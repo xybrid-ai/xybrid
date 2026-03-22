@@ -641,6 +641,123 @@ pub(crate) fn run_model(
     Ok(())
 }
 
+/// Run inference from a local model directory.
+pub(crate) fn run_directory(
+    dir: &Path,
+    input_audio: Option<&PathBuf>,
+    input_text: Option<&str>,
+    voice: Option<&str>,
+    output_path: Option<&PathBuf>,
+    dry_run: bool,
+    trace_enabled: bool,
+    trace_export: Option<&PathBuf>,
+) -> Result<()> {
+    if trace_enabled {
+        crate::tracing_viz::reset_collector();
+    }
+
+    println!("🚀 Xybrid Model Runner (local directory)");
+    println!("📂 Directory: {}\n", dir.display().to_string().cyan().bold());
+
+    if !dir.exists() {
+        return Err(anyhow::anyhow!("Directory not found: {}", dir.display()));
+    }
+
+    let (metadata, input) =
+        prepare_bundle_execution(dir, input_audio, input_text, voice, dry_run)?;
+
+    emit_pipeline_start_event(&metadata, "directory");
+
+    if dry_run {
+        println!("🔎 Dry Run: Model inspection only");
+        println!("{}", "=".repeat(60));
+        println!("\nModel is valid and ready for execution.");
+        println!("Use without --dry-run to run inference.");
+        return Ok(());
+    }
+
+    let input = input.ok_or_else(|| {
+        anyhow::anyhow!("No input provided. Use --input-audio <file> or --input-text <text>")
+    })?;
+
+    let (output, elapsed) = run_inference(dir, &metadata, &input, trace_enabled)?;
+
+    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    emit_pipeline_complete_event(&metadata, &output, elapsed);
+
+    if trace_enabled {
+        print_trace_output(trace_enabled, trace_export)?;
+    }
+
+    Ok(())
+}
+
+/// Run inference from a HuggingFace model (downloads if needed, auto-generates metadata).
+pub(crate) fn run_huggingface(
+    repo: &str,
+    input_audio: Option<&PathBuf>,
+    input_text: Option<&str>,
+    voice: Option<&str>,
+    output_path: Option<&PathBuf>,
+    dry_run: bool,
+    trace_enabled: bool,
+    trace_export: Option<&PathBuf>,
+) -> Result<()> {
+    if trace_enabled {
+        crate::tracing_viz::reset_collector();
+    }
+
+    println!("🚀 Xybrid Model Runner (HuggingFace)");
+    println!("🤗 Repo: {}\n", repo.cyan().bold());
+
+    println!("📥 Loading from HuggingFace (downloading if needed)...");
+    let loader = xybrid_sdk::ModelLoader::from_huggingface(repo);
+    let model = loader.load().context(format!(
+        "Failed to load model from HuggingFace repo '{}'",
+        repo
+    ))?;
+
+    println!("✅ Model loaded: {}", model.model_id().cyan());
+    println!();
+
+    // Resolve the cache directory for direct execution
+    let sanitized = repo.replace('/', "--");
+    let cache_dir = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
+        .join(".xybrid")
+        .join("cache")
+        .join("hf")
+        .join(&sanitized);
+
+    let (metadata, input) =
+        prepare_bundle_execution(&cache_dir, input_audio, input_text, voice, dry_run)?;
+
+    emit_pipeline_start_event(&metadata, "huggingface");
+
+    if dry_run {
+        println!("🔎 Dry Run: Model inspection only");
+        println!("{}", "=".repeat(60));
+        println!("\nModel is valid and ready for execution.");
+        println!("Use without --dry-run to run inference.");
+        return Ok(());
+    }
+
+    let input = input.ok_or_else(|| {
+        anyhow::anyhow!("No input provided. Use --input-audio <file> or --input-text <text>")
+    })?;
+
+    let (output, elapsed) = run_inference(&cache_dir, &metadata, &input, trace_enabled)?;
+
+    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    emit_pipeline_complete_event(&metadata, &output, elapsed);
+
+    if trace_enabled {
+        print_trace_output(trace_enabled, trace_export)?;
+    }
+
+    Ok(())
+}
+
 fn fetch_or_cache(
     client: &RegistryClient,
     model_id: &str,
