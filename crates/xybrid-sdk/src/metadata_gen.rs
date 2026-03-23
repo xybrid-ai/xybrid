@@ -65,6 +65,7 @@ pub fn generate_metadata(cache_dir: &Path, repo: &str) -> SdkResult<ModelMetadat
         model_card.as_ref(),
         gguf_info.as_ref(),
         onnx_info.as_ref(),
+        cache_dir,
     );
 
     // 5. Write to cache directory
@@ -505,6 +506,7 @@ fn build_metadata(
     card: Option<&HfModelCard>,
     gguf_info: Option<&GgufInfo>,
     onnx_info: Option<&OnnxInfo>,
+    cache_dir: &Path,
 ) -> ModelMetadata {
     // Determine the primary model file (largest file of the detected format)
     let primary = &model_files[0];
@@ -533,6 +535,7 @@ fn build_metadata(
             card,
             onnx_info,
             model_files,
+            cache_dir,
         ),
         ModelFormat::SafeTensors => {
             build_safetensors_metadata(&model_id, repo, primary, &task, card, model_files)
@@ -629,6 +632,7 @@ fn build_onnx_metadata(
     card: Option<&HfModelCard>,
     onnx_info: Option<&OnnxInfo>,
     all_files: &[ModelFileInfo],
+    cache_dir: &Path,
 ) -> ModelMetadata {
     use xybrid_core::execution::template::TokenizerType;
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
@@ -636,6 +640,16 @@ fn build_onnx_metadata(
     let mut preprocessing = Vec::new();
     let mut postprocessing = Vec::new();
     let mut files: Vec<String> = vec![primary.filename.clone()];
+
+    // Prefer tokenizer.json (HuggingFace fast tokenizer format) over vocab.txt.
+    // The `tokenizers` crate expects the JSON format; vocab.txt is a plain word list
+    // that cannot be loaded directly.
+    let has_tokenizer_json = cache_dir.join("tokenizer.json").exists();
+    let tokenizer_file = if has_tokenizer_json {
+        "tokenizer.json"
+    } else {
+        "vocab.txt"
+    };
 
     // Infer preprocessing/postprocessing from task + ONNX tensor info
     match task {
@@ -669,21 +683,21 @@ fn build_onnx_metadata(
         }
         "text-classification" | "sentiment-analysis" => {
             preprocessing.push(PreprocessingStep::Tokenize {
-                vocab_file: "vocab.txt".to_string(),
+                vocab_file: tokenizer_file.to_string(),
                 tokenizer_type: TokenizerType::WordPiece,
                 max_length: Some(512),
             });
             postprocessing.push(PostprocessingStep::Argmax { dim: None });
-            files.push("vocab.txt".to_string());
+            files.push(tokenizer_file.to_string());
         }
         "token-classification" | "ner" => {
             preprocessing.push(PreprocessingStep::Tokenize {
-                vocab_file: "vocab.txt".to_string(),
+                vocab_file: tokenizer_file.to_string(),
                 tokenizer_type: TokenizerType::WordPiece,
                 max_length: Some(512),
             });
             postprocessing.push(PostprocessingStep::Argmax { dim: None });
-            files.push("vocab.txt".to_string());
+            files.push(tokenizer_file.to_string());
         }
         "image-classification" => {
             preprocessing.push(PreprocessingStep::Normalize {
@@ -694,17 +708,17 @@ fn build_onnx_metadata(
         }
         "feature-extraction" | "sentence-similarity" => {
             preprocessing.push(PreprocessingStep::Tokenize {
-                vocab_file: "vocab.txt".to_string(),
+                vocab_file: tokenizer_file.to_string(),
                 tokenizer_type: TokenizerType::WordPiece,
                 max_length: Some(512),
             });
-            files.push("vocab.txt".to_string());
+            files.push(tokenizer_file.to_string());
             // Output is typically embeddings — no postprocessing needed
         }
         _ => {
             // Generic: try to infer from ONNX input names
             if let Some(info) = onnx_info {
-                infer_steps_from_onnx(info, &mut preprocessing, &mut postprocessing, &mut files);
+                infer_steps_from_onnx(info, &mut preprocessing, &mut postprocessing, &mut files, tokenizer_file);
             } else {
                 log::warn!(
                     target: "xybrid_sdk",
@@ -844,6 +858,7 @@ fn infer_steps_from_onnx(
     preprocessing: &mut Vec<xybrid_core::execution::PreprocessingStep>,
     postprocessing: &mut Vec<xybrid_core::execution::PostprocessingStep>,
     files: &mut Vec<String>,
+    tokenizer_file: &str,
 ) {
     use xybrid_core::execution::template::TokenizerType;
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
@@ -857,11 +872,11 @@ fn infer_steps_from_onnx(
 
     if has_token_inputs {
         preprocessing.push(PreprocessingStep::Tokenize {
-            vocab_file: "vocab.txt".to_string(),
+            vocab_file: tokenizer_file.to_string(),
             tokenizer_type: TokenizerType::WordPiece,
             max_length: Some(512),
         });
-        files.push("vocab.txt".to_string());
+        files.push(tokenizer_file.to_string());
     }
 
     // Check for audio inputs
