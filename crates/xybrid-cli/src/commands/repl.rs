@@ -38,9 +38,9 @@ pub(crate) fn handle_repl_command(
 
     // --model-file: load a bare GGUF file with auto-generated metadata
     let stages = if let Some(ref gguf_path) = model_file {
-        let gguf_path = gguf_path.canonicalize().with_context(|| {
-            format!("GGUF file not found: {}", gguf_path.display())
-        })?;
+        let gguf_path = gguf_path
+            .canonicalize()
+            .with_context(|| format!("GGUF file not found: {}", gguf_path.display()))?;
 
         let metadata = xybrid_sdk::metadata_gen::generate_metadata_for_gguf_file(&gguf_path)
             .map_err(|e| anyhow::anyhow!("Failed to generate metadata for GGUF file: {}", e))?;
@@ -77,8 +77,7 @@ pub(crate) fn handle_repl_command(
         stage.bundle_path = Some(parent_dir.to_string_lossy().to_string());
         vec![stage]
     } else {
-        let client =
-            RegistryClient::from_env().context("Failed to initialize registry client")?;
+        let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
 
         let (config_path, model_id) = if let Some(config) = config {
             (Some(config), None)
