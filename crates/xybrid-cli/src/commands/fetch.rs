@@ -61,17 +61,14 @@ pub(crate) fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Re
 ///
 /// Downloads a model directly from HuggingFace Hub and auto-generates metadata.
 pub(crate) fn handle_fetch_huggingface_command(repo: &str) -> Result<()> {
-    println!(
-        "📥 Fetching from HuggingFace: {}",
-        repo.cyan().bold()
-    );
+    println!("📥 Fetching from HuggingFace: {}", repo.cyan().bold());
     println!("{}", "=".repeat(60));
     println!();
 
     // Compute cache dir to check for auto-generated metadata after load
     let sanitized = repo.replace('/', "--");
-    let cache_dir = dirs::home_dir()
-        .map(|h| h.join(".xybrid").join("cache").join("hf").join(&sanitized));
+    let cache_dir =
+        dirs::home_dir().map(|h| h.join(".xybrid").join("cache").join("hf").join(&sanitized));
 
     let loader = xybrid_sdk::ModelLoader::from_huggingface(repo);
     let model = loader.load().context(format!(

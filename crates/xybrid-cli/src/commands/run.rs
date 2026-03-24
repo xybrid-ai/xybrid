@@ -657,14 +657,16 @@ pub(crate) fn run_directory(
     }
 
     println!("🚀 Xybrid Model Runner (local directory)");
-    println!("📂 Directory: {}\n", dir.display().to_string().cyan().bold());
+    println!(
+        "📂 Directory: {}\n",
+        dir.display().to_string().cyan().bold()
+    );
 
     if !dir.exists() {
         return Err(anyhow::anyhow!("Directory not found: {}", dir.display()));
     }
 
-    let (metadata, input) =
-        prepare_bundle_execution(dir, input_audio, input_text, voice, dry_run)?;
+    let (metadata, input) = prepare_bundle_execution(dir, input_audio, input_text, voice, dry_run)?;
 
     emit_pipeline_start_event(&metadata, "directory");
 

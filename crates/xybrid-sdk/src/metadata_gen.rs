@@ -718,7 +718,13 @@ fn build_onnx_metadata(
         _ => {
             // Generic: try to infer from ONNX input names
             if let Some(info) = onnx_info {
-                infer_steps_from_onnx(info, &mut preprocessing, &mut postprocessing, &mut files, tokenizer_file);
+                infer_steps_from_onnx(
+                    info,
+                    &mut preprocessing,
+                    &mut postprocessing,
+                    &mut files,
+                    tokenizer_file,
+                );
             } else {
                 log::warn!(
                     target: "xybrid_sdk",
