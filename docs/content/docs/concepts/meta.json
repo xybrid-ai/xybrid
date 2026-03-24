@@ -10,6 +10,7 @@
     "---Infrastructure---",
     "registry",
     "bundles",
+    "caching",
     "---Operations---",
     "packaging-and-deployment"
   ]
