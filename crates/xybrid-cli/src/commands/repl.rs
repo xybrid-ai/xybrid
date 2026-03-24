@@ -19,6 +19,7 @@ use xybrid_sdk::registry_client::RegistryClient;
 pub(crate) fn handle_repl_command(
     config: Option<PathBuf>,
     model: Option<String>,
+    model_file: Option<PathBuf>,
     voice: Option<String>,
     _target: Option<String>,
     stream: bool,
@@ -35,27 +36,70 @@ pub(crate) fn handle_repl_command(
     print_streaming_status(stream);
     println!();
 
-    let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
+    // --model-file: load a bare GGUF file with auto-generated metadata
+    let stages = if let Some(ref gguf_path) = model_file {
+        let gguf_path = gguf_path.canonicalize().with_context(|| {
+            format!("GGUF file not found: {}", gguf_path.display())
+        })?;
 
-    let (config_path, model_id) = if let Some(config) = config {
-        (Some(config), None)
-    } else if let Some(model) = model {
-        (None, Some(model))
+        let metadata = xybrid_sdk::metadata_gen::generate_metadata_for_gguf_file(&gguf_path)
+            .map_err(|e| anyhow::anyhow!("Failed to generate metadata for GGUF file: {}", e))?;
+
+        let parent_dir = gguf_path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Cannot determine parent directory of GGUF file"))?;
+
+        println!("📦 Loading local GGUF: {}", gguf_path.display());
+        if verbose > 0 {
+            println!("   Model ID: {}", metadata.model_id);
+            if let xybrid_core::execution::ExecutionTemplate::Gguf { context_length, .. } =
+                &metadata.execution_template
+            {
+                println!("   Context length: {}", context_length);
+            }
+            if let Some(arch) = metadata.metadata.get("architecture") {
+                println!("   Architecture: {}", arch);
+            }
+        }
+
+        // Write metadata to parent dir so ModelLoader can find it
+        let metadata_path = parent_dir.join("model_metadata.json");
+        let needs_write = !metadata_path.exists();
+        if needs_write {
+            let json = serde_json::to_string_pretty(&metadata)?;
+            fs::write(&metadata_path, &json)?;
+            if verbose > 0 {
+                println!("   Generated model_metadata.json");
+            }
+        }
+
+        let mut stage = StageDescriptor::new(metadata.model_id.clone());
+        stage.bundle_path = Some(parent_dir.to_string_lossy().to_string());
+        vec![stage]
     } else {
-        return Err(anyhow::anyhow!(
-            "Either --config or --model must be specified"
-        ));
-    };
+        let client =
+            RegistryClient::from_env().context("Failed to initialize registry client")?;
 
-    let pipeline_config = if let Some(ref path) = config_path {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read config: {}", path.display()))?;
-        Some(PipelineConfig::from_yaml(&content)?)
-    } else {
-        None
-    };
+        let (config_path, model_id) = if let Some(config) = config {
+            (Some(config), None)
+        } else if let Some(model) = model {
+            (None, Some(model))
+        } else {
+            return Err(anyhow::anyhow!(
+                "Either --config, --model, or --model-file must be specified"
+            ));
+        };
 
-    let stages = load_stages(&client, &pipeline_config, &model_id)?;
+        let pipeline_config = if let Some(ref path) = config_path {
+            let content = fs::read_to_string(path)
+                .with_context(|| format!("Failed to read config: {}", path.display()))?;
+            Some(PipelineConfig::from_yaml(&content)?)
+        } else {
+            None
+        };
+
+        load_stages(&client, &pipeline_config, &model_id)?
+    };
 
     let mut conversation_context: Option<ConversationContext> = None;
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]

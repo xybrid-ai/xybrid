@@ -84,6 +84,48 @@ pub fn generate_metadata(cache_dir: &Path, repo: &str) -> SdkResult<ModelMetadat
     Ok(metadata)
 }
 
+/// Generate `ModelMetadata` for a standalone GGUF file on disk.
+///
+/// Reads the GGUF binary header to extract architecture and context length,
+/// then returns a ready-to-use `ModelMetadata` without writing anything to disk.
+/// This enables `--model-file ./path/to/model.gguf` workflows.
+pub fn generate_metadata_for_gguf_file(gguf_path: &Path) -> SdkResult<ModelMetadata> {
+    if !gguf_path.exists() {
+        return Err(SdkError::LoadError(format!(
+            "GGUF file not found: {}",
+            gguf_path.display()
+        )));
+    }
+
+    let filename = gguf_path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .ok_or_else(|| SdkError::LoadError("Invalid GGUF file path".to_string()))?
+        .to_string();
+
+    let model_id = filename
+        .trim_end_matches(".gguf")
+        .to_lowercase()
+        .replace(' ', "-");
+
+    let gguf_info = read_gguf_metadata(gguf_path);
+
+    let file_info = ModelFileInfo {
+        filename: filename.clone(),
+        format: ModelFormat::Gguf,
+        size_bytes: std::fs::metadata(gguf_path).map(|m| m.len()).unwrap_or(0),
+    };
+
+    Ok(build_gguf_metadata(
+        &model_id,
+        &filename,
+        &file_info,
+        "text-generation",
+        None,
+        gguf_info.as_ref(),
+    ))
+}
+
 // ============================================================================
 // HuggingFace Model Card Parsing
 // ============================================================================

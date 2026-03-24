@@ -181,12 +181,16 @@ enum Commands {
     /// Interactive REPL mode - keeps models loaded for fast repeated inference
     Repl {
         /// Path to the pipeline configuration file (YAML)
-        #[arg(short, long, value_name = "FILE", conflicts_with = "model")]
+        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["model", "model_file"])]
         config: Option<PathBuf>,
 
         /// Model ID to run directly from registry (e.g., "qwen2.5-0.5b-instruct")
-        #[arg(short, long, value_name = "ID", conflicts_with = "config")]
+        #[arg(short, long, value_name = "ID", conflicts_with_all = ["config", "model_file"])]
         model: Option<String>,
+
+        /// Path to a local GGUF model file (auto-generates metadata)
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["config", "model"])]
+        model_file: Option<PathBuf>,
 
         /// Voice ID for TTS models (e.g., "af_bella", "am_adam")
         #[arg(long, value_name = "VOICE")]
@@ -449,12 +453,13 @@ fn run_command(cli: Cli) -> Result<()> {
         Commands::Repl {
             config,
             model,
+            model_file,
             voice,
             target,
             stream,
             system,
         } => commands::repl::handle_repl_command(
-            config, model, voice, target, stream, system, verbose,
+            config, model, model_file, voice, target, stream, system, verbose,
         ),
         Commands::Trace {
             session,
