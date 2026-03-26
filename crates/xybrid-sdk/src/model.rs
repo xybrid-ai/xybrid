@@ -666,7 +666,7 @@ impl ModelLoader {
                 repo
             );
             match crate::metadata_gen::generate_metadata(&cache_dir, repo) {
-                Ok(_metadata) => {
+                Ok((_metadata, _task_inference)) => {
                     log::info!(
                         target: "xybrid_sdk",
                         "Auto-generated model_metadata.json for '{}'. \

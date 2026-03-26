@@ -19,6 +19,7 @@
 pub mod bundle;
 pub mod cache;
 pub mod fetch;
+pub mod init;
 pub mod models;
 pub mod pack;
 pub mod pipeline;
