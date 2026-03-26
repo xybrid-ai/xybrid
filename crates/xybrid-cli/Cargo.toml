@@ -27,6 +27,9 @@ candle-cuda = ["xybrid-sdk/candle-cuda"]
 # HuggingFace direct loading
 huggingface = ["xybrid-sdk/huggingface"]
 
+# ONNX model inspection (for `xybrid init`)
+onnx-inspect = ["xybrid-sdk/onnx-inspect"]
+
 # Local LLM inference
 llm-mistral = ["xybrid-sdk/llm-mistral"]
 llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
@@ -60,6 +63,7 @@ hostname = "0.4"
 # CLI UI
 indicatif = "0.17"
 console = "0.15"
+dialoguer = "0.11"
 # Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

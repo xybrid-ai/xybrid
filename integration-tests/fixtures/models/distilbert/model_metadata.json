@@ -1,37 +1,23 @@
 {
-  "model_id": "all-minilm-l6-v2",
+  "model_id": "distilbert",
   "version": "1.0",
-  "description": "Sentence transformer model for generating embeddings (384 dimensions)",
   "execution_template": {
-    "type": "SimpleMode",
+    "type": "Onnx",
     "model_file": "model.onnx"
   },
-  "preprocessing": [
-    {
-      "type": "Tokenize",
-      "vocab_file": "tokenizer.json",
-      "tokenizer_type": "WordPiece",
-      "max_length": 512
-    }
-  ],
-  "postprocessing": [
-    {
-      "type": "MeanPool",
-      "dim": 1
-    }
-  ],
+  "preprocessing": [],
+  "postprocessing": [],
   "files": [
+    "config.json",
     "model.onnx",
+    "model_metadata.old.json",
     "tokenizer.json",
-    "vocab.txt",
-    "config.json"
+    "vocab.txt"
   ],
+  "description": "distilbert (auto-generated)",
   "metadata": {
-    "architecture": "BertModel",
-    "hidden_size": 384,
-    "num_layers": 6,
-    "num_attention_heads": 12,
-    "max_position_embeddings": 512,
-    "vocab_size": 30522
+    "task": "unknown",
+    "auto_generated": true,
+    "architecture": "bert"
   }
 }

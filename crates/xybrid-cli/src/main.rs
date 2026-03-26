@@ -73,6 +73,32 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Generate model_metadata.json by inspecting model files in a directory
+    Init {
+        /// Path to the model directory to inspect
+        #[arg(value_name = "DIRECTORY")]
+        directory: String,
+
+        /// Overwrite existing model_metadata.json
+        #[arg(long)]
+        force: bool,
+
+        /// Non-interactive mode (accept defaults for ambiguous cases)
+        #[arg(long)]
+        yes: bool,
+
+        /// Override detected task (e.g., "text-classification", "text-to-speech")
+        #[arg(long, value_name = "TASK")]
+        task: Option<String>,
+
+        /// Output structured JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+
+        /// Override auto-generated model ID
+        #[arg(long, value_name = "ID")]
+        model_id: Option<String>,
+    },
     /// Manage models from the registry
     Models {
         #[command(subcommand)]
@@ -344,6 +370,23 @@ fn init_telemetry(cli: &Cli) -> bool {
 fn run_command(cli: Cli) -> Result<()> {
     let verbose = cli.verbose;
     match cli.command {
+        Commands::Init {
+            directory,
+            force,
+            yes,
+            task,
+            json,
+            model_id,
+        } => commands::init::handle_init_command(
+            &directory,
+            commands::init::InitFlags {
+                force,
+                yes,
+                task,
+                json,
+                model_id,
+            },
+        ),
         Commands::Models { command } => commands::models::handle_models_command(command),
         Commands::Prepare { config } => commands::pipeline::handle_prepare_command(&config),
         Commands::Plan { config } => commands::pipeline::handle_plan_command(&config),
