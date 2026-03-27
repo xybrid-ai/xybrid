@@ -26,13 +26,8 @@ fn copy_fixture_to_temp(fixture_name: &str, files: &[&str]) -> tempfile::TempDir
     for file in files {
         let src_file = src.join(file);
         if src_file.exists() {
-            std::fs::copy(&src_file, tmp.path().join(file)).unwrap_or_else(|e| {
-                panic!(
-                    "Failed to copy {}: {}",
-                    src_file.display(),
-                    e
-                )
-            });
+            std::fs::copy(&src_file, tmp.path().join(file))
+                .unwrap_or_else(|e| panic!("Failed to copy {}: {}", src_file.display(), e));
         }
     }
     tmp
@@ -69,7 +64,10 @@ fn test_mnist_fixture_generates_image_classification() {
 
     // Preprocessing should include Normalize
     assert!(
-        metadata.preprocessing.iter().any(|s| matches!(s, PreprocessingStep::Normalize { .. })),
+        metadata
+            .preprocessing
+            .iter()
+            .any(|s| matches!(s, PreprocessingStep::Normalize { .. })),
         "Expected Normalize preprocessing, got: {:?}",
         metadata.preprocessing
     );
@@ -211,9 +209,10 @@ fn test_all_minilm_fixture_generates_tokenize_and_meanpool() {
     }
 
     // Preprocessing should include Tokenize
-    let has_tokenize = metadata.preprocessing.iter().any(|s| {
-        matches!(s, PreprocessingStep::Tokenize { .. })
-    });
+    let has_tokenize = metadata
+        .preprocessing
+        .iter()
+        .any(|s| matches!(s, PreprocessingStep::Tokenize { .. }));
     assert!(
         has_tokenize,
         "Expected Tokenize preprocessing, got: {:?}",
@@ -244,9 +243,10 @@ fn test_all_minilm_fixture_generates_tokenize_and_meanpool() {
     }
 
     // Postprocessing should include MeanPool (for feature-extraction/sentence-similarity)
-    let has_meanpool = metadata.postprocessing.iter().any(|s| {
-        matches!(s, PostprocessingStep::MeanPool { .. })
-    });
+    let has_meanpool = metadata
+        .postprocessing
+        .iter()
+        .any(|s| matches!(s, PostprocessingStep::MeanPool { .. }));
     assert!(
         has_meanpool,
         "Expected MeanPool postprocessing, got: {:?}",
@@ -280,13 +280,15 @@ fn test_generate_metadata_writes_valid_json_for_mnist() {
     let tmp = copy_fixture_to_temp("mnist", &["model.onnx"]);
 
     // generate_metadata writes model_metadata.json to disk
-    let (metadata, _) =
-        xybrid_sdk::metadata_gen::generate_metadata(tmp.path(), "")
-            .expect("generate_metadata should succeed for MNIST");
+    let (metadata, _) = xybrid_sdk::metadata_gen::generate_metadata(tmp.path(), "")
+        .expect("generate_metadata should succeed for MNIST");
 
     // Verify model_metadata.json was written
     let metadata_path = tmp.path().join("model_metadata.json");
-    assert!(metadata_path.exists(), "model_metadata.json should be written");
+    assert!(
+        metadata_path.exists(),
+        "model_metadata.json should be written"
+    );
 
     // Round-trip: read back and parse
     let json = std::fs::read_to_string(&metadata_path).unwrap();
@@ -328,9 +330,8 @@ fn test_generate_metadata_writes_valid_json_for_gguf() {
     f.write_all(&32768u32.to_le_bytes()).unwrap();
     drop(f);
 
-    let (metadata, _) =
-        xybrid_sdk::metadata_gen::generate_metadata(tmp.path(), "")
-            .expect("generate_metadata should succeed for GGUF");
+    let (metadata, _) = xybrid_sdk::metadata_gen::generate_metadata(tmp.path(), "")
+        .expect("generate_metadata should succeed for GGUF");
 
     // Verify file was written and round-trips
     let metadata_path = tmp.path().join("model_metadata.json");
@@ -340,9 +341,7 @@ fn test_generate_metadata_writes_valid_json_for_gguf() {
             .expect("Written model_metadata.json should parse");
 
     match &parsed.execution_template {
-        ExecutionTemplate::Gguf {
-            context_length, ..
-        } => {
+        ExecutionTemplate::Gguf { context_length, .. } => {
             assert_eq!(*context_length, 32768);
         }
         other => panic!("Expected Gguf template, got {:?}", other),
@@ -367,9 +366,8 @@ fn test_model_id_derived_from_directory_name() {
     let src = fixtures_dir().join("mnist/model.onnx");
     std::fs::copy(&src, model_dir.join("model.onnx")).unwrap();
 
-    let (metadata, _) =
-        xybrid_sdk::metadata_gen::inspect_and_generate(&model_dir, "", None)
-            .expect("inspect_and_generate should succeed");
+    let (metadata, _) = xybrid_sdk::metadata_gen::inspect_and_generate(&model_dir, "", None)
+        .expect("inspect_and_generate should succeed");
 
     // model_id should be sanitized: lowercase, kebab-case
     assert_eq!(metadata.model_id, "my-custom-model.v2");

@@ -181,10 +181,7 @@ fn list_model_files(dir: &Path) -> Vec<String> {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             // Skip hidden files, README.md, and model_metadata.json
-            if name.starts_with('.')
-                || name == "README.md"
-                || name == "model_metadata.json"
-            {
+            if name.starts_with('.') || name == "README.md" || name == "model_metadata.json" {
                 continue;
             }
             if entry.path().is_file() || entry.path().is_symlink() {
@@ -702,10 +699,7 @@ pub(crate) fn inspect_supporting_files(dir: &Path) -> SupportingFileInfo {
 
         if let Some(len) = vocab_len.filter(|&l| l > 0) {
             info.vocab_size = Some(len);
-        } else if let Some(added) = tokenizer_val
-            .get("added_tokens")
-            .and_then(|a| a.as_array())
-        {
+        } else if let Some(added) = tokenizer_val.get("added_tokens").and_then(|a| a.as_array()) {
             if !added.is_empty() {
                 info.vocab_size = Some(added.len());
             }
@@ -714,15 +708,9 @@ pub(crate) fn inspect_supporting_files(dir: &Path) -> SupportingFileInfo {
 
     // Parse config.json
     if let Some(config_val) = read_json_file(&dir.join("config.json")) {
-        info.hidden_size = config_val
-            .get("hidden_size")
-            .and_then(|v| v.as_u64());
-        info.num_labels = config_val
-            .get("num_labels")
-            .and_then(|v| v.as_u64());
-        info.config_vocab_size = config_val
-            .get("vocab_size")
-            .and_then(|v| v.as_u64());
+        info.hidden_size = config_val.get("hidden_size").and_then(|v| v.as_u64());
+        info.num_labels = config_val.get("num_labels").and_then(|v| v.as_u64());
+        info.config_vocab_size = config_val.get("vocab_size").and_then(|v| v.as_u64());
         info.max_position_embeddings = config_val
             .get("max_position_embeddings")
             .and_then(|v| v.as_u64());
@@ -746,10 +734,7 @@ pub(crate) fn inspect_supporting_files(dir: &Path) -> SupportingFileInfo {
         if info.image_size.is_none() {
             if let Some(size) = preproc_val.get("image_size").and_then(|v| v.as_u64()) {
                 info.image_size = Some(size);
-            } else if let Some(size_obj) = preproc_val
-                .get("size")
-                .and_then(|v| v.as_object())
-            {
+            } else if let Some(size_obj) = preproc_val.get("size").and_then(|v| v.as_object()) {
                 // Try height or shortest_edge
                 if let Some(h) = size_obj.get("height").and_then(|v| v.as_u64()) {
                     info.image_size = Some(h);
@@ -759,9 +744,7 @@ pub(crate) fn inspect_supporting_files(dir: &Path) -> SupportingFileInfo {
             }
         }
 
-        info.do_normalize = preproc_val
-            .get("do_normalize")
-            .and_then(|v| v.as_bool());
+        info.do_normalize = preproc_val.get("do_normalize").and_then(|v| v.as_bool());
 
         // Image mean/std from preprocessor_config override config.json values
         if let Some(mean) = extract_f64_array(&preproc_val, "image_mean") {
@@ -819,9 +802,7 @@ pub(crate) struct TensorInfo {
 fn inspect_onnx_model(path: &Path) -> Option<OnnxInfo> {
     use ort::session::Session;
 
-    let session = match Session::builder()
-        .and_then(|b| b.commit_from_file(path))
-    {
+    let session = match Session::builder().and_then(|b| b.commit_from_file(path)) {
         Ok(s) => s,
         Err(e) => {
             log::warn!(
@@ -925,14 +906,9 @@ fn build_metadata(
         .unwrap_or_else(|| "unknown".to_string());
 
     match primary.format {
-        ModelFormat::Gguf => build_gguf_metadata(
-            model_id,
-            model_id,
-            primary,
-            &task,
-            card,
-            gguf_info,
-        ),
+        ModelFormat::Gguf => {
+            build_gguf_metadata(model_id, model_id, primary, &task, card, gguf_info)
+        }
         ModelFormat::Onnx => build_onnx_metadata(
             model_id,
             model_id,
@@ -1683,9 +1659,10 @@ fn infer_from_output_shapes(
             let num_classes = shape.get(1).copied().unwrap_or(0);
             if num_classes > 0 && num_classes <= 1000 {
                 // Check if any input looks image-like: [batch, channels, H, W]
-                let has_image_input = onnx.inputs.iter().any(|i| {
-                    i.shape.len() == 4 && i.shape.get(1).copied().unwrap_or(0) <= 4
-                });
+                let has_image_input = onnx
+                    .inputs
+                    .iter()
+                    .any(|i| i.shape.len() == 4 && i.shape.get(1).copied().unwrap_or(0) <= 4);
 
                 if has_image_input {
                     return TaskInference {
@@ -2188,11 +2165,13 @@ mod tests {
     #[cfg(feature = "onnx-inspect")]
     fn test_inspect_onnx_model_mnist() {
         // The mnist fixture has input: Input3 [1,1,28,28] float32
-        let model_path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../integration-tests/fixtures/models/mnist/model.onnx");
+        let model_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../integration-tests/fixtures/models/mnist/model.onnx");
         if !model_path.exists() {
-            eprintln!("Skipping test: mnist fixture not found at {}", model_path.display());
+            eprintln!(
+                "Skipping test: mnist fixture not found at {}",
+                model_path.display()
+            );
             return;
         }
 
@@ -2217,12 +2196,22 @@ mod tests {
         // input_ids + attention_mask with [batch, num_classes] output → text-classification
         let onnx = OnnxInfo {
             inputs: vec![
-                TensorInfo { name: "input_ids".into(), shape: vec![1, 128], dtype: "Int64".into() },
-                TensorInfo { name: "attention_mask".into(), shape: vec![1, 128], dtype: "Int64".into() },
+                TensorInfo {
+                    name: "input_ids".into(),
+                    shape: vec![1, 128],
+                    dtype: "Int64".into(),
+                },
+                TensorInfo {
+                    name: "attention_mask".into(),
+                    shape: vec![1, 128],
+                    dtype: "Int64".into(),
+                },
             ],
-            outputs: vec![
-                TensorInfo { name: "logits".into(), shape: vec![1, 2], dtype: "Float32".into() },
-            ],
+            outputs: vec![TensorInfo {
+                name: "logits".into(),
+                shape: vec![1, 2],
+                dtype: "Float32".into(),
+            }],
         };
         let files = SupportingFileInfo {
             has_tokenizer_json: true,
@@ -2235,8 +2224,14 @@ mod tests {
         assert_eq!(result.task, "text-classification");
         assert_eq!(result.confidence, Confidence::Medium);
         assert!(!result.preprocessing.is_empty());
-        assert!(matches!(result.preprocessing[0], xybrid_core::execution::PreprocessingStep::Tokenize { .. }));
-        assert!(matches!(result.postprocessing[0], xybrid_core::execution::PostprocessingStep::Softmax { .. }));
+        assert!(matches!(
+            result.preprocessing[0],
+            xybrid_core::execution::PreprocessingStep::Tokenize { .. }
+        ));
+        assert!(matches!(
+            result.postprocessing[0],
+            xybrid_core::execution::PostprocessingStep::Softmax { .. }
+        ));
     }
 
     #[test]
@@ -2244,18 +2239,31 @@ mod tests {
         // input_ids + attention_mask with [batch, seq, hidden] output → feature-extraction (ambiguous)
         let onnx = OnnxInfo {
             inputs: vec![
-                TensorInfo { name: "input_ids".into(), shape: vec![1, 128], dtype: "Int64".into() },
-                TensorInfo { name: "attention_mask".into(), shape: vec![1, 128], dtype: "Int64".into() },
+                TensorInfo {
+                    name: "input_ids".into(),
+                    shape: vec![1, 128],
+                    dtype: "Int64".into(),
+                },
+                TensorInfo {
+                    name: "attention_mask".into(),
+                    shape: vec![1, 128],
+                    dtype: "Int64".into(),
+                },
             ],
-            outputs: vec![
-                TensorInfo { name: "last_hidden_state".into(), shape: vec![1, 128, 384], dtype: "Float32".into() },
-            ],
+            outputs: vec![TensorInfo {
+                name: "last_hidden_state".into(),
+                shape: vec![1, 128, 384],
+                dtype: "Float32".into(),
+            }],
         };
         let files = SupportingFileInfo::default();
 
         let result = infer_task_from_tensors(&onnx, &files, None);
         assert_eq!(result.task, "feature-extraction");
-        assert!(matches!(result.postprocessing[0], xybrid_core::execution::PostprocessingStep::MeanPool { .. }));
+        assert!(matches!(
+            result.postprocessing[0],
+            xybrid_core::execution::PostprocessingStep::MeanPool { .. }
+        ));
         // Should have token-classification as alternative
         assert_eq!(result.confidence, Confidence::Low);
         assert!(!result.alternatives.is_empty());
@@ -2266,12 +2274,16 @@ mod tests {
     fn test_infer_vision_pixel_values() {
         // pixel_values input → image-classification
         let onnx = OnnxInfo {
-            inputs: vec![
-                TensorInfo { name: "pixel_values".into(), shape: vec![1, 3, 224, 224], dtype: "Float32".into() },
-            ],
-            outputs: vec![
-                TensorInfo { name: "logits".into(), shape: vec![1, 1000], dtype: "Float32".into() },
-            ],
+            inputs: vec![TensorInfo {
+                name: "pixel_values".into(),
+                shape: vec![1, 3, 224, 224],
+                dtype: "Float32".into(),
+            }],
+            outputs: vec![TensorInfo {
+                name: "logits".into(),
+                shape: vec![1, 1000],
+                dtype: "Float32".into(),
+            }],
         };
         let files = SupportingFileInfo {
             image_mean: Some(vec![0.5, 0.5, 0.5]),
@@ -2283,7 +2295,9 @@ mod tests {
         assert_eq!(result.task, "image-classification");
         assert_eq!(result.confidence, Confidence::Medium);
         // Should use custom mean/std from files
-        if let xybrid_core::execution::PreprocessingStep::Normalize { mean, .. } = &result.preprocessing[0] {
+        if let xybrid_core::execution::PreprocessingStep::Normalize { mean, .. } =
+            &result.preprocessing[0]
+        {
             assert_eq!(mean, &[0.5, 0.5, 0.5]);
         } else {
             panic!("Expected Normalize preprocessing");
@@ -2294,18 +2308,25 @@ mod tests {
     fn test_infer_vision_from_output_shape() {
         // 4D image-like input + [batch, classes<1000] output → image-classification (fallback)
         let onnx = OnnxInfo {
-            inputs: vec![
-                TensorInfo { name: "Input3".into(), shape: vec![1, 1, 28, 28], dtype: "Float32".into() },
-            ],
-            outputs: vec![
-                TensorInfo { name: "Plus214_Output_0".into(), shape: vec![1, 10], dtype: "Float32".into() },
-            ],
+            inputs: vec![TensorInfo {
+                name: "Input3".into(),
+                shape: vec![1, 1, 28, 28],
+                dtype: "Float32".into(),
+            }],
+            outputs: vec![TensorInfo {
+                name: "Plus214_Output_0".into(),
+                shape: vec![1, 10],
+                dtype: "Float32".into(),
+            }],
         };
         let files = SupportingFileInfo::default();
 
         let result = infer_task_from_tensors(&onnx, &files, None);
         assert_eq!(result.task, "image-classification");
-        assert!(matches!(result.postprocessing[0], xybrid_core::execution::PostprocessingStep::Softmax { .. }));
+        assert!(matches!(
+            result.postprocessing[0],
+            xybrid_core::execution::PostprocessingStep::Softmax { .. }
+        ));
     }
 
     #[test]
@@ -2313,13 +2334,27 @@ mod tests {
         // tokens + style + speed → text-to-speech
         let onnx = OnnxInfo {
             inputs: vec![
-                TensorInfo { name: "tokens".into(), shape: vec![1, -1], dtype: "Int64".into() },
-                TensorInfo { name: "style".into(), shape: vec![1, 256], dtype: "Float32".into() },
-                TensorInfo { name: "speed".into(), shape: vec![1], dtype: "Float32".into() },
+                TensorInfo {
+                    name: "tokens".into(),
+                    shape: vec![1, -1],
+                    dtype: "Int64".into(),
+                },
+                TensorInfo {
+                    name: "style".into(),
+                    shape: vec![1, 256],
+                    dtype: "Float32".into(),
+                },
+                TensorInfo {
+                    name: "speed".into(),
+                    shape: vec![1],
+                    dtype: "Float32".into(),
+                },
             ],
-            outputs: vec![
-                TensorInfo { name: "audio".into(), shape: vec![1, -1], dtype: "Float32".into() },
-            ],
+            outputs: vec![TensorInfo {
+                name: "audio".into(),
+                shape: vec![1, -1],
+                dtype: "Float32".into(),
+            }],
         };
         let files = SupportingFileInfo {
             has_tokens_txt: true,
@@ -2330,8 +2365,14 @@ mod tests {
         let result = infer_task_from_tensors(&onnx, &files, None);
         assert_eq!(result.task, "text-to-speech");
         assert_eq!(result.confidence, Confidence::High);
-        assert!(matches!(result.preprocessing[0], xybrid_core::execution::PreprocessingStep::Phonemize { .. }));
-        assert!(matches!(result.postprocessing[0], xybrid_core::execution::PostprocessingStep::TTSAudioEncode { .. }));
+        assert!(matches!(
+            result.preprocessing[0],
+            xybrid_core::execution::PreprocessingStep::Phonemize { .. }
+        ));
+        assert!(matches!(
+            result.postprocessing[0],
+            xybrid_core::execution::PostprocessingStep::TTSAudioEncode { .. }
+        ));
     }
 
     #[test]
@@ -2339,12 +2380,22 @@ mod tests {
         // HF card pipeline_tag should take priority over tensor patterns
         let onnx = OnnxInfo {
             inputs: vec![
-                TensorInfo { name: "input_ids".into(), shape: vec![1, 128], dtype: "Int64".into() },
-                TensorInfo { name: "attention_mask".into(), shape: vec![1, 128], dtype: "Int64".into() },
+                TensorInfo {
+                    name: "input_ids".into(),
+                    shape: vec![1, 128],
+                    dtype: "Int64".into(),
+                },
+                TensorInfo {
+                    name: "attention_mask".into(),
+                    shape: vec![1, 128],
+                    dtype: "Int64".into(),
+                },
             ],
-            outputs: vec![
-                TensorInfo { name: "output".into(), shape: vec![1, 128, 384], dtype: "Float32".into() },
-            ],
+            outputs: vec![TensorInfo {
+                name: "output".into(),
+                shape: vec![1, 128, 384],
+                dtype: "Float32".into(),
+            }],
         };
         let files = SupportingFileInfo::default();
         let card = HfModelCard {
@@ -2355,19 +2406,26 @@ mod tests {
         let result = infer_task_from_tensors(&onnx, &files, Some(&card));
         assert_eq!(result.task, "feature-extraction");
         assert_eq!(result.confidence, Confidence::High);
-        assert!(matches!(result.postprocessing[0], xybrid_core::execution::PostprocessingStep::MeanPool { .. }));
+        assert!(matches!(
+            result.postprocessing[0],
+            xybrid_core::execution::PostprocessingStep::MeanPool { .. }
+        ));
     }
 
     #[test]
     fn test_infer_asr_input_features() {
         // input_features → ASR
         let onnx = OnnxInfo {
-            inputs: vec![
-                TensorInfo { name: "input_features".into(), shape: vec![1, 80, 3000], dtype: "Float32".into() },
-            ],
-            outputs: vec![
-                TensorInfo { name: "logits".into(), shape: vec![1, 1500, 51865], dtype: "Float32".into() },
-            ],
+            inputs: vec![TensorInfo {
+                name: "input_features".into(),
+                shape: vec![1, 80, 3000],
+                dtype: "Float32".into(),
+            }],
+            outputs: vec![TensorInfo {
+                name: "logits".into(),
+                shape: vec![1, 1500, 51865],
+                dtype: "Float32".into(),
+            }],
         };
         let files = SupportingFileInfo {
             has_vocab_json: true,
@@ -2384,12 +2442,22 @@ mod tests {
         // Verify that tokenizer type and max_length from supporting files are used
         let onnx = OnnxInfo {
             inputs: vec![
-                TensorInfo { name: "input_ids".into(), shape: vec![1, 128], dtype: "Int64".into() },
-                TensorInfo { name: "attention_mask".into(), shape: vec![1, 128], dtype: "Int64".into() },
+                TensorInfo {
+                    name: "input_ids".into(),
+                    shape: vec![1, 128],
+                    dtype: "Int64".into(),
+                },
+                TensorInfo {
+                    name: "attention_mask".into(),
+                    shape: vec![1, 128],
+                    dtype: "Int64".into(),
+                },
             ],
-            outputs: vec![
-                TensorInfo { name: "logits".into(), shape: vec![1, 3], dtype: "Float32".into() },
-            ],
+            outputs: vec![TensorInfo {
+                name: "logits".into(),
+                shape: vec![1, 3],
+                dtype: "Float32".into(),
+            }],
         };
         let files = SupportingFileInfo {
             has_tokenizer_json: true,
@@ -2399,9 +2467,17 @@ mod tests {
         };
 
         let result = infer_task_from_tensors(&onnx, &files, None);
-        if let xybrid_core::execution::PreprocessingStep::Tokenize { vocab_file, tokenizer_type, max_length } = &result.preprocessing[0] {
+        if let xybrid_core::execution::PreprocessingStep::Tokenize {
+            vocab_file,
+            tokenizer_type,
+            max_length,
+        } = &result.preprocessing[0]
+        {
             assert_eq!(vocab_file, "tokenizer.json");
-            assert!(matches!(tokenizer_type, xybrid_core::execution::template::TokenizerType::BPE));
+            assert!(matches!(
+                tokenizer_type,
+                xybrid_core::execution::template::TokenizerType::BPE
+            ));
             assert_eq!(*max_length, Some(1024));
         } else {
             panic!("Expected Tokenize preprocessing");
@@ -2424,7 +2500,10 @@ mod tests {
 
     #[test]
     fn test_sanitize_model_id_kebab_case() {
-        assert_eq!(sanitize_model_id("Qwen3.5-0.8B-Q4_K_M"), "qwen3.5-0.8b-q4-k-m");
+        assert_eq!(
+            sanitize_model_id("Qwen3.5-0.8B-Q4_K_M"),
+            "qwen3.5-0.8b-q4-k-m"
+        );
         assert_eq!(sanitize_model_id("all-MiniLM-L6-v2"), "all-minilm-l6-v2");
     }
 
@@ -2444,7 +2523,13 @@ mod tests {
 
         assert_eq!(metadata.model_id, "test-onnx");
         assert_eq!(metadata.version, "1.0");
-        assert!(metadata.metadata.get("auto_generated").and_then(|v| v.as_bool()) == Some(true));
+        assert!(
+            metadata
+                .metadata
+                .get("auto_generated")
+                .and_then(|v| v.as_bool())
+                == Some(true)
+        );
     }
 
     #[test]
@@ -2499,7 +2584,8 @@ mod tests {
         std::fs::write(
             dir.path().join("README.md"),
             "---\npipeline_tag: image-classification\n---\n# Vision\n",
-        ).unwrap();
+        )
+        .unwrap();
         let preproc = serde_json::json!({
             "image_mean": [0.5, 0.5, 0.5],
             "image_std": [0.25, 0.25, 0.25],
@@ -2508,7 +2594,8 @@ mod tests {
         std::fs::write(
             dir.path().join("preprocessor_config.json"),
             serde_json::to_string(&preproc).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let (metadata, _) = generate_metadata(dir.path(), "test/vision").unwrap();
 
@@ -2532,7 +2619,10 @@ mod tests {
         let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../integration-tests/fixtures/models/mnist");
         if !fixture_dir.exists() {
-            eprintln!("Skipping test: mnist fixture not found at {}", fixture_dir.display());
+            eprintln!(
+                "Skipping test: mnist fixture not found at {}",
+                fixture_dir.display()
+            );
             return;
         }
 
@@ -2558,12 +2648,18 @@ mod tests {
         assert!(matches!(ti.confidence, Confidence::Medium));
 
         // Should have Normalize preprocessing and Softmax postprocessing
-        assert!(!metadata.preprocessing.is_empty(), "Should have preprocessing");
+        assert!(
+            !metadata.preprocessing.is_empty(),
+            "Should have preprocessing"
+        );
         assert!(matches!(
             metadata.preprocessing[0],
             xybrid_core::execution::PreprocessingStep::Normalize { .. }
         ));
-        assert!(!metadata.postprocessing.is_empty(), "Should have postprocessing");
+        assert!(
+            !metadata.postprocessing.is_empty(),
+            "Should have postprocessing"
+        );
         assert!(matches!(
             metadata.postprocessing[0],
             xybrid_core::execution::PostprocessingStep::Softmax { .. }

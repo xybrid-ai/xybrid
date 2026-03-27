@@ -47,8 +47,8 @@ fn test_init_json_on_mnist_fixture() {
     );
 
     // Parse stdout as JSON
-    let json: serde_json::Value =
-        serde_json::from_str(stdout.trim()).unwrap_or_else(|_| panic!("Invalid JSON in stdout: {}", stdout));
+    let json: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|_| panic!("Invalid JSON in stdout: {}", stdout));
 
     // Verify required fields
     assert_eq!(json["status"], "ok", "Expected status 'ok', got: {}", json);

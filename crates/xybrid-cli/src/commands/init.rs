@@ -184,7 +184,11 @@ fn print_summary(
     task: &str,
     confidence: Confidence,
 ) {
-    println!("  {} {}", "Model ID:".bright_white().bold(), metadata.model_id.cyan());
+    println!(
+        "  {} {}",
+        "Model ID:".bright_white().bold(),
+        metadata.model_id.cyan()
+    );
     println!(
         "  {} {}",
         "Template:".bright_white().bold(),
@@ -206,7 +210,11 @@ fn print_summary(
 
     // Files found
     let files = metadata_gen::list_model_files_pub(dir);
-    println!("  {} ({} files)", "Files found:".bright_white().bold(), files.len());
+    println!(
+        "  {} ({} files)",
+        "Files found:".bright_white().bold(),
+        files.len()
+    );
     for f in &files {
         println!("    {} {}", "•".bright_cyan(), f);
     }
@@ -218,7 +226,11 @@ fn print_summary(
         println!("    {} (none)", "•".bright_black());
     } else {
         for step in &metadata.preprocessing {
-            println!("    {} {}", "•".bright_cyan(), format_preprocessing_step(step));
+            println!(
+                "    {} {}",
+                "•".bright_cyan(),
+                format_preprocessing_step(step)
+            );
         }
     }
     println!();
@@ -229,7 +241,11 @@ fn print_summary(
         println!("    {} (none)", "•".bright_black());
     } else {
         for step in &metadata.postprocessing {
-            println!("    {} {}", "•".bright_cyan(), format_postprocessing_step(step));
+            println!(
+                "    {} {}",
+                "•".bright_cyan(),
+                format_postprocessing_step(step)
+            );
         }
     }
 }

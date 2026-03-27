@@ -148,8 +148,9 @@ fn test_gguf_model_without_readme_uses_defaults() {
     // Only a GGUF file, no README
     write_gguf_v3_header(&dir.path().join("model.gguf"), "qwen2", 4096);
 
-    let (metadata, _) = xybrid_sdk::metadata_gen::generate_metadata(dir.path(), "someone/qwen2-model")
-        .expect("should succeed even without README");
+    let (metadata, _) =
+        xybrid_sdk::metadata_gen::generate_metadata(dir.path(), "someone/qwen2-model")
+            .expect("should succeed even without README");
 
     assert_eq!(metadata.model_id, "qwen2-model");
 
@@ -174,7 +175,8 @@ fn test_no_model_files_returns_error() {
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join("README.md"), "# No model files here").unwrap();
 
-    let result: Result<_, _> = xybrid_sdk::metadata_gen::generate_metadata(dir.path(), "test/empty-repo");
+    let result: Result<_, _> =
+        xybrid_sdk::metadata_gen::generate_metadata(dir.path(), "test/empty-repo");
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(err.contains("No model files"), "Error: {}", err);
@@ -194,8 +196,9 @@ fn test_onnx_model_with_task_produces_correct_steps() {
     // Dummy ONNX file
     std::fs::write(dir.path().join("model.onnx"), b"dummy onnx data").unwrap();
 
-    let (metadata, _) = xybrid_sdk::metadata_gen::generate_metadata(dir.path(), "test-org/vision-model")
-        .expect("should succeed");
+    let (metadata, _) =
+        xybrid_sdk::metadata_gen::generate_metadata(dir.path(), "test-org/vision-model")
+            .expect("should succeed");
 
     assert_eq!(metadata.model_id, "vision-model");
 
