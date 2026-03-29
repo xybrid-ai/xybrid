@@ -1,0 +1,106 @@
+---
+title: Kotlin
+description: Kotlin SDK 模式与高级用法
+---
+
+Kotlin SDK（`ai.xybrid:xybrid-kotlin`）发布于 Maven Central，使用 UniFFI 生成的绑定实现类型安全的 Kotlin ML 推理。安装与核心 API 参考请见 [Android SDK 指南](/zh/docs/sdks/android)。
+
+本页介绍 Kotlin 特有的使用模式与高级用法。
+
+## 密封类
+
+SDK 利用 Kotlin 密封类实现穷举模式匹配。
+
+### Envelope 变体
+
+```kotlin
+val envelope: XybridEnvelope = when (inputType) {
+    InputType.AUDIO -> Envelope.audio(audioBytes, 16000u)
+    InputType.TEXT -> Envelope.text("Hello world")
+    InputType.EMBEDDING -> Envelope.embedding(floatList)
+}
+```
+
+### 错误处理
+
+```kotlin
+val result = try {
+    model.run(envelope)
+} catch (e: XybridException) {
+    when (e) {
+        is XybridException.ModelNotFound -> showError("Model ${e.modelId} not found")
+        is XybridException.InferenceFailed -> showError("Failed: ${e.message}")
+        is XybridException.InvalidInput -> showError("Bad input: ${e.message}")
+        is XybridException.IoException -> showError("I/O error: ${e.message}")
+    }
+    return
+}
+```
+
+## 协程集成
+
+使用协程将同步的 SDK 调用封装为非阻塞 UI 操作：
+
+```kotlin
+import kotlinx.coroutines.*
+
+class InferenceRepository {
+    private val dispatcher = Dispatchers.IO
+
+    suspend fun loadModel(modelId: String): XybridModel = withContext(dispatcher) {
+        XybridModelLoader.fromRegistry(modelId).load()
+    }
+
+    suspend fun runInference(
+        model: XybridModel,
+        envelope: XybridEnvelope
+    ): XybridResult = withContext(dispatcher) {
+        model.run(envelope)
+    }
+}
+```
+
+## Jetpack Compose 集成
+
+```kotlin
+@Composable
+fun InferenceScreen() {
+    var result by remember { mutableStateOf<XybridResult?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Button(onClick = {
+        scope.launch {
+            isLoading = true
+            val model = withContext(Dispatchers.IO) {
+                XybridModelLoader.fromRegistry("kokoro-82m").load()
+            }
+            result = withContext(Dispatchers.IO) {
+                model.run(Envelope.text("Hello from Compose!"))
+            }
+            isLoading = false
+        }
+    }) {
+        Text(if (isLoading) "Running..." else "Run Inference")
+    }
+
+    result?.let {
+        Text("Output: ${it.text ?: "Audio output"}")
+        Text("Latency: ${it.latencyMs}ms")
+    }
+}
+```
+
+## 类型别名
+
+SDK 提供与完整限定名对应的短别名：
+
+| 别名 | 完整类型 |
+|-------|-----------|
+| `ModelLoader` | `XybridModelLoader` |
+| `Model` | `XybridModel` |
+| `Envelope` | `XybridEnvelope` |
+| `Result` | `XybridResult` |
+| `XybridError` | `XybridException` |
+
+完整 API 参考请见 [Android SDK 指南](/zh/docs/sdks/android)。

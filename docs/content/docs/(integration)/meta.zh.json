@@ -1,0 +1,7 @@
+{
+  "title": "集成",
+  "root": true,
+  "description": "集成 Xybrid 的 SDK 与 API",
+  "icon": "Puzzle",
+  "pages": ["sdks"]
+}

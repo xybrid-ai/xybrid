@@ -1,0 +1,323 @@
+---
+title: Unity
+description: 面向 Unity 应用的本地 ML 推理 SDK
+---
+
+Unity SDK（`ai.xybrid.sdk`）通过 C FFI 提供到 Xybrid 运行时的 C# 绑定，支持在 Unity 游戏和应用中进行本地 ML 推理。
+
+## 安装
+
+通过 Unity Package Manager 使用 git URL 安装：
+
+```
+https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
+```
+
+在 Unity 中：**Window > Package Manager > + > Add package from git URL**
+
+最低 Unity 版本：**2021.3 LTS**
+
+## 初始化
+
+在启动时初始化一次 SDK：
+
+```csharp
+using Xybrid;
+
+void Awake()
+{
+    XybridClient.Initialize();
+}
+```
+
+`Initialize()` 是线程安全且幂等的——多次调用无副作用。
+
+## 快速开始
+
+```csharp
+using Xybrid;
+
+// 一行代码加载并运行
+var model = XybridClient.LoadModel("kokoro-82m");
+using (var envelope = Envelope.Text("Halt! None shall pass without the king's seal."))
+using (var result = model.Run(envelope))
+{
+    result.ThrowIfFailed();
+    Debug.Log($"Output: {result.Text}");
+    Debug.Log($"Latency: {result.LatencyMs}ms");
+}
+```
+
+---
+
+## 模型加载
+
+### 从注册表
+
+```csharp
+using (var loader = ModelLoader.FromRegistry("whisper-tiny"))
+{
+    var model = loader.Load();
+    // 使用模型执行推理...
+}
+```
+
+### 从本地 Bundle
+
+```csharp
+using (var loader = ModelLoader.FromBundle("path/to/model.xyb"))
+{
+    var model = loader.Load();
+}
+```
+
+### 便捷方法
+
+```csharp
+// 无需管理加载器，直接加载
+var model = XybridClient.LoadModel("kokoro-82m");
+var model = XybridClient.LoadModelFromBundle("path/to/model.xyb");
+```
+
+---
+
+## 输入 Envelope
+
+### 文本
+
+```csharp
+using (var envelope = Envelope.Text("The dragon sleeps in the northern cave."))
+{
+    using (var result = model.Run(envelope))
+    {
+        Debug.Log(result.Text);
+    }
+}
+```
+
+### 带角色扮演的文本（用于对话）
+
+```csharp
+using (var envelope = Envelope.Text("You are a blacksmith in a medieval village.", MessageRole.System))
+{
+    // 与 ConversationContext 配合使用
+}
+```
+
+### 音频
+
+```csharp
+byte[] audioBytes = File.ReadAllBytes("audio.wav");
+using (var envelope = Envelope.Audio(audioBytes, sampleRate: 16000, channels: 1))
+{
+    using (var result = model.Run(envelope))
+    {
+        Debug.Log($"Transcription: {result.Text}");
+    }
+}
+```
+
+### 便捷方法
+
+```csharp
+// 文本输入，文本输出简写
+string output = model.RunText("Tell me about the ancient ruins.");
+
+// 音频输入，文本输出简写（玩家语音指令）
+string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
+```
+
+---
+
+## 结果处理
+
+```csharp
+using (var result = model.Run(envelope))
+{
+    if (result.Success)
+    {
+        Debug.Log($"Output: {result.Text}");
+        Debug.Log($"Latency: {result.LatencyMs}ms");
+    }
+    else
+    {
+        Debug.LogError($"Error: {result.Error}");
+    }
+}
+
+// 或失败时抛出异常
+using (var result = model.Run(envelope))
+{
+    result.ThrowIfFailed();
+    // 此处可安全使用 result.Text
+}
+```
+
+### InferenceResult 属性
+
+| 属性 | 类型 | 说明 |
+|----------|------|-------------|
+| `Success` | `bool` | 推理是否成功 |
+| `Error` | `string` | 失败时的错误信息 |
+| `Text` | `string` | 文本输出（ASR、LLM） |
+| `LatencyMs` | `uint` | 推理延迟（毫秒） |
+
+---
+
+## 对话上下文
+
+带自动历史管理的多轮 LLM 对话：
+
+```csharp
+using (var context = new ConversationContext())
+{
+    context.SetSystem("You are a wise elder in a forest village. You speak in short, cryptic phrases.");
+    context.SetMaxHistoryLength(50); // 超过 50 条消息后 FIFO 裁剪
+
+    // 第一轮
+    context.Push("Where is the lost temple?", MessageRole.User);
+    using (var envelope = Envelope.Text("Where is the lost temple?"))
+    using (var result = model.Run(envelope, context))
+    {
+        result.ThrowIfFailed();
+        context.Push(result.Text, MessageRole.Assistant);
+        Debug.Log(result.Text);
+    }
+
+    // 第二轮（包含完整历史）
+    context.Push("What dangers await there?", MessageRole.User);
+    using (var envelope = Envelope.Text("What dangers await there?"))
+    using (var result = model.Run(envelope, context))
+    {
+        result.ThrowIfFailed();
+        context.Push(result.Text, MessageRole.Assistant);
+        Debug.Log(result.Text);
+    }
+
+    // 清除历史，保留系统提示
+    context.Clear();
+}
+```
+
+### ConversationContext 属性
+
+| 属性 | 类型 | 说明 |
+|----------|------|-------------|
+| `Id` | `string` | 对话 UUID |
+| `HistoryLength` | `uint` | 当前消息数量 |
+| `HasSystem` | `bool` | 是否已设置系统提示 |
+
+---
+
+## LLM 流式输出
+
+Unity 支持通过回调对 LLM 模型进行逐 Token 流式输出：
+
+```csharp
+// 检查模型是否支持流式输出
+if (model.SupportsTokenStreaming)
+{
+    using (var envelope = Envelope.Text("Tell me a story about a brave knight."))
+    using (var result = model.RunStreaming(envelope, token =>
+    {
+        // 每生成一个 Token 时调用
+        Debug.Log(token.Token);
+    }))
+    {
+        result.ThrowIfFailed();
+        Debug.Log($"Full response: {result.Text}");
+    }
+}
+```
+
+### 带对话上下文的流式输出
+
+```csharp
+using (var context = new ConversationContext())
+{
+    context.SetSystem("You are a tavern keeper in a fantasy RPG.");
+
+    context.Push("What's on the menu today?", MessageRole.User);
+    using (var envelope = Envelope.Text("What's on the menu today?"))
+    using (var result = model.RunStreaming(envelope, context, token =>
+    {
+        Debug.Log(token.Token);  // 每个 Token 到达时输出
+    }))
+    {
+        result.ThrowIfFailed();
+        context.Push(result.Text, MessageRole.Assistant);
+    }
+}
+```
+
+### 便捷流式输出
+
+```csharp
+// 文本输入，流式文本输出
+string response = model.RunStreamingText("Describe the dungeon entrance.", token =>
+{
+    // 用每个 Token 更新 UI
+    dialogueText.text += token.Token;
+});
+```
+
+---
+
+## IDisposable 模式
+
+所有持有资源的类均实现 `IDisposable`，使用 `using` 块确保正确释放：
+
+```csharp
+using (var loader = ModelLoader.FromRegistry("kokoro-82m"))
+using (var model = loader.Load())
+using (var envelope = Envelope.Text("Your quest is complete, hero."))
+using (var result = model.Run(envelope))
+{
+    result.ThrowIfFailed();
+    Debug.Log(result.Text);
+}
+```
+
+实现 `IDisposable` 的类：`Model`、`ModelLoader`、`Envelope`、`InferenceResult`、`ConversationContext`
+
+---
+
+## 错误处理
+
+```csharp
+try
+{
+    var model = XybridClient.LoadModel("nonexistent-model");
+}
+catch (ModelNotFoundException e)
+{
+    Debug.LogError($"Model not found: {e.ModelId}");
+}
+catch (InferenceException e)
+{
+    Debug.LogError($"Inference failed: {e.Message}");
+}
+catch (XybridException e)
+{
+    Debug.LogError($"SDK error: {e.Message}");
+}
+```
+
+### 异常层次结构
+
+| 异常 | 说明 |
+|-----------|-------------|
+| `XybridException` | 所有 SDK 错误的基类 |
+| `ModelNotFoundException` | 注册表中未找到模型 ID（含 `ModelId` 属性） |
+| `InferenceException` | 推理执行失败 |
+
+---
+
+## 平台支持
+
+| 平台 | 状态 |
+|----------|--------|
+| macOS（Apple Silicon） | 支持 |
+| macOS（Intel） | 支持 |
+| Windows | 规划中 |
+| Linux | 规划中 |

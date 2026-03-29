@@ -1,0 +1,301 @@
+---
+title: Flutter
+description: 面向 Flutter 应用的本地 ML 推理
+---
+
+Flutter SDK（`xybrid_flutter`）通过 FFI 提供到 Xybrid Rust 核心的 Dart 绑定，支持在移动端和桌面应用中进行本地 ML 推理。
+
+## 安装
+
+在 `pubspec.yaml` 中添加依赖：
+
+```yaml
+dependencies:
+  xybrid_flutter: ^0.1.0-beta5
+```
+
+## 初始化
+
+在使用任何 Xybrid API 前初始化 SDK：
+
+```dart
+import 'package:xybrid_flutter/xybrid_flutter.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Xybrid.init();
+  runApp(MyApp());
+}
+```
+
+## 核心模式：加载 → 运行
+
+所有推理遵循相同模式：
+
+1. **创建加载器** — 通过注册表 ID 或本地 Bundle 指定模型
+2. **加载** — 下载（如需要）并初始化模型
+3. **运行** — 使用输入 Envelope 执行推理
+
+```dart
+final model = await Xybrid.model('kokoro-82m').load();
+final result = await model.run(XybridEnvelope.text('Hello world'));
+print(result.text);
+```
+
+---
+
+## 文字转语音
+
+```dart
+final model = await Xybrid.model('kokoro-82m').load();
+final envelope = XybridEnvelope.text('Hello, how are you?', voiceId: 'af_heart');
+final result = await model.run(envelope);
+
+// 获取用于播放的 WAV 格式音频字节
+final wavBytes = result.audioAsWav(sampleRate: 24000);
+```
+
+## 语音转文字
+
+```dart
+final model = await Xybrid.model('whisper-tiny').load();
+final envelope = XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000);
+final result = await model.run(envelope);
+print(result.text); // "Hello, how are you?"
+```
+
+## LLM 对话与流式输出
+
+```dart
+final model = await Xybrid.model('gemma-3-1b').load();
+
+final context = ConversationContext();
+context.setSystem('You are a helpful assistant.');
+context.pushText('Tell me a joke', MessageRole.user);
+
+final envelope = XybridEnvelope.text('Tell me a joke');
+
+await for (final token in model.runStreamingWithContext(envelope, context)) {
+  stdout.write(token.token); // 每个 Token 到达时立即输出
+}
+```
+
+## 带进度的加载
+
+```dart
+final loader = XybridModelLoader.fromRegistry('kokoro-82m');
+
+await for (final event in loader.loadWithProgress()) {
+  switch (event) {
+    case LoadProgress(:final percentage):
+      print('Loading: $percentage%');
+    case LoadComplete():
+      print('Model ready!');
+    case LoadError(:final message):
+      print('Error: $message');
+  }
+}
+```
+
+---
+
+## API 参考
+
+### Xybrid
+
+SDK 的主入口。
+
+```dart
+class Xybrid {
+  static Future<void> init();
+  static bool get isInitialized;
+  static void setApiKey(String apiKey);
+
+  static XybridModelLoader model(String modelId);
+  static XybridPipeline pipeline({String? yaml, String? filePath});
+}
+```
+
+---
+
+### XybridModelLoader
+
+从不同来源创建并加载模型。
+
+```dart
+class XybridModelLoader {
+  factory XybridModelLoader.fromRegistry(String modelId);
+  factory XybridModelLoader.fromBundle(String path);
+
+  Future<XybridModel> load();
+  Stream<LoadEvent> loadWithProgress();
+}
+```
+
+**加载事件：**
+
+| 事件 | 属性 | 说明 |
+|-------|-----------|-------------|
+| `LoadProgress` | `progress`（0.0–1.0）、`percentage`（0–100） | 下载/加载进度 |
+| `LoadComplete` | — | 模型已就绪 |
+| `LoadError` | `message` | 加载失败 |
+
+---
+
+### XybridModel
+
+已加载并可用于推理的模型。
+
+```dart
+class XybridModel {
+  Future<XybridResult> run(XybridEnvelope envelope, {GenerationConfig? config});
+  Future<XybridResult> runWithContext(XybridEnvelope envelope, ConversationContext context, {GenerationConfig? config});
+  Stream<StreamToken> runStreaming(XybridEnvelope envelope, {GenerationConfig? config});
+  Stream<StreamToken> runStreamingWithContext(XybridEnvelope envelope, ConversationContext context, {GenerationConfig? config});
+}
+```
+
+---
+
+### XybridEnvelope
+
+模型推理的输入容器。
+
+```dart
+class XybridEnvelope {
+  factory XybridEnvelope.audio({
+    required List<int> bytes,
+    required int sampleRate,
+    int channels = 1,
+  });
+
+  factory XybridEnvelope.text(String text, {String? voiceId, double? speed});
+  factory XybridEnvelope.embedding(List<double> data);
+  factory XybridEnvelope.textWithRole(String text, MessageRole role);
+
+  XybridEnvelope withRole(MessageRole role);
+}
+```
+
+---
+
+### XybridResult
+
+模型推理的输出结果。
+
+```dart
+class XybridResult {
+  bool get success;
+  String? get text;                  // ASR / LLM 输出
+  Uint8List? get audioBytes;         // TTS 输出（原始 PCM）
+  List<double>? get embedding;       // 嵌入输出
+  int get latencyMs;
+
+  Uint8List? audioAsWav({int sampleRate = 24000, int channels = 1});
+}
+```
+
+---
+
+### StreamToken
+
+流式 LLM 推理的 Token。
+
+```dart
+class StreamToken {
+  final String token;            // 生成的 Token 文本
+  final int index;               // Token 位置
+  final String cumulativeText;   // 目前已生成的全部文本
+  final bool isFinal;            // 是否为序列中的最后一个 Token
+  final String? finishReason;    // "stop"、"length"、"error"
+}
+```
+
+---
+
+### ConversationContext
+
+LLM 模型的多轮对话管理。
+
+```dart
+class ConversationContext {
+  ConversationContext();
+  ConversationContext.withId(String id);
+
+  String get id;
+  int get historyLength;
+  bool get hasSystem;
+
+  void setSystem(String text);
+  void setMaxHistoryLength(int length);
+  void push(XybridEnvelope envelope);
+  void pushText(String text, MessageRole role);
+  void clear();  // 清除历史，保留系统提示
+}
+```
+
+```dart
+enum MessageRole { system, user, assistant }
+```
+
+---
+
+### XybridPipeline
+
+用于串联多个模型的多阶段流水线。
+
+```dart
+class XybridPipeline {
+  factory XybridPipeline.fromYaml(String yaml);
+  factory XybridPipeline.fromFile(String path);
+
+  String? get name;
+  int get stageCount;
+  List<String> get stageNames;
+
+  Future<XybridResult> run(XybridEnvelope envelope);
+}
+```
+
+#### 流水线示例
+
+```dart
+final yaml = '''
+name: voice-assistant
+stages:
+  - whisper-tiny
+  - gemma-3-1b
+  - kokoro-82m
+''';
+
+final pipeline = XybridPipeline.fromYaml(yaml);
+final result = await pipeline.run(
+  XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000),
+);
+// 结果为最后阶段输出的 TTS 音频
+final wav = result.audioAsWav();
+```
+
+---
+
+### XybridException
+
+```dart
+class XybridException implements Exception {
+  final String message;
+}
+```
+
+所有 SDK 错误均抛出 `XybridException`。使用 `loadWithProgress()` 时，加载错误通过 `LoadError` 事件上报。
+
+---
+
+## 平台支持
+
+| 平台 | 状态 | 加速器 |
+|----------|--------|--------------|
+| macOS | 支持 | Metal、CoreML |
+| iOS | 支持 | Metal、CoreML |
+| Android | 支持 | NNAPI |
+| Linux | 支持 | CPU |
+| Windows | 规划中 | DirectML |

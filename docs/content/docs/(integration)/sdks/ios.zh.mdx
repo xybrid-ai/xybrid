@@ -1,0 +1,182 @@
+---
+title: iOS / macOS
+description: 面向 iOS 和 macOS 的原生 Swift SDK，支持本地 ML 推理
+---
+
+Swift SDK 通过 UniFFI 为 iOS 和 macOS 应用提供到 Xybrid 运行时的原生绑定。
+
+<Callout type="info">
+Swift SDK 处于早期访问阶段，API 稳定但尚未作为正式版本发布。可通过 Swift Package Manager 从源码安装，或使用 [Flutter SDK](/zh/docs/sdks/flutter) 进行跨平台开发。
+</Callout>
+
+## 安装
+
+通过 Swift Package Manager 添加 Xybrid 包：
+
+```swift title="Package.swift"
+dependencies: [
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.0")
+]
+```
+
+或在 Xcode 中：**File > Add Package Dependencies**，输入仓库 URL。
+
+**支持的平台：** iOS 13.0+，macOS 10.15+
+
+## 快速开始
+
+```swift
+import Xybrid
+
+// 从注册表加载模型
+let loader = ModelLoader.fromRegistry(modelId: "kokoro-82m")
+let model = try loader.load()
+
+// 执行推理
+let envelope = Envelope.text("Hello, world!")
+let result = try model.run(envelope: envelope)
+
+if result.success {
+    print("Output: \(result.text ?? "")")
+    print("Latency: \(result.latency)s")
+}
+```
+
+---
+
+## 模型加载
+
+### 从注册表
+
+```swift
+let loader = ModelLoader.fromRegistry(modelId: "whisper-tiny")
+let model = try loader.load()
+```
+
+### 从本地 Bundle
+
+```swift
+let loader = ModelLoader.fromBundle(path: bundlePath)
+let model = try loader.load()
+```
+
+---
+
+## 输入 Envelope
+
+### 音频（语音识别）
+
+```swift
+let envelope = Envelope.audio(pcmData: audioData, sampleRate: 16000, channels: 1)
+let result = try model.run(envelope: envelope)
+print("Transcription: \(result.text ?? "")")
+```
+
+### 文本（文字转语音）
+
+```swift
+// 纯文本
+let envelope = Envelope.text("Hello, how are you?")
+
+// 带声音和语速
+let envelope = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
+
+let result = try model.run(envelope: envelope)
+if let audioBytes = result.audioBytes {
+    // 播放或保存音频
+}
+```
+
+### 嵌入
+
+```swift
+let envelope = Envelope.embedding(data: [0.1, 0.2, 0.3])
+let result = try model.run(envelope: envelope)
+if let vector = result.embedding {
+    // 处理嵌入向量
+}
+```
+
+---
+
+## 结果处理
+
+```swift
+let result = try model.run(envelope: envelope)
+
+if result.success {
+    switch result.outputType {
+    case "text":
+        print("Text: \(result.text!)")
+    case "audio":
+        playAudio(result.audioBytes!)
+    case "embedding":
+        process(result.embedding!)
+    default:
+        break
+    }
+    print("Latency: \(result.latency)s")  // TimeInterval（秒）
+} else {
+    print("Error: \(result.error ?? "Unknown")")
+}
+```
+
+### XybridResult 属性
+
+| 属性 | 类型 | 说明 |
+|----------|------|-------------|
+| `success` | `Bool` | 推理是否成功 |
+| `error` | `String?` | 失败时的错误信息 |
+| `outputType` | `String` | `"text"`、`"audio"` 或 `"embedding"` |
+| `text` | `String?` | 文本输出（ASR、LLM） |
+| `audioBytes` | `Data?` | 音频输出（TTS） |
+| `embedding` | `[Float]?` | 嵌入向量 |
+| `latencyMs` | `UInt32` | 推理延迟（毫秒） |
+| `isFailure` | `Bool` | 便捷属性：`!success` |
+| `latency` | `TimeInterval` | 延迟（秒） |
+
+---
+
+## 错误处理
+
+SDK 使用 Swift 错误枚举实现类型安全的错误处理：
+
+```swift
+do {
+    let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
+    let result = try model.run(envelope: envelope)
+} catch XybridError.ModelNotFound(let modelId) {
+    print("Model not found: \(modelId)")
+} catch XybridError.InferenceFailed(let message) {
+    print("Inference failed: \(message)")
+} catch XybridError.InvalidInput(let message) {
+    print("Invalid input: \(message)")
+} catch XybridError.IoError(let message) {
+    print("I/O error: \(message)")
+} catch {
+    print("Unexpected error: \(error.localizedDescription)")
+}
+```
+
+---
+
+## 类型别名
+
+SDK 提供便捷短别名：
+
+| 别名 | 完整类型 |
+|-------|-----------|
+| `ModelLoader` | `XybridModelLoader` |
+| `Model` | `XybridModel` |
+| `Envelope` | `XybridEnvelope` |
+| `Result` | `XybridResult` |
+
+---
+
+## 平台支持
+
+| 平台 | 状态 | 加速器 |
+|----------|--------|--------------|
+| iOS | 支持 | Metal、CoreML、ANE |
+| macOS（Apple Silicon） | 支持 | Metal、CoreML、ANE |
+| macOS（Intel） | 支持 | CPU |

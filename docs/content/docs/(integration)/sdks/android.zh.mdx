@@ -1,0 +1,161 @@
+---
+title: Android
+description: 面向 Android 的原生 SDK，支持本地 ML 推理
+---
+
+Android SDK 通过 UniFFI 为 Xybrid 运行时提供原生 Kotlin 绑定，支持在 Android 应用中进行本地 ML 推理。
+
+## 安装
+
+从 Maven Central 添加 Xybrid SDK：
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta5")
+}
+```
+
+最低 SDK 版本：**24**（Android 7.0）
+
+## 快速开始
+
+```kotlin
+import ai.xybrid.*
+
+// 从注册表加载模型
+val loader = XybridModelLoader.fromRegistry("kokoro-82m")
+val model = loader.load()
+
+// 运行推理
+val result = model.run(Envelope.text("Hello, world!"))
+
+if (result.success) {
+    println("Output: ${result.text}")
+    println("Latency: ${result.latencyMs}ms")
+}
+```
+
+---
+
+## 模型加载
+
+### 从注册表
+
+```kotlin
+val loader = XybridModelLoader.fromRegistry("whisper-tiny")
+val model = loader.load()
+```
+
+### 从本地 Bundle
+
+```kotlin
+val loader = XybridModelLoader.fromBundle("/path/to/model.xyb")
+val model = loader.load()
+```
+
+---
+
+## 输入 Envelope
+
+`Envelope` 工厂方法为不同模型类型创建类型安全的输入。
+
+### 音频（语音识别）
+
+```kotlin
+val envelope = Envelope.audio(
+    bytes = audioBytes,     // 原始 PCM 字节
+    sampleRate = 16000u,    // 采样率（Hz）
+    channels = 1u           // 单声道
+)
+val result = model.run(envelope)
+println("Transcription: ${result.text}")
+```
+
+### 文本（文字转语音）
+
+```kotlin
+// 纯文本
+val envelope = Envelope.text("Hello, how are you?")
+
+// 带声音和语速
+val envelope = Envelope.text("Hello", voiceId = "af_heart", speed = 1.0)
+
+val result = model.run(envelope)
+val audioOutput = result.audioBytes  // 原始 PCM 音频
+```
+
+### 嵌入
+
+```kotlin
+val envelope = Envelope.embedding(listOf(0.1f, 0.2f, 0.3f))
+val result = model.run(envelope)
+val vector = result.embedding
+```
+
+---
+
+## 结果处理
+
+```kotlin
+val result = model.run(envelope)
+
+if (result.success) {
+    when (result.outputType) {
+        "text" -> println("Text: ${result.text}")
+        "audio" -> playAudio(result.audioBytes!!)
+        "embedding" -> process(result.embedding!!)
+    }
+    println("Latency: ${result.latencyMs}ms")
+    println("Latency: ${result.latencySeconds}s")
+} else {
+    println("Error: ${result.error}")
+}
+```
+
+### XybridResult 属性
+
+| 属性 | 类型 | 说明 |
+|----------|------|-------------|
+| `success` | `Boolean` | 推理是否成功 |
+| `error` | `String?` | 失败时的错误信息 |
+| `outputType` | `String` | `"text"`、`"audio"` 或 `"embedding"` |
+| `text` | `String?` | 文本输出（ASR、LLM） |
+| `audioBytes` | `ByteArray?` | 音频输出（TTS） |
+| `embedding` | `List<Float>?` | 嵌入向量 |
+| `latencyMs` | `UInt` | 推理延迟（毫秒） |
+| `isFailure` | `Boolean` | 便捷属性：`!success` |
+| `latencySeconds` | `Double` | 延迟（秒） |
+
+---
+
+## 错误处理
+
+SDK 使用密封异常类实现类型安全的错误处理：
+
+```kotlin
+try {
+    val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
+    val result = model.run(envelope)
+} catch (e: XybridException.ModelNotFound) {
+    println("Model not found: ${e.modelId}")
+} catch (e: XybridException.InferenceFailed) {
+    println("Inference failed: ${e.message}")
+} catch (e: XybridException.InvalidInput) {
+    println("Invalid input: ${e.message}")
+} catch (e: XybridException.IoException) {
+    println("I/O error: ${e.message}")
+} catch (e: XybridException) {
+    // 兜底处理，提供友好错误信息
+    showError(e.displayMessage)
+}
+```
+
+---
+
+## 平台支持
+
+| 架构 | 状态 |
+|-------------|--------|
+| arm64-v8a | 支持 |
+| armeabi-v7a | 支持 |
+| x86_64 | 支持（模拟器） |

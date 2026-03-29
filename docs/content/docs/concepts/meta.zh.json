@@ -1,0 +1,17 @@
+{
+  "title": "核心概念",
+  "description": "核心概念与 Xybrid 工作原理",
+  "icon": "Cog",
+  "root": true,
+  "pages": [
+    "pipelines",
+    "---实时推理---",
+    "streaming",
+    "---基础设施---",
+    "registry",
+    "bundles",
+    "caching",
+    "---运维操作---",
+    "packaging-and-deployment"
+  ]
+}

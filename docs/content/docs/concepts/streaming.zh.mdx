@@ -1,0 +1,101 @@
+---
+title: 流式推理
+description: LLM 与音频转录的实时 Token 流式输出
+---
+
+
+Xybrid 支持两种流式推理：**LLM Token 流式输出**（现已可用）和**实时音频流式输出**（规划中）。
+
+## LLM Token 流式输出
+
+逐 Token 流式输出 LLM 响应，实现实时聊天界面。
+
+### Flutter
+
+```dart
+final model = await Xybrid.model('gemma-3-1b').load();
+
+final envelope = XybridEnvelope.text('Tell me a joke');
+
+await for (final token in model.runStreaming(envelope)) {
+  stdout.write(token.token); // 每个 Token 生成时立即输出
+}
+```
+
+#### 加上对话上下文
+
+```dart
+final context = ConversationContext();
+context.setSystem('You are a helpful assistant.');
+context.pushText('Tell me a joke', MessageRole.user);
+
+final envelope = XybridEnvelope.text('Tell me a joke');
+
+await for (final token in model.runStreamingWithContext(envelope, context)) {
+  stdout.write(token.token);
+}
+```
+
+#### 加上生成配置
+
+```dart
+final stream = model.runStreaming(
+  XybridEnvelope.text('Write a poem'),
+  config: GenerationConfig.creative(),
+);
+
+await for (final token in stream) {
+  stdout.write(token.token);
+}
+```
+
+### Unity（C#）
+
+```csharp
+// 基于回调的流式输出
+using (var envelope = Envelope.Text("Tell me a story."))
+using (var result = model.RunStreaming(envelope, token =>
+{
+    Debug.Log(token.Token);
+}))
+{
+    result.ThrowIfFailed();
+}
+
+// 便捷方法
+string response = model.RunStreamingText("Tell me a story.", token =>
+{
+    dialogueText.text += token.Token;
+});
+```
+
+### StreamToken 属性
+
+| 属性 | 类型 | 说明 |
+|----------|------|-------------|
+| `token` | `String` | 生成的 Token 文本 |
+| `index` | `int` | Token 在序列中的位置 |
+| `cumulativeText` | `String` | 目前已生成的全部文本 |
+| `isFinal` | `bool` | 是否为最后一个 Token |
+| `finishReason` | `String?` | `"stop"`、`"length"` 或 `"error"` |
+
+## SDK 支持情况
+
+| 功能 | Flutter | Unity | Kotlin | Swift |
+|---------|---------|-------|--------|-------|
+| `runStreaming()` | 支持 | 支持 | 规划中 | 规划中 |
+| `runStreamingWithContext()` | 支持 | 支持 | 规划中 | 规划中 |
+| 生成配置 | 支持 | 支持 | 规划中 | 规划中 |
+
+---
+
+## 实时音频流式输出（规划中）
+
+基于分块 Whisper 推理的实时音频转录（含部分结果输出）已列入未来版本计划，将支持：
+
+- 麦克风持续输入与分块处理
+- 音频接收过程中的部分转录结果
+- 用于自动分段的语音活动检测（VAD）
+- 可配置的块大小与重叠
+
+该功能实现后将在所有 SDK 中提供。

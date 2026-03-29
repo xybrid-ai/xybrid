@@ -1,0 +1,153 @@
+---
+title: Bundles
+description: 模型打包格式
+---
+
+
+**Bundle**（`.xyb` 文件）是一个包含执行所需全部文件的模型打包体。
+
+## Bundle 格式
+
+Bundle 是一个 ZIP 压缩包，包含：
+
+```
+model-name.xyb/
+├── model_metadata.json    # 执行配置
+├── model.onnx             # 模型文件（或 .safetensors）
+├── vocab.json             # 词汇表（用于 ASR）
+├── tokens.txt             # Token 列表（用于 TTS）
+├── voices.bin             # 声音嵌入（用于 TTS）
+└── ...                    # 其他所需文件
+```
+
+## model_metadata.json
+
+元数据文件定义模型的执行方式：
+
+```json
+{
+  "model_id": "wav2vec2-base-960h",
+  "version": "1.0",
+  "description": "Speech recognition model",
+
+  "execution_template": {
+    "type": "SimpleMode",
+    "model_file": "model.onnx"
+  },
+
+  "preprocessing": [
+    { "type": "AudioDecode", "sample_rate": 16000, "channels": 1 }
+  ],
+
+  "postprocessing": [
+    { "type": "CTCDecode", "vocab_file": "vocab.json", "blank_index": 0 }
+  ],
+
+  "files": ["model.onnx", "vocab.json"],
+
+  "metadata": {
+    "task": "speech-recognition",
+    "language": "en"
+  }
+}
+```
+
+## Bundle 类型
+
+### ASR Bundle（Wav2Vec2）
+
+```json
+{
+  "model_id": "wav2vec2-base-960h",
+  "execution_template": {
+    "type": "SimpleMode",
+    "model_file": "model.onnx"
+  },
+  "preprocessing": [
+    { "type": "AudioDecode", "sample_rate": 16000, "channels": 1 }
+  ],
+  "postprocessing": [
+    { "type": "CTCDecode", "vocab_file": "vocab.json", "blank_index": 0 }
+  ]
+}
+```
+
+### ASR Bundle（Whisper）
+
+```json
+{
+  "model_id": "whisper-tiny",
+  "execution_template": {
+    "type": "CandleModel",
+    "model_type": "WhisperTiny"
+  },
+  "preprocessing": [
+    { "type": "AudioDecode", "sample_rate": 16000, "channels": 1 }
+  ],
+  "postprocessing": []
+}
+```
+
+### TTS Bundle（Kokoro）
+
+```json
+{
+  "model_id": "kokoro-82m",
+  "execution_template": {
+    "type": "SimpleMode",
+    "model_file": "model.onnx"
+  },
+  "preprocessing": [
+    {
+      "type": "Phonemize",
+      "tokens_file": "tokens.txt",
+      "backend": "EspeakNG"
+    }
+  ],
+  "postprocessing": [
+    {
+      "type": "TTSAudioEncode",
+      "sample_rate": 24000,
+      "apply_postprocessing": true
+    }
+  ]
+}
+```
+
+## 平台变体
+
+Bundle 与平台相关，同一模型可能有针对不同平台的不同 Bundle：
+
+| 平台 | 标识符 |
+|----------|------------|
+| macOS（Apple Silicon） | `macos-arm64` |
+| macOS（Intel） | `macos-x86_64` |
+| iOS | `ios-arm64` |
+| Android | `android-arm64` |
+| Linux | `linux-x86_64` |
+| Windows | `windows-x86_64` |
+
+## Bundle 解析
+
+当流水线引用 `whisper-tiny@1.0` 时：
+
+1. **检测平台** — 确定当前平台（如 `macos-arm64`）
+2. **检查缓存** — 在（`~/.xybrid/registry/`）中查找本地缓存
+3. **下载** — 若未缓存则从注册表获取
+4. **解压** — 将 Bundle 解压到缓存
+5. **执行** — SDK 读取 `model_metadata.json` 并执行推理
+
+## 必填字段
+
+| 字段 | 说明 |
+|-------|-------------|
+| `model_id` | 唯一标识符 |
+| `version` | 语义化版本号 |
+| `execution_template` | 模型运行方式 |
+| `preprocessing` | 输入变换步骤 |
+| `postprocessing` | 输出变换步骤 |
+| `files` | Bundle 中的文件列表 |
+
+## 相关文档
+
+- [注册表](/zh/docs/concepts/registry) — Bundle 分发
