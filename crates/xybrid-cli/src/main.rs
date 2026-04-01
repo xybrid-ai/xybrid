@@ -526,7 +526,15 @@ fn run_command(cli: Cli) -> Result<()> {
             stream,
             system,
         } => commands::repl::handle_repl_command(
-            config, model, model_file, huggingface, voice, target, stream, system, verbose,
+            config,
+            model,
+            model_file,
+            huggingface,
+            voice,
+            target,
+            stream,
+            system,
+            verbose,
         ),
         Commands::Trace {
             session,

@@ -60,7 +60,7 @@ pub(crate) fn handle_repl_command(
         stage.bundle_path = Some(cache_dir.to_string_lossy().to_string());
         vec![stage]
     } else if let Some(ref gguf_path) = model_file {
-    // --model-file: load a bare GGUF file with auto-generated metadata
+        // --model-file: load a bare GGUF file with auto-generated metadata
         let gguf_path = gguf_path
             .canonicalize()
             .with_context(|| format!("GGUF file not found: {}", gguf_path.display()))?;
