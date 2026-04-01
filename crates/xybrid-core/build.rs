@@ -190,7 +190,7 @@ fn compile_llama_cpp() {
                 "clone",
                 "--depth",
                 "1",
-                "https://github.com/ggerganov/llama.cpp",
+                "https://github.com/PrismML-Eng/llama.cpp",
                 &llama_cpp_dir.to_string_lossy(),
             ])
             .status();
