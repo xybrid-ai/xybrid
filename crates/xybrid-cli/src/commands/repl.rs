@@ -20,6 +20,7 @@ pub(crate) fn handle_repl_command(
     config: Option<PathBuf>,
     model: Option<String>,
     model_file: Option<PathBuf>,
+    huggingface: Option<String>,
     voice: Option<String>,
     _target: Option<String>,
     stream: bool,
@@ -36,8 +37,30 @@ pub(crate) fn handle_repl_command(
     print_streaming_status(stream);
     println!();
 
+    // --huggingface: load from HuggingFace repo
+    let stages = if let Some(ref repo) = huggingface {
+        println!("🤗 Loading from HuggingFace: {}", repo);
+        let loader = ModelLoader::from_huggingface(repo);
+        let _model = loader.load().context(format!(
+            "Failed to load model from HuggingFace repo '{}'",
+            repo
+        ))?;
+
+        let sanitized = repo.replace('/', "--");
+        let cache_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
+            .join(".xybrid")
+            .join("cache")
+            .join("hf")
+            .join(&sanitized);
+
+        println!("✅ Model loaded from HuggingFace");
+
+        let mut stage = StageDescriptor::new(_model.model_id());
+        stage.bundle_path = Some(cache_dir.to_string_lossy().to_string());
+        vec![stage]
+    } else if let Some(ref gguf_path) = model_file {
     // --model-file: load a bare GGUF file with auto-generated metadata
-    let stages = if let Some(ref gguf_path) = model_file {
         let gguf_path = gguf_path
             .canonicalize()
             .with_context(|| format!("GGUF file not found: {}", gguf_path.display()))?;
@@ -85,7 +108,7 @@ pub(crate) fn handle_repl_command(
             (None, Some(model))
         } else {
             return Err(anyhow::anyhow!(
-                "Either --config, --model, or --model-file must be specified"
+                "Either --config, --model, --model-file, or --huggingface must be specified"
             ));
         };
 

@@ -211,16 +211,21 @@ enum Commands {
     /// Interactive REPL mode - keeps models loaded for fast repeated inference
     Repl {
         /// Path to the pipeline configuration file (YAML)
-        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["model", "model_file"])]
+        #[arg(short, long, value_name = "FILE", conflicts_with_all = ["model", "model_file", "huggingface"])]
         config: Option<PathBuf>,
 
         /// Model ID to run directly from registry (e.g., "qwen2.5-0.5b-instruct")
-        #[arg(short, long, value_name = "ID", conflicts_with_all = ["config", "model_file"])]
+        #[arg(short, long, value_name = "ID", conflicts_with_all = ["config", "model_file", "huggingface"])]
         model: Option<String>,
 
         /// Path to a local GGUF model file (auto-generates metadata)
-        #[arg(long, value_name = "PATH", conflicts_with_all = ["config", "model"])]
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["config", "model", "huggingface"])]
         model_file: Option<PathBuf>,
+
+        /// HuggingFace repo to run (e.g., "prism-ml/Bonsai-8B-gguf")
+        /// Downloads if not cached, auto-generates metadata if needed
+        #[arg(long, value_name = "REPO", conflicts_with_all = ["config", "model", "model_file"])]
+        huggingface: Option<String>,
 
         /// Voice ID for TTS models (e.g., "af_bella", "am_adam")
         #[arg(long, value_name = "VOICE")]
@@ -515,12 +520,13 @@ fn run_command(cli: Cli) -> Result<()> {
             config,
             model,
             model_file,
+            huggingface,
             voice,
             target,
             stream,
             system,
         } => commands::repl::handle_repl_command(
-            config, model, model_file, voice, target, stream, system, verbose,
+            config, model, model_file, huggingface, voice, target, stream, system, verbose,
         ),
         Commands::Trace {
             session,
