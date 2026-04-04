@@ -44,7 +44,7 @@ jobs:
       # Cache size: ~1.5GB compressed
       - name: Cache Android NDK
         id: cache-ndk
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
           key: android-ndk-${{ env.NDK_VERSION }}
@@ -64,7 +64,7 @@ jobs:
       # Expected cache hit rate: ~95% (cargo-ndk version changes rarely)
       - name: Cache cargo-ndk
         id: cache-cargo-ndk
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-ndk
           key: cargo-ndk-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
