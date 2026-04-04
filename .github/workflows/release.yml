@@ -166,7 +166,7 @@ jobs:
           key: release-android
 
       - name: Setup Android NDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install NDK
         run: |
@@ -211,7 +211,7 @@ jobs:
           java-version: 17
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Download Android .so artifacts
         uses: actions/download-artifact@v4
@@ -316,7 +316,7 @@ jobs:
 
       - name: Setup Android SDK
         if: matrix.android
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Android NDK
         if: matrix.android

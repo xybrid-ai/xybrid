@@ -50,7 +50,7 @@ jobs:
           key: android-ndk-${{ env.NDK_VERSION }}
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install NDK
         if: steps.cache-ndk.outputs.cache-hit != 'true'
