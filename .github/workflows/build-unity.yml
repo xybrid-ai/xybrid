@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check versions match git tag
         run: |
@@ -55,7 +55,7 @@ jobs:
     if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: true
 
@@ -103,7 +103,7 @@ jobs:
     if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: true
 
@@ -148,7 +148,7 @@ jobs:
           file bindings/unity/Runtime/Plugins/macOS/*.dylib || true
 
       - name: Upload macOS plugins
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unity-plugins-macos
           path: bindings/unity/Runtime/Plugins/macOS/
@@ -163,7 +163,7 @@ jobs:
     if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: true
 
@@ -205,7 +205,7 @@ jobs:
           ls -la bindings/unity/Runtime/Plugins/Windows/ || echo "WARNING: Windows plugin directory not found"
 
       - name: Upload Windows plugins
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unity-plugins-windows
           path: bindings/unity/Runtime/Plugins/Windows/
@@ -220,7 +220,7 @@ jobs:
     if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: true
 
@@ -260,7 +260,7 @@ jobs:
           ls -la bindings/unity/Runtime/Plugins/Linux/ || echo "WARNING: Linux plugin directory not found"
 
       - name: Upload Linux plugins
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unity-plugins-linux
           path: bindings/unity/Runtime/Plugins/Linux/
@@ -275,7 +275,7 @@ jobs:
     if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: true
 
@@ -308,13 +308,13 @@ jobs:
 
       - name: Cache Android NDK
         id: cache-ndk
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
           key: android-ndk-${{ env.NDK_VERSION }}
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install NDK
         if: steps.cache-ndk.outputs.cache-hit != 'true'
@@ -325,7 +325,7 @@ jobs:
 
       - name: Cache cargo-ndk
         id: cache-cargo-ndk
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-ndk
           key: cargo-ndk-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
@@ -369,7 +369,7 @@ jobs:
           done
 
       - name: Upload Android plugins
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unity-plugins-android
           path: bindings/unity/Runtime/Plugins/Android/
@@ -384,7 +384,7 @@ jobs:
     if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: true
 
@@ -436,7 +436,7 @@ jobs:
           file bindings/unity/Runtime/Plugins/iOS/*.a || true
 
       - name: Upload iOS plugins
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unity-plugins-ios
           path: bindings/unity/Runtime/Plugins/iOS/
@@ -451,10 +451,10 @@ jobs:
     if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download all Unity plugin artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: unity-plugins-*
           path: downloaded-plugins
@@ -501,7 +501,7 @@ jobs:
           ls -lh "xybrid-unity-sdk-${VERSION}.tar.gz"
 
       - name: Upload Unity SDK package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unity-sdk-package
           path: xybrid-unity-sdk-*.tar.gz
@@ -542,12 +542,12 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_upm == 'true')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Download all Unity plugin artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: unity-plugins-*
           path: downloaded-plugins

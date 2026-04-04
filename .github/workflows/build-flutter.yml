@@ -32,7 +32,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: true
 
@@ -92,7 +92,7 @@ jobs:
       # Cache the FRB codegen binary to avoid compiling from source every run
       - name: Cache FRB codegen binary
         id: cache-frb
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/flutter_rust_bridge_codegen
@@ -146,7 +146,7 @@ jobs:
           Get-ChildItem -Path . -Recurse -Filter "xybrid_flutter_ffi*" -ErrorAction SilentlyContinue | Select-Object FullName
 
       - name: Upload Flutter native library artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: flutter-native-${{ matrix.platform }}
           path: |

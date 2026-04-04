@@ -17,7 +17,7 @@ jobs:
     name: Build Android .so files
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -44,13 +44,13 @@ jobs:
       # Cache size: ~1.5GB compressed
       - name: Cache Android NDK
         id: cache-ndk
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
           key: android-ndk-${{ env.NDK_VERSION }}
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install NDK
         if: steps.cache-ndk.outputs.cache-hit != 'true'
@@ -64,7 +64,7 @@ jobs:
       # Expected cache hit rate: ~95% (cargo-ndk version changes rarely)
       - name: Cache cargo-ndk
         id: cache-cargo-ndk
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-ndk
           key: cargo-ndk-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
@@ -122,7 +122,7 @@ jobs:
           ls -la "$SO_BASE_PATH"/x86_64/
 
       - name: Upload Android .so artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-so-files
           path: bindings/kotlin/libs/
