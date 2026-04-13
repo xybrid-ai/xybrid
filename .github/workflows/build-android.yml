@@ -30,10 +30,17 @@ jobs:
             armv7-linux-androideabi,
             x86_64-linux-android
 
-      # Rust caching with Swatinem/rust-cache
-      # Cache key is based on Cargo.lock hash (automatic) + workflow-specific prefix
-      # Expected cache hit rate: ~80-90% on incremental changes
-      # Cache includes: ~/.cargo/registry, ~/.cargo/git, target/
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:

@@ -66,10 +66,11 @@ jobs:
           echo "All versions match v$TAG_VERSION"
 
   #
-  # Apple XCFramework build (macOS only)
+  # Consolidated Apple build: XCFramework + Flutter darwin precompile + CLI macos-arm64
+  # Runs all three on one macos-14 runner to share sccache and avoid 3x queue wait.
   #
-  build-apple:
-    name: Build Apple XCFramework
+  build-apple-all:
+    name: Build Apple (all)
     needs: [check-version]
     runs-on: macos-14
     steps:
@@ -100,12 +101,21 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: release-apple
+          prefix-key: "v1-rust"
+          shared-key: "apple-xcframework"
+          cache-all-crates: "true"
+          save-if: "true"
 
+      - name: Install LLVM
+        run: brew install llvm
+
+      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
+
+      # --- Step 1: Build XCFramework (cold compile, ~18 min) ---
       - name: Build XCFramework
         run: cargo xtask build-xcframework --release
 
-      - name: Prepare artifact with version
+      - name: Prepare XCFramework artifact
         shell: bash
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
@@ -129,6 +139,44 @@ jobs:
           name: xcframework
           path: dist/XybridFFI-*.xcframework.zip
           if-no-files-found: error
+
+      # --- Step 2: Precompile Flutter darwin (sccache warm, ~3-5 min) ---
+      - name: Install build tool dependencies
+        working-directory: bindings/flutter/cargokit/build_tool
+        run: dart pub get
+
+      - name: Precompile and upload Flutter darwin binaries
+        working-directory: bindings/flutter/cargokit/build_tool
+        shell: bash
+        env:
+          PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dart run bin/build_tool.dart precompile-binaries \
+            --repository ${{ github.repository }} \
+            --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
+            --verbose
+
+      # --- Step 3: Build CLI macos-arm64 (sccache warm, ~1-2 min) ---
+      - name: Build CLI (macos-arm64)
+        run: cargo build --release -p xybrid-cli --target aarch64-apple-darwin --features platform-macos
+
+      - name: Strip CLI binary
+        run: strip target/aarch64-apple-darwin/release/xybrid
+
+      - name: Prepare CLI artifact
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          mkdir -p dist-cli
+          cp target/aarch64-apple-darwin/release/xybrid dist-cli/xybrid-${VERSION}-macos-arm64
+          chmod +x dist-cli/xybrid-${VERSION}-macos-arm64
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-macos-arm64
+          path: dist-cli/*
 
   #
   # Android .so files build (Linux with NDK)
@@ -165,7 +213,10 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: release-android
+          prefix-key: "v1-rust"
+          shared-key: "android-ndk"
+          cache-all-crates: "true"
+          save-if: "true"
 
       - name: Setup Android NDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
@@ -237,40 +288,12 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
 
   #
-  # Flutter precompiled binaries (uploaded to separate precompiled_<hash> release)
-  # These are auto-downloaded by cargokit when users don't have Rust installed
+  # Flutter precompiled binaries — Linux (waits for build-android to warm sccache)
   #
-  precompile-flutter:
-    name: Precompile Flutter (${{ matrix.name }})
-    needs: [check-version]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: darwin
-            os: macos-14
-            # Apple Silicon only (Intel Mac dropped — ort-sys has no x86_64 prebuilt binaries)
-            rust_targets: >-
-              aarch64-apple-darwin,
-              aarch64-apple-ios,
-              aarch64-apple-ios-sim
-            android: false
-
-          - name: linux
-            os: ubuntu-latest
-            rust_targets: >-
-              x86_64-unknown-linux-gnu,
-              aarch64-linux-android,
-              armv7-linux-androideabi,
-              x86_64-linux-android
-            android: true
-
-          - name: windows
-            os: windows-latest
-            rust_targets: x86_64-pc-windows-msvc
-            android: false
-
-    runs-on: ${{ matrix.os }}
+  precompile-flutter-linux:
+    name: Precompile Flutter (linux)
+    needs: [check-version, build-android]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -280,7 +303,11 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
-          targets: ${{ matrix.rust_targets }}
+          targets: >-
+            x86_64-unknown-linux-gnu,
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -296,50 +323,99 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: precompile-flutter-${{ matrix.name }}
+          prefix-key: "v1-rust"
+          shared-key: "flutter-linux"
+          cache-all-crates: "true"
+          save-if: "true"
 
       - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
 
-      - name: Install LLVM (Linux)
-        if: matrix.name == 'linux'
+      - name: Install LLVM
         run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
 
-      - name: Install LLVM (macOS)
-        if: matrix.name == 'darwin'
-        run: brew install llvm
-
-      - name: Install LLVM and NASM (Windows)
-        if: matrix.name == 'windows'
-        run: choco install llvm nasm
-
-      - name: Add NASM to PATH (Windows)
-        if: matrix.name == 'windows'
-        shell: bash
-        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
-
       - name: Setup Android SDK
-        if: matrix.android
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
       - name: Install Android NDK
-        if: matrix.android
         run: |
           sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
       - name: Install cargo-ndk
-        if: matrix.android
         run: which cargo-ndk || cargo install cargo-ndk
 
       - name: Install build tool dependencies
         working-directory: bindings/flutter/cargokit/build_tool
         run: dart pub get
 
-      - name: Force dynamic CRT on Windows (required for cdylib DLL linking)
-        if: matrix.name == 'windows'
+      - name: Precompile and upload binaries
+        working-directory: bindings/flutter/cargokit/build_tool
+        shell: bash
+        env:
+          PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dart run bin/build_tool.dart precompile-binaries \
+            --repository ${{ github.repository }} \
+            --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
+            --verbose \
+            --android-sdk-location $ANDROID_HOME \
+            --android-ndk-version ${{ env.NDK_VERSION }} \
+            --android-min-sdk-version 28
+
+  #
+  # Flutter precompiled binaries — Windows
+  #
+  precompile-flutter-windows:
+    name: Precompile Flutter (windows)
+    needs: [check-version]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
         shell: bash
         run: |
-          # Use -MD not /MD — Git Bash mangles /MD to C:/Program Files/Git/MD
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "flutter-windows"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
+
+      - name: Install LLVM and NASM
+        run: choco install llvm nasm
+
+      - name: Add NASM to PATH
+        shell: bash
+        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
+
+      - name: Install build tool dependencies
+        working-directory: bindings/flutter/cargokit/build_tool
+        run: dart pub get
+
+      - name: Force dynamic CRT (required for cdylib DLL linking)
+        shell: bash
+        run: |
           echo "CFLAGS=-MD" >> $GITHUB_ENV
           echo "CXXFLAGS=-MD" >> $GITHUB_ENV
 
@@ -350,21 +426,20 @@ jobs:
           PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ARGS="--repository ${{ github.repository }} --manifest-dir ${{ github.workspace }}/bindings/flutter/rust --verbose"
-          if [ "${{ matrix.android }}" = "true" ]; then
-            ARGS="$ARGS --android-sdk-location $ANDROID_HOME --android-ndk-version ${{ env.NDK_VERSION }} --android-min-sdk-version 28"
-          fi
-          dart run bin/build_tool.dart precompile-binaries $ARGS
+          dart run bin/build_tool.dart precompile-binaries \
+            --repository ${{ github.repository }} \
+            --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
+            --verbose
 
   #
-  # Publish Flutter SDK to pub.dev (OIDC — zero secrets)
+  # Publish Flutter SDK to pub.dev (OIDC -- zero secrets)
   # Uses dart-lang/setup-dart reusable workflow for automatic OIDC token exchange.
   # Requires trusted publisher configured on pub.dev for xybrid-ai/xybrid + release.yml.
-  # This job does NOT block the GitHub Release — failure only affects pub.dev publishing.
+  # This job does NOT block the GitHub Release -- failure only affects pub.dev publishing.
   #
   publish-flutter:
     name: Publish Flutter to pub.dev
-    needs: [precompile-flutter]
+    needs: [build-apple-all, precompile-flutter-linux, precompile-flutter-windows]
     permissions:
       id-token: write   # Required for OIDC authentication with pub.dev
     uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
@@ -372,7 +447,7 @@ jobs:
       working-directory: bindings/flutter
 
   #
-  # CLI builds (cross-platform matrix)
+  # CLI builds (Linux + Windows only; macOS is built in build-apple-all)
   #
   build-cli:
     name: Build CLI (${{ matrix.name }})
@@ -382,12 +457,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macos-arm64
-            os: macos-14
-            target: aarch64-apple-darwin
-            artifact: xybrid
-            features: platform-macos
-
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -423,7 +492,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: release-cli-${{ matrix.name }}
+          prefix-key: "v1-rust"
+          shared-key: "cli-${{ matrix.name }}"
+          cache-all-crates: "true"
+          save-if: "true"
 
       - name: Build CLI
         run: cargo build --release -p xybrid-cli --target ${{ matrix.target }} --features ${{ matrix.features }}
@@ -456,7 +528,7 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [build-apple, build-android, build-cli]
+    needs: [build-apple-all, build-android, build-cli]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
