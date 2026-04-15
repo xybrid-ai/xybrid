@@ -45,6 +45,12 @@ pub enum PreprocessedData {
         phonemes: String,
         original_text: String,
     },
+
+    /// Raw IPA phoneme strings (no token-ID mapping)
+    RawPhonemes {
+        phonemes: String,
+        original_text: String,
+    },
 }
 
 impl PreprocessedData {
@@ -121,6 +127,7 @@ impl PreprocessedData {
         match self {
             PreprocessedData::Text(text) => Some(text),
             PreprocessedData::PhonemeIds { original_text, .. } => Some(original_text),
+            PreprocessedData::RawPhonemes { original_text, .. } => Some(original_text),
             PreprocessedData::TokenIds { original_text, .. } => Some(original_text),
             _ => None,
         }
@@ -163,7 +170,9 @@ impl PreprocessedData {
                 ))
             }
             PreprocessedData::PhonemeIds { original_text, .. } => {
-                // Fallback to original text for now
+                Ok(Envelope::new(EnvelopeKind::Text(original_text.clone())))
+            }
+            PreprocessedData::RawPhonemes { original_text, .. } => {
                 Ok(Envelope::new(EnvelopeKind::Text(original_text.clone())))
             }
             PreprocessedData::TokenIds { original_text, .. } => {

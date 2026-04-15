@@ -53,6 +53,30 @@ pub enum VoiceFormat {
         pattern: String,
     },
 
+    /// Pre-encoded codec tokens for codec-based TTS (NeuTTS, MARS5)
+    ///
+    /// Example:
+    /// ```json
+    /// {
+    ///   "format": "precomputed_codes",
+    ///   "codes_dir": "voices/",
+    ///   "codes_pattern": "{voice_id}.bin",
+    ///   "transcript_dir": "voices/",
+    ///   "transcript_pattern": "{voice_id}.txt"
+    /// }
+    /// ```
+    #[serde(rename = "precomputed_codes")]
+    PrecomputedCodes {
+        /// Directory containing binary code files
+        codes_dir: String,
+        /// File pattern (e.g., "{voice_id}.bin")
+        codes_pattern: String,
+        /// Directory containing reference transcript files
+        transcript_dir: String,
+        /// File pattern (e.g., "{voice_id}.txt")
+        transcript_pattern: String,
+    },
+
     /// Voice cloning from reference audio (Chatterbox, future)
     ///
     /// Example:
@@ -266,6 +290,45 @@ mod tests {
             }
             _ => panic!("Expected PerModel format"),
         }
+    }
+
+    #[test]
+    fn test_voice_format_precomputed_codes() {
+        let json = r#"{
+            "format": "precomputed_codes",
+            "codes_dir": "voices/",
+            "codes_pattern": "{voice_id}.bin",
+            "transcript_dir": "voices/",
+            "transcript_pattern": "{voice_id}.txt",
+            "default": "jo",
+            "catalog": [
+                {"id": "jo", "name": "Jo", "gender": "female", "language": "en-US"},
+                {"id": "dave", "name": "Dave", "gender": "male", "language": "en-US"}
+            ]
+        }"#;
+
+        let config: VoiceConfig = serde_json::from_str(json).unwrap();
+        match &config.format {
+            VoiceFormat::PrecomputedCodes {
+                codes_dir,
+                codes_pattern,
+                transcript_dir,
+                transcript_pattern,
+            } => {
+                assert_eq!(codes_dir, "voices/");
+                assert_eq!(codes_pattern, "{voice_id}.bin");
+                assert_eq!(transcript_dir, "voices/");
+                assert_eq!(transcript_pattern, "{voice_id}.txt");
+            }
+            _ => panic!("Expected PrecomputedCodes format"),
+        }
+        assert_eq!(config.default, "jo");
+        assert_eq!(config.catalog.len(), 2);
+
+        let serialized = serde_json::to_string(&config).unwrap();
+        let reparsed: VoiceConfig = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(reparsed.default, "jo");
+        assert_eq!(reparsed.catalog.len(), 2);
     }
 
     #[test]

@@ -10,6 +10,7 @@
 //! | [`audio`] | `TTSAudioEncode` |
 
 pub mod audio;
+pub mod codec;
 pub mod decode;
 pub mod tensor_ops;
 
@@ -79,6 +80,12 @@ pub fn apply_postprocessing_step(
             *sample_rate,
             *apply_postprocessing,
             *trim_trailing_silence,
+        ),
+
+        PostprocessingStep::CodecDecode { .. } => Err(
+            crate::runtime_adapter::AdapterError::InvalidInput(
+                "CodecDecode is handled by CodecTtsStrategy, not the generic postprocessing dispatcher".into(),
+            ),
         ),
     }
 }
