@@ -30,6 +30,21 @@ pub trait PhonemizerBackend: Send + Sync {
     /// - `tokens_map`: Mapping from IPA characters to token IDs (used for vocab filtering)
     fn phonemize(&self, text: &str, tokens_map: &HashMap<char, i64>) -> ExecutorResult<String>;
 
+    /// Convert text to raw IPA phonemes without vocab filtering.
+    ///
+    /// Used by codec TTS strategies that need unfiltered phoneme output.
+    /// Default implementation calls `phonemize()` with a permissive map
+    /// covering Latin, IPA Extensions, and common Unicode ranges.
+    fn phonemize_raw(&self, text: &str) -> ExecutorResult<String> {
+        let mut universal_map = HashMap::new();
+        for i in 0x20u32..0x2000 {
+            if let Some(c) = char::from_u32(i) {
+                universal_map.insert(c, i as i64);
+            }
+        }
+        self.phonemize(text, &universal_map)
+    }
+
     /// Human-readable name of this backend.
     fn name(&self) -> &'static str;
 }

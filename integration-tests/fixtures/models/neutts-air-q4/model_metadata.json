@@ -1,0 +1,71 @@
+{
+  "model_id": "neutts-air-q4",
+  "version": "1.0",
+  "description": "NeuTTS Air (500M) - Codec-based TTS with discrete audio generation. Q4 quantized GGUF backbone + NeuCodec ONNX decoder. Higher quality than Nano.",
+  "execution_template": {
+    "type": "Gguf",
+    "model_file": "neutts-air-Q4_0.gguf",
+    "context_length": 4096
+  },
+  "preprocessing": [
+    {
+      "type": "PhonemeRaw",
+      "backend": "EspeakNG",
+      "language": "en-us"
+    }
+  ],
+  "postprocessing": [
+    {
+      "type": "CodecDecode",
+      "decoder_model": "neucodec-decoder-int8.onnx",
+      "sample_rate": 24000,
+      "token_pattern": "<\\|speech_(\\d+)\\|>",
+      "apply_postprocessing": true
+    }
+  ],
+  "files": [
+    "neutts-air-Q4_0.gguf",
+    "neucodec-decoder-int8.onnx",
+    "voices/jo.bin",
+    "voices/jo.txt",
+    "voices/dave.bin",
+    "voices/dave.txt"
+  ],
+  "voices": {
+    "format": "precomputed_codes",
+    "codes_dir": "voices/",
+    "codes_pattern": "{voice_id}.bin",
+    "transcript_dir": "voices/",
+    "transcript_pattern": "{voice_id}.txt",
+    "default": "jo",
+    "catalog": [
+      {
+        "id": "jo",
+        "name": "Jo",
+        "gender": "female",
+        "language": "en-US",
+        "style": "neutral"
+      },
+      {
+        "id": "dave",
+        "name": "Dave",
+        "gender": "male",
+        "language": "en-US",
+        "style": "neutral"
+      }
+    ]
+  },
+  "metadata": {
+    "task": "text-to-speech",
+    "architecture": "neutts",
+    "backend": "llamacpp",
+    "parameters": 500000000,
+    "license": "MIT",
+    "sample_rate": 24000,
+    "family": "NeuTTS",
+    "codec_model": "neucodec",
+    "codec_tokens": 4096,
+    "ram_minimum_mb": 512,
+    "ram_recommended_mb": 1024
+  }
+}

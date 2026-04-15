@@ -391,8 +391,11 @@ impl LlmBackend for LlamaCppBackend {
 
         sys::llama_kv_cache_clear(context);
 
-        // Tokenize directly — no chat template formatting.
-        let tokens = sys::llama_tokenize(model, prompt, true)?;
+        // Tokenize with parse_special=true so boundary tokens like
+        // <|SPEECH_GENERATION_START|>, <|TEXT_PROMPT_START|>, <|im_start|>, etc.
+        // collapse to single vocab IDs instead of 8-10 subword pieces each.
+        // Matches llama-cpp-python's Llama.__call__ default (special=True).
+        let tokens = sys::llama_tokenize_special(model, prompt, true)?;
 
         let n_ctx = sys::llama_n_ctx(context);
         if tokens.len() >= n_ctx {

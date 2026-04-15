@@ -63,6 +63,12 @@ pub fn apply_preprocessing_step(
             text::tokenize_step(data, &vocab_path, tokenizer_type, *max_length)
         }
 
+        PreprocessingStep::PhonemeRaw { .. } => {
+            Err(crate::runtime_adapter::AdapterError::InvalidInput(
+                "PhonemeRaw is handled by CodecTtsStrategy, not the generic preprocessing dispatcher".into(),
+            ))
+        }
+
         PreprocessingStep::Phonemize {
             tokens_file,
             backend,

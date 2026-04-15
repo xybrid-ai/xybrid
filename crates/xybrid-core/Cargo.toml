@@ -121,6 +121,10 @@ walkdir = "2.4"  # For directory traversal in tests
 ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }  # For HTTP in tests
 criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarking framework
 
+[[example]]
+name = "neutts_tts"
+required-features = ["llm-llamacpp"]
+
 [[bench]]
 name = "inference_backends"
 harness = false

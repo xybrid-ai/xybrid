@@ -9,6 +9,8 @@
 !/distilbert/model_metadata.json
 !/resnet50/model_metadata.json
 !/mnist/model_metadata.json
+!/neutts-nano-q4/model_metadata.json
+!/neutts-air-q4/model_metadata.json
 model_metadata.json
 
 # Keep scripts and tooling

@@ -20,7 +20,9 @@
 
 use log::{debug, info, warn};
 
-use super::template::{ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage};
+use super::template::{
+    ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage, PostprocessingStep,
+};
 use crate::conversation::ConversationContext;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::ir::EnvelopeKind;
@@ -242,6 +244,30 @@ impl TemplateExecutor {
 
             let raw_outputs = self.execute_pipeline(stages, config, preprocessed, metadata)?;
             return self.run_postprocessing(metadata, raw_outputs);
+        }
+
+        // Step 1.5: Codec TTS dispatch (GGUF backbone + CodecDecode postprocessing).
+        // Must come before the plain-GGUF fast-path below — CodecTtsStrategy orchestrates
+        // PhonemeRaw preprocessing, voice codes, LLM generation, and ONNX codec decoding
+        // in a single call. Plain-GGUF models fall through to execute_llm() as before.
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        if matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
+            && metadata
+                .postprocessing
+                .iter()
+                .any(|s| matches!(s, PostprocessingStep::CodecDecode { .. }))
+        {
+            use super::strategies::{CodecTtsStrategy, ExecutionContext, ExecutionStrategy};
+            debug!(
+                target: "xybrid_core",
+                "Detected codec TTS metadata, dispatching to CodecTtsStrategy"
+            );
+            let strategy = CodecTtsStrategy::new();
+            let mut ctx = ExecutionContext {
+                base_path: &self.base_path,
+                runtimes: &mut self.runtimes,
+            };
+            return strategy.execute(&mut ctx, metadata, input);
         }
 
         // Step 2: Single Model Execution
