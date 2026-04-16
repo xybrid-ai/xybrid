@@ -11,7 +11,9 @@ use crate::execution::postprocessing::codec::{
     codec_decode_step, create_codec_session, decode_tokens_to_samples, extract_speech_tokens,
 };
 use crate::execution::strategies::llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
-use crate::execution::template::{ExecutionTemplate, ModelMetadata, PostprocessingStep};
+use crate::execution::template::{
+    ExecutionTemplate, GenerationParams, ModelMetadata, PostprocessingStep,
+};
 use crate::execution::types::ExecutorResult;
 use crate::execution::voice_loader::TtsVoiceLoader;
 use crate::ir::{Envelope, EnvelopeKind};
@@ -110,6 +112,7 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
                 model_file,
                 chat_template,
                 context_length,
+                ..
             } => {
                 let model_path = Path::new(base_path).join(model_file);
                 let mut config =
@@ -127,6 +130,47 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
                 "Expected GGUF execution template".to_string(),
             )),
         }
+    }
+
+    /// Build sampling params for LLM generation, starting from NeuTTS-friendly
+    /// defaults (temperature=1.0, top_k=50, no top_p or repetition filtering,
+    /// stops on `<|SPEECH_GENERATION_END|>`) and overriding any field that the
+    /// model's `execution_template.generation_params` declares.
+    fn build_generation_params(metadata: &ModelMetadata) -> LlmGenerationParams {
+        let mut params = LlmGenerationParams {
+            max_tokens: 2048,
+            temperature: 1.0,
+            top_p: 1.0,
+            top_k: 50,
+            repetition_penalty: 1.0,
+            system_prompt: None,
+            stop_sequences: vec!["<|SPEECH_GENERATION_END|>".to_string()],
+        };
+
+        if let ExecutionTemplate::Gguf {
+            generation_params: Some(overrides),
+            ..
+        } = &metadata.execution_template
+        {
+            let GenerationParams {
+                max_tokens,
+                temperature,
+                top_p,
+                top_k,
+                repetition_penalty,
+                stop_sequences,
+            } = overrides;
+            if let Some(v) = max_tokens { params.max_tokens = *v; }
+            if let Some(v) = temperature { params.temperature = *v; }
+            if let Some(v) = top_p { params.top_p = *v; }
+            if let Some(v) = top_k { params.top_k = *v; }
+            if let Some(v) = repetition_penalty { params.repetition_penalty = *v; }
+            if !stop_sequences.is_empty() {
+                params.stop_sequences = stop_sequences.clone();
+            }
+        }
+
+        params
     }
 
     /// Extract CodecDecode config from postprocessing steps.
@@ -341,19 +385,7 @@ impl<I: LlmInference + 'static> ExecutionStrategy for CodecTtsStrategy<I> {
             Self::extract_codec_config(metadata)?;
         let decoder_path = Path::new(ctx.base_path).join(decoder_model);
 
-        // Match NeuTTS official Python reference: temperature=1.0, top_k=50,
-        // no top_p filtering, no repetition penalty. Speech codec tokens legitimately
-        // repeat (sustained phonemes) — penalizing them drives the model off-distribution
-        // and produces hallucinated audio past the natural endpoint.
-        let params = LlmGenerationParams {
-            max_tokens: 2048,
-            temperature: 1.0,
-            top_p: 1.0,
-            top_k: 50,
-            repetition_penalty: 1.0,
-            system_prompt: None,
-            stop_sequences: vec!["<|SPEECH_GENERATION_END|>".to_string()],
-        };
+        let params = Self::build_generation_params(metadata);
 
         let chunks = Self::chunk_text(&input_text, max_chars);
 
@@ -510,6 +542,7 @@ mod tests {
                 model_file: "model.gguf".to_string(),
                 chat_template: None,
                 context_length: 2048,
+                generation_params: None,
             },
             preprocessing: vec![PreprocessingStep::PhonemeRaw {
                 backend: PhonemizerBackend::MisakiDictionary,
@@ -538,6 +571,7 @@ mod tests {
                 model_file: "model.gguf".to_string(),
                 chat_template: None,
                 context_length: 4096,
+                generation_params: None,
             },
             preprocessing: vec![],
             postprocessing: vec![],
@@ -675,5 +709,40 @@ mod tests {
         for chunk in &chunks {
             assert!(!chunk.is_empty());
         }
+    }
+
+    #[test]
+    fn test_build_generation_params_defaults_to_neutts_values() {
+        let metadata = create_codec_tts_metadata();
+        let params = CodecTtsStrategy::<MockInference>::build_generation_params(&metadata);
+        assert_eq!(params.max_tokens, 2048);
+        assert_eq!(params.temperature, 1.0);
+        assert_eq!(params.top_p, 1.0);
+        assert_eq!(params.top_k, 50);
+        assert_eq!(params.repetition_penalty, 1.0);
+        assert_eq!(params.stop_sequences, vec!["<|SPEECH_GENERATION_END|>".to_string()]);
+    }
+
+    #[test]
+    fn test_build_generation_params_applies_metadata_overrides() {
+        use crate::execution::template::GenerationParams;
+        let mut metadata = create_codec_tts_metadata();
+        metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 2048,
+            generation_params: Some(GenerationParams {
+                temperature: Some(0.7),
+                top_p: Some(0.85),
+                stop_sequences: vec!["<|custom_stop|>".to_string()],
+                ..Default::default()
+            }),
+        };
+        let params = CodecTtsStrategy::<MockInference>::build_generation_params(&metadata);
+        assert_eq!(params.temperature, 0.7);
+        assert_eq!(params.top_p, 0.85);
+        assert_eq!(params.top_k, 50, "unspecified fields keep defaults");
+        assert_eq!(params.max_tokens, 2048, "unspecified fields keep defaults");
+        assert_eq!(params.stop_sequences, vec!["<|custom_stop|>".to_string()]);
     }
 }

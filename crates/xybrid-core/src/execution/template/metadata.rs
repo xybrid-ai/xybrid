@@ -79,7 +79,33 @@ pub enum ExecutionTemplate {
         /// Maximum context length (tokens)
         #[serde(default = "default_context_length")]
         context_length: usize,
+
+        /// Per-model generation sampling parameters. When absent or when a
+        /// field is absent, the consuming strategy supplies its own defaults.
+        /// Used by codec TTS models (e.g. NeuTTS) that need specific sampling
+        /// config for speech-token generation.
+        #[serde(default)]
+        generation_params: Option<GenerationParams>,
     },
+}
+
+/// Sampling parameters for GGUF generation. All fields optional so metadata
+/// only needs to specify overrides; absent fields use strategy defaults.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct GenerationParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repetition_penalty: Option<f32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stop_sequences: Vec<String>,
 }
 
 // ============================================================================

@@ -203,6 +203,7 @@ mod tests {
                 model_file: "model.gguf".to_string(),
                 chat_template: None,
                 context_length: 4096,
+                generation_params: None,
             },
             preprocessing: vec![],
             postprocessing: vec![],
@@ -232,6 +233,7 @@ mod tests {
                 model_file: "model.gguf".to_string(),
                 chat_template: None,
                 context_length: 2048,
+                generation_params: None,
             },
             preprocessing: vec![PreprocessingStep::PhonemeRaw {
                 backend: Default::default(),
@@ -267,6 +269,7 @@ mod tests {
                 model_file: "model.gguf".to_string(),
                 chat_template: None,
                 context_length: 4096,
+                generation_params: None,
             },
             preprocessing: vec![],
             postprocessing: vec![],
