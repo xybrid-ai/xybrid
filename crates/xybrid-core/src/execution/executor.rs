@@ -286,6 +286,7 @@ impl TemplateExecutor {
                 model_file,
                 chat_template,
                 context_length,
+                ..
             } => {
                 debug!(
                     target: "xybrid_core",
@@ -637,6 +638,7 @@ impl TemplateExecutor {
                 model_file,
                 chat_template,
                 context_length,
+                ..
             } = &metadata.execution_template
             {
                 let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());

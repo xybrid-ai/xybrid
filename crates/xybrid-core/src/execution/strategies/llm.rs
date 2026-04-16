@@ -488,6 +488,7 @@ impl<I: LlmInference> LlmStrategy<I> {
                 model_file,
                 chat_template,
                 context_length,
+                ..
             } => {
                 let model_path = Path::new(base_path).join(model_file);
 
@@ -941,6 +942,7 @@ mod tests {
                 model_file: "model.gguf".to_string(),
                 chat_template: Some("template.json".to_string()),
                 context_length: 4096,
+                generation_params: None,
             },
             preprocessing: vec![],
             postprocessing: vec![],

@@ -1017,6 +1017,7 @@ fn build_gguf_metadata(
             model_file: primary.filename.clone(),
             chat_template: None,
             context_length,
+            generation_params: None,
         },
         preprocessing: Vec::new(),
         postprocessing: Vec::new(),

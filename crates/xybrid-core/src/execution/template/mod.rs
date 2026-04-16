@@ -14,7 +14,8 @@ mod voice;
 
 // Re-export metadata types
 pub use metadata::{
-    ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage, RefinementSchedule,
+    ExecutionMode, ExecutionTemplate, GenerationParams, ModelMetadata, PipelineStage,
+    RefinementSchedule,
 };
 
 // Re-export step types
