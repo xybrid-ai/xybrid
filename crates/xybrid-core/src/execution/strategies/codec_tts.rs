@@ -160,11 +160,21 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
                 repetition_penalty,
                 stop_sequences,
             } = overrides;
-            if let Some(v) = max_tokens { params.max_tokens = *v; }
-            if let Some(v) = temperature { params.temperature = *v; }
-            if let Some(v) = top_p { params.top_p = *v; }
-            if let Some(v) = top_k { params.top_k = *v; }
-            if let Some(v) = repetition_penalty { params.repetition_penalty = *v; }
+            if let Some(v) = max_tokens {
+                params.max_tokens = *v;
+            }
+            if let Some(v) = temperature {
+                params.temperature = *v;
+            }
+            if let Some(v) = top_p {
+                params.top_p = *v;
+            }
+            if let Some(v) = top_k {
+                params.top_k = *v;
+            }
+            if let Some(v) = repetition_penalty {
+                params.repetition_penalty = *v;
+            }
             if !stop_sequences.is_empty() {
                 params.stop_sequences = stop_sequences.clone();
             }
@@ -174,9 +184,7 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
     }
 
     /// Extract CodecDecode config from postprocessing steps.
-    fn extract_codec_config(
-        metadata: &ModelMetadata,
-    ) -> ExecutorResult<(&str, u32, &str, bool)> {
+    fn extract_codec_config(metadata: &ModelMetadata) -> ExecutorResult<(&str, u32, &str, bool)> {
         metadata
             .postprocessing
             .iter()
@@ -195,9 +203,7 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
                 _ => None,
             })
             .ok_or_else(|| {
-                AdapterError::InvalidInput(
-                    "No CodecDecode postprocessing step found".to_string(),
-                )
+                AdapterError::InvalidInput("No CodecDecode postprocessing step found".to_string())
             })
     }
 
@@ -229,11 +235,7 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
     }
 
     /// Build the NeuTTS prompt from phonemes and reference codes.
-    fn build_prompt(
-        ref_phones: &str,
-        input_phones: &str,
-        ref_codes: &[i32],
-    ) -> String {
+    fn build_prompt(ref_phones: &str, input_phones: &str, ref_codes: &[i32]) -> String {
         let ref_tokens: String = ref_codes
             .iter()
             .map(|c| format!("<|speech_{}|>", c))
@@ -343,8 +345,7 @@ impl<I: LlmInference + 'static> ExecutionStrategy for CodecTtsStrategy<I> {
             })?;
 
         let voice_loader = TtsVoiceLoader::new(ctx.base_path);
-        let (ref_codes, ref_transcript) =
-            voice_loader.load_reference_codes(metadata, voice_id)?;
+        let (ref_codes, ref_transcript) = voice_loader.load_reference_codes(metadata, voice_id)?;
 
         debug!(
             target: "xybrid_core",
@@ -432,8 +433,7 @@ impl<I: LlmInference + 'static> ExecutionStrategy for CodecTtsStrategy<I> {
                 decode_tokens_to_samples(&mut decoder_session, &tokens, sample_rate, apply_pp)?;
 
             if std::env::var(DEBUG_DUMP_ENV).is_ok() {
-                let bytes: Vec<u8> =
-                    samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+                let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
                 dump("waveform.f32", &bytes);
             }
 
@@ -450,8 +450,7 @@ impl<I: LlmInference + 'static> ExecutionStrategy for CodecTtsStrategy<I> {
         info!(target: "xybrid_core", "Splitting into {} chunks", chunks.len());
 
         let mut decoder_session = create_codec_session(&decoder_path)?;
-        let silence_samples =
-            (sample_rate as usize * INTER_CHUNK_SILENCE_MS as usize) / 1000;
+        let silence_samples = (sample_rate as usize * INTER_CHUNK_SILENCE_MS as usize) / 1000;
         let mut all_samples: Vec<f32> = Vec::new();
 
         for (i, chunk) in chunks.iter().enumerate() {
@@ -468,9 +467,8 @@ impl<I: LlmInference + 'static> ExecutionStrategy for CodecTtsStrategy<I> {
             let prompt = Self::build_prompt(&ref_phones, &chunk_phones, &ref_codes);
             let llm_output = inference.generate_raw(&prompt, &params)?;
             let tokens = extract_speech_tokens(&llm_output, token_pattern)?;
-            let chunk_samples = decode_tokens_to_samples(
-                &mut decoder_session, &tokens, sample_rate, apply_pp,
-            )?;
+            let chunk_samples =
+                decode_tokens_to_samples(&mut decoder_session, &tokens, sample_rate, apply_pp)?;
 
             all_samples.extend(chunk_samples);
         }
@@ -495,7 +493,7 @@ impl<I: LlmInference + 'static> ExecutionStrategy for CodecTtsStrategy<I> {
 mod tests {
     use super::*;
     use crate::execution::strategies::llm::LlmModelConfig;
-    use crate::execution::template::{PreprocessingStep, PhonemizerBackend};
+    use crate::execution::template::{PhonemizerBackend, PreprocessingStep};
     use std::collections::HashMap;
 
     /// Mock LLM inference for testing.
@@ -515,15 +513,10 @@ mod tests {
 
     impl LlmInference for MockInference {
         fn load_model(&mut self, _config: &LlmModelConfig) -> ExecutorResult<()> {
-            self.loaded
-                .store(true, std::sync::atomic::Ordering::SeqCst);
+            self.loaded.store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
-        fn generate(
-            &self,
-            _prompt: &str,
-            _params: &LlmGenerationParams,
-        ) -> ExecutorResult<String> {
+        fn generate(&self, _prompt: &str, _params: &LlmGenerationParams) -> ExecutorResult<String> {
             Ok(self.response.clone())
         }
         fn is_loaded(&self) -> bool {
@@ -613,11 +606,8 @@ mod tests {
 
     #[test]
     fn test_build_prompt() {
-        let prompt = CodecTtsStrategy::<MockInference>::build_prompt(
-            "hɛˈloʊ",
-            "wɝld",
-            &[10, 20, 30],
-        );
+        let prompt =
+            CodecTtsStrategy::<MockInference>::build_prompt("hɛˈloʊ", "wɝld", &[10, 20, 30]);
 
         assert!(prompt.contains("<|TEXT_PROMPT_START|>"));
         assert!(prompt.contains("hɛˈloʊ wɝld"));
@@ -720,7 +710,10 @@ mod tests {
         assert_eq!(params.top_p, 1.0);
         assert_eq!(params.top_k, 50);
         assert_eq!(params.repetition_penalty, 1.0);
-        assert_eq!(params.stop_sequences, vec!["<|SPEECH_GENERATION_END|>".to_string()]);
+        assert_eq!(
+            params.stop_sequences,
+            vec!["<|SPEECH_GENERATION_END|>".to_string()]
+        );
     }
 
     #[test]

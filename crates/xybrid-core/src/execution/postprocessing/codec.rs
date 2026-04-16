@@ -99,7 +99,10 @@ pub fn decode_tokens_to_samples(
     );
 
     if apply_postprocessing {
-        Ok(crate::phonemizer::postprocess_tts_audio(&waveform, sample_rate))
+        Ok(crate::phonemizer::postprocess_tts_audio(
+            &waveform,
+            sample_rate,
+        ))
     } else {
         Ok(waveform)
     }
@@ -118,7 +121,8 @@ pub fn codec_decode_step(
 ) -> ExecutorResult<Vec<u8>> {
     let tokens = extract_speech_tokens(text, token_pattern)?;
     let mut session = create_codec_session(decoder_model_path)?;
-    let samples = decode_tokens_to_samples(&mut session, &tokens, sample_rate, apply_postprocessing)?;
+    let samples =
+        decode_tokens_to_samples(&mut session, &tokens, sample_rate, apply_postprocessing)?;
     Ok(crate::audio::samples_to_wav(&samples, sample_rate))
 }
 
