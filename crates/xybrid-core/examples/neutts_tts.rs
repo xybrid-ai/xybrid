@@ -70,7 +70,9 @@ fn parse_args() -> Args {
                 println!("  --text, -t <TEXT>         Text to synthesize (default: demo sentence)");
                 println!("  --voice, -v <ID>          Voice ID (e.g., jo, dave)");
                 println!("  --model-dir, -m <PATH>    Path to NeuTTS model directory");
-                println!("  --output, -o <PATH>       Output WAV file (default: neutts_output.wav)");
+                println!(
+                    "  --output, -o <PATH>       Output WAV file (default: neutts_output.wav)"
+                );
                 println!("  --help, -h                Show this help");
                 println!();
                 println!("Examples:");
@@ -126,14 +128,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !voices.is_empty() {
         println!("Available voices:");
         for v in &voices {
-            let marker = if metadata.voices.as_ref().is_some_and(|vc| vc.default == v.id) {
+            let marker = if metadata
+                .voices
+                .as_ref()
+                .is_some_and(|vc| vc.default == v.id)
+            {
                 " (default)"
             } else {
                 ""
             };
-            println!(
-                "  - {} ({}){}", v.id, v.name, marker
-            );
+            println!("  - {} ({}){}", v.id, v.name, marker);
         }
         println!();
     }

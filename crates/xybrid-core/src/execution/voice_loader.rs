@@ -443,9 +443,10 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
         metadata: &ModelMetadata,
         voice_id: &str,
     ) -> ExecutorResult<(Vec<i32>, String)> {
-        let voice_config = metadata.voices.as_ref().ok_or_else(|| {
-            AdapterError::InvalidInput("No voice config in metadata".to_string())
-        })?;
+        let voice_config = metadata
+            .voices
+            .as_ref()
+            .ok_or_else(|| AdapterError::InvalidInput("No voice config in metadata".to_string()))?;
 
         match &voice_config.format {
             VoiceFormat::PrecomputedCodes {
@@ -571,7 +572,9 @@ fn read_codes_binary(data: &[u8]) -> ExecutorResult<Vec<i32>> {
     if data.len() < expected {
         return Err(AdapterError::InvalidInput(format!(
             "Voice codes file truncated: expected {} bytes for {} codes, got {}",
-            expected, count, data.len()
+            expected,
+            count,
+            data.len()
         )));
     }
     let mut codes = Vec::with_capacity(count);

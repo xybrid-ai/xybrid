@@ -23,17 +23,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--dump-dir" => { dump_dir = PathBuf::from(&args[i + 1]); i += 2; }
-            "--output" | "-o" => { output = PathBuf::from(&args[i + 1]); i += 2; }
-            "--last-ms"  => { mode = Mode::LastMs(args[i + 1].parse()?); i += 2; }
-            "--first-ms" => { mode = Mode::FirstMs(args[i + 1].parse()?); i += 2; }
+            "--dump-dir" => {
+                dump_dir = PathBuf::from(&args[i + 1]);
+                i += 2;
+            }
+            "--output" | "-o" => {
+                output = PathBuf::from(&args[i + 1]);
+                i += 2;
+            }
+            "--last-ms" => {
+                mode = Mode::LastMs(args[i + 1].parse()?);
+                i += 2;
+            }
+            "--first-ms" => {
+                mode = Mode::FirstMs(args[i + 1].parse()?);
+                i += 2;
+            }
             "--range-ms" => {
-                let (a, b) = args[i + 1].split_once(':').ok_or("range must be A:B in ms")?;
+                let (a, b) = args[i + 1]
+                    .split_once(':')
+                    .ok_or("range must be A:B in ms")?;
                 mode = Mode::RangeMs(a.parse()?, b.parse()?);
                 i += 2;
             }
-            "--all"  => { mode = Mode::All; i += 1; }
-            "--help" | "-h" => { print_help(); return Ok(()); }
+            "--all" => {
+                mode = Mode::All;
+                i += 1;
+            }
+            "--help" | "-h" => {
+                print_help();
+                return Ok(());
+            }
             other => return Err(format!("unknown arg: {}", other).into()),
         }
     }
@@ -47,17 +67,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect();
     let total_ms = (all.len() as f32 / sample_rate as f32 * 1000.0) as usize;
-    println!("Full waveform: {} samples ({} ms @ {} Hz)", all.len(), total_ms, sample_rate);
+    println!(
+        "Full waveform: {} samples ({} ms @ {} Hz)",
+        all.len(),
+        total_ms,
+        sample_rate
+    );
 
     let ms_to_samples = |ms: usize| (sample_rate as usize * ms) / 1000;
 
     let slice: &[f32] = match mode {
         Mode::All => &all,
-        Mode::LastMs(ms)  => { let n = ms_to_samples(ms); &all[all.len().saturating_sub(n)..] }
-        Mode::FirstMs(ms) => { let n = ms_to_samples(ms); &all[..n.min(all.len())] }
+        Mode::LastMs(ms) => {
+            let n = ms_to_samples(ms);
+            &all[all.len().saturating_sub(n)..]
+        }
+        Mode::FirstMs(ms) => {
+            let n = ms_to_samples(ms);
+            &all[..n.min(all.len())]
+        }
         Mode::RangeMs(a, b) => {
             let start = ms_to_samples(a).min(all.len());
-            let end   = ms_to_samples(b).min(all.len());
+            let end = ms_to_samples(b).min(all.len());
             &all[start..end.max(start)]
         }
     };
@@ -65,12 +96,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wav = samples_to_wav(slice, sample_rate);
     std::fs::write(&output, wav)?;
     let duration = slice.len() as f32 / sample_rate as f32;
-    println!("Wrote {} ({:.2}s, {} samples)", output.display(), duration, slice.len());
+    println!(
+        "Wrote {} ({:.2}s, {} samples)",
+        output.display(),
+        duration,
+        slice.len()
+    );
     println!("Play: afplay {}", output.display());
     Ok(())
 }
 
-enum Mode { All, FirstMs(usize), LastMs(usize), RangeMs(usize, usize) }
+enum Mode {
+    All,
+    FirstMs(usize),
+    LastMs(usize),
+    RangeMs(usize, usize),
+}
 
 fn print_help() {
     println!("Slice a neutts_tts waveform dump into WAVs.");

@@ -448,7 +448,10 @@ mod tests {
         assert_eq!(metadata.version, "1.0");
         assert!(matches!(
             metadata.execution_template,
-            super::ExecutionTemplate::Gguf { context_length: 2048, .. }
+            super::ExecutionTemplate::Gguf {
+                context_length: 2048,
+                ..
+            }
         ));
         assert_eq!(metadata.preprocessing.len(), 1);
         assert!(matches!(
@@ -458,7 +461,10 @@ mod tests {
         assert_eq!(metadata.postprocessing.len(), 1);
         assert!(matches!(
             &metadata.postprocessing[0],
-            PostprocessingStep::CodecDecode { sample_rate: 24000, .. }
+            PostprocessingStep::CodecDecode {
+                sample_rate: 24000,
+                ..
+            }
         ));
         assert!(metadata.voices.is_some());
         let vc = metadata.voices.as_ref().unwrap();
@@ -481,7 +487,10 @@ mod tests {
         assert_eq!(metadata.model_id, "neutts-air-q4");
         assert!(matches!(
             metadata.execution_template,
-            super::ExecutionTemplate::Gguf { context_length: 4096, .. }
+            super::ExecutionTemplate::Gguf {
+                context_length: 4096,
+                ..
+            }
         ));
         assert_eq!(metadata.preprocessing.len(), 1);
         assert!(matches!(
