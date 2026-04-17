@@ -47,6 +47,7 @@ fn strip_thinking_tags(text: &str) -> String {
     result
 }
 
+use crate::runtime_adapter::llm_telemetry::itl_stats;
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
 };
@@ -276,8 +277,13 @@ impl LlmBackend for LlamaCppBackend {
 
         let start = std::time::Instant::now();
 
-        // Generate with stop sequences for early termination
-        let output_tokens = sys::llama_generate_with_stops(
+        // Use the streaming API internally so we can capture per-token
+        // timestamps for TTFT + inter-token-latency telemetry. The closure
+        // is observation-only (no external emission) — generation still
+        // returns the full token vector like `llama_generate_with_stops`
+        // did. Keeps the non-streaming contract of this function intact.
+        let mut chunk_timestamps: Vec<std::time::Instant> = Vec::new();
+        let (output_tokens, _stopped_by_callback) = sys::llama_generate_streaming(
             context,
             model,
             &tokens,
@@ -288,6 +294,10 @@ impl LlmBackend for LlamaCppBackend {
             config.top_k,
             config.repetition_penalty,
             &config.stop_sequences,
+            |_token_id, _token_text| {
+                chunk_timestamps.push(std::time::Instant::now());
+                Ok(())
+            },
         )?;
 
         let elapsed = start.elapsed();
@@ -368,12 +378,63 @@ impl LlmBackend for LlamaCppBackend {
             0.0
         };
 
+        // Streaming-derived telemetry from per-token timestamps.
+        // First timestamp marks end-of-prefill / start-of-decode, so
+        // `ttft_ms` captures the prefill phase and the inter-chunk gaps
+        // that follow are the steady-state decode cadence.
+        let ttft_ms = chunk_timestamps
+            .first()
+            .map(|t0| t0.duration_since(start).as_millis() as u64);
+        let inter_chunk_ms: Vec<u32> = chunk_timestamps
+            .windows(2)
+            .map(|w| w[1].duration_since(w[0]).as_millis() as u32)
+            .collect();
+        let (mean_itl_ms, p95_itl_ms) = itl_stats(&inter_chunk_ms);
+
+        // Derive decode_tps and prefill_tps from signals we already have.
+        // llama.cpp's sys bindings don't expose `llama_perf_context`'s
+        // `t_p_eval_ms` / `t_eval_ms`, so these are inferred rather than
+        // reported by the engine — document the semantics inline.
+        //
+        // decode_tps: inverse of mean inter-chunk latency. This is the
+        // textbook definition of steady-state decode throughput — every
+        // inter-token gap is a decode step, so `1000 / mean_gap_ms` is
+        // tokens/sec during the decode phase (excluding prefill).
+        let decode_tps = mean_itl_ms.and_then(|mean| {
+            if mean > 0.0 {
+                Some(1000.0 / mean)
+            } else {
+                None
+            }
+        });
+        // prefill_tps: prompt tokens / TTFT. TTFT covers prompt evaluation
+        // plus one token's worth of sampling; on prompts long enough for
+        // prefill to dominate, this approximates the prefill throughput
+        // mistralrs reports directly. For very short prompts the sampler
+        // overhead biases the number downward, which matches mistral's
+        // own "below timing resolution → None" semantics via the zero
+        // filter below.
+        let prefill_tps = ttft_ms.and_then(|ttft| {
+            if ttft > 0 && !tokens.is_empty() {
+                Some(tokens.len() as f32 * 1000.0 / ttft as f32)
+            } else {
+                None
+            }
+        });
+
         Ok(GenerationOutput {
             text,
             tokens_generated,
             generation_time_ms: elapsed.as_millis() as u64,
             tokens_per_second,
             finish_reason,
+            ttft_ms,
+            mean_itl_ms,
+            p95_itl_ms,
+            emitted_chunks: Some(chunk_timestamps.len() as u32),
+            inter_chunk_ms,
+            decode_tps,
+            prefill_tps,
         })
     }
 
@@ -435,6 +496,13 @@ impl LlmBackend for LlamaCppBackend {
             generation_time_ms: elapsed.as_millis() as u64,
             tokens_per_second,
             finish_reason: "length".to_string(),
+            ttft_ms: None,
+            mean_itl_ms: None,
+            p95_itl_ms: None,
+            emitted_chunks: None,
+            inter_chunk_ms: Vec::new(),
+            decode_tps: None,
+            prefill_tps: None,
         })
     }
 
@@ -479,6 +547,13 @@ impl LlmBackend for LlamaCppBackend {
         }
 
         let start = std::time::Instant::now();
+
+        // Per-callback timestamps for streaming telemetry (TTFT, ITL, chunk
+        // count). Recorded on every invocation of the C-layer callback
+        // regardless of whether the token was emitted to the external
+        // `on_token` — the stream itself is what's being measured, not
+        // user-visible output.
+        let mut chunk_timestamps: Vec<std::time::Instant> = Vec::new();
 
         // Track cumulative text and what we've safely emitted
         let mut cumulative_text = String::new();
@@ -534,6 +609,12 @@ impl LlmBackend for LlamaCppBackend {
             config.repetition_penalty,
             &streaming_stop_patterns, // Pass full stop patterns to C layer
             |token_id, token_text| {
+                // Record the timestamp on every C-layer callback, before
+                // any stop-pattern filtering. This keeps the stream-level
+                // timing independent of what actually made it to the
+                // external `on_token` consumer.
+                chunk_timestamps.push(std::time::Instant::now());
+
                 // Once we hit a stop pattern, don't emit any more tokens
                 if hit_stop_pattern {
                     return Ok(());
@@ -667,12 +748,45 @@ impl LlmBackend for LlamaCppBackend {
             let _ = on_token(final_partial);
         }
 
+        // Streaming-derived telemetry — same contract as `generate()`'s
+        // non-streaming path. Timestamps came from the C-layer callback
+        // on every token (see `chunk_timestamps` initialization above).
+        let ttft_ms = chunk_timestamps
+            .first()
+            .map(|t0| t0.duration_since(start).as_millis() as u64);
+        let inter_chunk_ms: Vec<u32> = chunk_timestamps
+            .windows(2)
+            .map(|w| w[1].duration_since(w[0]).as_millis() as u32)
+            .collect();
+        let (mean_itl_ms, p95_itl_ms) = itl_stats(&inter_chunk_ms);
+        let decode_tps = mean_itl_ms.and_then(|mean| {
+            if mean > 0.0 {
+                Some(1000.0 / mean)
+            } else {
+                None
+            }
+        });
+        let prefill_tps = ttft_ms.and_then(|ttft| {
+            if ttft > 0 && !tokens.is_empty() {
+                Some(tokens.len() as f32 * 1000.0 / ttft as f32)
+            } else {
+                None
+            }
+        });
+
         Ok(GenerationOutput {
             text,
             tokens_generated,
             generation_time_ms: elapsed.as_millis() as u64,
             tokens_per_second,
             finish_reason,
+            ttft_ms,
+            mean_itl_ms,
+            p95_itl_ms,
+            emitted_chunks: Some(chunk_timestamps.len() as u32),
+            inter_chunk_ms,
+            decode_tps,
+            prefill_tps,
         })
     }
 

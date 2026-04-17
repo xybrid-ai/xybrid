@@ -524,6 +524,7 @@ pub(crate) fn run_bundle(
     let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
 
     print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
     if trace_enabled {
@@ -532,6 +533,43 @@ pub(crate) fn run_bundle(
     }
 
     Ok(())
+}
+
+/// Print the per-inference LLM telemetry block populated by the adapter's
+/// streaming path. Keys match `runtime_adapter/llm.rs`'s envelope metadata
+/// inserts. Non-LLM stages (no `ttft_ms`) emit nothing so ASR/TTS runs stay
+/// quiet under `--trace`.
+fn print_llm_trace_block(output: &Envelope, trace_enabled: bool) {
+    if !trace_enabled || !output.metadata.contains_key("ttft_ms") {
+        return;
+    }
+    let m = &output.metadata;
+    println!();
+    println!("LLM Trace");
+    println!("{}", "-".repeat(60));
+    let rows: &[(&str, &str, &str)] = &[
+        ("ttft_ms", "TTFT", " ms"),
+        ("decode_tps", "Decode TPS", " tok/s"),
+        ("prefill_tps", "Prefill TPS", " tok/s"),
+        ("tokens_per_second", "Wallclock TPS", " tok/s"),
+        ("mean_itl_ms", "Mean ITL", " ms"),
+        ("p95_itl_ms", "p95 ITL", " ms"),
+        ("emitted_chunks", "Emitted chunks", ""),
+        ("tokens_generated", "Tokens generated", ""),
+        ("finish_reason", "Finish reason", ""),
+    ];
+    for (key, label, suffix) in rows {
+        let present = m.contains_key(*key);
+        let val = m.get(*key).map(|s| s.as_str()).unwrap_or("—");
+        println!(
+            "  {:<22}: {}{}",
+            label,
+            val,
+            if present { suffix } else { "" }
+        );
+    }
+    println!("{}", "-".repeat(60));
+    println!();
 }
 
 /// Run inference on a model directly from the registry.
@@ -651,6 +689,7 @@ pub(crate) fn run_model(
     let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
 
     print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
     if trace_enabled {
@@ -703,6 +742,7 @@ pub(crate) fn run_directory(
     let (output, elapsed) = run_inference(dir, &metadata, &input, trace_enabled)?;
 
     print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
     if trace_enabled {
@@ -769,6 +809,7 @@ pub(crate) fn run_huggingface(
     let (output, elapsed) = run_inference(&cache_dir, &metadata, &input, trace_enabled)?;
 
     print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
     if trace_enabled {
@@ -863,6 +904,7 @@ pub(crate) fn run_model_file(
     let (output, elapsed) = run_inference(parent_dir, &metadata, &input, trace_enabled)?;
 
     print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
     if trace_enabled {

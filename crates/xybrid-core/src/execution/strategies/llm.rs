@@ -274,8 +274,7 @@ impl Default for DefaultLlmInference {
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 impl LlmInference for DefaultLlmInference {
     fn load_model(&mut self, config: &LlmModelConfig) -> ExecutorResult<()> {
-        use crate::runtime_adapter::llm::LlmRuntimeAdapter;
-        use crate::runtime_adapter::RuntimeAdapter;
+        use crate::runtime_adapter::llm::{LlmConfig, LlmRuntimeAdapter};
 
         // Determine backend hint
         let hint = config
@@ -283,9 +282,18 @@ impl LlmInference for DefaultLlmInference {
             .as_deref()
             .or(self.backend_hint.as_deref());
 
+        // Build the rich LlmConfig so chat_template and context_length
+        // reach the backend instead of being dropped by the trait
+        // `load_model(path)` wrapper.
+        let mut llm_config = LlmConfig::new(&config.model_path);
+        llm_config.context_length = config.context_length;
+        if let Some(template_path) = config.chat_template.as_ref() {
+            llm_config = llm_config.with_chat_template(template_path.clone());
+        }
+
         // Create adapter with backend hint
         let mut adapter = LlmRuntimeAdapter::with_backend_hint(hint)?;
-        adapter.load_model(&config.model_path)?;
+        adapter.load_model_with_config(&llm_config)?;
 
         self.adapter = Some(adapter);
         Ok(())

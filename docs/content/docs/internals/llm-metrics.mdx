@@ -1,0 +1,116 @@
+---
+title: LLM Telemetry Metrics
+description: TTFT, decode / prefill TPS, inter-chunk latency — what the SDK emits per LLM inference
+---
+
+The xybrid SDK emits per-inference LLM telemetry as string key/value pairs
+on the active tracing span and on the output envelope's metadata. These
+metrics are generated automatically by the LLM adapter's streaming path
+and require no additional configuration from the caller.
+
+This page documents the **production contract** — the fields, units, and
+guarantees the SDK provides.
+
+## Field reference
+
+| Field | Unit | Type | Source |
+| --- | --- | --- | --- |
+| `ttft_ms` | ms | `u64` | `Instant` of the first emitted `Response::Chunk` minus the `generate()` start time. |
+| `tokens_generated` | count | `usize` | mistralrs `Usage.completion_tokens` (terminal chunk). |
+| `tokens_per_second` | tok/s | `f32` | Wallclock: `tokens_generated / elapsed`. Includes prefill time. |
+| `decode_tps` | tok/s | `f32` | mistralrs `Usage.avg_compl_tok_per_sec` — steady-state decode only. `None` when 0.0 (timing below resolution). |
+| `prefill_tps` | tok/s | `f32` | mistralrs `Usage.avg_prompt_tok_per_sec`. Same zero-filter semantics. |
+| `mean_itl_ms` | ms | `f32` | Arithmetic mean of inter-chunk `Instant` deltas. `None` when only one chunk was emitted. |
+| `p95_itl_ms` | ms | `u32` | 95th percentile of inter-chunk deltas. Same one-chunk guard. |
+| `emitted_chunks` | count | `u32` | Number of `Response::Chunk` values observed on the stream. |
+| `finish_reason` | — | `String` | Terminal chunk's `ChunkChoice.finish_reason`. See values below. |
+
+### `finish_reason` values
+
+| Value | Meaning |
+|-------|---------|
+| `stop` | The model produced a natural end-of-sequence token — the response is complete. |
+| `length` | Generation was truncated because it hit the `max_tokens` limit. The model had more to produce but was cut off. Consider increasing `GenerationConfig.max_tokens` if responses are incomplete. |
+| `unknown` | The SDK could not extract `finish_reason` from the terminal chunk. Should not occur in normal operation after the terminal-chunk detection fix; if it does, it indicates a stream protocol issue. |
+
+## Where the metrics appear
+
+### Output envelope metadata
+
+After `TemplateExecutor::execute()` returns, the output `Envelope.metadata`
+(`HashMap<String, String>`) carries all nine fields as string key/value
+pairs. Callers can read them directly:
+
+```rust
+let output = executor.execute(&metadata, &input)?;
+if let Some(ttft) = output.metadata.get("ttft_ms") {
+    println!("Time to first token: {} ms", ttft);
+}
+```
+
+### Tracing span metadata
+
+The same fields are written to the active tracing span via
+`xybrid_core::tracing::add_metadata(key, value)`. This makes them
+available in:
+
+- `xybrid trace --latest` (CLI inspection)
+- `xybrid run --trace` (prints an LLM Trace block for LLM stages)
+- Any telemetry backend that reads span metadata from the exported trace
+
+An additional field, `generation_time_ms` (total wallclock for the
+`generate()` call), is also written to span metadata. It is not listed
+in the table above because it duplicates the stage-level `latency_ms`
+and is not LLM-specific.
+
+## Emission path
+
+1. `MistralBackend::generate` (`core/src/runtime_adapter/llm/mistral.rs`)
+   streams tokens via `stream_chat_request`. On `is_streaming=true`,
+   mistralrs signals completion via the **last `Response::Chunk`** — not
+   `Response::Done`. `ChunkChoice.finish_reason` and
+   `ChatCompletionChunkResponse.usage` are `Some(..)` only on that
+   terminal chunk. A stream that closes without a terminal signal returns
+   `AdapterError::InferenceFailed`; partial text is never published as a
+   successful result.
+2. `LlmRuntimeAdapter::execute`
+   (`core/src/runtime_adapter/llm/adapter.rs`) writes each scalar into
+   the response envelope's metadata **and** into the active tracing span
+   via `add_metadata`. The two destinations are intentional: the envelope
+   serves in-process Rust consumers, the tracing span flows to the
+   telemetry pipeline.
+
+## Deterministic-by-default
+
+`GenerationConfig::default()` uses `temperature = 0.0`, which selects
+mistralrs's deterministic sampler. Callers that want sampling must
+explicitly set `temperature > 0.0`. This preserves reproducible output
+for tests, caching, and any stage that depends on stable local inference.
+
+## Guarantees and non-guarantees
+
+- **Guaranteed on every successful LLM generation**: `ttft_ms`,
+  `tokens_generated`, `tokens_per_second`, `emitted_chunks`,
+  `finish_reason`.
+- **Best-effort**: `decode_tps`, `prefill_tps`, `mean_itl_ms`,
+  `p95_itl_ms`. Short prompts on fast hardware occasionally produce
+  `avg_*_tok_per_sec = 0.0` in mistralrs; these are filtered to `None`.
+  ITL summaries require at least two emitted chunks.
+- **Not emitted**: raw per-chunk deltas (`inter_chunk_ms`). Kept
+  in-process on `GenerationOutput` for Rust debugging; never serialized
+  to envelope metadata or the tracing span.
+
+## Non-LLM stages
+
+Preprocessing, postprocessing, ASR, TTS, and embedding stages do not emit
+any of the nine fields above. Their tracing spans carry only generic
+metadata (stage name, duration, model ID).
+
+## See also
+
+- `core/src/runtime_adapter/llm/mistral.rs` — streaming state machine
+  (`StreamState` + `handle_response`).
+- `core/src/runtime_adapter/llm/adapter.rs` — envelope + tracing emission.
+- `core/src/runtime_adapter/llm/config.rs` — `GenerationConfig` defaults.
+- `core/examples/llm_streaming_metrics.rs` — reference example with soft
+  assertions.

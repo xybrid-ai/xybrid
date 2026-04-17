@@ -920,7 +920,12 @@ impl TemplateExecutor {
             "tokens_per_second".to_string(),
             format!("{:.2}", output.tokens_per_second),
         );
-        response_metadata.insert("finish_reason".to_string(), output.finish_reason);
+        response_metadata.insert(
+            "finish_reason".to_string(),
+            output.finish_reason.clone(),
+        );
+        insert_llm_streaming_metrics(&mut response_metadata, &output);
+        mirror_llm_metrics_to_span(&output);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1002,7 +1007,12 @@ impl TemplateExecutor {
             "tokens_per_second".to_string(),
             format!("{:.2}", output.tokens_per_second),
         );
-        response_metadata.insert("finish_reason".to_string(), output.finish_reason);
+        response_metadata.insert(
+            "finish_reason".to_string(),
+            output.finish_reason.clone(),
+        );
+        insert_llm_streaming_metrics(&mut response_metadata, &output);
+        mirror_llm_metrics_to_span(&output);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1089,7 +1099,12 @@ impl TemplateExecutor {
             "tokens_per_second".to_string(),
             format!("{:.2}", output.tokens_per_second),
         );
-        response_metadata.insert("finish_reason".to_string(), output.finish_reason);
+        response_metadata.insert(
+            "finish_reason".to_string(),
+            output.finish_reason.clone(),
+        );
+        insert_llm_streaming_metrics(&mut response_metadata, &output);
+        mirror_llm_metrics_to_span(&output);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1239,7 +1254,12 @@ impl TemplateExecutor {
             "tokens_per_second".to_string(),
             format!("{:.2}", output.tokens_per_second),
         );
-        response_metadata.insert("finish_reason".to_string(), output.finish_reason);
+        response_metadata.insert(
+            "finish_reason".to_string(),
+            output.finish_reason.clone(),
+        );
+        insert_llm_streaming_metrics(&mut response_metadata, &output);
+        mirror_llm_metrics_to_span(&output);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1929,6 +1949,85 @@ fn crossfade_audio_chunks(chunks: &[Vec<f32>], crossfade_len: usize) -> Vec<f32>
 impl Default for TemplateExecutor {
     fn default() -> Self {
         Self::new("")
+    }
+}
+
+// =============================================================================
+// LLM streaming-telemetry helpers
+// =============================================================================
+//
+// The executor's four LLM execution paths (`execute_llm`,
+// `execute_llm_streaming`, `execute_llm_with_messages`,
+// `execute_llm_streaming_with_messages`) all call
+// `adapter.backend().generate(...)` directly, bypassing
+// `runtime_adapter::llm::LlmRuntimeAdapter::execute()` where the telemetry
+// extraction originally lived. These helpers re-apply the same contract at
+// the executor layer so all four paths surface the 9 LLM scalars expected
+// by the platform ingest (repos/xybrid-platform/ingest/src/tinybird.rs).
+//
+// Keys match the Tinybird `telemetry_spans` datasource columns exactly.
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn insert_llm_streaming_metrics(
+    response_metadata: &mut HashMap<String, String>,
+    output: &crate::runtime_adapter::llm::GenerationOutput,
+) {
+    if let Some(v) = output.ttft_ms {
+        response_metadata.insert("ttft_ms".to_string(), v.to_string());
+    }
+    if let Some(v) = output.mean_itl_ms {
+        response_metadata.insert("mean_itl_ms".to_string(), format!("{:.4}", v));
+    }
+    if let Some(v) = output.p95_itl_ms {
+        response_metadata.insert("p95_itl_ms".to_string(), v.to_string());
+    }
+    if let Some(v) = output.emitted_chunks {
+        response_metadata.insert("emitted_chunks".to_string(), v.to_string());
+    }
+    if let Some(v) = output.decode_tps {
+        response_metadata.insert("decode_tps".to_string(), format!("{:.4}", v));
+    }
+    if let Some(v) = output.prefill_tps {
+        response_metadata.insert("prefill_tps".to_string(), format!("{:.4}", v));
+    }
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn mirror_llm_metrics_to_span(output: &crate::runtime_adapter::llm::GenerationOutput) {
+    // Always-present scalars. These reach the platform via
+    // `PlatformEvent.stages[].spans[].metadata` (populated by
+    // `xybrid_core::tracing::add_metadata` on the currently active span).
+    xybrid_trace::add_metadata("tokens_generated", output.tokens_generated.to_string());
+    xybrid_trace::add_metadata(
+        "generation_time_ms",
+        output.generation_time_ms.to_string(),
+    );
+    xybrid_trace::add_metadata(
+        "tokens_per_second",
+        format!("{:.2}", output.tokens_per_second),
+    );
+    xybrid_trace::add_metadata("finish_reason", &output.finish_reason);
+
+    // Streaming-derived scalars. Only mirror when the backend reported them;
+    // the `Option<_>` + `nonzero` filter in mistral keeps misleading zeros
+    // out of the dashboard.
+    if let Some(v) = output.ttft_ms {
+        xybrid_trace::add_metadata("ttft_ms", v.to_string());
+    }
+    if let Some(v) = output.mean_itl_ms {
+        xybrid_trace::add_metadata("mean_itl_ms", format!("{:.4}", v));
+    }
+    if let Some(v) = output.p95_itl_ms {
+        xybrid_trace::add_metadata("p95_itl_ms", v.to_string());
+    }
+    if let Some(v) = output.emitted_chunks {
+        xybrid_trace::add_metadata("emitted_chunks", v.to_string());
+    }
+    if let Some(v) = output.decode_tps {
+        xybrid_trace::add_metadata("decode_tps", format!("{:.4}", v));
+    }
+    if let Some(v) = output.prefill_tps {
+        xybrid_trace::add_metadata("prefill_tps", format!("{:.4}", v));
     }
 }
 

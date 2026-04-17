@@ -129,7 +129,9 @@ pub struct GenerationConfig {
     #[serde(default = "default_max_tokens")]
     pub max_tokens: usize,
 
-    /// Temperature for sampling. Default: 0.7
+    /// Temperature for sampling. Default: 0.0 (deterministic / greedy).
+    /// Callers who want sampling must set this explicitly — see `greedy()`
+    /// and `creative()` constructors.
     #[serde(default = "default_temperature")]
     pub temperature: f32,
 
@@ -164,7 +166,11 @@ fn default_max_tokens() -> usize {
 }
 
 fn default_temperature() -> f32 {
-    0.7
+    // Deterministic-by-default: 0.0 triggers mistralrs's
+    // `set_deterministic_sampler()` path, making local inference
+    // reproducible without explicit config. Callers who want
+    // sampling must opt in (e.g. `GenerationConfig::creative()`).
+    0.0
 }
 
 fn default_top_p() -> f32 {
@@ -495,7 +501,11 @@ mod tests {
     fn test_generation_config_defaults() {
         let config = GenerationConfig::default();
         assert_eq!(config.max_tokens, 2048);
-        assert!((config.temperature - 0.7).abs() < f32::EPSILON);
+        // Deterministic-by-default: temperature=0.0 is the SDK's documented
+        // default (see `default_temperature` doc-comment). Callers that want
+        // sampling opt in via `GenerationConfig::creative()` or explicit
+        // `with_temperature(x)`.
+        assert!(config.temperature.abs() < f32::EPSILON);
         assert!((config.top_p - 0.9).abs() < f32::EPSILON);
         assert!((config.min_p - 0.05).abs() < f32::EPSILON);
         assert_eq!(config.top_k, 40);

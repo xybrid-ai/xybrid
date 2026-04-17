@@ -48,10 +48,26 @@ pub struct GenerationOutput {
     pub tokens_generated: usize,
     /// Generation time in milliseconds
     pub generation_time_ms: u64,
-    /// Tokens per second
+    /// Tokens per second (wallclock — includes prefill + decode)
     pub tokens_per_second: f32,
     /// Finish reason: "stop", "length", "error"
     pub finish_reason: String,
+    /// Time to first emitted chunk (ms). `None` for non-streaming backends.
+    pub ttft_ms: Option<u64>,
+    /// Mean inter-token latency (ms), computed from inter-chunk gaps.
+    pub mean_itl_ms: Option<f32>,
+    /// p95 inter-token latency (ms).
+    pub p95_itl_ms: Option<u32>,
+    /// Number of chunks emitted (≈ tokens when 1 token/chunk).
+    pub emitted_chunks: Option<u32>,
+    /// Per-gap inter-chunk latencies (ms), for histogram analysis if desired.
+    pub inter_chunk_ms: Vec<u32>,
+    /// Decode-only tokens/sec (excludes prefill time). Sourced from
+    /// mistralrs's terminal `Usage.avg_compl_tok_per_sec`. Steady-state
+    /// throughput, not wallclock.
+    pub decode_tps: Option<f32>,
+    /// Prefill tokens/sec. Sourced from `Usage.avg_prompt_tok_per_sec`.
+    pub prefill_tps: Option<f32>,
 }
 
 // =============================================================================
@@ -401,7 +417,62 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
                     "tokens_per_second".to_string(),
                     format!("{:.2}", output.tokens_per_second),
                 );
-                response_metadata.insert("finish_reason".to_string(), output.finish_reason);
+                response_metadata.insert(
+                    "finish_reason".to_string(),
+                    output.finish_reason.clone(),
+                );
+
+                // Streaming-path metrics. Keys match the platform Tinybird
+                // schema + ingest extractor (repos/xybrid-platform/ingest/src/tinybird.rs).
+                // Route to both the envelope metadata (so downstream stages can
+                // see them) and `xybrid_core::tracing::add_metadata` (so the
+                // span-level wire path picks them up — see plan phase 0.4).
+                if let Some(v) = output.ttft_ms {
+                    let s = v.to_string();
+                    response_metadata.insert("ttft_ms".to_string(), s.clone());
+                    crate::tracing::add_metadata("ttft_ms", &s);
+                }
+                if let Some(v) = output.mean_itl_ms {
+                    let s = format!("{:.4}", v);
+                    response_metadata.insert("mean_itl_ms".to_string(), s.clone());
+                    crate::tracing::add_metadata("mean_itl_ms", &s);
+                }
+                if let Some(v) = output.p95_itl_ms {
+                    let s = v.to_string();
+                    response_metadata.insert("p95_itl_ms".to_string(), s.clone());
+                    crate::tracing::add_metadata("p95_itl_ms", &s);
+                }
+                if let Some(v) = output.emitted_chunks {
+                    let s = v.to_string();
+                    response_metadata.insert("emitted_chunks".to_string(), s.clone());
+                    crate::tracing::add_metadata("emitted_chunks", &s);
+                }
+                if let Some(v) = output.decode_tps {
+                    let s = format!("{:.4}", v);
+                    response_metadata.insert("decode_tps".to_string(), s.clone());
+                    crate::tracing::add_metadata("decode_tps", &s);
+                }
+                if let Some(v) = output.prefill_tps {
+                    let s = format!("{:.4}", v);
+                    response_metadata.insert("prefill_tps".to_string(), s.clone());
+                    crate::tracing::add_metadata("prefill_tps", &s);
+                }
+                // Mirror the always-present scalars onto the span metadata
+                // too so they reach the platform without relying on the
+                // envelope metadata being serialized downstream.
+                crate::tracing::add_metadata(
+                    "tokens_generated",
+                    output.tokens_generated.to_string(),
+                );
+                crate::tracing::add_metadata(
+                    "generation_time_ms",
+                    output.generation_time_ms.to_string(),
+                );
+                crate::tracing::add_metadata(
+                    "tokens_per_second",
+                    format!("{:.2}", output.tokens_per_second),
+                );
+                crate::tracing::add_metadata("finish_reason", &output.finish_reason);
 
                 Ok(Envelope {
                     kind: EnvelopeKind::Text(output.text),
@@ -471,6 +542,13 @@ mod tests {
             generation_time_ms: 100,
             tokens_per_second: 30.0,
             finish_reason: "stop".to_string(),
+            ttft_ms: None,
+            mean_itl_ms: None,
+            p95_itl_ms: None,
+            emitted_chunks: None,
+            inter_chunk_ms: Vec::new(),
+            decode_tps: None,
+            prefill_tps: None,
         };
         assert_eq!(output.text, "Hello world");
         assert_eq!(output.tokens_generated, 3);
@@ -512,6 +590,13 @@ mod tests {
                     generation_time_ms: 50,
                     tokens_per_second: 40.0,
                     finish_reason: "stop".to_string(),
+                    ttft_ms: None,
+                    mean_itl_ms: None,
+                    p95_itl_ms: None,
+                    emitted_chunks: None,
+                    inter_chunk_ms: Vec::new(),
+                    decode_tps: None,
+                    prefill_tps: None,
                 })
             }
             fn generate_raw(
@@ -584,6 +669,13 @@ mod tests {
                     generation_time_ms: 10,
                     tokens_per_second: 100.0,
                     finish_reason: "stop".to_string(),
+                    ttft_ms: None,
+                    mean_itl_ms: None,
+                    p95_itl_ms: None,
+                    emitted_chunks: None,
+                    inter_chunk_ms: Vec::new(),
+                    decode_tps: None,
+                    prefill_tps: None,
                 })
             }
             fn generate_raw(

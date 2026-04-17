@@ -67,6 +67,10 @@ pub mod candle;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 pub mod llm;
 
+// Shared telemetry helpers for LLM backends (itl_stats, etc.)
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+pub(crate) mod llm_telemetry;
+
 // MistralBackend (feature-gated, uses mistral.rs - desktop only, NOT Android)
 // Requires +fp16 on ARM which causes SIGILL on devices without ARMv8.2-A FP16
 #[cfg(feature = "llm-mistral")]

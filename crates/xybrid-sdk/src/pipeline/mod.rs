@@ -907,7 +907,10 @@ impl Pipeline {
             })?;
         let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
-        crate::telemetry::set_telemetry_pipeline_context(None, None);
+        // Note: `set_telemetry_pipeline_context(None, None)` deferred to
+        // after `publish_telemetry_event` below. The exporter's flush
+        // thread reads pipeline_id/trace_id lazily at flush time; if we
+        // cleared here the PipelineComplete event would get null IDs.
 
         let stages: Vec<StageTiming> = results
             .iter()
@@ -933,7 +936,22 @@ impl Pipeline {
             )
         };
 
-        // Emit telemetry event
+        // Emit telemetry event. LLM metrics ride on the separate
+        // `PlatformEvent.stages[].spans[].metadata` path (populated via
+        // `xybrid_core::tracing::add_metadata` in the LLM adapter), so we
+        // intentionally keep this `data` blob compact — only the fields
+        // that already crossed the wire before llm_metrics existed.
+        let stage_data: Vec<serde_json::Value> = results
+            .iter()
+            .map(|result| {
+                serde_json::json!({
+                    "name": result.stage,
+                    "latency_ms": result.latency_ms,
+                    "target": result.routing_decision.target.to_string(),
+                })
+            })
+            .collect();
+
         let event = crate::telemetry::TelemetryEvent {
             event_type: "PipelineComplete".to_string(),
             stage_name: self.name.clone(),
@@ -942,11 +960,7 @@ impl Pipeline {
             error: None,
             data: Some(
                 serde_json::json!({
-                    "stages": stages.iter().map(|s| serde_json::json!({
-                        "name": s.name,
-                        "latency_ms": s.latency_ms,
-                        "target": s.target,
-                    })).collect::<Vec<_>>(),
+                    "stages": stage_data,
                     "output_type": format!("{:?}", output_type),
                 })
                 .to_string(),
@@ -957,6 +971,10 @@ impl Pipeline {
                 .unwrap_or(0),
         };
         crate::telemetry::publish_telemetry_event(event);
+
+        // Clear pipeline context AFTER publish so the event carried
+        // correlation IDs visible to the exporter's lazy-read flush.
+        crate::telemetry::set_telemetry_pipeline_context(None, None);
 
         Ok(PipelineExecutionResult {
             name: self.name.clone(),
@@ -1024,7 +1042,9 @@ impl Pipeline {
                 })?;
             let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
-            crate::telemetry::set_telemetry_pipeline_context(None, None);
+            // Note: `set_telemetry_pipeline_context(None, None)` deferred
+            // to after `publish_telemetry_event` below — see sync arm for
+            // the correlation-ID rationale.
 
             let stages: Vec<StageTiming> = results
                 .iter()
@@ -1049,6 +1069,46 @@ impl Pipeline {
                     Envelope::new(EnvelopeKind::Text(String::new())),
                 )
             };
+
+            // Emit PipelineComplete telemetry event. Previously absent from
+            // this async path (existed only in sync `run`); attaching now
+            // brings the two paths to parity. LLM metrics ride on span
+            // metadata (see the sync arm above for rationale), so this
+            // `data` blob stays compact.
+            let stage_data: Vec<serde_json::Value> = results
+                .iter()
+                .map(|result| {
+                    serde_json::json!({
+                        "name": result.stage,
+                        "latency_ms": result.latency_ms,
+                        "target": result.routing_decision.target.to_string(),
+                    })
+                })
+                .collect();
+
+            let event = crate::telemetry::TelemetryEvent {
+                event_type: "PipelineComplete".to_string(),
+                stage_name: name.clone(),
+                target: None,
+                latency_ms: Some(total_latency_ms),
+                error: None,
+                data: Some(
+                    serde_json::json!({
+                        "stages": stage_data,
+                        "output_type": format!("{:?}", output_type),
+                    })
+                    .to_string(),
+                ),
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+            };
+            crate::telemetry::publish_telemetry_event(event);
+
+            // Clear pipeline context after publish to keep the exporter's
+            // lazy-read flush correlated with the just-completed pipeline.
+            crate::telemetry::set_telemetry_pipeline_context(None, None);
 
             Ok(PipelineExecutionResult {
                 name,
@@ -1383,4 +1443,12 @@ id: asr
         .unwrap();
         assert_eq!(stage.stage_id(), "asr");
     }
+
+    // NOTE: Prior to Phase 0.4 we had a `llm_metrics_appear_in_per_stage_json`
+    // test here that validated an `llm_metrics` sub-object on each stage's
+    // telemetry entry. That path was dead at the wire boundary (see plan
+    // phase 0.4), so both the emission code and this test were removed.
+    // LLM metrics now ride on `PlatformEvent.stages[].spans[].metadata`
+    // via `xybrid_core::tracing::add_metadata`, which is covered by the
+    // platform ingest's own extraction tests in `ingest/src/tinybird.rs`.
 }
