@@ -920,10 +920,7 @@ impl TemplateExecutor {
             "tokens_per_second".to_string(),
             format!("{:.2}", output.tokens_per_second),
         );
-        response_metadata.insert(
-            "finish_reason".to_string(),
-            output.finish_reason.clone(),
-        );
+        response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
         mirror_llm_metrics_to_span(&output);
 
@@ -1007,10 +1004,7 @@ impl TemplateExecutor {
             "tokens_per_second".to_string(),
             format!("{:.2}", output.tokens_per_second),
         );
-        response_metadata.insert(
-            "finish_reason".to_string(),
-            output.finish_reason.clone(),
-        );
+        response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
         mirror_llm_metrics_to_span(&output);
 
@@ -1099,10 +1093,7 @@ impl TemplateExecutor {
             "tokens_per_second".to_string(),
             format!("{:.2}", output.tokens_per_second),
         );
-        response_metadata.insert(
-            "finish_reason".to_string(),
-            output.finish_reason.clone(),
-        );
+        response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
         mirror_llm_metrics_to_span(&output);
 
@@ -1254,10 +1245,7 @@ impl TemplateExecutor {
             "tokens_per_second".to_string(),
             format!("{:.2}", output.tokens_per_second),
         );
-        response_metadata.insert(
-            "finish_reason".to_string(),
-            output.finish_reason.clone(),
-        );
+        response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
         mirror_llm_metrics_to_span(&output);
 
@@ -1998,10 +1986,7 @@ fn mirror_llm_metrics_to_span(output: &crate::runtime_adapter::llm::GenerationOu
     // `PlatformEvent.stages[].spans[].metadata` (populated by
     // `xybrid_core::tracing::add_metadata` on the currently active span).
     xybrid_trace::add_metadata("tokens_generated", output.tokens_generated.to_string());
-    xybrid_trace::add_metadata(
-        "generation_time_ms",
-        output.generation_time_ms.to_string(),
-    );
+    xybrid_trace::add_metadata("generation_time_ms", output.generation_time_ms.to_string());
     xybrid_trace::add_metadata(
         "tokens_per_second",
         format!("{:.2}", output.tokens_per_second),

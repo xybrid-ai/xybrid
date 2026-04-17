@@ -417,10 +417,7 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
                     "tokens_per_second".to_string(),
                     format!("{:.2}", output.tokens_per_second),
                 );
-                response_metadata.insert(
-                    "finish_reason".to_string(),
-                    output.finish_reason.clone(),
-                );
+                response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
 
                 // Streaming-path metrics. Keys match the platform Tinybird
                 // schema + ingest extractor (repos/xybrid-platform/ingest/src/tinybird.rs).

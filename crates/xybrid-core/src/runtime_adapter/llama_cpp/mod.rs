@@ -47,10 +47,10 @@ fn strip_thinking_tags(text: &str) -> String {
     result
 }
 
-use crate::runtime_adapter::llm_telemetry::itl_stats;
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
 };
+use crate::runtime_adapter::llm_telemetry::itl_stats;
 use crate::runtime_adapter::AdapterError;
 use std::sync::Mutex;
 #[cfg(feature = "llm-llamacpp")]
