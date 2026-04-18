@@ -26,32 +26,16 @@ mod sys;
 // Re-export log control functions for external use
 pub use sys::{llama_log_get_verbosity, llama_log_set_verbosity};
 
-/// Strip thinking/reasoning tags from model output.
-///
-/// Models like Qwen 3.5 emit `<think>...</think>` blocks before the actual
-/// response. This function removes those blocks so only the user-facing
-/// content remains.
-fn strip_thinking_tags(text: &str) -> String {
-    let mut result = text.to_string();
-    // Remove all <think>...</think> blocks (greedy within each block)
-    while let Some(start) = result.find("<think>") {
-        if let Some(end) = result[start..].find("</think>") {
-            let end_absolute = start + end + "</think>".len();
-            result.replace_range(start..end_absolute, "");
-        } else {
-            // Opening tag without closing — strip from <think> to end
-            result.truncate(start);
-            break;
-        }
-    }
-    result
-}
-
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
 };
 #[cfg(feature = "llm-llamacpp")]
 use crate::runtime_adapter::llm_telemetry::StreamingTelemetry;
+#[cfg(feature = "llm-llamacpp")]
+use crate::runtime_adapter::streaming_postprocess::{
+    merge_stop_patterns, strip_thinking_tags, trim_partial_stop_suffix, truncate_at_first_stop,
+    StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
+};
 use crate::runtime_adapter::AdapterError;
 use std::sync::Mutex;
 #[cfg(feature = "llm-llamacpp")]
@@ -276,14 +260,12 @@ impl LlmBackend for LlamaCppBackend {
             )));
         }
 
-        let start = std::time::Instant::now();
-
-        // Use the streaming API internally so we can capture per-token
-        // timestamps for TTFT + inter-token-latency telemetry. The closure
-        // is observation-only (no external emission) — generation still
-        // returns the full token vector like `llama_generate_with_stops`
-        // did. Keeps the non-streaming contract of this function intact.
-        let mut chunk_timestamps: Vec<std::time::Instant> = Vec::new();
+        // Per-chunk timestamps capture the streaming cadence for TTFT +
+        // inter-token-latency telemetry. The closure is observation-only
+        // (no external emission) — generation still returns the full
+        // token vector like `llama_generate_with_stops` did. Keeps the
+        // non-streaming contract of this function intact.
+        let mut tel = StreamingTelemetry::new(tokens.len());
         let (output_tokens, _stopped_by_callback) = sys::llama_generate_streaming(
             context,
             model,
@@ -321,61 +303,20 @@ impl LlmBackend for LlamaCppBackend {
         log::debug!(target: "xybrid_core", "LLM raw output ({} chars): {:?}", text.len(), &text[..text.len().min(200)]);
         log::debug!(target: "xybrid_core", "First 100 bytes: {:?}", text.as_bytes().iter().take(100).collect::<Vec<_>>());
 
-        // Apply stop sequence truncation
-        // Find the earliest occurrence of any stop sequence and truncate there
-        let mut finish_reason = "length".to_string();
-
-        // Build list of patterns to check - include config stop sequences plus common markers
-        let mut stop_patterns: Vec<&str> =
-            config.stop_sequences.iter().map(|s| s.as_str()).collect();
-        // Always check for these common markers even if not in config
-        // Note: <end_of_turn> is Gemma's stop token, <|im_end|> is ChatML (Qwen, Phi)
-        // Also include partial markers without "<" for models using ChatML fallback
-        let extra_patterns = [
-            "<|im_end|>",
-            "<|im_start|>",
-            "<|endoftext|>",
-            "</s>",
-            "<end_of_turn>",
-            "|im_end|>",
-            "|im_start|>",
-            "|endoftext|>",
-            "end_of_turn>",
-        ];
-        for p in &extra_patterns {
-            if !stop_patterns.contains(p) {
-                stop_patterns.push(p);
-            }
-        }
-
-        log::debug!(target: "xybrid_core", "Searching for stop patterns: {:?}", stop_patterns);
-
-        let mut earliest_pos: Option<usize> = None;
-        for stop_seq in &stop_patterns {
-            if let Some(pos) = text.find(stop_seq) {
-                log::debug!(target: "xybrid_core", "Found '{}' at position {}", stop_seq, pos);
-                match earliest_pos {
-                    None => earliest_pos = Some(pos),
-                    Some(current) if pos < current => earliest_pos = Some(pos),
-                    _ => {}
-                }
-            }
-        }
-        if let Some(pos) = earliest_pos {
-            log::debug!(target: "xybrid_core", "Truncating at position {}", pos);
-            text.truncate(pos);
-            finish_reason = "stop".to_string();
-        } else {
-            log::debug!(target: "xybrid_core", "No stop pattern found in text");
-        }
-
-        // Strip thinking tags (e.g., Qwen 3.5 <think>...</think> blocks)
-        let text = strip_thinking_tags(&text);
-
-        // Trim any trailing whitespace from the response
-        let text = text.trim().to_string();
-
+        // Stop-pattern truncation + think-tag stripping live in
+        // `streaming_postprocess`. The `*_BROKEN` patterns cover
+        // tokenizers that split the leading `<` off a chat-template
+        // marker — safe only for final-text cleanup, not streaming.
+        let final_stop_patterns = {
+            let mut extras: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
+            extras.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
+            merge_stop_patterns(&config.stop_sequences, &extras)
         };
+        log::debug!(target: "xybrid_core", "Searching for stop patterns: {:?}", final_stop_patterns);
+        let stopped = truncate_at_first_stop(&mut text, &final_stop_patterns);
+        let text = strip_thinking_tags(&text).trim().to_string();
+        let finish_reason = if stopped { "stop" } else { "length" }.to_string();
+
         // Telemetry derivation (TTFT, mean/p95 ITL, decode_tps, prefill_tps)
         // lives in `llm_telemetry::StreamingTelemetry` and is shared with
         // the mistral backend — llama.cpp's sys bindings don't expose
@@ -521,44 +462,7 @@ impl LlmBackend for LlamaCppBackend {
         let stop_patterns = merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
         let mut filter = StreamingTextFilter::new(stop_patterns.clone());
         let mut token_index = 0usize;
-        let mut hit_stop_pattern = false;
-        let mut inside_think_block = false;
 
-        // Build stop patterns list for early detection during streaming
-        // Note: <end_of_turn> is Gemma's stop token, <|im_end|> is ChatML (Qwen, Phi)
-        let streaming_stop_patterns: Vec<String> = {
-            let mut patterns: Vec<String> = config.stop_sequences.clone();
-            for p in [
-                "<|im_end|>",
-                "<|im_start|>",
-                "<|endoftext|>",
-                "</s>",
-                "<end_of_turn>",
-            ] {
-                if !patterns.iter().any(|s| s == p) {
-                    patterns.push(p.to_string());
-                }
-            }
-            patterns
-        };
-
-        // Helper: find if text ends with a PREFIX of any stop pattern.
-        // Returns the position where the potential stop sequence starts, or None.
-        // This holds back partial matches so they aren't emitted before the
-        // full pattern is accumulated and caught.
-        let find_potential_stop_start = |text: &str| -> Option<usize> {
-            for pattern in &streaming_stop_patterns {
-                for prefix_len in 1..=pattern.len() {
-                    let prefix = &pattern[..prefix_len];
-                    if text.ends_with(prefix) {
-                        return Some(text.len() - prefix_len);
-                    }
-                }
-            }
-            None
-        };
-
-        // Generate with streaming callback
         let (output_tokens, _stopped_by_callback) = sys::llama_generate_streaming(
             context,
             model,
@@ -569,74 +473,20 @@ impl LlmBackend for LlamaCppBackend {
             config.min_p,
             config.top_k,
             config.repetition_penalty,
-            &streaming_stop_patterns, // Pass full stop patterns to C layer
+            &stop_patterns, // C layer uses these for early stop / llama_vocab_is_eog
             |token_id, token_text| {
-                // Record the timestamp on every C-layer callback, before
-                // any stop-pattern filtering. This keeps the stream-level
-                // timing independent of what actually made it to the
-                // external `on_token` consumer.
-                chunk_timestamps.push(std::time::Instant::now());
-
-                // Once we hit a stop pattern, don't emit any more tokens
-                if hit_stop_pattern {
-                    return Ok(());
-                }
-
-                cumulative_text.push_str(token_text);
-
-                // Handle <think>...</think> blocks: suppress streaming output
-                // while inside a thinking block (Qwen 3.5, etc.)
-                if !inside_think_block && cumulative_text[last_emitted_len..].contains("<think>") {
-                    inside_think_block = true;
-                    // Move emitted pointer past any content before <think>
-                    if let Some(pos) = cumulative_text.find("<think>") {
-                        last_emitted_len = pos;
-                    }
-                }
-                if inside_think_block {
-                    if cumulative_text.contains("</think>") {
-                        inside_think_block = false;
-                        // Strip the think block from cumulative text
-                        cumulative_text = strip_thinking_tags(&cumulative_text);
-                        // Reset emitted length to current cleaned text length
-                        // (nothing new to emit yet, next token will trigger emission)
-                        last_emitted_len = last_emitted_len.min(cumulative_text.len());
-                    }
-                    return Ok(());
-                }
-
-                // Check if any COMPLETE stop pattern is now in the cumulative text
-                for pattern in &streaming_stop_patterns {
-                    if cumulative_text.contains(pattern.as_str()) {
-                        log::debug!(target: "xybrid_core", "Streaming: detected stop pattern '{}', stopping token emission", pattern);
-                        hit_stop_pattern = true;
-                        // Truncate the cumulative text at the stop pattern
-                        if let Some(pos) = cumulative_text.find(pattern.as_str()) {
-                            cumulative_text.truncate(pos);
-                        }
-                        return Ok(());
-                    }
-                }
-
-                // Find the safe portion to emit (excluding potential stop sequence starts)
-                let safe_end =
-                    find_potential_stop_start(&cumulative_text).unwrap_or(cumulative_text.len());
                 // Timestamp every C-layer callback, before any filtering —
                 // the stream itself is what's being measured, not the
                 // user-visible emission.
                 tel.record_chunk();
 
-                // Only emit if we have new safe content
-                if safe_end > last_emitted_len {
-                    let safe_text = &cumulative_text[last_emitted_len..safe_end];
+                if let Some(safe_text) = filter.push(token_text) {
                     let partial = PartialToken::new(
-                        safe_text.to_string(),
+                        safe_text,
                         token_index,
-                        cumulative_text[..safe_end].to_string(),
+                        filter.cumulative_emitted().to_string(),
                     )
                     .with_token_id(token_id as i64);
-
-                    last_emitted_len = safe_end;
                     token_index += 1;
                     on_token(partial)?;
                 }
@@ -650,62 +500,37 @@ impl LlmBackend for LlamaCppBackend {
         // stop-pattern cleanup. Shared with `generate()` — see
         // `compute_streaming_fields`.
         let fields = tel.finalize(output_tokens.len());
-        let mut text = sys::llama_detokenize(model, &output_tokens)?;
 
-        // Apply stop sequence truncation (safety net - streaming callback already truncated)
-        let mut finish_reason = if hit_stop_pattern {
+        // Final-output cleanup: detokenize the full token vector (rather
+        // than using the filter's cumulative text) as a belt-and-braces
+        // guard against chunk-boundary UTF-8 edge cases, then run the
+        // same truncate / trim-partial / strip-think passes used by the
+        // non-streaming path. The `_BROKEN` fallback patterns are
+        // included here because this is final-text only — no streaming
+        // false-positive risk.
+        let final_patterns = {
+            let mut extras: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
+            extras.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
+            merge_stop_patterns(&config.stop_sequences, &extras)
+        };
+        let mut text = sys::llama_detokenize(model, &output_tokens)?;
+        let stopped_full = truncate_at_first_stop(&mut text, &final_patterns);
+        let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_patterns);
+        let text = strip_thinking_tags(&text).trim().to_string();
+        let finish_reason = if filter.is_stopped() || stopped_full || trimmed_partial {
             "stop".to_string()
         } else {
             "length".to_string()
         };
 
-        // Use streaming_stop_patterns (already built above) for final text cleanup
-        let mut earliest_pos: Option<usize> = None;
-        for pattern in &streaming_stop_patterns {
-            if let Some(pos) = text.find(pattern.as_str()) {
-                match earliest_pos {
-                    None => earliest_pos = Some(pos),
-                    Some(current) if pos < current => earliest_pos = Some(pos),
-                    _ => {}
-                }
-            }
-        }
-        if let Some(pos) = earliest_pos {
-            text.truncate(pos);
-            finish_reason = "stop".to_string();
-        }
-
-        // Clean up trailing partial stop tokens.
-        // With llama_vocab_is_eog() catching model stop tokens at the C layer,
-        // we only need to check for partial prefixes of our known stop patterns.
-        for pattern in &streaming_stop_patterns {
-            // Check if text ends with any suffix that is a prefix of a stop pattern.
-            // E.g., text ending with "<|im_" when the stop pattern is "<|im_end|>".
-            for prefix_len in 1..pattern.len() {
-                let prefix = &pattern[..prefix_len];
-                if text.ends_with(prefix) {
-                    log::debug!(target: "xybrid_core", "Cleaning up partial stop token: '{}'", prefix);
-                    text.truncate(text.len() - prefix_len);
-                    finish_reason = "stop".to_string();
-                    break;
-                }
-            }
-            if finish_reason == "stop" {
-                break;
-            }
-        }
-
-        // Strip thinking tags (e.g., Qwen 3.5 <think>...</think> blocks)
-        let text = strip_thinking_tags(&text);
-
-        let text = text.trim().to_string();
-
-        // Send final token with finish reason
+        // Send final empty token with finish_reason — matches the
+        // pre-refactor contract so downstream consumers see a
+        // terminal signal. Guarded on `token_index > 0` to avoid
+        // emitting a stray terminal chunk when nothing was ever
+        // emitted (e.g. immediate stop).
         if token_index > 0 {
             let final_partial = PartialToken::new(String::new(), token_index, text.clone())
                 .with_finish_reason(&finish_reason);
-
-            // Ignore error on final notification - generation is complete
             let _ = on_token(final_partial);
         }
 
