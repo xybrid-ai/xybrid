@@ -97,12 +97,13 @@ pub struct TelemetryConfig {
 
 impl Default for TelemetryConfig {
     fn default() -> Self {
+        let device = crate::device::Device::current();
         Self {
             endpoint: String::new(),
             api_key: String::new(),
             session_id: Uuid::new_v4(),
-            device_id: None,
-            platform: None,
+            device_id: Some(device.id.clone()),
+            platform: Some(device.platform.clone()),
             app_version: None,
             batch_size: 10,
             flush_interval_secs: 5,
@@ -128,13 +129,19 @@ impl TelemetryConfig {
         self
     }
 
-    /// Set device metadata
+    /// Override device ID and platform (both auto-detected by default).
     pub fn with_device(
         mut self,
         device_id: impl Into<String>,
         platform: impl Into<String>,
     ) -> Self {
         self.device_id = Some(device_id.into());
+        self.platform = Some(platform.into());
+        self
+    }
+
+    /// Override only the platform string (device ID remains auto-detected).
+    pub fn with_platform(mut self, platform: impl Into<String>) -> Self {
         self.platform = Some(platform.into());
         self
     }

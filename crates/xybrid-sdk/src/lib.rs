@@ -108,6 +108,7 @@ use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 
 pub mod benchmark;
 pub mod cache;
+pub mod device;
 pub mod llm;
 pub mod metadata_gen;
 pub mod model;
@@ -151,6 +152,7 @@ pub use xybrid_core::execution::template as execution_template;
 // SDK types (new API)
 pub use benchmark::{compare_benchmarks, BenchmarkResult, ExecutionProviderInfo};
 pub use cache::{CacheManager, CacheStatus, SdkCacheProvider};
+pub use device::{device_id, Device};
 pub use llm::{
     default_gateway_url, ChatMessage, CompletionRequest, CompletionResponse, LlmBackend,
     LlmClientConfig, MessageRole, TokenUsage,
