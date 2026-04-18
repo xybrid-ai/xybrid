@@ -13,7 +13,8 @@ use crate::ir::MessageRole;
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
 };
-use crate::runtime_adapter::llm_telemetry::itl_stats;
+#[cfg(feature = "llm-mistral")]
+use crate::runtime_adapter::llm_telemetry::compute_streaming_fields;
 use crate::runtime_adapter::AdapterError;
 
 #[cfg(feature = "llm-mistral")]
@@ -399,48 +400,39 @@ impl LlmBackend for MistralBackend {
             finish_reason,
             tokens_reported,
             chunk_ts,
-            decode_tps_reported: decode_tps,
-            prefill_tps_reported: prefill_tps,
+            decode_tps_reported,
+            prefill_tps_reported,
             ..
         } = state;
-
-        let elapsed = start.elapsed();
 
         // `saw_terminal` in the async block above guarantees we had a
         // usage-bearing terminal chunk; if it was absent despite terminal
         // signals, fall back to chunk count so downstream metrics don't NaN.
         let tokens_generated = tokens_reported.unwrap_or(chunk_ts.len());
 
-        let ttft_ms = chunk_ts
-            .first()
-            .map(|t0| t0.duration_since(start).as_millis() as u64);
-
-        let inter_chunk_ms: Vec<u32> = chunk_ts
-            .windows(2)
-            .map(|w| w[1].duration_since(w[0]).as_millis() as u32)
-            .collect();
-
-        let (mean_itl_ms, p95_itl_ms) = itl_stats(&inter_chunk_ms);
-
-        let tokens_per_second = if elapsed.as_secs_f32() > 0.0 {
-            tokens_generated as f32 / elapsed.as_secs_f32()
-        } else {
-            0.0
-        };
+        // Shared telemetry derivation (TTFT, mean/p95 ITL, tokens_per_second).
+        // `prompt_token_count = 0` because mistralrs tokenizes internally
+        // and reports prefill_tps directly via `Usage.avg_prompt_tok_per_sec`
+        // — we override the (always-None) derived value with the engine
+        // number below via `.or()`.
+        let fields = compute_streaming_fields(start, &chunk_ts, 0, tokens_generated);
 
         Ok(GenerationOutput {
             text,
             tokens_generated,
-            generation_time_ms: elapsed.as_millis() as u64,
-            tokens_per_second,
+            generation_time_ms: fields.generation_time_ms,
+            tokens_per_second: fields.tokens_per_second,
             finish_reason,
-            ttft_ms,
-            mean_itl_ms,
-            p95_itl_ms,
-            emitted_chunks: Some(chunk_ts.len() as u32),
-            inter_chunk_ms,
-            decode_tps,
-            prefill_tps,
+            ttft_ms: fields.ttft_ms,
+            mean_itl_ms: fields.mean_itl_ms,
+            p95_itl_ms: fields.p95_itl_ms,
+            emitted_chunks: fields.emitted_chunks,
+            inter_chunk_ms: fields.inter_chunk_ms,
+            // Engine-reported values win when present; derived values
+            // (decode_tps from ITL, prefill_tps = None since we passed 0
+            // prompt tokens) are the fallback for any future code path.
+            decode_tps: decode_tps_reported.or(fields.decode_tps),
+            prefill_tps: prefill_tps_reported.or(fields.prefill_tps),
         })
     }
 
