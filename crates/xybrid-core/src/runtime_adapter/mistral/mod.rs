@@ -526,42 +526,16 @@ impl LlmBackend for MistralBackend {
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime_adapter::llm_telemetry::itl_stats;
-
-    #[test]
-    fn itl_stats_empty() {
-        assert_eq!(itl_stats(&[]), (None, None));
-    }
-
-    #[test]
-    fn itl_stats_single() {
-        let (mean, p95) = itl_stats(&[10]);
-        assert_eq!(mean, Some(10.0));
-        assert_eq!(p95, Some(10));
-    }
-
-    #[test]
-    fn itl_stats_small() {
-        let (mean, p95) = itl_stats(&[10, 20, 30, 40]);
-        assert_eq!(mean, Some(25.0));
-        // len=4 → idx = round(3 * 0.95) = round(2.85) = 3 → sorted[3] = 40.
-        assert_eq!(p95, Some(40));
-    }
-
-    #[test]
-    fn itl_stats_unsorted() {
-        let (mean, p95) = itl_stats(&[30, 10, 40, 20]);
-        assert_eq!(mean, Some(25.0));
-        assert_eq!(p95, Some(40));
-    }
-
-    // ---- Mock-stream tests for handle_response / StreamState ----
+    // Mock-stream tests for `handle_response` / `StreamState`.
     //
-    // These exercise the pure state machine that `generate()` drives with
-    // real mistralrs responses. They reproduce the Codex P1 regression from
-    // the prior review: the terminal `Response::Chunk` must populate
-    // `finish_reason` and `usage`, since mistralrs under `is_streaming=true`
-    // does not emit `Response::Done`.
+    // These exercise the pure state machine that `generate()` drives
+    // with real mistralrs responses. They reproduce the Codex P1
+    // regression from the prior review: the terminal `Response::Chunk`
+    // must populate `finish_reason` and `usage`, since mistralrs under
+    // `is_streaming=true` does not emit `Response::Done`.
+    //
+    // Telemetry math (itl_stats, streaming field derivation) is tested
+    // in `runtime_adapter::llm_telemetry` — no point repeating it here.
 
     #[cfg(feature = "llm-mistral")]
     mod mock_stream {
