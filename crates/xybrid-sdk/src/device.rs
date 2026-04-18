@@ -259,12 +259,18 @@ mod tests {
     fn id_is_64_hex_chars() {
         let d = Device::current();
         assert_eq!(d.id.len(), 64, "SHA-256 hex should be 64 chars");
-        assert!(d.id.chars().all(|c| c.is_ascii_hexdigit()), "id must be hex");
+        assert!(
+            d.id.chars().all(|c| c.is_ascii_hexdigit()),
+            "id must be hex"
+        );
     }
 
     #[test]
     fn platform_matches_current_platform() {
-        assert_eq!(Device::current().platform, crate::platform::current_platform());
+        assert_eq!(
+            Device::current().platform,
+            crate::platform::current_platform()
+        );
     }
 
     #[test]
@@ -287,7 +293,10 @@ mod tests {
 
     #[test]
     fn machine_id_not_empty() {
-        assert!(!get_machine_id().is_empty(), "Machine ID must never be empty");
+        assert!(
+            !get_machine_id().is_empty(),
+            "Machine ID must never be empty"
+        );
     }
 
     #[test]
