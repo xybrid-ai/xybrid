@@ -39,12 +39,8 @@ pub(crate) const CHAT_STOP_PATTERNS: &[&str] = &[
 /// Only safe to use in **final-text cleanup** — during streaming
 /// these would false-positive on legitimate text that happens to
 /// start with `|`. [`StreamingTextFilter`] does NOT include them.
-pub(crate) const CHAT_STOP_PATTERNS_BROKEN: &[&str] = &[
-    "|im_end|>",
-    "|im_start|>",
-    "|endoftext|>",
-    "end_of_turn>",
-];
+pub(crate) const CHAT_STOP_PATTERNS_BROKEN: &[&str] =
+    &["|im_end|>", "|im_start|>", "|endoftext|>", "end_of_turn>"];
 
 /// Merge caller-supplied patterns with defaults, de-duplicated while
 /// preserving caller order first.
@@ -79,10 +75,7 @@ pub(crate) fn strip_thinking_tags(text: &str) -> String {
 
 /// Truncate `text` at the earliest complete occurrence of any pattern
 /// in `patterns`. Returns `true` if a stop was found and truncated.
-pub(crate) fn truncate_at_first_stop<S: AsRef<str>>(
-    text: &mut String,
-    patterns: &[S],
-) -> bool {
+pub(crate) fn truncate_at_first_stop<S: AsRef<str>>(text: &mut String, patterns: &[S]) -> bool {
     let mut earliest: Option<usize> = None;
     for p in patterns {
         if let Some(pos) = text.find(p.as_ref()) {
@@ -107,10 +100,7 @@ pub(crate) fn truncate_at_first_stop<S: AsRef<str>>(
 ///
 /// Returns `true` on first trim and stops (matches the prior
 /// llama_cpp behavior).
-pub(crate) fn trim_partial_stop_suffix<S: AsRef<str>>(
-    text: &mut String,
-    patterns: &[S],
-) -> bool {
+pub(crate) fn trim_partial_stop_suffix<S: AsRef<str>>(text: &mut String, patterns: &[S]) -> bool {
     for pattern in patterns {
         let p = pattern.as_ref();
         for prefix_len in 1..p.len() {
@@ -261,7 +251,10 @@ mod tests {
 
     #[test]
     fn strip_thinking_tags_truncates_unclosed_block() {
-        assert_eq!(strip_thinking_tags("visible<think>still reasoning"), "visible");
+        assert_eq!(
+            strip_thinking_tags("visible<think>still reasoning"),
+            "visible"
+        );
     }
 
     #[test]
