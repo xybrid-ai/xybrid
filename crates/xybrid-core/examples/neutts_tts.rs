@@ -39,29 +39,21 @@ fn parse_args() -> Args {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--text" | "-t" => {
-                if i + 1 < args.len() {
-                    text = args[i + 1].clone();
-                    i += 1;
-                }
+            "--text" | "-t" if i + 1 < args.len() => {
+                text = args[i + 1].clone();
+                i += 1;
             }
-            "--voice" | "-v" => {
-                if i + 1 < args.len() {
-                    voice = Some(args[i + 1].clone());
-                    i += 1;
-                }
+            "--voice" | "-v" if i + 1 < args.len() => {
+                voice = Some(args[i + 1].clone());
+                i += 1;
             }
-            "--model-dir" | "-m" => {
-                if i + 1 < args.len() {
-                    model_dir = Some(args[i + 1].clone());
-                    i += 1;
-                }
+            "--model-dir" | "-m" if i + 1 < args.len() => {
+                model_dir = Some(args[i + 1].clone());
+                i += 1;
             }
-            "--output" | "-o" => {
-                if i + 1 < args.len() {
-                    output = args[i + 1].clone();
-                    i += 1;
-                }
+            "--output" | "-o" if i + 1 < args.len() => {
+                output = args[i + 1].clone();
+                i += 1;
             }
             "--help" | "-h" => {
                 println!("Usage: neutts_tts [OPTIONS]");
