@@ -1,0 +1,372 @@
+name: Release Dry-Run
+
+# Runs publish-side validation on release/* branches so publish failures surface
+# before tagging. Mirrors release.yml but:
+#   - Derives target version from branch name instead of tag
+#   - Does not upload to pub.dev, Maven Central, GitHub Releases, or swift branch
+#   - Runs the same build jobs so sccache is warm for the real release
+on:
+  push:
+    branches:
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'Cargo.toml'
+      - 'bindings/flutter/pubspec.yaml'
+      - 'bindings/flutter/CHANGELOG.md'
+      - 'bindings/flutter/rust/Cargo.toml'
+      - 'bindings/kotlin/build.gradle.kts'
+      - 'bindings/unity/package.json'
+      - 'CHANGELOG.md'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Target version to validate (without v prefix, e.g. 0.1.0-beta11)'
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  NDK_VERSION: "26.1.10909125"
+  FLUTTER_VERSION: "3.35.7"
+  FRB_VERSION: "2.11.1"
+
+permissions:
+  contents: read
+  pull-requests: write  # for posting the dry-run report comment
+
+jobs:
+  #
+  # Derive the version we're validating against. Three sources, in order:
+  #   1. workflow_dispatch input
+  #   2. branch name (release/v0.1.0-beta11 → 0.1.0-beta11)
+  #   3. PR head branch name if PR is from a release/* branch
+  # Then verify every package matches that version — same check as release.yml
+  # but without requiring a tag to exist yet.
+  #
+  check-version-branch:
+    name: Verify Version (branch)
+    runs-on: ubuntu-latest
+    outputs:
+      target_version: ${{ steps.derive.outputs.version }}
+      is_release_branch: ${{ steps.derive.outputs.is_release }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Derive target version
+        id: derive
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+            IS_RELEASE=true
+          elif [[ "${GITHUB_REF}" == refs/heads/release/* ]]; then
+            BRANCH="${GITHUB_REF#refs/heads/release/}"
+            VERSION="${BRANCH#v}"
+            IS_RELEASE=true
+          elif [[ "${GITHUB_HEAD_REF}" == release/* ]]; then
+            BRANCH="${GITHUB_HEAD_REF#release/}"
+            VERSION="${BRANCH#v}"
+            IS_RELEASE=true
+          else
+            # PR from a non-release branch that touched version files — just
+            # use Cargo version and skip the strict match check.
+            VERSION=$(grep -A5 '\[workspace\.package\]' Cargo.toml | grep '^version' | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+            IS_RELEASE=false
+          fi
+
+          echo "Target version: $VERSION (release branch: $IS_RELEASE)"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is_release=$IS_RELEASE" >> $GITHUB_OUTPUT
+
+      - name: Check all package versions match target
+        if: steps.derive.outputs.is_release == 'true'
+        shell: bash
+        run: |
+          TARGET="${{ steps.derive.outputs.version }}"
+          CARGO_VERSION=$(grep -A5 '\[workspace\.package\]' Cargo.toml | grep '^version' | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          FLUTTER_VERSION_PKG=$(grep '^version:' bindings/flutter/pubspec.yaml | sed 's/version: *//')
+          UNITY_VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
+          KOTLIN_VERSION=$(grep '^version = ' bindings/kotlin/build.gradle.kts | sed 's/version = "\(.*\)"/\1/')
+          FLUTTER_RUST_VERSION=$(grep '^version = ' bindings/flutter/rust/Cargo.toml | head -1 | sed 's/version = "\(.*\)".*/\1/')
+
+          echo "Target:              $TARGET"
+          echo "Cargo workspace:     $CARGO_VERSION"
+          echo "Flutter pubspec:     $FLUTTER_VERSION_PKG"
+          echo "Flutter rust crate:  $FLUTTER_RUST_VERSION"
+          echo "Unity package:       $UNITY_VERSION"
+          echo "Kotlin gradle:       $KOTLIN_VERSION"
+
+          FAILED=0
+          for V in "$CARGO_VERSION" "$FLUTTER_VERSION_PKG" "$FLUTTER_RUST_VERSION" "$UNITY_VERSION" "$KOTLIN_VERSION"; do
+            if [ "$V" != "$TARGET" ]; then
+              echo "ERROR: $V != $TARGET"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "Run 'just bump-version $TARGET' in repos/xybrid/ before opening the release PR."
+            exit 1
+          fi
+
+      - name: Check changelogs have entries for target version
+        if: steps.derive.outputs.is_release == 'true'
+        shell: bash
+        run: |
+          TARGET="${{ steps.derive.outputs.version }}"
+          MISSING=0
+
+          if ! grep -q "## \[${TARGET}\]" CHANGELOG.md; then
+            echo "ERROR: CHANGELOG.md missing entry for [${TARGET}]"
+            MISSING=1
+          fi
+          if ! grep -q "## ${TARGET}$" bindings/flutter/CHANGELOG.md; then
+            echo "ERROR: bindings/flutter/CHANGELOG.md missing entry for ${TARGET}"
+            MISSING=1
+          fi
+
+          # pub.dev will reject a package with placeholder changelog content
+          if grep -q "_TODO" CHANGELOG.md bindings/flutter/CHANGELOG.md; then
+            echo "ERROR: Changelog contains _TODO placeholders. Run /fill-changelog and review."
+            MISSING=1
+          fi
+
+          if [ "$MISSING" -eq 1 ]; then
+            exit 1
+          fi
+          echo "Changelogs OK for ${TARGET}"
+
+  #
+  # Flutter dry-run publish — catches pub.dev validation failures before tag time.
+  # Uses `flutter pub` (not `dart pub`) because the package depends on the Flutter SDK.
+  #
+  flutter-dryrun:
+    name: Flutter pub publish --dry-run
+    needs: [check-version-branch]
+    if: needs.check-version-branch.outputs.is_release_branch == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: false  # pub.dev dry-run doesn't need native submodules
+
+      - uses: subosito/flutter-action@44ac965b96f18d999802d4b807e3256d5a3f9fa1 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: flutter pub get
+        working-directory: bindings/flutter
+        run: flutter pub get
+
+      - name: flutter pub publish --dry-run
+        working-directory: bindings/flutter
+        run: flutter pub publish --dry-run
+
+  #
+  # Kotlin dry-run — validates what Maven Central rejects packages over:
+  #   - AAR assembles (bundleReleaseAar)
+  #   - POM has required fields: name, description, url, license, scm, developers
+  #     (generatePomFileForMavenPublication)
+  #   - sources jar builds (sourceReleaseJar)
+  # Skips signAllPublications (vanniktech plugin, requires real GPG key) and
+  # publishToMavenLocal (depends on the signed .asc artifact). A published-
+  # with-no-signature vs real-release divergence is accepted: the signing config
+  # itself is validated only at tag time.
+  #
+  kotlin-dryrun:
+    name: Kotlin publish validation
+    needs: [check-version-branch]
+    if: needs.check-version-branch.outputs.is_release_branch == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      # Use empty .so placeholders — we're validating the Gradle pipeline, not
+      # shipping binaries. Real Maven Central publish still needs build-android.
+      - name: Create placeholder .so files
+        run: |
+          mkdir -p bindings/kotlin/libs/arm64-v8a
+          mkdir -p bindings/kotlin/libs/armeabi-v7a
+          mkdir -p bindings/kotlin/libs/x86_64
+          touch bindings/kotlin/libs/arm64-v8a/libxybrid.so
+          touch bindings/kotlin/libs/armeabi-v7a/libxybrid.so
+          touch bindings/kotlin/libs/x86_64/libxybrid.so
+
+      - name: Assemble AAR + generate POM + sources jar
+        working-directory: bindings/kotlin
+        run: ./gradlew bundleReleaseAar generatePomFileForMavenPublication sourceReleaseJar
+
+      - name: Validate POM has Maven Central required fields
+        working-directory: bindings/kotlin
+        shell: bash
+        run: |
+          POM=build/publications/maven/pom-default.xml
+          if [ ! -f "$POM" ]; then
+            echo "ERROR: POM not generated at $POM"
+            exit 1
+          fi
+
+          echo "--- Generated POM ---"
+          cat "$POM"
+          echo "---------------------"
+
+          MISSING=0
+          for TAG in name description url licenses scm developers; do
+            if ! grep -q "<${TAG}>" "$POM"; then
+              echo "ERROR: POM missing required tag <${TAG}> (Maven Central will reject)"
+              MISSING=1
+            fi
+          done
+
+          if [ "$MISSING" -eq 1 ]; then
+            exit 1
+          fi
+          echo "POM has all Maven Central required fields."
+
+  #
+  # Build the precompiled binaries cargokit will ship. We do NOT run
+  # precompile-binaries (which uploads to GitHub Releases) — just cargo build.
+  # This catches: link errors, feature flag combos, missing system deps.
+  #
+  build-validate-apple:
+    name: Build-validate (Apple)
+    needs: [check-version-branch]
+    if: needs.check-version-branch.outputs.is_release_branch == 'true'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            aarch64-apple-ios,
+            aarch64-apple-ios-sim,
+            aarch64-apple-darwin
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
+      # Share cache key with release.yml so the tag build is hot
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "apple-xcframework"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - run: brew install llvm
+
+      - name: Build XCFramework (release)
+        run: cargo xtask build-xcframework --release
+
+  build-validate-android:
+    name: Build-validate (Android)
+    needs: [check-version-branch]
+    if: needs.check-version-branch.outputs.is_release_branch == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "android-ndk"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - run: |
+          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - run: which cargo-ndk || cargo install cargo-ndk
+
+      - name: Build Android .so
+        run: cargo xtask build-android --release
+
+  #
+  # Rollup: fail the PR if any validation step failed.
+  # Single required status check in branch protection.
+  #
+  release-dryrun-ok:
+    name: Release Dry-Run Summary
+    needs:
+      - check-version-branch
+      - flutter-dryrun
+      - kotlin-dryrun
+      - build-validate-apple
+      - build-validate-android
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        shell: bash
+        run: |
+          if [[ "${{ needs.check-version-branch.result }}" != "success" ]]; then
+            echo "FAIL: version check"
+            exit 1
+          fi
+
+          # If this wasn't a release branch, the downstream jobs are skipped —
+          # that's fine, nothing to validate.
+          if [[ "${{ needs.check-version-branch.outputs.is_release_branch }}" != "true" ]]; then
+            echo "Not a release branch — nothing to validate."
+            exit 0
+          fi
+
+          FAILED=0
+          for PAIR in \
+            "flutter-dryrun=${{ needs.flutter-dryrun.result }}" \
+            "kotlin-dryrun=${{ needs.kotlin-dryrun.result }}" \
+            "build-validate-apple=${{ needs.build-validate-apple.result }}" \
+            "build-validate-android=${{ needs.build-validate-android.result }}"; do
+            if [[ "${PAIR##*=}" != "success" ]]; then
+              echo "FAIL: ${PAIR%%=*}"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "One or more dry-run jobs failed. See individual job logs."
+            exit 1
+          fi
+          echo "All dry-run validations passed. Safe to tag."
