@@ -9316,7 +9316,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid_flutter"
-version = "0.1.0-beta10"
+version = "0.1.0-beta11"
 dependencies = [
  "android_logger 0.14.1",
  "flutter_rust_bridge",

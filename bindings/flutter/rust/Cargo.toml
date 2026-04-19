@@ -1,6 +1,6 @@
 [package]
 name = "xybrid_flutter"
-version = "0.1.0-beta10"  # Hardcoded (not workspace) — cargokit hashes this file to detect changes
+version = "0.1.0-beta11"  # Hardcoded (not workspace) — cargokit hashes this file to detect changes
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

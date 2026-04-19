@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.0-beta11] - 2026-04-19
+
+### Added
+
+- **LLM streaming telemetry** (#40): TTFT, decode/prefill TPS, and ITL metrics emitted by the SDK for both `llama_cpp` and `mistral` backends. Streaming paths in both backends hardened with regression coverage for `<think>...</think>` tag filtering.
+- **Device struct** (#42): SDK exposes a `Device` struct with a stable cross-platform device identifier for telemetry and routing.
+- **NeuTTS codec TTS** (#43): Codec-based TTS integration via the llama.cpp runtime adapter.
+- **Actionable offline errors and cached-models fallback**: Offline load no longer trips the circuit breaker, `SdkError::Offline` now propagates through `xybrid-uniffi`, and the SDK falls back to the local cache with a clear error when the registry is unreachable.
+
+### Fixed
+
+- **Rust 1.95 clippy clean** (#41): Satisfied `collapsible_match` and `unnecessary_sort_by` lints introduced in Rust 1.95.
+
+---
+
 ## [0.1.0-beta10] - 2026-04-07
 
 ### Added
