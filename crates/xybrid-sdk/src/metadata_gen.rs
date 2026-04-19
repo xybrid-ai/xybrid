@@ -1024,6 +1024,7 @@ fn build_gguf_metadata(
         files: vec![primary.filename.clone()],
         vision_encoder: None,
         description: Some(description),
+        backend: None,
         metadata: metadata_map,
         voices: None,
         max_chunk_chars: None,
@@ -1043,7 +1044,7 @@ fn build_onnx_metadata(
     all_files: &[String],
     cache_dir: &Path,
 ) -> ModelMetadata {
-    use xybrid_core::execution::template::TokenizerType;
+    use xybrid_core::execution::template::{TokenizerBackend, TokenizerType};
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     // Use task inference results when available (they incorporate supporting file info)
@@ -1093,6 +1094,7 @@ fn build_onnx_metadata(
                     vocab_file: tokenizer_file.to_string(),
                     tokenizer_type: TokenizerType::WordPiece,
                     max_length: supporting_files.max_position_embeddings.map(|v| v as usize),
+                    backend: TokenizerBackend::HuggingFace,
                 });
                 postprocessing.push(PostprocessingStep::Argmax { dim: None });
             }
@@ -1101,6 +1103,7 @@ fn build_onnx_metadata(
                     vocab_file: tokenizer_file.to_string(),
                     tokenizer_type: TokenizerType::WordPiece,
                     max_length: supporting_files.max_position_embeddings.map(|v| v as usize),
+                    backend: TokenizerBackend::HuggingFace,
                 });
                 postprocessing.push(PostprocessingStep::Argmax { dim: None });
             }
@@ -1123,6 +1126,7 @@ fn build_onnx_metadata(
                     vocab_file: tokenizer_file.to_string(),
                     tokenizer_type: TokenizerType::WordPiece,
                     max_length: supporting_files.max_position_embeddings.map(|v| v as usize),
+                    backend: TokenizerBackend::HuggingFace,
                 });
             }
             _ => {
@@ -1205,6 +1209,7 @@ fn build_onnx_metadata(
         files,
         vision_encoder: None,
         description: Some(description),
+        backend: None,
         metadata: metadata_map,
         voices: None,
         max_chunk_chars: None,
@@ -1276,6 +1281,7 @@ fn build_safetensors_metadata(
         files,
         vision_encoder: None,
         description: Some(description),
+        backend: None,
         metadata: metadata_map,
         voices: None,
         max_chunk_chars: None,
@@ -1484,6 +1490,7 @@ fn infer_from_pipeline_tag(
     image_std: &[f32],
     files: &SupportingFileInfo,
 ) -> Option<TaskInference> {
+    use xybrid_core::execution::template::TokenizerBackend;
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     let inf = match tag {
@@ -1529,6 +1536,7 @@ fn infer_from_pipeline_tag(
                 vocab_file: tokenizer_file.to_string(),
                 tokenizer_type,
                 max_length,
+                backend: TokenizerBackend::HuggingFace,
             }],
             postprocessing: vec![PostprocessingStep::Softmax { dim: None }],
             confidence: Confidence::High,
@@ -1540,6 +1548,7 @@ fn infer_from_pipeline_tag(
                 vocab_file: tokenizer_file.to_string(),
                 tokenizer_type,
                 max_length,
+                backend: TokenizerBackend::HuggingFace,
             }],
             postprocessing: vec![PostprocessingStep::Argmax { dim: None }],
             confidence: Confidence::High,
@@ -1561,6 +1570,7 @@ fn infer_from_pipeline_tag(
                 vocab_file: tokenizer_file.to_string(),
                 tokenizer_type,
                 max_length,
+                backend: TokenizerBackend::HuggingFace,
             }],
             postprocessing: vec![PostprocessingStep::MeanPool { dim: 1 }],
             confidence: Confidence::High,
@@ -1580,12 +1590,14 @@ fn infer_nlp_task_from_outputs(
     max_length: Option<usize>,
     files: &SupportingFileInfo,
 ) -> TaskInference {
+    use xybrid_core::execution::template::TokenizerBackend;
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     let tokenize_step = PreprocessingStep::Tokenize {
         vocab_file: tokenizer_file.to_string(),
         tokenizer_type: tokenizer_type.clone(),
         max_length,
+        backend: TokenizerBackend::HuggingFace,
     };
 
     // Analyze output shapes
@@ -1674,6 +1686,7 @@ fn infer_from_output_shapes(
     image_std: &[f32],
     _files: &SupportingFileInfo,
 ) -> TaskInference {
+    use xybrid_core::execution::template::TokenizerBackend;
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     if let Some(output) = onnx.outputs.first() {
@@ -1708,6 +1721,7 @@ fn infer_from_output_shapes(
                         vocab_file: tokenizer_file.to_string(),
                         tokenizer_type,
                         max_length,
+                        backend: TokenizerBackend::HuggingFace,
                     }],
                     postprocessing: vec![PostprocessingStep::Softmax { dim: None }],
                     confidence: Confidence::Low,
@@ -1761,7 +1775,7 @@ fn infer_steps_from_onnx(
     files: &mut Vec<String>,
     tokenizer_file: &str,
 ) {
-    use xybrid_core::execution::template::TokenizerType;
+    use xybrid_core::execution::template::{TokenizerBackend, TokenizerType};
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     let input_names: Vec<&str> = info.inputs.iter().map(|i| i.name.as_str()).collect();
@@ -1776,6 +1790,7 @@ fn infer_steps_from_onnx(
             vocab_file: tokenizer_file.to_string(),
             tokenizer_type: TokenizerType::WordPiece,
             max_length: Some(512),
+            backend: TokenizerBackend::HuggingFace,
         });
         files.push(tokenizer_file.to_string());
     }
@@ -2496,6 +2511,7 @@ mod tests {
             vocab_file,
             tokenizer_type,
             max_length,
+            ..
         } = &result.preprocessing[0]
         {
             assert_eq!(vocab_file, "tokenizer.json");

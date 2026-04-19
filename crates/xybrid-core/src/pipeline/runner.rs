@@ -462,6 +462,13 @@ impl PipelineRunner {
                     "parts": parts.iter().map(|part| self.envelope_to_value(part)).collect::<Vec<_>>()
                 })
             }
+            EnvelopeKind::TokenIds(ids) => {
+                serde_json::json!({
+                    "type": "tokens",
+                    "length": ids.len(),
+                    "output": ids
+                })
+            }
         }
     }
 
@@ -527,6 +534,10 @@ impl PipelineRunner {
             EnvelopeKind::MultiPart(_) => (
                 OutputResultType::Json,
                 OutputResult::Json(self.envelope_to_value(envelope)),
+            ),
+            EnvelopeKind::TokenIds(ids) => (
+                OutputResultType::Json,
+                OutputResult::Json(serde_json::json!({ "tokens": ids })),
             ),
         }
     }

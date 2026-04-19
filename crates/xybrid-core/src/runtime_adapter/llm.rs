@@ -687,6 +687,10 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
             EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
                 "LLM adapter expects Text input, not MultiPart".to_string(),
             )),
+            EnvelopeKind::TokenIds(_) => Err(AdapterError::InvalidInput(
+                "Generic LLM adapter expects Text input; TokenIds is reserved for MLX prefill"
+                    .to_string(),
+            )),
         }
     }
 }

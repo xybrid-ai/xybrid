@@ -154,6 +154,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
             println!("🖼️  Vision output (unexpected for MNIST)");
         }
+        EnvelopeKind::TokenIds(ids) => {
+            println!("🔢 Token ID output (unexpected for MNIST): {} ids", ids.len());
+        }
     }
 
     println!();

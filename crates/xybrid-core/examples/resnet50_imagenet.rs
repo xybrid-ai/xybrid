@@ -136,6 +136,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
             println!("🖼️  Vision output (unexpected for ResNet-50)");
         }
+        EnvelopeKind::TokenIds(ids) => {
+            println!(
+                "🔢 Token ID output (unexpected for ResNet-50): {} ids",
+                ids.len()
+            );
+        }
     }
 
     println!();

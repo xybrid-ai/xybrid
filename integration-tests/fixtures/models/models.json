@@ -598,6 +598,33 @@
           "notes": "Requires espeak-ng for phonemization. Install: brew install espeak-ng (macOS) or apt install espeak-ng (Linux)"
         }
       }
+    },
+    "qwen3.5-3b": {
+      "description": "Qwen 3.5 3B Instruct — MLX 4-bit variant for Apple Silicon (requires llm-mlx-runtime)",
+      "source": "registry",
+      "size_mb": 1800,
+      "task": "text-generation",
+      "feature_gate": "llm-mlx",
+      "platforms": ["ios", "macos"],
+      "notes": "Downloaded from xybrid-ai/Qwen3.5-3B-Instruct-MLX-4bit once published. Used by the runtime backend selector when MLX is available; non-Apple fixtures should use qwen3.5-2b instead."
+    },
+    "gemma4-2b": {
+      "description": "Gemma 4 2B Instruct — MLX 4-bit variant for Apple Silicon (requires llm-mlx-runtime)",
+      "source": "registry",
+      "size_mb": 1200,
+      "task": "text-generation",
+      "feature_gate": "llm-mlx",
+      "platforms": ["ios", "macos"],
+      "notes": "Downloaded from xybrid-ai/Gemma-4-2B-Instruct-MLX-4bit once published. Used by the runtime backend selector when MLX is available; non-Apple fixtures should use gemma-4-e2b instead."
+    },
+    "lfm3.5-1.5b": {
+      "description": "Liquid LFM 3.5 1.5B — MLX 4-bit variant for Apple Silicon, hybrid conv+attention (requires llm-mlx-runtime)",
+      "source": "registry",
+      "size_mb": 900,
+      "task": "text-generation",
+      "feature_gate": "llm-mlx",
+      "platforms": ["ios", "macos"],
+      "notes": "Downloaded from xybrid-ai/LFM-3.5-1.5B-MLX-4bit once published. Used by the runtime backend selector when MLX is available; non-Apple fixtures should use lfm2.5-350m instead."
     }
   }
 }

@@ -1,0 +1,23 @@
+[package]
+name = "mlx-c-sys"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+description = "Raw FFI bindings to mlx-c (Apple Silicon). Links against vendor/mlx-apple/mlx.xcframework."
+publish = false
+
+[lib]
+name = "mlx_c_sys"
+path = "src/lib.rs"
+
+[features]
+# Default: empty crate that compiles on any target. Consumers opt in by
+# enabling `bindings`, which pulls in the generated bindgen output and the
+# static link against vendor/mlx-apple/mlx.xcframework. This split keeps
+# `cargo check --workspace` clean on Linux CI runners where the xcframework
+# is unreachable and MLX cannot link.
+default = []
+bindings = []
+
+[build-dependencies]
+bindgen = "0.70"

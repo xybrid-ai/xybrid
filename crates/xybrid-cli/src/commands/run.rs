@@ -355,6 +355,7 @@ fn run_dry_run(
             EnvelopeKind::Audio(_) => EnvelopeKind::Text("transcribed".to_string()),
             EnvelopeKind::Text(t) => EnvelopeKind::Text(format!("{}-output", t)),
             EnvelopeKind::Embedding(_) => EnvelopeKind::Text("result".to_string()),
+            EnvelopeKind::TokenIds(_) => EnvelopeKind::Text("tokens-result".to_string()),
             EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                 EnvelopeKind::Text("vision-output".to_string())
             }
@@ -460,6 +461,14 @@ fn print_pipeline_results(
             EnvelopeKind::MultiPart(parts) => {
                 ui::kv("  Parts", &format!("{}", parts.len()));
             }
+            EnvelopeKind::TokenIds(ids) => {
+                ui::kv("  Tokens", &format!("{} ids", ids.len()));
+                if ids.len() <= 16 {
+                    println!("    {:?}", ids);
+                } else {
+                    println!("    {:?} ...", &ids[..8]);
+                }
+            }
         }
         println!();
     }
@@ -502,6 +511,14 @@ fn save_pipeline_output(
                 }
                 EnvelopeKind::MultiPart(_) => {
                     save_envelope_json(path, &last_result.output)?;
+                }
+                EnvelopeKind::TokenIds(ids) => {
+                    let json =
+                        serde_json::to_string_pretty(ids).context("Failed to serialize token IDs")?;
+                    fs::write(path, json).with_context(|| {
+                        format!("Failed to write token IDs to {}", path.display())
+                    })?;
+                    ui::ok(&format!("Token IDs saved to {}", path.display()));
                 }
             }
         }
@@ -1171,6 +1188,22 @@ fn print_inference_results(
             ui::kv("Parts", &format!("{}", parts.len()));
             if let Some(path) = output_path {
                 save_envelope_json(path, output)?;
+            }
+        }
+        EnvelopeKind::TokenIds(ids) => {
+            ui::kv("Tokens", &format!("{} ids", ids.len()));
+            if ids.len() <= 16 {
+                println!("    {:?}", ids);
+            } else {
+                println!("    {:?} ...", &ids[..8]);
+            }
+            if let Some(path) = output_path {
+                let json =
+                    serde_json::to_string_pretty(ids).context("Failed to serialize token IDs")?;
+                fs::write(path, json)
+                    .with_context(|| format!("Failed to write token IDs to {}", path.display()))?;
+                println!();
+                ui::ok(&format!("Token IDs saved to {}", path.display()));
             }
         }
     }

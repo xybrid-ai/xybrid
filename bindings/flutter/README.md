@@ -198,13 +198,29 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 
 ## Platform Support
 
-| Platform | ONNX Runtime | Candle | LLM (llama.cpp) | Notes |
-|----------|:---:|:---:|:---:|-------|
-| **macOS** | ✅ | ✅ Metal | ✅ | Apple Silicon only (M1+) |
-| **iOS** | ✅ CoreML | ✅ Metal | ✅ | arm64, downloads ORT from HuggingFace |
-| **Android** | ✅ | — | ✅ | arm64-v8a, x86_64; ORT from Maven Central |
-| **Linux** | ✅ | ✅ CPU | ✅ | x86_64 |
-| **Windows** | ✅ | ✅ CPU | ✅ | x86_64 |
+| Platform | ONNX Runtime | Candle | LLM (llama.cpp) | MLX | Notes |
+|----------|:---:|:---:|:---:|:---:|-------|
+| **macOS** | ✅ | ✅ Metal | ✅ | ✅ | Apple Silicon only (M1+); MLX auto-selected for supported LLMs |
+| **iOS** | ✅ CoreML | ✅ Metal | ✅ | ✅ | arm64; downloads ORT + MLX xcframework on first build |
+| **Android** | ✅ | — | ✅ | — | arm64-v8a, x86_64; ORT from Maven Central |
+| **Linux** | ✅ | ✅ CPU | ✅ | — | x86_64 |
+| **Windows** | ✅ | ✅ CPU | ✅ | — | x86_64 |
+
+### MLX on Apple Silicon
+
+MLX is a third LLM + embedding backend for `aarch64-apple-darwin` and `aarch64-apple-ios`. **No API changes are needed** — `Xybrid.model(id).load()` and `XybridModelLoader.fromRegistry(id).load()` automatically route to MLX when the model has an `mlx` registry variant and the host is Apple Silicon. On non-Apple platforms and Intel Macs, calls fall through to llama.cpp with no change in behaviour.
+
+Supported MLX models today: Qwen 3 / Qwen 3.5 (end-to-end chat + streaming), BERT / nomic-bert (embeddings). Gemma 4 and LFM 3.5 skeletons are present but their forward pass is pending.
+
+To force a specific backend per pipeline stage:
+
+```yaml
+stages:
+  - model: qwen3.5-0.8b
+    backend: mlx          # "auto" (default) | "mlx" | "llamacpp"
+```
+
+See [`docs/backends/mlx.md`](../../docs/backends/mlx.md) in the main repo for the full selection rules, xcframework setup, and iOS OOM troubleshooting.
 
 ### Model Support
 

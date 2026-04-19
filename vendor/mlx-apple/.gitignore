@@ -1,0 +1,8 @@
+# The xcframework itself is built by .github/workflows/build-mlx-xcframework.yml
+# and materialised locally by tools/scripts/fetch-mlx-xcframework.sh. Never
+# check it in — the pinned SHA in UPSTREAM_VERSIONS.txt is the source of truth.
+mlx.xcframework/
+
+# Sidecar marker recording the SHA256 of the currently-installed xcframework
+# zip. Used by fetch-mlx-xcframework.sh for idempotency.
+.installed-sha256

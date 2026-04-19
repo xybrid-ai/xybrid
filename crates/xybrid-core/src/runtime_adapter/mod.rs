@@ -58,6 +58,10 @@ pub mod types;
 // Shared vision contracts for embedding-style multimodal backends.
 pub mod vision;
 
+// Runtime backend selector. Always available so pipeline config can surface
+// explicit backend-choice errors even when a runtime is not compiled in.
+pub mod selector;
+
 // Runtime backends (organized in subdirectories)
 pub mod onnx;
 
@@ -72,11 +76,11 @@ pub mod coreml;
 pub mod candle;
 
 // LLM shared types and adapter (available when any LLM backend is enabled)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 pub mod llm;
 
 // Shared telemetry helpers for LLM backends (itl_stats, etc.)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 pub(crate) mod llm_telemetry;
 
 // Shared streaming post-processing for LLM backends
@@ -97,6 +101,10 @@ pub mod mistral;
 #[cfg(feature = "llm-llamacpp")]
 pub mod llama_cpp;
 
+// MLX backend (feature-gated, Apple Silicon runtime via `llm-mlx-runtime`).
+#[cfg(feature = "llm-mlx")]
+pub mod mlx;
+
 // Re-exports from runtime backends
 pub use cloud::{CloudRuntimeAdapter, CloudStreaming};
 pub use metadata_driven::MetadataDrivenAdapter;
@@ -115,7 +123,7 @@ pub use candle::{CandleBackend, CandleRuntimeAdapter};
 
 // LLM exports - adapter types only (ChatMessage, GenerationConfig, LlmConfig
 // are re-exported from types.rs unconditionally below)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 pub use llm::{GenerationOutput, LlmBackend, LlmResult, LlmRuntimeAdapter};
 
 // MistralBackend export (desktop only)
@@ -132,6 +140,10 @@ pub use llama_cpp::{llama_log_get_verbosity, llama_log_set_verbosity};
 
 // Re-export inference backend types
 pub use inference_backend::{BackendError, BackendResult, InferenceBackend, RuntimeType};
+pub use selector::{
+    current_target, mlx_runtime_available, select_llm_backend, select_with_cfg, BackendChoice,
+    RegistryView, SelectionParams, SelectorCfg, SelectorError,
+};
 pub use traits::ModelRuntime;
 
 // Always-available streaming and chat types (NOT feature-gated)

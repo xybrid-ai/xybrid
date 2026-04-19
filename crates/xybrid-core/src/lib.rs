@@ -156,6 +156,28 @@ compile_error!(
 /// runtime core version without a parallel constant.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// llm-mlx-runtime links Apple's MLX framework through the validated
+// Apple Silicon macOS slice. The lighter llm-mlx feature intentionally stays
+// cross-platform so registry metadata, selectors, and docs can compile
+// without linking MLX.
+#[cfg(all(
+    feature = "llm-mlx-runtime",
+    not(all(target_os = "macos", target_arch = "aarch64"))
+))]
+compile_error!(
+    "Invalid feature combination: `llm-mlx-runtime` requires Apple Silicon macOS \
+    (`aarch64-apple-darwin`).\n\n\
+    Reason: `llm-mlx-runtime` links Apple's MLX framework against Metal + \
+    Accelerate through the validated macOS arm64 xcframework slice. Current iOS \
+    builds remain non-linking only until upstream MLX ships a Metal-enabled iOS \
+    slice. The `llm-mlx` feature is cross-platform and does not link MLX.\n\n\
+    Solution:\n\
+    - For Apple Silicon macOS runtime builds: use `llm-mlx-runtime`\n\
+    - For iOS selector/docs builds: use `llm-mlx`\n\
+    - For cross-platform selector/docs builds: use `llm-mlx`\n\
+    - For Android/Linux/Windows inference: use `llm-llamacpp` or `llm-mistral`"
+);
+
 // ============================================================================
 // Prelude - Common imports for convenience
 // ============================================================================

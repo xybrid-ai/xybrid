@@ -108,6 +108,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("❌ Unexpected vision output");
             return Err("Expected audio output, got vision output".into());
         }
+        EnvelopeKind::TokenIds(ids) => {
+            println!("❌ Unexpected token IDs output: {} ids", ids.len());
+            return Err("Expected audio output, got token IDs".into());
+        }
     }
 
     println!();

@@ -391,13 +391,29 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 
 ---
 
+## Inference Backends
+
+Xybrid ships multiple inference runtimes and routes between them automatically based on model type, platform, and hardware:
+
+| Backend | Model Formats | Platforms | Acceleration |
+|---------|---------------|-----------|--------------|
+| **ONNX Runtime** | `.onnx` | All | CPU, CoreML (ANE), Metal |
+| **Candle** | `.safetensors` (Whisper) | All | CPU, Metal, CUDA |
+| **llama.cpp** | `.gguf` (LLM) | All | CPU (runtime SIMD), Metal, CUDA |
+| **mistral.rs** | `.gguf` (LLM) | Desktop, macOS, iOS | CPU, Metal, CUDA |
+| **MLX** | SafeTensors (Qwen, Gemma, BERT) | macOS, iOS | Metal (Apple Silicon only) |
+
+MLX is selected automatically on Apple Silicon when a model has an `mlx` variant in the registry. Otherwise, the runtime falls through to `llm-llamacpp`. See [`docs/backends/mlx.md`](docs/backends/mlx.md) for MLX runtime selection, xcframework setup, and troubleshooting.
+
+---
+
 ## Why Xybrid?
 
 - **Privacy first** — All inference runs on-device. Your data never leaves the device. The SDK attaches a small fleet-attribution header on registry metadata calls — see [registry telemetry](docs/telemetry/registry.md).
 - **Offline capable** — No internet required after initial model download.
 - **Cross-platform** — One API across iOS, Android, macOS, Linux, and Windows.
 - **Multi-model pipelines (MMP)** — Chain models together (ASR → LLM → TTS) in a single call.
-- **Automatic optimization** — Hardware acceleration on Apple Neural Engine, Metal, and CUDA.
+- **Automatic optimization** — Hardware acceleration on Apple Neural Engine, Metal, MLX, and CUDA.
 
 ### How it compares
 

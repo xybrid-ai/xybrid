@@ -1,0 +1,766 @@
+//! `pub(crate)` FFI helpers over `mlx_c_sys::bindings`.
+//!
+//! Every `unsafe` block in `xybrid-mlx` lives in this module. The public
+//! surface in `lib.rs` exposes only safe wrappers. Each helper here carries
+//! a `# Safety` doc comment describing the invariants the caller must
+//! uphold; the safe wrappers in [`crate::array`] and [`crate::stream`] are
+//! responsible for proving those invariants hold.
+//!
+//! We keep the helpers small and purpose-specific rather than re-exporting
+//! the whole binding set: callers should not need to reach into
+//! `mlx_c_sys::bindings` directly.
+
+use mlx_c_sys::bindings::{
+    self as sys, mlx_array, mlx_device, mlx_dtype, mlx_optional_float, mlx_stream, mlx_vector_array,
+};
+
+use crate::error::MlxError;
+
+/// Translate an mlx-c nonzero return into an [`MlxError`].
+///
+/// mlx-c's convention is "0 = success, nonzero = error". The underlying
+/// detail is fetched via the companion error surface in later stories;
+/// for US-005's skeleton we emit a generic [`MlxError::Internal`] with
+/// the nonzero code so callers get at least a debuggable signal.
+pub(crate) fn check_rc(rc: i32, ctx: &'static str) -> Result<(), MlxError> {
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(MlxError::Internal(format!(
+            "mlx-c `{ctx}` returned rc={rc}"
+        )))
+    }
+}
+
+/// Create a fresh default CPU stream handle.
+///
+/// # Safety
+///
+/// Safe to call from any thread at any time. The returned handle owns
+/// exactly one reference to the underlying stream and must be freed via
+/// [`stream_free`] exactly once.
+pub(crate) unsafe fn default_cpu_stream() -> mlx_stream {
+    sys::mlx_default_cpu_stream_new()
+}
+
+/// Create a fresh default GPU stream handle.
+///
+/// # Safety
+///
+/// Same contract as [`default_cpu_stream`]. Requires the Metal runtime to
+/// be reachable at call time — on Apple hardware that is always true.
+pub(crate) unsafe fn default_gpu_stream() -> mlx_stream {
+    sys::mlx_default_gpu_stream_new()
+}
+
+/// Retain-copy a stream handle.
+///
+/// Implements the `Clone` semantics for [`crate::MlxStream`] in terms of
+/// mlx-c's `mlx_stream_set`: construct a fresh empty handle, then bump the
+/// underlying refcount via `set`.
+///
+/// # Safety
+///
+/// `src` must be a live stream handle. The returned handle is owned by the
+/// caller and must be freed via [`stream_free`].
+pub(crate) unsafe fn stream_clone(src: mlx_stream) -> Result<mlx_stream, MlxError> {
+    let mut dst = sys::mlx_stream_new();
+    let rc = sys::mlx_stream_set(&mut dst, src);
+    if rc != 0 {
+        // The empty handle returned by `mlx_stream_new` is still safe to
+        // free on failure — it owns nothing beyond the empty descriptor.
+        let _ = sys::mlx_stream_free(dst);
+        return Err(MlxError::Internal(format!(
+            "mlx-c `mlx_stream_set` returned rc={rc}"
+        )));
+    }
+    Ok(dst)
+}
+
+/// Drop one reference from a stream handle.
+///
+/// # Safety
+///
+/// `stream` must have been produced by one of the mlx-c stream
+/// constructors (or by [`stream_clone`]). It must not be used after this
+/// call. Any nonzero return is tracing-logged and ignored — drop glue
+/// cannot surface a `Result`.
+pub(crate) unsafe fn stream_free(stream: mlx_stream) {
+    let rc = sys::mlx_stream_free(stream);
+    if rc != 0 {
+        tracing::warn!(rc, "mlx_stream_free returned nonzero");
+    }
+}
+
+/// Create an empty array handle (no data, no shape, no dtype). Used as the
+/// destination of an `mlx_array_set` retain.
+///
+/// # Safety
+///
+/// Returned handle must be freed via [`array_free`] exactly once.
+pub(crate) unsafe fn array_new_empty() -> mlx_array {
+    sys::mlx_array_new()
+}
+
+/// Retain-copy an array handle.
+///
+/// # Safety
+///
+/// `src` must be a live array handle. The returned handle is owned by the
+/// caller and must be freed via [`array_free`].
+pub(crate) unsafe fn array_clone(src: mlx_array) -> Result<mlx_array, MlxError> {
+    let mut dst = sys::mlx_array_new();
+    let rc = sys::mlx_array_set(&mut dst, src);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(dst);
+        return Err(MlxError::Internal(format!(
+            "mlx-c `mlx_array_set` returned rc={rc}"
+        )));
+    }
+    Ok(dst)
+}
+
+/// Drop one reference from an array handle.
+///
+/// # Safety
+///
+/// `arr` must have been produced by an mlx-c array constructor (or by
+/// [`array_clone`]). It must not be used after this call.
+pub(crate) unsafe fn array_free(arr: mlx_array) {
+    let rc = sys::mlx_array_free(arr);
+    if rc != 0 {
+        tracing::warn!(rc, "mlx_array_free returned nonzero");
+    }
+}
+
+/// Read the dtype tag of an array.
+///
+/// # Safety
+///
+/// `arr` must be a live array handle.
+pub(crate) unsafe fn array_dtype(arr: mlx_array) -> mlx_dtype {
+    sys::mlx_array_dtype(arr)
+}
+
+/// Read the rank (number of dimensions) of an array.
+///
+/// # Safety
+///
+/// `arr` must be a live array handle.
+pub(crate) unsafe fn array_ndim(arr: mlx_array) -> usize {
+    sys::mlx_array_ndim(arr)
+}
+
+/// Copy an array's shape into an owned vector.
+///
+/// # Safety
+///
+/// `arr` must be a live array handle. We immediately copy the returned C
+/// pointer into a `Vec<i32>` so the caller never holds a dangling slice
+/// across further FFI calls.
+pub(crate) unsafe fn array_shape(arr: mlx_array) -> Vec<i32> {
+    let ndim = sys::mlx_array_ndim(arr);
+    if ndim == 0 {
+        return Vec::new();
+    }
+    let raw = sys::mlx_array_shape(arr);
+    if raw.is_null() {
+        return Vec::new();
+    }
+    let slice = std::slice::from_raw_parts(raw, ndim);
+    slice.to_vec()
+}
+
+/// Read the total element count of an array (product of shape).
+///
+/// # Safety
+///
+/// `arr` must be a live array handle.
+pub(crate) unsafe fn array_size(arr: mlx_array) -> usize {
+    sys::mlx_array_size(arr)
+}
+
+/// Allocate a fresh mlx device handle of the given type.
+///
+/// # Safety
+///
+/// Returned handle must be freed via [`device_free`] exactly once.
+pub(crate) unsafe fn device_new(dev_type: sys::mlx_device_type, index: i32) -> mlx_device {
+    sys::mlx_device_new_type(dev_type, index)
+}
+
+/// Drop a device handle.
+///
+/// # Safety
+///
+/// `dev` must have been produced by [`device_new`] (or another mlx-c
+/// device constructor). It must not be used after this call.
+pub(crate) unsafe fn device_free(dev: mlx_device) {
+    let rc = sys::mlx_device_free(dev);
+    if rc != 0 {
+        tracing::warn!(rc, "mlx_device_free returned nonzero");
+    }
+}
+
+/// Construct an array from a host-side f32 slice via `mlx_array_new_data`.
+/// The underlying C call copies the buffer, so the caller does not need to
+/// keep `data` alive beyond the call.
+///
+/// # Safety
+///
+/// - `data` must point to at least `product(shape) * sizeof(f32)` valid f32
+///   values.
+/// - `shape` must be a valid slice of i32 dimension sizes.
+/// - Returned handle is owned by the caller and must be freed via
+///   [`array_free`] exactly once.
+pub(crate) unsafe fn array_new_data_f32(data: *const f32, shape: &[i32]) -> mlx_array {
+    sys::mlx_array_new_data(
+        data.cast::<std::ffi::c_void>(),
+        shape.as_ptr(),
+        shape.len() as i32,
+        sys::mlx_dtype__MLX_FLOAT32,
+    )
+}
+
+/// Construct an array from a host-side i32 slice via `mlx_array_new_data`.
+///
+/// # Safety
+///
+/// Same contract as [`array_new_data_f32`] but for `i32` elements.
+pub(crate) unsafe fn array_new_data_i32(data: *const i32, shape: &[i32]) -> mlx_array {
+    sys::mlx_array_new_data(
+        data.cast::<std::ffi::c_void>(),
+        shape.as_ptr(),
+        shape.len() as i32,
+        sys::mlx_dtype__MLX_INT32,
+    )
+}
+
+/// Evaluate an array (materialise any pending compute graph).
+///
+/// # Safety
+///
+/// `arr` must be a live array handle.
+pub(crate) unsafe fn array_eval(arr: mlx_array) -> Result<(), MlxError> {
+    check_rc(sys::mlx_array_eval(arr), "mlx_array_eval")
+}
+
+/// Copy an evaluated array's f32 data into an owned `Vec<f32>`.
+///
+/// # Safety
+///
+/// `arr` must be a live array handle. The array must have dtype f32 and
+/// must have been evaluated; `mlx_array_data_float32` returns NULL otherwise.
+pub(crate) unsafe fn array_data_f32(arr: mlx_array) -> Result<Vec<f32>, MlxError> {
+    let ptr = sys::mlx_array_data_float32(arr);
+    if ptr.is_null() {
+        return Err(MlxError::Internal(
+            "mlx_array_data_float32 returned null (array unevaluated or wrong dtype)".into(),
+        ));
+    }
+    let n = sys::mlx_array_size(arr);
+    Ok(std::slice::from_raw_parts(ptr, n).to_vec())
+}
+
+/// Copy an evaluated array's u8 data into an owned `Vec<u8>`.
+///
+/// # Safety
+///
+/// `arr` must be a live array handle. The array must have dtype u8 and
+/// must have been evaluated; `mlx_array_data_uint8` returns NULL otherwise.
+pub(crate) unsafe fn array_data_u8(arr: mlx_array) -> Result<Vec<u8>, MlxError> {
+    let ptr = sys::mlx_array_data_uint8(arr);
+    if ptr.is_null() {
+        return Err(MlxError::Internal(
+            "mlx_array_data_uint8 returned null (array unevaluated or wrong dtype)".into(),
+        ));
+    }
+    let n = sys::mlx_array_size(arr);
+    Ok(std::slice::from_raw_parts(ptr, n).to_vec())
+}
+
+/// Construct an `mlx_array` that reuses an externally-owned buffer, with a
+/// caller-provided destructor run exactly once when MLX drops the last
+/// reference.
+///
+/// This is the primitive behind [`crate::array::MlxArray::from_shared_buffer`]
+/// — MLX gets the buffer's data pointer, and the destructor is responsible
+/// for releasing the backing allocation (typically a [`crate::SharedBuffer`]
+/// wrapped in a `Box`).
+///
+/// # Safety
+///
+/// - `data` must point to at least `product(shape) * dtype.size()` valid
+///   bytes for the duration of the array's lifetime — which, since MLX
+///   drives the lifetime, means "until `dtor(payload)` fires".
+/// - `payload` is forwarded to `dtor` verbatim. Common use: the Rust
+///   `Box::into_raw(Box::new(shared_buffer))` pointer, with `dtor`
+///   performing `drop(Box::from_raw(payload as *mut SharedBuffer))`.
+/// - `dtor` must be safe to call exactly once, from any thread, after
+///   MLX has finished using the array.
+/// - Returned handle is owned by the caller and must be freed via
+///   [`array_free`] exactly once.
+pub(crate) unsafe fn array_new_data_managed_payload(
+    data: *mut std::ffi::c_void,
+    shape: &[i32],
+    dtype: mlx_dtype,
+    payload: *mut std::ffi::c_void,
+    dtor: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
+) -> mlx_array {
+    sys::mlx_array_new_data_managed_payload(
+        data,
+        shape.as_ptr(),
+        shape.len() as i32,
+        dtype,
+        payload,
+        dtor,
+    )
+}
+
+/// Dispatch `mlx_matmul(res, a, b, s)`.
+///
+/// # Safety
+///
+/// `a`, `b`, `s` must be live handles. The returned handle is owned by the
+/// caller and must be freed via [`array_free`] exactly once.
+pub(crate) unsafe fn op_matmul(
+    a: mlx_array,
+    b: mlx_array,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_matmul(&mut res, a, b, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_matmul rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_add(res, a, b, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_add(
+    a: mlx_array,
+    b: mlx_array,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_add(&mut res, a, b, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_add rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_multiply(res, a, b, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_mul(
+    a: mlx_array,
+    b: mlx_array,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_multiply(&mut res, a, b, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_multiply rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_softmax_axis(res, a, axis, precise=true, s)`.
+///
+/// `precise=true` matches PyTorch's default numerical behaviour (promote to
+/// f32 for the intermediate max/exp/sum even when the input is f16/bf16).
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_softmax_axis(
+    a: mlx_array,
+    axis: i32,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_softmax_axis(&mut res, a, axis, /* precise */ true, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_softmax_axis rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_fast_rms_norm(res, x, weight_or_null, eps, s)`.
+///
+/// Pass a zero-initialised `mlx_array` (`mlx_array_new()` style, but without
+/// ownership) as `weight` to request the unweighted variant — mlx-c checks
+/// for a null `ctx`. The safe wrapper in `ops/basic.rs` constructs that
+/// sentinel and is responsible for never freeing it.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_fast_rms_norm(
+    x: mlx_array,
+    weight: mlx_array,
+    eps: f32,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_fast_rms_norm(&mut res, x, weight, eps, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_fast_rms_norm rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_astype(res, a, dtype, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_astype(
+    a: mlx_array,
+    dtype: mlx_dtype,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_astype(&mut res, a, dtype, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_astype rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Construct a sentinel null `mlx_array` (ctx = null) without allocating.
+///
+/// Used to pass the "no weight" option to [`op_fast_rms_norm`] — mlx-c
+/// detects the null ctx and skips the weight multiply. The returned value
+/// must **not** be freed (there is no underlying handle to free).
+///
+/// # Safety
+///
+/// The caller must not call `mlx_array_free` on the returned value. Using
+/// it as input to any op other than ones that explicitly accept a null
+/// array (see mlx-c comments `/* may be null */`) is undefined.
+pub(crate) unsafe fn array_null() -> mlx_array {
+    mlx_array {
+        ctx: std::ptr::null_mut(),
+    }
+}
+
+/// Dispatch `mlx_reshape(res, a, shape, shape_num, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`]. `shape.as_ptr()` must remain valid for the
+/// duration of the call (we pass the Rust slice's pointer through).
+pub(crate) unsafe fn op_reshape(
+    a: mlx_array,
+    shape: &[i32],
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_reshape(&mut res, a, shape.as_ptr(), shape.len(), s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_reshape rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_transpose_axes(res, a, axes, axes_num, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_transpose_axes(
+    a: mlx_array,
+    axes: &[i32],
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_transpose_axes(&mut res, a, axes.as_ptr(), axes.len(), s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_transpose_axes rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_transpose(res, a, s)` — the default "reverse all axes"
+/// variant used when no explicit permutation is supplied.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_transpose_default(
+    a: mlx_array,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_transpose(&mut res, a, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_transpose rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_take_axis(res, a, indices, axis, s)`.
+///
+/// This is mlx-c's single-axis gather — equivalent to `torch.index_select` or
+/// numpy's `take`. Returns rows / slices of `a` picked by `indices` along
+/// `axis`, with `indices.shape` broadcasting into the gathered dim.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_take_axis(
+    a: mlx_array,
+    indices: mlx_array,
+    axis: i32,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_take_axis(&mut res, a, indices, axis, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_take_axis rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Build an owned `mlx_vector_array` from an array of `mlx_array` handles.
+///
+/// The vector bumps the refcount of each underlying array (mlx-c's
+/// `mlx_vector_array_new_data` copies handles into a new `std::vector<array>`
+/// which retains each element). The returned vector is owned by the caller
+/// and must be freed via [`vector_array_free`] exactly once.
+///
+/// # Safety
+///
+/// `arrays` must be a slice of live `mlx_array` handles. Each handle remains
+/// owned by its original `MlxArray`; this helper does not consume ownership.
+pub(crate) unsafe fn vector_array_from(arrays: &[mlx_array]) -> mlx_vector_array {
+    sys::mlx_vector_array_new_data(arrays.as_ptr(), arrays.len())
+}
+
+/// Drop one reference from a vector-of-array handle.
+///
+/// # Safety
+///
+/// `vec` must have been produced by [`vector_array_from`] or another mlx-c
+/// vector constructor.
+pub(crate) unsafe fn vector_array_free(vec: mlx_vector_array) {
+    let rc = sys::mlx_vector_array_free(vec);
+    if rc != 0 {
+        tracing::warn!(rc, "mlx_vector_array_free returned nonzero");
+    }
+}
+
+/// Dispatch `mlx_concatenate_axis(res, arrays, axis, s)`.
+///
+/// Concatenates a list of arrays along `axis`. All arrays must have matching
+/// shapes in every dim except `axis`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`]. `arrays` is a borrowed vector handle —
+/// freeing it is the caller's responsibility (we do not consume it).
+pub(crate) unsafe fn op_concat_axis(
+    arrays: mlx_vector_array,
+    axis: i32,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_concatenate_axis(&mut res, arrays, axis, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_concatenate_axis rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Construct an `mlx_optional_float` (the mlx-c "maybe-float" struct used by
+/// [`op_fast_rope`] for the base frequency).
+pub(crate) fn optional_float(v: Option<f32>) -> mlx_optional_float {
+    match v {
+        Some(value) => mlx_optional_float {
+            value,
+            has_value: true,
+        },
+        None => mlx_optional_float {
+            value: 0.0,
+            has_value: false,
+        },
+    }
+}
+
+/// Dispatch `mlx_fast_rope(res, x, dims, traditional, base, scale, offset,
+/// freqs_or_null, s)`.
+///
+/// Applies Rotary Position Embedding to `x`. `freqs` may be null (pass the
+/// sentinel from [`array_null`]) to let mlx compute the default cos/sin
+/// table from `base` + `scale`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`]. The `freqs` null-sentinel must **not** be
+/// freed — it owns no underlying handle.
+pub(crate) unsafe fn op_fast_rope(
+    x: mlx_array,
+    dims: i32,
+    traditional: bool,
+    base: mlx_optional_float,
+    scale: f32,
+    offset: i32,
+    freqs: mlx_array,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_fast_rope(
+        &mut res,
+        x,
+        dims,
+        traditional,
+        base,
+        scale,
+        offset,
+        freqs,
+        s,
+    );
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_fast_rope rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_sigmoid(res, a, s)` — element-wise `1 / (1 + exp(-x))`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_sigmoid(a: mlx_array, s: mlx_stream) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_sigmoid(&mut res, a, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_sigmoid rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_exp(res, a, s)` — element-wise exponential.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_exp(a: mlx_array, s: mlx_stream) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_exp(&mut res, a, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_exp rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_reciprocal(res, a, s)` — element-wise `1 / x`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_reciprocal(a: mlx_array, s: mlx_stream) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_reciprocal(&mut res, a, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_reciprocal rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_argmax_axis(res, a, axis, keepdims, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`].
+pub(crate) unsafe fn op_argmax_axis(
+    a: mlx_array,
+    axis: i32,
+    keepdims: bool,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_argmax_axis(&mut res, a, axis, keepdims, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_argmax_axis rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Copy an evaluated array's u32 data into an owned `Vec<u32>`. Used to read
+/// back `mlx_argmax_axis` results (mlx returns `u32` indices).
+///
+/// # Safety
+///
+/// `arr` must be a live array handle with dtype u32 that has been
+/// evaluated; `mlx_array_data_uint32` returns NULL otherwise.
+pub(crate) unsafe fn array_data_u32(arr: mlx_array) -> Result<Vec<u32>, MlxError> {
+    let ptr = sys::mlx_array_data_uint32(arr);
+    if ptr.is_null() {
+        return Err(MlxError::Internal(
+            "mlx_array_data_uint32 returned null (array unevaluated or wrong dtype)".into(),
+        ));
+    }
+    let n = sys::mlx_array_size(arr);
+    Ok(std::slice::from_raw_parts(ptr, n).to_vec())
+}
+
+/// Dispatch `mlx_fast_scaled_dot_product_attention(res, q, k, v, scale,
+/// mask_mode, mask_or_null, sinks_or_null, s)`.
+///
+/// `mask_mode` is a C string — callers pass `"causal"` for the causal mask or
+/// `""` (empty) for no mode. When supplying an explicit additive mask, pass
+/// `mode = ""` and a non-null `mask`. `sinks` is unused by the safe wrapper
+/// today and always forwarded as a null sentinel.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`]. `mask_mode` must be a valid nul-terminated
+/// C string pointer; the caller is responsible for its lifetime through the
+/// call. Null sentinels for `mask_arr` / `sinks` must **not** be freed.
+pub(crate) unsafe fn op_sdpa(
+    q: mlx_array,
+    k: mlx_array,
+    v: mlx_array,
+    scale: f32,
+    mask_mode: *const std::os::raw::c_char,
+    mask_arr: mlx_array,
+    sinks: mlx_array,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_fast_scaled_dot_product_attention(
+        &mut res, q, k, v, scale, mask_mode, mask_arr, sinks, s,
+    );
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!(
+            "mlx_fast_scaled_dot_product_attention rc={rc}"
+        )));
+    }
+    Ok(res)
+}

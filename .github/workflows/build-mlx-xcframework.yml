@@ -1,0 +1,213 @@
+name: Build MLX XCFramework
+
+# Builds a fat mlx.xcframework from upstream ml-explore/mlx and ml-explore/mlx-c
+# sources. Three slices are produced (iphoneos-arm64, iphonesimulator-arm64,
+# macos-arm64) so downstream consumers (mlx-c-sys, vendor/mlx-apple) do not need
+# a Metal toolchain or CMake locally.
+#
+# Triggers:
+#   - workflow_dispatch:        manual rebuild (e.g. after bumping UPSTREAM_VERSIONS.txt)
+#   - push to master:           when vendor/mlx-apple/UPSTREAM_VERSIONS.txt changes
+#   - pull_request to master:   same paths, for review
+#   - tags 'mlx-v*':            tagged release; the artifact is also attached
+#                               to the GitHub Release as mlx-{version}.xcframework.zip
+#                               with a sibling .sha256 file.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    tags: ['mlx-v*']
+    paths:
+      - 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt'
+      - 'tools/scripts/build-mlx-slice.sh'
+      - '.github/workflows/build-mlx-xcframework.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt'
+      - 'tools/scripts/build-mlx-slice.sh'
+      - '.github/workflows/build-mlx-xcframework.yml'
+
+permissions:
+  contents: write
+
+env:
+  MLX_DEPLOYMENT_TARGET_IOS: '15.0'
+  MLX_DEPLOYMENT_TARGET_MACOS: '13.3'
+
+jobs:
+  build:
+    name: Build mlx.xcframework
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Select Xcode 16
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.app
+          xcodebuild -version
+          clang --version
+
+      - name: Read upstream pins
+        id: pins
+        run: |
+          set -euo pipefail
+          PINS_FILE="vendor/mlx-apple/UPSTREAM_VERSIONS.txt"
+          if [ ! -f "$PINS_FILE" ]; then
+            echo "::error::$PINS_FILE missing — US-002 must land before this workflow can run"
+            exit 1
+          fi
+          MLX_SHA=$(grep '^mlx=' "$PINS_FILE" | cut -d= -f2 | tr -d '[:space:]')
+          MLX_C_SHA=$(grep '^mlx-c=' "$PINS_FILE" | cut -d= -f2 | tr -d '[:space:]')
+          if [ -z "$MLX_SHA" ] || [ -z "$MLX_C_SHA" ]; then
+            echo "::error::UPSTREAM_VERSIONS.txt must define both mlx= and mlx-c= keys"
+            exit 1
+          fi
+          echo "mlx_sha=$MLX_SHA" >> "$GITHUB_OUTPUT"
+          echo "mlx_c_sha=$MLX_C_SHA" >> "$GITHUB_OUTPUT"
+          echo "mlx pinned at:   $MLX_SHA"
+          echo "mlx-c pinned at: $MLX_C_SHA"
+
+      - name: Resolve release version
+        id: version
+        run: |
+          set -euo pipefail
+          REF="${GITHUB_REF#refs/tags/}"
+          if [[ "$GITHUB_REF" == refs/tags/mlx-v* ]]; then
+            VERSION="${REF#mlx-v}"
+            IS_TAG=true
+          else
+            SHORT_MLX="${{ steps.pins.outputs.mlx_sha }}"
+            VERSION="0.0.0+sha.${SHORT_MLX:0:7}"
+            IS_TAG=false
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "is_tag=$IS_TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION (tagged=$IS_TAG)"
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        run: |
+          {
+            echo "SCCACHE_GHA_ENABLED=true"
+            echo "CMAKE_C_COMPILER_LAUNCHER=sccache"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache"
+          } >> "$GITHUB_ENV"
+
+      - name: Clone upstream sources
+        run: |
+          set -euo pipefail
+          mkdir -p build/upstream
+          git clone --filter=blob:none https://github.com/ml-explore/mlx.git build/upstream/mlx
+          git -C build/upstream/mlx checkout "${{ steps.pins.outputs.mlx_sha }}"
+          git clone --filter=blob:none https://github.com/ml-explore/mlx-c.git build/upstream/mlx-c
+          git -C build/upstream/mlx-c checkout "${{ steps.pins.outputs.mlx_c_sha }}"
+
+      - name: Build slice — iphoneos-arm64
+        run: |
+          ./tools/scripts/build-mlx-slice.sh \
+            --slice iphoneos-arm64 \
+            --sysroot iphoneos \
+            --arch arm64 \
+            --system-name iOS \
+            --deployment-target "${MLX_DEPLOYMENT_TARGET_IOS}" \
+            --mlx-src build/upstream/mlx \
+            --mlx-c-src build/upstream/mlx-c \
+            --out build/slices/iphoneos-arm64
+
+      - name: Build slice — iphonesimulator-arm64
+        run: |
+          ./tools/scripts/build-mlx-slice.sh \
+            --slice iphonesimulator-arm64 \
+            --sysroot iphonesimulator \
+            --arch arm64 \
+            --system-name iOS \
+            --deployment-target "${MLX_DEPLOYMENT_TARGET_IOS}" \
+            --mlx-src build/upstream/mlx \
+            --mlx-c-src build/upstream/mlx-c \
+            --out build/slices/iphonesimulator-arm64
+
+      - name: Build slice — macos-arm64
+        run: |
+          ./tools/scripts/build-mlx-slice.sh \
+            --slice macos-arm64 \
+            --sysroot macosx \
+            --arch arm64 \
+            --system-name Darwin \
+            --deployment-target "${MLX_DEPLOYMENT_TARGET_MACOS}" \
+            --mlx-src build/upstream/mlx \
+            --mlx-c-src build/upstream/mlx-c \
+            --out build/slices/macos-arm64
+
+      - name: Assemble mlx.xcframework
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          rm -rf dist/mlx.xcframework
+
+          xcodebuild -create-xcframework \
+            -library build/slices/iphoneos-arm64/lib/libmlx-combined.a \
+              -headers build/slices/iphoneos-arm64/include \
+            -library build/slices/iphonesimulator-arm64/lib/libmlx-combined.a \
+              -headers build/slices/iphonesimulator-arm64/include \
+            -library build/slices/macos-arm64/lib/libmlx-combined.a \
+              -headers build/slices/macos-arm64/include \
+            -output dist/mlx.xcframework
+
+          # Bundle each slice's .metallib alongside its library.
+          # xcodebuild -create-xcframework does not place resources directly,
+          # so we drop them into a sibling Resources/ inside each slice dir;
+          # consumers (mlx-c-sys build.rs) resolve them relative to the lib path.
+          for SLICE in ios-arm64 ios-arm64-simulator macos-arm64; do
+            case "$SLICE" in
+              ios-arm64)            SRC=build/slices/iphoneos-arm64 ;;
+              ios-arm64-simulator)  SRC=build/slices/iphonesimulator-arm64 ;;
+              macos-arm64)          SRC=build/slices/macos-arm64 ;;
+            esac
+            DST="dist/mlx.xcframework/${SLICE}/Resources"
+            mkdir -p "$DST"
+            if compgen -G "${SRC}/lib/*.metallib" > /dev/null; then
+              cp "${SRC}"/lib/*.metallib "$DST"/
+            else
+              echo "::warning::no .metallib produced for ${SLICE} — Metal kernels will not be available at runtime"
+            fi
+          done
+
+          echo "XCFramework layout:"
+          find dist/mlx.xcframework -maxdepth 3 -print
+
+      - name: Package and checksum
+        id: package
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP_NAME="mlx-${VERSION}.xcframework.zip"
+          (cd dist && zip -r "../${ZIP_NAME}" mlx.xcframework)
+          shasum -a 256 "${ZIP_NAME}" | awk '{print $1}' > "${ZIP_NAME}.sha256"
+          echo "Bundle:    ${ZIP_NAME}"
+          echo "SHA256:    $(cat "${ZIP_NAME}.sha256")"
+          echo "zip_name=${ZIP_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload xcframework artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mlx-xcframework
+          path: |
+            ${{ steps.package.outputs.zip_name }}
+            ${{ steps.package.outputs.zip_name }}.sha256
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release
+        if: steps.version.outputs.is_tag == 'true'
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        with:
+          files: |
+            ${{ steps.package.outputs.zip_name }}
+            ${{ steps.package.outputs.zip_name }}.sha256
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

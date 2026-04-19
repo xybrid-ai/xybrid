@@ -803,6 +803,9 @@ fn execute_batch(
                     EnvelopeKind::MultiPart(parts) => {
                         ui::ok(&format!("Multi-part output: {} parts", parts.len()));
                     }
+                    EnvelopeKind::TokenIds(ids) => {
+                        ui::ok(&format!("Token IDs: {} tokens", ids.len()));
+                    }
                 }
             }
 

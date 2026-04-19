@@ -1,0 +1,21 @@
+# MLX xcframework upstream pins.
+#
+# Consumed by:
+#   - .github/workflows/build-mlx-xcframework.yml
+#   - tools/scripts/fetch-mlx-xcframework.sh
+#
+# Bump `mlx=` and `mlx-c=` to the desired upstream revisions, then trigger the
+# "Build MLX XCFramework" workflow. When the build succeeds and is published as
+# a GitHub Release under the tag `mlx-v<release>`, update `release=` and
+# `sha256=` below so downstream `fetch-mlx-xcframework.sh` runs can verify the
+# exact artifact they are pulling.
+
+# Upstream commits to build from (full 40-char SHAs).
+mlx=ce45c52505c8158ea48d2a54e8caae05efd86bfe
+mlx-c=a0b5179b2a34f6441eb78efe39f3b36be757f5a6
+
+# Published release artifact — leave as `unpublished` until a `mlx-v*` tag has
+# been cut. The fetch script errors out with a clear message until both fields
+# are populated, so no one accidentally pulls an unverified build.
+release=unpublished
+sha256=unpublished

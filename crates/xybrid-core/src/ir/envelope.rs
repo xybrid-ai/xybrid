@@ -1052,6 +1052,8 @@ pub enum EnvelopeKind {
     Image { source: ImageSource },
     /// Ordered envelope fragments that represent one logical message.
     MultiPart(Vec<Envelope>),
+    /// Token IDs produced by tokenizer preprocessing for LLM prefill.
+    TokenIds(Vec<i64>),
 }
 
 impl fmt::Debug for EnvelopeKind {
@@ -1094,6 +1096,7 @@ impl fmt::Debug for EnvelopeKind {
                 }
             },
             EnvelopeKind::MultiPart(parts) => f.debug_tuple("MultiPart").field(parts).finish(),
+            EnvelopeKind::TokenIds(data) => f.debug_tuple("TokenIds").field(data).finish(),
         }
     }
 }
@@ -1111,6 +1114,7 @@ impl EnvelopeKind {
             EnvelopeKind::Embedding(_) => "Embedding",
             EnvelopeKind::Image { .. } => "Image",
             EnvelopeKind::MultiPart(_) => "MultiPart",
+            EnvelopeKind::TokenIds(_) => "TokenIds",
         }
     }
 
@@ -1126,6 +1130,7 @@ impl EnvelopeKind {
             EnvelopeKind::Embedding(data) => data.len() * std::mem::size_of::<f32>(),
             EnvelopeKind::Image { source } => source.byte_len(),
             EnvelopeKind::MultiPart(parts) => parts.iter().map(Envelope::payload_size).sum(),
+            EnvelopeKind::TokenIds(data) => data.len() * std::mem::size_of::<i64>(),
         }
     }
 }
@@ -1538,7 +1543,10 @@ impl Envelope {
                     part.collect_image_summaries(summaries);
                 }
             }
-            EnvelopeKind::Audio(_) | EnvelopeKind::Text(_) | EnvelopeKind::Embedding(_) => {}
+            EnvelopeKind::Audio(_)
+            | EnvelopeKind::Text(_)
+            | EnvelopeKind::Embedding(_)
+            | EnvelopeKind::TokenIds(_) => {}
         }
     }
 
@@ -1573,7 +1581,10 @@ impl Envelope {
                 }
                 Ok(())
             }
-            EnvelopeKind::Audio(_) | EnvelopeKind::Text(_) | EnvelopeKind::Embedding(_) => Ok(()),
+            EnvelopeKind::Audio(_)
+            | EnvelopeKind::Text(_)
+            | EnvelopeKind::Embedding(_)
+            | EnvelopeKind::TokenIds(_) => Ok(()),
         }
     }
 

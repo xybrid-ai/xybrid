@@ -395,6 +395,7 @@ impl RuntimeAdapter for CloudRuntimeAdapter {
             EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                 EnvelopeKind::Text("cloud-output-vision-unsupported".to_string())
             }
+            EnvelopeKind::TokenIds(_) => EnvelopeKind::Text("cloud-output-tokens".to_string()),
         };
 
         Ok(crate::ir::Envelope::new(output))
@@ -443,6 +444,7 @@ impl RuntimeAdapter for MockRuntimeAdapter {
             EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                 EnvelopeKind::Text("mock-output-vision-unsupported".to_string())
             }
+            EnvelopeKind::TokenIds(_) => EnvelopeKind::Text("mock-output-tokens".to_string()),
         };
 
         Ok(crate::ir::Envelope::new(output))

@@ -1099,6 +1099,7 @@ mod tests {
             files: vec!["model.gguf".to_string()],
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,

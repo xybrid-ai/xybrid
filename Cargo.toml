@@ -10,6 +10,8 @@ members = [
     "crates/xybrid-ffi",
     "crates/llama-cpp-sys",
     "crates/xybrid-llama",
+    "crates/mlx-c-sys",
+    "crates/xybrid-mlx",
     "bindings/flutter/rust",
     "macros",
     "xtask",

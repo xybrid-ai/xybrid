@@ -185,6 +185,19 @@ impl StageConfig {
         }
     }
 
+    /// Get the LLM backend override (auto, mlx, llamacpp, mistral).
+    ///
+    /// `None` means no override was specified — the runtime selector applies
+    /// its default priority. See
+    /// [`crate::runtime_adapter::selector`] for how this interacts with
+    /// registry variants and the `llm-mlx` capability probe.
+    pub fn backend(&self) -> Option<&str> {
+        match self {
+            StageConfig::Simple(_) => None,
+            StageConfig::Object(obj) => obj.backend.as_deref(),
+        }
+    }
+
     /// Convert to StageObjectConfig for uniform handling.
     pub fn to_object(&self) -> StageObjectConfig {
         match self {
@@ -205,6 +218,7 @@ impl StageConfig {
                     target: None,
                     provider: None,
                     execution_provider: None,
+                    backend: None,
                     options: HashMap::new(),
                 }
             }
@@ -241,6 +255,19 @@ pub struct StageObjectConfig {
     /// Valid values: "cpu", "coreml", "coreml-ane", "coreml-gpu"
     #[serde(default)]
     pub execution_provider: Option<String>,
+
+    /// LLM backend override for this stage.
+    ///
+    /// Accepted values (case-insensitive): `auto`, `mlx`, `llamacpp`, `mistral`.
+    /// `None` or `"auto"` means "let the runtime selector decide"
+    /// (see `xybrid_core::runtime_adapter::selector`). Added in US-016.
+    ///
+    /// When set to an explicit backend on a host where that backend is not
+    /// compiled in (e.g. `backend: mlx` on a Linux build with only
+    /// `llm-llamacpp`), pipeline loading fails with a descriptive error
+    /// listing the available backends for the current target.
+    #[serde(default)]
+    pub backend: Option<String>,
 
     /// Stage-specific options (flattened for convenience)
     /// Common options: system_prompt, max_tokens, temperature
@@ -445,5 +472,26 @@ stages:
 "#;
         let config = PipelineConfig::from_yaml(yaml).unwrap();
         assert_eq!(config.stages[0].execution_provider(), None);
+    }
+
+    #[test]
+    fn test_backend_override_parsed() {
+        let yaml = r#"
+stages:
+  - model: qwen3.5-3b
+    backend: mlx
+"#;
+        let config = PipelineConfig::from_yaml(yaml).unwrap();
+        assert_eq!(config.stages[0].backend(), Some("mlx"));
+    }
+
+    #[test]
+    fn test_backend_default_none() {
+        let yaml = r#"
+stages:
+  - qwen3.5-3b
+"#;
+        let config = PipelineConfig::from_yaml(yaml).unwrap();
+        assert_eq!(config.stages[0].backend(), None);
     }
 }

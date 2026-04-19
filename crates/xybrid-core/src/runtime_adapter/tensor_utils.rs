@@ -67,6 +67,11 @@ pub fn envelope_to_tensors(
                     .to_string(),
             ))
         }
+        EnvelopeKind::TokenIds(_) => {
+            return Err(AdapterError::InvalidInput(
+                "EnvelopeKind::TokenIds cannot be converted to an ONNX f32 tensor".to_string(),
+            ))
+        }
     };
 
     let mut result = std::collections::HashMap::new();

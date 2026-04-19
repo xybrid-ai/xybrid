@@ -70,7 +70,7 @@ yuvutils-rs = { version = "0.8.3", default-features = false }  # For raw YUV cam
 # Disable default features to exclude esaxx_fast (esaxx-rs/cpp) which hardcodes
 # static_crt(true) on MSVC, producing /MT objects that conflict with ORT's /MD.
 # We only run tokenizer models, we don't train them — esaxx-rs is only for BPE training.
-tokenizers = { version = "0.19", default-features = false, features = ["onig"] }
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 schemars = { version = "0.8", optional = true }  # JSON Schema generation for model_metadata.json
 hound = "3.5"  # For WAV file reading (audio preprocessing)
 cmudict-fast = "0.8"  # For CMU pronouncing dictionary (TTS phonemization)
@@ -98,6 +98,16 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 # crates.io release (mistralrs 0.8.1 or newer) and restore the
 # `dep:mistralrs` wiring in the `llm-mistral*` features below.
 # mistralrs = { version = "0.8", optional = true }
+
+# MLX adapter dep. `llm-mlx` uses the non-linking portion of `xybrid-mlx`
+# on every platform, while `llm-mlx-runtime` forwards `xybrid-mlx/bindings`
+# for Apple Silicon runtime execution.
+xybrid-mlx = { path = "../xybrid-mlx", optional = true }
+
+# HuggingFace-style chat templates for MLX-LM bundles.
+minijinja = { version = "2.5", default-features = false, features = ["builtins", "loader", "macros", "serde"], optional = true }
+minijinja-contrib = { version = "2.5", features = ["pycompat"], optional = true }
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"], optional = true }
 
 [features]
 # `llm-llamacpp` is NOT enabled by default — it requires cmake + a C++
@@ -159,6 +169,12 @@ llm-llamacpp-vision = [
     "xybrid-llama/vision",
 ]
 
+# MLX backend metadata/dispatch path (cross-platform, no MLX linkage).
+llm-mlx = ["dep:xybrid-mlx", "dep:safetensors", "dep:minijinja", "dep:minijinja-contrib", "dep:rand"]
+
+# Full MLX runtime for Apple Silicon macOS.
+llm-mlx-runtime = ["llm-mlx", "xybrid-mlx/bindings"]
+
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
 # downstream demos, integration tests, and benchmarks. Off by default.
 # Crates that depend on `xybrid-core` enable this when they need to inject
@@ -201,6 +217,10 @@ harness = false
 name = "raw_image_ingress"
 harness = false
 required-features = ["dev-tools"]
+
+[[bench]]
+name = "llm_backend_compare"
+harness = false
 
 # Platform-specific ureq dependencies
 # Non-Android: Use default ureq with TLS
