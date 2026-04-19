@@ -366,15 +366,20 @@ impl PhonemizerBackend for OpenPhonemizerBackend {
             }
         }
 
-        let trimmed = result.trim().to_string();
-
-        // Filter to only characters in vocabulary (matches espeak/misaki pattern)
-        let filtered: String = trimmed
+        // Filter to only characters in vocabulary (matches espeak/misaki pattern).
+        let filtered: String = result
             .chars()
             .filter(|c| tokens_map.contains_key(c))
             .collect();
 
-        Ok(filtered)
+        // Collapse runs of whitespace AFTER filtering. Vocab filtering can
+        // strip out-of-range chars (e.g. the U+2019 curly apostrophe that
+        // survives phonemization of "I'm" in reference transcripts), which
+        // leaves the flanking spaces adjacent. Single-spaced IPA is what
+        // downstream tokenizers are trained on.
+        let normalized = filtered.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        Ok(normalized)
     }
 
     fn name(&self) -> &'static str {

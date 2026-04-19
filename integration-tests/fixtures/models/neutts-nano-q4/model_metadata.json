@@ -18,7 +18,7 @@
   "preprocessing": [
     {
       "type": "PhonemeRaw",
-      "backend": "EspeakNG",
+      "backend": "OpenPhonemizer",
       "language": "en-us"
     }
   ],
@@ -34,6 +34,8 @@
   "files": [
     "neutts-nano-Q4_0.gguf",
     "neucodec-decoder-int8.onnx",
+    "open-phonemizer.onnx",
+    "dictionary.json",
     "voices/jo.bin",
     "voices/jo.txt",
     "voices/dave.bin",

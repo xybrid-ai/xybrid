@@ -12,16 +12,37 @@ set -euo pipefail
 # VoiceFormat::PrecomputedCodes expects. Conversion requires PyTorch
 # (one-time, not a runtime dependency).
 #
-# Usage: ./integration-tests/fetch-neutts-nano.sh
+# Usage:
+#   ./integration-tests/fetch-neutts-nano.sh                # populate local fixture
+#   ./integration-tests/fetch-neutts-nano.sh <TARGET_DIR>   # populate a staging dir
+#                                                             (e.g. for HF upload)
+#
+# When TARGET_DIR is provided:
+#   - files are written to <TARGET_DIR>/ (and <TARGET_DIR>/voices/)
+#   - .pt conversion artifacts are removed after producing .bin files
+#   - no model_metadata.json requirement (xybrid-pack generates it)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FIXTURE_DIR="$SCRIPT_DIR/fixtures/models/neutts-nano-q4"
-VOICES_DIR="$FIXTURE_DIR/voices"
+DEFAULT_FIXTURE="$SCRIPT_DIR/fixtures/models/neutts-nano-q4"
+
+if [ "$#" -ge 1 ] && [ -n "$1" ]; then
+    TARGET_DIR="$1"
+    STAGING_MODE=1
+else
+    TARGET_DIR="$DEFAULT_FIXTURE"
+    STAGING_MODE=0
+fi
+VOICES_DIR="$TARGET_DIR/voices"
 
 GGUF_URL="https://huggingface.co/neuphonic/neutts-nano-q4-gguf/resolve/main/neutts-nano-Q4_0.gguf"
 DECODER_URL="https://huggingface.co/neuphonic/neucodec-onnx-decoder-int8/resolve/main/model.onnx"
 VOICES_BASE="https://raw.githubusercontent.com/neuphonic/neutts/main/samples"
 VOICES=(jo dave)
+
+# OpenPhonemizer assets (pure-Rust G2P, replaces system espeak-ng).
+# Sourced from the KittenTTS-ONNX bundle we already host on HF.
+OP_MODEL_URL="https://huggingface.co/xybrid-ai/KittenTTS-Nano-0.8-ONNX/resolve/main/open-phonemizer.onnx"
+OP_DICT_URL="https://huggingface.co/xybrid-ai/KittenTTS-Nano-0.8-ONNX/resolve/main/dictionary.json"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -107,15 +128,19 @@ download() {
 
 mkdir -p "$VOICES_DIR"
 
-[ -f "$FIXTURE_DIR/model_metadata.json" ] \
-    || fatal "Fixture metadata missing: $FIXTURE_DIR/model_metadata.json
+if [ "$STAGING_MODE" -eq 0 ]; then
+    [ -f "$TARGET_DIR/model_metadata.json" ] \
+        || fatal "Fixture metadata missing: $TARGET_DIR/model_metadata.json
        This script only fetches the model files. The metadata is committed."
+fi
 
-info "Target: $FIXTURE_DIR"
+info "Target: $TARGET_DIR"
 echo
 
-download "$GGUF_URL"    "$FIXTURE_DIR/neutts-nano-Q4_0.gguf"      "GGUF backbone (~195 MB)"
-download "$DECODER_URL" "$FIXTURE_DIR/neucodec-decoder-int8.onnx" "NeuCodec decoder (~312 MB)"
+download "$GGUF_URL"    "$TARGET_DIR/neutts-nano-Q4_0.gguf"      "GGUF backbone (~195 MB)"
+download "$DECODER_URL" "$TARGET_DIR/neucodec-decoder-int8.onnx" "NeuCodec decoder (~312 MB)"
+download "$OP_MODEL_URL" "$TARGET_DIR/open-phonemizer.onnx"      "OpenPhonemizer ONNX (~59 MB)"
+download "$OP_DICT_URL"  "$TARGET_DIR/dictionary.json"           "OpenPhonemizer dictionary (~10 MB)"
 
 echo
 info "Fetching reference voices: ${VOICES[*]}"
@@ -131,21 +156,38 @@ for voice in "${VOICES[@]}"; do
     bin="$VOICES_DIR/$voice.bin"
     if [ -f "$bin" ] && [ "$bin" -nt "$pt" ]; then
         ok "$voice.bin already up-to-date"
-        continue
+    else
+        run_python "$SCRIPT_DIR/convert_neutts_voice.py" "$pt" "$bin"
     fi
-    run_python "$SCRIPT_DIR/convert_neutts_voice.py" "$pt" "$bin"
 done
 
+# In staging mode, strip the .pt conversion artifacts — they're not part of
+# the final bundle and shouldn't be uploaded to HuggingFace.
+if [ "$STAGING_MODE" -eq 1 ]; then
+    for voice in "${VOICES[@]}"; do
+        rm -f "$VOICES_DIR/$voice.pt"
+    done
+fi
+
 echo
-info "Verifying fixture contents"
+info "Verifying contents"
 all_present=1
-for f in \
-    "model_metadata.json" \
-    "neutts-nano-Q4_0.gguf" \
-    "neucodec-decoder-int8.onnx" \
-    "voices/jo.bin" "voices/jo.txt" \
-    "voices/dave.bin" "voices/dave.txt"; do
-    if [ -f "$FIXTURE_DIR/$f" ]; then
+
+required=(
+    "neutts-nano-Q4_0.gguf"
+    "neucodec-decoder-int8.onnx"
+    "open-phonemizer.onnx"
+    "dictionary.json"
+    "voices/jo.bin" "voices/jo.txt"
+    "voices/dave.bin" "voices/dave.txt"
+)
+# Fixture mode also expects the committed model_metadata.json.
+if [ "$STAGING_MODE" -eq 0 ]; then
+    required=("model_metadata.json" "${required[@]}")
+fi
+
+for f in "${required[@]}"; do
+    if [ -f "$TARGET_DIR/$f" ]; then
         ok "$f"
     else
         warn "missing: $f"
@@ -155,14 +197,21 @@ done
 
 echo
 if [ $all_present -eq 1 ]; then
-    ok "Fixture ready at $FIXTURE_DIR"
-    echo
-    echo "Run end-to-end:"
-    echo "  cargo run --example neutts_tts -p xybrid-core --features llm-llamacpp -- \\"
-    echo "    --model-dir integration-tests/fixtures/models/neutts-nano-q4 \\"
-    echo "    --text \"Hello from xybrid\" \\"
-    echo "    --voice jo \\"
-    echo "    --output /tmp/neutts.wav"
+    if [ "$STAGING_MODE" -eq 1 ]; then
+        ok "Staging dir ready at $TARGET_DIR"
+        echo
+        echo "Next (upload to HuggingFace):"
+        echo "  hf upload xybrid-ai/NeuTTS-Nano-Q4 $TARGET_DIR . --commit-message 'OP bundle'"
+    else
+        ok "Fixture ready at $TARGET_DIR"
+        echo
+        echo "Run end-to-end:"
+        echo "  cargo run --example neutts_tts -p xybrid-core --features llm-llamacpp -- \\"
+        echo "    --model-dir integration-tests/fixtures/models/neutts-nano-q4 \\"
+        echo "    --text \"Hello from xybrid\" \\"
+        echo "    --voice jo \\"
+        echo "    --output /tmp/neutts.wav"
+    fi
 else
     fatal "Some files are missing — see warnings above."
 fi
