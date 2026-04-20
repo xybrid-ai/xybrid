@@ -426,9 +426,12 @@ jobs:
           PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Convert Windows backslashes to forward slashes so bash doesn't
+          # interpret \a, \x etc. as backslash-escapes and mangle the path.
+          MANIFEST_DIR="${GITHUB_WORKSPACE//\\//}/bindings/flutter/rust"
           dart run bin/build_tool.dart precompile-binaries \
             --repository ${{ github.repository }} \
-            --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
+            --manifest-dir "$MANIFEST_DIR" \
             --verbose
 
   #

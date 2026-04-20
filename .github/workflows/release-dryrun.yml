@@ -280,6 +280,77 @@ jobs:
       - name: Build XCFramework (release)
         run: cargo xtask build-xcframework --release
 
+  #
+  # Windows-specific validation. This job exists because the real release
+  # workflow (precompile-flutter-windows) has hit Windows-only bugs twice:
+  #   - backslash path mangling in bash (github.workspace → "D:\a\x" → bash
+  #     escape-processes \a, \x → "D:ax...")
+  #   - CFLAGS=-MD CRT mismatch for cdylib linking
+  # We replicate the real job's path + CRT handling without uploading anything.
+  #
+  build-validate-windows:
+    name: Build-validate (Windows)
+    needs: [check-version-branch]
+    if: needs.check-version-branch.outputs.is_release_branch == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "flutter-windows"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Install LLVM and NASM
+        run: choco install llvm nasm
+
+      - name: Add NASM to PATH
+        shell: bash
+        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
+
+      - name: Force dynamic CRT (cdylib DLL linking requirement)
+        shell: bash
+        run: |
+          echo "CFLAGS=-MD" >> $GITHUB_ENV
+          echo "CXXFLAGS=-MD" >> $GITHUB_ENV
+
+      - name: Validate manifest path resolves on Windows
+        shell: bash
+        run: |
+          # Bash on Windows parses \a, \x etc. as backslash-escapes of
+          # non-special characters, mangling D:\a\xybrid into D:axybrid.
+          # Verify the converted path actually exists before the build uses it.
+          MANIFEST_DIR="${GITHUB_WORKSPACE//\\//}/bindings/flutter/rust"
+          echo "GITHUB_WORKSPACE='$GITHUB_WORKSPACE'"
+          echo "MANIFEST_DIR='$MANIFEST_DIR'"
+          if [ ! -d "$MANIFEST_DIR" ]; then
+            echo "ERROR: manifest dir does not exist — backslash escaping regression?"
+            exit 1
+          fi
+
+      - name: Build flutter bindings (Windows)
+        shell: bash
+        run: |
+          MANIFEST_DIR="${GITHUB_WORKSPACE//\\//}/bindings/flutter/rust"
+          cd "$MANIFEST_DIR"
+          cargo build --release --target x86_64-pc-windows-msvc
+
   build-validate-android:
     name: Build-validate (Android)
     needs: [check-version-branch]
@@ -335,6 +406,7 @@ jobs:
       - kotlin-dryrun
       - build-validate-apple
       - build-validate-android
+      - build-validate-windows
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -358,7 +430,8 @@ jobs:
             "flutter-dryrun=${{ needs.flutter-dryrun.result }}" \
             "kotlin-dryrun=${{ needs.kotlin-dryrun.result }}" \
             "build-validate-apple=${{ needs.build-validate-apple.result }}" \
-            "build-validate-android=${{ needs.build-validate-android.result }}"; do
+            "build-validate-android=${{ needs.build-validate-android.result }}" \
+            "build-validate-windows=${{ needs.build-validate-windows.result }}"; do
             if [[ "${PAIR##*=}" != "success" ]]; then
               echo "FAIL: ${PAIR%%=*}"
               FAILED=1
