@@ -370,6 +370,74 @@ fn default_context_length() -> usize {
 }
 
 // ============================================================================
+// Swim-lane grouping helpers
+// ============================================================================
+
+/// Map a model's declared task (`model_metadata.json::metadata.task`) to the
+/// swim-lane category the console uses to group spans into horizontal lanes.
+///
+/// Returns `None` when the task is either missing or doesn't fit one of the
+/// recognised lanes — the span still renders, it just lands in the catch-all
+/// lane at the bottom of the view.
+pub fn stage_kind_from_task(task: &str) -> Option<&'static str> {
+    match task {
+        "speech-recognition" | "speech-to-text" | "asr" => Some("asr"),
+        "text-to-speech" | "tts" => Some("tts"),
+        "text-generation" | "chat" | "llm" => Some("llm"),
+        "translation" => Some("translate"),
+        "image-classification" | "image-to-text" | "vision" => Some("vision"),
+        "embedding" | "sentence-embedding" => Some("embed"),
+        "audio-classification" | "vad" => Some("audio"),
+        _ => None,
+    }
+}
+
+/// Map a model's execution template to the `span_kind` colour hint used by
+/// the swim-lane bar renderer (`gpu` / `cpu` / `io` / `tool`).
+///
+/// This is the *outer* `execute:<model_id>` span annotation — the LLM adapter
+/// overrides this on its inner `llm_inference` span with more precise Metal-
+/// vs-CPU information once it knows which kernel path ran.
+pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
+    match template {
+        ExecutionTemplate::CoreMl { .. } => "gpu",
+        ExecutionTemplate::SafeTensors { .. } => {
+            #[cfg(feature = "candle-metal")]
+            {
+                "gpu"
+            }
+            #[cfg(not(feature = "candle-metal"))]
+            {
+                "cpu"
+            }
+        }
+        ExecutionTemplate::Gguf { .. } => {
+            // llm.rs overrides this on the inner llm_inference span; here we
+            // set the outer execute span to the same best-guess value so the
+            // swim-lane bar colour is consistent whether we read it off the
+            // outer or inner span.
+            #[cfg(all(
+                any(feature = "llm-mistral-metal", feature = "llm-llamacpp"),
+                target_os = "macos"
+            ))]
+            {
+                "gpu"
+            }
+            #[cfg(not(all(
+                any(feature = "llm-mistral-metal", feature = "llm-llamacpp"),
+                target_os = "macos"
+            )))]
+            {
+                "cpu"
+            }
+        }
+        ExecutionTemplate::Onnx { .. }
+        | ExecutionTemplate::TfLite { .. }
+        | ExecutionTemplate::ModelGraph { .. } => "cpu",
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

@@ -593,10 +593,23 @@ impl Pipeline {
     }
 
     /// Check if all device models are cached and ready.
+    ///
+    /// Must hold BOTH: every stage is cached on disk (can run locally)
+    /// AND this handle has loaded each Cached stage's bundle path into
+    /// `handle.bundle_paths`. A freshly-constructed `Pipeline` with a
+    /// warm on-disk cache satisfies the first but not the second, so
+    /// `run()` used to skip `load_models()` and hit the core's mock
+    /// fallback. Integration (cloud-routed) stages don't need a local
+    /// bundle and pass through.
     pub fn is_ready(&self) -> bool {
-        self.stages
-            .iter()
-            .all(|s| matches!(s.status, StageStatus::Cached | StageStatus::Integration))
+        let Ok(handle) = self.handle.read() else {
+            return false;
+        };
+        self.stages.iter().all(|s| match s.status {
+            StageStatus::Cached => handle.bundle_paths.contains_key(&s.id),
+            StageStatus::Integration => true,
+            _ => false,
+        })
     }
 
     /// Get the total bytes that need to be downloaded.
@@ -1450,5 +1463,5 @@ id: asr
     // phase 0.4), so both the emission code and this test were removed.
     // LLM metrics now ride on `PlatformEvent.stages[].spans[].metadata`
     // via `xybrid_core::tracing::add_metadata`, which is covered by the
-    // platform ingest's own extraction tests in `ingest/src/tinybird.rs`.
+    // consuming platform's own span-extraction tests.
 }

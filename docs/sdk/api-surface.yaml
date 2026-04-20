@@ -344,6 +344,82 @@ classes:
     section: "9. Configuration Types"
     status: { dart: stub, kotlin: planned, swift: planned, csharp: planned }
 
+  RustTelemetryConfig:
+    type: builder
+    section: "9. Configuration Types"
+    rust_path: "xybrid_sdk::telemetry::TelemetryConfig"
+    status: { rust: implemented }
+    stability: { rust: stable }
+    not_applicable: [dart, kotlin, swift, csharp]
+    since: "0.1.0-beta10"
+    notes: "Rust-only SDK telemetry builder surface. Non-Rust SDKs do not expose TelemetryConfig in this batch."
+    methods:
+      with_device_label:
+        name: with_device_label
+        parameters:
+          - { name: label, type: "impl Into<String>" }
+        returns: Self
+        description: "Sets a human-friendly label displayed alongside the stable device identifier."
+        since: "0.1.0-beta10"
+      with_hardware:
+        name: with_hardware
+        parameters:
+          - { name: profile, type: DeviceProfile }
+        returns: Self
+        description: "Supplies the complete hardware profile and disables automatic hardware detection."
+        since: "0.1.0-beta10"
+      with_hardware_chip:
+        name: with_hardware_chip
+        parameters:
+          - { name: chip, type: "impl Into<String>" }
+        returns: Self
+        description: "Overrides the detected chip family."
+        since: "0.1.0-beta10"
+      with_hardware_ram_gb:
+        name: with_hardware_ram_gb
+        parameters:
+          - { name: gb, type: u32 }
+        returns: Self
+        description: "Overrides the detected RAM size in GB."
+        since: "0.1.0-beta10"
+      with_hardware_os:
+        name: with_hardware_os
+        parameters:
+          - { name: os, type: "impl Into<String>" }
+          - { name: version, type: "impl Into<String>" }
+        returns: Self
+        description: "Overrides the detected OS name and OS version."
+        since: "0.1.0-beta10"
+      with_hardware_arch:
+        name: with_hardware_arch
+        parameters:
+          - { name: arch, type: "impl Into<String>" }
+        returns: Self
+        description: "Overrides the detected CPU architecture."
+        since: "0.1.0-beta10"
+      with_device_attribute:
+        name: with_device_attribute
+        parameters:
+          - { name: key, type: "impl Into<String>" }
+          - { name: value, type: "impl Into<String>" }
+        returns: Self
+        description: "Adds an app-provided string attribute under device.custom."
+        since: "0.1.0-beta10"
+      with_auto_hardware_detection:
+        name: with_auto_hardware_detection
+        parameters:
+          - { name: enabled, type: bool }
+        returns: Self
+        description: "Enables or disables automatic hardware detection; default is true. When disabled and no explicit overrides are supplied, the SDK omits the `device` object and skips auto-generation of `device_id` on emitted events."
+        since: "0.1.0-beta10"
+      with_hostname_capture:
+        name: with_hostname_capture
+        parameters:
+          - { name: enabled, type: bool }
+        returns: Self
+        description: "Enables or disables hostname capture; default is false."
+        since: "0.1.0-beta10"
+
   XybridConfiguration:
     type: data
     section: "9. Configuration Types"

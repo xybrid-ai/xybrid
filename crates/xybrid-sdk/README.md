@@ -72,6 +72,25 @@ let config = TelemetryConfig::new("https://ingest.xybrid.dev", "sk_live_xxx")
 let exporter = HttpTelemetryExporter::new(config);
 ```
 
+### Device context
+
+Telemetry auto-detects chip family, RAM, OS and kernel versions, CPU architecture,
+and execution provider hints by default.
+
+```rust
+use xybrid_sdk::telemetry::{HttpTelemetryExporter, TelemetryConfig};
+
+let config = TelemetryConfig::new("https://ingest.xybrid.dev", "sk_live_xxx")
+    .with_app_version("mirage-vault/0.0.1")
+    .with_device_label("Sami's MacBook Pro")
+    .with_hardware_chip("Apple M4 Max");
+
+let exporter = HttpTelemetryExporter::new(config);
+```
+
+See [telemetry.md](../../docs/sdk/telemetry.md) for full privacy posture,
+opt-out, and wire format.
+
 ### Environment Variables
 
 | Variable | Description | Default |
@@ -94,4 +113,3 @@ See `examples/macro_demo.rs` for a complete example of using the macro.
 ```bash
 cargo run --example macro_demo
 ```
-

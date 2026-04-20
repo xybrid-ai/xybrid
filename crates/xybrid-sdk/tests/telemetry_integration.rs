@@ -26,6 +26,8 @@
 //! ```
 
 use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -35,7 +37,8 @@ use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::testing::model_fixtures;
 use xybrid_sdk::{
     flush_platform_telemetry, init_platform_telemetry, publish_telemetry_event,
-    register_telemetry_sender, shutdown_platform_telemetry, TelemetryConfig, TelemetryEvent,
+    register_telemetry_sender, shutdown_platform_telemetry, HttpTelemetryExporter, TelemetryConfig,
+    TelemetryEvent,
 };
 
 // ---------------------------------------------------------------------------
@@ -59,6 +62,74 @@ fn event(event_type: &str) -> TelemetryEvent {
         data: None,
         timestamp_ms: now_ms(),
     }
+}
+
+fn start_mock_ingest() -> (String, mpsc::Receiver<String>, std::thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("mock ingest should bind");
+    let addr = listener.local_addr().expect("mock ingest should have addr");
+    let (tx, rx) = mpsc::channel();
+
+    let handle = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("mock ingest should accept");
+        let mut buffer = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        let mut header_end = None;
+        let mut content_length = 0_usize;
+
+        loop {
+            let read = stream.read(&mut chunk).expect("mock ingest should read");
+            if read == 0 {
+                break;
+            }
+            buffer.extend_from_slice(&chunk[..read]);
+
+            if header_end.is_none() {
+                header_end = find_header_end(&buffer);
+                if let Some(end) = header_end {
+                    content_length = parse_content_length(&buffer[..end]);
+                }
+            }
+
+            if let Some(end) = header_end {
+                let body_start = end + 4;
+                if buffer.len() >= body_start + content_length {
+                    break;
+                }
+            }
+        }
+
+        let body = header_end
+            .map(|end| {
+                let body_start = end + 4;
+                let body_end = (body_start + content_length).min(buffer.len());
+                String::from_utf8_lossy(&buffer[body_start..body_end]).to_string()
+            })
+            .unwrap_or_default();
+        tx.send(body).expect("mock ingest should send body");
+
+        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK";
+        stream
+            .write_all(response)
+            .expect("mock ingest should respond");
+    });
+
+    (format!("http://{addr}"), rx, handle)
+}
+
+fn find_header_end(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn parse_content_length(headers: &[u8]) -> usize {
+    String::from_utf8_lossy(headers)
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0)
 }
 
 /// Create a dummy 28×28 grayscale image as a flat f32 vec (784 pixels).
@@ -268,6 +339,36 @@ fn telemetry_event_fields() {
     let deser: TelemetryEvent = serde_json::from_str(&json).unwrap();
     assert_eq!(deser.event_type, ev.event_type);
     assert_eq!(deser.latency_ms, ev.latency_ms);
+}
+
+/// Verify HTTP-exported events include the resolved device profile.
+#[test]
+fn telemetry_http_event_includes_device_profile() {
+    let (endpoint, rx, handle) = start_mock_ingest();
+    let config = TelemetryConfig::new(endpoint, "test-key")
+        .with_device("integration-test", "ci")
+        .with_hardware_chip("integration-chip")
+        .with_hardware_ram_gb(64)
+        .with_batch_size(1)
+        .with_flush_interval(60);
+    let exporter = HttpTelemetryExporter::new(config);
+
+    exporter.push(event("DeviceProfileEvent"));
+
+    let body = rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("mock ingest should receive a request body");
+    handle.join().expect("mock ingest thread should finish");
+
+    let json: serde_json::Value = serde_json::from_str(&body).expect("request body should be JSON");
+    let device = &json["events"][0]["device"];
+
+    assert_eq!(device["chip_family"].as_str(), Some("integration-chip"));
+    assert_eq!(device["ram_gb"].as_u64(), Some(64));
+    assert!(
+        device["chip_family"].is_string() || device["arch"].is_string(),
+        "device should include chip_family or arch: {device:?}"
+    );
 }
 
 /// Verify that TemplateExecutor automatically emits ExecutionStarted and

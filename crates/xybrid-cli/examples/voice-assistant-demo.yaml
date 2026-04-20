@@ -1,0 +1,59 @@
+# ======================================================================
+# Voice Assistant Demo — ASR → LLM → TTS (all on device)
+# ======================================================================
+#
+# 3-stage pipeline chosen to produce a rich span tree for the Xybrid
+# Platform flamegraph:
+#
+#   asr   → wav2vec2-base-960h  — CTC decode span, audio preprocess
+#   llm   → qwen2.5-0.5b        — streaming span with ttft_ms,
+#                                 prefill_tps, decode_tps, tokens_in,
+#                                 tokens_out, finish_reason metadata
+#   tts   → kokoro-82m          — phonemize + model inference spans
+#
+# Every stage runs locally — no API keys, no cloud round-trips.
+#
+# Run (see examples/voice-assistant-demo.README.md for platform
+# telemetry instructions):
+#
+#   xybrid run \
+#     -c crates/xybrid-cli/examples/voice-assistant-demo.yaml \
+#     --input-audio integration-tests/fixtures/input/jfk.wav \
+#     --output /tmp/voice-assistant-reply.wav \
+#     --trace
+# ======================================================================
+
+name: voice-assistant-demo
+version: "1.0"
+description: "ASR → local LLM → TTS voice-assistant pipeline for the tracing demo."
+
+stages:
+  # ----------------------------------------------------------------
+  # Stage 1 — ASR: transcribe the incoming WAV
+  # ----------------------------------------------------------------
+  - id: asr
+    model: wav2vec2-base-960h
+    target: device
+
+  # ----------------------------------------------------------------
+  # Stage 2 — LLM: answer the transcript; emits the streaming-token
+  # span the flamegraph is built around (prefill + decode bars)
+  # ----------------------------------------------------------------
+  - id: llm
+    model: qwen2.5-0.5b-instruct
+    target: device
+    streaming: true
+    system_prompt: |
+      You are the Xybrid voice assistant. Reply in one or two short
+      sentences — the answer is read back through a TTS model, so
+      keep it concise and natural.
+    max_tokens: 80
+    temperature: 0.7
+
+  # ----------------------------------------------------------------
+  # Stage 3 — TTS: synthesize the reply
+  # ----------------------------------------------------------------
+  - id: tts
+    model: kokoro-82m
+    target: device
+    voice: af_bella

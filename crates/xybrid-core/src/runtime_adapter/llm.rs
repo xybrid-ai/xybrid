@@ -419,11 +419,11 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
                 );
                 response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
 
-                // Streaming-path metrics. Keys match the platform Tinybird
-                // schema + ingest extractor (repos/xybrid-platform/ingest/src/tinybird.rs).
-                // Route to both the envelope metadata (so downstream stages can
-                // see them) and `xybrid_core::tracing::add_metadata` (so the
-                // span-level wire path picks them up — see plan phase 0.4).
+                // Streaming-path metrics — the canonical keys the platform's
+                // span-extraction layer reads. Route to both the envelope
+                // metadata (so downstream stages can see them) and
+                // `xybrid_core::tracing::add_metadata` (so the span-level
+                // wire path picks them up — see plan phase 0.4).
                 if let Some(v) = output.ttft_ms {
                     let s = v.to_string();
                     response_metadata.insert("ttft_ms".to_string(), s.clone());
@@ -461,6 +461,11 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
                     "tokens_generated",
                     output.tokens_generated.to_string(),
                 );
+                // Canonical `tokens_out` key for the analytics backend's
+                // span extractor. Equal to `tokens_generated` by
+                // construction — the SDK hoist lifts this onto the outer
+                // payload so trace dashboards can render the column.
+                crate::tracing::add_metadata("tokens_out", output.tokens_generated.to_string());
                 crate::tracing::add_metadata(
                     "generation_time_ms",
                     output.generation_time_ms.to_string(),
@@ -470,6 +475,19 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
                     format!("{:.2}", output.tokens_per_second),
                 );
                 crate::tracing::add_metadata("finish_reason", &output.finish_reason);
+                // span_kind tells the console swim-lanes renderer which
+                // bar color to use. llama.cpp with Metal compiled in runs
+                // the forward pass on the GPU; otherwise it's CPU.
+                #[cfg(all(
+                    any(feature = "llm-mistral-metal", feature = "llm-llamacpp"),
+                    target_os = "macos"
+                ))]
+                crate::tracing::add_metadata("span_kind", "gpu");
+                #[cfg(not(all(
+                    any(feature = "llm-mistral-metal", feature = "llm-llamacpp"),
+                    target_os = "macos"
+                )))]
+                crate::tracing::add_metadata("span_kind", "cpu");
 
                 Ok(Envelope {
                     kind: EnvelopeKind::Text(output.text),

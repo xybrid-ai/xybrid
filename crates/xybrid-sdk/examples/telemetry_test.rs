@@ -21,7 +21,7 @@ use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::testing::model_fixtures;
 use xybrid_sdk::{
     flush_platform_telemetry, init_platform_telemetry, publish_telemetry_event,
-    shutdown_platform_telemetry, TelemetryConfig, TelemetryEvent,
+    shutdown_platform_telemetry, DeviceProfile, TelemetryConfig, TelemetryEvent,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -39,12 +39,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Platform endpoint: {}", endpoint);
     println!("API key: {}...\n", &api_key[..api_key.len().min(20)]);
 
-    // Initialize telemetry with explicit config
-    let config = TelemetryConfig::new(&endpoint, &api_key)
-        .with_device("test-device-001", "macos")
-        .with_app_version("0.0.13-test")
+    // Zero-effort path: auto-detect chip, RAM, OS, arch.
+    let zero_effort_config = TelemetryConfig::new(&endpoint, &api_key).with_app_version("0.0.1");
+
+    // Mirage-style path: keep auto-detection and add app-specific context.
+    let config = zero_effort_config
+        .with_device_label("mirage-vault")
+        .with_device_attribute("target_mode", "privacy-strict")
         .with_batch_size(1) // Flush immediately for testing
         .with_flush_interval(1);
+
+    let device_preview = DeviceProfile::detect().merged_with(config.device_profile_patch.clone());
+    println!(
+        "Device context preview:\n{}\n",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "device_label": config.device_label.clone(),
+            "device": device_preview,
+        }))?
+    );
 
     println!("Initializing platform telemetry...");
     init_platform_telemetry(config);

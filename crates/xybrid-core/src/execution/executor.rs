@@ -20,7 +20,10 @@
 
 use log::{debug, info, warn};
 
-use super::template::{ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage};
+use super::template::{
+    span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata,
+    PipelineStage,
+};
 use crate::conversation::ConversationContext;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::ir::EnvelopeKind;
@@ -226,6 +229,20 @@ impl TemplateExecutor {
         let _exec_span = xybrid_trace::SpanGuard::new(format!("execute:{}", metadata.model_id));
         xybrid_trace::add_metadata("model_id", &metadata.model_id);
         xybrid_trace::add_metadata("version", &metadata.version);
+        // Grouping + colour hints for the swim-lanes renderer. `stage_kind`
+        // drives the lane label (ASR / LLM / TTS / …); `span_kind` drives
+        // the bar colour (gpu / cpu / io / tool). LLM adapters override
+        // `span_kind` on their inner `llm_inference` span with more precise
+        // information (Metal vs CPU kernels).
+        if let Some(task) = metadata.metadata.get("task").and_then(|v| v.as_str()) {
+            if let Some(kind) = stage_kind_from_task(task) {
+                xybrid_trace::add_metadata("stage_kind", kind);
+            }
+        }
+        xybrid_trace::add_metadata(
+            "span_kind",
+            span_kind_from_template(&metadata.execution_template),
+        );
 
         // Step 1: Handling ModelGraph (multi-model DAG)
         if let ExecutionTemplate::ModelGraph { stages, config } = &metadata.execution_template {
@@ -1282,6 +1299,16 @@ impl TemplateExecutor {
             debug!(target: "xybrid_core", "Applying preprocessing: {}", step_name);
 
             let _step_span = xybrid_trace::SpanGuard::new(format!("preprocessing:{}", step_name));
+            // Audio decode is I/O-dominant (WAV parse → PCM samples); the
+            // rest (Tokenize / Phonemize / MelSpectrogram / …) is pure CPU.
+            xybrid_trace::add_metadata(
+                "span_kind",
+                if step_name.eq_ignore_ascii_case("audiodecode") {
+                    "io"
+                } else {
+                    "cpu"
+                },
+            );
 
             data = preprocessing::apply_preprocessing_step(step, data, input, &self.base_path)?;
         }
@@ -1427,6 +1454,16 @@ impl TemplateExecutor {
             debug!(target: "xybrid_core", "Applying postprocessing: {}", step_name);
 
             let _step_span = xybrid_trace::SpanGuard::new(format!("postprocessing:{}", step_name));
+            // TTSAudioEncode writes raw PCM → WAV (I/O). Everything else
+            // (CTCDecode / ArgMax / Softmax / …) is pure CPU.
+            xybrid_trace::add_metadata(
+                "span_kind",
+                if step_name.eq_ignore_ascii_case("ttsaudioencode") {
+                    "io"
+                } else {
+                    "cpu"
+                },
+            );
 
             data = postprocessing::apply_postprocessing_step(step, data, &self.base_path)?;
         }
@@ -1950,10 +1987,8 @@ impl Default for TemplateExecutor {
 // `adapter.backend().generate(...)` directly, bypassing
 // `runtime_adapter::llm::LlmRuntimeAdapter::execute()` where the telemetry
 // extraction originally lived. These helpers re-apply the same contract at
-// the executor layer so all four paths surface the 9 LLM scalars expected
-// by the platform ingest (repos/xybrid-platform/ingest/src/tinybird.rs).
-//
-// Keys match the Tinybird `telemetry_spans` datasource columns exactly.
+// the executor layer so all four paths surface the 9 LLM scalars the
+// consuming analytics backend expects on every LLM span.
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 fn insert_llm_streaming_metrics(

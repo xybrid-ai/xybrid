@@ -34,19 +34,17 @@
 //! - **Integration**: Third-party API calls (OpenAI, Anthropic, etc.) via [`CloudRuntimeAdapter`]
 //! - **Cloud/Server**: Xybrid-hosted inference (future)
 
-use crate::bundler::BundleManifest;
 use crate::context::StageDescriptor;
 use crate::execution::{ModelMetadata, TemplateExecutor};
 use crate::ir::Envelope;
 use crate::runtime_adapter::{AdapterError, CloudRuntimeAdapter, RuntimeAdapter};
 use crate::tracing as trace;
-use log::{debug, warn};
+use log::debug;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-use tempfile::TempDir;
 use thiserror::Error;
 
 use tokio::task;
@@ -103,8 +101,6 @@ pub struct Executor {
     default_local_adapter: Option<String>,
     /// Default adapter name for cloud execution
     default_cloud_adapter: Option<String>,
-    /// Temporary directory for mock model files (demo only)
-    _mock_models_dir: Option<TempDir>,
     /// Cached TemplateExecutor instances keyed by base_path.
     /// This avoids recreating executors (and reloading models) on every call.
     template_executor_cache: HashMap<String, TemplateExecutor>,
@@ -116,7 +112,6 @@ impl Clone for Executor {
             adapters: self.adapters.clone(),
             default_local_adapter: self.default_local_adapter.clone(),
             default_cloud_adapter: self.default_cloud_adapter.clone(),
-            _mock_models_dir: None,                  // Don't clone temp dir
             template_executor_cache: HashMap::new(), // Don't clone cache (stateful)
         }
     }
@@ -129,182 +124,8 @@ impl Executor {
             adapters: HashMap::new(),
             default_local_adapter: None,
             default_cloud_adapter: None,
-            _mock_models_dir: None,
             template_executor_cache: HashMap::new(),
         }
-    }
-
-    /// Resolves a stage to a model file path.
-    ///
-    /// IMPORTANT: Core only accepts directories or direct model files, not .xyb bundles.
-    /// Bundle extraction must be done by SDK's CacheManager.ensure_extracted() first.
-    ///
-    /// If the stage has no bundle_path, falls back to mock model creation (for demo/testing).
-    fn resolve_stage_to_model_path(
-        &mut self,
-        stage: &StageDescriptor,
-        adapter_name: &str,
-    ) -> ExecutorResult<PathBuf> {
-        // Check if stage has a bundle_path (set by SDK after downloading/extracting)
-        if let Some(bundle_path) = &stage.bundle_path {
-            let path = PathBuf::from(bundle_path);
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-
-            // BOUNDARY ENFORCEMENT: Reject .xyb files - check extension BEFORE checking existence
-            if ext == "xyb" || ext == "bundle" {
-                return Err(ExecutorError::BundleNotExtracted(format!(
-                    "Received .xyb bundle path '{}'. Core only accepts extracted directories. \
-                     Use SDK's CacheManager.ensure_extracted() to extract the bundle first.",
-                    path.display()
-                )));
-            }
-
-            if path.exists() {
-                // If it's a directory, find the model file in it
-                if path.is_dir() {
-                    return self.find_model_file_in_extracted_bundle(&path, adapter_name);
-                }
-
-                // Direct model file path
-                return Ok(path);
-            }
-        }
-
-        // Fallback: Create mock model file (for demo/testing)
-        self.resolve_stage_to_model_path_mock(&stage.name, adapter_name)
-    }
-
-    /// Creates a mock model file for demo purposes.
-    fn resolve_stage_to_model_path_mock(
-        &mut self,
-        stage_name: &str,
-        adapter_name: &str,
-    ) -> ExecutorResult<PathBuf> {
-        // Parse stage name (e.g., "whisper-tiny@1.2" -> "whisper-tiny")
-        let model_name = stage_name.split('@').next().unwrap_or(stage_name);
-
-        // Create temp directory for mock models if not exists
-        if self._mock_models_dir.is_none() {
-            self._mock_models_dir =
-                Some(TempDir::new().map_err(|e| {
-                    ExecutorError::Other(format!("Failed to create temp dir: {}", e))
-                })?);
-        }
-
-        let temp_dir = self._mock_models_dir.as_ref().unwrap();
-
-        // Determine file extension based on adapter
-        let extension = match adapter_name {
-            "coreml" => "mlpackage",
-            "onnx" | "onnx-mobile" => "onnx",
-            "cloud" => "onnx", // Cloud uses ONNX format
-            _ => "onnx",       // Default to ONNX
-        };
-
-        let model_path = temp_dir
-            .path()
-            .join(format!("{}.{}", model_name, extension));
-
-        // Create mock model file if it doesn't exist
-        if !model_path.exists() {
-            if extension == "mlpackage" {
-                // Create .mlpackage directory structure
-                fs::create_dir_all(&model_path).map_err(|e| {
-                    ExecutorError::Other(format!("Failed to create mlpackage dir: {}", e))
-                })?;
-                // Create minimal manifest.json
-                let manifest_path = model_path.join("manifest.json");
-                fs::write(&manifest_path, b"{}").map_err(|e| {
-                    ExecutorError::Other(format!("Failed to write manifest: {}", e))
-                })?;
-            } else {
-                // Create mock ONNX file
-                fs::write(&model_path, b"mock onnx model data").map_err(|e| {
-                    ExecutorError::Other(format!("Failed to write model file: {}", e))
-                })?;
-            }
-        }
-
-        Ok(model_path)
-    }
-
-    /// Finds the model file in an extracted bundle directory.
-    ///
-    /// # Arguments
-    ///
-    /// * `extract_dir` - Directory containing extracted bundle files
-    /// * `adapter_name` - Name of the adapter (to determine model file type)
-    ///
-    /// # Returns
-    ///
-    /// Path to the model file
-    fn find_model_file_in_extracted_bundle(
-        &self,
-        extract_dir: &Path,
-        adapter_name: &str,
-    ) -> ExecutorResult<PathBuf> {
-        // Read manifest to get file list
-        let manifest_path = extract_dir.join("manifest.json");
-        let manifest_content = fs::read_to_string(&manifest_path)
-            .map_err(|e| ExecutorError::Other(format!("Failed to read manifest: {}", e)))?;
-        let manifest: BundleManifest = serde_json::from_str(&manifest_content)
-            .map_err(|e| ExecutorError::Other(format!("Failed to parse manifest: {}", e)))?;
-
-        // Determine expected file extensions based on adapter
-        let expected_extensions: Vec<&str> = match adapter_name {
-            "coreml" => vec!["mlpackage", "mlmodel"],
-            "onnx" | "onnx-mobile" => vec!["onnx"],
-            "cloud" => vec!["onnx"],
-            _ => vec!["onnx"],
-        };
-
-        // Look for model file in manifest.files
-        for file_name in &manifest.files {
-            let file_path = extract_dir.join(file_name);
-            if file_path.exists() {
-                // Check if file extension matches
-                if let Some(ext) = file_path.extension().and_then(|s| s.to_str()) {
-                    if expected_extensions.contains(&ext) {
-                        return Ok(file_path);
-                    }
-                }
-            }
-        }
-
-        // If not found in manifest, try scanning directory
-        let entries = fs::read_dir(extract_dir)
-            .map_err(|e| ExecutorError::Other(format!("Failed to read extract dir: {}", e)))?;
-
-        for entry in entries {
-            let entry = entry
-                .map_err(|e| ExecutorError::Other(format!("Failed to read dir entry: {}", e)))?;
-            let path = entry.path();
-
-            // Skip manifest.json
-            if path.file_name().and_then(|s| s.to_str()) == Some("manifest.json") {
-                continue;
-            }
-
-            // Check if extension matches
-            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                if expected_extensions.contains(&ext) {
-                    return Ok(path);
-                }
-            }
-
-            // Check if it's a directory (for .mlpackage)
-            if path.is_dir() && expected_extensions.contains(&"mlpackage") {
-                // Check if it looks like a .mlpackage directory
-                if path.extension().and_then(|s| s.to_str()) == Some("mlpackage") {
-                    return Ok(path);
-                }
-            }
-        }
-
-        Err(ExecutorError::Other(format!(
-            "Model file not found in bundle for adapter: {}",
-            adapter_name
-        )))
     }
 
     /// Registers a runtime adapter with the executor.
@@ -525,59 +346,36 @@ impl Executor {
             );
         }
 
-        // Fallback: Use raw adapter execution (no metadata-driven processing)
-        warn!(
+        // Raw adapter fallback for externally-preloaded adapters (test
+        // harness or advanced embedders). Unlike the old code path, we
+        // no longer auto-create a zero-byte mock `.onnx` file or swap
+        // the `ModelNotLoaded` error for a `mock-output-<stage>-<input>`
+        // envelope. If the adapter isn't pre-loaded the real
+        // `ModelNotLoaded` error propagates — the user must call
+        // `Pipeline::load_models()` first (or pre-load the adapter).
+        debug!(
             target: "xybrid_core",
-            "FALLBACK: Using raw adapter '{}' for stage '{}'. This bypasses metadata-driven execution!",
+            "Stage '{}' has no bundle_path; falling back to raw adapter '{}' (adapter must be pre-loaded)",
+            stage.name,
             adapter_name,
-            stage.name
         );
-        let model_path = self.resolve_stage_to_model_path(stage, &adapter_name)?;
-        let model_path_str = model_path
-            .to_str()
-            .ok_or_else(|| ExecutorError::Other("Invalid model path".to_string()))?;
-
-        // Try to load model if adapter is mutable
-        if let Some(adapter_arc) = self.adapters.get_mut(&adapter_name) {
-            if let Some(adapter_mut) = Arc::get_mut(adapter_arc) {
-                // Try to load model - ignore errors (will handle ModelNotLoaded below)
-                let _ = adapter_mut.load_model(model_path_str);
-            }
-        }
 
         let adapter = self
             .get_adapter(&adapter_name)
             .ok_or_else(|| ExecutorError::AdapterNotFound(adapter_name.clone()))?;
 
-        // Execute inference via adapter
-        // Handle ModelNotLoaded error gracefully for demo
-        let output = match adapter.execute(input) {
-            Ok(output) => output,
-            Err(AdapterError::ModelNotLoaded(_)) => {
-                // Model not loaded - return mock output for demo
-                // In production, models should be pre-loaded
-                match &input.kind {
-                    crate::ir::EnvelopeKind::Audio(_) => Envelope::new(
-                        crate::ir::EnvelopeKind::Text(format!("mock-asr-output-{}", stage.name)),
-                    ),
-                    crate::ir::EnvelopeKind::Text(t) => Envelope::new(
-                        crate::ir::EnvelopeKind::Text(format!("mock-output-{}-{}", stage.name, t)),
-                    ),
-                    crate::ir::EnvelopeKind::Embedding(_) => {
-                        Envelope::new(crate::ir::EnvelopeKind::Text(format!(
-                            "mock-embedding-output-{}",
-                            stage.name
-                        )))
-                    }
-                }
-            }
-            Err(e) => return Err(ExecutorError::AdapterError(e)),
-        };
+        let output = adapter.execute(input).map_err(|e| match e {
+            AdapterError::ModelNotLoaded(msg) => ExecutorError::Other(format!(
+                "Stage '{}' has no bundle_path and the adapter is not loaded: {}. \
+                 Call `Pipeline::load_models()` before `Pipeline::run()`, or pre-load \
+                 the adapter with `adapter.load_model(path)` before driving the \
+                 orchestrator directly.",
+                stage.name, msg
+            )),
+            other => ExecutorError::AdapterError(other),
+        })?;
 
-        // Calculate latency
         let latency_ms = start_time.elapsed().as_millis();
-
-        // Create metadata
         let metadata = StageMetadata {
             adapter: adapter_name,
             target: target.to_string(),
@@ -917,6 +715,45 @@ mod tests {
         assert_eq!(metadata.target, "local");
         assert_eq!(metadata.adapter, "mock");
         Ok(())
+    }
+
+    /// Regression test for A1 — `execute_stage` used to silently return
+    /// `mock-output-<stage>-<input>` envelopes when the adapter was
+    /// registered but not loaded and the stage had no bundle_path. That
+    /// made `Pipeline::run()` look like it worked end-to-end even though
+    /// every stage was producing fake text. The fix surfaces the real
+    /// `ModelNotLoaded` error (wrapped with a message pointing at
+    /// `Pipeline::load_models()`) instead.
+    #[test]
+    fn test_execute_stage_unloaded_adapter_errors_instead_of_mocking() {
+        let mut executor = Executor::new();
+        // Register adapter WITHOUT calling load_model — simulates the
+        // post-A1 state where Pipeline::run drives the orchestrator
+        // without first running load_models(). The mock's `execute()`
+        // returns `AdapterError::ModelNotLoaded` when `is_loaded` is
+        // false, which is exactly the path the old fallback masked.
+        let adapter = MockRuntimeAdapter::with_text_output("(never returned)");
+        executor.register_adapter(Arc::new(adapter));
+
+        let stage = StageDescriptor::new("asr");
+        let input = Envelope::new(EnvelopeKind::Audio(vec![0u8; 1024]));
+
+        let result = executor.execute_stage(&stage, &input, "local");
+
+        let err = result.expect_err(
+            "execute_stage must surface the real ModelNotLoaded error; \
+             previously it returned `mock-output-asr-...` and silently succeeded",
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("load_models") || msg.contains("not loaded"),
+            "error should point the user at Pipeline::load_models(), got: {msg}"
+        );
+        // And obviously not the old mock envelope.
+        assert!(
+            !msg.contains("mock-output"),
+            "error must not leak the old mock fallback string"
+        );
     }
 
     #[test]

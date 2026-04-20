@@ -130,6 +130,7 @@ pub use xybrid_core::bundler;
 pub use xybrid_core::cache_provider::CacheProvider;
 pub use xybrid_core::context;
 pub use xybrid_core::conversation::ConversationContext;
+pub use xybrid_core::device::DeviceProfile;
 pub use xybrid_core::execution;
 pub use xybrid_core::ir;
 pub use xybrid_core::orchestrator;

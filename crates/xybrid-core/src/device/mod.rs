@@ -45,12 +45,16 @@ pub mod apple;
 // Main detection logic
 pub mod capabilities;
 
+// Telemetry-facing device profile (chip, RAM, OS, for wire events)
+pub mod profile;
+
 // Platform tests
 #[cfg(test)]
 mod tests;
 
 // Re-exports for convenience
 pub use capabilities::detect_capabilities;
+pub use profile::DeviceProfile;
 pub use types::{
     DetectionConfidence, DetectionSource, GpuType, HardwareCapabilities, NpuType, Platform,
     ThermalState,

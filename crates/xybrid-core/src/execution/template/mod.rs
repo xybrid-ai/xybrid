@@ -12,9 +12,10 @@ mod metadata;
 mod steps;
 mod voice;
 
-// Re-export metadata types
+// Re-export metadata types + swim-lane grouping helpers
 pub use metadata::{
-    ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage, RefinementSchedule,
+    span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata,
+    PipelineStage, RefinementSchedule,
 };
 
 // Re-export step types
