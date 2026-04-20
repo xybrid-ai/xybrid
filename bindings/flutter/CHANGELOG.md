@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-beta11
+
+* Added LLM streaming telemetry: TTFT, decode/prefill TPS, and ITL now exposed via the SDK for both `llama_cpp` and `mistral` backends
+* Added `Device` struct with a stable cross-platform device identifier
+* Added NeuTTS codec TTS support
+* Improved offline behavior: actionable errors and cached-models fallback when the registry is unreachable
+
 ## 0.1.0-beta10
 
 * Version bump to track core release. No Flutter API changes.

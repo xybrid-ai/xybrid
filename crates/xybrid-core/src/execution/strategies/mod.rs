@@ -9,6 +9,7 @@
 //! | [`BertStrategy`] | BERT-style token-based inference |
 //! | [`ModelGraphStrategy`] | Multi-stage DAG execution |
 //! | [`LlmStrategy`] | GGUF LLM execution (feature-gated) |
+//! | [`CodecTtsStrategy`] | Codec TTS: GGUF backbone + ONNX decoder (feature-gated) |
 //!
 //! ## Design
 //!
@@ -25,6 +26,9 @@ mod tts;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 mod llm;
 
+// Codec TTS depends on LLM infrastructure (same feature gate)
+mod codec_tts;
+
 pub use standard::StandardStrategy;
 pub use tts::TtsStrategy;
 
@@ -33,6 +37,9 @@ pub use llm::LlmStrategy;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 #[allow(unused_imports)]
 pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
+
+#[allow(unused_imports)]
+pub use codec_tts::CodecTtsStrategy;
 
 // Always compile the llm module (stubs when features disabled)
 #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
@@ -114,7 +121,13 @@ impl StrategyResolver {
     pub fn new() -> Self {
         let mut strategies: Vec<Box<dyn ExecutionStrategy>> = vec![];
 
-        // LLM strategy must be checked first (GGUF templates)
+        // CodecTts must be checked before LLM (both match GGUF, but CodecTts also requires CodecDecode)
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        {
+            strategies.push(Box::new(CodecTtsStrategy::new()));
+        }
+
+        // LLM strategy for plain GGUF models (no CodecDecode)
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
             strategies.push(Box::new(LlmStrategy::new()));
@@ -190,6 +203,7 @@ mod tests {
                 model_file: "model.gguf".to_string(),
                 chat_template: None,
                 context_length: 4096,
+                generation_params: None,
             },
             preprocessing: vec![],
             postprocessing: vec![],
@@ -204,5 +218,92 @@ mod tests {
         let strategy = resolver.resolve(&metadata);
         assert!(strategy.is_some());
         assert_eq!(strategy.unwrap().name(), "llm");
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn test_resolver_selects_codec_tts_for_gguf_with_codec_decode() {
+        use crate::execution::template::PostprocessingStep;
+
+        let resolver = StrategyResolver::new();
+        let metadata = ModelMetadata {
+            model_id: "neutts-nano-q4".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 2048,
+                generation_params: None,
+            },
+            preprocessing: vec![PreprocessingStep::PhonemeRaw {
+                backend: Default::default(),
+                language: Some("en-us".to_string()),
+            }],
+            postprocessing: vec![PostprocessingStep::CodecDecode {
+                decoder_model: "neucodec-decoder-int8.onnx".to_string(),
+                sample_rate: 24000,
+                token_pattern: r"<\|speech_(\d+)\|>".to_string(),
+                apply_postprocessing: true,
+            }],
+            files: vec!["model.gguf".to_string()],
+            description: None,
+            metadata: std::collections::HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        let strategy = resolver.resolve(&metadata);
+        assert!(strategy.is_some());
+        assert_eq!(strategy.unwrap().name(), "codec_tts");
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn test_resolver_selects_llm_not_codec_tts_for_plain_gguf() {
+        let resolver = StrategyResolver::new();
+        let metadata = ModelMetadata {
+            model_id: "plain-llm".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 4096,
+                generation_params: None,
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec!["model.gguf".to_string()],
+            description: None,
+            metadata: std::collections::HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        let strategy = resolver.resolve(&metadata);
+        assert!(strategy.is_some());
+        assert_eq!(strategy.unwrap().name(), "llm");
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn test_resolver_selects_tts_not_codec_for_onnx_phonemize() {
+        let resolver = StrategyResolver::new();
+        let metadata = ModelMetadata::onnx("kokoro-82m", "1.0", "model.onnx").with_preprocessing(
+            PreprocessingStep::Phonemize {
+                tokens_file: "tokens.txt".to_string(),
+                backend: Default::default(),
+                dict_file: None,
+                language: None,
+                add_padding: true,
+                normalize_text: false,
+                silence_tokens: None,
+            },
+        );
+
+        let strategy = resolver.resolve(&metadata);
+        assert!(strategy.is_some());
+        assert_eq!(strategy.unwrap().name(), "tts");
     }
 }

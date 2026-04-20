@@ -75,6 +75,9 @@ pub struct LlmGenerationParams {
     pub top_p: f32,
     /// Top-k sampling (0 = disabled)
     pub top_k: usize,
+    /// Repetition penalty (1.0 = disabled). Harmful for codec TTS where
+    /// speech tokens legitimately repeat — keep at 1.0 for raw generation.
+    pub repetition_penalty: f32,
     /// System prompt (optional)
     pub system_prompt: Option<String>,
     /// Stop sequences - generation stops when any of these are encountered
@@ -88,6 +91,7 @@ impl Default for LlmGenerationParams {
             temperature: 0.7,
             top_p: 0.9,
             top_k: 40,
+            repetition_penalty: 1.1,
             system_prompt: None,
             stop_sequences: Vec::new(),
         }
@@ -224,8 +228,22 @@ pub trait LlmInference: Send + Sync {
     /// Load a model with the given configuration.
     fn load_model(&mut self, config: &LlmModelConfig) -> ExecutorResult<()>;
 
-    /// Generate text from a prompt.
+    /// Generate text from a prompt. The prompt is wrapped in a chat template
+    /// (as a user message) before being sent to the backend.
     fn generate(&self, prompt: &str, params: &LlmGenerationParams) -> ExecutorResult<String>;
+
+    /// Generate text from a raw prompt WITHOUT applying any chat template.
+    ///
+    /// Used by codec TTS (NeuTTS) and any caller that has already formatted
+    /// the prompt with model-specific control tokens. `params.system_prompt`
+    /// is ignored for raw generation — include the system prompt in the
+    /// raw prompt text if you need it.
+    ///
+    /// Default implementation falls back to `generate()` for mocks; the real
+    /// `DefaultLlmInference` overrides this to call the backend's raw path.
+    fn generate_raw(&self, prompt: &str, params: &LlmGenerationParams) -> ExecutorResult<String> {
+        self.generate(prompt, params)
+    }
 
     /// Check if a model is currently loaded.
     fn is_loaded(&self) -> bool;
@@ -312,7 +330,7 @@ impl LlmInference for DefaultLlmInference {
             temperature: params.temperature,
             top_p: params.top_p,
             top_k: params.top_k,
-            repetition_penalty: 1.1,
+            repetition_penalty: params.repetition_penalty,
             stop_sequences: params.stop_sequences.clone(),
             ..Default::default()
         };
@@ -326,6 +344,39 @@ impl LlmInference for DefaultLlmInference {
 
         let output =
             adapter.generate_with_config(prompt, params.system_prompt.as_deref(), &gen_config)?;
+
+        Ok(output.text)
+    }
+
+    fn generate_raw(&self, prompt: &str, params: &LlmGenerationParams) -> ExecutorResult<String> {
+        use crate::runtime_adapter::llm::GenerationConfig;
+
+        let adapter = self
+            .adapter
+            .as_ref()
+            .ok_or_else(|| AdapterError::RuntimeError("No model loaded".to_string()))?;
+
+        let gen_config = GenerationConfig {
+            max_tokens: params.max_tokens,
+            temperature: params.temperature,
+            top_p: params.top_p,
+            top_k: params.top_k,
+            repetition_penalty: params.repetition_penalty,
+            stop_sequences: params.stop_sequences.clone(),
+            ..Default::default()
+        };
+
+        debug!(
+            target: "xybrid_core",
+            "LLM raw generation (no chat template) with {} stop sequences: {:?}",
+            gen_config.stop_sequences.len(),
+            gen_config.stop_sequences
+        );
+
+        let output = adapter
+            .backend()
+            .generate_raw(prompt, &gen_config)
+            .map_err(|e| AdapterError::RuntimeError(format!("LLM raw generation failed: {}", e)))?;
 
         Ok(output.text)
     }
@@ -437,6 +488,7 @@ impl<I: LlmInference> LlmStrategy<I> {
                 model_file,
                 chat_template,
                 context_length,
+                ..
             } => {
                 let model_path = Path::new(base_path).join(model_file);
 
@@ -890,6 +942,7 @@ mod tests {
                 model_file: "model.gguf".to_string(),
                 chat_template: Some("template.json".to_string()),
                 context_length: 4096,
+                generation_params: None,
             },
             preprocessing: vec![],
             postprocessing: vec![],

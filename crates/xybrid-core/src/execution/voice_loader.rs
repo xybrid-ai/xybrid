@@ -258,6 +258,11 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
         if let Some(voice_config) = &metadata.voices {
             match &voice_config.format {
                 VoiceFormat::Embedded { file, .. } => Ok(Some(self.base_path.join(file))),
+                VoiceFormat::PrecomputedCodes { .. } => {
+                    Err(AdapterError::InvalidInput(
+                        "PrecomputedCodes voice format uses load_reference_codes(), not the embedding path".to_string(),
+                    ))
+                }
                 VoiceFormat::PerModel { .. } | VoiceFormat::Cloning { .. } => {
                     Err(AdapterError::InvalidInput(
                         "Only embedded voice format is currently supported".to_string(),
@@ -429,6 +434,77 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
         .map_err(|e| AdapterError::RuntimeError(format!("Failed to load voice embedding: {}", e)))
     }
 
+    /// Load precomputed reference codes and transcript for codec TTS.
+    ///
+    /// Returns `(codes, transcript)` where codes are integer audio tokens
+    /// and transcript is the reference text for the given voice.
+    pub fn load_reference_codes(
+        &self,
+        metadata: &ModelMetadata,
+        voice_id: &str,
+    ) -> ExecutorResult<(Vec<i32>, String)> {
+        let voice_config = metadata
+            .voices
+            .as_ref()
+            .ok_or_else(|| AdapterError::InvalidInput("No voice config in metadata".to_string()))?;
+
+        match &voice_config.format {
+            VoiceFormat::PrecomputedCodes {
+                codes_dir,
+                codes_pattern,
+                transcript_dir,
+                transcript_pattern,
+            } => {
+                let codes_file = codes_pattern.replace("{voice_id}", voice_id);
+                let codes_path = self.base_path.join(codes_dir).join(&codes_file);
+
+                let transcript_file = transcript_pattern.replace("{voice_id}", voice_id);
+                let transcript_path = self.base_path.join(transcript_dir).join(&transcript_file);
+
+                if !codes_path.exists() {
+                    return Err(AdapterError::RuntimeError(format!(
+                        "Voice codes file not found: {:?}",
+                        codes_path
+                    )));
+                }
+                if !transcript_path.exists() {
+                    return Err(AdapterError::RuntimeError(format!(
+                        "Voice transcript file not found: {:?}",
+                        transcript_path
+                    )));
+                }
+
+                let codes_data = std::fs::read(&codes_path).map_err(|e| {
+                    AdapterError::RuntimeError(format!(
+                        "Failed to read voice codes {:?}: {}",
+                        codes_path, e
+                    ))
+                })?;
+                let codes = read_codes_binary(&codes_data)?;
+
+                let transcript = std::fs::read_to_string(&transcript_path).map_err(|e| {
+                    AdapterError::RuntimeError(format!(
+                        "Failed to read voice transcript {:?}: {}",
+                        transcript_path, e
+                    ))
+                })?;
+
+                debug!(
+                    target: "xybrid_core",
+                    "Loaded reference codes for voice '{}': {} codes, transcript len={}",
+                    voice_id,
+                    codes.len(),
+                    transcript.len()
+                );
+
+                Ok((codes, transcript.trim().to_string()))
+            }
+            _ => Err(AdapterError::InvalidInput(
+                "load_reference_codes requires PrecomputedCodes voice format".to_string(),
+            )),
+        }
+    }
+
     /// Load and blend multiple voice embeddings for compound voice IDs.
     ///
     /// Each component voice is loaded individually via the existing voice resolution
@@ -482,6 +558,33 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
         blended
             .ok_or_else(|| AdapterError::RuntimeError("No voice components to blend".to_string()))
     }
+}
+
+/// Parse precomputed codes from binary format: u32 LE count + N × i32 LE values.
+fn read_codes_binary(data: &[u8]) -> ExecutorResult<Vec<i32>> {
+    if data.len() < 4 {
+        return Err(AdapterError::InvalidInput(
+            "Voice codes file too small to contain count header".to_string(),
+        ));
+    }
+    let count = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+    let expected = 4 + count * 4;
+    if data.len() < expected {
+        return Err(AdapterError::InvalidInput(format!(
+            "Voice codes file truncated: expected {} bytes for {} codes, got {}",
+            expected,
+            count,
+            data.len()
+        )));
+    }
+    let mut codes = Vec::with_capacity(count);
+    for i in 0..count {
+        let offset = 4 + i * 4;
+        codes.push(i32::from_le_bytes(
+            data[offset..offset + 4].try_into().unwrap(),
+        ));
+    }
+    Ok(codes)
 }
 
 #[cfg(test)]

@@ -79,7 +79,33 @@ pub enum ExecutionTemplate {
         /// Maximum context length (tokens)
         #[serde(default = "default_context_length")]
         context_length: usize,
+
+        /// Per-model generation sampling parameters. When absent or when a
+        /// field is absent, the consuming strategy supplies its own defaults.
+        /// Used by codec TTS models (e.g. NeuTTS) that need specific sampling
+        /// config for speech-token generation.
+        #[serde(default)]
+        generation_params: Option<GenerationParams>,
     },
+}
+
+/// Sampling parameters for GGUF generation. All fields optional so metadata
+/// only needs to specify overrides; absent fields use strategy defaults.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct GenerationParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repetition_penalty: Option<f32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stop_sequences: Vec<String>,
 }
 
 // ============================================================================
@@ -476,6 +502,78 @@ mod tests {
             ExecutionMode::Autoregressive { max_tokens, .. } => assert_eq!(max_tokens, 100),
             _ => panic!("Expected autoregressive mode"),
         }
+    }
+
+    #[test]
+    fn test_neutts_nano_q4_fixture_parses() {
+        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../integration-tests/fixtures/models/neutts-nano-q4/model_metadata.json");
+        let json = std::fs::read_to_string(&fixture_path)
+            .unwrap_or_else(|e| panic!("Failed to read {:?}: {}", fixture_path, e));
+        let metadata: ModelMetadata = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(metadata.model_id, "neutts-nano-q4");
+        assert_eq!(metadata.version, "1.0");
+        assert!(matches!(
+            metadata.execution_template,
+            super::ExecutionTemplate::Gguf {
+                context_length: 2048,
+                ..
+            }
+        ));
+        assert_eq!(metadata.preprocessing.len(), 1);
+        assert!(matches!(
+            &metadata.preprocessing[0],
+            PreprocessingStep::PhonemeRaw { .. }
+        ));
+        assert_eq!(metadata.postprocessing.len(), 1);
+        assert!(matches!(
+            &metadata.postprocessing[0],
+            PostprocessingStep::CodecDecode {
+                sample_rate: 24000,
+                ..
+            }
+        ));
+        assert!(metadata.voices.is_some());
+        let vc = metadata.voices.as_ref().unwrap();
+        assert_eq!(vc.default, "jo");
+        assert_eq!(vc.catalog.len(), 2);
+        assert!(matches!(
+            &vc.format,
+            super::super::voice::VoiceFormat::PrecomputedCodes { .. }
+        ));
+    }
+
+    #[test]
+    fn test_neutts_air_q4_fixture_parses() {
+        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../integration-tests/fixtures/models/neutts-air-q4/model_metadata.json");
+        let json = std::fs::read_to_string(&fixture_path)
+            .unwrap_or_else(|e| panic!("Failed to read {:?}: {}", fixture_path, e));
+        let metadata: ModelMetadata = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(metadata.model_id, "neutts-air-q4");
+        assert!(matches!(
+            metadata.execution_template,
+            super::ExecutionTemplate::Gguf {
+                context_length: 4096,
+                ..
+            }
+        ));
+        assert_eq!(metadata.preprocessing.len(), 1);
+        assert!(matches!(
+            &metadata.preprocessing[0],
+            PreprocessingStep::PhonemeRaw { .. }
+        ));
+        assert_eq!(metadata.postprocessing.len(), 1);
+        assert!(matches!(
+            &metadata.postprocessing[0],
+            PostprocessingStep::CodecDecode { .. }
+        ));
+        assert!(metadata.voices.is_some());
+        let vc = metadata.voices.as_ref().unwrap();
+        assert_eq!(vc.default, "jo");
+        assert_eq!(vc.catalog.len(), 2);
     }
 
     #[test]

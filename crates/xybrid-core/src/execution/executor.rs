@@ -22,7 +22,7 @@ use log::{debug, info, warn};
 
 use super::template::{
     span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata,
-    PipelineStage,
+    PipelineStage, PostprocessingStep,
 };
 use crate::conversation::ConversationContext;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -261,6 +261,30 @@ impl TemplateExecutor {
             return self.run_postprocessing(metadata, raw_outputs);
         }
 
+        // Step 1.5: Codec TTS dispatch (GGUF backbone + CodecDecode postprocessing).
+        // Must come before the plain-GGUF fast-path below — CodecTtsStrategy orchestrates
+        // PhonemeRaw preprocessing, voice codes, LLM generation, and ONNX codec decoding
+        // in a single call. Plain-GGUF models fall through to execute_llm() as before.
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        if matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
+            && metadata
+                .postprocessing
+                .iter()
+                .any(|s| matches!(s, PostprocessingStep::CodecDecode { .. }))
+        {
+            use super::strategies::{CodecTtsStrategy, ExecutionContext, ExecutionStrategy};
+            debug!(
+                target: "xybrid_core",
+                "Detected codec TTS metadata, dispatching to CodecTtsStrategy"
+            );
+            let strategy = CodecTtsStrategy::new();
+            let mut ctx = ExecutionContext {
+                base_path: &self.base_path,
+                runtimes: &mut self.runtimes,
+            };
+            return strategy.execute(&mut ctx, metadata, input);
+        }
+
         // Step 2: Single Model Execution
         let (runtime_type, model_file) = match &metadata.execution_template {
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file.clone()),
@@ -277,6 +301,7 @@ impl TemplateExecutor {
                 model_file,
                 chat_template,
                 context_length,
+                ..
             } => {
                 debug!(
                     target: "xybrid_core",
@@ -628,6 +653,7 @@ impl TemplateExecutor {
                 model_file,
                 chat_template,
                 context_length,
+                ..
             } = &metadata.execution_template
             {
                 let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());

@@ -66,10 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ExecutionStarted+Completed pairs + the final PipelineComplete). Without
     // this the traces_list pipe falls back to grouping by the per-event `id`
     // so each run shows up as 7 separate rows.
-    let pipeline_id = uuid::Uuid::new_v5(
-        &uuid::Uuid::NAMESPACE_OID,
-        b"voice-assistant-demo",
-    );
+    let pipeline_id = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"voice-assistant-demo");
     let trace_id = uuid::Uuid::new_v4();
     set_telemetry_pipeline_context(Some(pipeline_id), Some(trace_id));
 
@@ -195,9 +192,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_stage(id: &str, model_dir: &Path, input: &Envelope) -> Result<Envelope, Box<dyn std::error::Error>> {
-    let metadata: ModelMetadata =
-        serde_json::from_str(&std::fs::read_to_string(model_dir.join("model_metadata.json"))?)?;
+fn run_stage(
+    id: &str,
+    model_dir: &Path,
+    input: &Envelope,
+) -> Result<Envelope, Box<dyn std::error::Error>> {
+    let metadata: ModelMetadata = serde_json::from_str(&std::fs::read_to_string(
+        model_dir.join("model_metadata.json"),
+    )?)?;
 
     // Each stage gets a top-level span. The LLM adapter appends its own
     // metadata (ttft_ms, decode_tps, tokens_generated, …) to the

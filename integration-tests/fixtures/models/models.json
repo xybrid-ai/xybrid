@@ -27,6 +27,20 @@
       "task": "text-generation",
       "feature_gate": "llm-llamacpp"
     },
+    "neutts-nano-q4": {
+      "description": "NeuTTS Nano Q4 - Codec-based TTS (120M GGUF + NeuCodec ONNX + OpenPhonemizer). Voice cloning, no system deps.",
+      "source": "registry",
+      "size_mb": 577,
+      "task": "text-to-speech",
+      "feature_gate": "llm-llamacpp"
+    },
+    "neutts-air-q4": {
+      "description": "NeuTTS Air Q4 - Higher-quality codec TTS (~500M GGUF + NeuCodec ONNX + OpenPhonemizer).",
+      "source": "registry",
+      "size_mb": 909,
+      "task": "text-to-speech",
+      "feature_gate": "llm-llamacpp"
+    },
     "mnist": {
       "description": "Handwritten digit classification (28x28 grayscale, 10 classes)",
       "source": "url",

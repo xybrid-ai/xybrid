@@ -130,6 +130,19 @@ pub enum PreprocessingStep {
         shape: Vec<usize>,
     },
 
+    /// Convert text to raw IPA phoneme strings without token-ID mapping
+    ///
+    /// Use for: LLM-based TTS models (NeuTTS) that inject phonemes into text prompts
+    PhonemeRaw {
+        /// Phonemization backend to use (default: MisakiDictionary)
+        #[serde(default)]
+        backend: PhonemizerBackend,
+
+        /// Language code (e.g., "en-us")
+        #[serde(default)]
+        language: Option<String>,
+    },
+
     /// Phonemize text to IPA symbols for TTS
     ///
     /// Use for: TTS models (KittenTTS, Piper, Kokoro) that require phoneme input
@@ -179,6 +192,7 @@ impl PreprocessingStep {
             PreprocessingStep::CenterCrop { .. } => "CenterCrop",
             PreprocessingStep::AudioDecode { .. } => "AudioDecode",
             PreprocessingStep::Reshape { .. } => "Reshape",
+            PreprocessingStep::PhonemeRaw { .. } => "PhonemeRaw",
             PreprocessingStep::Phonemize { .. } => "Phonemize",
         }
     }
@@ -314,6 +328,24 @@ pub enum PostprocessingStep {
         /// Path to tokenizer.json file (HuggingFace format)
         tokenizer_file: String,
     },
+
+    /// Decode LLM speech token output to audio via an ONNX codec decoder
+    ///
+    /// Use for: Codec-based TTS models (NeuTTS, MARS5, F5-TTS)
+    CodecDecode {
+        /// Path to the ONNX codec decoder model (relative to bundle root)
+        decoder_model: String,
+
+        /// Output sample rate in Hz
+        sample_rate: u32,
+
+        /// Regex pattern to extract speech token IDs from LLM output text
+        token_pattern: String,
+
+        /// Whether to apply postprocessing (normalization, silence trimming)
+        #[serde(default = "default_tts_postprocess")]
+        apply_postprocessing: bool,
+    },
 }
 
 impl PostprocessingStep {
@@ -331,6 +363,7 @@ impl PostprocessingStep {
             PostprocessingStep::CTCDecode { .. } => "CTCDecode",
             PostprocessingStep::TTSAudioEncode { .. } => "TTSAudioEncode",
             PostprocessingStep::WhisperDecode { .. } => "WhisperDecode",
+            PostprocessingStep::CodecDecode { .. } => "CodecDecode",
         }
     }
 }
@@ -478,4 +511,99 @@ fn default_pool_dim() -> usize {
 
 fn default_tts_postprocess() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phoneme_raw_serde_round_trip() {
+        let json = r#"{
+            "type": "PhonemeRaw",
+            "backend": "EspeakNG",
+            "language": "en-us"
+        }"#;
+
+        let step: PreprocessingStep = serde_json::from_str(json).unwrap();
+        match &step {
+            PreprocessingStep::PhonemeRaw { backend, language } => {
+                assert!(matches!(backend, PhonemizerBackend::EspeakNG));
+                assert_eq!(language.as_deref(), Some("en-us"));
+            }
+            _ => panic!("Expected PhonemeRaw variant"),
+        }
+
+        let serialized = serde_json::to_string(&step).unwrap();
+        let deserialized: PreprocessingStep = serde_json::from_str(&serialized).unwrap();
+        let reserialized = serde_json::to_string(&deserialized).unwrap();
+        assert_eq!(serialized, reserialized);
+    }
+
+    #[test]
+    fn phoneme_raw_defaults() {
+        let json = r#"{"type": "PhonemeRaw"}"#;
+
+        let step: PreprocessingStep = serde_json::from_str(json).unwrap();
+        match &step {
+            PreprocessingStep::PhonemeRaw { backend, language } => {
+                assert!(matches!(backend, PhonemizerBackend::MisakiDictionary));
+                assert!(language.is_none());
+            }
+            _ => panic!("Expected PhonemeRaw variant"),
+        }
+    }
+
+    #[test]
+    fn codec_decode_serde_round_trip() {
+        let json = r#"{
+            "type": "CodecDecode",
+            "decoder_model": "neucodec_mini_decoder.onnx",
+            "sample_rate": 24000,
+            "token_pattern": "<\\|speech_(\\d+)\\|>",
+            "apply_postprocessing": true
+        }"#;
+
+        let step: PostprocessingStep = serde_json::from_str(json).unwrap();
+        match &step {
+            PostprocessingStep::CodecDecode {
+                decoder_model,
+                sample_rate,
+                token_pattern,
+                apply_postprocessing,
+            } => {
+                assert_eq!(decoder_model, "neucodec_mini_decoder.onnx");
+                assert_eq!(*sample_rate, 24000);
+                assert_eq!(token_pattern, r"<\|speech_(\d+)\|>");
+                assert!(*apply_postprocessing);
+            }
+            _ => panic!("Expected CodecDecode variant"),
+        }
+
+        let serialized = serde_json::to_string(&step).unwrap();
+        let deserialized: PostprocessingStep = serde_json::from_str(&serialized).unwrap();
+        let reserialized = serde_json::to_string(&deserialized).unwrap();
+        assert_eq!(serialized, reserialized);
+    }
+
+    #[test]
+    fn codec_decode_default_apply_postprocessing() {
+        let json = r#"{
+            "type": "CodecDecode",
+            "decoder_model": "decoder.onnx",
+            "sample_rate": 24000,
+            "token_pattern": "<\\|speech_(\\d+)\\|>"
+        }"#;
+
+        let step: PostprocessingStep = serde_json::from_str(json).unwrap();
+        match &step {
+            PostprocessingStep::CodecDecode {
+                apply_postprocessing,
+                ..
+            } => {
+                assert!(*apply_postprocessing);
+            }
+            _ => panic!("Expected CodecDecode variant"),
+        }
+    }
 }

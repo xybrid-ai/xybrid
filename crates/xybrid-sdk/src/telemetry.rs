@@ -968,7 +968,10 @@ fn extract_llm_token_counts(stages: &serde_json::Value) -> Option<(Option<u64>, 
         if let Some(v) = read(meta, &["tokens_in", "prompt_tokens"]) {
             tokens_in = Some(v);
         }
-        if let Some(v) = read(meta, &["tokens_out", "completion_tokens", "tokens_generated"]) {
+        if let Some(v) = read(
+            meta,
+            &["tokens_out", "completion_tokens", "tokens_generated"],
+        ) {
             tokens_out = Some(v);
         }
     }
