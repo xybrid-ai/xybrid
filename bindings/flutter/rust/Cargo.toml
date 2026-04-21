@@ -23,7 +23,7 @@ tokio-stream = "0.1"
 log = "0.4"
 
 [target.'cfg(target_os = "android")'.dependencies]
-android_logger = "0.14"
+android_logger = "0.15"
 # SDK preset handles: ort-dynamic, llm-llamacpp
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", default-features = false, features = ["platform-android"] }
 # Direct ort dependency for Android initialization (loads .so at runtime)
