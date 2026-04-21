@@ -2,7 +2,8 @@
 
 ## 0.1.0-beta12
 
-* _TODO: fill in user-facing Flutter changes (or note "Version bump to track core release. No Flutter API changes.")_
+* LLM telemetry expansion: swim-lane spans, device profile metadata, and Pipeline::run hardening on top of beta11's streaming telemetry
+* Fixed Windows precompile path mangling that was blocking native binaries from publishing to pub.dev
 
 ## 0.1.0-beta11
 
