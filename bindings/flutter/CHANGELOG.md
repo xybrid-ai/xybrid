@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-beta12
+
+* _TODO: fill in user-facing Flutter changes (or note "Version bump to track core release. No Flutter API changes.")_
+
 ## 0.1.0-beta11
 
 * Added LLM streaming telemetry: TTFT, decode/prefill TPS, and ITL now exposed via the SDK for both `llama_cpp` and `mistral` backends

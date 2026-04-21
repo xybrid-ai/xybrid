@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.0-beta12] - 2026-04-20
+
+### Added
+
+- _TODO: fill in user-facing changes_
+
+### Fixed
+
+- _TODO: fill in user-facing fixes_
+
+---
+
 ## [0.1.0-beta11] - 2026-04-19
 
 ### Added
