@@ -133,7 +133,7 @@ dependencies: [
 ```gradle
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta11")
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta12")
 }
 ```
 

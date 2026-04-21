@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.0-beta12] - 2026-04-20
+
+### Added
+
+- **LLM telemetry expansion** (#45): Swim-lane spans, device profile metadata, and Pipeline::run hardening build on the streaming telemetry landed in beta11.
+
+### Fixed
+
+- **Flutter Windows publish** (#48): Fixed backslash mangling in the Windows precompile CI job that was stripping `\a`, `\x` from `${{ github.workspace }}` when bash parsed the path, preventing Flutter native binaries from being published to pub.dev.
+- **Example crate name collision** (#49): Renamed `voice_assistant_demo` in `xybrid-core` examples to avoid a conflict with the example of the same name in `xybrid-sdk`.
+
+---
+
 ## [0.1.0-beta11] - 2026-04-19
 
 ### Added
