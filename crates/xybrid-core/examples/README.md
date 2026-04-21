@@ -73,7 +73,7 @@ cargo run --example tts_kokoro_misaki -p xybrid-core
 |---------|-------------|
 | `device_metrics` | System metrics collection |
 | `metadata_validation` | Validate model_metadata.json files |
-| `voice_assistant_demo` | Full ASR → LLM → TTS pipeline |
+| `voice_assistant_gateway_demo` | Full ASR → LLM → TTS pipeline (gateway/direct LLM) |
 | `authority_demo` | Permission/authority patterns |
 | `cloud_llm_demo` | Cloud LLM integration |
 | `vad_demo` | Voice Activity Detection |

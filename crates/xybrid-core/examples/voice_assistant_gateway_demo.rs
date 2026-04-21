@@ -1,9 +1,13 @@
-//! Voice Assistant Demo - Full Pipeline
+//! Voice Assistant Gateway Demo - Full Pipeline
 //!
-//! This example demonstrates a complete voice assistant pipeline:
+//! This example demonstrates a complete voice assistant pipeline driving the
+//! LLM stage through `xybrid-gateway` or a direct cloud provider:
 //! 1. Voice Input → ASR (Wav2Vec2) → Text transcription
 //! 2. Text → LLM (via Gateway or Direct API) → Response
 //! 3. Response → TTS (KittenTTS) → Audio output
+//!
+//! For the SDK-flavoured telemetry demo (pipeline spans + flamegraph),
+//! see `crates/xybrid-sdk/examples/voice_assistant_demo.rs` instead.
 //!
 //! Prerequisites:
 //! - Download models: ./integration-tests/download.sh wav2vec2-base-960h kitten-tts
@@ -12,17 +16,17 @@
 //! - For direct mode: OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable
 //!
 //! Usage:
-//!   cargo run --example voice_assistant_demo [audio.wav] [gateway|openai|anthropic]
+//!   cargo run --example voice_assistant_gateway_demo [audio.wav] [gateway|openai|anthropic]
 //!
 //! Examples:
 //!   # Use gateway (recommended - run xybrid-gateway first)
-//!   cargo run --example voice_assistant_demo sample.wav gateway
+//!   cargo run --example voice_assistant_gateway_demo sample.wav gateway
 //!
 //!   # Use direct OpenAI API
-//!   cargo run --example voice_assistant_demo sample.wav openai
+//!   cargo run --example voice_assistant_gateway_demo sample.wav openai
 //!
 //!   # Use direct Anthropic API
-//!   cargo run --example voice_assistant_demo sample.wav anthropic
+//!   cargo run --example voice_assistant_gateway_demo sample.wav anthropic
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -175,7 +179,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         // No audio provided - use default text
         println!("💡 No audio file provided. Using sample text input.");
-        println!("   Usage: cargo run --example voice_assistant_demo <audio.wav> [gateway|openai|anthropic]");
+        println!("   Usage: cargo run --example voice_assistant_gateway_demo <audio.wav> [gateway|openai|anthropic]");
         println!();
         "Hello, I'm interested in learning about Rust programming.".to_string()
     };
