@@ -3530,7 +3530,7 @@ name = "integration-tests"
 version = "0.1.0-beta12"
 dependencies = [
  "anyhow",
- "dirs 5.0.1",
+ "dirs 6.0.0",
  "env_logger",
  "log",
  "serde",
@@ -9188,7 +9188,7 @@ dependencies = [
  "colored",
  "console 0.15.11",
  "dialoguer",
- "dirs 5.0.1",
+ "dirs 6.0.0",
  "hostname",
  "indicatif 0.17.11",
  "lazy_static",
@@ -9221,7 +9221,7 @@ dependencies = [
  "cmake",
  "cmudict-fast",
  "criterion",
- "dirs 5.0.1",
+ "dirs 6.0.0",
  "filetime",
  "hf-hub 0.3.2",
  "hound",
@@ -9285,7 +9285,7 @@ version = "0.1.0-beta12"
 dependencies = [
  "anyhow",
  "chrono",
- "dirs 5.0.1",
+ "dirs 6.0.0",
  "hf-hub 0.5.0",
  "log",
  "ort",
@@ -9316,7 +9316,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid_flutter"
-version = "0.1.0-beta11"
+version = "0.1.0-beta12"
 dependencies = [
  "android_logger 0.14.1",
  "flutter_rust_bridge",

@@ -52,7 +52,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
 anyhow = "1.0"
-dirs = "5.0"
+dirs = "6.0"
 chrono = "0.4"
 sha2 = "0.10"
 colored = "2.1"
