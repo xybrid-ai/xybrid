@@ -571,6 +571,10 @@ impl Default for PipelineRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestrator::LocalAuthority;
+    use crate::runtime_adapter::RuntimeAdapter;
+    use crate::testing::mocks::MockRuntimeAdapter;
+    use std::sync::Arc;
 
     fn text_envelope(value: &str) -> Envelope {
         Envelope::new(EnvelopeKind::Text(value.to_string()))
@@ -578,6 +582,24 @@ mod tests {
 
     fn audio_envelope(bytes: &[u8]) -> Envelope {
         Envelope::new(EnvelopeKind::Audio(bytes.to_vec()))
+    }
+
+    /// Swap the runner's orchestrator for a fresh one with a pre-loaded mock
+    /// adapter as the sole registered runtime.
+    ///
+    /// `PipelineRunner::new()` wires up a bootstrapped orchestrator that
+    /// registers the real ONNX/cloud adapters and sets them as the
+    /// `local`/`cloud` defaults. `register_local_model` only flips a routing
+    /// availability flag — the executor will still pick the default ONNX
+    /// adapter, which has no model loaded, and surface `ModelNotLoaded` now
+    /// that the silent mock-output fallback is gone. Using `with_authority`
+    /// gives us a fresh executor where the mock is the only option.
+    fn preload_mock_local_adapter(runner: &mut PipelineRunner) {
+        let mut fresh = Orchestrator::with_authority(Box::new(LocalAuthority::new()));
+        let mut adapter = MockRuntimeAdapter::with_text_output("mock output");
+        adapter.load_model("/mock/model.onnx").unwrap();
+        fresh.executor_mut().register_adapter(Arc::new(adapter));
+        *runner.orchestrator_mut() = fresh;
     }
 
     #[test]
@@ -616,6 +638,7 @@ stages:
 "#;
         let mut runner = PipelineRunner::new();
         runner.register_local_model("test-model", true);
+        preload_mock_local_adapter(&mut runner);
 
         let input = text_envelope("Hello, world!");
         let result = runner.run_yaml(yaml, input);
@@ -649,6 +672,7 @@ stages:
         let mut runner = PipelineRunner::new();
         runner.register_local_model("model-a", true);
         runner.register_local_model("model-b", true);
+        preload_mock_local_adapter(&mut runner);
 
         let input = text_envelope("Hello");
         let result = runner.run_yaml(yaml, input);
@@ -685,6 +709,7 @@ stages:
         let mut runner = PipelineRunner::new();
         runner.register_local_model("wav2vec2", true);
         runner.register_local_model("processor", true);
+        preload_mock_local_adapter(&mut runner);
 
         let input = audio_envelope(&[0u8; 32000]);
         let result = runner.run_yaml(yaml, input);

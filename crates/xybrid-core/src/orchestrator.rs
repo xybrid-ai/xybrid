@@ -820,11 +820,17 @@ mod tests {
         Envelope::new(EnvelopeKind::Audio(bytes.to_vec()))
     }
 
-    /// Helper to create an orchestrator with a mock adapter registered.
+    /// Helper to create an orchestrator with a pre-loaded mock adapter registered.
+    ///
+    /// For `Batch` we deliberately use `with_authority(LocalAuthority::new())`
+    /// instead of `Orchestrator::new()` — the latter bootstraps the real
+    /// ONNX/cloud adapters and wires them as the default for `local`/`cloud`
+    /// targets, so a subsequently-added mock would never be selected. The
+    /// fresh-executor path leaves the mock as the only registered adapter.
     fn orchestrator_with_mock_adapter(execution_mode: ExecutionMode) -> Orchestrator {
         let mut orchestrator = match execution_mode {
             ExecutionMode::Streaming => Orchestrator::with_streaming(StreamConfig::default()),
-            ExecutionMode::Batch => Orchestrator::new(),
+            ExecutionMode::Batch => Orchestrator::with_authority(Box::new(LocalAuthority::new())),
         };
 
         // Register a mock adapter that returns text output
@@ -869,7 +875,10 @@ mod tests {
 
     #[test]
     fn test_execute_pipeline() {
-        let mut orchestrator = Orchestrator::new();
+        // Pipeline mixes locally-available (asr/tts) and cloud-only
+        // (motivator) stages; the local stages need a pre-loaded adapter
+        // since the mock-output fallback is gone.
+        let mut orchestrator = orchestrator_with_mock_adapter(ExecutionMode::Batch);
         let stages = vec![
             StageDescriptor::new("asr"),
             StageDescriptor::new("motivator"),
@@ -929,7 +938,10 @@ mod tests {
 
     #[test]
     fn test_high_rtt_routes_to_local() {
-        let mut orchestrator = Orchestrator::new();
+        // High RTT routes to local, so the local adapter must actually run.
+        // Since the post-hardening Executor no longer synthesises mock-output
+        // envelopes for unloaded adapters, we need a pre-loaded mock adapter.
+        let mut orchestrator = orchestrator_with_mock_adapter(ExecutionMode::Batch);
         let stage = StageDescriptor::new("test_stage");
         let input = text_envelope("Text");
         let metrics = DeviceMetrics {
