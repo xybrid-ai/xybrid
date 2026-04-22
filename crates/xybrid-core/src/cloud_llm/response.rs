@@ -193,8 +193,7 @@ impl From<OpenAIResponse> for LlmResponse {
             model: resp.model,
             finish_reason,
             usage: resp.usage.map(|u| {
-                let cache_read_input_tokens =
-                    u.prompt_tokens_details.and_then(|d| d.cached_tokens);
+                let cache_read_input_tokens = u.prompt_tokens_details.and_then(|d| d.cached_tokens);
                 Usage {
                     prompt_tokens: u.prompt_tokens,
                     completion_tokens: u.completion_tokens,

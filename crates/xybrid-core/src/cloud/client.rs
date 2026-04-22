@@ -335,8 +335,8 @@ fn parse_gateway_usage(u: &serde_json::Value) -> super::completion::Usage {
     // responses (where only the miss key is present). Preserves the
     // "provider didn't report" (None) vs "cold cache" (Some(0))
     // distinction downstream.
-    let has_cache_fields = u.get("prompt_cache_hit_tokens").is_some()
-        || u.get("prompt_cache_miss_tokens").is_some();
+    let has_cache_fields =
+        u.get("prompt_cache_hit_tokens").is_some() || u.get("prompt_cache_miss_tokens").is_some();
     let cache_read_input_tokens = if has_cache_fields {
         Some(
             u.get("prompt_cache_hit_tokens")

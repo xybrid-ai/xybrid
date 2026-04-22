@@ -1564,8 +1564,7 @@ mod tests {
             timestamp_ms: 1_700_000_000_000,
         };
         let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform_event =
-            convert_to_platform_event(&event, &config, None, None, None);
+        let platform_event = convert_to_platform_event(&event, &config, None, None, None);
         let payload_json = serde_json::to_string(&platform_event.payload).unwrap();
 
         // Forbidden keys built at runtime so the source of this file
