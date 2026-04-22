@@ -55,14 +55,46 @@ impl Message {
 }
 
 /// Token usage statistics.
+///
+/// Cache fields follow Anthropic-flavored canonical names because Anthropic
+/// is the only major provider that reports both buckets; flattening down
+/// to a hit/miss pair would lose the cache-creation premium tier.
+///
+/// Per-provider mapping (wire field names live in each adapter's doc,
+/// not here, so this file stays canonical-only):
+/// - **DeepSeek**: hit count → `cache_read_input_tokens`; no cache
+///   creation concept → `cache_creation_input_tokens` is `None`.
+/// - **Anthropic**: both fields direct. `prompt_tokens` is canonical
+///   `input_tokens + cache_read + cache_creation`, not raw `input_tokens`.
+/// - **OpenAI**: `prompt_tokens_details.cached_tokens` →
+///   `cache_read_input_tokens`; no cache creation reported.
+/// - **Gemini** (future): `cached_content_token_count` →
+///   `cache_read_input_tokens`.
+///
+/// Derived (not stored): `uncached_input_tokens = max(0, prompt_tokens -
+/// cache_read - cache_creation)`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Usage {
-    /// Number of tokens in the prompt.
+    /// Total effective input tokens across ALL buckets (uncached +
+    /// cache-read + cache-creation). For Anthropic, this is synthesized at
+    /// parse time to preserve the sum semantics; for other providers the
+    /// raw `prompt_tokens` already has this shape.
     pub prompt_tokens: u32,
     /// Number of tokens in the completion.
     pub completion_tokens: u32,
     /// Total tokens used.
     pub total_tokens: u32,
+    /// Prompt tokens served from the provider's prefix cache. Discounted
+    /// tier across every provider that reports caching. `None` when the
+    /// provider doesn't report cache metrics (Groq, and OpenAI when a
+    /// request is too short to be auto-cached).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u32>,
+    /// Prompt tokens that ESTABLISHED new cache entries on this request.
+    /// Premium tier (~1.25× input rate on the only provider that reports
+    /// it today, Anthropic). `None` / `Some(0)` on every other provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u32>,
 }
 
 /// Request for cloud completion.
@@ -248,6 +280,8 @@ impl From<crate::cloud_llm::LlmResponse> for CompletionResponse {
                 prompt_tokens: u.prompt_tokens,
                 completion_tokens: u.completion_tokens,
                 total_tokens: u.total_tokens,
+                cache_read_input_tokens: u.cache_read_input_tokens,
+                cache_creation_input_tokens: u.cache_creation_input_tokens,
             }),
             id: resp.id,
             latency_ms: None,

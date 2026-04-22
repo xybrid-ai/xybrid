@@ -240,11 +240,7 @@ impl Cloud {
                     .as_str()
                     .map(|s| s.to_string());
 
-                let usage = json_resp.get("usage").map(|u| super::completion::Usage {
-                    prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-                    completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
-                    total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
-                });
+                let usage = json_resp.get("usage").map(parse_gateway_usage);
 
                 let id = json_resp["id"].as_str().map(|s| s.to_string());
 
@@ -326,6 +322,39 @@ impl Default for Cloud {
     }
 }
 
+/// Parse a raw gateway `usage` JSON value into canonical `Usage`.
+///
+/// Maps DeepSeek's `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
+/// onto `cache_read_input_tokens` + derived uncached. The DeepSeek miss
+/// count isn't stored — downstream code derives it as
+/// `prompt_tokens - cache_read - cache_creation`. DeepSeek has no
+/// cache-creation concept; Anthropic's creation field is plumbed via
+/// the direct-path adapter in `cloud_llm::response`, not this function.
+fn parse_gateway_usage(u: &serde_json::Value) -> super::completion::Usage {
+    // Presence on either field surfaces as `Some(0)` for cold-cache
+    // responses (where only the miss key is present). Preserves the
+    // "provider didn't report" (None) vs "cold cache" (Some(0))
+    // distinction downstream.
+    let has_cache_fields = u.get("prompt_cache_hit_tokens").is_some()
+        || u.get("prompt_cache_miss_tokens").is_some();
+    let cache_read_input_tokens = if has_cache_fields {
+        Some(
+            u.get("prompt_cache_hit_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32,
+        )
+    } else {
+        None
+    };
+    super::completion::Usage {
+        prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+        completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
+        total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+        cache_read_input_tokens,
+        cache_creation_input_tokens: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,6 +394,59 @@ mod tests {
     fn test_cloud_circuit_breaker_initial_state() {
         let cloud = Cloud::new().unwrap();
         assert!(!cloud.is_circuit_open());
+    }
+
+    #[test]
+    fn gateway_usage_maps_deepseek_cache_fields() {
+        // Shape of a real DeepSeek `usage` block on a warm-cache call.
+        let blob = serde_json::json!({
+            "prompt_tokens": 1000,
+            "completion_tokens": 120,
+            "total_tokens": 1120,
+            "prompt_cache_hit_tokens": 800,
+            "prompt_cache_miss_tokens": 200,
+        });
+        let usage = parse_gateway_usage(&blob);
+        assert_eq!(usage.prompt_tokens, 1000);
+        assert_eq!(usage.completion_tokens, 120);
+        assert_eq!(usage.cache_read_input_tokens, Some(800));
+        assert_eq!(usage.cache_creation_input_tokens, None);
+        // Derived uncached matches the provider's reported miss count.
+        let derived_uncached = usage
+            .prompt_tokens
+            .saturating_sub(usage.cache_read_input_tokens.unwrap_or(0))
+            .saturating_sub(usage.cache_creation_input_tokens.unwrap_or(0));
+        assert_eq!(derived_uncached, 200);
+    }
+
+    #[test]
+    fn gateway_usage_cold_cache_only_miss_field() {
+        // First-call cold-cache response may include only the miss key.
+        // Either-field presence detection should surface read as Some(0)
+        // so the UI can render "0% cached" (vs hiding the receipt).
+        let blob = serde_json::json!({
+            "prompt_tokens": 500,
+            "completion_tokens": 50,
+            "total_tokens": 550,
+            "prompt_cache_miss_tokens": 500,
+        });
+        let usage = parse_gateway_usage(&blob);
+        assert_eq!(usage.cache_read_input_tokens, Some(0));
+        assert_eq!(usage.cache_creation_input_tokens, None);
+    }
+
+    #[test]
+    fn gateway_usage_no_cache_fields_stays_none() {
+        // Providers that don't report caching at all (Groq, short-prompt
+        // OpenAI) → both cache fields None.
+        let blob = serde_json::json!({
+            "prompt_tokens": 300,
+            "completion_tokens": 30,
+            "total_tokens": 330,
+        });
+        let usage = parse_gateway_usage(&blob);
+        assert_eq!(usage.cache_read_input_tokens, None);
+        assert_eq!(usage.cache_creation_input_tokens, None);
     }
 
     #[test]
