@@ -303,6 +303,9 @@ struct PlatformEventBatch {
     events: Vec<PlatformEvent>,
 }
 
+const CONTEXT_PIPELINE_ID_KEY: &str = "__xybrid_pipeline_id";
+const CONTEXT_TRACE_ID_KEY: &str = "__xybrid_trace_id";
+
 /// HTTP telemetry exporter that sends events to the Xybrid Platform
 ///
 /// # Resilience Features
@@ -809,6 +812,8 @@ fn convert_to_platform_event(
 ) -> PlatformEvent {
     // Build payload from event fields
     let mut payload = serde_json::json!({});
+    let mut event_pipeline_id = pipeline_id;
+    let mut event_trace_id = trace_id;
 
     if let Some(stage) = &event.stage_name {
         payload["stage_name"] = serde_json::json!(stage);
@@ -827,7 +832,43 @@ fn convert_to_platform_event(
     }
     if let Some(data) = &event.data {
         // Try to parse as JSON, otherwise store as string
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+        if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Some(obj) = parsed.as_object_mut() {
+                if let Some(v) = obj.remove(CONTEXT_PIPELINE_ID_KEY) {
+                    event_pipeline_id = v.as_str().and_then(|s| Uuid::parse_str(s).ok());
+                }
+                if let Some(v) = obj.remove(CONTEXT_TRACE_ID_KEY) {
+                    event_trace_id = v.as_str().and_then(|s| Uuid::parse_str(s).ok());
+                }
+            }
+            // Hoist select top-level fields from `data` into `payload` so
+            // downstream analytics (the platform's /traces list reads
+            // these at the top level of the JSONB payload) can find them
+            // without diving into the nested `data` object. Spans further
+            // down already populate `tokens_in` / `tokens_out` for
+            // local-inference events; this covers the non-span path where
+            // a caller publishes usage info manually — e.g. a direct
+            // cloud-provider response whose `usage` block wouldn't
+            // otherwise reach the dashboard's cost column.
+            for key in [
+                "tokens_in",
+                "tokens_out",
+                "model_id",
+                // Cache-tier tokens for providers that report them.
+                // Canonical names (Anthropic-flavored) so the list page
+                // and detail-page receipt work uniformly across
+                // DeepSeek / Anthropic / OpenAI / Gemini.
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+            ]
+            .iter()
+            {
+                if payload.get(*key).is_none() {
+                    if let Some(v) = parsed.get(*key) {
+                        payload[*key] = v.clone();
+                    }
+                }
+            }
             payload["data"] = parsed;
         } else {
             payload["data"] = serde_json::json!(data);
@@ -838,12 +879,55 @@ fn convert_to_platform_event(
     let timestamp = chrono::DateTime::from_timestamp_millis(event.timestamp_ms as i64)
         .map(|dt| dt.to_rfc3339());
 
-    // Capture spans for PipelineComplete and ModelComplete events
-    // This includes the full span tree from TemplateExecutor instrumentation
+    // Capture spans for PipelineComplete and ModelComplete events.
+    //
+    // Two source paths, in priority order:
+    //
+    //   1. **Embedded spans in `event.data["spans"]`** — used when the
+    //      caller pre-captured the span tree synchronously before
+    //      publishing. This sidesteps a race in the default (global
+    //      collector) path: `convert_to_platform_event` runs on the
+    //      exporter's background thread, but the global tracing
+    //      collector is mutated live by whatever the caller's next
+    //      unit of work is opening. For bursty emitters (e.g. chunked
+    //      document summarization firing many ModelComplete events
+    //      back-to-back), this produced empty/misattributed stages.
+    //      Callers that need deterministic per-event capture write
+    //      `get_stages_json()["spans"]` into `event.data["spans"]`
+    //      and reset tracing themselves before publishing.
+    //
+    //   2. **Global `TemplateExecutor`-populated collector** — the
+    //      historical path, preserved for in-process local inference
+    //      where only one model call is active at a time and the race
+    //      doesn't manifest.
     let stages = if (event.event_type == "PipelineComplete" || event.event_type == "ModelComplete")
         && core_tracing::is_tracing_enabled()
     {
-        let spans = core_tracing::get_stages_json();
+        let embedded_spans: Option<serde_json::Value> = payload
+            .get("data")
+            .and_then(|d| d.get("spans"))
+            .filter(|v| !v.is_null())
+            .cloned();
+
+        let spans = if let Some(inner) = embedded_spans {
+            // Do NOT reset the global collector here. The caller already
+            // did its own synchronous capture+reset on the publishing
+            // thread (see `publish_telemetry_event::snapshot_spans_into_event`
+            // and Mirage's `summarize.rs::synthesize_chunk_cloud`). Any
+            // state currently in the collector at this moment belongs to
+            // OTHER in-flight work on other threads — resetting it here
+            // would steal their open spans and drop them on the floor,
+            // producing empty flamegraphs for those subsequent events.
+            // That's the race the earlier reset caused: a classifier's
+            // async-processed embedded-spans event clobbered a concurrent
+            // cloud synthesize's still-open span stack.
+            serde_json::json!({ "spans": inner })
+        } else {
+            let s = core_tracing::get_stages_json();
+            core_tracing::reset_tracing();
+            s
+        };
+
         // Hoist LLM token counts from the span metadata into the outer
         // payload so analytics backends that read `tokens_in` /
         // `tokens_out` at the top of the event see them without having
@@ -851,14 +935,16 @@ fn convert_to_platform_event(
         // span is present.
         if let Some((tokens_in, tokens_out)) = extract_llm_token_counts(&spans) {
             if let Some(n) = tokens_in {
-                payload["tokens_in"] = serde_json::json!(n);
+                if payload.get("tokens_in").is_none() {
+                    payload["tokens_in"] = serde_json::json!(n);
+                }
             }
             if let Some(n) = tokens_out {
-                payload["tokens_out"] = serde_json::json!(n);
+                if payload.get("tokens_out").is_none() {
+                    payload["tokens_out"] = serde_json::json!(n);
+                }
             }
         }
-        // Reset tracing for next execution
-        core_tracing::reset_tracing();
         Some(spans)
     } else {
         None
@@ -874,8 +960,8 @@ fn convert_to_platform_event(
         app_version: config.app_version.clone(),
         device: device_profile.cloned(),
         timestamp,
-        pipeline_id,
-        trace_id,
+        pipeline_id: event_pipeline_id,
+        trace_id: event_trace_id,
         stages,
     }
 }
@@ -1284,8 +1370,119 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
     }
 }
 
+/// Synchronous span snapshot for publish. Only acts on completion-family
+/// events (PipelineComplete / ModelComplete) where the dashboard wants a
+/// flamegraph; skips if the caller already embedded their own spans.
+/// When it does act, it drains the global collector so the next unit of
+/// work on this thread starts with a clean slate.
+fn snapshot_spans_into_event(event: TelemetryEvent) -> TelemetryEvent {
+    let is_completion = matches!(
+        event.event_type.as_str(),
+        "PipelineComplete" | "ModelComplete"
+    );
+    if !is_completion || !core_tracing::is_tracing_enabled() {
+        return event;
+    }
+
+    // If the caller already has spans in their data blob, leave it
+    // alone — they opted into managing their own lifecycle (Mirage
+    // does this for cross-chunk isolation).
+    let data_already_has_spans = event
+        .data
+        .as_ref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| v.get("spans").cloned())
+        .filter(|v| !v.is_null())
+        .is_some();
+    if data_already_has_spans {
+        return event;
+    }
+
+    let captured = core_tracing::get_stages_json();
+    core_tracing::reset_tracing();
+
+    // Merge captured spans into event.data["spans"].
+    let mut merged: serde_json::Value = event
+        .data
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !merged.is_object() {
+        merged = serde_json::json!({});
+    }
+    if let Some(spans) = captured.get("spans") {
+        merged["spans"] = spans.clone();
+    }
+
+    TelemetryEvent {
+        data: Some(merged.to_string()),
+        ..event
+    }
+}
+
+fn current_telemetry_pipeline_context() -> (Option<Uuid>, Option<Uuid>) {
+    if let Ok(exporter) = PLATFORM_EXPORTER.read() {
+        if let Some(exp) = exporter.as_ref() {
+            let pipeline_id = exp.pipeline_id.read().ok().and_then(|g| *g);
+            let trace_id = exp.trace_id.read().ok().and_then(|g| *g);
+            return (pipeline_id, trace_id);
+        }
+    }
+    (None, None)
+}
+
+fn snapshot_context_into_event(event: TelemetryEvent) -> TelemetryEvent {
+    let (pipeline_id, trace_id) = current_telemetry_pipeline_context();
+    if pipeline_id.is_none() && trace_id.is_none() {
+        return event;
+    }
+
+    let mut data = match event.data.as_ref() {
+        Some(raw) => match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(value) if value.is_object() => value,
+            Ok(value) => serde_json::json!({ "value": value }),
+            Err(_) => serde_json::json!({ "value": raw }),
+        },
+        None => serde_json::json!({}),
+    };
+
+    if let Some(obj) = data.as_object_mut() {
+        if let Some(id) = pipeline_id {
+            obj.insert(CONTEXT_PIPELINE_ID_KEY.to_string(), serde_json::json!(id));
+        }
+        if let Some(id) = trace_id {
+            obj.insert(CONTEXT_TRACE_ID_KEY.to_string(), serde_json::json!(id));
+        }
+    }
+
+    TelemetryEvent {
+        data: Some(data.to_string()),
+        ..event
+    }
+}
+
 /// Publish a telemetry event to all registered subscribers
 pub fn publish_telemetry_event(event: TelemetryEvent) {
+    // Span snapshot: capture spans synchronously at publish time.
+    //
+    // The exporter thread (`convert_to_platform_event`) used to do this
+    // asynchronously, which caused a race when a caller published
+    // ModelComplete/PipelineComplete events back-to-back: any span opened
+    // by the next unit of work (e.g. Mirage's chunked summarize opening
+    // `cloud_synthesize` immediately after a local classifier's event
+    // published) could be stolen or reset by the exporter while still
+    // open, producing empty spans / 0ms durations in the flamegraph.
+    //
+    // Capturing here instead, on the PUBLISHING thread, anchors each
+    // event's span tree to the exact state of the global collector at
+    // the moment the caller finished emitting it. Subsequent span work
+    // on the same thread is cleanly separated. Callers that already
+    // embedded `spans` in `event.data` (e.g. Mirage's `summarize.rs`
+    // `synthesize_chunk_cloud`, which captures+resets earlier for
+    // composability) are left untouched so they keep full control.
+    let event = snapshot_spans_into_event(event);
+    let event = snapshot_context_into_event(event);
+
     // Use unwrap_or_else to recover from poisoned mutex - this prevents
     // a panic in one component from permanently breaking telemetry
     let Ok(senders) = TELEMETRY_SENDERS.lock() else {
@@ -1335,6 +1532,61 @@ pub fn bridge_orchestrator_events(orchestrator: &xybrid_core::orchestrator::Orch
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platform_event_payload_has_no_legacy_cache_keys() {
+        // End-to-end through convert_to_platform_event so we exercise
+        // the real hoist list + serde path. A ModelComplete event
+        // carrying a data blob with canonical cache keys must
+        // serialize to a payload that contains the canonical names and
+        // none of the DeepSeek-specific legacy names. This backs up
+        // the source-containment test (`tests/legacy_cache_names.rs`)
+        // with a runtime-format assertion: if a field rename is
+        // incomplete — e.g., a `#[serde(rename = "cache_hit_tokens")]`
+        // is forgotten or a manual json literal writes the old key —
+        // this catches it even when the source file reads canonical.
+        let data = serde_json::json!({
+            "model_id": "deepseek-chat",
+            "tokens_in": 1000,
+            "tokens_out": 120,
+            "cost_usd": 0.00123,
+            "cache_read_input_tokens": 800,
+            "cache_read_cost_usd": 0.000056,
+            "uncached_input_cost_usd": 0.000054,
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("cloud_synthesize".to_string()),
+            target: Some("cloud".to_string()),
+            latency_ms: Some(420),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform_event =
+            convert_to_platform_event(&event, &config, None, None, None);
+        let payload_json = serde_json::to_string(&platform_event.payload).unwrap();
+
+        // Forbidden keys built at runtime so the source of this file
+        // doesn't contain the literals (5a would flag them otherwise).
+        let forbidden = [
+            format!("cache{}hit{}tokens", "_", "_"),
+            format!("cache{}miss{}tokens", "_", "_"),
+            format!("cache{}hit{}cost{}usd", "_", "_", "_"),
+            format!("cache{}miss{}cost{}usd", "_", "_", "_"),
+        ];
+        for key in &forbidden {
+            assert!(
+                !payload_json.contains(key),
+                "platform event payload leaked legacy key {key}: {payload_json}"
+            );
+        }
+        // Positive assertion — the canonical name IS present. Without
+        // this, an empty payload would trivially satisfy the negation
+        // above.
+        assert!(payload_json.contains("cache_read_input_tokens"));
+    }
 
     #[test]
     fn test_convert_stage_start_event() {
@@ -1675,6 +1927,51 @@ mod tests {
             json.get("device_id").is_none(),
             "strict opt-out must omit `device_id` entirely, not emit null. got: {json}"
         );
+    }
+
+    #[test]
+    fn embedded_context_overrides_flush_context() {
+        let config = TelemetryConfig::new("http://example.invalid", "k");
+        let event_pipeline_id = Uuid::new_v4();
+        let event_trace_id = Uuid::new_v4();
+        let flush_pipeline_id = Uuid::new_v4();
+        let flush_trace_id = Uuid::new_v4();
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: None,
+            target: Some("cloud".to_string()),
+            latency_ms: Some(42),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    CONTEXT_PIPELINE_ID_KEY: event_pipeline_id,
+                    CONTEXT_TRACE_ID_KEY: event_trace_id,
+                    "model_id": "deepseek-chat",
+                    "tokens_in": 100,
+                    "tokens_out": 10,
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 0,
+        };
+
+        let converted = convert_to_platform_event(
+            &event,
+            &config,
+            None,
+            Some(flush_pipeline_id),
+            Some(flush_trace_id),
+        );
+
+        assert_eq!(converted.pipeline_id, Some(event_pipeline_id));
+        assert_eq!(converted.trace_id, Some(event_trace_id));
+        assert_eq!(converted.payload["model_id"], "deepseek-chat");
+        assert!(converted.payload["data"]
+            .get(CONTEXT_PIPELINE_ID_KEY)
+            .is_none());
+        assert!(converted.payload["data"]
+            .get(CONTEXT_TRACE_ID_KEY)
+            .is_none());
     }
 
     #[test]
