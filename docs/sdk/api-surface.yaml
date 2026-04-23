@@ -419,6 +419,23 @@ classes:
         returns: Self
         description: "Enables or disables hostname capture; default is false."
         since: "0.1.0-beta10"
+      with_resource_telemetry:
+        name: with_resource_telemetry
+        parameters:
+          - { name: mode, type: "ResourceTelemetryMode" }
+        returns: Self
+        description: >-
+          Enables per-inference resource telemetry (CPU avg/peak, process
+          RSS peak, min available memory, memory-pressure peak, thermal peak,
+          battery end, sample count). When the mode is not `Off`,
+          `init_platform_telemetry` pre-warms a process-wide
+          `ResourceMonitor` and every subsequent `XybridModel::run*` /
+          `Pipeline::run*` call attaches a `resource_summary` object to its
+          `ModelComplete` / `PipelineComplete` telemetry event. The env var
+          `XYBRID_RESOURCE_TELEMETRY=off|boundary|summary|debug_local` wins
+          over this config value. Full contract at
+          `docs/sdk/resource-telemetry.md`. Default is `Off`.
+        since: "0.1.0-beta12"
 
   XybridConfiguration:
     type: data

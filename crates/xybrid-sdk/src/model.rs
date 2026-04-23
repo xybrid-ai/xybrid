@@ -1308,6 +1308,12 @@ impl XybridModel {
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
         let start = Instant::now();
+        // Begin a resource-telemetry scope for this run. When
+        // `resource_telemetry_mode()` is `Off` the guard is a no-op; otherwise
+        // it captures start snapshots (and launches a sampler for Summary /
+        // DebugLocal). Summary is produced by
+        // `publish_with_resource_summary` at the end of this function.
+        let resource_guard = crate::telemetry::begin_resource_run();
 
         // Recover from poisoned RwLock to prevent permanent lock errors
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -1345,7 +1351,7 @@ impl XybridModel {
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0),
         };
-        crate::telemetry::publish_telemetry_event(event);
+        crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
@@ -1396,6 +1402,7 @@ impl XybridModel {
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
         let start = Instant::now();
+        let resource_guard = crate::telemetry::begin_resource_run();
 
         // Recover from poisoned RwLock to prevent permanent lock errors
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -1434,7 +1441,7 @@ impl XybridModel {
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0),
         };
-        crate::telemetry::publish_telemetry_event(event);
+        crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
@@ -1890,6 +1897,7 @@ impl XybridModel {
 
         tokio::task::spawn_blocking(move || {
             let start = Instant::now();
+            let resource_guard = crate::telemetry::begin_resource_run();
 
             // Recover from poisoned RwLock to prevent permanent lock errors
             let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
@@ -1927,7 +1935,7 @@ impl XybridModel {
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0),
             };
-            crate::telemetry::publish_telemetry_event(event);
+            crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
             Ok(InferenceResult::new(output, &model_id, latency_ms))
         })

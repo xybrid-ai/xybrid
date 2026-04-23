@@ -48,6 +48,10 @@ pub mod capabilities;
 // Telemetry-facing device profile (chip, RAM, OS, for wire events)
 pub mod profile;
 
+// Per-inference resource monitor + sampler (INF-23 epic).
+// See `docs/sdk/resource-telemetry.md` for the public contract.
+pub mod resource;
+
 // Platform tests
 #[cfg(test)]
 mod tests;
@@ -55,6 +59,10 @@ mod tests;
 // Re-exports for convenience
 pub use capabilities::detect_capabilities;
 pub use profile::DeviceProfile;
+pub use resource::{
+    MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceTelemetryMode, ResourceUsageSummary,
+    RunGuard,
+};
 pub use types::{
     DetectionConfidence, DetectionSource, GpuType, HardwareCapabilities, NpuType, Platform,
     ThermalState,

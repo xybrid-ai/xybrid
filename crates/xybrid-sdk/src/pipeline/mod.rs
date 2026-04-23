@@ -912,6 +912,7 @@ impl Pipeline {
         };
 
         let start_time = std::time::Instant::now();
+        let resource_guard = crate::telemetry::begin_resource_run();
         let results: Vec<StageExecutionResult> = orchestrator
             .execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn)
             .map_err(|e| {
@@ -983,7 +984,7 @@ impl Pipeline {
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0),
         };
-        crate::telemetry::publish_telemetry_event(event);
+        crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
         // Clear pipeline context AFTER publish so the event carried
         // correlation IDs visible to the exporter's lazy-read flush.
@@ -1042,6 +1043,7 @@ impl Pipeline {
             };
 
             let start_time = std::time::Instant::now();
+            let resource_guard = crate::telemetry::begin_resource_run();
             let results: Vec<StageExecutionResult> = orchestrator
                 .execute_pipeline(
                     &stage_descriptors,
@@ -1117,7 +1119,7 @@ impl Pipeline {
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0),
             };
-            crate::telemetry::publish_telemetry_event(event);
+            crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
             // Clear pipeline context after publish to keep the exporter's
             // lazy-read flush correlated with the just-completed pipeline.

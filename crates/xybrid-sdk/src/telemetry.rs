@@ -26,6 +26,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 pub use xybrid_core::device::DeviceProfile;
+use xybrid_core::device::{ResourceMonitor, ResourceTelemetryMode, ResourceUsageSummary};
 use xybrid_core::event_bus::OrchestratorEvent;
 use xybrid_core::execution::listener::{self as execution_listener, ExecutionEvent};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
@@ -115,6 +116,14 @@ pub struct TelemetryConfig {
     /// suppress the latter without dropping the former.
     #[doc(hidden)]
     pub device_id_explicit: bool,
+
+    /// Resource telemetry mode. Defaults to `Off` so existing callers see no
+    /// behavior change. Enable via [`TelemetryConfig::with_resource_telemetry`]
+    /// — authenticated deployments typically use
+    /// `ResourceTelemetryMode::summary()`. Respected by `init_platform_telemetry`
+    /// which pre-warms the process-wide [`xybrid_core::device::ResourceMonitor`]
+    /// so the first inference does not pay a sysinfo cold-read cost.
+    pub resource_telemetry: ResourceTelemetryMode,
 }
 
 impl Default for TelemetryConfig {
@@ -137,6 +146,7 @@ impl Default for TelemetryConfig {
             auto_hardware_detection: true,
             capture_hostname: false,
             device_id_explicit: false,
+            resource_telemetry: ResourceTelemetryMode::Off,
         }
     }
 }
@@ -268,6 +278,45 @@ impl TelemetryConfig {
         self.capture_hostname = enabled;
         self
     }
+
+    /// Enable per-inference resource telemetry (CPU, memory, process RSS,
+    /// pressure, thermal, battery). Sibling to the existing cache-token and
+    /// LLM-metric fields on the wire; fully documented at
+    /// `docs/sdk/resource-telemetry.md`.
+    ///
+    /// Authenticated deployments typically want
+    /// `ResourceTelemetryMode::summary()`. Omitting the call keeps the default
+    /// `Off` so existing callers see no behavior change.
+    pub fn with_resource_telemetry(mut self, mode: ResourceTelemetryMode) -> Self {
+        self.resource_telemetry = mode.normalized();
+        self
+    }
+}
+
+/// Read the `XYBRID_RESOURCE_TELEMETRY` env var, if set. Recognized values:
+/// `off`, `boundary`, `summary`, `summary:<ms>`, `debug_local`,
+/// `debug_local:<ms>`. Unknown values fall back to `None` so the caller can
+/// use their configured default.
+fn resource_mode_from_env() -> Option<ResourceTelemetryMode> {
+    let raw = std::env::var("XYBRID_RESOURCE_TELEMETRY").ok()?;
+    let lower = raw.trim().to_ascii_lowercase();
+    let (head, interval) = match lower.split_once(':') {
+        Some((h, t)) => (h, t.parse::<u32>().ok()),
+        None => (lower.as_str(), None),
+    };
+    let default_interval = ResourceTelemetryMode::DEFAULT_SUMMARY_INTERVAL_MS;
+    let mode = match head {
+        "off" => ResourceTelemetryMode::Off,
+        "boundary" => ResourceTelemetryMode::Boundary,
+        "summary" => ResourceTelemetryMode::Summary {
+            interval_ms: interval.unwrap_or(default_interval),
+        },
+        "debug_local" | "debuglocal" | "debug-local" => ResourceTelemetryMode::DebugLocal {
+            interval_ms: interval.unwrap_or(default_interval),
+        },
+        _ => return None,
+    };
+    Some(mode.normalized())
 }
 
 /// Event payload for platform API (matches IngestTelemetryEvent)
@@ -860,6 +909,13 @@ fn convert_to_platform_event(
                 // DeepSeek / Anthropic / OpenAI / Gemini.
                 "cache_read_input_tokens",
                 "cache_creation_input_tokens",
+                // Per-inference resource summary (INF-23). Nested JSON
+                // stays under `data.resource_summary`; hoisting the
+                // object to the payload top level lets the Tinybird
+                // ingest datasource column-extract via
+                // `json:$.resource_summary.*` without teaching each
+                // consumer the nested shape.
+                "resource_summary",
             ]
             .iter()
             {
@@ -1090,9 +1146,16 @@ static PLATFORM_EXPORTER: RwLock<Option<HttpTelemetryExporter>> = RwLock::new(No
 ///
 /// init_platform_telemetry(config);
 /// ```
-pub fn init_platform_telemetry(config: TelemetryConfig) {
+pub fn init_platform_telemetry(mut config: TelemetryConfig) {
     // Enable span tracing in xybrid-core for execution profiling
     core_tracing::init_tracing(true);
+
+    // Resource-telemetry mode. Env override wins over the config value
+    // so operators can flip `XYBRID_RESOURCE_TELEMETRY=off` during demos
+    // without rebuilding; the env-only init path below uses the same
+    // helper so behavior is identical.
+    config.resource_telemetry = resolve_resource_telemetry_mode(config.resource_telemetry);
+    activate_resource_telemetry(config.resource_telemetry);
 
     // Register automatic execution listener so TemplateExecutor emits
     // ExecutionStarted / ExecutionCompleted / ExecutionFailed events
@@ -1110,6 +1173,104 @@ pub fn init_platform_telemetry(config: TelemetryConfig) {
     }
 }
 
+// -- Process-wide resource-telemetry mode ----------------------------------
+//
+// `XybridModel::run*` / `Pipeline::run*` consult this to decide whether (and
+// how) to instrument a run. Stored independently of `TelemetryConfig` so the
+// SDK doesn't have to carry a config reference into every run path. Writes
+// happen at `init_platform_telemetry`; reads are cheap.
+static RESOURCE_TELEMETRY_MODE: RwLock<ResourceTelemetryMode> =
+    RwLock::new(ResourceTelemetryMode::Off);
+
+fn set_resource_telemetry_mode(mode: ResourceTelemetryMode) {
+    if let Ok(mut guard) = RESOURCE_TELEMETRY_MODE.write() {
+        *guard = mode;
+    }
+}
+
+/// Apply the `XYBRID_RESOURCE_TELEMETRY` env override on top of a configured
+/// mode. The env var wins unconditionally when set (and parses to a known
+/// variant) so operators can disable resource telemetry at runtime without a
+/// rebuild. Both `init_platform_telemetry` and `init_platform_telemetry_from_env`
+/// funnel through here so the two init paths can't drift.
+fn resolve_resource_telemetry_mode(configured: ResourceTelemetryMode) -> ResourceTelemetryMode {
+    match resource_mode_from_env() {
+        Some(env_mode) => env_mode,
+        None => configured,
+    }
+}
+
+/// Pre-warm the global `ResourceMonitor` + publish the active mode to the
+/// process-wide state read by `begin_resource_run`. `Off` still stores the
+/// mode so a later rehydration can read a consistent value; the monitor
+/// just sits idle until something flips it on.
+fn activate_resource_telemetry(mode: ResourceTelemetryMode) {
+    if !mode.is_off() {
+        ResourceMonitor::global().prewarm();
+    }
+    set_resource_telemetry_mode(mode);
+}
+
+/// Current resource-telemetry mode for this process. `Off` until
+/// `init_platform_telemetry` runs with a mode other than `Off`.
+pub fn resource_telemetry_mode() -> ResourceTelemetryMode {
+    match RESOURCE_TELEMETRY_MODE.read() {
+        Ok(g) => *g,
+        Err(poisoned) => *poisoned.into_inner(),
+    }
+}
+
+/// Begin a resource-telemetry scope for one `Model::run*` / `Pipeline::run*`
+/// call. Returns a guard that produces the summary on `finish()`. Callers
+/// who want the summary attached to their outgoing `TelemetryEvent` can use
+/// [`attach_resource_summary`] at emit time.
+pub fn begin_resource_run() -> xybrid_core::device::RunGuard {
+    ResourceMonitor::global().begin_run(resource_telemetry_mode())
+}
+
+/// Mutate a `TelemetryEvent.data` JSON string to add `resource_summary`.
+/// If `data` already parses as an object, the field is inserted alongside
+/// existing keys; otherwise the event is left untouched so we never clobber
+/// a publisher's bespoke payload. Safe to call with `None` summary (no-op).
+pub fn attach_resource_summary(event: &mut TelemetryEvent, summary: Option<ResourceUsageSummary>) {
+    let Some(summary) = summary else {
+        return;
+    };
+    let Ok(summary_json) = serde_json::to_value(&summary) else {
+        return;
+    };
+    let mut parsed: serde_json::Value = match event.data.as_deref() {
+        Some(s) if !s.is_empty() => match serde_json::from_str(s) {
+            Ok(v) => v,
+            Err(_) => return,
+        },
+        _ => serde_json::json!({}),
+    };
+    if let Some(obj) = parsed.as_object_mut() {
+        obj.insert("resource_summary".to_string(), summary_json);
+        event.data = serde_json::to_string(&parsed).ok();
+    }
+}
+
+/// Attach the resource summary from `guard` and publish the event. Run-site
+/// shorthand for callers that always want the two steps bundled:
+///
+/// ```text
+/// let guard = begin_resource_run();
+/// // ... run inference ...
+/// publish_with_resource_summary(event, guard);
+/// ```
+///
+/// Safe to call with a disabled guard; `attach_resource_summary` becomes a
+/// no-op and the publish path is unchanged.
+pub fn publish_with_resource_summary(
+    mut event: TelemetryEvent,
+    guard: xybrid_core::device::RunGuard,
+) {
+    attach_resource_summary(&mut event, guard.finish());
+    publish_telemetry_event(event);
+}
+
 /// Initialize platform telemetry from environment variables
 ///
 /// Returns `true` if initialization succeeded, `false` if XYBRID_API_KEY is not set.
@@ -1118,6 +1279,14 @@ pub fn init_platform_telemetry_from_env() -> bool {
     if let Some(exporter) = HttpTelemetryExporter::from_env() {
         // Enable span tracing in xybrid-core for execution profiling
         core_tracing::init_tracing(true);
+
+        // Resource-telemetry: the env path has no TelemetryConfig, so the
+        // env var is the only way in. Apply the same resolver + activation
+        // pair `init_platform_telemetry` uses so consumers that rely on
+        // `XYBRID_RESOURCE_TELEMETRY=summary` get identical behavior
+        // regardless of which init entry point they chose.
+        let resource_mode = resolve_resource_telemetry_mode(ResourceTelemetryMode::Off);
+        activate_resource_telemetry(resource_mode);
 
         // Register automatic execution listener
         register_execution_listener();
@@ -1585,6 +1754,109 @@ mod tests {
         // this, an empty payload would trivially satisfy the negation
         // above.
         assert!(payload_json.contains("cache_read_input_tokens"));
+    }
+
+    #[test]
+    fn resource_summary_attaches_and_hoists_through_convert() {
+        // End-to-end happy path for INF-23: attach_resource_summary()
+        // edits event.data, then convert_to_platform_event hoists
+        // resource_summary to the platform-event payload top level
+        // (same hoist mechanism as cache tokens).
+        let summary = ResourceUsageSummary {
+            cpu_avg_pct: Some(34.1),
+            cpu_peak_pct: Some(62.5),
+            process_rss_peak_mb: Some(712),
+            available_mem_min_mb: Some(4180),
+            memory_pressure_peak: xybrid_core::device::MemoryPressure::Normal,
+            thermal_state_peak: xybrid_core::device::ThermalState::Normal,
+            battery_pct_end: Some(72),
+            sample_count: 4,
+            sampling_mode: "summary".to_string(),
+            sampling_interval_ms: Some(1000),
+        };
+        let mut event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(420),
+            error: None,
+            data: Some(serde_json::json!({ "model_id": "qwen2.5-0.5b" }).to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        attach_resource_summary(&mut event, Some(summary));
+
+        // Sanity: attach mutated event.data.
+        let data_json = event.data.clone().expect("data present");
+        let data: serde_json::Value = serde_json::from_str(&data_json).unwrap();
+        assert!(data.get("resource_summary").is_some());
+        assert_eq!(
+            data["resource_summary"]["cpu_peak_pct"].as_f64(),
+            Some(62.5)
+        );
+
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let payload_json = serde_json::to_string(&platform.payload).unwrap();
+
+        // Hoisted to payload top level (sibling of tokens_in / cache_*).
+        assert!(
+            payload_json.contains("\"resource_summary\""),
+            "resource_summary must be hoisted to payload top level, got: {}",
+            payload_json
+        );
+        // And reachable via the object root, not just as a nested string.
+        let parsed: serde_json::Value = serde_json::from_str(&payload_json).unwrap();
+        assert_eq!(
+            parsed["resource_summary"]["cpu_peak_pct"].as_f64(),
+            Some(62.5),
+            "hoisted value should be the same object we attached"
+        );
+    }
+
+    #[test]
+    fn attach_resource_summary_with_none_is_noop() {
+        let original = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: None,
+            target: None,
+            latency_ms: None,
+            error: None,
+            data: Some("{\"model_id\":\"x\"}".to_string()),
+            timestamp_ms: 0,
+        };
+        let mut event = original.clone();
+        attach_resource_summary(&mut event, None);
+        assert_eq!(event.data, original.data);
+    }
+
+    #[test]
+    fn env_resource_mode_parses_all_variants() {
+        // Helper drives the parsed variants without touching the real env.
+        let cases: &[(&str, ResourceTelemetryMode)] = &[
+            ("off", ResourceTelemetryMode::Off),
+            ("boundary", ResourceTelemetryMode::Boundary),
+            (
+                "summary",
+                ResourceTelemetryMode::Summary {
+                    interval_ms: ResourceTelemetryMode::DEFAULT_SUMMARY_INTERVAL_MS,
+                },
+            ),
+            (
+                "summary:500",
+                ResourceTelemetryMode::Summary { interval_ms: 500 },
+            ),
+            (
+                "debug_local:250",
+                ResourceTelemetryMode::DebugLocal { interval_ms: 250 },
+            ),
+        ];
+        for (raw, expected) in cases {
+            std::env::set_var("XYBRID_RESOURCE_TELEMETRY", raw);
+            let parsed = resource_mode_from_env().expect(raw);
+            assert_eq!(&parsed, expected, "parsing `{}`", raw);
+        }
+        std::env::remove_var("XYBRID_RESOURCE_TELEMETRY");
+        assert!(resource_mode_from_env().is_none());
     }
 
     #[test]
