@@ -911,10 +911,9 @@ fn convert_to_platform_event(
                 "cache_creation_input_tokens",
                 // Per-inference resource summary (INF-23). Nested JSON
                 // stays under `data.resource_summary`; hoisting the
-                // object to the payload top level lets the Tinybird
-                // ingest datasource column-extract via
-                // `json:$.resource_summary.*` without teaching each
-                // consumer the nested shape.
+                // object to the payload top level lets the analytics
+                // backend column-extract via flat JSON-path selectors
+                // without teaching each consumer the nested shape.
                 "resource_summary",
             ]
             .iter()

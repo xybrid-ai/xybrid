@@ -145,8 +145,8 @@ impl ResourceSnapshot {
 /// Aggregate observation across a single `ModelComplete` / `PipelineComplete`
 /// run. Attached to `event.data.resource_summary` and hoisted to the
 /// platform-event payload top level by the SDK. The wire shape is flat
-/// (no nested enum) so the Tinybird `LowCardinality(String)` column for
-/// `sampling_mode` can extract cleanly.
+/// (no nested enum) so the analytics backend's low-cardinality string
+/// column for `sampling_mode` can extract cleanly.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResourceUsageSummary {
     pub cpu_avg_pct: Option<f32>,

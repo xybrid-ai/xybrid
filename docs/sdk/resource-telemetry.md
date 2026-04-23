@@ -115,9 +115,47 @@ taken across samples; `cpu_avg_pct` is a simple mean.
 | `memory_pressure_peak` | `MemoryPressure` | enum | worst (Critical > Warn > Normal > Unknown) |
 | `thermal_state_peak` | `ThermalState` | enum | worst (Critical > Hot > Warm > Normal) |
 | `battery_pct_end` | `u8?` | % | value from final snapshot |
-| `sample_count` | `u32` | count | number of snapshots aggregated |
-| `sampling_mode` | `string` | label | `"off"` / `"boundary"` / `"summary"` / `"debug_local"` — the label of the mode that produced this summary. Flat string so Tinybird's `LowCardinality(String)` column extracts cleanly. |
+| `sample_count` | `u32` | count | number of snapshots aggregated (see [Interpreting `sample_count`](#interpreting-sample_count) for the composition formula) |
+| `sampling_mode` | `string` | label | `"off"` / `"boundary"` / `"summary"` / `"debug_local"` — the label of the mode that produced this summary. Flat string so the analytics backend's low-cardinality column extracts cleanly. |
 | `sampling_interval_ms` | `u32?` | ms | configured interval for `summary` / `debug_local`; absent on `off` / `boundary` |
+
+### Interpreting `sample_count`
+
+Composition formula:
+
+```
+sample_count = 1 (start bookend) + N (periodic samples) + 1 (end bookend)
+```
+
+- **`N = 0`** when the run finishes before the sampler's first tick. Expected on
+  sub-interval inferences: a 600 ms run with the default `interval_ms: 1000`
+  produces `sample_count = 2`.
+- **`N = floor(run_duration_ms / interval_ms)`** is a good first-order
+  approximation for longer runs — the sampler sleeps between ticks and an
+  off-by-one is normal.
+
+Expected values by mode:
+
+| Mode | `sample_count` | Notes |
+|---|---|---|
+| `off` | no summary emitted | consumer sees `resource_summary: null` |
+| `boundary` | always exactly `2` | bookends, no sampler thread |
+| `summary` | `>= 2` | 2 on sub-interval runs, grows with duration |
+| `debug_local` | `>= 2` | same as `summary`, plus raw samples kept locally |
+
+Debugging signals:
+
+- **`sample_count == 2` on a long run in `summary` mode** is anomalous — either
+  the sampler thread failed to spawn or the guard was dropped before `finish()`
+  (panicking inference path). Either way the aggregation stayed on the bookend
+  fallback.
+- **Identical `cpu_avg_pct` and `cpu_peak_pct`** on a `summary`-mode run
+  usually means `sample_count == 2` — there was no mid-run trajectory to
+  average over.
+
+Graceful-degradation guarantee: `sample_count >= 2` is always true when a
+summary is emitted. A sampler failure (including complete absence of ticks)
+produces partial data, never a missing summary or a failed inference.
 
 ## Live-snapshot surface
 
@@ -175,14 +213,15 @@ publisher's `event.data` JSON. Example `ModelComplete` payload, abbreviated:
 
 `xybrid-sdk::telemetry::convert_to_platform_event` hoists `resource_summary` to
 the platform-event payload top level (same mechanism as `tokens_in`,
-`cache_read_input_tokens`). This lets Tinybird `json:$.resource_summary.*`
-column extraction work without teaching the ingest service the nested shape.
+`cache_read_input_tokens`). This lets the analytics backend extract each field
+via flat JSON-path selectors without teaching the ingest service the nested
+shape.
 
 ### Storage
 
-Tinybird `telemetry_events` datasource adds one typed column per summary field
-(Slice 2 / INF-31). Legacy rows keep `NULL` for every new column; the dashboard
-hides its Resource Usage card when all fields are `NULL`.
+The analytics backend's `telemetry_events` table adds one typed column per
+summary field (Slice 2 / INF-31). Legacy rows keep `NULL` for every new column;
+the dashboard hides its Resource Usage card when all fields are `NULL`.
 
 ## Privacy guarantees
 
@@ -254,7 +293,8 @@ regression is resolved.
   but ignores it — the wire format is additive.
 - **Rollback**: remove the `.with_resource_telemetry(...)` call on
   `TelemetryConfig`; sampling stops, summaries stop flowing, no schema
-  migration required. Tinybird columns default to `NULL` and stay empty.
+  migration required. Analytics-backend columns default to `NULL` and stay
+  empty.
 
 ## Platform availability
 
