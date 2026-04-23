@@ -280,8 +280,22 @@ The Criterion bench suite locks in the SLOs:
 - Cached live-snapshot read: `< 100 µs`.
 - Cache-miss refresh: `< 1 ms`.
 
-If any of these regress in CI, the default flips to `Boundary` until the
-regression is resolved.
+### Measured overhead (Apple Silicon macOS, INF-32 bench)
+
+| Scenario                                       | Observed (median) | SLO                  | Verdict        |
+| ---------------------------------------------- | ----------------- | -------------------- | -------------- |
+| `off` mode, per `begin_run + finish`           | 4.8 ns            | —                    | baseline       |
+| `Boundary` mode, per run                       | 275 µs            | < 1 ms               | pass           |
+| `Summary { interval_ms: 1000 }` per run        | 354 µs            | < 1 ms bookkeeping   | pass           |
+| `Summary { interval_ms: 250 }` (stress) per run | 354 µs            | not a default        | documented only |
+| Cached live-snapshot read (500 ms TTL)         | 25 ns             | < 100 µs             | pass (~4000×)  |
+| Cache-miss refresh                             | 134 µs            | < 1 ms               | pass           |
+
+Reproduce with: `cargo bench -p xybrid-core --bench resource_telemetry`.
+
+Numbers on non-Apple targets will differ; the SLO gates stay the same.
+If any scenario regresses above its gate in CI, the default flips to
+`Boundary` until the regression is resolved.
 
 ## Compatibility
 

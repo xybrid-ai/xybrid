@@ -129,6 +129,10 @@ required-features = ["llm-llamacpp"]
 name = "inference_backends"
 harness = false
 
+[[bench]]
+name = "resource_telemetry"
+harness = false
+
 # Platform-specific ureq dependencies
 # Non-Android: Use default ureq with TLS
 [target.'cfg(not(target_os = "android"))'.dependencies]
