@@ -1813,6 +1813,51 @@ mod tests {
     }
 
     #[test]
+    fn pipeline_complete_publishes_resource_summary_in_payload() {
+        // Parallel coverage to `resource_summary_attaches_and_hoists_through_convert`
+        // but for the PipelineComplete path — the hoist logic has no branch
+        // on event_type, but we assert the shape end-to-end so a future
+        // regression that special-cases Model vs Pipeline won't slip.
+        let summary = ResourceUsageSummary {
+            cpu_avg_pct: Some(12.0),
+            cpu_peak_pct: Some(45.0),
+            process_rss_peak_mb: Some(380),
+            available_mem_min_mb: Some(6000),
+            memory_pressure_peak: xybrid_core::device::MemoryPressure::Normal,
+            thermal_state_peak: xybrid_core::device::ThermalState::Normal,
+            battery_pct_end: None,
+            sample_count: 3,
+            sampling_mode: "summary".to_string(),
+            sampling_interval_ms: Some(1000),
+        };
+        let mut event = TelemetryEvent {
+            event_type: "PipelineComplete".to_string(),
+            stage_name: Some("mirage-document-insights".to_string()),
+            target: None,
+            latency_ms: Some(1_200),
+            error: None,
+            data: Some("{\"stages\":[],\"output_type\":\"Text\"}".to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        attach_resource_summary(&mut event, Some(summary));
+
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let payload_json = serde_json::to_string(&platform.payload).unwrap();
+
+        assert!(
+            payload_json.contains("\"resource_summary\""),
+            "PipelineComplete should carry resource_summary on payload top level, got: {payload_json}"
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&payload_json).unwrap();
+        assert_eq!(parsed["resource_summary"]["sample_count"].as_i64(), Some(3));
+        assert_eq!(
+            parsed["resource_summary"]["memory_pressure_peak"].as_str(),
+            Some("normal")
+        );
+    }
+
+    #[test]
     fn attach_resource_summary_with_none_is_noop() {
         let original = TelemetryEvent {
             event_type: "ModelComplete".to_string(),
