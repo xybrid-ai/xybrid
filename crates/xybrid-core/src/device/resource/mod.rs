@@ -424,10 +424,7 @@ impl ResourceMonitor {
             process_rss_mb,
             available_mem_mb: available_mb,
             total_mem_mb: inner.total_mem_mb.or(total_mb),
-            memory_pressure: MemoryPressure::derive(
-                available_mb,
-                inner.total_mem_mb.or(total_mb),
-            ),
+            memory_pressure: MemoryPressure::derive(available_mb, inner.total_mem_mb.or(total_mb)),
             // Thermal + battery come from platform-specific bridges in a
             // later slice (iOS thermal state, Android power manager, etc.).
             // For now desktop/server report Normal thermal and no battery —
@@ -545,10 +542,7 @@ mod sampler {
         samples: Mutex<Vec<ResourceSnapshot>>,
     }
 
-    pub(super) fn start(
-        monitor: ResourceMonitor,
-        mode: ResourceTelemetryMode,
-    ) -> Option<Handle> {
+    pub(super) fn start(monitor: ResourceMonitor, mode: ResourceTelemetryMode) -> Option<Handle> {
         let interval_ms = mode.interval_ms()?;
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
