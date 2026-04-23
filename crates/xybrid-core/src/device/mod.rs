@@ -48,7 +48,7 @@ pub mod capabilities;
 // Telemetry-facing device profile (chip, RAM, OS, for wire events)
 pub mod profile;
 
-// Per-inference resource monitor + sampler (INF-23 epic).
+// Per-inference resource monitor + sampler.
 // See `docs/sdk/resource-telemetry.md` for the public contract.
 pub mod resource;
 

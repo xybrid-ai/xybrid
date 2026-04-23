@@ -1,7 +1,6 @@
 # Resource Telemetry
 
-> **Status**: Draft spec, Slice 1 of [INF-23](https://linear.app/xybrid/issue/INF-23).
-> **Owner**: Inference team. **Last updated**: 2026-04-23.
+> **Status**: Draft spec. **Owner**: Inference team. **Last updated**: 2026-04-23.
 
 Resource telemetry attaches CPU, memory, process RSS, memory pressure, thermal,
 and battery context to each Xybrid inference trace so developers can see whether
@@ -82,7 +81,7 @@ Single point-in-time observation.
 | `available_mem_mb` | `u32` | MiB | yes | System-wide available memory. |
 | `total_mem_mb` | `u32` | MiB | yes | Cached after first read; stable for the process lifetime. |
 | `memory_pressure` | `MemoryPressure` | enum | no | Derived from `available_mem_mb / total_mem_mb`. `Unknown` when either field is `None`. |
-| `thermal_state` | `ThermalState` | enum | no | Defaults to `Normal` on platforms without native thermal signals. Enriched by mobile native bridges (INF-26). |
+| `thermal_state` | `ThermalState` | enum | no | Defaults to `Normal` on platforms without native thermal signals. Enriched by mobile native bridges in a later slice. |
 | `battery_pct` | `u8` | % [0 – 100] | yes | Permission-free only. `None` on desktop and on mobile when not available. |
 | `captured_at_ms` | `u64` | ms since epoch | no | For sampler debugging + deterministic tests. |
 
@@ -97,9 +96,9 @@ Derived, not sampled. Purely a function of the available/total ratio.
 | `Critical` | `< 5 %` |
 | `Unknown` | either `available_mem_mb` or `total_mem_mb` is `None` |
 
-Thresholds are a first-cut heuristic. Tuning is tracked against benchmark data
-in INF-32; changes must be rolled with a config version bump and corresponding
-dashboard legend update.
+Thresholds are a first-cut heuristic. Tuning is tracked against benchmark data;
+changes must be rolled with a config version bump and corresponding dashboard
+legend update.
 
 ### `ResourceUsageSummary` (sampler output)
 
@@ -159,7 +158,7 @@ produces partial data, never a missing summary or a failed inference.
 
 ## Live-snapshot surface
 
-Adaptive execution (INF-30) consumes live snapshots synchronously on the hot
+Adaptive execution consumes live snapshots synchronously on the hot
 path. The same primitive backs the sampler, so there is never more than one
 retained `sysinfo::System` in the process.
 
@@ -173,7 +172,7 @@ Semantics:
 - Otherwise refreshes the retained `System`, produces a new snapshot, and
   returns it.
 - **Cached read**: `< 100 µs` target on desktop-class hardware. Validated by
-  benchmark in INF-32.
+  the resource-telemetry Criterion bench.
 - **Cache-miss refresh**: `< 1 ms` target on a warm `System`. First call after
   process start is allowed to exceed this.
 
@@ -220,8 +219,8 @@ shape.
 ### Storage
 
 The analytics backend's `telemetry_events` table adds one typed column per
-summary field (Slice 2 / INF-31). Legacy rows keep `NULL` for every new column;
-the dashboard hides its Resource Usage card when all fields are `NULL`.
+summary field. Legacy rows keep `NULL` for every new column; the dashboard
+hides its Resource Usage card when all fields are `NULL`.
 
 ## Privacy guarantees
 
@@ -273,7 +272,7 @@ the anonymous telemetry PRD, not this one).
   were not validated for overhead.
 - **Live-snapshot TTL**: `500 ms` for internal callers.
 
-Benchmarks in INF-32 lock in the SLOs:
+The Criterion bench suite locks in the SLOs:
 
 - `Boundary` mode: overhead per inference `< 1 ms`.
 - `Summary { interval_ms: 1000 }`: throughput impact `< 1 %` on the
@@ -298,7 +297,7 @@ regression is resolved.
 
 ## Platform availability
 
-Cross-platform availability of each signal is tracked in Slice 4 (INF-26) when
+Cross-platform availability of each signal is tracked in a later slice when
 the native mobile bridges land. Until then, the desktop / server picture is:
 
 | Signal | macOS | Linux | Windows |
@@ -315,13 +314,5 @@ summary.
 
 ## References
 
-- [INF-23 (epic)](https://linear.app/xybrid/issue/INF-23) — goal, acceptance criteria.
-- [INF-24 (spec)](https://linear.app/xybrid/issue/INF-24) — this document.
-- [INF-25 (core sampler)](https://linear.app/xybrid/issue/INF-25) — implementation ticket.
-- [INF-27 (SDK config)](https://linear.app/xybrid/issue/INF-27) — public API surface.
-- [INF-29 (trace attachment)](https://linear.app/xybrid/issue/INF-29) — wire-up in `Model::run*` / `Pipeline::run*`.
-- [INF-30 (adaptive execution)](https://linear.app/xybrid/issue/INF-30) — live-snapshot consumer.
-- [INF-31 (dashboard)](https://linear.app/xybrid/issue/INF-31) — Resource Usage card.
-- [INF-32 (validation)](https://linear.app/xybrid/issue/INF-32) — SLO benchmarks.
 - `crates/xybrid-core/src/device/resource/` — Rust source.
 - `docs/sdk/telemetry.md` — sibling doc for the existing platform-telemetry surface.

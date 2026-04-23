@@ -4,10 +4,10 @@
 //! [`ResourceMonitor`]. Two producers sit on top:
 //!
 //! - [`ResourceMonitor::current_snapshot`] — synchronous TTL-cached read used
-//!   on the inference hot path by adaptive execution (INF-30).
+//!   on the inference hot path by adaptive execution.
 //! - [`ResourceMonitor::begin_run`] — per-run sampler that produces one
 //!   [`ResourceUsageSummary`] and attaches it to the outgoing telemetry
-//!   event (INF-29).
+//!   event.
 //!
 //! The full contract lives in `docs/sdk/resource-telemetry.md`. Thresholds,
 //! SLOs, and the privacy posture are defined there; this module implements
@@ -51,8 +51,9 @@ pub enum ResourceTelemetryMode {
 }
 
 impl ResourceTelemetryMode {
-    /// Default summary interval (1 s). Tuned by INF-32 benchmarks; if that
-    /// ticket changes it, update this constant and the spec doc together.
+    /// Default summary interval (1 s). Tuned by the resource-telemetry bench
+    /// suite; if benchmarks argue for a different default, update this constant
+    /// and the spec doc together.
     pub const DEFAULT_SUMMARY_INTERVAL_MS: u32 = 1000;
     /// Minimum allowed sample interval. The PRD pins the floor at 250 ms:
     /// anything below was not validated for overhead and would invalidate
@@ -427,9 +428,10 @@ impl ResourceMonitor {
                 available_mb,
                 inner.total_mem_mb.or(total_mb),
             ),
-            // Thermal + battery come from platform-specific bridges in
-            // Slice 4 (INF-26). For now desktop/server report Normal thermal
-            // and no battery — see spec's availability table.
+            // Thermal + battery come from platform-specific bridges in a
+            // later slice (iOS thermal state, Android power manager, etc.).
+            // For now desktop/server report Normal thermal and no battery —
+            // see the spec's availability table.
             thermal_state: ThermalState::Normal,
             battery_pct: None,
             captured_at_ms: now_ms(),

@@ -909,11 +909,11 @@ fn convert_to_platform_event(
                 // DeepSeek / Anthropic / OpenAI / Gemini.
                 "cache_read_input_tokens",
                 "cache_creation_input_tokens",
-                // Per-inference resource summary (INF-23). Nested JSON
-                // stays under `data.resource_summary`; hoisting the
-                // object to the payload top level lets the analytics
-                // backend column-extract via flat JSON-path selectors
-                // without teaching each consumer the nested shape.
+                // Per-inference resource summary. Nested JSON stays under
+                // `data.resource_summary`; hoisting the object to the payload
+                // top level lets the analytics backend column-extract via
+                // flat JSON-path selectors without teaching each consumer
+                // the nested shape.
                 "resource_summary",
             ]
             .iter()
@@ -1757,7 +1757,7 @@ mod tests {
 
     #[test]
     fn resource_summary_attaches_and_hoists_through_convert() {
-        // End-to-end happy path for INF-23: attach_resource_summary()
+        // End-to-end happy path: attach_resource_summary()
         // edits event.data, then convert_to_platform_event hoists
         // resource_summary to the platform-event payload top level
         // (same hoist mechanism as cache tokens).
