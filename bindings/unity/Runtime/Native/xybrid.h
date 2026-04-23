@@ -158,6 +158,17 @@ typedef struct XybridBundleHandle {
 } XybridBundleHandle;
 
 /*
+ Opaque handle to a telemetry configuration.
+
+ Create with `xybrid_telemetry_config_new`. Free with
+ `xybrid_telemetry_config_free` unless the handle has been consumed by
+ `xybrid_telemetry_init` (which always takes ownership).
+ */
+typedef struct XybridTelemetryConfigHandle {
+  void *_0;
+} XybridTelemetryConfigHandle;
+
+/*
  Initialize the xybrid library.
 
  This function should be called once before using any other xybrid functions.
@@ -1621,5 +1632,156 @@ const char *xybrid_bundle_file_name(struct XybridBundleHandle *handle, uint32_t 
  - `handle`: A handle to the bundle to free. May be null (no-op).
  */
 void xybrid_bundle_free(struct XybridBundleHandle *handle);
+
+/*
+ Create a new telemetry configuration bound to the SDK's default ingest
+ endpoint.
+
+ The default endpoint is `xybrid_sdk::telemetry::DEFAULT_INGEST_URL`
+ (currently `https://ingest.xybrid.dev`). To target a self-hosted collector,
+ call `xybrid_telemetry_config_set_endpoint` after construction.
+
+ # Parameters
+
+ - `api_key`: Null-terminated UTF-8 API key for authentication.
+
+ # Returns
+
+ A handle to the telemetry config, or null on failure. On failure, call
+ `xybrid_last_error()` to get the error message. Failure modes: null input
+ or invalid UTF-8.
+ */
+struct XybridTelemetryConfigHandle *xybrid_telemetry_config_new(const char *api_key);
+
+/*
+ Get a static pointer to the SDK's default telemetry ingest URL.
+
+ Returns a pointer to a null-terminated UTF-8 string. The returned pointer is
+ valid for the lifetime of the library and MUST NOT be freed by the caller.
+ Useful for diagnostics and for language bindings that want to display the
+ resolved endpoint alongside a config created via `xybrid_telemetry_config_new`.
+ */
+const char *xybrid_telemetry_default_endpoint(void);
+
+/*
+ Free a telemetry config handle.
+
+ Null-safe and idempotent with respect to null inputs. Do NOT call on a
+ handle that has already been consumed by `xybrid_telemetry_init`, which
+ takes ownership and frees it.
+
+ # Parameters
+
+ - `handle`: Handle to free. May be null (no-op).
+ */
+void xybrid_telemetry_config_free(struct XybridTelemetryConfigHandle *handle);
+
+/*
+ Set the app version on a telemetry config.
+
+ # Returns
+
+ `0` on success; non-zero on failure (null handle, null string, or invalid
+ UTF-8). Failure details are available via `xybrid_last_error()`.
+ */
+int32_t xybrid_telemetry_config_set_app_version(struct XybridTelemetryConfigHandle *handle,
+                                                const char *version);
+
+/*
+ Override the ingest endpoint on a telemetry config.
+
+ Use this to target a self-hosted collector or a non-production endpoint.
+ By default, `xybrid_telemetry_config_new` binds the config to
+ `xybrid_sdk::telemetry::DEFAULT_INGEST_URL`; this setter replaces that
+ endpoint with the caller-supplied value.
+
+ # Returns
+
+ `0` on success; non-zero on failure (null handle, null string, or invalid
+ UTF-8). Failure details are available via `xybrid_last_error()`.
+ */
+int32_t xybrid_telemetry_config_set_endpoint(struct XybridTelemetryConfigHandle *handle,
+                                             const char *endpoint);
+
+/*
+ Set the human-friendly device label on a telemetry config.
+
+ # Returns
+
+ `0` on success; non-zero on failure.
+ */
+int32_t xybrid_telemetry_config_set_device_label(struct XybridTelemetryConfigHandle *handle,
+                                                 const char *label);
+
+/*
+ Attach an arbitrary app-provided device attribute (key/value string pair).
+
+ Stored under `device.custom` on the wire event.
+
+ # Returns
+
+ `0` on success; non-zero on failure.
+ */
+int32_t xybrid_telemetry_config_set_device_attribute(struct XybridTelemetryConfigHandle *handle,
+                                                     const char *key,
+                                                     const char *value);
+
+/*
+ Set the batch size (events buffered before a flush).
+
+ # Returns
+
+ `0` on success; non-zero if `handle` is null.
+ */
+int32_t xybrid_telemetry_config_set_batch_size(struct XybridTelemetryConfigHandle *handle,
+                                               uint32_t batch_size);
+
+/*
+ Set the flush interval in seconds.
+
+ # Returns
+
+ `0` on success; non-zero if `handle` is null.
+ */
+int32_t xybrid_telemetry_config_set_flush_interval_secs(struct XybridTelemetryConfigHandle *handle,
+                                                        uint32_t secs);
+
+/*
+ Initialize platform telemetry from a config handle.
+
+ Consumes the handle (frees it) regardless of success or failure — callers
+ must NOT call `xybrid_telemetry_config_free` on a handle that was passed in
+ here, even if this function returns non-zero.
+
+ # Returns
+
+ `0` on success; non-zero on failure (null handle, or already initialized
+ without an intervening shutdown). Failure details via `xybrid_last_error()`.
+ */
+int32_t xybrid_telemetry_init(struct XybridTelemetryConfigHandle *handle);
+
+/*
+ Flush all pending telemetry events.
+
+ Safe to call before init or after shutdown — it forwards to the SDK, which
+ no-ops when the platform exporter is absent.
+
+ # Returns
+
+ `0` on success; non-zero on failure (panic in the underlying flush).
+ */
+int32_t xybrid_telemetry_flush(void);
+
+/*
+ Shutdown the platform telemetry exporter.
+
+ Idempotent: a second call (or a call before init) returns `0` without
+ touching the SDK.
+
+ # Returns
+
+ `0` on success; non-zero on failure (panic in the underlying shutdown).
+ */
+int32_t xybrid_telemetry_shutdown(void);
 
 #endif /* XYBRID_H */

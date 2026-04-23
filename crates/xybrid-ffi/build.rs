@@ -15,7 +15,7 @@
 //! ```
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -35,7 +35,7 @@ fn main() {
 }
 
 /// Generate C header using cbindgen
-fn generate_c_header(crate_path: &PathBuf) {
+fn generate_c_header(crate_path: &Path) {
     let include_dir = crate_path.join("include");
     std::fs::create_dir_all(&include_dir).expect("Failed to create include directory");
 
@@ -66,7 +66,7 @@ fn generate_c_header(crate_path: &PathBuf) {
 
 /// Generate C# bindings using csbindgen
 #[cfg(feature = "csharp")]
-fn generate_csharp_bindings(crate_path: &PathBuf) {
+fn generate_csharp_bindings(crate_path: &Path) {
     // Determine output path
     // Default: Unity package in the bindings directory
     let out_dir = env::var("XYBRID_CSHARP_OUT_DIR").unwrap_or_else(|_| {

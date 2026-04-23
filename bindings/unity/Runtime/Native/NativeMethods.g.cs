@@ -1536,6 +1536,162 @@ namespace Xybrid.Native
         [DllImport(__DllName, EntryPoint = "xybrid_bundle_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void xybrid_bundle_free(XybridBundleHandle* handle);
 
+        /// <summary>
+        ///  Create a new telemetry configuration bound to the SDK's default ingest
+        ///  endpoint.
+        ///
+        ///  The default endpoint is `xybrid_sdk::telemetry::DEFAULT_INGEST_URL`
+        ///  (currently `https://ingest.xybrid.dev`). To target a self-hosted collector,
+        ///  call `xybrid_telemetry_config_set_endpoint` after construction.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `api_key`: Null-terminated UTF-8 API key for authentication.
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the telemetry config, or null on failure. On failure, call
+        ///  `xybrid_last_error()` to get the error message. Failure modes: null input
+        ///  or invalid UTF-8.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_config_new", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridTelemetryConfigHandle* xybrid_telemetry_config_new(byte* api_key);
+
+        /// <summary>
+        ///  Get a static pointer to the SDK's default telemetry ingest URL.
+        ///
+        ///  Returns a pointer to a null-terminated UTF-8 string. The returned pointer is
+        ///  valid for the lifetime of the library and MUST NOT be freed by the caller.
+        ///  Useful for diagnostics and for language bindings that want to display the
+        ///  resolved endpoint alongside a config created via `xybrid_telemetry_config_new`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_default_endpoint", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_telemetry_default_endpoint();
+
+        /// <summary>
+        ///  Free a telemetry config handle.
+        ///
+        ///  Null-safe and idempotent with respect to null inputs. Do NOT call on a
+        ///  handle that has already been consumed by `xybrid_telemetry_init`, which
+        ///  takes ownership and frees it.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `handle`: Handle to free. May be null (no-op).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_config_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_telemetry_config_free(XybridTelemetryConfigHandle* handle);
+
+        /// <summary>
+        ///  Set the app version on a telemetry config.
+        ///
+        ///  # Returns
+        ///
+        ///  `0` on success; non-zero on failure (null handle, null string, or invalid
+        ///  UTF-8). Failure details are available via `xybrid_last_error()`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_config_set_app_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_telemetry_config_set_app_version(XybridTelemetryConfigHandle* handle, byte* version);
+
+        /// <summary>
+        ///  Override the ingest endpoint on a telemetry config.
+        ///
+        ///  Use this to target a self-hosted collector or a non-production endpoint.
+        ///  By default, `xybrid_telemetry_config_new` binds the config to
+        ///  `xybrid_sdk::telemetry::DEFAULT_INGEST_URL`; this setter replaces that
+        ///  endpoint with the caller-supplied value.
+        ///
+        ///  # Returns
+        ///
+        ///  `0` on success; non-zero on failure (null handle, null string, or invalid
+        ///  UTF-8). Failure details are available via `xybrid_last_error()`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_config_set_endpoint", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_telemetry_config_set_endpoint(XybridTelemetryConfigHandle* handle, byte* endpoint);
+
+        /// <summary>
+        ///  Set the human-friendly device label on a telemetry config.
+        ///
+        ///  # Returns
+        ///
+        ///  `0` on success; non-zero on failure.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_config_set_device_label", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_telemetry_config_set_device_label(XybridTelemetryConfigHandle* handle, byte* label);
+
+        /// <summary>
+        ///  Attach an arbitrary app-provided device attribute (key/value string pair).
+        ///
+        ///  Stored under `device.custom` on the wire event.
+        ///
+        ///  # Returns
+        ///
+        ///  `0` on success; non-zero on failure.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_config_set_device_attribute", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_telemetry_config_set_device_attribute(XybridTelemetryConfigHandle* handle, byte* key, byte* value);
+
+        /// <summary>
+        ///  Set the batch size (events buffered before a flush).
+        ///
+        ///  # Returns
+        ///
+        ///  `0` on success; non-zero if `handle` is null.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_config_set_batch_size", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_telemetry_config_set_batch_size(XybridTelemetryConfigHandle* handle, uint batch_size);
+
+        /// <summary>
+        ///  Set the flush interval in seconds.
+        ///
+        ///  # Returns
+        ///
+        ///  `0` on success; non-zero if `handle` is null.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_config_set_flush_interval_secs", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_telemetry_config_set_flush_interval_secs(XybridTelemetryConfigHandle* handle, uint secs);
+
+        /// <summary>
+        ///  Initialize platform telemetry from a config handle.
+        ///
+        ///  Consumes the handle (frees it) regardless of success or failure — callers
+        ///  must NOT call `xybrid_telemetry_config_free` on a handle that was passed in
+        ///  here, even if this function returns non-zero.
+        ///
+        ///  # Returns
+        ///
+        ///  `0` on success; non-zero on failure (null handle, or already initialized
+        ///  without an intervening shutdown). Failure details via `xybrid_last_error()`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_init", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_telemetry_init(XybridTelemetryConfigHandle* handle);
+
+        /// <summary>
+        ///  Flush all pending telemetry events.
+        ///
+        ///  Safe to call before init or after shutdown — it forwards to the SDK, which
+        ///  no-ops when the platform exporter is absent.
+        ///
+        ///  # Returns
+        ///
+        ///  `0` on success; non-zero on failure (panic in the underlying flush).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_flush", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_telemetry_flush();
+
+        /// <summary>
+        ///  Shutdown the platform telemetry exporter.
+        ///
+        ///  Idempotent: a second call (or a call before init) returns `0` without
+        ///  touching the SDK.
+        ///
+        ///  # Returns
+        ///
+        ///  `0` on success; non-zero on failure (panic in the underlying shutdown).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_telemetry_shutdown", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_telemetry_shutdown();
+
 
     }
 
@@ -1621,6 +1777,19 @@ namespace Xybrid.Native
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct XybridBundleHandle
+    {
+        public void* Item1;
+    }
+
+    /// <summary>
+    ///  Opaque handle to a telemetry configuration.
+    ///
+    ///  Create with `xybrid_telemetry_config_new`. Free with
+    ///  `xybrid_telemetry_config_free` unless the handle has been consumed by
+    ///  `xybrid_telemetry_init` (which always takes ownership).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct XybridTelemetryConfigHandle
     {
         public void* Item1;
     }

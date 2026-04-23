@@ -7,6 +7,7 @@ This directory contains Unity example projects demonstrating Xybrid SDK integrat
 | Example | Description | Size | Location |
 |---------|-------------|------|----------|
 | **[Starter](./starter/)** | Minimal integration example with basic API usage | ~50MB | In this repo |
+| **[Telemetry](./Telemetry/)** | End-to-end telemetry lifecycle with mobile pause-flush | ~50MB | In this repo |
 | **[Night Tavern](https://github.com/xybrid-ai/xybrid-unity-tavern)** | Full RPG with NPC dialogue and TTS audio | ~500MB | Separate repo |
 | **[Otome 2](https://github.com/xybrid-ai/xybrid-unity-otome)** | Visual novel showcase with voice synthesis | ~300MB | Separate repo |
 

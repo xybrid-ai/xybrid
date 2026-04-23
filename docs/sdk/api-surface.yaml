@@ -342,7 +342,94 @@ classes:
   TelemetryConfiguration:
     type: data
     section: "9. Configuration Types"
-    status: { dart: stub, kotlin: planned, swift: planned, csharp: planned }
+    status: { dart: stub, kotlin: planned, swift: planned, csharp: implemented }
+
+  CsTelemetryConfig:
+    type: builder
+    section: "9. Configuration Types"
+    csharp_path: "Xybrid.TelemetryConfig"
+    status: { csharp: implemented }
+    stability: { csharp: stable }
+    not_applicable: [dart, kotlin, swift, rust]
+    since: "0.1.0-beta11"
+    notes: "Unity / C# SDK telemetry builder + lifecycle surface. Constructor takes only (apiKey) and binds to the SDK's default ingest URL (https://ingest.xybrid.dev); use WithEndpoint to target a self-hosted collector. The Endpoint property reports the currently resolved URL. Fluent setters mutate in place and return `this`. Lifecycle methods live on XybridClient (InitializeTelemetry consumes the config handle, FlushTelemetry / ShutdownTelemetry are idempotent)."
+    methods:
+      constructor:
+        name: TelemetryConfig
+        parameters:
+          - { name: apiKey, type: string }
+        returns: TelemetryConfig
+        description: "Creates a new config bound to the SDK's default ingest endpoint. Throws ArgumentException if apiKey is null, empty, or whitespace."
+        since: "0.1.0-beta12"
+      Endpoint:
+        name: Endpoint
+        property: true
+        returns: string
+        description: "Currently resolved ingest endpoint. Returns the SDK default until WithEndpoint is called, then the override."
+        since: "0.1.0-beta12"
+      with_endpoint:
+        name: WithEndpoint
+        parameters:
+          - { name: endpoint, type: string }
+        returns: TelemetryConfig
+        description: "Overrides the ingest endpoint. Use for self-hosted collectors. Throws ArgumentException on null/empty/whitespace."
+        since: "0.1.0-beta12"
+      with_app_version:
+        name: WithAppVersion
+        parameters:
+          - { name: appVersion, type: string }
+        returns: TelemetryConfig
+        description: "Sets the application version reported with every telemetry event."
+        since: "0.1.0-beta11"
+      with_device_label:
+        name: WithDeviceLabel
+        parameters:
+          - { name: deviceLabel, type: string }
+        returns: TelemetryConfig
+        description: "Sets a human-readable device label reported with every telemetry event."
+        since: "0.1.0-beta11"
+      with_device_attribute:
+        name: WithDeviceAttribute
+        parameters:
+          - { name: key, type: string }
+          - { name: value, type: string }
+        returns: TelemetryConfig
+        description: "Adds or replaces a custom device attribute under device.custom."
+        since: "0.1.0-beta11"
+      with_batch_size:
+        name: WithBatchSize
+        parameters:
+          - { name: batchSize, type: uint }
+        returns: TelemetryConfig
+        description: "Sets the maximum number of events buffered before flushing."
+        since: "0.1.0-beta11"
+      with_flush_interval:
+        name: WithFlushInterval
+        parameters:
+          - { name: interval, type: TimeSpan }
+        returns: TelemetryConfig
+        description: "Sets the background flush interval; fractional seconds are truncated."
+        since: "0.1.0-beta11"
+      InitializeTelemetry:
+        name: InitializeTelemetry
+        static: true
+        parameters:
+          - { name: config, type: TelemetryConfig }
+        returns: void
+        description: "Starts the telemetry sender. Consumes the config handle. Throws InvalidOperationException if XybridClient is not initialized or if telemetry is already initialized."
+        since: "0.1.0-beta11"
+      FlushTelemetry:
+        name: FlushTelemetry
+        static: true
+        returns: void
+        description: "Forces a synchronous flush of buffered telemetry events. No-op if telemetry was never initialized."
+        since: "0.1.0-beta11"
+      ShutdownTelemetry:
+        name: ShutdownTelemetry
+        static: true
+        returns: void
+        description: "Shuts down the telemetry sender. Idempotent and fire-and-forget; no-op if telemetry was never initialized or already shut down."
+        since: "0.1.0-beta11"
 
   RustTelemetryConfig:
     type: builder

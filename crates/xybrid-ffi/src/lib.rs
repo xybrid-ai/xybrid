@@ -28,6 +28,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::panic::{self, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 // Import SDK types
@@ -3924,6 +3925,473 @@ pub unsafe extern "C" fn xybrid_bundle_free(handle: *mut XybridBundleHandle) {
     }
 }
 
+// ============================================================================
+// Telemetry Config Handle (US-001)
+// ============================================================================
+//
+// Opaque handle wrapping `xybrid_sdk::telemetry::TelemetryConfig`. Consumers
+// build one with `xybrid_telemetry_config_new`, mutate it via the setter
+// family, then pass it to `xybrid_telemetry_init` (which consumes it) or
+// dispose of it with `xybrid_telemetry_config_free`.
+
+/// Opaque handle to a telemetry configuration.
+///
+/// Create with `xybrid_telemetry_config_new`. Free with
+/// `xybrid_telemetry_config_free` unless the handle has been consumed by
+/// `xybrid_telemetry_init` (which always takes ownership).
+#[repr(C)]
+pub struct XybridTelemetryConfigHandle(*mut c_void);
+
+pub(crate) type BoxedTelemetryConfig = Box<xybrid_sdk::telemetry::TelemetryConfig>;
+
+impl XybridTelemetryConfigHandle {
+    pub(crate) fn from_boxed(config: BoxedTelemetryConfig) -> *mut Self {
+        let ptr = Box::into_raw(config) as *mut c_void;
+        Box::into_raw(Box::new(XybridTelemetryConfigHandle(ptr)))
+    }
+
+    /// Convert handle back to the boxed config (takes ownership of handle).
+    ///
+    /// # Safety
+    /// The handle must be valid and not already freed.
+    pub(crate) unsafe fn into_boxed(handle: *mut Self) -> Option<BoxedTelemetryConfig> {
+        if handle.is_null() {
+            return None;
+        }
+        let wrapper = Box::from_raw(handle);
+        if wrapper.0.is_null() {
+            return None;
+        }
+        Some(Box::from_raw(
+            wrapper.0 as *mut xybrid_sdk::telemetry::TelemetryConfig,
+        ))
+    }
+
+    /// Mutable borrow of the underlying config from a handle.
+    ///
+    /// # Safety
+    /// The handle must be valid and not already freed.
+    pub(crate) unsafe fn as_mut<'a>(
+        handle: *mut Self,
+    ) -> Option<&'a mut xybrid_sdk::telemetry::TelemetryConfig> {
+        if handle.is_null() {
+            return None;
+        }
+        let wrapper = &*handle;
+        if wrapper.0.is_null() {
+            return None;
+        }
+        Some(&mut *(wrapper.0 as *mut xybrid_sdk::telemetry::TelemetryConfig))
+    }
+}
+
+/// Create a new telemetry configuration bound to the SDK's default ingest
+/// endpoint.
+///
+/// The default endpoint is `xybrid_sdk::telemetry::DEFAULT_INGEST_URL`
+/// (currently `https://ingest.xybrid.dev`). To target a self-hosted collector,
+/// call `xybrid_telemetry_config_set_endpoint` after construction.
+///
+/// # Parameters
+///
+/// - `api_key`: Null-terminated UTF-8 API key for authentication.
+///
+/// # Returns
+///
+/// A handle to the telemetry config, or null on failure. On failure, call
+/// `xybrid_last_error()` to get the error message. Failure modes: null input
+/// or invalid UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_config_new(
+    api_key: *const c_char,
+) -> *mut XybridTelemetryConfigHandle {
+    clear_last_error();
+
+    if api_key.is_null() {
+        set_last_error("api_key is null");
+        return std::ptr::null_mut();
+    }
+
+    let api_key_str = match CStr::from_ptr(api_key).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("api_key is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let config = Box::new(xybrid_sdk::telemetry::TelemetryConfig::new(
+        xybrid_sdk::telemetry::DEFAULT_INGEST_URL,
+        api_key_str,
+    ));
+    XybridTelemetryConfigHandle::from_boxed(config)
+}
+
+/// Get a static pointer to the SDK's default telemetry ingest URL.
+///
+/// Returns a pointer to a null-terminated UTF-8 string. The returned pointer is
+/// valid for the lifetime of the library and MUST NOT be freed by the caller.
+/// Useful for diagnostics and for language bindings that want to display the
+/// resolved endpoint alongside a config created via `xybrid_telemetry_config_new`.
+#[no_mangle]
+pub extern "C" fn xybrid_telemetry_default_endpoint() -> *const c_char {
+    static DEFAULT_ENDPOINT_CSTRING: std::sync::OnceLock<CString> = std::sync::OnceLock::new();
+    DEFAULT_ENDPOINT_CSTRING
+        .get_or_init(|| {
+            CString::new(xybrid_sdk::telemetry::DEFAULT_INGEST_URL)
+                .expect("DEFAULT_INGEST_URL contains no null bytes")
+        })
+        .as_ptr()
+}
+
+/// Free a telemetry config handle.
+///
+/// Null-safe and idempotent with respect to null inputs. Do NOT call on a
+/// handle that has already been consumed by `xybrid_telemetry_init`, which
+/// takes ownership and frees it.
+///
+/// # Parameters
+///
+/// - `handle`: Handle to free. May be null (no-op).
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_config_free(
+    handle: *mut XybridTelemetryConfigHandle,
+) {
+    if !handle.is_null() {
+        let _ = XybridTelemetryConfigHandle::into_boxed(handle);
+    }
+}
+
+/// Set the app version on a telemetry config.
+///
+/// # Returns
+///
+/// `0` on success; non-zero on failure (null handle, null string, or invalid
+/// UTF-8). Failure details are available via `xybrid_last_error()`.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_config_set_app_version(
+    handle: *mut XybridTelemetryConfigHandle,
+    version: *const c_char,
+) -> i32 {
+    clear_last_error();
+
+    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+        Some(c) => c,
+        None => {
+            set_last_error("telemetry config handle is null");
+            return -1;
+        }
+    };
+    if version.is_null() {
+        set_last_error("version is null");
+        return -2;
+    }
+    let version_str = match CStr::from_ptr(version).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("version is not valid UTF-8");
+            return -3;
+        }
+    };
+    config.app_version = Some(version_str);
+    0
+}
+
+/// Override the ingest endpoint on a telemetry config.
+///
+/// Use this to target a self-hosted collector or a non-production endpoint.
+/// By default, `xybrid_telemetry_config_new` binds the config to
+/// `xybrid_sdk::telemetry::DEFAULT_INGEST_URL`; this setter replaces that
+/// endpoint with the caller-supplied value.
+///
+/// # Returns
+///
+/// `0` on success; non-zero on failure (null handle, null string, or invalid
+/// UTF-8). Failure details are available via `xybrid_last_error()`.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_config_set_endpoint(
+    handle: *mut XybridTelemetryConfigHandle,
+    endpoint: *const c_char,
+) -> i32 {
+    clear_last_error();
+
+    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+        Some(c) => c,
+        None => {
+            set_last_error("telemetry config handle is null");
+            return -1;
+        }
+    };
+    if endpoint.is_null() {
+        set_last_error("endpoint is null");
+        return -2;
+    }
+    let endpoint_str = match CStr::from_ptr(endpoint).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("endpoint is not valid UTF-8");
+            return -3;
+        }
+    };
+    config.endpoint = endpoint_str;
+    0
+}
+
+/// Set the human-friendly device label on a telemetry config.
+///
+/// # Returns
+///
+/// `0` on success; non-zero on failure.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_config_set_device_label(
+    handle: *mut XybridTelemetryConfigHandle,
+    label: *const c_char,
+) -> i32 {
+    clear_last_error();
+
+    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+        Some(c) => c,
+        None => {
+            set_last_error("telemetry config handle is null");
+            return -1;
+        }
+    };
+    if label.is_null() {
+        set_last_error("label is null");
+        return -2;
+    }
+    let label_str = match CStr::from_ptr(label).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("label is not valid UTF-8");
+            return -3;
+        }
+    };
+    config.device_label = Some(label_str);
+    0
+}
+
+/// Attach an arbitrary app-provided device attribute (key/value string pair).
+///
+/// Stored under `device.custom` on the wire event.
+///
+/// # Returns
+///
+/// `0` on success; non-zero on failure.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_config_set_device_attribute(
+    handle: *mut XybridTelemetryConfigHandle,
+    key: *const c_char,
+    value: *const c_char,
+) -> i32 {
+    clear_last_error();
+
+    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+        Some(c) => c,
+        None => {
+            set_last_error("telemetry config handle is null");
+            return -1;
+        }
+    };
+    if key.is_null() {
+        set_last_error("key is null");
+        return -2;
+    }
+    if value.is_null() {
+        set_last_error("value is null");
+        return -3;
+    }
+    let key_str = match CStr::from_ptr(key).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("key is not valid UTF-8");
+            return -4;
+        }
+    };
+    let value_str = match CStr::from_ptr(value).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_last_error("value is not valid UTF-8");
+            return -5;
+        }
+    };
+    config.device_profile_patch.custom.insert(key_str, value_str);
+    0
+}
+
+/// Set the batch size (events buffered before a flush).
+///
+/// # Returns
+///
+/// `0` on success; non-zero if `handle` is null.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_config_set_batch_size(
+    handle: *mut XybridTelemetryConfigHandle,
+    batch_size: u32,
+) -> i32 {
+    clear_last_error();
+
+    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+        Some(c) => c,
+        None => {
+            set_last_error("telemetry config handle is null");
+            return -1;
+        }
+    };
+    config.batch_size = batch_size as usize;
+    0
+}
+
+/// Set the flush interval in seconds.
+///
+/// # Returns
+///
+/// `0` on success; non-zero if `handle` is null.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_config_set_flush_interval_secs(
+    handle: *mut XybridTelemetryConfigHandle,
+    secs: u32,
+) -> i32 {
+    clear_last_error();
+
+    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+        Some(c) => c,
+        None => {
+            set_last_error("telemetry config handle is null");
+            return -1;
+        }
+    };
+    config.flush_interval_secs = secs as u64;
+    0
+}
+
+// ============================================================================
+// Telemetry Lifecycle (US-002)
+// ============================================================================
+//
+// `init_platform_telemetry`, `flush_platform_telemetry`, and
+// `shutdown_platform_telemetry` in the SDK return `()` and silently no-op when
+// the platform exporter is absent. The FFI wrapper layers an `AtomicBool` on
+// top so a second `xybrid_telemetry_init` without an intervening shutdown is
+// rejected with a clear error message instead of silently leaking the prior
+// sender.
+
+/// Tracks whether the FFI consumer has called `xybrid_telemetry_init` without
+/// a matching `xybrid_telemetry_shutdown`.
+static TELEMETRY_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+/// Initialize platform telemetry from a config handle.
+///
+/// Consumes the handle (frees it) regardless of success or failure — callers
+/// must NOT call `xybrid_telemetry_config_free` on a handle that was passed in
+/// here, even if this function returns non-zero.
+///
+/// # Returns
+///
+/// `0` on success; non-zero on failure (null handle, or already initialized
+/// without an intervening shutdown). Failure details via `xybrid_last_error()`.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_init(
+    handle: *mut XybridTelemetryConfigHandle,
+) -> i32 {
+    clear_last_error();
+
+    if handle.is_null() {
+        set_last_error("telemetry config handle is null");
+        return -1;
+    }
+
+    // Always reclaim the handle so the consumer never has to free it after
+    // calling init. If we bail on the double-init path below, the boxed
+    // config drops here and is freed.
+    let config = match XybridTelemetryConfigHandle::into_boxed(handle) {
+        Some(c) => c,
+        None => {
+            set_last_error("telemetry config handle is invalid");
+            return -2;
+        }
+    };
+
+    // Gate against double-init: only flip false -> true succeeds. If the
+    // exchange fails, drop `config` (freeing the second sender's resources)
+    // and return non-zero without touching the live exporter.
+    if TELEMETRY_INITIALIZED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        set_last_error(
+            "telemetry already initialized; call xybrid_telemetry_shutdown before reinitializing",
+        );
+        return -3;
+    }
+
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        xybrid_sdk::telemetry::init_platform_telemetry(*config);
+    }));
+
+    if result.is_err() {
+        // Roll the gate back so a future init can retry, and surface a
+        // diagnostic message via the thread-local error slot.
+        TELEMETRY_INITIALIZED.store(false, Ordering::Release);
+        set_last_error("telemetry init panicked");
+        return -4;
+    }
+
+    0
+}
+
+/// Flush all pending telemetry events.
+///
+/// Safe to call before init or after shutdown — it forwards to the SDK, which
+/// no-ops when the platform exporter is absent.
+///
+/// # Returns
+///
+/// `0` on success; non-zero on failure (panic in the underlying flush).
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_flush() -> i32 {
+    clear_last_error();
+
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        xybrid_sdk::telemetry::flush_platform_telemetry();
+    }));
+
+    if result.is_err() {
+        set_last_error("telemetry flush panicked");
+        return -1;
+    }
+    0
+}
+
+/// Shutdown the platform telemetry exporter.
+///
+/// Idempotent: a second call (or a call before init) returns `0` without
+/// touching the SDK.
+///
+/// # Returns
+///
+/// `0` on success; non-zero on failure (panic in the underlying shutdown).
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_telemetry_shutdown() -> i32 {
+    clear_last_error();
+
+    // Only invoke the SDK shutdown when we actually own a live exporter.
+    // `swap` flips the gate to `false` and returns the previous value.
+    if !TELEMETRY_INITIALIZED.swap(false, Ordering::AcqRel) {
+        return 0;
+    }
+
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        xybrid_sdk::telemetry::shutdown_platform_telemetry();
+    }));
+
+    if result.is_err() {
+        set_last_error("telemetry shutdown panicked");
+        return -1;
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5147,6 +5615,332 @@ mod tests {
         unsafe {
             let len = xybrid_result_embedding_len(std::ptr::null_mut());
             assert_eq!(len, 0);
+        }
+    }
+
+    // ========================================================================
+    // Tests for Telemetry Config (US-001)
+    // ========================================================================
+
+    #[test]
+    fn test_telemetry_config_new_and_free() {
+        let api_key = CString::new("secret-key").unwrap();
+        unsafe {
+            let handle = xybrid_telemetry_config_new(api_key.as_ptr());
+            assert!(!handle.is_null());
+            // A config built from the default constructor must carry the SDK's
+            // default ingest URL so callers that skip WithEndpoint still emit.
+            let cfg = XybridTelemetryConfigHandle::as_mut(handle).unwrap();
+            assert_eq!(cfg.endpoint, xybrid_sdk::telemetry::DEFAULT_INGEST_URL);
+            xybrid_telemetry_config_free(handle);
+        }
+    }
+
+    #[test]
+    fn test_telemetry_config_new_null_api_key() {
+        unsafe {
+            let handle = xybrid_telemetry_config_new(std::ptr::null());
+            assert!(handle.is_null());
+            let err = xybrid_last_error();
+            assert!(!err.is_null());
+        }
+    }
+
+    #[test]
+    fn test_telemetry_config_free_null() {
+        unsafe {
+            xybrid_telemetry_config_free(std::ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn test_telemetry_default_endpoint_returns_default() {
+        unsafe {
+            let ptr = xybrid_telemetry_default_endpoint();
+            assert!(!ptr.is_null());
+            let s = CStr::from_ptr(ptr).to_str().expect("valid UTF-8");
+            assert_eq!(s, xybrid_sdk::telemetry::DEFAULT_INGEST_URL);
+            // Pointer is static — callers must not free. Re-reading should
+            // yield the same value.
+            let ptr2 = xybrid_telemetry_default_endpoint();
+            assert_eq!(ptr, ptr2);
+        }
+    }
+
+    #[test]
+    fn test_telemetry_config_set_endpoint_overrides_default() {
+        let api_key = CString::new("secret-key").unwrap();
+        let endpoint = CString::new("https://telemetry.example.com").unwrap();
+        unsafe {
+            let handle = xybrid_telemetry_config_new(api_key.as_ptr());
+            assert!(!handle.is_null());
+
+            assert_eq!(
+                xybrid_telemetry_config_set_endpoint(handle, endpoint.as_ptr()),
+                0
+            );
+            let cfg = XybridTelemetryConfigHandle::as_mut(handle).unwrap();
+            assert_eq!(cfg.endpoint, "https://telemetry.example.com");
+
+            xybrid_telemetry_config_free(handle);
+        }
+    }
+
+    #[test]
+    fn test_telemetry_config_set_endpoint_null_guards() {
+        let api_key = CString::new("secret-key").unwrap();
+        let endpoint = CString::new("https://telemetry.example.com").unwrap();
+        unsafe {
+            // Null handle rejects before dereferencing anything.
+            assert_ne!(
+                xybrid_telemetry_config_set_endpoint(std::ptr::null_mut(), endpoint.as_ptr()),
+                0
+            );
+            // Valid handle but null endpoint string rejects with a distinct
+            // error code.
+            let handle = xybrid_telemetry_config_new(api_key.as_ptr());
+            assert!(!handle.is_null());
+            assert_ne!(
+                xybrid_telemetry_config_set_endpoint(handle, std::ptr::null()),
+                0
+            );
+            xybrid_telemetry_config_free(handle);
+        }
+    }
+
+    #[test]
+    fn test_telemetry_config_setters_success() {
+        let api_key = CString::new("secret-key").unwrap();
+        let version = CString::new("1.2.3").unwrap();
+        let label = CString::new("Sami's MacBook").unwrap();
+        let attr_key = CString::new("build_flavor").unwrap();
+        let attr_val = CString::new("debug").unwrap();
+
+        unsafe {
+            let handle = xybrid_telemetry_config_new(api_key.as_ptr());
+            assert!(!handle.is_null());
+
+            assert_eq!(
+                xybrid_telemetry_config_set_app_version(handle, version.as_ptr()),
+                0
+            );
+            assert_eq!(
+                xybrid_telemetry_config_set_device_label(handle, label.as_ptr()),
+                0
+            );
+            assert_eq!(
+                xybrid_telemetry_config_set_device_attribute(
+                    handle,
+                    attr_key.as_ptr(),
+                    attr_val.as_ptr()
+                ),
+                0
+            );
+            assert_eq!(xybrid_telemetry_config_set_batch_size(handle, 32), 0);
+            assert_eq!(
+                xybrid_telemetry_config_set_flush_interval_secs(handle, 15),
+                0
+            );
+
+            // Inspect the applied values.
+            let cfg = XybridTelemetryConfigHandle::as_mut(handle).unwrap();
+            assert_eq!(cfg.app_version.as_deref(), Some("1.2.3"));
+            assert_eq!(cfg.device_label.as_deref(), Some("Sami's MacBook"));
+            assert_eq!(
+                cfg.device_profile_patch.custom.get("build_flavor").map(String::as_str),
+                Some("debug")
+            );
+            assert_eq!(cfg.batch_size, 32);
+            assert_eq!(cfg.flush_interval_secs, 15);
+
+            xybrid_telemetry_config_free(handle);
+        }
+    }
+
+    #[test]
+    fn test_telemetry_config_setters_null_handle() {
+        let version = CString::new("1.0").unwrap();
+        let attr_key = CString::new("k").unwrap();
+        let attr_val = CString::new("v").unwrap();
+        unsafe {
+            assert_ne!(
+                xybrid_telemetry_config_set_app_version(std::ptr::null_mut(), version.as_ptr()),
+                0
+            );
+            assert_ne!(
+                xybrid_telemetry_config_set_device_label(std::ptr::null_mut(), version.as_ptr()),
+                0
+            );
+            assert_ne!(
+                xybrid_telemetry_config_set_device_attribute(
+                    std::ptr::null_mut(),
+                    attr_key.as_ptr(),
+                    attr_val.as_ptr()
+                ),
+                0
+            );
+            assert_ne!(
+                xybrid_telemetry_config_set_batch_size(std::ptr::null_mut(), 16),
+                0
+            );
+            assert_ne!(
+                xybrid_telemetry_config_set_flush_interval_secs(std::ptr::null_mut(), 5),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn test_telemetry_config_setters_null_strings() {
+        let api_key = CString::new("secret-key").unwrap();
+        let value = CString::new("v").unwrap();
+        unsafe {
+            let handle = xybrid_telemetry_config_new(api_key.as_ptr());
+            assert!(!handle.is_null());
+
+            assert_ne!(
+                xybrid_telemetry_config_set_app_version(handle, std::ptr::null()),
+                0
+            );
+            assert_ne!(
+                xybrid_telemetry_config_set_device_label(handle, std::ptr::null()),
+                0
+            );
+            assert_ne!(
+                xybrid_telemetry_config_set_device_attribute(
+                    handle,
+                    std::ptr::null(),
+                    value.as_ptr()
+                ),
+                0
+            );
+            assert_ne!(
+                xybrid_telemetry_config_set_device_attribute(
+                    handle,
+                    value.as_ptr(),
+                    std::ptr::null()
+                ),
+                0
+            );
+
+            xybrid_telemetry_config_free(handle);
+        }
+    }
+
+    // ========================================================================
+    // Tests for Telemetry Lifecycle (US-002)
+    // ========================================================================
+    //
+    // The lifecycle functions touch global SDK state (the `PLATFORM_EXPORTER`
+    // RwLock) plus our own `TELEMETRY_INITIALIZED` gate. Cargo runs unit
+    // tests in parallel by default, so these tests grab a process-wide mutex
+    // to serialize against each other and reset the gate before they start.
+
+    static TELEMETRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn telemetry_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        let guard = TELEMETRY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Make sure we don't inherit state from a previous test that crashed
+        // mid-flight. Calling shutdown when uninitialized is a no-op.
+        unsafe {
+            let _ = xybrid_telemetry_shutdown();
+        }
+        TELEMETRY_INITIALIZED.store(false, Ordering::Release);
+        guard
+    }
+
+    fn telemetry_handle() -> *mut XybridTelemetryConfigHandle {
+        let api_key = CString::new("test-key").unwrap();
+        let endpoint = CString::new("https://ingest.invalid.test").unwrap();
+        unsafe {
+            let handle = xybrid_telemetry_config_new(api_key.as_ptr());
+            if !handle.is_null() {
+                // Lifecycle tests don't want to touch the real default ingest
+                // URL; override to a reserved `.invalid` TLD so any accidental
+                // network traffic fails fast.
+                let _ = xybrid_telemetry_config_set_endpoint(handle, endpoint.as_ptr());
+            }
+            handle
+        }
+    }
+
+    #[test]
+    fn test_telemetry_lifecycle_init_flush_shutdown_reinit() {
+        let _guard = telemetry_test_guard();
+
+        unsafe {
+            let handle = telemetry_handle();
+            assert!(!handle.is_null());
+            assert_eq!(xybrid_telemetry_init(handle), 0);
+            assert_eq!(xybrid_telemetry_flush(), 0);
+            assert_eq!(xybrid_telemetry_shutdown(), 0);
+
+            // Reinit after shutdown must succeed.
+            let handle2 = telemetry_handle();
+            assert!(!handle2.is_null());
+            assert_eq!(xybrid_telemetry_init(handle2), 0);
+            assert_eq!(xybrid_telemetry_shutdown(), 0);
+        }
+    }
+
+    #[test]
+    fn test_telemetry_double_init_rejected() {
+        let _guard = telemetry_test_guard();
+
+        unsafe {
+            let handle = telemetry_handle();
+            assert_eq!(xybrid_telemetry_init(handle), 0);
+
+            // Second init without an intervening shutdown must fail and must
+            // not leak the second config (init always consumes the handle).
+            let handle2 = telemetry_handle();
+            assert_ne!(xybrid_telemetry_init(handle2), 0);
+            let err = xybrid_last_error();
+            assert!(!err.is_null());
+
+            // Shutdown after the rejected double-init still returns 0.
+            assert_eq!(xybrid_telemetry_shutdown(), 0);
+        }
+    }
+
+    #[test]
+    fn test_telemetry_init_null_handle() {
+        let _guard = telemetry_test_guard();
+
+        unsafe {
+            assert_ne!(xybrid_telemetry_init(std::ptr::null_mut()), 0);
+            let err = xybrid_last_error();
+            assert!(!err.is_null());
+            // Shutdown is a no-op since init never succeeded.
+            assert_eq!(xybrid_telemetry_shutdown(), 0);
+        }
+    }
+
+    #[test]
+    fn test_telemetry_shutdown_idempotent() {
+        let _guard = telemetry_test_guard();
+
+        unsafe {
+            // Shutdown before any init: still 0.
+            assert_eq!(xybrid_telemetry_shutdown(), 0);
+
+            let handle = telemetry_handle();
+            assert_eq!(xybrid_telemetry_init(handle), 0);
+            assert_eq!(xybrid_telemetry_shutdown(), 0);
+            // Second shutdown also returns 0.
+            assert_eq!(xybrid_telemetry_shutdown(), 0);
+        }
+    }
+
+    #[test]
+    fn test_telemetry_flush_safe_when_uninitialized() {
+        let _guard = telemetry_test_guard();
+
+        unsafe {
+            // Flush before init must be safe and return 0 (SDK no-ops).
+            assert_eq!(xybrid_telemetry_flush(), 0);
         }
     }
 }

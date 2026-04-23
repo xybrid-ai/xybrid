@@ -847,14 +847,94 @@ data class XybridConfiguration(
 }
 ```
 
+### C# (Unity)
+
+The Unity SDK ships a fluent telemetry builder (`Xybrid.TelemetryConfig`) plus three
+static lifecycle methods on `Xybrid.XybridClient` (`InitializeTelemetry`, `FlushTelemetry`,
+`ShutdownTelemetry`). Construct a config, hand it to `XybridClient.InitializeTelemetry`
+(which consumes the native handle), call `FlushTelemetry()` whenever you want a
+synchronous drain, and `ShutdownTelemetry()` once at app exit.
+
+```csharp
+public sealed class TelemetryConfig : IDisposable
+{
+    public TelemetryConfig(string apiKey); // binds to the SDK default ingest URL
+    public string Endpoint { get; }        // currently resolved ingest endpoint
+    public TelemetryConfig WithEndpoint(string endpoint); // self-hosted override
+    public TelemetryConfig WithAppVersion(string appVersion);
+    public TelemetryConfig WithDeviceLabel(string deviceLabel);
+    public TelemetryConfig WithDeviceAttribute(string key, string value);
+    public TelemetryConfig WithBatchSize(uint batchSize);
+    public TelemetryConfig WithFlushInterval(TimeSpan interval);
+    public bool IsDisposed { get; }
+    public void Dispose();
+}
+
+public static class XybridClient
+{
+    public static void InitializeTelemetry(TelemetryConfig config);
+    public static void FlushTelemetry();
+    public static void ShutdownTelemetry();
+}
+```
+
+**Usage example — default ingest endpoint:**
+
+```csharp
+// C# / Unity
+XybridClient.Initialize();
+
+var config = new TelemetryConfig(
+        apiKey: Environment.GetEnvironmentVariable("XYBRID_TELEMETRY_API_KEY"))
+    .WithAppVersion("1.4.2")
+    .WithDeviceLabel(SystemInfo.deviceModel)
+    .WithDeviceAttribute("build", "release")
+    .WithBatchSize(64)
+    .WithFlushInterval(TimeSpan.FromSeconds(30));
+
+// config.Endpoint reports "https://ingest.xybrid.dev" until overridden
+XybridClient.InitializeTelemetry(config); // consumes config; subsequent Dispose is a no-op
+
+// ... run inferences ...
+
+XybridClient.FlushTelemetry();   // call from OnApplicationPause(true) on mobile
+XybridClient.ShutdownTelemetry(); // call from OnApplicationQuit
+```
+
+**Self-hosted endpoint:**
+
+```csharp
+var config = new TelemetryConfig(apiKey)
+    .WithEndpoint("https://telemetry.internal.example.com")
+    .WithAppVersion("1.4.2");
+// config.Endpoint now reports the override.
+XybridClient.InitializeTelemetry(config);
+```
+
 ### Implementation Status
 
 | Type | Dart | Kotlin | Swift | C# |
 |------|------|--------|-------|----|
-| `TelemetryConfiguration` | 🚧 | — | — | — |
+| `TelemetryConfiguration` | 🚧 | — | — | ✅ |
 | `XybridConfiguration` | — | — | — | — |
 
+| Method (C# `XybridClient` / `TelemetryConfig`) | Dart | Kotlin | Swift | C# |
+|-----------------------------------------------|------|--------|-------|----|
+| `TelemetryConfig(apiKey)` ctor | — | — | — | ✅ |
+| `Endpoint` property | — | — | — | ✅ |
+| `WithEndpoint()` | — | — | — | ✅ |
+| `WithAppVersion()` | — | — | — | ✅ |
+| `WithDeviceLabel()` | — | — | — | ✅ |
+| `WithDeviceAttribute()` | — | — | — | ✅ |
+| `WithBatchSize()` | — | — | — | ✅ |
+| `WithFlushInterval()` | — | — | — | ✅ |
+| `XybridClient.InitializeTelemetry()` | 🚧 | — | — | ✅ |
+| `XybridClient.FlushTelemetry()` | — | — | — | ✅ |
+| `XybridClient.ShutdownTelemetry()` | — | — | — | ✅ |
+
 > **Note**: `initTelemetry()` exists in Dart as a stub that throws `UnimplementedError`.
+> The C# (Unity) SDK is the first non-Rust implementation of the telemetry surface;
+> the Dart, Kotlin, and Swift implementations are still planned.
 
 ---
 
