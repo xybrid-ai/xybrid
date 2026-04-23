@@ -56,11 +56,41 @@ fn bench_begin_run_boundary(c: &mut Criterion) {
     });
 }
 
+fn bench_begin_run_summary_1000(c: &mut Criterion) {
+    // Dominated by sampler-thread spawn + stop overhead plus two
+    // ResourceSnapshot reads. Real inferences run far longer than a
+    // single tick; the SLO defended here is per-run bookkeeping, not
+    // sampler-window throughput.
+    let monitor = ResourceMonitor::new();
+    monitor.prewarm();
+    c.bench_function("resource_run::summary_1000ms", |b| {
+        b.iter(|| {
+            let guard = monitor.begin_run(ResourceTelemetryMode::Summary { interval_ms: 1000 });
+            let _ = guard.finish();
+        });
+    });
+}
+
+fn bench_begin_run_summary_250_stress(c: &mut Criterion) {
+    // MIN_SAMPLE_INTERVAL_MS floor. Documents overhead at the most
+    // aggressive legal configuration — not a default.
+    let monitor = ResourceMonitor::new();
+    monitor.prewarm();
+    c.bench_function("resource_run::summary_250ms_stress", |b| {
+        b.iter(|| {
+            let guard = monitor.begin_run(ResourceTelemetryMode::Summary { interval_ms: 250 });
+            let _ = guard.finish();
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_cached_snapshot,
     bench_refresh_snapshot,
     bench_begin_run_off,
     bench_begin_run_boundary,
+    bench_begin_run_summary_1000,
+    bench_begin_run_summary_250_stress,
 );
 criterion_main!(benches);
