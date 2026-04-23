@@ -763,6 +763,41 @@ mod tests {
     }
 
     #[test]
+    fn summary_run_shorter_than_sampler_tick_still_produces_summary() {
+        // Sampler can't tick before a near-instant inference returns —
+        // the guard must still produce a well-formed summary from the
+        // start+end bookends rather than failing the run. This is the
+        // graceful-degradation promise for Summary mode: even if zero
+        // samples come from the background thread, sample_count >= 2.
+        let monitor = ResourceMonitor::new();
+        monitor.prewarm();
+        let guard = monitor.begin_run(ResourceTelemetryMode::Summary { interval_ms: 1000 });
+        let summary = guard
+            .finish()
+            .expect("Summary mode should produce a summary even without sampler ticks");
+        assert!(summary.sample_count >= 2);
+        assert_eq!(summary.sampling_mode, "summary");
+        assert_eq!(summary.sampling_interval_ms, Some(1000));
+    }
+
+    #[test]
+    fn run_guard_drop_without_finish_stops_sampler_cleanly() {
+        // Abandoning a guard (e.g. surrounding inference panicked)
+        // must cancel the sampler without panicking or leaking the
+        // thread. We can't observe join() state externally, so verify
+        // by running many short drops back-to-back — if the sampler
+        // didn't stop, the thread count would grow without bound and
+        // the test would eventually allocate-deadlock or panic.
+        let monitor = ResourceMonitor::new();
+        monitor.prewarm();
+        for _ in 0..64 {
+            let guard = monitor.begin_run(ResourceTelemetryMode::Summary { interval_ms: 250 });
+            drop(guard);
+        }
+        // If we got here, the drop path works.
+    }
+
+    #[test]
     fn concurrent_snapshots_share_one_system() {
         // Several threads hammering `current_snapshot` should not panic on
         // poisoned locks or construct multiple `sysinfo::System`s. We can't
