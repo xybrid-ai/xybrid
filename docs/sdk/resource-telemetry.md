@@ -19,7 +19,6 @@ to current device state instead of frozen init-time values.
 - [Trace payload placement](#trace-payload-placement)
 - [Privacy guarantees](#privacy-guarantees)
 - [Defaults and tuning](#defaults-and-tuning)
-- [Compatibility](#compatibility)
 
 ## Goals and non-goals
 
@@ -35,8 +34,6 @@ to current device state instead of frozen init-time values.
   init so the first inference does not pay the `~100 ms` cold-refresh cost.
 - Sampling that never fails the inference. A sampler error produces a partial
   summary rather than propagating up.
-- Wire format additive to existing telemetry: `resource_summary` is an optional
-  field on `event.data`; consumers that don't know about it ignore it.
 
 **Non-goals**
 
@@ -219,8 +216,7 @@ shape.
 ### Storage
 
 The analytics backend's `telemetry_events` table adds one typed column per
-summary field. Legacy rows keep `NULL` for every new column; the dashboard
-hides its Resource Usage card when all fields are `NULL`.
+summary field.
 
 ## Privacy guarantees
 
@@ -296,18 +292,6 @@ Reproduce with: `cargo bench -p xybrid-core --bench resource_telemetry`.
 Numbers on non-Apple targets will differ; the SLO gates stay the same.
 If any scenario regresses above its gate in CI, the default flips to
 `Boundary` until the regression is resolved.
-
-## Compatibility
-
-- **Old SDK clients** (no resource telemetry) produce events without a
-  `resource_summary` field. Ingest accepts them; the dashboard's Resource
-  Usage card hides.
-- **Old backend / old dashboard** sees events that carry `resource_summary`
-  but ignores it — the wire format is additive.
-- **Rollback**: remove the `.with_resource_telemetry(...)` call on
-  `TelemetryConfig`; sampling stops, summaries stop flowing, no schema
-  migration required. Analytics-backend columns default to `NULL` and stay
-  empty.
 
 ## Platform availability
 
