@@ -1,0 +1,79 @@
+---
+title: LLM 遥测指标
+description: TTFT、解码/预填充 TPS、块间延迟 — SDK 每次 LLM 推理输出的指标
+---
+
+xybrid SDK 将每次推理的 LLM 遥测数据以字符串键值对的形式写入活跃 tracing span 和输出 Envelope 的 metadata。这些指标由 LLM 适配器的流式路径自动生成，调用方无需额外配置。
+
+本页记录 **生产协议** — SDK 提供的字段、单位与保证。
+
+## 字段参考
+
+| 字段 | 单位 | 类型 | 来源 |
+| --- | --- | --- | --- |
+| `ttft_ms` | ms | `u64` | 首个 `Response::Chunk` 发出时的 `Instant` 减去 `generate()` 开始时间。 |
+| `tokens_generated` | 数量 | `usize` | mistralrs `Usage.completion_tokens`（终止块）。 |
+| `tokens_per_second` | tok/s | `f32` | 挂钟吞吐量：`tokens_generated / elapsed`，含预填充时间。 |
+| `decode_tps` | tok/s | `f32` | mistralrs `Usage.avg_compl_tok_per_sec` — 仅稳态解码。值为 0.0 时（计时精度不足）返回 `None`。 |
+| `prefill_tps` | tok/s | `f32` | mistralrs `Usage.avg_prompt_tok_per_sec`，同样的零值过滤语义。 |
+| `mean_itl_ms` | ms | `f32` | 块间 `Instant` 差值的算术平均。仅发出一个块时返回 `None`。 |
+| `p95_itl_ms` | ms | `u32` | 块间差值的第 95 百分位。同样的单块保护。 |
+| `emitted_chunks` | 数量 | `u32` | 流中观察到的 `Response::Chunk` 数量。 |
+| `finish_reason` | — | `String` | 终止块的 `ChunkChoice.finish_reason`，取值见下表。 |
+
+### `finish_reason` 取值
+
+| 值 | 含义 |
+|-------|---------|
+| `stop` | 模型生成了自然的序列结束 token，响应完整。 |
+| `length` | 生成因达到 `max_tokens` 上限而截断，模型本可继续生成。若响应不完整，可考虑增大 `GenerationConfig.max_tokens`。 |
+| `unknown` | SDK 无法从终止块中提取 `finish_reason`。正常情况下在终止块检测修复后不应出现；若出现，则表明流协议异常。 |
+
+## 指标的输出位置
+
+### 输出 Envelope metadata
+
+`TemplateExecutor::execute()` 返回后，输出 `Envelope.metadata`（`HashMap<String, String>`）中携带全部九个字段的字符串键值对，调用方可直接读取：
+
+```rust
+let output = executor.execute(&metadata, &input)?;
+if let Some(ttft) = output.metadata.get("ttft_ms") {
+    println!("Time to first token: {} ms", ttft);
+}
+```
+
+### Tracing span metadata
+
+相同字段通过 `xybrid_core::tracing::add_metadata(key, value)` 写入活跃 tracing span，可在以下位置获取：
+
+- `xybrid trace --latest`（CLI 查看）
+- `xybrid run --trace`（为 LLM 阶段打印 LLM Trace 块）
+- 任何从导出 trace 中读取 span metadata 的遥测后端
+
+此外，`generation_time_ms`（`generate()` 调用的总挂钟时间）也会写入 span metadata，但未列入上表，因为它与阶段级别的 `latency_ms` 重复，且并非 LLM 特有。
+
+## 发射路径
+
+1. `MistralBackend::generate`（`core/src/runtime_adapter/llm/mistral.rs`）通过 `stream_chat_request` 流式输出 token。当 `is_streaming=true` 时，mistralrs 通过**最后一个 `Response::Chunk`** 而非 `Response::Done` 信号表示完成。`ChunkChoice.finish_reason` 和 `ChatCompletionChunkResponse.usage` 仅在该终止块上为 `Some(..)`。流在没有终止信号的情况下关闭时返回 `AdapterError::InferenceFailed`；部分文本不会作为成功结果发布。
+2. `LlmRuntimeAdapter::execute`（`core/src/runtime_adapter/llm/adapter.rs`）将每个标量写入响应 Envelope 的 metadata **并**通过 `add_metadata` 写入活跃 tracing span。两个目标是有意为之：Envelope 服务于进程内的 Rust 消费者，tracing span 流向遥测管道。
+
+## 默认确定性
+
+`GenerationConfig::default()` 使用 `temperature = 0.0`，选择 mistralrs 的确定性采样器。需要采样的调用方必须显式设置 `temperature > 0.0`。这保证了测试、缓存以及依赖稳定本地推理的阶段的输出可复现。
+
+## 保证与非保证
+
+- **每次成功 LLM 生成均保证输出**：`ttft_ms`、`tokens_generated`、`tokens_per_second`、`emitted_chunks`、`finish_reason`。
+- **尽力输出**：`decode_tps`、`prefill_tps`、`mean_itl_ms`、`p95_itl_ms`。在快速硬件上短提示偶尔会使 mistralrs 产生 `avg_*_tok_per_sec = 0.0`，这些值会被过滤为 `None`。ITL 汇总需要至少两个发出的块。
+- **不输出**：原始的每块间隔（`inter_chunk_ms`）。在进程内保留于 `GenerationOutput` 供 Rust 调试使用，不序列化到 Envelope metadata 或 tracing span。
+
+## 非 LLM 阶段
+
+预处理、后处理、ASR、TTS 和 Embedding 阶段不输出上述九个字段中的任何一个。其 tracing span 仅携带通用 metadata（阶段名称、耗时、模型 ID）。
+
+## 相关资源
+
+- `core/src/runtime_adapter/llm/mistral.rs` — 流式状态机（`StreamState` + `handle_response`）
+- `core/src/runtime_adapter/llm/adapter.rs` — Envelope 与 tracing 发射
+- `core/src/runtime_adapter/llm/config.rs` — `GenerationConfig` 默认值
+- `core/examples/llm_streaming_metrics.rs` — 含软断言的参考示例

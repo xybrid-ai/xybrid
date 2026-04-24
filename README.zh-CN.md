@@ -33,12 +33,14 @@
 <br>
 [![License][license-shield]][license-url]
 [![Build][build-shield]][build-url]
+[![OpenSSF Scorecard][scorecard-shield]][scorecard-url]
 [![Stars][stars-shield]][stars-url]
 [![Release][release-shield]][release-url]
 [![Release Date][release-date-shield]][release-url]
 <br>
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
+[![Visitors](https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid)](https://github.com/xybrid-ai/xybrid)
 
 </p>
 
@@ -52,6 +54,8 @@
 [license-url]: https://opensource.org/licenses/Apache-2.0
 [build-shield]: https://img.shields.io/github/actions/workflow/status/xybrid-ai/xybrid/ci.yml?branch=master&style=flat
 [build-url]: https://github.com/xybrid-ai/xybrid/actions
+[scorecard-shield]: https://api.scorecard.dev/projects/github.com/xybrid-ai/xybrid/badge
+[scorecard-url]: https://scorecard.dev/viewer/?uri=github.com/xybrid-ai/xybrid
 [stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat
 [stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
 [release-shield]: https://img.shields.io/github/v/release/xybrid-ai/xybrid?style=flat&sort=semver
@@ -68,9 +72,7 @@
   <img src="docs/demo-android.gif" alt="Android demo" width="150">
 </p>
 
-<p align="center">
-  <img src="docs/game-demo.gif" alt="游戏演示" width="540">
-</p>
+
 
 ## 从这里开始
 
@@ -81,8 +83,11 @@
 | 为游戏添加 AI NPC | [Unity SDK →](bindings/unity/)，体验 [3D 酒馆示例](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | Android 原生开发 | [Kotlin SDK →](bindings/kotlin/) |
 | Rust / 嵌入式 | [核心 crate →](crates/) |
-
 ---
+
+<p align="center">
+  <img src="docs/game-demo.gif" alt="游戏演示" width="540">
+</p>
 
 ## SDK
 
@@ -101,7 +106,38 @@ Xybrid 是一个 **Rust 驱动的运行时**，为所有主流平台提供原生
 
 ### 安装
 
-**CLI** — 一键安装（无需 Rust）：
+**Unity** → Package Manager：
+
+```sh
+https://github.com/xybrid-ai/xybrid.git#upm
+```
+
+**Flutter** → `pubspec.yaml`：
+
+```yaml
+dependencies:
+  xybrid_flutter: ^0.1.0
+```
+
+**Swift (iOS / macOS)**：
+
+```swift
+// Package.swift
+dependencies: [
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.0")
+]
+```
+
+**Kotlin (Android)**：
+
+```gradle
+// build.gradle.kts
+dependencies {
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta12")
+}
+```
+
+**CLI**
 
 ```bash
 # macOS / Linux
@@ -113,39 +149,7 @@ curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh |
 irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 ```
 
-或使用 Rust：
-
-```bash
-cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli
-```
-
-也可以直接从 [Releases](https://github.com/xybrid-ai/xybrid/releases) 下载二进制文件。
-
-完整的安装指南请参阅 [Installation Guide](docs/INSTALLATION.md)（英文）。
-
-**Unity** — Package Manager → 通过 git URL 添加：
-
-```bash
-https://github.com/xybrid-ai/xybrid.git#upm
-```
-
-> `upm` 分支包含所有平台的预编译原生库。
-> 固定版本：`https://github.com/xybrid-ai/xybrid.git#upm/v0.1.0-beta8`
-
-**Flutter** — 添加到你的 `pubspec.yaml`：
-
-```yaml
-dependencies:
-  xybrid_flutter: ^0.1.0
-```
-
-**Kotlin (Android)** — 添加到你的 `build.gradle.kts`：
-
-```gradle
-dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta9")
-}
-```
+完整安装选项、硬件加速与 CLI 参考请参阅 [Installation Guide](docs/INSTALLATION.md)。
 
 ---
 
@@ -164,29 +168,29 @@ xybrid run kokoro-82m --input "国破山河在，城春草木深" -o output.wav
 
 **Flutter:**
 ```dart
-final model = await Xybrid.model(modelId: 'kokoro-82m').load();
-final result = await model.run(envelope: Envelope.text(text: '国破山河在，城春草木深'));
+final model = await Xybrid.model('kokoro-82m').load();
+final result = await model.run(XybridEnvelope.text('国破山河在，城春草木深'));
 // 输出 → 24kHz WAV 音频
 ```
 
 **Kotlin:**
 ```kotlin
-val model = Xybrid.model(modelId = "kokoro-82m").load()
-val result = model.run(envelope = XybridEnvelope.Text("国破山河在，城春草木深"))
+val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
+val result = model.run(Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
 
 **Swift:**
 ```swift
-let model = try Xybrid.model(modelId: "kokoro-82m").load()
-let result = try model.run(envelope: .text("国破山河在，城春草木深"))
+let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
+let result = try model.run(envelope: Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
 
 **Unity (C#):**
 ```csharp
-var model = Xybrid.Model(modelId: "kokoro-82m").Load();
-var result = model.Run(envelope: Envelope.Text("国破山河在，城春草木深"));
+var model = XybridClient.LoadModel("kokoro-82m");
+var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 // 输出 → 24kHz WAV 音频
 ```
 
@@ -217,9 +221,8 @@ xybrid run voice-assistant.yaml --input question.wav -o response.wav
 
 **Flutter:**
 ```dart
-final pipeline = await Xybrid.pipeline(yamlContent: yamlString).load();
-await pipeline.loadModels();
-final result = await pipeline.run(envelope: Envelope.audio(bytes: audioBytes));
+final pipeline = Xybrid.pipeline(yaml: yamlString);
+final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000));
 ```
 
 **Kotlin:**
@@ -290,12 +293,49 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 | Phi-4 Mini | LLM | 3.8B | P2 | 规格就绪（首个多量化：Q4, Q8, FP16） |
 | Qwen3 0.6B | LLM | 600M | P2 | 计划中 |
 | Trinity Nano | LLM (MoE) | 6B（1B 活跃） | P2 | 计划中 |
-| LFM2 700M | LLM | 700M | P2 | 计划中 |
+| LFM2-VL 700M | Vision+LLM | 700M | P2 | 计划中 |
 | Nomic Embed Text v1.5 | 嵌入 | 137M | P1 | 受阻（需要 Tokenize/MeanPool 步骤） |
 | LFM2-VL 450M | 视觉 | 450M | P2 | 计划中 |
 | Whisper Tiny CoreML | ASR | 39M | P2 | 计划中 |
 | Qwen3-TTS 0.6B | TTS | 600M | P2 | 受阻（需要自定义 SafeTensors 运行时） |
 | Chatterbox Turbo | TTS | 350M | P3 | 受阻（需要 ModelGraph 模板） |
+
+<details>
+<summary><h3>自定义模型（实验性）</h3></summary>
+
+> **注意**：自定义模型支持为实验性功能。`model_metadata.json` schema 已稳定，但 AI 辅助工具（`/xybrid-init`）仍在积极开发中，可能尚不支持所有模型类型。
+
+Xybrid 支持**任意** ONNX、GGUF 或 SafeTensors 模型，只需提供一个 `model_metadata.json` 告诉 xybrid 如何运行它。
+
+**使用 AI 助手**（Claude Code、Codex 等）：
+
+```sh
+# 将 xybrid skills 安装到你的项目中
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+
+# 从 HuggingFace 模型生成 model_metadata.json
+claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
+```
+
+Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚本会为 Claude Code（`.claude/skills`）和 Codex（`.codex/skills`）创建符号链接。
+
+**手动创建** — 在模型目录中新建 `model_metadata.json`：
+
+```json
+{
+  "model_id": "my-model",
+  "version": "1.0",
+  "execution_template": { "type": "Onnx", "model_file": "model.onnx" },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": ["model.onnx"],
+  "metadata": { "task": "text-generation" }
+}
+```
+
+完整 schema 见 [model metadata 文档](docs/sdk/API_REFERENCE.md)，或参考 [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/) 中的现有示例。
+
+</details>
 
 ---
 

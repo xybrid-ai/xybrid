@@ -1,0 +1,361 @@
+---
+title: 可观测性
+description: 遥测、追踪与设备智能
+---
+
+通过遥测、设备指标和追踪来监控和调试 Xybrid 流水线。
+
+## 概述
+
+Xybrid 出于两个目的收集遥测数据：
+
+1. **运行时优化** — 设备能力信息用于指导路由决策
+2. **用量分析** — 用于调试和可视化的指标数据
+
+## 设备智能
+
+### 硬件能力
+
+系统检测硬件能力以优化路由：
+
+```rust
+pub struct HardwareCapabilities {
+    // 加速器可用性
+    pub has_gpu: bool,
+    pub has_metal: bool,      // iOS/macOS
+    pub has_nnapi: bool,      // Android
+    pub has_coreml: bool,     // iOS/macOS Neural Engine
+
+    // 资源指标
+    pub memory_available_mb: u64,
+    pub memory_total_mb: u64,
+    pub battery_level: u8,    // 0-100
+    pub thermal_state: ThermalState,
+
+    // 平台信息
+    pub platform: Platform,
+    pub gpu_type: Option<GpuType>,
+    pub npu_type: Option<NpuType>,
+}
+```
+
+### 温控状态
+
+| 状态 | 温度 | 动作 |
+|-------|-------------|--------|
+| `Normal` | < 60°C | 全性能运行 |
+| `Warm` | 60-70°C | 可能降频 |
+| `Hot` | 70-80°C | 降低工作负载 |
+| `Critical` | > 80°C | 暂停高负载操作 |
+
+### 决策方法
+
+```rust
+// 是否应降低工作负载？
+capabilities.should_throttle()
+// → 电量 < 20% 或热状态为 Hot/Critical 时返回 true
+
+// 优先使用哪种加速器？
+capabilities.should_prefer_metal()   // macOS/iOS
+capabilities.should_prefer_nnapi()   // Android
+capabilities.should_prefer_gpu()     // 通用 GPU 计算
+```
+
+### Flutter 用法
+
+```dart
+final caps = await xybrid.getDeviceCapabilities();
+print('GPU: ${caps.hasGpu}, Metal: ${caps.hasMetal}');
+print('Battery: ${caps.batteryLevel}%, Thermal: ${caps.thermalState}');
+
+if (caps.shouldThrottle) {
+  // 使用云端推理或低性能模型
+}
+```
+
+## 遥测事件
+
+### 事件类型
+
+事件从编排器经由事件总线流出：
+
+| 事件 | 说明 |
+|-------|-------------|
+| `PipelineStart` | 流水线开始执行 |
+| `PipelineComplete` | 流水线执行完成 |
+| `StageStart` | 阶段开始处理 |
+| `StageComplete` | 阶段处理完成 |
+| `StageError` | 阶段执行失败 |
+| `RoutingDecided` | 路由目标已选定 |
+| `ExecutionStarted` | 推理开始 |
+| `ExecutionCompleted` | 推理完成 |
+| `PolicyEvaluated` | 策略检查结果 |
+
+### 事件结构
+
+```rust
+pub struct TelemetryEvent {
+    pub event_type: String,
+    pub stage_name: Option<String>,
+    pub target: Option<String>,       // "local"、"cloud"、"fallback"
+    pub latency_ms: Option<u32>,
+    pub error: Option<String>,
+    pub data: Option<String>,         // 附加 JSON
+    pub timestamp_ms: u64,
+}
+```
+
+### 订阅事件
+
+```dart
+final stream = subscribeTelemetryEvents();
+stream.listen((event) {
+  print('[${event.eventType}] ${event.stageName ?? ""} '
+        '${event.target ?? ""} ${event.latencyMs ?? ""}ms');
+});
+```
+
+## LLM 遥测指标
+
+LLM 阶段通过 `xybrid_core::tracing::add_metadata` 将每次推理的额外指标以字符串键值对形式写入活跃 tracing span。这些指标随阶段 span 流经遥测管道，可在 Xybrid 控制台和分析 API 上获取。
+
+| 字段 | 说明 |
+|-------|-------------|
+| `ttft_ms` | 首个流式块发出的时间（ms） |
+| `tokens_generated` | 来自 mistralrs `Usage` 的 token 数 |
+| `tokens_per_second` | 挂钟吞吐量（含预填充） |
+| `decode_tps` | 来自 `Usage.avg_compl_tok_per_sec` 的仅解码吞吐量 |
+| `prefill_tps` | 来自 `Usage.avg_prompt_tok_per_sec` 的预填充吞吐量 |
+| `mean_itl_ms` | 平均块间延迟 |
+| `p95_itl_ms` | 第 95 百分位块间延迟 |
+| `emitted_chunks` | 观察到的流式块数量 |
+| `finish_reason` | `"stop"`、`"length"` 或 `"unknown"` |
+
+非 LLM 阶段（ASR、TTS、Embedding）不输出这些字段。
+
+完整字段参考、发射路径与保证见 [LLM 指标](/zh/docs/internals/llm-metrics)。
+
+## 会话指标
+
+用于分析的基于会话的聚合数据：
+
+```rust
+pub struct SessionMetrics {
+    pub session_id: String,
+    pub device_id: String,
+    pub started_at: u64,
+    pub ended_at: Option<u64>,
+
+    // 聚合数据
+    pub total_inferences: u64,
+    pub total_latency_ms: u64,
+    pub models_used: Vec<String>,
+    pub error_count: u64,
+
+    // 设备快照
+    pub hardware_capabilities: HardwareCapabilities,
+}
+```
+
+### 单模型指标
+
+```rust
+pub struct ApiCallMetric {
+    pub model_id: String,
+    pub version: String,
+    pub call_count: u64,
+    pub total_latency_ms: u64,
+    pub avg_latency_ms: u64,
+    pub error_count: u64,
+    pub last_called: u64,
+}
+```
+
+## CLI 追踪
+
+### 查看追踪
+
+```bash
+# 最新会话
+xybrid trace --latest
+
+# 指定会话
+xybrid trace --session abc123
+
+# 导出到文件
+xybrid trace --latest --export trace.json
+```
+
+### 追踪存储
+
+追踪文件存储于 `~/.xybrid/traces/`：
+
+```
+~/.xybrid/traces/
+├── abc123.log
+├── def456.log
+└── ...
+```
+
+## 导出格式
+
+会话数据以 JSON 格式导出：
+
+```json
+{
+  "version": "2.0",
+  "session": {
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "device_id": "device-abc123",
+    "platform": "macos",
+    "started_at": "2024-12-12T12:00:00Z"
+  },
+  "hardware": {
+    "has_gpu": true,
+    "gpu_type": "metal",
+    "has_npu": true,
+    "memory_total_mb": 16384,
+    "battery_level": 85,
+    "thermal_state": "normal"
+  },
+  "metrics": {
+    "total_inferences": 42,
+    "total_latency_ms": 12500,
+    "avg_latency_ms": 297,
+    "error_count": 0,
+    "by_model": [
+      {
+        "model_id": "wav2vec2-base-960h",
+        "call_count": 42,
+        "avg_latency_ms": 297
+      }
+    ]
+  }
+}
+```
+
+## Flutter SDK API
+
+### 设备能力
+
+```dart
+// 获取当前设备能力
+HardwareCapabilities getDeviceCapabilities();
+
+// 检查模型是否可在本地运行
+bool canRunModelLocally({required String modelId, String? version});
+```
+
+### 会话指标
+
+```dart
+// 获取当前会话指标
+SessionMetrics getSessionMetrics();
+
+// 将遥测数据导出为 JSON
+String exportTelemetryJson();
+
+// 重置会话
+void resetSession();
+```
+
+### 遥测流
+
+```dart
+// 订阅实时事件
+Stream<TelemetryEvent> subscribeTelemetryEvents();
+```
+
+## 配置
+
+### CLI 配置
+
+在 `~/.config/xybrid/config.yml` 中：
+
+```yaml
+telemetry:
+  enabled: true
+  endpoint: "http://localhost:4318"
+  sampling_rate: 0.05
+  privacy_mode: "summary_only"
+```
+
+### Rust 配置
+
+```rust
+let mut telemetry = Telemetry::new();
+telemetry.set_enabled(false); // 禁用
+
+// 或创建时即禁用
+let telemetry = Telemetry::with_enabled(false);
+```
+
+## 最佳使用方法
+
+### 尽早初始化
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await RustLib.init();
+  initTelemetryStream();
+  runApp(MyApp());
+}
+```
+
+### 只订阅一次
+
+```dart
+late StreamSubscription<TelemetryEvent> _subscription;
+
+@override
+void initState() {
+  super.initState();
+  _subscription = subscribeTelemetryEvents().listen(_onEvent);
+}
+
+@override
+void dispose() {
+  _subscription.cancel();
+  super.dispose();
+}
+```
+
+### 会话结束前导出文件
+
+```dart
+final json = xybrid.exportTelemetryJson();
+await uploadToBackend(json);
+```
+
+### 推理前检查设备能力
+
+```dart
+final caps = xybrid.getDeviceCapabilities();
+if (caps.shouldThrottle) {
+  return useCloudFallback();
+}
+```
+
+## 错误分类
+
+错误按类别分类以便调试：
+
+| 类别 | 说明 |
+|----------|-------------|
+| `ModelLoading` | Bundle/模型文件问题 |
+| `Preprocessing` | 输入格式/转换 |
+| `Inference` | 运行时执行 |
+| `Postprocessing` | 输出格式 |
+| `Network` | Registry/云端连接 |
+| `Hardware` | GPU/NPU 初始化 |
+| `Memory` | 内存不足（OOM） |
+
+## 平台支持
+
+| 平台 | GPU | NPU | 电量 | 温控 |
+|----------|-----|-----|---------|---------|
+| macOS | Metal | CoreML | pmset | - |
+| iOS | Metal | CoreML | UIDevice | ProcessInfo |
+| Android | Vulkan | NNAPI | BatteryManager | JNI |
+| Linux | Vulkan | - | /sys/class | /sys/class |

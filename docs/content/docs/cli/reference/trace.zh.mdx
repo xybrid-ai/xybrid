@@ -1,0 +1,167 @@
+---
+title: xybrid trace
+description: 查看历史运行的遥测数据
+---
+
+查看历史流水线运行的遥测日志与追踪记录。
+
+## 用法
+
+```bash
+xybrid trace --session <id>
+xybrid trace --latest
+xybrid trace --latest --export <path>
+```
+
+## 选项
+
+| 选项 | 简写 | 说明 |
+|--------|-------|-------------|
+| `--session` | `-s` | 指定会话标识符 |
+| `--latest` | | 加载最近一次会话 |
+| `--export` | | 将 JSON 摘要写入文件 |
+| `--output` | | 输出格式：`pretty` 或 `json` |
+
+## 执行流程
+
+1. 从 `~/.xybrid/traces/<session>.log` 读取结构化 JSON 追踪
+2. 解析阶段延迟、路由决策与决策结果
+3. 显示彩色摘要表格
+
+## 示例
+
+### 查看最新追踪
+
+```bash
+xybrid trace --latest
+```
+
+### 查看指定会话
+
+```bash
+xybrid trace --session abc123
+```
+
+### 导出为 JSON
+
+```bash
+xybrid trace --latest --export trace.json
+```
+
+### 格式化输出
+
+```bash
+xybrid trace --latest --output pretty
+```
+
+## 示例输出
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Session: abc123                                             │
+│ Pipeline: voice-assistant                                   │
+│ Started: 2024-12-12T10:30:00Z                               │
+├─────────────────────────────────────────────────────────────┤
+│ Stage              │ Target      │ Latency │ Status         │
+├────────────────────┼─────────────┼─────────┼────────────────┤
+│ whisper-tiny@1.2   │ local       │ 52ms    │ ✓ success      │
+│ gpt-4o-mini        │ integration │ 340ms   │ ✓ success      │
+│ kokoro-82m@0.1     │ local       │ 89ms    │ ✓ success      │
+├─────────────────────────────────────────────────────────────┤
+│ Total: 481ms                                                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 追踪数据
+
+每条追踪记录包含：
+
+| 字段 | 说明 |
+|-------|-------------|
+| `session_id` | 唯一标识符 |
+| `pipeline_name` | 已执行的流水线名称 |
+| `started_at` | 执行开始时间 |
+| `stages` | 各阶段结果数组 |
+| `total_latency_ms` | 端到端总耗时 |
+
+### 阶段数据
+
+| 字段 | 说明 |
+|-------|-------------|
+| `name` | 阶段标识符 |
+| `target` | 执行位置（local、integration） |
+| `latency_ms` | 执行耗时 |
+| `status` | 成功或失败 |
+| `routing_reason` | 选择该目标的原因 |
+| `policy_result` | 策略评估结果 |
+
+### LLM 阶段元数据
+
+LLM 阶段的 span metadata 中携带额外字段。当 `xybrid run` 使用 `--trace` 时，
+这些字段会出现在 CLI 输出和导出的 Chrome trace 中：
+
+| 字段 | 说明 |
+|-------|-------------|
+| `ttft_ms` | 首个 token 的时间（ms） |
+| `decode_tps` | 仅解码阶段的 tokens/秒 |
+| `prefill_tps` | 预填充阶段的 tokens/秒 |
+| `tokens_per_second` | 挂钟吞吐量（含预填充） |
+| `mean_itl_ms` | 平均块间延迟（ms） |
+| `p95_itl_ms` | 第 95 百分位块间延迟（ms） |
+| `emitted_chunks` | 流式块数量 |
+| `tokens_generated` | 总生成 token 数 |
+| `finish_reason` | `"stop"`、`"length"` 或 `"unknown"` |
+
+非 LLM 阶段不输出这些字段。完整协议见 [LLM 指标](/zh/docs/internals/llm-metrics)。
+
+## 追踪存储
+
+追踪文件存储于：
+
+```
+~/.xybrid/traces/
+├── abc123.log
+├── def456.log
+└── ...
+```
+
+每个文件包含换行分隔的 JSON 事件。
+
+## 导出格式
+
+导出的 JSON 包含完整追踪数据：
+
+```json
+{
+  "session_id": "abc123",
+  "pipeline_name": "voice-assistant",
+  "started_at": "2024-12-12T10:30:00Z",
+  "stages": [
+    {
+      "name": "whisper-tiny@1.2",
+      "target": "local",
+      "latency_ms": 52,
+      "status": "success",
+      "routing_reason": "model_available_locally"
+    }
+  ],
+  "total_latency_ms": 481
+}
+```
+
+## 示例工作流
+
+调试流水线性能：
+
+```bash
+# 运行流水线
+xybrid run --pipeline voice-assistant
+
+# 查看执行详情
+xybrid trace --latest
+
+# 导出以供分析
+xybrid trace --latest --export debug.json
+```
+
+遥测配置见 [可观测性](/zh/docs/internals/observability)。

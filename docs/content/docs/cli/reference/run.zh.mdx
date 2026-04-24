@@ -1,0 +1,133 @@
+---
+title: xybrid run
+description: 执行混合流水线
+---
+
+在当前设备上执行混合流水线。
+
+## 用法
+
+```bash
+xybrid run --config <path>
+xybrid run --pipeline <name>
+xybrid run --pipeline <name> --dry-run
+```
+
+## 选项
+
+| 选项 | 简写 | 说明 |
+|--------|-------|-------------|
+| `--config` | `-c` | 直接加载流水线 YAML 文件 |
+| `--pipeline` | `-p` | 在 `examples/` 目录下查找 `<name>.yml` |
+| `--bundle` | `-b` | 直接运行 `.xyb` Bundle 文件 |
+| `--input-text` | | 文本模型（LLM、TTS）的文本输入 |
+| `--input-audio` | | 音频模型（ASR）的 WAV 文件路径 |
+| `--target` | | 强制指定模型格式（`onnx`、`coreml`、`tflite`）；省略时自动检测 |
+| `--dry-run` | | 模拟路由决策但不执行推理 |
+| `--policy` | | 加载附加策略 Bundle |
+| `--trace` | | 启用执行追踪，输出火焰图与 LLM 指标 |
+| `--trace-export` | | 将追踪导出为 JSON 文件（Chrome trace 格式） |
+
+## 执行流程
+
+1. 将 YAML 解析为 `PipelineConfig`
+2. 执行策略 → 路由 → 推理的循环
+3. 打印各阶段延迟与路由摘要
+
+在 dry-run 模式下，CLI 仅打印路由决策与模拟输出，不会调用适配器。
+
+## 示例
+
+### 从配置文件运行
+
+```bash
+xybrid run --config ./pipelines/voice-assistant.yaml
+```
+
+### 运行命名流水线
+
+```bash
+xybrid run --pipeline hiiipe
+```
+
+按以下顺序查找 `hiiipe.yml` 或 `hiiipe.yaml`：
+- `xybrid-cli/examples/`
+- `./examples/`
+
+### Dry Run（仅模拟）
+
+```bash
+xybrid run --pipeline hiiipe --dry-run
+```
+
+输出显示路由决策，不执行实际推理：
+
+```
+▶️ Stage: whisper-tiny@1.2 → would route to: local
+▶️ Stage: gpt-4o-mini → would route to: integration
+▶️ Stage: kokoro-82m@0.1 → would route to: local
+```
+
+### 使用自定义策略
+
+```bash
+xybrid run --pipeline hiiipe --policy ./policies/strict-privacy.yaml
+```
+
+## 示例输出
+
+```
+▶️ Stage: whisper-tiny@1.2 → local
+🎯 Routing: local (fast path)
+⚙️ Execution complete (52ms)
+
+▶️ Stage: gpt-4o-mini → integration
+🎯 Routing: integration (OpenAI)
+⚙️ Execution complete (340ms)
+
+▶️ Stage: kokoro-82m@0.1 → local
+🎯 Routing: local (fast path)
+⚙️ Execution complete (89ms)
+
+🎉 Pipeline complete (total 481ms)
+```
+
+## 流水线格式
+
+`run` 命令接受 YAML 格式的流水线定义：
+
+```yaml
+name: "voice-assistant"
+stages:
+  - whisper-tiny@1.0
+  - target: integration
+    provider: openai
+    model: gpt-4o-mini
+  - kokoro-82m@0.1
+```
+
+完整 DSL 参考见 [流水线](/zh/docs/concepts/pipelines)。
+
+## LLM 推理追踪
+
+当传入 `--trace` 且流水线包含 LLM 阶段时，CLI 会在输出后额外打印一个指标块：
+
+```
+📊 LLM Trace:
+------------------------------------------------------------
+  TTFT                  : 412 ms
+  Decode TPS            : 42.80 tok/s
+  Prefill TPS           : 184.20 tok/s
+  Wallclock TPS         : 38.10 tok/s
+  Mean ITL              : 14.30 ms
+  p95 ITL               : 28 ms
+  Emitted chunks        : 64
+  Tokens generated      : 64
+  Finish reason         : stop
+------------------------------------------------------------
+```
+
+这些值从输出 Envelope 的 metadata 中读取，由 LLM 适配器的流式路径填充。
+非 LLM 阶段（ASR、TTS、Embedding）不会输出这些字段，相应块将被跳过。
+
+字段定义与端到端发射路径见 [LLM 指标](/zh/docs/internals/llm-metrics)。

@@ -1,0 +1,42 @@
+---
+title: 内部机制
+description: Xybrid 底层工作原理
+---
+
+本节面向研究人员、贡献者和希望深入了解系统运作方式的开发者，介绍 Xybrid 的内部架构。
+
+## 概述
+
+Xybrid 是一个混合云/本地 ML 推理编排器。它根据模型可用性、设备能力和用户策略，在本地执行与云端 API 之间动态路由 ML 工作负载。
+
+## 核心架构
+
+系统围绕以下关键组件构建：
+
+| 组件 | 用途 |
+|-----------|---------|
+| [Envelope](/zh/docs/internals/envelope) | 音频、文本、Embedding 的通用数据容器 |
+| [Orchestrator](/zh/docs/internals/orchestrator) | 将请求路由到合适的执行目标 |
+| [Pipeline](/zh/docs/internals/pipeline) | 串联多个阶段（ASR → LLM → TTS） |
+| [Executor](/zh/docs/internals/executor) | 通过 ONNX 或 Candle 运行时执行模型 |
+| [StreamSession](/zh/docs/internals/stream-session) | 实时流式推理 |
+
+## 数据流
+
+1. **输入**以 `Envelope` 形式到达（音频字节、文本或 Embedding）
+2. **Orchestrator** 决定执行目标（设备端、云端或回退）
+3. **Executor** 运行模型并产生输出
+4. **输出**被封装到新的 `Envelope` 中，传递给下一阶段
+
+详情见 [数据流与执行](/zh/docs/internals/data-flow-and-execution)。
+
+## 基础设施
+
+| 组件 | 用途 |
+|-----------|---------|
+| [Registry](/zh/docs/concepts/registry) | Bundle 分发服务器 |
+| [Bundles](/zh/docs/concepts/bundles) | 打包的模型（`.xyb` 格式） |
+| [Pipeline DSL](/zh/docs/concepts/pipelines) | YAML 流水线定义 |
+| [Streaming](/zh/docs/concepts/streaming) | 实时推理 |
+| [Observability](/zh/docs/internals/observability) | 遥测、追踪与设备智能 |
+| [LLM Metrics](/zh/docs/internals/llm-metrics) | TTFT、解码/预填充 TPS、块间延迟 |
