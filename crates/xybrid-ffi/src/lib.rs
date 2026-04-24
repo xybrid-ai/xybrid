@@ -4054,9 +4054,7 @@ pub extern "C" fn xybrid_telemetry_default_endpoint() -> *const c_char {
 ///
 /// - `handle`: Handle to free. May be null (no-op).
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_telemetry_config_free(
-    handle: *mut XybridTelemetryConfigHandle,
-) {
+pub unsafe extern "C" fn xybrid_telemetry_config_free(handle: *mut XybridTelemetryConfigHandle) {
     if !handle.is_null() {
         let _ = XybridTelemetryConfigHandle::into_boxed(handle);
     }
@@ -4215,7 +4213,10 @@ pub unsafe extern "C" fn xybrid_telemetry_config_set_device_attribute(
             return -5;
         }
     };
-    config.device_profile_patch.custom.insert(key_str, value_str);
+    config
+        .device_profile_patch
+        .custom
+        .insert(key_str, value_str);
     0
 }
 
@@ -4291,9 +4292,7 @@ static TELEMETRY_INITIALIZED: AtomicBool = AtomicBool::new(false);
 /// `0` on success; non-zero on failure (null handle, or already initialized
 /// without an intervening shutdown). Failure details via `xybrid_last_error()`.
 #[no_mangle]
-pub unsafe extern "C" fn xybrid_telemetry_init(
-    handle: *mut XybridTelemetryConfigHandle,
-) -> i32 {
+pub unsafe extern "C" fn xybrid_telemetry_init(handle: *mut XybridTelemetryConfigHandle) -> i32 {
     clear_last_error();
 
     if handle.is_null() {
@@ -5747,7 +5746,10 @@ mod tests {
             assert_eq!(cfg.app_version.as_deref(), Some("1.2.3"));
             assert_eq!(cfg.device_label.as_deref(), Some("Sami's MacBook"));
             assert_eq!(
-                cfg.device_profile_patch.custom.get("build_flavor").map(String::as_str),
+                cfg.device_profile_patch
+                    .custom
+                    .get("build_flavor")
+                    .map(String::as_str),
                 Some("debug")
             );
             assert_eq!(cfg.batch_size, 32);
