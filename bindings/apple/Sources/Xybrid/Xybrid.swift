@@ -8,6 +8,43 @@
 
 import Foundation
 
+// MARK: - SDK Initialization
+
+/// Main entry point for the Xybrid SDK on iOS/macOS.
+///
+/// Call `Xybrid.initialize()` once before using any other Xybrid functionality.
+/// It registers the binding identifier so registry calls are attributed to the
+/// Swift SDK, and is safe to call multiple times — subsequent calls are no-ops.
+///
+/// ```swift
+/// // Application entry point
+/// Xybrid.initialize()
+/// ```
+public enum Xybrid {
+    private static let initLock = NSLock()
+    nonisolated(unsafe) private static var initialized = false
+
+    /// Initialize the Xybrid runtime.
+    ///
+    /// Registers the Swift binding identifier with the SDK so that the
+    /// `X-Xybrid-Client` header on registry HTTP calls reports
+    /// `binding=swift`. Idempotent and thread-safe.
+    public static func initialize() {
+        initLock.lock()
+        defer { initLock.unlock() }
+        if initialized { return }
+        setBinding(binding: "swift")
+        initialized = true
+    }
+
+    /// Returns `true` if `initialize()` has been called.
+    public static var isInitialized: Bool {
+        initLock.lock()
+        defer { initLock.unlock() }
+        return initialized
+    }
+}
+
 // MARK: - Public Type Re-exports
 
 /// Loads ML models from the registry or local bundles.

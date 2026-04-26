@@ -1529,6 +1529,15 @@ public func initSdkCacheDir(cacheDir: String)  {
 
 
 
+public func setBinding(binding: String)  {
+    try! rustCall() {
+    uniffi_xybrid_uniffi_fn_func_set_binding(
+        FfiConverterString.lower(binding),$0)
+}
+}
+
+
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -1545,6 +1554,9 @@ private var initializationResult: InitializationResult {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir() != 59754) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xybrid_uniffi_checksum_func_set_binding() != 53803) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id() != 623) {

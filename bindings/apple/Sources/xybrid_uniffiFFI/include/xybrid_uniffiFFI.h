@@ -89,6 +89,8 @@ void* _Nonnull uniffi_xybrid_uniffi_fn_method_xybridmodelloader_load(void*_Nonnu
 );
 void uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(RustBuffer cache_dir, RustCallStatus *_Nonnull out_status
 );
+void uniffi_xybrid_uniffi_fn_func_set_binding(RustBuffer binding, RustCallStatus *_Nonnull out_status
+);
 RustBuffer ffi_xybrid_uniffi_rustbuffer_alloc(int32_t size, RustCallStatus *_Nonnull out_status
 );
 RustBuffer ffi_xybrid_uniffi_rustbuffer_from_bytes(ForeignBytes bytes, RustCallStatus *_Nonnull out_status
@@ -204,6 +206,9 @@ void ffi_xybrid_uniffi_rust_future_free_void(void* _Nonnull handle
 void ffi_xybrid_uniffi_rust_future_complete_void(void* _Nonnull handle, RustCallStatus *_Nonnull out_status
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir(void
+    
+);
+uint16_t uniffi_xybrid_uniffi_checksum_func_set_binding(void
     
 );
 uint16_t uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id(void
