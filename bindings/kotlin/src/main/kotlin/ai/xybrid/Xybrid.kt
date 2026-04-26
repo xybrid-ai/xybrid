@@ -45,6 +45,7 @@ object Xybrid {
         if (initialized) return
         synchronized(this) {
             if (initialized) return
+            setBinding("kotlin")
             val cacheDir = File(context.filesDir, "xybrid/models")
             initSdkCacheDir(cacheDir.absolutePath)
             initialized = true
