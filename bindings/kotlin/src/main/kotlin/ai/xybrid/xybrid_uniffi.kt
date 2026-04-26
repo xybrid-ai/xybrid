@@ -413,6 +413,8 @@ internal interface _UniFFILib : Library {
     ): Pointer
     fun uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(`cacheDir`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
+    fun uniffi_xybrid_uniffi_fn_func_set_binding(`binding`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Unit
     fun ffi_xybrid_uniffi_rustbuffer_alloc(`size`: Int,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_xybrid_uniffi_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,_uniffi_out_err: RustCallStatus, 
@@ -529,6 +531,8 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir(
     ): Short
+    fun uniffi_xybrid_uniffi_checksum_func_set_binding(
+    ): Short
     fun uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id(
     ): Short
     fun uniffi_xybrid_uniffi_checksum_method_xybridmodel_has_voices(
@@ -567,6 +571,9 @@ private fun uniffiCheckContractApiVersion(lib: _UniFFILib) {
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir() != 59754.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_xybrid_uniffi_checksum_func_set_binding() != 53803.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id() != 623.toShort()) {
@@ -2158,6 +2165,14 @@ fun `initSdkCacheDir`(`cacheDir`: String) =
     
     rustCall() { _status ->
     _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(FfiConverterString.lower(`cacheDir`),_status)
+}
+
+
+
+fun `setBinding`(`binding`: String) =
+    
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_set_binding(FfiConverterString.lower(`binding`),_status)
 }
 
 
