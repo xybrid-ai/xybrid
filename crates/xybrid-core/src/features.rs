@@ -31,7 +31,9 @@ const ALL_FEATURES: &[(&str, bool)] = &[
 /// and return a slice with a stable address.
 pub fn enabled() -> &'static [&'static str] {
     static ENABLED: OnceLock<Vec<&'static str>> = OnceLock::new();
-    ENABLED.get_or_init(|| filter_enabled(ALL_FEATURES)).as_slice()
+    ENABLED
+        .get_or_init(|| filter_enabled(ALL_FEATURES))
+        .as_slice()
 }
 
 fn filter_enabled(items: &[(&'static str, bool)]) -> Vec<&'static str> {

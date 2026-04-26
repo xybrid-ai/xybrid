@@ -33,9 +33,7 @@ pub fn is_telemetry_opted_out() -> bool {
 /// [`OPTED_OUT`] cache used by [`is_telemetry_opted_out`]).
 fn parse_optout(value: Option<&str>) -> bool {
     matches!(
-        value
-            .map(|v| v.trim().to_ascii_lowercase())
-            .as_deref(),
+        value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
         Some("1") | Some("true") | Some("yes")
     )
 }

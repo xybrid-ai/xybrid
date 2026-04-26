@@ -1267,14 +1267,26 @@ mod tests {
             "header should start with sanitized binding: {}",
             header
         );
-        assert!(header.contains("sdk_version="), "missing sdk_version: {}", header);
-        assert!(header.contains("core_version="), "missing core_version: {}", header);
+        assert!(
+            header.contains("sdk_version="),
+            "missing sdk_version: {}",
+            header
+        );
+        assert!(
+            header.contains("core_version="),
+            "missing core_version: {}",
+            header
+        );
         assert!(
             header.contains(&format!("platform={}", current_platform())),
             "platform mismatch: {}",
             header
         );
-        assert!(header.contains("backends="), "missing backends key: {}", header);
+        assert!(
+            header.contains("backends="),
+            "missing backends key: {}",
+            header
+        );
     }
 
     #[test]
@@ -1533,10 +1545,7 @@ mod tests {
         let req = client.agent.get("http://127.0.0.1:1/v1/models");
         let req = client.apply_client_header_with_optout(req, false);
         let header = req.header(CLIENT_HEADER_NAME);
-        assert!(
-            header.is_some(),
-            "header must be set when opt-out is false"
-        );
+        assert!(header.is_some(), "header must be set when opt-out is false");
         let value = header.unwrap();
         assert!(value.contains("binding=rust;"), "value: {}", value);
         assert!(value.contains("sdk_version="), "value: {}", value);
@@ -1632,7 +1641,9 @@ mod tests {
             .with_binding("flutter");
 
         client.list_models().expect("list_models should succeed");
-        client.get_model("test-model").expect("get_model should succeed");
+        client
+            .get_model("test-model")
+            .expect("get_model should succeed");
         client
             .resolve("test-model", Some("apple-arm64-cpu"))
             .expect("resolve should succeed");

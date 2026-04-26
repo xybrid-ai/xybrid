@@ -196,7 +196,6 @@ pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
 pub use streaming::{FfiPartialResult, FfiStreamState, FfiStreamStats, FfiStreamingConfig};
-pub use telemetry_optout::is_telemetry_opted_out;
 pub use telemetry::{
     // Orchestrator event bridge
     bridge_orchestrator_events,
@@ -214,6 +213,7 @@ pub use telemetry::{
     TelemetryEvent,
     TelemetrySender,
 };
+pub use telemetry_optout::is_telemetry_opted_out;
 
 /// Re-export OrchestratorEvent for event subscriptions
 pub use xybrid_core::event_bus::OrchestratorEvent;
