@@ -30,7 +30,7 @@ fn init_sdk_cache_dir(cache_dir: String) {
 /// The xybrid-uniffi crate is shared by both Kotlin and Swift, so the
 /// identity must be supplied by the platform-side wrapper at SDK init —
 /// the Kotlin `Xybrid.init(...)` calls `setBinding("kotlin")`, and the
-/// Swift `Xybrid.init(...)` calls `setBinding("swift")` (US-008).
+/// Swift `Xybrid.initialize()` calls `setBinding(binding: "swift")`.
 ///
 /// Only the known platform values are forwarded to `xybrid_sdk::set_binding`
 /// (which requires a `&'static str`). Any other input collapses to
@@ -41,12 +41,21 @@ fn init_sdk_cache_dir(cache_dir: String) {
 /// calls are silent no-ops.
 #[uniffi::export]
 fn set_binding(binding: String) {
-    let static_binding: &'static str = match binding.as_str() {
+    xybrid_sdk::set_binding(resolve_binding(binding.as_str()));
+}
+
+/// Pure helper that maps a runtime binding string to a `&'static str`.
+///
+/// Factored out of `set_binding` so tests can exercise every accepted
+/// platform without touching the process-global `OnceLock` in xybrid-sdk
+/// (the OnceLock's first-set-wins semantics make per-platform integration
+/// tests in the same process race-prone).
+fn resolve_binding(binding: &str) -> &'static str {
+    match binding {
         "kotlin" => "kotlin",
         "swift" => "swift",
         _ => xybrid_sdk::DEFAULT_BINDING,
-    };
-    xybrid_sdk::set_binding(static_binding);
+    }
 }
 
 /// Error type exposed via UniFFI to Swift/Kotlin consumers.
@@ -509,9 +518,33 @@ impl XybridModelLoader {
 mod tests {
     use super::*;
 
-    // Single combined test: the binding is process-global via OnceLock,
-    // so splitting into multiple tests would race on which one observes
-    // the first set_binding call.
+    // Pure-helper tests: exercise every accepted platform without touching
+    // the process-global OnceLock in xybrid-sdk. This is the only way to
+    // assert "swift" → "swift" mapping in the same test process where the
+    // Kotlin integration test below has already locked the OnceLock.
+    #[test]
+    fn resolve_binding_kotlin_returns_kotlin() {
+        assert_eq!(resolve_binding("kotlin"), "kotlin");
+    }
+
+    #[test]
+    fn resolve_binding_swift_returns_swift() {
+        assert_eq!(resolve_binding("swift"), "swift");
+    }
+
+    #[test]
+    fn resolve_binding_unknown_returns_default() {
+        assert_eq!(resolve_binding("evil_unknown"), xybrid_sdk::DEFAULT_BINDING);
+        assert_eq!(resolve_binding(""), xybrid_sdk::DEFAULT_BINDING);
+        assert_eq!(resolve_binding("KOTLIN"), xybrid_sdk::DEFAULT_BINDING);
+        assert_eq!(resolve_binding("flutter"), xybrid_sdk::DEFAULT_BINDING);
+    }
+
+    // Single combined integration test: the binding is process-global via
+    // OnceLock, so splitting into multiple tests that call `set_binding`
+    // would race on which one observes the first set. The Kotlin path is
+    // the canonical wire-through; the Swift path is verified at the pure
+    // `resolve_binding` layer above.
     #[test]
     fn set_binding_kotlin_registers_kotlin_binding() {
         // Kotlin wrapper calls this from Xybrid.init().
@@ -527,16 +560,19 @@ mod tests {
             .expect("default_client should succeed in tests");
         assert_eq!(client.binding(), "kotlin");
 
-        // OnceLock first-set-wins: a later call (e.g. from a misbehaving
-        // consumer) cannot overwrite the registered identity.
+        // OnceLock first-set-wins: a later call (e.g. from the Swift wrapper
+        // running in the same process, or a misbehaving consumer) cannot
+        // overwrite the registered identity.
         set_binding("swift".to_string());
         assert_eq!(xybrid_sdk::get_binding(), "kotlin");
 
         // Unknown values must not propagate raw to the registry header
         // (defensive sanitization parallel to build_client_header). The
         // OnceLock is already set, so behavior is unobservable here, but
-        // the match arm is exercised — the `_ => DEFAULT_BINDING` branch
-        // is what protects a cold-start process from header pollution.
+        // the wire-through call still goes through `resolve_binding`'s
+        // closed match — the `_ => DEFAULT_BINDING` branch is what
+        // protects a cold-start process from header pollution and is
+        // exercised directly by `resolve_binding_unknown_returns_default`.
         set_binding("evil_unknown".to_string());
         assert_eq!(xybrid_sdk::get_binding(), "kotlin");
     }
