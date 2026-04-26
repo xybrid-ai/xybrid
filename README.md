@@ -358,7 +358,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 
 ## Why Xybrid?
 
-- **Privacy first** — All inference runs on-device. Your data never leaves the device. The SDK attaches a small fleet-attribution header on registry metadata calls — see [registry telemetry](docs/telemetry/registry.md) for what it contains and how to opt out via `XYBRID_TELEMETRY_OPTOUT=1`.
+- **Privacy first** — All inference runs on-device. Your data never leaves the device. The SDK attaches a small fleet-attribution header on registry metadata calls — see [registry telemetry](docs/telemetry/registry.md).
 - **Offline capable** — No internet required after initial model download.
 - **Cross-platform** — One API across iOS, Android, macOS, Linux, and Windows.
 - **Pipeline orchestration** — Chain models together (ASR → LLM → TTS) in a single call.
