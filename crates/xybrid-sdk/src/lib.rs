@@ -232,11 +232,37 @@ use std::sync::OnceLock;
 /// Global SDK configuration.
 static SDK_CONFIG: OnceLock<SdkConfig> = OnceLock::new();
 
+/// Default binding identifier reported in the registry telemetry header.
+///
+/// Each platform binding (Flutter, Kotlin, Swift, Unity) overrides this via
+/// [`SdkConfig::with_binding`] so registry calls can be attributed correctly.
+pub const DEFAULT_BINDING: &str = "rust";
+
 /// SDK configuration options.
 #[derive(Debug, Clone, Default)]
 pub struct SdkConfig {
     /// Custom cache directory (required on Android, optional elsewhere)
     pub cache_dir: Option<std::path::PathBuf>,
+    /// Binding identifier reported in the `X-Xybrid-Client` registry header.
+    ///
+    /// Defaults to [`DEFAULT_BINDING`] when unset. Bindings should set this
+    /// at SDK init via [`SdkConfig::with_binding`].
+    pub binding: Option<&'static str>,
+}
+
+impl SdkConfig {
+    /// Override the binding identifier reported in the registry telemetry header.
+    ///
+    /// Returns `self` to support a fluent builder style.
+    pub fn with_binding(mut self, binding: &'static str) -> Self {
+        self.binding = Some(binding);
+        self
+    }
+
+    /// Resolve the configured binding identifier, falling back to [`DEFAULT_BINDING`].
+    pub fn binding(&self) -> &'static str {
+        self.binding.unwrap_or(DEFAULT_BINDING)
+    }
 }
 
 /// Initialize the SDK with a custom cache directory.
@@ -303,6 +329,7 @@ pub fn init_sdk_cache_dir(cache_dir: impl Into<std::path::PathBuf>) {
 
     let config = SdkConfig {
         cache_dir: Some(cache_path),
+        ..SdkConfig::default()
     };
     let _ = SDK_CONFIG.set(config);
 }
@@ -758,4 +785,42 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
         total_latency_ms,
         final_output,
     })
+}
+
+#[cfg(test)]
+mod sdk_config_tests {
+    use super::{SdkConfig, DEFAULT_BINDING};
+
+    #[test]
+    fn default_binding_is_rust() {
+        assert_eq!(DEFAULT_BINDING, "rust");
+    }
+
+    #[test]
+    fn default_config_resolves_to_default_binding() {
+        let cfg = SdkConfig::default();
+        assert!(cfg.binding.is_none());
+        assert_eq!(cfg.binding(), "rust");
+    }
+
+    #[test]
+    fn with_binding_overrides_default() {
+        let cfg = SdkConfig::default().with_binding("flutter");
+        assert_eq!(cfg.binding, Some("flutter"));
+        assert_eq!(cfg.binding(), "flutter");
+    }
+
+    #[test]
+    fn with_binding_preserves_other_fields() {
+        let cfg = SdkConfig {
+            cache_dir: Some(std::path::PathBuf::from("/tmp/xybrid-cache")),
+            ..SdkConfig::default()
+        }
+        .with_binding("kotlin");
+        assert_eq!(cfg.binding(), "kotlin");
+        assert_eq!(
+            cfg.cache_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/xybrid-cache"))
+        );
+    }
 }
