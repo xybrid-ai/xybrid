@@ -37,7 +37,7 @@ use crate::model::SdkError;
 use crate::platform::current_platform;
 use crate::source::detect_platform;
 use crate::telemetry_optout::is_telemetry_opted_out;
-use crate::DEFAULT_BINDING;
+use crate::{get_binding, DEFAULT_BINDING};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -138,7 +138,9 @@ pub struct RegistryClient {
 impl RegistryClient {
     /// Create a new registry client with the specified API URLs (primary first).
     ///
-    /// The client carries [`DEFAULT_BINDING`] until overridden via [`Self::with_binding`].
+    /// The client picks up the process-global binding via [`get_binding`]
+    /// (defaulting to [`DEFAULT_BINDING`] when unset). Per-instance overrides
+    /// go through [`Self::with_binding`].
     pub fn new(api_urls: Vec<String>) -> Result<Self, SdkError> {
         if api_urls.is_empty() {
             return Err(SdkError::ConfigError(
@@ -172,7 +174,7 @@ impl RegistryClient {
             agent,
             circuits,
             retry_policy: RetryPolicy::default(),
-            binding: DEFAULT_BINDING,
+            binding: get_binding(),
         })
     }
 
