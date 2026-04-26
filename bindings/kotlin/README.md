@@ -402,6 +402,10 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
 | ARM64 | arm64-v8a | Most modern Android phones |
 | x86_64 | x86_64 | Android emulator on Intel/AMD |
 
+## Telemetry
+
+The Android binding reports `binding=kotlin` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
+
 ## Full Plan
 
 See [DRAFT-PLATFORM-SDK-RESTRUCTURE.md](../../docs/architecture/DRAFT-PLATFORM-SDK-RESTRUCTURE.md) for the complete restructuring plan.
