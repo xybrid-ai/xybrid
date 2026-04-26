@@ -120,6 +120,7 @@ pub mod source;
 pub mod stream;
 pub mod streaming;
 pub mod telemetry;
+pub mod telemetry_optout;
 
 // ============================================================================
 // Re-exports
@@ -195,6 +196,7 @@ pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
 pub use streaming::{FfiPartialResult, FfiStreamState, FfiStreamStats, FfiStreamingConfig};
+pub use telemetry_optout::is_telemetry_opted_out;
 pub use telemetry::{
     // Orchestrator event bridge
     bridge_orchestrator_events,
