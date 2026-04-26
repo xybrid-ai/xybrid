@@ -131,10 +131,14 @@ pub struct RegistryClient {
     circuits: Vec<Arc<CircuitBreaker>>,
     /// Retry policy for API calls
     retry_policy: RetryPolicy,
+    /// Binding identifier reported via the `X-Xybrid-Client` header.
+    binding: &'static str,
 }
 
 impl RegistryClient {
     /// Create a new registry client with the specified API URLs (primary first).
+    ///
+    /// The client carries [`DEFAULT_BINDING`] until overridden via [`Self::with_binding`].
     pub fn new(api_urls: Vec<String>) -> Result<Self, SdkError> {
         if api_urls.is_empty() {
             return Err(SdkError::ConfigError(
@@ -168,7 +172,46 @@ impl RegistryClient {
             agent,
             circuits,
             retry_policy: RetryPolicy::default(),
+            binding: DEFAULT_BINDING,
         })
+    }
+
+    /// Override the binding identifier reported via the `X-Xybrid-Client` header.
+    ///
+    /// Each platform binding (Flutter, Kotlin, Swift, Unity) calls this with
+    /// its own identifier so registry calls are attributed correctly. Defaults
+    /// to [`DEFAULT_BINDING`] when not set.
+    pub fn with_binding(mut self, binding: &'static str) -> Self {
+        self.binding = binding;
+        self
+    }
+
+    /// Return the binding identifier this client reports.
+    pub fn binding(&self) -> &'static str {
+        self.binding
+    }
+
+    /// Apply the [`CLIENT_HEADER_NAME`] header to a request when telemetry is opted in.
+    ///
+    /// When [`is_telemetry_opted_out`] is true, returns the request unchanged so
+    /// no header is set on the wire.
+    fn apply_client_header(&self, req: ureq::Request) -> ureq::Request {
+        self.apply_client_header_with_optout(req, is_telemetry_opted_out())
+    }
+
+    /// Same as [`Self::apply_client_header`] but takes the opt-out flag explicitly.
+    ///
+    /// Tests use this to exercise both branches without depending on the
+    /// process-global `OnceLock` cache that [`is_telemetry_opted_out`] keeps.
+    fn apply_client_header_with_optout(
+        &self,
+        req: ureq::Request,
+        opted_out: bool,
+    ) -> ureq::Request {
+        match build_client_header_with_optout(self.binding, opted_out) {
+            Some(value) => req.set(CLIENT_HEADER_NAME, &value),
+            None => req,
+        }
     }
 
     /// Create a new registry client with a single API URL.
@@ -219,7 +262,8 @@ impl RegistryClient {
     pub fn list_models(&self) -> Result<Vec<ModelSummary>, SdkError> {
         self.execute_with_fallback(|api_url| {
             let url = format!("{}/v1/models", api_url);
-            let response = self.agent.get(&url).call();
+            let req = self.apply_client_header(self.agent.get(&url));
+            let response = req.call();
             self.handle_response(response, "list models")
         })
         .and_then(|response| {
@@ -237,7 +281,8 @@ impl RegistryClient {
     pub fn get_model(&self, mask: &str) -> Result<ModelDetail, SdkError> {
         self.execute_with_fallback(|api_url| {
             let url = format!("{}/v1/models/{}", api_url, mask);
-            let response = self.agent.get(&url).call();
+            let req = self.apply_client_header(self.agent.get(&url));
+            let response = req.call();
             self.handle_response_with_404(response, "get model", || {
                 SdkError::ModelNotFound(format!("Model '{}' not found", mask))
             })
@@ -262,7 +307,8 @@ impl RegistryClient {
                 "{}/v1/models/{}/resolve?platform={}",
                 api_url, mask, platform
             );
-            let response = self.agent.get(&url).call();
+            let req = self.apply_client_header(self.agent.get(&url));
+            let response = req.call();
             self.handle_response_with_404(response, "resolve model", || {
                 SdkError::ModelNotFound(format!(
                     "Model '{}' not found or no compatible variant for platform '{}'",
@@ -1459,6 +1505,194 @@ mod tests {
             call_count.load(Ordering::SeqCst),
             1,
             "offline errors must not be retried within a single URL"
+        );
+    }
+
+    #[test]
+    fn registry_client_default_binding_is_rust() {
+        let client = RegistryClient::default_client().unwrap();
+        assert_eq!(client.binding(), DEFAULT_BINDING);
+    }
+
+    #[test]
+    fn registry_client_with_binding_overrides_default() {
+        let client = RegistryClient::default_client()
+            .unwrap()
+            .with_binding("flutter");
+        assert_eq!(client.binding(), "flutter");
+    }
+
+    #[test]
+    fn apply_client_header_sets_header_when_not_opted_out() {
+        // Build a request through the helper that takes opted_out explicitly so
+        // the test never touches the OnceLock-cached opt-out state owned by
+        // `is_telemetry_opted_out`.
+        let client = RegistryClient::with_url("http://127.0.0.1:1").unwrap();
+        let req = client.agent.get("http://127.0.0.1:1/v1/models");
+        let req = client.apply_client_header_with_optout(req, false);
+        let header = req.header(CLIENT_HEADER_NAME);
+        assert!(
+            header.is_some(),
+            "header must be set when opt-out is false"
+        );
+        let value = header.unwrap();
+        assert!(value.contains("binding=rust;"), "value: {}", value);
+        assert!(value.contains("sdk_version="), "value: {}", value);
+        assert!(value.contains("core_version="), "value: {}", value);
+        assert!(value.contains("platform="), "value: {}", value);
+        assert!(value.contains("backends="), "value: {}", value);
+    }
+
+    #[test]
+    fn apply_client_header_omits_header_when_opted_out() {
+        let client = RegistryClient::with_url("http://127.0.0.1:1").unwrap();
+        let req = client.agent.get("http://127.0.0.1:1/v1/models");
+        let req = client.apply_client_header_with_optout(req, true);
+        assert_eq!(
+            req.header(CLIENT_HEADER_NAME),
+            None,
+            "no header on the wire when telemetry is opted out"
+        );
+    }
+
+    #[test]
+    fn apply_client_header_uses_configured_binding() {
+        let client = RegistryClient::with_url("http://127.0.0.1:1")
+            .unwrap()
+            .with_binding("flutter");
+        let req = client.agent.get("http://127.0.0.1:1/v1/models");
+        let req = client.apply_client_header_with_optout(req, false);
+        let value = req.header(CLIENT_HEADER_NAME).unwrap();
+        assert!(
+            value.starts_with("binding=flutter;"),
+            "configured binding must flow into the header: {}",
+            value
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Mock-server integration tests for header wiring.
+    //
+    // These exercise the actual HTTP path through `list_models`, `get_model`,
+    // and `resolve` against a local httpmock instance. The opt-in/opt-out
+    // matrix is covered by the in-process `apply_client_header_with_optout`
+    // tests above (the OnceLock cache in `is_telemetry_opted_out` makes a
+    // process-wide flip impractical here).
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn metadata_calls_send_x_xybrid_client_header() {
+        // Spins up a local httpmock server and exercises all three metadata
+        // methods through the real wire path. Each mock matches against the
+        // EXACT expected header value, computed from `build_client_header`
+        // with the same binding the client is configured with. If the wired
+        // header value differs in any field the mock won't match and the
+        // request will 404 — so a regression in format or content surfaces
+        // as a test failure, not a silent pass.
+        use httpmock::prelude::*;
+
+        let expected = build_client_header_with_optout("flutter", false)
+            .expect("header must be built when not opted out");
+
+        let server = MockServer::start();
+
+        let list_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models")
+                .header(CLIENT_HEADER_NAME, expected.as_str());
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"models": []}"#);
+        });
+        let get_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/test-model")
+                .header(CLIENT_HEADER_NAME, expected.as_str());
+            then.status(200).header("content-type", "application/json")
+                .body(
+                    r#"{"id":"test-model","family":"test","task":"text-generation","parameters":1,"description":"d","default_variant":null,"variants":{}}"#,
+                );
+        });
+        let resolve_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/test-model/resolve")
+                .query_param_exists("platform")
+                .header(CLIENT_HEADER_NAME, expected.as_str());
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"mask":"test-model","platform":"x","resolved":{"hf_repo":"o/r","file":"u.xyb","download_url":"https://x","format":"onnx","quantization":"fp32","size_bytes":1,"sha256":""}}"#,
+                );
+        });
+
+        let client = RegistryClient::with_url(server.base_url())
+            .unwrap()
+            .with_binding("flutter");
+
+        client.list_models().expect("list_models should succeed");
+        client.get_model("test-model").expect("get_model should succeed");
+        client
+            .resolve("test-model", Some("apple-arm64-cpu"))
+            .expect("resolve should succeed");
+
+        list_mock.assert();
+        get_mock.assert();
+        resolve_mock.assert();
+
+        // Independent format check on the expected value to ensure the
+        // exact-match assertion above is meaningful (not e.g. the empty string).
+        assert!(expected.starts_with("binding=flutter;"), "{}", expected);
+        assert!(expected.contains("sdk_version="), "{}", expected);
+        assert!(expected.contains("core_version="), "{}", expected);
+        assert!(expected.contains("platform="), "{}", expected);
+        assert!(expected.contains("backends="), "{}", expected);
+    }
+
+    #[test]
+    fn metadata_calls_omit_header_when_opt_out_helper_returns_none() {
+        // Mock-server companion to `apply_client_header_omits_header_when_opted_out`:
+        // verifies that when the helper is invoked with `opted_out=true` (the
+        // contract that `build_client_header` honors under
+        // XYBRID_TELEMETRY_OPTOUT=1), no X-Xybrid-Client header reaches the
+        // wire. We can't flip the process-wide OnceLock cache that
+        // `is_telemetry_opted_out` keeps, so this test exercises the wire path
+        // through `apply_client_header_with_optout(_, true)` directly. The
+        // mock fails the match if the header is present (header(name, "")
+        // requires equality, which a missing header satisfies as None).
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+
+        // A permissive mock: matches any request to /v1/models. We then
+        // inspect the mock's hit count to confirm the request reached it
+        // (i.e. wasn't rejected) and rely on the absence of any
+        // header-asserting mock. To assert no header, we set up a SECOND
+        // mock that REQUIRES the header — if that one fires, the wire
+        // carried the header and the test fails.
+        let permissive = server.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"models": []}"#);
+        });
+        let with_header = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models")
+                .header_exists(CLIENT_HEADER_NAME);
+            then.status(599).body("UNEXPECTED HEADER");
+        });
+
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+        let url = format!("{}/v1/models", server.base_url());
+        let req = client.apply_client_header_with_optout(client.agent.get(&url), true);
+        let response = req.call().expect("request should reach mock server");
+        assert_eq!(response.status(), 200);
+
+        permissive.assert();
+        assert_eq!(
+            with_header.hits(),
+            0,
+            "X-Xybrid-Client header must NOT be sent when opted out"
         );
     }
 }
