@@ -135,6 +135,7 @@ pub use xybrid_core::device::{
     ResourceUsageSummary, RunGuard as ResourceRunGuard,
 };
 pub use xybrid_core::execution;
+pub use xybrid_core::features;
 pub use xybrid_core::ir;
 pub use xybrid_core::orchestrator;
 pub use xybrid_core::orchestrator::routing_engine;
