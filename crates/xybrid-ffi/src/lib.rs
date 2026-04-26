@@ -708,6 +708,73 @@ pub extern "C" fn xybrid_init() -> i32 {
     0
 }
 
+/// Set the platform binding identifier reported in registry call telemetry.
+///
+/// Call this once at application startup, BEFORE [`xybrid_init`], to declare
+/// which platform binding (e.g. Unity) is hosting the SDK. The value flows into
+/// the `X-Xybrid-Client` HTTP header on every registry metadata call.
+///
+/// First-call-wins semantics: subsequent calls are silent no-ops. If never
+/// called, the SDK reports the default `"rust"` binding.
+///
+/// The mapping is bounded: only known platform identifiers are accepted; every
+/// other input falls back to the default `"rust"` binding to bound cardinality
+/// on the registry side.
+///
+/// # Parameters
+///
+/// - `binding`: A null-terminated UTF-8 string. Currently the only recognized
+///   value is `"unity"`; any other value collapses to `"rust"`.
+///
+/// # Returns
+///
+/// - `0` on success
+/// - `-1` if `binding` is null or not valid UTF-8 (check `xybrid_last_error()`)
+///
+/// # Example (C)
+///
+/// ```c
+/// xybrid_set_binding("unity");
+/// xybrid_init();
+/// ```
+///
+/// # Safety
+///
+/// `binding` must be either null or a pointer to a null-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_set_binding(binding: *const c_char) -> i32 {
+    clear_last_error();
+
+    if binding.is_null() {
+        set_last_error("binding is null");
+        return -1;
+    }
+
+    let binding_str = match CStr::from_ptr(binding).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("binding is not valid UTF-8");
+            return -1;
+        }
+    };
+
+    xybrid_sdk::set_binding(resolve_binding(binding_str));
+    0
+}
+
+/// Map a runtime binding string to a `'static str` literal.
+///
+/// Closed-allowlist: only `"unity"` is accepted; every other value collapses
+/// to [`xybrid_sdk::DEFAULT_BINDING`]. The closed match is required because
+/// `xybrid_sdk::set_binding` takes `&'static str`, and it doubles as defensive
+/// sanitization at the FFI boundary.
+fn resolve_binding(binding: &str) -> &'static str {
+    match binding {
+        "unity" => "unity",
+        _ => xybrid_sdk::DEFAULT_BINDING,
+    }
+}
+
 /// Get the library version string.
 ///
 /// Returns a pointer to a null-terminated string containing the library version.
@@ -4557,6 +4624,76 @@ mod tests {
         // Init should return 0 (success)
         let result = xybrid_init();
         assert_eq!(result, 0);
+    }
+
+    // ========================================================================
+    // Tests for xybrid_set_binding (US-009)
+    // ========================================================================
+    //
+    // The integration test below calls `xybrid_set_binding("unity")` which
+    // sets a process-global `OnceLock<&'static str>` in xybrid-sdk. The lock
+    // is first-set-wins, so other tests that want to assert behavior under a
+    // specific binding must use the pure `resolve_binding` helper to avoid
+    // racing on which test runs first. Default behavior ("rust" when unset)
+    // is asserted by checking `xybrid_sdk::DEFAULT_BINDING` and via the
+    // `resolve_binding` helper for unknown inputs — both are independent of
+    // the OnceLock state.
+
+    #[test]
+    fn test_resolve_binding_unity_returns_unity() {
+        assert_eq!(resolve_binding("unity"), "unity");
+    }
+
+    #[test]
+    fn test_resolve_binding_unknown_returns_default() {
+        assert_eq!(resolve_binding(""), xybrid_sdk::DEFAULT_BINDING);
+        assert_eq!(resolve_binding("UNITY"), xybrid_sdk::DEFAULT_BINDING);
+        assert_eq!(resolve_binding("flutter"), xybrid_sdk::DEFAULT_BINDING);
+        assert_eq!(resolve_binding("rust"), xybrid_sdk::DEFAULT_BINDING);
+        assert_eq!(resolve_binding("evil_unknown"), xybrid_sdk::DEFAULT_BINDING);
+    }
+
+    #[test]
+    fn test_default_binding_without_set_binding_is_rust() {
+        // PRD acceptance criterion: "init without set_binding produces
+        // binding='rust'". The xybrid-sdk OnceLock falls back to
+        // DEFAULT_BINDING when never set; verify the const itself is "rust".
+        assert_eq!(xybrid_sdk::DEFAULT_BINDING, "rust");
+    }
+
+    #[test]
+    fn test_xybrid_set_binding_null_returns_error() {
+        let result = unsafe { xybrid_set_binding(std::ptr::null()) };
+        assert_eq!(result, -1);
+        let error_ptr = xybrid_last_error();
+        assert!(!error_ptr.is_null());
+    }
+
+    #[test]
+    fn test_xybrid_set_binding_unity_registers_unity_binding() {
+        // Combined integration test (single-test pattern matching US-007/US-008):
+        // the OnceLock in xybrid-sdk locks process-globally, so once this test
+        // sets "unity" no later test in this process can flip it back.
+        let binding = CString::new("unity").expect("static literal has no null bytes");
+        let result = unsafe { xybrid_set_binding(binding.as_ptr()) };
+        assert_eq!(result, 0);
+
+        // After the call, xybrid_sdk::get_binding() reports "unity".
+        assert_eq!(xybrid_sdk::get_binding(), "unity");
+
+        // PRD: "must be called before xybrid_init" — verify init still succeeds.
+        assert_eq!(xybrid_init(), 0);
+
+        // The default RegistryClient (used by ModelLoader::from_registry under
+        // the hood) now reports binding="unity" on the X-Xybrid-Client header.
+        let client = xybrid_sdk::RegistryClient::default_client()
+            .expect("default registry client constructs without network access");
+        assert_eq!(client.binding(), "unity");
+
+        // First-set-wins: a second call with a different value cannot overwrite.
+        let other = CString::new("rust").expect("static literal has no null bytes");
+        let _ = unsafe { xybrid_set_binding(other.as_ptr()) };
+        assert_eq!(xybrid_sdk::get_binding(), "unity");
     }
 
     #[test]

@@ -53,13 +53,19 @@ namespace Xybrid
         /// calls are no-ops.
         /// </remarks>
         /// <exception cref="XybridException">Thrown if initialization fails.</exception>
-        public static void Initialize()
+        public static unsafe void Initialize()
         {
             lock (_lock)
             {
                 if (_initialized)
                 {
                     return;
+                }
+
+                byte[] bindingBytes = NativeHelpers.ToUtf8Bytes("unity");
+                fixed (byte* bindingPtr = bindingBytes)
+                {
+                    NativeMethods.xybrid_set_binding(bindingPtr);
                 }
 
                 int result = NativeMethods.xybrid_init();

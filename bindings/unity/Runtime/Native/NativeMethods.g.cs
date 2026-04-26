@@ -49,6 +49,44 @@ namespace Xybrid.Native
         internal static extern int xybrid_init();
 
         /// <summary>
+        ///  Set the platform binding identifier reported in registry call telemetry.
+        ///
+        ///  Call this once at application startup, BEFORE [`xybrid_init`], to declare
+        ///  which platform binding (e.g. Unity) is hosting the SDK. The value flows into
+        ///  the `X-Xybrid-Client` HTTP header on every registry metadata call.
+        ///
+        ///  First-call-wins semantics: subsequent calls are silent no-ops. If never
+        ///  called, the SDK reports the default `"rust"` binding.
+        ///
+        ///  The mapping is bounded: only known platform identifiers are accepted; every
+        ///  other input falls back to the default `"rust"` binding to bound cardinality
+        ///  on the registry side.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `binding`: A null-terminated UTF-8 string. Currently the only recognized
+        ///    value is `"unity"`; any other value collapses to `"rust"`.
+        ///
+        ///  # Returns
+        ///
+        ///  - `0` on success
+        ///  - `-1` if `binding` is null or not valid UTF-8 (check `xybrid_last_error()`)
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  xybrid_set_binding("unity");
+        ///  xybrid_init();
+        ///  ```
+        ///
+        ///  # Safety
+        ///
+        ///  `binding` must be either null or a pointer to a null-terminated C string.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_set_binding", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int xybrid_set_binding(byte* binding);
+
+        /// <summary>
         ///  Get the library version string.
         ///
         ///  Returns a pointer to a null-terminated string containing the library version.
