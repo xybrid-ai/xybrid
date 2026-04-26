@@ -29,7 +29,7 @@ mod commands;
 mod tracing_viz;
 pub mod ui;
 
-use commands::{CacheCommand, ModelsCommand};
+use commands::{CacheCommand, ModelsCommand, TelemetryCommand};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -289,6 +289,11 @@ enum Commands {
         /// Target platform (auto-detected if not specified)
         #[arg(short, long, value_name = "PLATFORM")]
         platform: Option<String>,
+    },
+    /// Report or manage registry telemetry settings
+    Telemetry {
+        #[command(subcommand)]
+        command: TelemetryCommand,
     },
 }
 
@@ -616,6 +621,7 @@ fn run_command(cli: Cli) -> Result<()> {
             output,
             platform,
         } => commands::bundle::handle_bundle_command(&model, output, platform.as_deref()),
+        Commands::Telemetry { command } => commands::telemetry::handle_telemetry_command(command),
     }
 }
 
