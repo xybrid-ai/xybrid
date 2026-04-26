@@ -232,11 +232,41 @@ use std::sync::OnceLock;
 /// Global SDK configuration.
 static SDK_CONFIG: OnceLock<SdkConfig> = OnceLock::new();
 
+/// Process-global binding identifier set by platform bindings at init.
+///
+/// First-set-wins (backed by [`OnceLock`]); after the first
+/// [`set_binding`] call, subsequent calls are silent no-ops. Read via
+/// [`get_binding`], which returns [`DEFAULT_BINDING`] when unset.
+static BINDING: OnceLock<&'static str> = OnceLock::new();
+
 /// Default binding identifier reported in the registry telemetry header.
 ///
 /// Each platform binding (Flutter, Kotlin, Swift, Unity) overrides this via
-/// [`SdkConfig::with_binding`] so registry calls can be attributed correctly.
+/// [`set_binding`] (process-global) or [`SdkConfig::with_binding`] (per-config)
+/// so registry calls can be attributed correctly.
 pub const DEFAULT_BINDING: &str = "rust";
+
+/// Register the binding identifier for this process.
+///
+/// Each platform binding (Flutter, Kotlin, Swift, Unity) calls this once at
+/// SDK init. The first call wins — subsequent calls are silent no-ops, which
+/// matches the lifecycle (a process is bound to exactly one platform binding).
+///
+/// `RegistryClient` default constructors (`new`, `default_client`,
+/// `with_url`, `from_env`) read this value via [`get_binding`], so any
+/// `RegistryClient` constructed after [`set_binding`] reports the configured
+/// binding in the `X-Xybrid-Client` header without explicit threading.
+pub fn set_binding(binding: &'static str) {
+    let _ = BINDING.set(binding);
+}
+
+/// Read the process-global binding identifier.
+///
+/// Returns the value passed to the most recent successful [`set_binding`]
+/// call, falling back to [`DEFAULT_BINDING`] when unset.
+pub fn get_binding() -> &'static str {
+    BINDING.get().copied().unwrap_or(DEFAULT_BINDING)
+}
 
 /// SDK configuration options.
 #[derive(Debug, Clone, Default)]
