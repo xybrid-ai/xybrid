@@ -199,6 +199,9 @@ pub mod template_executor {
 /// Allows Core to check cache without depending on SDK.
 pub mod cache_provider;
 
+/// Runtime feature-flag introspection (which backends were compiled in).
+pub mod features;
+
 // ============================================================================
 // Data Types & Intermediate Representation
 // ============================================================================
