@@ -34,7 +34,10 @@
 
 use crate::cache::CacheManager;
 use crate::model::SdkError;
+use crate::platform::current_platform;
 use crate::source::detect_platform;
+use crate::telemetry_optout::is_telemetry_opted_out;
+use crate::DEFAULT_BINDING;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -51,6 +54,64 @@ pub const FALLBACK_REGISTRY_URL: &str = "https://r2.xybrid.dev";
 
 /// All registry URLs in priority order.
 pub const REGISTRY_URLS: &[&str] = &[DEFAULT_REGISTRY_URL, FALLBACK_REGISTRY_URL];
+
+/// HTTP header carrying anonymous Xybrid SDK client identity for registry calls.
+///
+/// Set on every metadata request unless [`is_telemetry_opted_out`] is true.
+/// See `docs/telemetry/registry.md` for the full schema.
+pub const CLIENT_HEADER_NAME: &str = "X-Xybrid-Client";
+
+/// Build the value for the [`CLIENT_HEADER_NAME`] header.
+///
+/// Returns `None` when the user has opted out via `XYBRID_TELEMETRY_OPTOUT=1`.
+/// Callers must skip setting the header when this returns `None`.
+///
+/// The `binding` argument is sanitized: if it contains any character outside
+/// `[a-z0-9_-]`, or is empty, it is replaced with [`DEFAULT_BINDING`] to
+/// prevent user-supplied junk from being smuggled into the header value.
+///
+/// # Format
+///
+/// `binding={b}; sdk_version={v}; core_version={cv}; platform={p}; backends={list}`
+///
+/// `backends` is the comma-separated, alphabetical output of
+/// [`xybrid_core::features::enabled`].
+pub fn build_client_header(binding: &str) -> Option<String> {
+    build_client_header_with_optout(binding, is_telemetry_opted_out())
+}
+
+/// Pure helper underlying [`build_client_header`].
+///
+/// Takes the opt-out decision as a parameter so unit tests can exercise both
+/// branches without depending on the process-global `OnceLock` cache that
+/// [`is_telemetry_opted_out`] keeps.
+fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<String> {
+    if opted_out {
+        return None;
+    }
+    let safe_binding = sanitize_binding(binding);
+    let backends = xybrid_core::features::enabled().join(",");
+    Some(format!(
+        "binding={}; sdk_version={}; core_version={}; platform={}; backends={}",
+        safe_binding,
+        env!("CARGO_PKG_VERSION"),
+        xybrid_core::VERSION,
+        current_platform(),
+        backends,
+    ))
+}
+
+fn sanitize_binding(binding: &str) -> &str {
+    let valid = !binding.is_empty()
+        && binding
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
+    if valid {
+        binding
+    } else {
+        DEFAULT_BINDING
+    }
+}
 
 /// Connection timeout in milliseconds.
 const CONNECT_TIMEOUT_MS: u64 = 5000;
@@ -1147,6 +1208,117 @@ mod tests {
         let client = RegistryClient::default_client().unwrap();
         assert_eq!(client.api_urls.len(), 2);
         assert_eq!(client.primary_url(), DEFAULT_REGISTRY_URL);
+    }
+
+    #[test]
+    fn build_client_header_default_binding_has_all_fields() {
+        let header = build_client_header_with_optout("rust", false)
+            .expect("header must be built when not opted out");
+        assert!(
+            header.starts_with("binding=rust;"),
+            "header should start with sanitized binding: {}",
+            header
+        );
+        assert!(header.contains("sdk_version="), "missing sdk_version: {}", header);
+        assert!(header.contains("core_version="), "missing core_version: {}", header);
+        assert!(
+            header.contains(&format!("platform={}", current_platform())),
+            "platform mismatch: {}",
+            header
+        );
+        assert!(header.contains("backends="), "missing backends key: {}", header);
+    }
+
+    #[test]
+    fn build_client_header_opt_out_returns_none() {
+        // Tests the inner helper directly so it doesn't fight the OnceLock-
+        // cached opt-out state owned by `is_telemetry_opted_out` in other tests.
+        assert!(build_client_header_with_optout("rust", true).is_none());
+    }
+
+    #[test]
+    fn build_client_header_malformed_binding_falls_back_to_default() {
+        let header = build_client_header_with_optout("flutter; injected", false)
+            .expect("header must be built when not opted out");
+        assert!(
+            header.starts_with("binding=rust;"),
+            "malformed binding must collapse to DEFAULT_BINDING: {}",
+            header
+        );
+        assert!(
+            !header.contains("injected"),
+            "smuggled tokens must not appear in the header: {}",
+            header
+        );
+    }
+
+    #[test]
+    fn build_client_header_uppercase_binding_falls_back_to_default() {
+        let header = build_client_header_with_optout("FLUTTER", false).unwrap();
+        assert!(
+            header.starts_with("binding=rust;"),
+            "uppercase binding is not in the [a-z0-9_-] allowlist: {}",
+            header
+        );
+    }
+
+    #[test]
+    fn build_client_header_empty_binding_falls_back_to_default() {
+        let header = build_client_header_with_optout("", false).unwrap();
+        assert!(header.starts_with("binding=rust;"));
+    }
+
+    #[test]
+    fn build_client_header_accepts_known_bindings() {
+        for binding in ["rust", "flutter", "kotlin", "swift", "unity"] {
+            let header = build_client_header_with_optout(binding, false).unwrap();
+            let prefix = format!("binding={};", binding);
+            assert!(
+                header.starts_with(&prefix),
+                "binding `{}` should pass sanitization: {}",
+                binding,
+                header
+            );
+        }
+    }
+
+    #[test]
+    fn build_client_header_renders_empty_backends_list_without_panic() {
+        // We can't dynamically clear the compiled-in features table at runtime,
+        // but we can assert the header always includes the literal `backends=`
+        // key and never panics when the value is empty (the join on an empty
+        // slice yields ""). When no features are enabled, the header would end
+        // with `backends=` — and that is valid output, not a panic surface.
+        let header = build_client_header_with_optout("rust", false).unwrap();
+        assert!(
+            header.contains("backends="),
+            "header always carries the backends key: {}",
+            header
+        );
+        // Sanity: the format must not produce the broken `backends=,` shape.
+        assert!(
+            !header.contains("backends=,"),
+            "leading comma in backends list: {}",
+            header
+        );
+    }
+
+    #[test]
+    fn sanitize_binding_accepts_alphanumerics_underscore_and_hyphen() {
+        assert_eq!(sanitize_binding("rust"), "rust");
+        assert_eq!(sanitize_binding("flutter"), "flutter");
+        assert_eq!(sanitize_binding("react-native"), "react-native");
+        assert_eq!(sanitize_binding("snake_case"), "snake_case");
+        assert_eq!(sanitize_binding("v2"), "v2");
+    }
+
+    #[test]
+    fn sanitize_binding_rejects_invalid_chars() {
+        assert_eq!(sanitize_binding(""), DEFAULT_BINDING);
+        assert_eq!(sanitize_binding("Flutter"), DEFAULT_BINDING);
+        assert_eq!(sanitize_binding("flutter app"), DEFAULT_BINDING);
+        assert_eq!(sanitize_binding("flutter;injected"), DEFAULT_BINDING);
+        assert_eq!(sanitize_binding("flu/tter"), DEFAULT_BINDING);
     }
 
     #[test]
