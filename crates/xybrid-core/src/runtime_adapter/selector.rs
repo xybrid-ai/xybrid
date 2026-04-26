@@ -809,8 +809,7 @@ mod tests {
             // Headless CI without a Metal device — the probe legitimately
             // failed; the selector should fall through to llama.cpp and
             // we verify THAT instead, so CI stays green.
-            let chosen =
-                select_with_cfg(&SelectionParams::new("qwen3.5-3b"), &reg, &cfg).unwrap();
+            let chosen = select_with_cfg(&SelectionParams::new("qwen3.5-3b"), &reg, &cfg).unwrap();
             assert_eq!(chosen, BackendChoice::LlamaCpp);
             return;
         }
