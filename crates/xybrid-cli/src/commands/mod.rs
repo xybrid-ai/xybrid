@@ -13,6 +13,7 @@
 //! | [`pack`] | `pack` - Package local model artifacts |
 //! | [`pipeline`] | `prepare`, `plan` - Pipeline validation and planning |
 //! | [`trace`] | `trace` - Session telemetry analysis |
+//! | [`telemetry`] | `telemetry status` - Registry telemetry opt-out reporting |
 //! | [`types`] | Shared CLI enum types (ModelsCommand, CacheCommand) |
 //! | [`utils`] | Shared utility functions |
 
@@ -25,9 +26,11 @@ pub mod pack;
 pub mod pipeline;
 pub mod repl;
 pub mod run;
+pub mod telemetry;
 pub mod trace;
 pub mod types;
 pub mod utils;
 
 // Re-export shared types
+pub(crate) use telemetry::TelemetryCommand;
 pub(crate) use types::{CacheCommand, ModelsCommand};
