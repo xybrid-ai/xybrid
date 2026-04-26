@@ -268,6 +268,10 @@ https://github.com/xybrid-ai/xybrid/tree/main/examples/flutter
 
 Full API documentation: [pub.dev/documentation/xybrid_flutter](https://pub.dev/documentation/xybrid_flutter/latest/)
 
+## Telemetry
+
+The plugin reports `binding=flutter` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE)

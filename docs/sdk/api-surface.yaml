@@ -528,3 +528,46 @@ classes:
     type: data
     section: "9. Configuration Types"
     status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+
+  SdkConfig:
+    type: data
+    section: "9. Configuration Types"
+    rust_path: "xybrid_sdk::SdkConfig"
+    status: { rust: implemented }
+    stability: { rust: stable }
+    not_applicable: [dart, kotlin, swift, csharp]
+    since: "0.1.0-beta12"
+    notes: >-
+      Rust-side init configuration consumed by `init_sdk_cache_dir`. Non-Rust
+      bindings register the binding identifier via the platform-specific entry
+      points listed in `docs/telemetry/registry.md` (Flutter:
+      `XybridSdkClient`, Kotlin: `Xybrid.init`, Swift: `Xybrid.initialize`,
+      Unity: `XybridClient.Initialize`); they do not expose `SdkConfig`
+      directly. The `binding` field flows into the `X-Xybrid-Client` registry
+      header — see `docs/telemetry/registry.md` for the wire format.
+    properties:
+      cache_dir:
+        type: "Option<PathBuf>"
+        description: "Custom cache directory. Required on Android, optional elsewhere."
+        since: "0.1.0-beta10"
+      binding:
+        type: "Option<&'static str>"
+        description: >-
+          Binding identifier reported in the `X-Xybrid-Client` registry
+          telemetry header. Defaults to `xybrid_sdk::DEFAULT_BINDING`
+          ("rust") when unset. Each platform binding (Flutter, Kotlin,
+          Swift, Unity) sets its own value at SDK init.
+        since: "0.1.0-beta12"
+    methods:
+      with_binding:
+        name: with_binding
+        parameters:
+          - { name: binding, type: "&'static str" }
+        returns: Self
+        description: "Override the binding identifier reported in the registry telemetry header. Fluent builder."
+        since: "0.1.0-beta12"
+      binding:
+        name: binding
+        returns: "&'static str"
+        description: "Resolve the configured binding identifier, falling back to `DEFAULT_BINDING` when unset."
+        since: "0.1.0-beta12"

@@ -234,6 +234,10 @@ The Swift bindings are generated from `crates/xybrid-uniffi/` using [UniFFI](htt
 - Memory-safe wrappers
 - Automatic error handling
 
+## Telemetry
+
+The Apple binding reports `binding=swift` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
+
 ## Full Plan
 
 See [DRAFT-PLATFORM-SDK-RESTRUCTURE.md](../../docs/architecture/DRAFT-PLATFORM-SDK-RESTRUCTURE.md) for the complete restructuring plan.

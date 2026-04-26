@@ -275,6 +275,10 @@ bindings/unity/
 
 See the [full API documentation](https://docs.xybrid.ai/unity) for detailed reference.
 
+## Telemetry
+
+The Unity binding reports `binding=unity` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
+
 ## License
 
 Apache 2.0 - See [LICENSE](../../LICENSE) for details.

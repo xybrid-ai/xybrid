@@ -911,12 +911,60 @@ var config = new TelemetryConfig(apiKey)
 XybridClient.InitializeTelemetry(config);
 ```
 
+### Rust — `SdkConfig`
+
+The Rust SDK ships a small `SdkConfig` struct consumed by `init_sdk_cache_dir`.
+It carries the `binding` identifier reported in the `X-Xybrid-Client` registry
+telemetry header. Non-Rust bindings register their identifier through the
+platform-specific entry points listed under "Setting `binding` per binding"
+below — they do not expose `SdkConfig` directly.
+
+```rust
+pub struct SdkConfig {
+    pub cache_dir: Option<std::path::PathBuf>,
+    /// Reported in the `X-Xybrid-Client` registry header. Defaults to
+    /// `DEFAULT_BINDING` ("rust") when unset.
+    pub binding: Option<&'static str>,
+}
+
+impl SdkConfig {
+    /// Override the binding identifier reported in the registry telemetry header.
+    pub fn with_binding(self, binding: &'static str) -> Self;
+    /// Resolve the configured binding identifier, falling back to `DEFAULT_BINDING`.
+    pub fn binding(&self) -> &'static str;
+}
+
+pub const DEFAULT_BINDING: &str = "rust";
+```
+
+**Example — explicit Rust binding:**
+
+```rust
+use xybrid_sdk::{SdkConfig, DEFAULT_BINDING};
+
+let config = SdkConfig::default().with_binding("my-tool");
+assert_eq!(config.binding(), "my-tool");
+```
+
+**Setting `binding` per binding:**
+
+| Binding | Resolves to | Set by |
+|---------|-------------|--------|
+| Rust SDK direct | `rust` (default) | `xybrid_sdk::DEFAULT_BINDING`, override with `SdkConfig::with_binding(...)` or `xybrid_sdk::set_binding(...)` |
+| Flutter | `flutter` | Internal: `XybridSdkClient` calls `xybrid_sdk::set_binding("flutter")` from every FRB entry point |
+| Kotlin (Android) | `kotlin` | Internal: `Xybrid.init(context)` calls UniFFI `setBinding("kotlin")` |
+| Swift (iOS / macOS) | `swift` | Internal: `Xybrid.initialize()` calls UniFFI `setBinding(binding: "swift")` |
+| Unity (C#) | `unity` | Internal: `XybridClient.Initialize()` calls native `xybrid_set_binding("unity")` |
+
+The full wire format and the list of enum values for each header field is documented in [`docs/telemetry/registry.md`](../telemetry/registry.md).
+
 ### Implementation Status
 
-| Type | Dart | Kotlin | Swift | C# |
-|------|------|--------|-------|----|
-| `TelemetryConfiguration` | 🚧 | — | — | ✅ |
-| `XybridConfiguration` | — | — | — | — |
+| Type | Dart | Kotlin | Swift | C# | Rust |
+|------|------|--------|-------|----|------|
+| `TelemetryConfiguration` | 🚧 | — | — | ✅ | — |
+| `XybridConfiguration` | — | — | — | — | — |
+| `SdkConfig` | — | — | — | — | ✅ |
 
 | Method (C# `XybridClient` / `TelemetryConfig`) | Dart | Kotlin | Swift | C# |
 |-----------------------------------------------|------|--------|-------|----|
@@ -932,9 +980,16 @@ XybridClient.InitializeTelemetry(config);
 | `XybridClient.FlushTelemetry()` | — | — | — | ✅ |
 | `XybridClient.ShutdownTelemetry()` | — | — | — | ✅ |
 
+| Method (Rust `SdkConfig`) | Rust |
+|---------------------------|------|
+| `with_binding(binding)` | ✅ |
+| `binding()` | ✅ |
+
 > **Note**: `initTelemetry()` exists in Dart as a stub that throws `UnimplementedError`.
 > The C# (Unity) SDK is the first non-Rust implementation of the telemetry surface;
-> the Dart, Kotlin, and Swift implementations are still planned.
+> the Dart, Kotlin, and Swift implementations are still planned. `SdkConfig.binding`
+> is Rust-only — non-Rust bindings register their identifier through the
+> platform-specific entry points listed in [`docs/telemetry/registry.md`](../telemetry/registry.md).
 
 ---
 
