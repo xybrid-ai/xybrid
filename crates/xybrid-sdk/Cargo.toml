@@ -78,6 +78,9 @@ llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-core/llm-llamacpp"]
 
+[dev-dependencies]
+httpmock = "0.7"
+
 # Re-export the macro
 [package.metadata.docs.rs]
 all-features = true
