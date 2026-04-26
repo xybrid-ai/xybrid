@@ -150,12 +150,6 @@ compile_error!(
     - For other platforms: Use `ort-download` (CPU only)"
 );
 
-/// Version of the `xybrid-core` crate, sourced from Cargo metadata at compile time.
-///
-/// Re-exported by `xybrid-sdk` so registry telemetry headers can report the
-/// runtime core version without a parallel constant.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
 // llm-mlx-runtime links Apple's MLX framework through the validated
 // Apple Silicon macOS slice. The lighter llm-mlx feature intentionally stays
 // cross-platform so registry metadata, selectors, and docs can compile
@@ -177,6 +171,12 @@ compile_error!(
     - For cross-platform selector/docs builds: use `llm-mlx`\n\
     - For Android/Linux/Windows inference: use `llm-llamacpp` or `llm-mistral`"
 );
+
+/// Version of the `xybrid-core` crate, sourced from Cargo metadata at compile time.
+///
+/// Re-exported by `xybrid-sdk` so registry telemetry headers can report the
+/// runtime core version without a parallel constant.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // ============================================================================
 // Prelude - Common imports for convenience
