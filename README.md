@@ -110,6 +110,7 @@ Every SDK wraps the same Rust core — identical model support and behavior acro
 
 Install and run a model in your language of choice. Each section includes the install snippet and a minimal example.
 
+See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) for all options.
 
 <details>
 <summary><b>Flutter</summary>
@@ -235,7 +236,7 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 </details>
 
-See the full [Installation Guide](docs/INSTALLATION.md) for all options, hardware acceleration, and CLI reference. For platform-specific setup, see each SDK's README: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/).
+For platform-specific setup, see each SDK's README: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/).
 
 <details>
 <summary><h3>Pipelines (Experimental)</h3></summary>
