@@ -78,7 +78,7 @@
 
 | 目的 | パス |
 |------|------|
-| 最速デモ（2分） | [CLIをインストール →](#インストール) |
+| 最速デモ（2分） | [CLIをインストール →](#クイックスタート) |
 | モバイルまたはデスクトップアプリを構築 | [Flutter SDK →](bindings/flutter/) |
 | ゲームにAI NPCを追加 | [Unity SDK →](bindings/unity/) および [3D酒場デモ](https://github.com/xybrid-ai/xybrid-unity-tavern) を試す |
 | Androidネイティブ | [Kotlin SDK →](bindings/kotlin/) |
@@ -96,7 +96,7 @@ Xybridは**Rustベースのランタイム**であり、すべての主要プラ
 | SDK | プラットフォーム | インストール | ステータス | サンプル |
 |-----|-----------|---------|--------|--------|
 | **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [pub.dev](https://pub.dev/packages/xybrid_flutter) | 利用可能 | [README](examples/flutter/README.md) |
-| **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [下記参照](#インストール) | 利用可能 | [Unity 3D AI酒場](https://github.com/xybrid-ai/xybrid-unity-tavern) |
+| **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [下記参照](#クイックスタート) | 利用可能 | [Unity 3D AI酒場](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | 近日公開 | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | 利用可能 | [README](examples/android/README.md) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | 利用可能 | — |
@@ -104,40 +104,16 @@ Xybridは**Rustベースのランタイム**であり、すべての主要プラ
 
 すべてのSDKは同じRustコアをラップしており、すべてのプラットフォームで同一のモデルサポートと動作を提供します。
 
-### インストール
+---
 
-**Unity** → Package Manager:
+## クイックスタート
 
-```sh
-https://github.com/xybrid-ai/xybrid.git#upm
-```
+お好みの言語でインストールしてモデルを実行できます。各セクションにはインストール手順と最小限のサンプルが含まれています。
 
-**Flutter** → `pubspec.yaml`:
+<details>
+<summary><b>CLI</b> — macOS、Linux、Windows</summary>
 
-```yaml
-dependencies:
-  xybrid_flutter: ^0.1.0
-```
-
-**Swift (iOS / macOS)**:
-
-```swift
-// Package.swift
-dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.0")
-]
-```
-
-**Kotlin (Android)**:
-
-```gradle
-// build.gradle.kts
-dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta12")
-}
-```
-
-**CLI**
+**インストール:**
 
 ```bash
 # macOS / Linux
@@ -149,59 +125,119 @@ curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh |
 irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 ```
 
-すべてのオプション、ハードウェアアクセラレーション、CLIリファレンスについては、完全な[インストールガイド](docs/INSTALLATION.md)を参照してください。
+**モデルを実行:**
 
----
-
-## クイックスタート
-
-プラットフォーム固有のセットアップについては、各SDKのREADMEを参照してください: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)
-
-### 単一モデル
-
-CLIから1行で、または任意のSDKから3行でモデルを実行:
-
-**CLI:**
 ```sh
 xybrid run kokoro-82m --input "Hello world" -o output.wav
 ```
 
-**Flutter:**
+</details>
+
+<details>
+<summary><b>Flutter</b> — iOS、Android、macOS、Linux、Windows</summary>
+
+**インストール** `pubspec.yaml`:
+
+```yaml
+dependencies:
+  xybrid_flutter: ^0.1.0
+```
+
+**モデルを実行:**
+
 ```dart
 final model = await Xybrid.model('kokoro-82m').load();
 final result = await model.run(XybridEnvelope.text('Hello world'));
 // result → 24kHz WAVオーディオ
 ```
 
-**Kotlin:**
+</details>
+
+<details>
+<summary><b>Kotlin</b> — Android</summary>
+
+**インストール** `build.gradle.kts`:
+
+```gradle
+dependencies {
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta12")
+}
+```
+
+**モデルを実行:**
+
 ```kotlin
 val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
 val result = model.run(Envelope.text("Hello world"))
 // result → 24kHz WAVオーディオ
 ```
 
-**Swift:**
+</details>
+
+<details>
+<summary><b>Swift</b> — iOS、macOS</summary>
+
+**インストール** `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.0")
+]
+```
+
+**モデルを実行:**
+
 ```swift
 let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
 let result = try model.run(envelope: Envelope.text("Hello world"))
 // result → 24kHz WAVオーディオ
 ```
 
-**Unity (C#):**
+</details>
+
+<details>
+<summary><b>Unity (C#)</b> — macOS、Windows、Linux、iOS、Android</summary>
+
+**インストール** Unity Package Managerを使用:
+
+```sh
+https://github.com/xybrid-ai/xybrid.git#upm
+```
+
+**モデルを実行:**
+
 ```csharp
 var model = XybridClient.LoadModel("kokoro-82m");
 var result = model.Run(Envelope.Text("Hello world"));
 // result → 24kHz WAVオーディオ
 ```
 
-**Rust:**
+</details>
+
+<details>
+<summary><b>Rust</b> — すべてのプラットフォーム</summary>
+
+**インストール** `Cargo.toml`:
+
+```toml
+[dependencies]
+xybrid-sdk = "0.1"
+```
+
+**モデルを実行:**
+
 ```rust
 let model = Xybrid::model("kokoro-82m").load()?;
 let result = model.run(&Envelope::text("Hello world"))?;
 // result → 24kHz WAVオーディオ
 ```
 
-### パイプライン
+</details>
+
+すべてのオプション、ハードウェアアクセラレーション、CLIリファレンスについては、完全な[インストールガイド](docs/INSTALLATION.md)を参照してください。プラットフォーム固有のセットアップについては、各SDKのREADMEを参照してください: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
+
+<details>
+<summary><h3>パイプライン（実験的機能）</h3></summary>
 
 モデルを連鎖させて、3行のYAMLで音声アシスタントを構築:
 
@@ -246,6 +282,9 @@ let pipeline = Xybrid::pipeline(&yaml_string).load()?;
 pipeline.load_models()?;
 let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 ```
+
+</details>
+
 ---
 
 ## 対応モデル
