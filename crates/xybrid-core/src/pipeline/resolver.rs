@@ -145,6 +145,8 @@ impl ResolvedTarget {
             target: self.target.clone(),
             reason: self.reason.clone(),
             timestamp_ms: current_timestamp_ms(),
+            local_reliability_hint:
+                crate::orchestrator::routing_engine::LocalReliabilityHint::EMPTY,
         }
     }
 }
@@ -444,6 +446,7 @@ mod tests {
             network_rtt: 100,
             battery: 80,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
         ResolutionContext::new(metrics).with_local_available(true)
     }
@@ -561,6 +564,7 @@ mod tests {
             network_rtt: 50,
             battery: 90,
             temperature: 20.0,
+            ..DeviceMetrics::default()
         };
 
         let context = ResolutionContext::new(metrics)

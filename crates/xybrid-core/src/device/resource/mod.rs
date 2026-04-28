@@ -143,6 +143,32 @@ impl ResourceSnapshot {
     }
 }
 
+impl Default for ResourceSnapshot {
+    fn default() -> Self {
+        Self::unknown()
+    }
+}
+
+/// Injectable source of live resource snapshots.
+///
+/// The production implementation is [`ResourceMonitor`]. Tests can provide a
+/// scripted provider without depending on host CPU, thermal, or memory state.
+pub trait ResourceSnapshotProvider: Send + Sync + std::fmt::Debug {
+    fn current_snapshot(&self, max_age: Duration) -> ResourceSnapshot;
+}
+
+impl ResourceSnapshotProvider for ResourceMonitor {
+    fn current_snapshot(&self, max_age: Duration) -> ResourceSnapshot {
+        ResourceMonitor::current_snapshot(self, max_age)
+    }
+}
+
+impl<T: ResourceSnapshotProvider + ?Sized> ResourceSnapshotProvider for Arc<T> {
+    fn current_snapshot(&self, max_age: Duration) -> ResourceSnapshot {
+        self.as_ref().current_snapshot(max_age)
+    }
+}
+
 /// Aggregate observation across a single `ModelComplete` / `PipelineComplete`
 /// run. Attached to `event.data.resource_summary` and hoisted to the
 /// platform-event payload top level by the SDK. The wire shape is flat

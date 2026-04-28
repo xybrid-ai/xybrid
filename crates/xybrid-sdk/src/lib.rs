@@ -116,6 +116,7 @@ pub mod pipeline;
 pub mod platform;
 pub mod registry_client;
 pub mod result;
+pub mod run_options;
 pub mod source;
 pub mod stream;
 pub mod streaming;
@@ -167,6 +168,7 @@ pub use model::SdkError;
 pub use model::{ModelLoader, SdkResult, StreamConfig, StreamEvent, StreamToken, XybridModel};
 pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
+pub use run_options::{AbortPolicy, AbortReason, AbortSignal, CancellationToken, RunOptions};
 // Pipeline API (PipelineRef → Pipeline)
 pub use pipeline::{
     // Config types for FFI bindings (Flutter, Kotlin, Swift)
@@ -662,6 +664,7 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
         network_rtt: config.metrics.network_rtt,
         battery: config.metrics.battery,
         temperature: config.metrics.temperature,
+        ..DeviceMetrics::default()
     };
 
     // Create availability function from config
@@ -772,6 +775,7 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
         network_rtt: config.metrics.network_rtt,
         battery: config.metrics.battery,
         temperature: config.metrics.temperature,
+        ..DeviceMetrics::default()
     };
 
     // Create availability function from config

@@ -174,6 +174,9 @@ pub mod prelude;
 pub mod error;
 pub use error::{InferenceError, PipelineError, XybridError, XybridResult};
 
+/// Typed abort reasons shared by execution, routing feedback, and SDK wrappers.
+pub mod abort;
+
 // ============================================================================
 // Core Execution Layer (Orchestrator → Executor → TemplateExecutor)
 // See EXECUTION_LAYERS.md for architecture documentation

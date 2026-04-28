@@ -3,9 +3,14 @@
 //! These types define the interface between the Orchestrator and the OrchestrationAuthority.
 //! All decisions are wrapped in `AuthorityDecision<T>` to provide explainability.
 
+pub use crate::abort::AbortReason;
 use crate::context::DeviceMetrics;
+use crate::device::{MemoryPressure, ResourceMonitor, ThermalState};
 use crate::ir::{Envelope, EnvelopeKind};
+use crate::orchestrator::routing_engine::LocalReliabilityHint;
 use crate::pipeline::ExecutionTarget;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Context for target resolution decisions.
@@ -21,6 +26,8 @@ pub struct StageContext {
     pub input_kind: EnvelopeKind,
     /// Current device metrics.
     pub metrics: DeviceMetrics,
+    /// Process-wide live resource monitor.
+    pub resource_monitor: Arc<ResourceMonitor>,
     /// Explicit target from pipeline YAML (if specified).
     pub explicit_target: Option<ExecutionTarget>,
 }
@@ -149,6 +156,76 @@ pub enum ResolvedTarget {
     Server { endpoint: String },
 }
 
+/// Routing result plus the signal context used to make it.
+#[derive(Debug, Clone)]
+pub struct TargetResolution {
+    pub decision: AuthorityDecision<ResolvedTarget>,
+    pub effective_model_id: String,
+    pub signal_context: Option<SignalContext>,
+    pub local_reliability_hint: Option<LocalReliabilityHint>,
+}
+
+impl TargetResolution {
+    pub fn new(
+        decision: AuthorityDecision<ResolvedTarget>,
+        effective_model_id: impl Into<String>,
+        signal_context: Option<SignalContext>,
+    ) -> Self {
+        Self {
+            decision,
+            effective_model_id: effective_model_id.into(),
+            signal_context,
+            local_reliability_hint: None,
+        }
+    }
+
+    pub fn with_reliability_hint(mut self, hint: LocalReliabilityHint) -> Self {
+        self.local_reliability_hint = Some(hint);
+        self
+    }
+}
+
+/// Coarse execution outcome used for feedback and telemetry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum OutcomeCategory {
+    Success,
+    SoftFail { reason: String },
+    HardFail { reason: String },
+    AbortedForCloudFallback { reason: AbortReason },
+}
+
+impl OutcomeCategory {
+    pub fn is_local_unreliable(&self) -> bool {
+        matches!(
+            self,
+            OutcomeCategory::HardFail { .. } | OutcomeCategory::AbortedForCloudFallback { .. }
+        )
+    }
+}
+
+/// Low-cardinality signal bucket for reliability feedback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SignalContext {
+    pub memory_pressure: MemoryPressure,
+    pub thermal_state: ThermalState,
+    pub cpu_bucket: Option<u8>,
+}
+
+impl SignalContext {
+    pub fn from_metrics(metrics: &DeviceMetrics) -> Self {
+        let cpu_bucket = metrics
+            .resource
+            .cpu_pct
+            .map(|pct| ((pct.clamp(0.0, 100.0) / 10.0).floor() as u8).min(10));
+        Self {
+            memory_pressure: metrics.resource.memory_pressure,
+            thermal_state: metrics.resource.thermal_state,
+            cpu_bucket,
+        }
+    }
+}
+
 impl ResolvedTarget {
     /// Convert to a string for logging.
     pub fn as_str(&self) -> &str {
@@ -230,6 +307,49 @@ pub struct ExecutionOutcome {
     pub success: bool,
     /// Optional error message if failed.
     pub error: Option<String>,
+    /// Optional explicit outcome category. If absent, derived from `success`.
+    pub category: Option<OutcomeCategory>,
+    /// Effective model identifier used for feedback bucketing.
+    pub model_id: Option<String>,
+    /// Signal context captured during target resolution.
+    pub signal_context: Option<SignalContext>,
+}
+
+impl ExecutionOutcome {
+    pub fn effective_category(&self) -> OutcomeCategory {
+        if let Some(category) = &self.category {
+            return category.clone();
+        }
+        if self.success {
+            OutcomeCategory::Success
+        } else {
+            OutcomeCategory::HardFail {
+                reason: self
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "execution_failed".to_string()),
+            }
+        }
+    }
+
+    pub fn effective_model_id(&self) -> &str {
+        self.model_id.as_deref().unwrap_or(&self.stage_id)
+    }
+}
+
+impl Default for ExecutionOutcome {
+    fn default() -> Self {
+        Self {
+            stage_id: String::new(),
+            target: ResolvedTarget::Device,
+            latency_ms: 0,
+            success: false,
+            error: None,
+            category: None,
+            model_id: None,
+            signal_context: None,
+        }
+    }
 }
 
 /// Get current timestamp in milliseconds.

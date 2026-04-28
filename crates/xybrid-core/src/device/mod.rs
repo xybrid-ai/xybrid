@@ -60,8 +60,8 @@ mod tests;
 pub use capabilities::detect_capabilities;
 pub use profile::DeviceProfile;
 pub use resource::{
-    MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceTelemetryMode, ResourceUsageSummary,
-    RunGuard,
+    MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceSnapshotProvider,
+    ResourceTelemetryMode, ResourceUsageSummary, RunGuard,
 };
 pub use types::{
     DetectionConfidence, DetectionSource, GpuType, HardwareCapabilities, NpuType, Platform,

@@ -134,6 +134,9 @@ impl From<crate::runtime_adapter::AdapterError> for XybridError {
             AdapterError::IOError(e) => XybridError::Io(e),
             AdapterError::SerializationError(s) => XybridError::Serialization(s),
             AdapterError::RuntimeError(s) => XybridError::Inference(InferenceError::Backend(s)),
+            AdapterError::AbortedForCloudFallback { reason } => XybridError::Inference(
+                InferenceError::Backend(format!("aborted for cloud fallback: {reason}")),
+            ),
         }
     }
 }

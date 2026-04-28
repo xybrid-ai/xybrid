@@ -72,6 +72,15 @@ pub enum ExecutorError {
     Other(String),
 }
 
+impl ExecutorError {
+    pub fn cloud_fallback_abort_reason(&self) -> Option<crate::abort::AbortReason> {
+        match self {
+            Self::AdapterError(error) => error.cloud_fallback_abort_reason(),
+            _ => None,
+        }
+    }
+}
+
 /// Result type for executor operations.
 pub type ExecutorResult<T> = Result<T, ExecutorError>;
 

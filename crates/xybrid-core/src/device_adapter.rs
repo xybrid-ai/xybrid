@@ -206,6 +206,7 @@ impl DeviceAdapter for LocalDeviceAdapter {
             network_rtt: self.measure_network_rtt(),
             battery: self.read_battery_level(),
             temperature: self.read_temperature(),
+            ..DeviceMetrics::default()
         }
     }
 }

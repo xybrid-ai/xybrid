@@ -343,6 +343,12 @@ struct PlatformEvent {
     timestamp: Option<String>,
     pipeline_id: Option<Uuid>,
     trace_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    correlation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome_category: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    abort_reason: Option<String>,
     stages: Option<serde_json::Value>,
 }
 
@@ -863,6 +869,9 @@ fn convert_to_platform_event(
     let mut payload = serde_json::json!({});
     let mut event_pipeline_id = pipeline_id;
     let mut event_trace_id = trace_id;
+    let mut correlation_id = None;
+    let mut outcome_category = None;
+    let mut abort_reason = None;
 
     if let Some(stage) = &event.stage_name {
         payload["stage_name"] = serde_json::json!(stage);
@@ -915,6 +924,9 @@ fn convert_to_platform_event(
                 // flat JSON-path selectors without teaching each consumer
                 // the nested shape.
                 "resource_summary",
+                "correlation_id",
+                "outcome_category",
+                "abort_reason",
             ]
             .iter()
             {
@@ -924,6 +936,15 @@ fn convert_to_platform_event(
                     }
                 }
             }
+            correlation_id = parsed
+                .get("correlation_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            outcome_category = parsed.get("outcome_category").cloned();
+            abort_reason = parsed
+                .get("abort_reason")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
             payload["data"] = parsed;
         } else {
             payload["data"] = serde_json::json!(data);
@@ -1060,6 +1081,9 @@ fn convert_to_platform_event(
         timestamp,
         pipeline_id: event_pipeline_id,
         trace_id: event_trace_id,
+        correlation_id,
+        outcome_category,
+        abort_reason,
         stages,
     }
 }
@@ -2035,6 +2059,49 @@ mod tests {
     }
 
     #[test]
+    fn routing_outcome_fields_hoist_to_platform_event_top_level() {
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(420),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": "qwen2.5-0.5b",
+                    "correlation_id": "run-string-123",
+                    "outcome_category": {
+                        "kind": "aborted_for_cloud_fallback",
+                        "reason": "stress_memory"
+                    },
+                    "abort_reason": "stress_memory"
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 1_700_000_000_000,
+        };
+
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+
+        assert_eq!(platform.correlation_id.as_deref(), Some("run-string-123"));
+        assert_eq!(
+            platform
+                .outcome_category
+                .as_ref()
+                .and_then(|v| v.get("kind")),
+            Some(&serde_json::json!("aborted_for_cloud_fallback"))
+        );
+        assert_eq!(platform.abort_reason.as_deref(), Some("stress_memory"));
+        assert_eq!(platform.payload["correlation_id"], "run-string-123");
+        assert_eq!(
+            platform.payload["outcome_category"]["kind"],
+            "aborted_for_cloud_fallback"
+        );
+        assert_eq!(platform.payload["abort_reason"], "stress_memory");
+    }
+
+    #[test]
     fn attach_resource_summary_with_none_is_noop() {
         let original = TelemetryEvent {
             event_type: "ModelComplete".to_string(),
@@ -2350,6 +2417,9 @@ mod tests {
             timestamp: None,
             pipeline_id: None,
             trace_id: None,
+            correlation_id: None,
+            outcome_category: None,
+            abort_reason: None,
             stages: None,
         }];
 

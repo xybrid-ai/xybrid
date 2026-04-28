@@ -198,6 +198,7 @@ impl Default for RunnerConfig {
                 network_rtt: 100,
                 battery: 100,
                 temperature: 25.0,
+                ..DeviceMetrics::default()
             },
             capabilities: HardwareCapabilities::default(),
             local_models: HashMap::new(),
@@ -615,6 +616,7 @@ mod tests {
                 network_rtt: 50,
                 battery: 80,
                 temperature: 30.0,
+                ..DeviceMetrics::default()
             },
             ..Default::default()
         };
