@@ -18,6 +18,7 @@ use crate::control_sync::{
     ControlSync, ControlSyncConfig, ControlSyncHandler, ControlSyncProvider,
     NoopControlSyncHandler, NoopControlSyncProvider,
 };
+use crate::device::ResourceMonitor;
 use crate::device_adapter::DeviceAdapter;
 use crate::device_adapter::LocalDeviceAdapter;
 use crate::event_bus::{EventBus, OrchestratorEvent};
@@ -236,6 +237,7 @@ impl Orchestrator {
 
         // Initialize stream manager
         let stream_manager = StreamManager::new();
+        let resource_monitor = ResourceMonitor::global();
 
         // Determine execution mode
         let execution_mode = config
@@ -261,6 +263,7 @@ impl Orchestrator {
                     temperature: metrics_config
                         .temperature
                         .unwrap_or_else(|| device_adapter.collect_metrics().temperature),
+                    ..DeviceMetrics::default()
                 }
             } else {
                 device_adapter.collect_metrics()
@@ -306,6 +309,7 @@ impl Orchestrator {
             stream_manager,
             event_bus,
             telemetry.clone(),
+            resource_monitor,
             control_sync,
             execution_mode,
         );

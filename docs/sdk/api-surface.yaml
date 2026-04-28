@@ -115,6 +115,13 @@ classes:
           - { name: config, type: "GenerationConfig?", default: "null" }
         return: XybridResult
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      runWithOptions:
+        async: true
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: options, type: RunOptions }
+        return: XybridResult
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       runWithContext:
         async: true
         params:
@@ -123,12 +130,26 @@ classes:
           - { name: config, type: "GenerationConfig?", default: "null" }
         return: XybridResult
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+      runWithContextOptions:
+        async: true
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: context, type: ConversationContext }
+          - { name: options, type: RunOptions }
+        return: XybridResult
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       runStreaming:
         params:
           - { name: envelope, type: Envelope }
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+      runStreamingWithOptions:
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: options, type: RunOptions }
+        return: "Stream<StreamToken>"
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       runStreamingWithContext:
         params:
           - { name: envelope, type: Envelope }
@@ -136,6 +157,13 @@ classes:
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+      runStreamingWithContextOptions:
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: context, type: ConversationContext }
+          - { name: options, type: RunOptions }
+        return: "Stream<StreamToken>"
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       benchmark:
         async: true
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
@@ -571,3 +599,43 @@ classes:
         returns: "&'static str"
         description: "Resolve the configured binding identifier, falling back to `DEFAULT_BINDING` when unset."
         since: "0.1.0-beta12"
+  RunOptions:
+    type: data
+    section: "8. Supporting Types"
+    methods:
+      with_generation_config:
+        params: [{ name: config, type: GenerationConfig }]
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      with_abort_policy:
+        params: [{ name: policy, type: AbortPolicy }]
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      with_cancellation_token:
+        params: [{ name: token, type: CancellationToken }]
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      with_correlation_id:
+        params: [{ name: correlationId, type: String }]
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+
+  AbortPolicy:
+    type: data
+    section: "8. Supporting Types"
+    properties:
+      stop_on:
+        type: "List<AbortSignal>"
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      fallback_to_cloud:
+        type: bool
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      max_grace_tokens:
+        type: int
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+
+  CancellationToken:
+    type: class
+    section: "8. Supporting Types"
+    methods:
+      cancel:
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      is_cancelled:
+        return: bool
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }

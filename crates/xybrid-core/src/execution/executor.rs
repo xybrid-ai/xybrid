@@ -20,9 +20,11 @@
 
 use log::{debug, info, warn};
 
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use super::template::PostprocessingStep;
 use super::template::{
     span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata,
-    PipelineStage, PostprocessingStep,
+    PipelineStage,
 };
 use crate::conversation::ConversationContext;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -2081,6 +2083,7 @@ fn mirror_llm_metrics_to_span(output: &crate::runtime_adapter::llm::GenerationOu
 mod tests {
     use super::super::template::PreprocessingStep;
     use super::*;
+    use crate::ir::EnvelopeKind;
 
     // ============================================================================
     // Constructor Tests

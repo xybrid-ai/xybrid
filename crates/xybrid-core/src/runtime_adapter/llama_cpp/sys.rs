@@ -1006,10 +1006,7 @@ where
 
     // Check for callback error
     if let Some(err) = streaming_ctx.error {
-        return Err(AdapterError::RuntimeError(format!(
-            "Streaming callback error: {}",
-            err
-        )));
+        return Err(AdapterError::from_streaming_callback_error(err));
     }
 
     // Negative result (other than hard errors) means stopped by callback,

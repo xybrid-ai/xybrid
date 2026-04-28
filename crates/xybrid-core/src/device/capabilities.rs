@@ -356,6 +356,7 @@ mod tests {
             network_rtt: 100,
             battery: 75,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let caps = detect_capabilities(&metrics);
@@ -370,6 +371,7 @@ mod tests {
             network_rtt: 100,
             battery: 75,
             temperature: 75.0,
+            ..DeviceMetrics::default()
         };
 
         let caps = detect_capabilities(&metrics);
@@ -383,6 +385,7 @@ mod tests {
             network_rtt: 100,
             battery: 75,
             temperature: 85.0,
+            ..DeviceMetrics::default()
         };
 
         let caps = detect_capabilities(&metrics);
@@ -396,6 +399,7 @@ mod tests {
             network_rtt: 100,
             battery: 15,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let caps = detect_capabilities(&metrics);
@@ -410,6 +414,7 @@ mod tests {
             network_rtt: 100,
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
         let caps = detect_capabilities(&metrics);
         assert_eq!(caps.thermal_state(), ThermalState::Normal);
@@ -419,6 +424,7 @@ mod tests {
             network_rtt: 100,
             battery: 50,
             temperature: 65.0,
+            ..DeviceMetrics::default()
         };
         let caps = detect_capabilities(&metrics);
         assert_eq!(caps.thermal_state(), ThermalState::Warm);
@@ -428,6 +434,7 @@ mod tests {
             network_rtt: 100,
             battery: 50,
             temperature: 75.0,
+            ..DeviceMetrics::default()
         };
         let caps = detect_capabilities(&metrics);
         assert_eq!(caps.thermal_state(), ThermalState::Hot);
@@ -437,6 +444,7 @@ mod tests {
             network_rtt: 100,
             battery: 50,
             temperature: 85.0,
+            ..DeviceMetrics::default()
         };
         let caps = detect_capabilities(&metrics);
         assert_eq!(caps.thermal_state(), ThermalState::Critical);
@@ -523,6 +531,7 @@ mod tests {
             network_rtt: 100,
             battery: 75,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let caps = detect_capabilities(&metrics);
@@ -546,6 +555,7 @@ mod tests {
             network_rtt: 100,
             battery: 75,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let caps = detect_capabilities(&metrics);

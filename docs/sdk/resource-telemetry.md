@@ -218,6 +218,15 @@ shape.
 The analytics backend's `telemetry_events` table adds one typed column per
 summary field.
 
+Routing and fallback fields share the same flat extraction path. The Rust SDK
+hoists `correlation_id`, `outcome_category`, and `abort_reason` from event data
+to the platform event envelope top level when present; older SDKs can continue
+sending them in `payload` or `payload.data`. Ingest prefers the top-level
+envelope fields when present, then falls back to payload values. Stored Tinybird
+columns remain flat strings:
+`routing_source`, `routing_reason`, `outcome_category`, `abort_reason`,
+`fallback_target`, `fallback_reason`, `fallback_outcome`, and `correlation_id`.
+
 ## Privacy guarantees
 
 Resource telemetry is **device-level only**. It describes the machine's

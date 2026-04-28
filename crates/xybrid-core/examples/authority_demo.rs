@@ -9,6 +9,7 @@
 //!   cargo run -p xybrid-core --example authority_demo
 
 use xybrid_core::context::DeviceMetrics;
+use xybrid_core::device::ResourceMonitor;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::{
     LocalAuthority, ModelConstraints, ModelRequest, OrchestrationAuthority, PolicyOutcome,
@@ -143,6 +144,7 @@ fn demo_single_model(authority: &LocalAuthority, model_id: &str, metrics: &Devic
         model_id: model_id.to_string(),
         input_kind: EnvelopeKind::Audio(vec![]),
         metrics: metrics.clone(),
+        resource_monitor: ResourceMonitor::global(),
         explicit_target: None, // Let authority decide
     };
 
@@ -197,6 +199,7 @@ fn demo_pipeline(authority: &LocalAuthority, metrics: &DeviceMetrics) {
             model_id: model_id.to_string(),
             input_kind,
             metrics: metrics.clone(),
+            resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
         };
         let target = authority.resolve_target(&context);
@@ -238,6 +241,7 @@ fn demo_explicit_target(authority: &LocalAuthority, metrics: &DeviceMetrics) {
         model_id: "whisper-tiny".to_string(),
         input_kind: EnvelopeKind::Audio(vec![]),
         metrics: metrics.clone(),
+        resource_monitor: ResourceMonitor::global(),
         explicit_target: None, // Auto-routing
     };
 
@@ -251,6 +255,7 @@ fn demo_explicit_target(authority: &LocalAuthority, metrics: &DeviceMetrics) {
         model_id: "whisper-tiny".to_string(),
         input_kind: EnvelopeKind::Audio(vec![]),
         metrics: metrics.clone(),
+        resource_monitor: ResourceMonitor::global(),
         explicit_target: Some(ExecutionTarget::Device), // Force on-device
     };
 

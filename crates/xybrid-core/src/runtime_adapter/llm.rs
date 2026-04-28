@@ -142,8 +142,7 @@ pub trait LlmBackend: Send + Sync {
         };
 
         let mut callback = on_token;
-        callback(partial)
-            .map_err(|e| AdapterError::RuntimeError(format!("Streaming callback error: {}", e)))?;
+        callback(partial).map_err(AdapterError::from_streaming_callback_error)?;
 
         Ok(output)
     }

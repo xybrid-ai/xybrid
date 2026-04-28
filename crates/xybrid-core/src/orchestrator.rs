@@ -37,9 +37,10 @@ pub mod routing_engine;
 // Re-exports for public API
 // ─────────────────────────────────────────────────────────────────────────────
 pub use authority::{
-    AuthorityDecision, DecisionSource, ExecutionOutcome, LocalAuthority, ModelConstraints,
-    ModelRequest, ModelSelection, ModelSource, OrchestrationAuthority, PolicyOutcome,
-    PolicyRequest, RemoteAuthority, ResolvedTarget, StageContext,
+    AbortReason, AuthorityDecision, DecisionSource, ExecutionOutcome, LocalAuthority,
+    ModelConstraints, ModelRequest, ModelSelection, ModelSource, OrchestrationAuthority,
+    OutcomeCategory, PolicyOutcome, PolicyRequest, RemoteAuthority, ResolvedTarget, SignalContext,
+    StageContext, TargetResolution,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,8 +48,9 @@ pub use authority::{
 // ─────────────────────────────────────────────────────────────────────────────
 use crate::context::{DeviceMetrics, StageDescriptor};
 use crate::control_sync::ControlSync;
+use crate::device::ResourceMonitor;
 use crate::event_bus::{EventBus, OrchestratorEvent};
-use crate::executor::Executor;
+use crate::executor::{Executor, ExecutorError};
 use crate::ir::Envelope;
 use crate::streaming::manager::{StreamManager, StreamManagerConfig as StreamConfig};
 use crate::telemetry::Telemetry;
@@ -131,11 +133,42 @@ pub struct Orchestrator {
     stream_manager: StreamManager,
     event_bus: EventBus,
     telemetry: Arc<Telemetry>,
+    resource_monitor: Arc<ResourceMonitor>,
     control_sync: Option<ControlSync>,
     execution_mode: ExecutionMode,
 }
 
 impl Orchestrator {
+    fn effective_model_id(stage: &StageDescriptor) -> String {
+        stage.model.clone().unwrap_or_else(|| stage.name.clone())
+    }
+
+    fn build_execution_outcome(
+        stage: &StageDescriptor,
+        resolution: &TargetResolution,
+        latency_ms: u64,
+        success: bool,
+        error: Option<String>,
+        category: Option<OutcomeCategory>,
+    ) -> ExecutionOutcome {
+        ExecutionOutcome {
+            stage_id: stage.name.clone(),
+            target: resolution.decision.result.clone(),
+            latency_ms,
+            success,
+            error,
+            category,
+            model_id: Some(resolution.effective_model_id.clone()),
+            signal_context: resolution.signal_context,
+        }
+    }
+
+    fn outcome_category_from_executor_error(error: &ExecutorError) -> Option<OutcomeCategory> {
+        error
+            .cloud_fallback_abort_reason()
+            .map(|reason| OutcomeCategory::AbortedForCloudFallback { reason })
+    }
+
     /// Creates a new orchestrator with custom components.
     pub fn with_all(
         authority: Box<dyn OrchestrationAuthority>,
@@ -145,6 +178,7 @@ impl Orchestrator {
         stream_manager: StreamManager,
         event_bus: EventBus,
         telemetry: Arc<Telemetry>,
+        resource_monitor: Arc<ResourceMonitor>,
         control_sync: Option<ControlSync>,
         execution_mode: ExecutionMode,
     ) -> Self {
@@ -156,6 +190,7 @@ impl Orchestrator {
             stream_manager,
             event_bus,
             telemetry,
+            resource_monitor,
             control_sync,
             execution_mode,
         }
@@ -183,6 +218,7 @@ impl Orchestrator {
     /// ```
     pub fn with_authority(authority: Box<dyn OrchestrationAuthority>) -> Self {
         let telemetry = Arc::new(Telemetry::new());
+        let resource_monitor = ResourceMonitor::global();
         Self {
             authority,
             policy_engine: Box::new(DefaultPolicyEngine::with_default_policy()),
@@ -191,6 +227,7 @@ impl Orchestrator {
             stream_manager: StreamManager::new(),
             event_bus: EventBus::new(),
             telemetry,
+            resource_monitor,
             control_sync: None,
             execution_mode: ExecutionMode::Batch,
         }
@@ -205,6 +242,7 @@ impl Orchestrator {
         routing_engine: Box<dyn RoutingEngine>,
     ) -> Self {
         let telemetry = Arc::new(Telemetry::new());
+        let resource_monitor = ResourceMonitor::global();
         Self {
             authority: Box::new(LocalAuthority::new()),
             policy_engine,
@@ -213,6 +251,7 @@ impl Orchestrator {
             stream_manager: StreamManager::new(),
             event_bus: EventBus::new(),
             telemetry,
+            resource_monitor,
             control_sync: None,
             execution_mode: ExecutionMode::Batch,
         }
@@ -223,6 +262,7 @@ impl Orchestrator {
     /// Uses `LocalAuthority` by default - fully offline, no phone-home.
     pub fn with_streaming(config: StreamConfig) -> Self {
         let telemetry = Arc::new(Telemetry::new());
+        let resource_monitor = ResourceMonitor::global();
         Self {
             authority: Box::new(LocalAuthority::new()),
             policy_engine: Box::new(DefaultPolicyEngine::with_default_policy()),
@@ -231,6 +271,7 @@ impl Orchestrator {
             stream_manager: StreamManager::with_config(config),
             event_bus: EventBus::new(),
             telemetry,
+            resource_monitor,
             control_sync: None,
             execution_mode: ExecutionMode::Streaming,
         }
@@ -295,16 +336,17 @@ impl Orchestrator {
         // Step 3: Resolve target via OrchestrationAuthority
         let stage_context = StageContext {
             stage_id: stage.name.clone(),
-            model_id: stage.name.clone(), // Use stage name as model_id if not specified
+            model_id: Self::effective_model_id(stage),
             input_kind: input.kind.clone(),
             metrics: metrics.clone(),
+            resource_monitor: self.resource_monitor.clone(),
             explicit_target: stage.target.clone(),
         };
-        let target_decision = self.authority.resolve_target(&stage_context);
+        let target_resolution = self.authority.resolve_target_with_feedback(&stage_context);
 
         // Convert ResolvedTarget to RoutingDecision for backward compatibility
         let routing_decision =
-            self.resolved_target_to_routing_decision(&stage.name, &target_decision);
+            self.resolved_target_to_routing_decision(&stage.name, &target_resolution);
 
         // Emit routing decision event
         self.event_bus.publish(OrchestratorEvent::RoutingDecided {
@@ -333,14 +375,17 @@ impl Orchestrator {
             Ok((out, meta)) => (out, meta, true, None),
             Err(e) => {
                 let error_msg = format!("{:?}", e);
+                let category = Self::outcome_category_from_executor_error(&e);
                 // Record failure outcome
-                self.authority.record_outcome(&ExecutionOutcome {
-                    stage_id: stage.name.clone(),
-                    target: target_decision.result.clone(),
-                    latency_ms: 0,
-                    success: false,
-                    error: Some(error_msg.clone()),
-                });
+                let outcome = Self::build_execution_outcome(
+                    stage,
+                    &target_resolution,
+                    0,
+                    false,
+                    Some(error_msg.clone()),
+                    category,
+                );
+                self.authority.record_outcome(&outcome);
                 return Err(OrchestratorError::ExecutionFailed(error_msg));
             }
         };
@@ -361,13 +406,15 @@ impl Orchestrator {
         );
 
         // Step 6: Record outcome for learning (via OrchestrationAuthority)
-        self.authority.record_outcome(&ExecutionOutcome {
-            stage_id: stage.name.clone(),
-            target: target_decision.result.clone(),
-            latency_ms: latency_ms as u64,
+        let outcome = Self::build_execution_outcome(
+            stage,
+            &target_resolution,
+            latency_ms as u64,
             success,
-            error: error_msg,
-        });
+            error_msg,
+            None,
+        );
+        self.authority.record_outcome(&outcome);
 
         // Also record feedback for backward compatibility with routing engine
         self.routing_engine
@@ -499,16 +546,17 @@ impl Orchestrator {
         // Step 3: Resolve target via OrchestrationAuthority
         let stage_context = StageContext {
             stage_id: stage.name.clone(),
-            model_id: stage.name.clone(), // Use stage name as model_id if not specified
+            model_id: Self::effective_model_id(stage),
             input_kind: input.kind.clone(),
             metrics: metrics.clone(),
+            resource_monitor: self.resource_monitor.clone(),
             explicit_target: stage.target.clone(),
         };
-        let target_decision = self.authority.resolve_target(&stage_context);
+        let target_resolution = self.authority.resolve_target_with_feedback(&stage_context);
 
         // Convert ResolvedTarget to RoutingDecision for backward compatibility
         let routing_decision =
-            self.resolved_target_to_routing_decision(&stage.name, &target_decision);
+            self.resolved_target_to_routing_decision(&stage.name, &target_resolution);
 
         // Emit routing decision event
         self.event_bus.publish(OrchestratorEvent::RoutingDecided {
@@ -545,14 +593,17 @@ impl Orchestrator {
             Ok((out, meta)) => (out, meta, true, None),
             Err(e) => {
                 let error_msg = format!("{:?}", e);
+                let category = Self::outcome_category_from_executor_error(&e);
                 // Record failure outcome
-                self.authority.record_outcome(&ExecutionOutcome {
-                    stage_id: stage.name.clone(),
-                    target: target_decision.result.clone(),
-                    latency_ms: 0,
-                    success: false,
-                    error: Some(error_msg.clone()),
-                });
+                let outcome = Self::build_execution_outcome(
+                    stage,
+                    &target_resolution,
+                    0,
+                    false,
+                    Some(error_msg.clone()),
+                    category,
+                );
+                self.authority.record_outcome(&outcome);
                 return Err(OrchestratorError::ExecutionFailed(error_msg));
             }
         };
@@ -573,13 +624,15 @@ impl Orchestrator {
         );
 
         // Step 6: Record outcome for learning (via OrchestrationAuthority)
-        self.authority.record_outcome(&ExecutionOutcome {
-            stage_id: stage.name.clone(),
-            target: target_decision.result.clone(),
-            latency_ms: latency_ms as u64,
+        let outcome = Self::build_execution_outcome(
+            stage,
+            &target_resolution,
+            latency_ms as u64,
             success,
-            error: error_msg,
-        });
+            error_msg,
+            None,
+        );
+        self.authority.record_outcome(&outcome);
 
         // Also record feedback for backward compatibility with routing engine
         self.routing_engine
@@ -776,8 +829,9 @@ impl Orchestrator {
     fn resolved_target_to_routing_decision(
         &self,
         stage_name: &str,
-        decision: &AuthorityDecision<ResolvedTarget>,
+        resolution: &TargetResolution,
     ) -> RoutingDecision {
+        let decision = &resolution.decision;
         let target = match &decision.result {
             ResolvedTarget::Device => RouteTarget::Local,
             ResolvedTarget::Cloud { .. } => RouteTarget::Cloud,
@@ -794,6 +848,7 @@ impl Orchestrator {
                 decision.confidence * 100.0
             ),
             timestamp_ms: decision.timestamp_ms,
+            local_reliability_hint: resolution.local_reliability_hint.unwrap_or_default(),
         }
     }
 }
@@ -808,9 +863,9 @@ impl Default for Orchestrator {
 mod tests {
     use super::*;
     use crate::ir::{Envelope, EnvelopeKind};
-    use crate::runtime_adapter::RuntimeAdapter;
+    use crate::runtime_adapter::{AdapterError, AdapterResult, RuntimeAdapter};
     use crate::testing::mocks::MockRuntimeAdapter;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     fn text_envelope(value: &str) -> Envelope {
         Envelope::new(EnvelopeKind::Text(value.to_string()))
@@ -818,6 +873,92 @@ mod tests {
 
     fn audio_envelope(bytes: &[u8]) -> Envelope {
         Envelope::new(EnvelopeKind::Audio(bytes.to_vec()))
+    }
+
+    #[derive(Clone, Copy)]
+    enum FailureKind {
+        CloudFallbackAbort(AbortReason),
+        Runtime,
+    }
+
+    struct FailingRuntimeAdapter {
+        kind: FailureKind,
+        loaded: Mutex<bool>,
+    }
+
+    impl FailingRuntimeAdapter {
+        fn new(kind: FailureKind) -> Self {
+            Self {
+                kind,
+                loaded: Mutex::new(false),
+            }
+        }
+    }
+
+    impl RuntimeAdapter for FailingRuntimeAdapter {
+        fn name(&self) -> &str {
+            "failing"
+        }
+
+        fn supported_formats(&self) -> Vec<&'static str> {
+            vec!["onnx"]
+        }
+
+        fn load_model(&mut self, _path: &str) -> AdapterResult<()> {
+            *self.loaded.lock().unwrap() = true;
+            Ok(())
+        }
+
+        fn execute(&self, _input: &Envelope) -> AdapterResult<Envelope> {
+            assert!(
+                *self.loaded.lock().unwrap(),
+                "test adapter should be loaded before execution"
+            );
+            match self.kind {
+                FailureKind::CloudFallbackAbort(reason) => {
+                    Err(AdapterError::AbortedForCloudFallback { reason })
+                }
+                FailureKind::Runtime => Err(AdapterError::RuntimeError("boom".to_string())),
+            }
+        }
+    }
+
+    struct RecordingAuthority {
+        inner: Arc<LocalAuthority>,
+        outcomes: Arc<Mutex<Vec<ExecutionOutcome>>>,
+    }
+
+    impl RecordingAuthority {
+        fn new(inner: Arc<LocalAuthority>, outcomes: Arc<Mutex<Vec<ExecutionOutcome>>>) -> Self {
+            Self { inner, outcomes }
+        }
+    }
+
+    impl OrchestrationAuthority for RecordingAuthority {
+        fn apply_policy(&self, request: &PolicyRequest) -> AuthorityDecision<PolicyOutcome> {
+            self.inner.apply_policy(request)
+        }
+
+        fn resolve_target(&self, context: &StageContext) -> AuthorityDecision<ResolvedTarget> {
+            self.inner.resolve_target(context)
+        }
+
+        fn resolve_target_with_feedback(&self, context: &StageContext) -> TargetResolution {
+            self.inner.resolve_target_with_feedback(context)
+        }
+
+        fn select_model(&self, request: &ModelRequest) -> AuthorityDecision<ModelSelection> {
+            self.inner.select_model(request)
+        }
+
+        fn record_outcome(&self, outcome: &ExecutionOutcome) {
+            self.outcomes.lock().unwrap().push(outcome.clone());
+            self.inner.record_outcome(outcome);
+        }
+
+        fn name(&self) -> &str {
+            "recording"
+        }
     }
 
     /// Helper to create an orchestrator with a pre-loaded mock adapter registered.
@@ -843,6 +984,55 @@ mod tests {
         orchestrator
     }
 
+    fn orchestrator_with_failing_adapter(
+        kind: FailureKind,
+        outcomes: Arc<Mutex<Vec<ExecutionOutcome>>>,
+        inner: Arc<LocalAuthority>,
+    ) -> Orchestrator {
+        let authority = RecordingAuthority::new(inner, outcomes);
+        let mut orchestrator = Orchestrator::with_authority(Box::new(authority));
+        let mut adapter = FailingRuntimeAdapter::new(kind);
+        adapter.load_model("/mock/model.onnx").unwrap();
+        orchestrator
+            .executor_mut()
+            .register_adapter(Arc::new(adapter));
+        orchestrator
+    }
+
+    fn local_routing_metrics() -> DeviceMetrics {
+        DeviceMetrics {
+            network_rtt: 300,
+            battery: 50,
+            temperature: 25.0,
+            ..DeviceMetrics::default()
+        }
+    }
+
+    fn hysteresis_probe_context(model_id: &str) -> StageContext {
+        StageContext {
+            stage_id: "abort_stage".to_string(),
+            model_id: model_id.to_string(),
+            input_kind: EnvelopeKind::Text("probe".to_string()),
+            metrics: DeviceMetrics::default(),
+            resource_monitor: ResourceMonitor::global(),
+            explicit_target: None,
+        }
+    }
+
+    fn assert_hysteresis_active(authority: &LocalAuthority, model_id: &str, reason: AbortReason) {
+        let decision = authority.resolve_target(&hysteresis_probe_context(model_id));
+
+        assert!(matches!(decision.result, ResolvedTarget::Cloud { .. }));
+        assert!(decision.reason.contains("hysteresis"));
+        assert!(decision.reason.contains(reason.as_str()));
+    }
+
+    fn assert_no_hysteresis(authority: &LocalAuthority, model_id: &str) {
+        let decision = authority.resolve_target(&hysteresis_probe_context(model_id));
+
+        assert!(!decision.reason.contains("hysteresis"));
+    }
+
     #[test]
     fn test_orchestrator_creation() {
         let orchestrator = Orchestrator::new();
@@ -859,6 +1049,7 @@ mod tests {
             network_rtt: 100,
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
         let availability = LocalAvailability::new(true);
 
@@ -889,6 +1080,7 @@ mod tests {
             network_rtt: 100,
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let availability_fn = |stage: &str| -> LocalAvailability {
@@ -921,6 +1113,7 @@ mod tests {
             network_rtt: 100,
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
         let availability = LocalAvailability::new(true);
 
@@ -948,6 +1141,7 @@ mod tests {
             network_rtt: 300, // High RTT should trigger local routing
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
         let availability = LocalAvailability::new(true);
 
@@ -983,6 +1177,7 @@ mod tests {
             network_rtt: 100,
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
         let availability = LocalAvailability::new(true);
 
@@ -1007,5 +1202,108 @@ mod tests {
         let mut orchestrator = Orchestrator::new();
         let _manager = orchestrator.stream_manager_mut();
         // Just verify we can access the stream manager
+    }
+
+    #[test]
+    fn typed_cloud_fallback_abort_records_hysteresis_outcome_sync() {
+        let outcomes = Arc::new(Mutex::new(Vec::new()));
+        let authority = Arc::new(LocalAuthority::new());
+        let mut orchestrator = orchestrator_with_failing_adapter(
+            FailureKind::CloudFallbackAbort(AbortReason::StressMemory),
+            outcomes.clone(),
+            authority.clone(),
+        );
+        let stage = StageDescriptor::new("abort_stage").with_model("effective-model");
+        let input = text_envelope("Text");
+        let availability = LocalAvailability::new(true);
+
+        let result =
+            orchestrator.execute_stage(&stage, &input, &local_routing_metrics(), &availability);
+
+        assert!(matches!(result, Err(OrchestratorError::ExecutionFailed(_))));
+        let recorded = outcomes.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        let outcome = &recorded[0];
+        assert_eq!(outcome.effective_model_id(), "effective-model");
+        assert_eq!(outcome.target, ResolvedTarget::Device);
+        assert!(outcome.signal_context.is_some());
+        assert_eq!(
+            outcome.category,
+            Some(OutcomeCategory::AbortedForCloudFallback {
+                reason: AbortReason::StressMemory
+            })
+        );
+        drop(recorded);
+        assert_hysteresis_active(&authority, "effective-model", AbortReason::StressMemory);
+    }
+
+    #[test]
+    fn typed_cloud_fallback_abort_records_hysteresis_outcome_async() {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let outcomes = Arc::new(Mutex::new(Vec::new()));
+                let authority = Arc::new(LocalAuthority::new());
+                let mut orchestrator = orchestrator_with_failing_adapter(
+                    FailureKind::CloudFallbackAbort(AbortReason::StressThermal),
+                    outcomes.clone(),
+                    authority.clone(),
+                );
+                let stage = StageDescriptor::new("abort_stage").with_model("async-model");
+                let input = text_envelope("Text");
+                let availability = LocalAvailability::new(true);
+
+                let result = orchestrator
+                    .execute_stage_async(&stage, &input, &local_routing_metrics(), &availability)
+                    .await;
+
+                assert!(matches!(result, Err(OrchestratorError::ExecutionFailed(_))));
+                let recorded = outcomes.lock().unwrap();
+                assert_eq!(recorded.len(), 1);
+                let outcome = &recorded[0];
+                assert_eq!(outcome.effective_model_id(), "async-model");
+                assert_eq!(outcome.target, ResolvedTarget::Device);
+                assert!(outcome.signal_context.is_some());
+                assert_eq!(
+                    outcome.category,
+                    Some(OutcomeCategory::AbortedForCloudFallback {
+                        reason: AbortReason::StressThermal
+                    })
+                );
+                drop(recorded);
+                assert_hysteresis_active(&authority, "async-model", AbortReason::StressThermal);
+            });
+    }
+
+    #[test]
+    fn non_abort_failure_records_hard_fail_without_hysteresis() {
+        let outcomes = Arc::new(Mutex::new(Vec::new()));
+        let authority = Arc::new(LocalAuthority::new());
+        let mut orchestrator = orchestrator_with_failing_adapter(
+            FailureKind::Runtime,
+            outcomes.clone(),
+            authority.clone(),
+        );
+        let stage = StageDescriptor::new("abort_stage").with_model("hard-fail-model");
+        let input = text_envelope("Text");
+        let availability = LocalAvailability::new(true);
+
+        let result =
+            orchestrator.execute_stage(&stage, &input, &local_routing_metrics(), &availability);
+
+        assert!(matches!(result, Err(OrchestratorError::ExecutionFailed(_))));
+        let recorded = outcomes.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        let outcome = &recorded[0];
+        assert_eq!(outcome.effective_model_id(), "hard-fail-model");
+        assert_eq!(outcome.target, ResolvedTarget::Device);
+        assert!(matches!(
+            outcome.effective_category(),
+            OutcomeCategory::HardFail { .. }
+        ));
+        assert_eq!(outcome.category, None);
+        drop(recorded);
+        assert_no_hysteresis(&authority, "hard-fail-model");
     }
 }

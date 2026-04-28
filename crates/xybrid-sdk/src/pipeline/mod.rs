@@ -62,6 +62,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use xybrid_core::context::StageDescriptor;
+use xybrid_core::device::ResourceMonitor;
 use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
@@ -707,6 +708,7 @@ impl Pipeline {
                 model_id: model_id.clone(),
                 input_kind: EnvelopeKind::Text("".to_string()), // At preload time, we don't have actual input
                 metrics: metrics.clone(),
+                resource_monitor: ResourceMonitor::global(),
                 explicit_target,
             };
 

@@ -348,6 +348,25 @@ class XybridModel {
 }
 ```
 
+### Rust
+
+```rust
+impl XybridModel {
+    pub fn run_with_options(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+    ) -> SdkResult<InferenceResult>;
+
+    pub fn run_streaming_with_options<F>(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+        on_token: F,
+    ) -> SdkResult<InferenceResult>;
+}
+```
+
 ### Implementation Status
 
 | Method | Dart | Kotlin | Swift | C# |
@@ -358,9 +377,13 @@ class XybridModel {
 | `hasVoices` | — | ✅ | ✅ | ✅ |
 | `voice()` | — | ✅ | ✅ | ✅ |
 | `run()` | ✅ | ✅ | ✅ | ✅ |
+| `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
 | `runWithContext()` | ✅ | — | — | ✅ |
+| `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
 | `runStreaming()` | ✅ | — | — | ✅ |
+| `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | planned | planned | planned |
 | `runStreamingWithContext()` | ✅ | — | — | ✅ |
+| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |
 | `benchmark()` | — | — | — | — |
 | `unload()` | — | — | — | — |
 | `executionProviderInfo()` | — | — | — | — |
@@ -790,6 +813,43 @@ final stream = model.runStreaming(
 );
 ```
 
+### RunOptions and AbortPolicy
+
+Per-run controls for cooperative cancellation and resource-driven local abort.
+Rust SDK methods with options are available as `run_with_options`,
+`run_with_context_options`, `run_streaming_with_options`, and
+`run_streaming_with_context_options`.
+
+```rust
+let token = CancellationToken::new();
+let options = RunOptions::new()
+    .with_generation_config(GenerationConfig::greedy())
+    .with_cancellation_token(token.clone())
+    .with_abort_policy(
+        AbortPolicy::default()
+            .stop_on(AbortSignal::UserCancelled)
+            .stop_on(AbortSignal::MemoryPressureCritical)
+            .with_cloud_fallback(true)
+            .with_max_grace_tokens(2),
+    )
+    .with_correlation_id("run-123");
+
+let result = model.run_streaming_with_options(&envelope, &options, |token| {
+    print!("{}", token.token);
+    Ok(())
+});
+```
+
+`fallback_to_cloud` is carried in policy and telemetry contracts so binding
+layers and platform routing can restart on cloud where supported; local Rust
+streaming abort is cooperative and checked before every emitted token.
+
+Routing feedback is recorded inside the core orchestrator using low-cardinality
+resource buckets. The SDK keeps `correlation_id` as an opaque string for
+cross-binding compatibility; telemetry may include flat `routing_source`,
+`routing_reason`, `outcome_category`, `abort_reason`, `fallback_target`,
+`fallback_reason`, and `fallback_outcome` fields.
+
 ### Implementation Status
 
 | Type | Dart | Kotlin | Swift | C# |
@@ -797,6 +857,9 @@ final stream = model.runStreaming(
 | `ConversationContext` | ✅ | — | — | ✅ |
 | `MessageRole` | ✅ | — | — | ✅ |
 | `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
+| `RunOptions` | ✅ | planned | planned | planned |
+| `AbortPolicy` | ✅ | planned | planned | planned |
+| `CancellationToken` | ✅ | planned | planned | planned |
 | `StreamToken` | ✅ | — | — | ✅ |
 
 ---

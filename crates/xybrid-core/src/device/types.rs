@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// This enum represents the thermal state of a device, which affects
 /// performance and battery consumption decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThermalState {
     /// Normal operating temperature (< 60°C)

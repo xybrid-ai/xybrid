@@ -8,6 +8,7 @@
 
 use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
+use crate::run_options::{AbortState, RunOptions};
 use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::PathBuf;
@@ -138,6 +139,22 @@ impl xybrid_core::http::RetryableError for SdkError {
             _ => None,
         }
     }
+}
+
+fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
+    match error {
+        xybrid_core::runtime_adapter::AdapterError::AbortedForCloudFallback { reason } => {
+            SdkError::InferenceError(format!("Aborted for cloud fallback: {reason}"))
+        }
+        other => SdkError::InferenceError(format!("Streaming execution failed: {}", other)),
+    }
+}
+
+fn streaming_callback_error(error: Box<dyn std::error::Error + Send + Sync>) -> SdkError {
+    if let Some(reason) = xybrid_core::abort::cloud_fallback_reason_from_error(error.as_ref()) {
+        return SdkError::InferenceError(format!("Aborted for cloud fallback: {reason}"));
+    }
+    SdkError::InferenceError(format!("Streaming callback failed: {}", error))
 }
 
 /// Configuration for streaming ASR sessions.
@@ -1356,6 +1373,19 @@ impl XybridModel {
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
 
+    /// Run batch inference with per-run controls.
+    pub fn run_with_options(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+    ) -> SdkResult<InferenceResult> {
+        let mut abort_state = AbortState::new(options);
+        abort_state
+            .check_before_run()
+            .map_err(|reason| SdkError::InferenceError(format!("Execution aborted: {reason}")))?;
+        self.run(envelope, options.generation_config.as_ref())
+    }
+
     /// Run inference with conversation context.
     ///
     /// This method passes the conversation history to the model, allowing it to
@@ -1446,6 +1476,20 @@ impl XybridModel {
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
 
+    /// Run inference with conversation context and per-run controls.
+    pub fn run_with_context_options(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+        options: &RunOptions,
+    ) -> SdkResult<InferenceResult> {
+        let mut abort_state = AbortState::new(options);
+        abort_state
+            .check_before_run()
+            .map_err(|reason| SdkError::InferenceError(format!("Execution aborted: {reason}")))?;
+        self.run_with_context(envelope, context, options.generation_config.as_ref())
+    }
+
     /// Run streaming inference with conversation context.
     ///
     /// Combines streaming output with multi-turn conversation memory.
@@ -1522,9 +1566,7 @@ impl XybridModel {
                     Box::new(&mut on_token),
                     config,
                 )
-                .map_err(|e| {
-                    SdkError::InferenceError(format!("Streaming execution failed: {}", e))
-                })?
+                .map_err(streaming_execution_error)?
         } else {
             // For non-LLM models: run with context and emit single "token" with full result
             let result = handle
@@ -1541,7 +1583,7 @@ impl XybridModel {
                     cumulative_text: text.clone(),
                     finish_reason: Some("stop".to_string()),
                 };
-                let _ = on_token(token);
+                on_token(token).map_err(streaming_callback_error)?;
             }
 
             result
@@ -1574,6 +1616,35 @@ impl XybridModel {
         crate::telemetry::publish_telemetry_event(event);
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+    }
+
+    /// Run streaming inference with conversation context and per-token abort checks.
+    pub fn run_streaming_with_context_options<F>(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+        options: &RunOptions,
+        mut on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        let mut abort_state = AbortState::new(options);
+        let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
+        self.run_streaming_with_context(
+            envelope,
+            context,
+            options.generation_config.as_ref(),
+            move |token| {
+                if let Err(reason) = abort_state.check_before_token() {
+                    return Err(reason.into_streaming_error(fallback_to_cloud));
+                }
+                on_token(token)
+            },
+        )
     }
 
     /// Run inference with streaming output.
@@ -1640,9 +1711,7 @@ impl XybridModel {
             handle
                 .executor
                 .execute_streaming(&metadata, envelope, Box::new(&mut on_token), config)
-                .map_err(|e| {
-                    SdkError::InferenceError(format!("Streaming execution failed: {}", e))
-                })?
+                .map_err(streaming_execution_error)?
         } else {
             // For non-LLM models: run batch and emit single "token" with full result
             let result = handle
@@ -1659,7 +1728,7 @@ impl XybridModel {
                     cumulative_text: text.clone(),
                     finish_reason: Some("stop".to_string()),
                 };
-                let _ = on_token(token); // Ignore callback errors for non-streaming
+                on_token(token).map_err(streaming_callback_error)?;
             }
 
             result
@@ -1691,6 +1760,29 @@ impl XybridModel {
         crate::telemetry::publish_telemetry_event(event);
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+    }
+
+    /// Run streaming inference with per-token abort checks.
+    pub fn run_streaming_with_options<F>(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+        mut on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        let mut abort_state = AbortState::new(options);
+        let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
+        self.run_streaming(envelope, options.generation_config.as_ref(), move |token| {
+            if let Err(reason) = abort_state.check_before_token() {
+                return Err(reason.into_streaming_error(fallback_to_cloud));
+            }
+            on_token(token)
+        })
     }
 
     /// Run inference returning a stream of events.
@@ -1778,9 +1870,7 @@ impl XybridModel {
                             }),
                             config.as_ref(),
                         )
-                        .map_err(|e| {
-                            SdkError::InferenceError(format!("Streaming execution failed: {}", e))
-                        })?
+                        .map_err(streaming_execution_error)?
                 } else {
                     // Non-LLM: batch execution, emit single token
                     let result = guard
@@ -2025,6 +2115,53 @@ impl Clone for XybridModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streaming_execution_error_preserves_typed_cloud_fallback_abort() {
+        let error = streaming_execution_error(
+            xybrid_core::runtime_adapter::AdapterError::AbortedForCloudFallback {
+                reason: xybrid_core::abort::AbortReason::StressMemory,
+            },
+        );
+
+        match error {
+            SdkError::InferenceError(message) => {
+                assert!(message.contains("Aborted for cloud fallback"));
+                assert!(message.contains("stress_memory"));
+            }
+            other => panic!("expected inference error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn streaming_callback_error_preserves_typed_cloud_fallback_abort() {
+        let error =
+            streaming_callback_error(Box::new(xybrid_core::abort::CloudFallbackAbort::new(
+                xybrid_core::abort::AbortReason::StressThermal,
+            )));
+
+        match error {
+            SdkError::InferenceError(message) => {
+                assert!(message.contains("Aborted for cloud fallback"));
+                assert!(message.contains("stress_thermal"));
+            }
+            other => panic!("expected inference error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn streaming_callback_error_keeps_non_fallback_abort_generic() {
+        let error =
+            streaming_callback_error(Box::new(crate::run_options::AbortReason::UserCancelled));
+
+        match error {
+            SdkError::InferenceError(message) => {
+                assert!(message.contains("Streaming callback failed"));
+                assert!(message.contains("user_cancelled"));
+            }
+            other => panic!("expected inference error, got {other:?}"),
+        }
+    }
 
     #[test]
     fn test_model_loader_from_registry() {

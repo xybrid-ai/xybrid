@@ -160,7 +160,9 @@ impl Default for StrategyResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::template::{ExecutionTemplate, PreprocessingStep};
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    use crate::execution::template::ExecutionTemplate;
+    use crate::execution::template::PreprocessingStep;
 
     #[test]
     fn test_resolver_selects_tts_for_phonemize() {

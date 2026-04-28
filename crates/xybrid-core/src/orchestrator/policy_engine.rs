@@ -436,6 +436,7 @@ mod tests {
             network_rtt: 350,
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let result = engine.evaluate("test_stage", &envelope, &metrics);
@@ -451,6 +452,7 @@ mod tests {
             network_rtt: 100,
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let result = engine.evaluate("test_stage", &envelope, &metrics);
@@ -466,6 +468,7 @@ mod tests {
             network_rtt: 100,
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let result = engine.evaluate("test_stage", &envelope, &metrics);
@@ -493,6 +496,7 @@ signature: "test"
             network_rtt: 100,
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let policy_result = engine.evaluate("test", &envelope, &metrics);
@@ -518,6 +522,7 @@ signature: "test"
             network_rtt: 100,
             battery: 15,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let policy_result = engine.evaluate("test", &envelope, &metrics);
@@ -532,6 +537,7 @@ signature: "test"
             network_rtt: 100,
             battery: 50,
             temperature: 25.0,
+            ..DeviceMetrics::default()
         };
 
         let result = engine.evaluate("test_stage", &envelope, &metrics);
