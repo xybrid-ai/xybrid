@@ -78,7 +78,7 @@
 
 | Goal | Path |
 |------|------|
-| Fastest demo (2 min) | [Install CLI →](#install) |
+| Fastest demo (2 min) | [Install CLI →](#quick-start) |
 | Build a mobile or desktop app | [Flutter SDK →](bindings/flutter/) |
 | Add AI NPCs to your game | [Unity SDK →](bindings/unity/) and try the [3D tavern demo](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | Android native | [Kotlin SDK →](bindings/kotlin/) |
@@ -96,7 +96,7 @@ Xybrid is a **Rust-powered runtime** with native bindings for every major platfo
 | SDK | Platforms | Install | Status | Sample |
 |-----|-----------|---------|--------|--------|
 | **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [pub.dev](https://pub.dev/packages/xybrid_flutter) | Available | [README](examples/flutter/README.md) |
-| **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [See below](#install) | Available | [Unity 3D AI tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
+| **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [See below](#quick-start) | Available | [Unity 3D AI tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Coming Soon | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | Available | [README](examples/android/README.md) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | Available | — |
@@ -104,40 +104,16 @@ Xybrid is a **Rust-powered runtime** with native bindings for every major platfo
 
 Every SDK wraps the same Rust core — identical model support and behavior across all platforms.
 
-### Install
+---
 
-**Unity** → Package Manager:
+## Quick Start
 
-```sh
-https://github.com/xybrid-ai/xybrid.git#upm
-```
+Install and run a model in your language of choice. Each section includes the install snippet and a minimal example.
 
-**Flutter** → `pubspec.yaml`:
+<details>
+<summary><b>CLI</b> — macOS, Linux, Windows</summary>
 
-```yaml
-dependencies:
-  xybrid_flutter: ^0.1.0
-```
-
-**Swift (iOS / macOS)**:
-
-```swift
-// Package.swift
-dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.0")
-]
-```
-
-**Kotlin (Android)**:
-
-```gradle
-// build.gradle.kts
-dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta12")
-}
-```
-
-**CLI**
+**Install:**
 
 ```bash
 # macOS / Linux
@@ -149,59 +125,119 @@ curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh |
 irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 ```
 
-See the full [Installation Guide](docs/INSTALLATION.md) for all options, hardware acceleration, and CLI reference.
+**Run a model:**
 
----
-
-## Quick Start
-
-See each SDK's README for platform-specific setup: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)
-
-### Single Model
-
-Run a model in one line from the CLI, or three lines from any SDK:
-
-**CLI:**
 ```sh
 xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 ```
 
-**Flutter:**
+</details>
+
+<details>
+<summary><b>Flutter</b> — iOS, Android, macOS, Linux, Windows</summary>
+
+**Install** in `pubspec.yaml`:
+
+```yaml
+dependencies:
+  xybrid_flutter: ^0.1.0
+```
+
+**Run a model:**
+
 ```dart
 final model = await Xybrid.model('kokoro-82m').load();
 final result = await model.run(XybridEnvelope.text('Hello world'));
 // result → 24kHz WAV audio
 ```
 
-**Kotlin:**
+</details>
+
+<details>
+<summary><b>Kotlin</b> — Android</summary>
+
+**Install** in `build.gradle.kts`:
+
+```gradle
+dependencies {
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta12")
+}
+```
+
+**Run a model:**
+
 ```kotlin
 val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
 val result = model.run(Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
 
-**Swift:**
+</details>
+
+<details>
+<summary><b>Swift</b> — iOS, macOS</summary>
+
+**Install** in `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.0")
+]
+```
+
+**Run a model:**
+
 ```swift
 let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
 let result = try model.run(envelope: Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
 
-**Unity (C#):**
+</details>
+
+<details>
+<summary><b>Unity (C#)</b> — macOS, Windows, Linux, iOS, Android</summary>
+
+**Install** via Unity Package Manager:
+
+```sh
+https://github.com/xybrid-ai/xybrid.git#upm
+```
+
+**Run a model:**
+
 ```csharp
 var model = XybridClient.LoadModel("kokoro-82m");
 var result = model.Run(Envelope.Text("Hello world"));
 // result → 24kHz WAV audio
 ```
 
-**Rust:**
+</details>
+
+<details>
+<summary><b>Rust</b> — All platforms</summary>
+
+**Install** in `Cargo.toml`:
+
+```toml
+[dependencies]
+xybrid-sdk = "0.1"
+```
+
+**Run a model:**
+
 ```rust
 let model = Xybrid::model("kokoro-82m").load()?;
 let result = model.run(&Envelope::text("Hello world"))?;
 // result → 24kHz WAV audio
 ```
 
-### Pipelines
+</details>
+
+See the full [Installation Guide](docs/INSTALLATION.md) for all options, hardware acceleration, and CLI reference. For platform-specific setup, see each SDK's README: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/).
+
+<details>
+<summary><h3>Pipelines (Experimental)</h3></summary>
 
 Chain models together — build a voice assistant in 3 lines of YAML:
 
@@ -246,6 +282,9 @@ let pipeline = Xybrid::pipeline(&yaml_string).load()?;
 pipeline.load_models()?;
 let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 ```
+
+</details>
+
 ---
 
 ## Supported Models
