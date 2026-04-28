@@ -28,6 +28,7 @@
 <p align="center">
 
 [![Website][website-shield]][website-url]
+[![Docs][docs-shield]][docs-url]
 [![Discord][discord-shield]][discord-url]
 [![Twitter][twitter-shield]][twitter-url]
 <br>
@@ -40,12 +41,15 @@
 <br>
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
+[![Swift Package Manager][spm-shield]][spm-url]
 [![Visitors](https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid)](https://github.com/xybrid-ai/xybrid)
 
 </p>
 
 [website-shield]: https://img.shields.io/badge/xybrid.ai-4285F4?style=flat
 [website-url]: https://www.xybrid.ai/
+[docs-shield]: https://img.shields.io/badge/docs-xybrid.dev-1F6FEB?style=flat&logo=readthedocs&logoColor=white
+[docs-url]: https://docs.xybrid.dev/
 [discord-shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Finvites%2FYhFHHkhbad%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&logo=discord&logoColor=white&label=Discord&color=5865F2&suffix=%20members
 [discord-url]: https://discord.gg/YhFHHkhbad
 [twitter-shield]: https://img.shields.io/twitter/follow/xybrid_ai
@@ -65,6 +69,8 @@
 [pubdev-url]: https://pub.dev/packages/xybrid_flutter
 [maven-shield]: https://img.shields.io/maven-central/v/ai.xybrid/xybrid-kotlin?style=flat&label=Maven%20Central
 [maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
+[spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat&logo=swift&logoColor=white
+[spm-url]: https://github.com/xybrid-ai/xybrid
 </div>
 
 <p align="center">
