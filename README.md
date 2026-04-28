@@ -110,31 +110,9 @@ Every SDK wraps the same Rust core — identical model support and behavior acro
 
 Install and run a model in your language of choice. Each section includes the install snippet and a minimal example.
 
-<details>
-<summary><b>CLI</b> — macOS, Linux, Windows</summary>
-
-**Install:**
-
-```bash
-# macOS / Linux
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh
-```
-
-```powershell
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
-```
-
-**Run a model:**
-
-```sh
-xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
-```
-
-</details>
 
 <details>
-<summary><b>Flutter</b> — iOS, Android, macOS, Linux, Windows</summary>
+<summary><b>Flutter</summary>
 
 **Install** in `pubspec.yaml`:
 
@@ -154,7 +132,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 </details>
 
 <details>
-<summary><b>Kotlin</b> — Android</summary>
+<summary><b>Kotlin</summary>
 
 **Install** in `build.gradle.kts`:
 
@@ -175,7 +153,7 @@ val result = model.run(Envelope.text("Hello world"))
 </details>
 
 <details>
-<summary><b>Swift</b> — iOS, macOS</summary>
+<summary><b>Swift</summary>
 
 **Install** in `Package.swift`:
 
@@ -196,7 +174,7 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 </details>
 
 <details>
-<summary><b>Unity (C#)</b> — macOS, Windows, Linux, iOS, Android</summary>
+<summary><b>Unity/C#</summary>
 
 **Install** via Unity Package Manager:
 
@@ -215,7 +193,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 </details>
 
 <details>
-<summary><b>Rust</b> — All platforms</summary>
+<summary>Rust</summary>
 
 **Install** in `Cargo.toml`:
 
@@ -230,6 +208,29 @@ xybrid-sdk = "0.1"
 let model = Xybrid::model("kokoro-82m").load()?;
 let result = model.run(&Envelope::text("Hello world"))?;
 // result → 24kHz WAV audio
+```
+
+</details>
+
+<details>
+<summary><b>CLI</b> — macOS, Linux, Windows</summary>
+
+**Install:**
+
+```bash
+# macOS / Linux
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
+```
+
+**Run a model:**
+
+```sh
+xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 ```
 
 </details>
