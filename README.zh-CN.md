@@ -78,7 +78,7 @@
 
 | 目标 | 路径 |
 |------|------|
-| 最快上手（2 分钟） | [安装 CLI →](#安装) |
+| 最快上手（2 分钟） | [安装 CLI →](#快速开始) |
 | 构建移动端或桌面应用 | [Flutter SDK →](bindings/flutter/) |
 | 为游戏添加 AI NPC | [Unity SDK →](bindings/unity/)，体验 [3D 酒馆示例](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | Android 原生开发 | [Kotlin SDK →](bindings/kotlin/) |
@@ -96,7 +96,7 @@ Xybrid 是一个 **Rust 驱动的运行时**，为所有主流平台提供原生
 | SDK | 平台 | 安装 | 状态 | 示例 |
 |-----|------|------|------|------|
 | **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [pub.dev](https://pub.dev/packages/xybrid_flutter) | 可用 | [README](examples/flutter/README.md) |
-| **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [见下方](#安装) | 可用 | [Unity 3D AI 酒馆](https://github.com/xybrid-ai/xybrid-unity-tavern) |
+| **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [见下方](#快速开始) | 可用 | [Unity 3D AI 酒馆](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | 即将推出 | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | 可用 | [README](examples/android/README.md) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | 可用 | — |
@@ -104,40 +104,16 @@ Xybrid 是一个 **Rust 驱动的运行时**，为所有主流平台提供原生
 
 所有 SDK 封装同一个 Rust 核心——跨平台行为和模型支持完全一致。
 
-### 安装
+---
 
-**Unity** → Package Manager：
+## 快速开始
 
-```sh
-https://github.com/xybrid-ai/xybrid.git#upm
-```
+选择你喜欢的语言，安装并运行模型。每个语言下都包含安装片段和最小示例。
 
-**Flutter** → `pubspec.yaml`：
+<details>
+<summary><b>CLI</b> — macOS、Linux、Windows</summary>
 
-```yaml
-dependencies:
-  xybrid_flutter: ^0.1.0
-```
-
-**Swift (iOS / macOS)**：
-
-```swift
-// Package.swift
-dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.0")
-]
-```
-
-**Kotlin (Android)**：
-
-```gradle
-// build.gradle.kts
-dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta12")
-}
-```
-
-**CLI**
+**安装：**
 
 ```bash
 # macOS / Linux
@@ -149,59 +125,119 @@ curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh |
 irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 ```
 
-完整安装选项、硬件加速与 CLI 参考请参阅 [Installation Guide](docs/INSTALLATION.md)。
+**运行模型：**
 
----
-
-## 快速开始
-
-各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)
-
-### 单一模型
-
-通过 CLI 一行命令运行模型，或在任何 SDK 中用三行代码搞定：
-
-**CLI:**
 ```sh
 xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -o output.wav
 ```
 
-**Flutter:**
+</details>
+
+<details>
+<summary><b>Flutter</b> — iOS、Android、macOS、Linux、Windows</summary>
+
+**安装** 在 `pubspec.yaml`：
+
+```yaml
+dependencies:
+  xybrid_flutter: ^0.1.0
+```
+
+**运行模型：**
+
 ```dart
 final model = await Xybrid.model('kokoro-82m').load();
 final result = await model.run(XybridEnvelope.text('国破山河在，城春草木深'));
 // 输出 → 24kHz WAV 音频
 ```
 
-**Kotlin:**
+</details>
+
+<details>
+<summary><b>Kotlin</b> — Android</summary>
+
+**安装** 在 `build.gradle.kts`：
+
+```gradle
+dependencies {
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta12")
+}
+```
+
+**运行模型：**
+
 ```kotlin
 val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
 val result = model.run(Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
 
-**Swift:**
+</details>
+
+<details>
+<summary><b>Swift</b> — iOS、macOS</summary>
+
+**安装** 在 `Package.swift`：
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.0")
+]
+```
+
+**运行模型：**
+
 ```swift
 let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
 let result = try model.run(envelope: Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
 
-**Unity (C#):**
+</details>
+
+<details>
+<summary><b>Unity (C#)</b> — macOS、Windows、Linux、iOS、Android</summary>
+
+**安装** 通过 Unity Package Manager：
+
+```sh
+https://github.com/xybrid-ai/xybrid.git#upm
+```
+
+**运行模型：**
+
 ```csharp
 var model = XybridClient.LoadModel("kokoro-82m");
 var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 // 输出 → 24kHz WAV 音频
 ```
 
-**Rust:**
+</details>
+
+<details>
+<summary><b>Rust</b> — 全平台</summary>
+
+**安装** 在 `Cargo.toml`：
+
+```toml
+[dependencies]
+xybrid-sdk = "0.1"
+```
+
+**运行模型：**
+
 ```rust
 let model = Xybrid::model("kokoro-82m").load()?;
 let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 // 输出 → 24kHz WAV 音频
 ```
 
-### 流水线
+</details>
+
+完整安装选项、硬件加速与 CLI 参考请参阅 [Installation Guide](docs/INSTALLATION.md)。各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
+
+<details>
+<summary><h3>流水线（实验性）</h3></summary>
 
 将模型链接在一起——用 3 行 YAML 搭建语音助手：
 
@@ -246,6 +282,9 @@ let pipeline = Xybrid::pipeline(&yaml_string).load()?;
 pipeline.load_models()?;
 let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 ```
+
+</details>
+
 ---
 
 ## 支持的模型
