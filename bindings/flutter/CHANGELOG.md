@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-rc1
+
+* _TODO_
+
 ## 0.1.0-beta12
 
 * LLM telemetry expansion: swim-lane spans, device profile metadata, and Pipeline::run hardening on top of beta11's streaming telemetry

@@ -166,7 +166,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta12")
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-rc1")
 }
 ```
 
