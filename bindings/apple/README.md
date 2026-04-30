@@ -12,14 +12,14 @@ Add Xybrid to your Xcode project:
 
 1. In Xcode, select **File > Add Package Dependencies...**
 2. Enter: `https://github.com/xybrid-ai/xybrid`
-3. Set **Dependency Rule** to **Branch** → `swift`
+3. Set **Dependency Rule** to **Exact Version** → `0.1.0-beta13`
 4. Select the **Xybrid** library product
 
 Or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", branch: "swift")
+    .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
 ]
 ```
 
@@ -31,6 +31,11 @@ Then add the dependency to your target:
     dependencies: ["Xybrid"]
 )
 ```
+
+> Once a stable `0.1.0` is released, you'll be able to use
+> `from: "0.1.0"` instead of pinning an exact beta tag. Pre-release
+> identifiers (e.g. `-beta13`) are excluded from `from:` resolution per
+> SemVer, which is why a beta requires `exact:`.
 
 ## Usage
 

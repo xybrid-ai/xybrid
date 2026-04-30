@@ -15,9 +15,15 @@ Add the Xybrid package via Swift Package Manager:
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
 ]
 ```
+
+<Callout type="info">
+Pin to an exact tag while we're shipping betas — SPM's `from:` excludes
+pre-release identifiers per SemVer. Once `0.1.0` is released, switch to
+`from: "0.1.0"`.
+</Callout>
 
 Or in Xcode: **File > Add Package Dependencies** and enter the repository URL.
 

@@ -44,5 +44,9 @@ xcuserdata/
 # SwiftPM user data
 .swiftpm/xcode/xcuserdata/
 
+# SwiftPM build output (root Package.swift)
+/.build/
+Package.resolved
+
 # Build artifacts - XCFrameworks (built by `cargo xtask build-xcframework`)
 bindings/apple/XCFrameworks/*.xcframework/

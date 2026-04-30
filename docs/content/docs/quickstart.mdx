@@ -52,9 +52,13 @@ Or add to `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
 ]
 ```
+
+> Use `exact:` while pinning a beta tag — SPM's `from:` excludes pre-release
+> identifiers per SemVer. Switch to `from: "0.1.0"` once a stable `0.1.0`
+> ships.
 
 **Run inference**
 

@@ -133,6 +133,16 @@ jobs:
           echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
           echo "XCFramework SHA256: $CHECKSUM"
 
+      - name: Verify root Package.swift checksum matches built XCFramework
+        # SPM resolves the manifest at the tagged commit, so the manifest's
+        # xybridFFIChecksum must already match the zip we just built. If it
+        # doesn't, the engineer who cut the tag forgot to run
+        # bindings/apple/scripts/sync-spm-checksum.sh and re-tag — fail fast.
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          ./bindings/apple/scripts/sync-spm-checksum.sh --check dist/XybridFFI-${VERSION}.xcframework.zip
+
       - name: Upload XCFramework artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -578,7 +588,8 @@ jobs:
           echo "- \`xybrid-unity-sdk-${CURRENT_TAG}.tar.gz\` - Native plugins for all platforms (uploaded by Build Unity workflow)" >> CHANGELOG_RELEASE.md
           echo "" >> CHANGELOG_RELEASE.md
           echo "**Swift (iOS/macOS)**" >> CHANGELOG_RELEASE.md
-          echo "- SPM: \`.package(url: \"https://github.com/${{ github.repository }}\", branch: \"swift\")\`" >> CHANGELOG_RELEASE.md
+          echo "- SPM (recommended): \`.package(url: \"https://github.com/${{ github.repository }}\", exact: \"${CURRENT_TAG#v}\")\`" >> CHANGELOG_RELEASE.md
+          echo "- SPM (legacy, deprecated): \`.package(url: \"https://github.com/${{ github.repository }}\", branch: \"swift\")\`" >> CHANGELOG_RELEASE.md
           echo "- \`XybridFFI-${CURRENT_TAG}.xcframework.zip\` - Pre-built XCFramework (iOS arm64 + macOS arm64)" >> CHANGELOG_RELEASE.md
           echo "" >> CHANGELOG_RELEASE.md
           echo "**CLI**" >> CHANGELOG_RELEASE.md
@@ -628,7 +639,10 @@ jobs:
           echo "URL: $URL"
           echo "Checksum: $CHECKSUM"
 
-          # Generate the release Package.swift with URL-based binary target
+          # Generate the release Package.swift with URL-based binary target.
+          # Linker frameworks must mirror the root Package.swift exactly —
+          # MetalPerformanceShaders / MetalPerformanceShadersGraph are required
+          # because the XybridFFI xcframework calls into MPS at link time.
           cat > Package.swift << SWIFT_EOF
           // swift-tools-version:5.7
           import PackageDescription
@@ -653,6 +667,8 @@ jobs:
                       linkerSettings: [
                           .linkedLibrary("c++"),
                           .linkedFramework("Metal"),
+                          .linkedFramework("MetalPerformanceShaders"),
+                          .linkedFramework("MetalPerformanceShadersGraph"),
                           .linkedFramework("CoreML"),
                           .linkedFramework("Accelerate"),
                           .linkedFramework("Security"),
