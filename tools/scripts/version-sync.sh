@@ -15,6 +15,10 @@ CARGO_WORKSPACE="$REPO_ROOT/Cargo.toml"
 FLUTTER_PUBSPEC="$REPO_ROOT/bindings/flutter/pubspec.yaml"
 UNITY_PACKAGE="$REPO_ROOT/bindings/unity/package.json"
 KOTLIN_GRADLE="$REPO_ROOT/bindings/kotlin/build.gradle.kts"
+# Root SPM manifest. `let sdkVersion = "..."` drives the GitHub release-asset
+# URL for SPM consumers in remote mode and MUST match the cargo workspace
+# version.
+SWIFT_PACKAGE="$REPO_ROOT/Package.swift"
 
 # Extract current workspace version from Cargo.toml
 get_cargo_version() {
@@ -37,6 +41,11 @@ get_unity_version() {
 # Extract version from Kotlin build.gradle.kts
 get_kotlin_version() {
     grep '^version = ' "$KOTLIN_GRADLE" | sed 's/version = "\(.*\)"/\1/'
+}
+
+# Extract sdkVersion from root Package.swift
+get_swift_version() {
+    grep '^let sdkVersion = ' "$SWIFT_PACKAGE" | sed 's/let sdkVersion = "\(.*\)"/\1/'
 }
 
 # Set version in Cargo workspace (all Rust crates inherit via version.workspace = true)
@@ -74,6 +83,15 @@ set_kotlin_version() {
     rm -f "$KOTLIN_GRADLE.bak"
 }
 
+# Set sdkVersion in root Package.swift. Leaves useLocalNatives and
+# xybridFFIChecksum untouched — those are managed independently
+# (set-natives-mode.sh / sync-spm-checksum.sh).
+set_swift_version() {
+    local version="$1"
+    sed -i.bak "s/^let sdkVersion = \".*\"/let sdkVersion = \"$version\"/" "$SWIFT_PACKAGE"
+    rm -f "$SWIFT_PACKAGE.bak"
+}
+
 # Check mode: verify all versions match
 check_versions() {
     local cargo_version
@@ -83,7 +101,7 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version"; do
+    for name_func in "Flutter:get_flutter_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version
@@ -118,6 +136,7 @@ case "${1:-}" in
         set_flutter_version "$VERSION"
         set_unity_version "$VERSION"
         set_kotlin_version "$VERSION"
+        set_swift_version "$VERSION"
         echo "Done. Run '$0 --check' to verify."
         ;;
     --help|-h)
@@ -136,6 +155,7 @@ case "${1:-}" in
         set_flutter_version "$VERSION"
         set_unity_version "$VERSION"
         set_kotlin_version "$VERSION"
+        set_swift_version "$VERSION"
         echo ""
         echo "Rust crates inherit via version.workspace = true."
 

@@ -48,9 +48,14 @@ jobs:
           KOTLIN_VERSION=$(grep '^version = ' bindings/kotlin/build.gradle.kts | sed 's/version = "\(.*\)"/\1/')
           echo "Kotlin gradle:    $KOTLIN_VERSION"
 
+          # Check Swift (root Package.swift sdkVersion drives the SPM
+          # release-asset URL and must match the tag).
+          SWIFT_VERSION=$(grep '^let sdkVersion = ' Package.swift | sed 's/let sdkVersion = "\(.*\)"/\1/')
+          echo "Swift Package:    $SWIFT_VERSION"
+
           # Verify all match
           FAILED=0
-          for V in "$CARGO_VERSION" "$FLUTTER_VERSION_PKG" "$UNITY_VERSION" "$KOTLIN_VERSION"; do
+          for V in "$CARGO_VERSION" "$FLUTTER_VERSION_PKG" "$UNITY_VERSION" "$KOTLIN_VERSION" "$SWIFT_VERSION"; do
             if [ "$V" != "$TAG_VERSION" ]; then
               echo ""
               echo "ERROR: Version mismatch! Tag is v$TAG_VERSION but found $V"
