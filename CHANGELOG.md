@@ -17,11 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- _TODO_
+- **Per-inference resource telemetry** (#53): `xybrid-core` exposes CPU / memory / GPU pressure metrics per inference and `xybrid-sdk` folds them into telemetry events; new `device::resource` module with pressure sampling and a Criterion bench.
+- **Provider-agnostic prompt-cache token counts** (#52): Cloud LLM responses report `cache_creation` / `cache_read` token counts uniformly across providers; legacy field names continue to deserialize.
+- **Registry telemetry header** (#60): `X-Xybrid-Client` header on registry calls advertises binding, SDK version, core version, platform, and enabled backends; honors `XYBRID_TELEMETRY_OPTOUT`. Binding identifier is wired through Flutter, Kotlin, Swift, Unity, and Rust; CLI gains `xybrid telemetry status`.
+- **Unity / C# telemetry surface** (#56): `TelemetryConfig` API with Editor domain-reload guard, configuration sample scene, and Editor tests; C FFI exposes telemetry init / config / event hooks.
+- **Swift Package Manager root manifest** (#62): Top-level `Package.swift` with a `useLocalNatives` toggle for switching between published binaries and local-built XCFrameworks; `set-natives-mode.sh` and `sync-spm-checksum.sh` helpers.
+- **Localized docs**: Japanese README (#58) and Chinese localization for newly added documentation pages (#55).
 
 ### Fixed
 
-- _TODO_
+- **Apple SPM MPS link** (#62): Corrected Metal Performance Shaders linker flags so the Apple SPM target builds cleanly against the unified XCFramework.
 
 ---
 
