@@ -21,8 +21,9 @@
 use log::{debug, info, warn};
 
 use super::template::{
-    span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata,
-    PipelineStage, PostprocessingStep,
+    backend_label_from_template, normalize_llm_backend_hint, span_kind_from_template,
+    stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
+    PostprocessingStep,
 };
 use crate::conversation::ConversationContext;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -243,6 +244,18 @@ impl TemplateExecutor {
             "span_kind",
             span_kind_from_template(&metadata.execution_template),
         );
+
+        // Cost-accounting backend label (per `PlatformEvent.backend`).
+        // The bundle's `metadata.backend` hint disambiguates GGUF runtimes
+        // (llama.cpp vs mistral.rs); for ONNX/SafeTensors the template
+        // itself fixes the label. Omitted when the runtime isn't part of
+        // the closed set yet (CoreML / TFLite / ModelGraph) so analytics
+        // sees "absent" not "guessed".
+        let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+        if let Some(label) = backend_label_from_template(&metadata.execution_template, backend_hint)
+        {
+            xybrid_trace::add_metadata("backend", label);
+        }
 
         // Step 1: Handling ModelGraph (multi-model DAG)
         if let ExecutionTemplate::ModelGraph { stages, config } = &metadata.execution_template {
@@ -1173,7 +1186,11 @@ impl TemplateExecutor {
 
         let _llm_span = xybrid_trace::SpanGuard::new("llm_inference");
         xybrid_trace::add_metadata("model", model_file);
-        if let Some(hint) = backend_hint {
+        // Normalise the legacy `mistral` alias to the canonical wire label
+        // before annotating the span: the SDK telemetry hoist reads this
+        // span for the `backend` field on `PlatformEvent`, which must be
+        // in the closed set `{llamacpp, mistralrs, ...}`.
+        if let Some(hint) = backend_hint.and_then(normalize_llm_backend_hint) {
             xybrid_trace::add_metadata("backend", hint);
         }
 

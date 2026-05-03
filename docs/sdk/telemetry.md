@@ -213,6 +213,54 @@ The device profile is encoded as a typed `device` substructure. Platform ingest 
 
 Older SDKs continue to send the legacy top-level fields. Newer platform deployments should treat `device` as optional.
 
+## Cost-attribution fields
+
+Inference events (`ModelComplete`, `PipelineComplete`) carry per-call attribution scalars on the payload top level so the platform can compute cost without descending into the span tree. All fields are optional and absent when unknown — consumers must tolerate missing keys.
+
+| field | type | events | values | source |
+|---|---|---|---|---|
+| `backend` | string | inference | `llamacpp` \| `mistralrs` \| `ort` \| `candle` \| `cloud` | `ExecutionTemplate` variant + `metadata.backend` hint for GGUF; `cloud` for the cloud adapter |
+| `provider` | string | inference (cloud only) | `openai` \| `anthropic` \| `google` \| `elevenlabs` \| `openrouter` \| `custom` | Cloud `IntegrationProvider` resolved from envelope metadata |
+| `tokens_in` | u64 | inference | — | LLM span (`prompt_tokens` for OpenAI; synthesized total for Anthropic) |
+| `tokens_out` | u64 | inference | — | LLM span (`completion_tokens`) |
+| `cache_read_input_tokens` | u64 | inference | — | Anthropic-canonical; OpenAI's nested `prompt_tokens_details.cached_tokens` maps here |
+| `cache_creation_input_tokens` | u64 | inference | — | Anthropic-only |
+
+The closed set for `backend` is intentionally narrow — values outside it are not emitted (the field stays absent) so the analytics column can pin a closed enum without rejecting future runtimes mid-flight. Forward-declared backends (e.g. `mlx`) are added to the set only when a runtime adapter for them lands.
+
+For local LLM events `provider` is always absent; for cloud events it is always present alongside `backend = "cloud"`.
+
+## `ModelDownload` event
+
+Emitted exactly once per successful registry download, after the network transfer completes and (when applicable) SHA256 verification passes. Cache hits do **not** produce this event — the metric represents bytes-on-the-wire, not cache traffic.
+
+```json
+{
+  "event_type": "ModelDownload",
+  "session_id": "...",
+  "payload": {
+    "status": "success",
+    "latency_ms": 5432,
+    "data": {
+      "model_id": "kokoro-82m",
+      "bytes_downloaded": 132456789,
+      "source": "huggingface",
+      "duration_ms": 5432
+    }
+  },
+  "timestamp": "..."
+}
+```
+
+| field | type | description |
+|---|---|---|
+| `model_id` | string | Registry mask, e.g. `kokoro-82m` |
+| `bytes_downloaded` | u64 | Final on-disk size of the model file or `.xyb` bundle. Differs from the registry-declared expected size when upstream changed between resolve and fetch. |
+| `source` | string | Canonical download host: `r2` for Xybrid's R2 mirror, `huggingface` for direct HF pulls, `other` for any other host (forward-compat so a future provider doesn't lose attribution). |
+| `duration_ms` | u32 | Wallclock time inside the network download, excluding SHA256 verification and bundle extraction. Mirrored onto the top-level `latency_ms` so the existing latency column lights up. |
+
+The event respects the same opt-out as the registry call telemetry: when `XYBRID_TELEMETRY_OPTOUT=1` is set at process start, no `ModelDownload` event is emitted (the two leak the same kind of attribution surface — which model the user pulled — so they share one gate).
+
 ## Verification
 
 Run the SDK telemetry example from the repository root and inspect the JSON printed or received by your local ingest endpoint:

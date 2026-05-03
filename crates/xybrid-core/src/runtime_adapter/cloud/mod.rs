@@ -251,9 +251,36 @@ impl RuntimeAdapter for CloudRuntimeAdapter {
 
         let response = {
             let _llm_span = trace::SpanGuard::new("llm_inference");
-            client
+            // Annotate the inner LLM span with the cost-accounting fields
+            // before the call so that even if `complete` returns early
+            // (errors propagated upstream), the in-flight span still
+            // carries the runtime/provider it was attempting against.
+            // The SDK telemetry hoist (see
+            // `xybrid_sdk::telemetry::extract_llm_inference_string_attr`)
+            // lifts these onto the wire payload's top level for the
+            // billing column.
+            trace::add_metadata("backend", "cloud");
+            trace::add_metadata("provider", provider.as_str());
+            let resp = client
                 .complete(request)
-                .map_err(|e| AdapterError::InferenceFailed(format!("LLM request failed: {}", e)))?
+                .map_err(|e| AdapterError::InferenceFailed(format!("LLM request failed: {}", e)))?;
+            // Mirror cloud-provider token usage onto the LLM span so the
+            // hoist sees the same shape as a local-inference span. The
+            // canonical keys (`tokens_in` / `tokens_out` /
+            // `cache_*_input_tokens`) match what the local LLM adapter
+            // emits, so analytics consumers don't branch on local vs
+            // cloud.
+            if let Some(ref usage) = resp.usage {
+                trace::add_metadata("tokens_in", usage.prompt_tokens.to_string());
+                trace::add_metadata("tokens_out", usage.completion_tokens.to_string());
+                if let Some(c) = usage.cache_read_input_tokens {
+                    trace::add_metadata("cache_read_input_tokens", c.to_string());
+                }
+                if let Some(c) = usage.cache_creation_input_tokens {
+                    trace::add_metadata("cache_creation_input_tokens", c.to_string());
+                }
+            }
+            resp
         };
 
         // Build output envelope with response metadata

@@ -1000,6 +1000,22 @@ fn convert_to_platform_event(
                 }
             }
         }
+        // Hoist cost-accounting string attrs (`backend`, `provider`) from
+        // the LLM span. `backend` lands on every inference event; the
+        // local execution path emits values in the closed set
+        // {llamacpp, mlx, mistralrs, ort, candle} via
+        // `TemplateExecutor::execute_impl`, the cloud adapter emits
+        // `cloud` from its inner `llm_inference` span, and `provider`
+        // (openai / anthropic / …) is cloud-only. Hoisting the cloud
+        // fields here avoids dragging the analytics backend into the
+        // nested span tree for the billing column.
+        for key in ["backend", "provider"] {
+            if payload.get(key).is_none() {
+                if let Some(v) = extract_llm_inference_string_attr(&spans, key) {
+                    payload[key] = serde_json::json!(v);
+                }
+            }
+        }
         Some(spans)
     } else {
         None
@@ -1121,6 +1137,44 @@ fn extract_llm_token_counts(stages: &serde_json::Value) -> Option<(Option<u64>, 
     } else {
         None
     }
+}
+
+/// Walk a `stages` JSON (same shape as [`extract_llm_token_counts`]) and
+/// return the value of `key` from the LAST LLM-flavoured span that
+/// carries it as a string. Used to lift cost-accounting string attrs
+/// (`backend`, `provider`) onto the wire payload's top level alongside
+/// the token counts.
+///
+/// LLM-span detection is identical to [`extract_llm_token_counts`]
+/// (name prefix `llm_inference*` / `inference:*` or LLM-style metadata
+/// keys) so the two hoists agree on which span is "the" LLM span when
+/// a trace contains other inference spans (e.g. ASR/TTS).
+fn extract_llm_inference_string_attr(stages: &serde_json::Value, key: &str) -> Option<String> {
+    let spans = stages.get("spans")?.as_array()?;
+    let mut found: Option<String> = None;
+    for span in spans {
+        let name = span.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let meta = span.get("metadata");
+        let is_llm_span = name.starts_with("llm_inference")
+            || name.starts_with("inference:")
+            || meta
+                .map(|m| {
+                    m.get("ttft_ms").is_some()
+                        || m.get("tokens_generated").is_some()
+                        || m.get("tokens_out").is_some()
+                        || m.get("completion_tokens").is_some()
+                })
+                .unwrap_or(false);
+        if !is_llm_span {
+            continue;
+        }
+        if let Some(v) = meta.and_then(|m| m.get(key)).and_then(|v| v.as_str()) {
+            // Same last-span-wins rule as the token-count hoist: a retried
+            // run emits one span per attempt and we want the final value.
+            found = Some(v.to_string());
+        }
+    }
+    found
 }
 
 // ============================================================================
@@ -1627,6 +1681,77 @@ fn snapshot_context_into_event(event: TelemetryEvent) -> TelemetryEvent {
         data: Some(data.to_string()),
         ..event
     }
+}
+
+/// Build a `ModelDownload` event for a successful registry fetch.
+///
+/// Carries the cost-attribution fields agreed with the platform schema:
+/// `model_id` (registry mask), `bytes_downloaded` (final on-disk size of
+/// the model file or .xyb bundle), `source` (canonical download host
+/// label — `r2` for Xybrid's R2 mirror, `huggingface` for direct HF
+/// pulls; other hosts pass through as-is so a future provider doesn't
+/// silently lose attribution), and `duration_ms` (wallclock time spent
+/// inside the network download, excluding hash verification and cache
+/// extraction so the field reflects bytes-on-the-wire latency).
+///
+/// The wire `event_type` is the literal string `"ModelDownload"`. The
+/// fields land under `payload.data` after `convert_to_platform_event`
+/// runs; ingest reads them from there.
+///
+/// Pure builder — does not publish, allows unit tests to inspect the
+/// event shape without standing up the global exporter.
+fn build_model_download_event(
+    model_id: &str,
+    bytes_downloaded: u64,
+    source: &str,
+    duration_ms: u32,
+) -> TelemetryEvent {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let data = serde_json::json!({
+        "model_id": model_id,
+        "bytes_downloaded": bytes_downloaded,
+        "source": source,
+        "duration_ms": duration_ms,
+    });
+    TelemetryEvent {
+        event_type: "ModelDownload".to_string(),
+        stage_name: None,
+        target: None,
+        // Mirror duration onto the canonical `latency_ms` field so the
+        // platform's existing latency column lights up for downloads
+        // without a schema migration.
+        latency_ms: Some(duration_ms),
+        error: None,
+        data: Some(data.to_string()),
+        timestamp_ms: now_ms,
+    }
+}
+
+/// Publish a `ModelDownload` event for a successful registry fetch.
+///
+/// Honors [`crate::telemetry_optout::is_telemetry_opted_out`]: when the
+/// user has set `XYBRID_TELEMETRY_OPTOUT=1` no event is emitted, since
+/// the same opt-out already gates the registry call telemetry header
+/// and a model-download event would leak the same attribution surface
+/// (which model the user pulled, how big it was).
+///
+/// Cache hits MUST NOT call this — the event represents a real network
+/// transfer for cost accounting; emitting it on cache hits would
+/// double-count and hide cache-effectiveness metrics.
+pub fn publish_model_download(
+    model_id: &str,
+    bytes_downloaded: u64,
+    source: &str,
+    duration_ms: u32,
+) {
+    if crate::telemetry_optout::is_telemetry_opted_out() {
+        return;
+    }
+    let event = build_model_download_event(model_id, bytes_downloaded, source, duration_ms);
+    publish_telemetry_event(event);
 }
 
 /// Publish a telemetry event to all registered subscribers
@@ -2400,6 +2525,124 @@ mod tests {
         let (tin, tout) = extract_llm_token_counts(&stages).expect("should find llm spans");
         assert_eq!(tin, Some(64));
         assert_eq!(tout, Some(256));
+    }
+
+    #[test]
+    fn extract_llm_inference_string_attr_reads_backend_and_provider() {
+        // The cloud adapter writes both keys onto the inner
+        // `llm_inference` span (see `runtime_adapter::cloud::mod`).
+        // The hoist must read them through the same span-detection
+        // rule used by the token-count hoist so the two stay in sync.
+        let stages = serde_json::json!({
+            "spans": [
+                { "name": "execute:gpt-4o-mini", "metadata": {} },
+                {
+                    "name": "llm_inference",
+                    "metadata": {
+                        "backend": "cloud",
+                        "provider": "openai",
+                        "tokens_in": "120",
+                        "tokens_out": "32"
+                    }
+                }
+            ]
+        });
+        assert_eq!(
+            extract_llm_inference_string_attr(&stages, "backend").as_deref(),
+            Some("cloud")
+        );
+        assert_eq!(
+            extract_llm_inference_string_attr(&stages, "provider").as_deref(),
+            Some("openai")
+        );
+    }
+
+    #[test]
+    fn extract_llm_inference_string_attr_skips_non_llm_spans() {
+        // A non-LLM span (e.g., the outer execute span or an ASR
+        // span) carrying a `backend` key MUST NOT win — the hoist's
+        // contract is "read from the LLM span, the same one the
+        // token-count hoist reads". Otherwise a TTS/ASR backend
+        // string could spuriously land on an LLM event's payload.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:asr-whisper-tiny",
+                    "metadata": { "backend": "ort" }
+                },
+                {
+                    "name": "execute:gpt-4o-mini",
+                    "metadata": { "provider": "should-not-win" }
+                }
+            ]
+        });
+        assert!(extract_llm_inference_string_attr(&stages, "backend").is_none());
+        assert!(extract_llm_inference_string_attr(&stages, "provider").is_none());
+    }
+
+    #[test]
+    fn extract_llm_inference_string_attr_prefers_last_llm_span() {
+        // Mirror of `extract_llm_token_counts_prefers_last_authoritative_span`:
+        // a retried run emits one LLM span per attempt and the final
+        // attempt is the source of truth. Fields from earlier attempts
+        // must not leak through.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "llm_inference",
+                    "metadata": { "backend": "cloud", "provider": "anthropic" }
+                },
+                {
+                    "name": "llm_inference",
+                    "metadata": { "backend": "cloud", "provider": "openai" }
+                }
+            ]
+        });
+        assert_eq!(
+            extract_llm_inference_string_attr(&stages, "provider").as_deref(),
+            Some("openai"),
+            "must take last-span provider, not first"
+        );
+    }
+
+    #[test]
+    fn build_model_download_event_has_canonical_shape() {
+        // ModelDownload is the cost-attribution event for a successful
+        // registry fetch. The wire shape is fixed by the platform's
+        // billing pipeline: top-level `event_type` literal
+        // "ModelDownload", `latency_ms` mirrors `duration_ms`, and the
+        // four cost fields land under `data` as a JSON object.
+        let event = build_model_download_event("kokoro-82m", 1_234_567, "huggingface", 5_432);
+
+        assert_eq!(event.event_type, "ModelDownload");
+        assert_eq!(
+            event.latency_ms,
+            Some(5_432),
+            "latency_ms must mirror duration_ms so the existing latency column lights up without a schema migration"
+        );
+        assert!(event.error.is_none());
+        assert!(event.stage_name.is_none());
+        assert!(event.target.is_none());
+        assert!(event.timestamp_ms > 0, "timestamp must be populated");
+
+        let data: serde_json::Value =
+            serde_json::from_str(event.data.as_deref().expect("data present"))
+                .expect("data is valid JSON");
+        assert_eq!(data["model_id"].as_str(), Some("kokoro-82m"));
+        assert_eq!(data["bytes_downloaded"].as_u64(), Some(1_234_567));
+        assert_eq!(data["source"].as_str(), Some("huggingface"));
+        assert_eq!(data["duration_ms"].as_u64(), Some(5_432));
+    }
+
+    #[test]
+    fn build_model_download_event_carries_r2_source_label() {
+        // Sanity that the closed-set source label is passed through as-is.
+        // The classifier in `registry_client::classify_download_source`
+        // is responsible for mapping URLs to labels; this test guards
+        // the builder's pass-through contract.
+        let event = build_model_download_event("test-model", 42, "r2", 1);
+        let data: serde_json::Value = serde_json::from_str(event.data.as_deref().unwrap()).unwrap();
+        assert_eq!(data["source"].as_str(), Some("r2"));
     }
 
     #[test]

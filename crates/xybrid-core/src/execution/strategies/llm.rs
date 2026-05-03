@@ -11,7 +11,7 @@ use log::{debug, info};
 use std::path::Path;
 
 use super::{ExecutionContext, ExecutionStrategy};
-use crate::execution::template::{ExecutionTemplate, ModelMetadata};
+use crate::execution::template::{normalize_llm_backend_hint, ExecutionTemplate, ModelMetadata};
 use crate::execution::types::ExecutorResult;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::AdapterError;
@@ -548,7 +548,15 @@ impl<I: LlmInference + 'static> ExecutionStrategy for LlmStrategy<I> {
         );
 
         xybrid_trace::add_metadata("model", &config.model_path);
-        if let Some(hint) = &config.backend_hint {
+        // Emit the canonical wire label (`mistralrs` / `llamacpp`) onto the
+        // inner LLM span so the SDK telemetry hoist surfaces a closed-set
+        // value on `PlatformEvent.backend`. The raw `metadata.backend`
+        // string can still be the legacy `mistral` alias on older bundles.
+        if let Some(hint) = config
+            .backend_hint
+            .as_deref()
+            .and_then(normalize_llm_backend_hint)
+        {
             xybrid_trace::add_metadata("backend", hint);
         }
 

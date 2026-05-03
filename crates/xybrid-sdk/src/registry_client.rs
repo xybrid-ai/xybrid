@@ -46,7 +46,7 @@ use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryableError};
 
 pub const DEFAULT_REGISTRY_URL: &str = "https://registry.xybrid.dev";
@@ -99,6 +99,35 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
         current_platform(),
         backends,
     ))
+}
+
+/// Classify a download URL into the canonical telemetry `source` label
+/// emitted on `ModelDownload` events.
+///
+/// Recognised hosts:
+/// - `r2.xybrid.dev` / `*.r2.dev` / `r2.cloudflarestorage.com` → `"r2"`
+///   (Xybrid's Cloudflare R2 mirror, fronts both the registry-served
+///   bundles and the fallback URL list).
+/// - `huggingface.co` / `hf.co` → `"huggingface"` (direct HF pulls
+///   used for passthrough variants where the registry forwards the
+///   raw upstream URL).
+///
+/// Anything else passes through as `"other"` so cost attribution still
+/// produces a labelled event when a future variant adds a new origin
+/// — the analytics backend can then promote the new label into a
+/// recognised category without dropping rows in the meantime.
+fn classify_download_source(url: &str) -> &'static str {
+    let lower = url.to_ascii_lowercase();
+    if lower.contains("huggingface.co") || lower.contains("hf.co/") {
+        "huggingface"
+    } else if lower.contains("r2.xybrid.dev")
+        || lower.contains("r2.cloudflarestorage.com")
+        || lower.contains(".r2.dev")
+    {
+        "r2"
+    } else {
+        "other"
+    }
 }
 
 fn sanitize_binding(binding: &str) -> &str {
@@ -648,12 +677,35 @@ impl RegistryClient {
 
         // Download from HuggingFace
         info!("Downloading '{}' from {}", mask, resolved.download_url);
+        // Time only the wallclock spent inside the download itself so
+        // the emitted `ModelDownload.duration_ms` reflects bytes-on-the-
+        // wire latency. Hash verification + cache extraction run after
+        // this block and have their own (much cheaper) cost; conflating
+        // them would smear the network signal that operators actually
+        // care about for the cost dashboard.
+        let download_started = Instant::now();
         self.download_with_progress(
             &resolved.download_url,
             &cache_path,
             resolved.size_bytes,
             progress_callback,
         )?;
+        let download_duration = download_started.elapsed();
+
+        // Emit a ModelDownload telemetry event for cost accounting. Use
+        // the actual on-disk size — `resolved.size_bytes` is the
+        // registry-declared expected size, which can drift from what
+        // landed if the upstream changed between resolve and fetch. The
+        // helper honors XYBRID_TELEMETRY_OPTOUT internally.
+        let bytes_downloaded = std::fs::metadata(&cache_path)
+            .map(|m| m.len())
+            .unwrap_or(resolved.size_bytes);
+        crate::telemetry::publish_model_download(
+            mask,
+            bytes_downloaded,
+            classify_download_source(&resolved.download_url),
+            download_duration.as_millis().min(u32::MAX as u128) as u32,
+        );
 
         // Verify hash and cache it for fast future lookups
         if !resolved.sha256.is_empty() {
@@ -801,12 +853,27 @@ impl RegistryClient {
             "Passthrough download '{}' from {}",
             mask, resolved.download_url
         );
+        // Same reasoning as the standard fetch path: we time the
+        // network transfer alone so the cost dashboard sees a clean
+        // bytes-on-the-wire signal.
+        let download_started = Instant::now();
         self.download_with_progress(
             &resolved.download_url,
             &model_file_path,
             resolved.size_bytes,
             &progress_callback,
         )?;
+        let download_duration = download_started.elapsed();
+
+        let bytes_downloaded = std::fs::metadata(&model_file_path)
+            .map(|m| m.len())
+            .unwrap_or(resolved.size_bytes);
+        crate::telemetry::publish_model_download(
+            mask,
+            bytes_downloaded,
+            classify_download_source(&resolved.download_url),
+            download_duration.as_millis().min(u32::MAX as u128) as u32,
+        );
 
         // Verify SHA256
         if !resolved.sha256.is_empty() {
@@ -1250,6 +1317,53 @@ impl CacheStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classify_download_source_recognises_r2_hosts() {
+        // Xybrid's R2 mirror serves both the registry's primary bundle
+        // URLs and the `r2.xybrid.dev` fallback list. All three host
+        // shapes must label as `"r2"` so cost attribution doesn't split
+        // the row across CDN edges.
+        assert_eq!(
+            classify_download_source("https://r2.xybrid.dev/v1/kokoro/universal.xyb"),
+            "r2"
+        );
+        assert_eq!(
+            classify_download_source("https://abcd1234.r2.cloudflarestorage.com/bundles/x.xyb"),
+            "r2"
+        );
+        assert_eq!(
+            classify_download_source("https://pub-xxx.r2.dev/x.xyb"),
+            "r2"
+        );
+    }
+
+    #[test]
+    fn classify_download_source_recognises_huggingface_hosts() {
+        // Passthrough variants resolve to raw HuggingFace download URLs.
+        assert_eq!(
+            classify_download_source(
+                "https://huggingface.co/xybrid-ai/kokoro-82m/resolve/main/model.gguf"
+            ),
+            "huggingface"
+        );
+        assert_eq!(
+            classify_download_source("https://hf.co/owner/repo/resolve/main/m.gguf"),
+            "huggingface"
+        );
+    }
+
+    #[test]
+    fn classify_download_source_falls_back_to_other() {
+        // Unknown hosts must still produce a labelled event so a future
+        // origin doesn't silently drop attribution rows. The platform
+        // can promote `"other"` to a recognised category later.
+        assert_eq!(
+            classify_download_source("https://cdn.example.com/m.gguf"),
+            "other"
+        );
+        assert_eq!(classify_download_source(""), "other");
+    }
 
     #[test]
     fn test_default_client() {
