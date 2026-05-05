@@ -21,10 +21,11 @@
 use log::{debug, info, warn};
 
 use super::template::{
-    backend_label_from_template, normalize_llm_backend_hint, span_kind_from_template,
-    stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
-    PostprocessingStep,
+    backend_label_from_template, span_kind_from_template, stage_kind_from_task, ExecutionMode,
+    ExecutionTemplate, ModelMetadata, PipelineStage,
 };
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use super::template::{normalize_llm_backend_hint, PostprocessingStep};
 use crate::conversation::ConversationContext;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::ir::EnvelopeKind;

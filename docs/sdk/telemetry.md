@@ -219,7 +219,7 @@ Inference events (`ModelComplete`, `PipelineComplete`) carry per-call attributio
 
 | field | type | events | values | source |
 |---|---|---|---|---|
-| `backend` | string | inference | `llamacpp` \| `mistralrs` \| `ort` \| `candle` \| `cloud` | `ExecutionTemplate` variant + `metadata.backend` hint for GGUF; `cloud` for the cloud adapter |
+| `backend` | string | inference | `llamacpp` \| `mlx` \| `mistralrs` \| `ort` \| `candle` \| `cloud` | `ExecutionTemplate` variant + `metadata.backend` hint (GGUF requires the hint; SafeTensors defaults to `candle` and accepts `mlx` to override on Apple Silicon); `cloud` for the cloud adapter |
 | `provider` | string | inference (cloud only) | `openai` \| `anthropic` \| `google` \| `elevenlabs` \| `openrouter` \| `custom` | Cloud `IntegrationProvider` resolved from envelope metadata |
 | `tokens_in` | u64 | inference | — | LLM span (`prompt_tokens` for OpenAI; synthesized total for Anthropic) |
 | `tokens_out` | u64 | inference | — | LLM span (`completion_tokens`) |

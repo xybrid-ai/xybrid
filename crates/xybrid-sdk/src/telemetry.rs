@@ -1000,20 +1000,26 @@ fn convert_to_platform_event(
                 }
             }
         }
-        // Hoist cost-accounting string attrs (`backend`, `provider`) from
-        // the LLM span. `backend` lands on every inference event; the
-        // local execution path emits values in the closed set
-        // {llamacpp, mlx, mistralrs, ort, candle} via
-        // `TemplateExecutor::execute_impl`, the cloud adapter emits
-        // `cloud` from its inner `llm_inference` span, and `provider`
-        // (openai / anthropic / …) is cloud-only. Hoisting the cloud
-        // fields here avoids dragging the analytics backend into the
-        // nested span tree for the billing column.
-        for key in ["backend", "provider"] {
-            if payload.get(key).is_none() {
-                if let Some(v) = extract_llm_inference_string_attr(&spans, key) {
-                    payload[key] = serde_json::json!(v);
-                }
+        // Hoist cost-accounting string attrs onto the payload top level
+        // for the billing column.
+        //
+        // `backend` may live on any span — LLM events set it on the
+        // inner `llm_inference` span (via `LlmStrategy` / cloud adapter),
+        // non-LLM events (ASR/TTS) set it on the outer `execute:<model>`
+        // span via `backend_label_from_template`. Read from any span so
+        // both surfaces produce the same wire shape.
+        //
+        // `provider` is cloud-LLM-only and must stay gated to LLM spans:
+        // a non-LLM span carrying a stray `provider` key would emit a
+        // phantom value on an ASR/TTS payload.
+        if payload.get("backend").is_none() {
+            if let Some(v) = extract_string_attr_from_any_span(&spans, "backend") {
+                payload["backend"] = serde_json::json!(v);
+            }
+        }
+        if payload.get("provider").is_none() {
+            if let Some(v) = extract_llm_inference_string_attr(&spans, "provider") {
+                payload["provider"] = serde_json::json!(v);
             }
         }
         Some(spans)
@@ -1171,6 +1177,31 @@ fn extract_llm_inference_string_attr(stages: &serde_json::Value, key: &str) -> O
         if let Some(v) = meta.and_then(|m| m.get(key)).and_then(|v| v.as_str()) {
             // Same last-span-wins rule as the token-count hoist: a retried
             // run emits one span per attempt and we want the final value.
+            found = Some(v.to_string());
+        }
+    }
+    found
+}
+
+/// Walk a `stages` JSON and return the value of `key` from the LAST span
+/// (any flavour) that carries it as a string. Used for cost-accounting
+/// scalars that must surface on every inference event regardless of
+/// modality — chiefly `backend`, which is set on the outer
+/// `execute:<model>` span for non-LLM events (ASR/TTS via
+/// `backend_label_from_template`) and on the inner `llm_inference` span
+/// for LLM events.
+///
+/// Intentionally NOT used for `provider`: that field is cloud-LLM-only
+/// and a stray match on a non-LLM span would emit a nonsense provider
+/// value on an ASR/TTS payload. Use [`extract_llm_inference_string_attr`]
+/// for provider.
+fn extract_string_attr_from_any_span(stages: &serde_json::Value, key: &str) -> Option<String> {
+    let spans = stages.get("spans")?.as_array()?;
+    let mut found: Option<String> = None;
+    for span in spans {
+        let meta = span.get("metadata");
+        if let Some(v) = meta.and_then(|m| m.get(key)).and_then(|v| v.as_str()) {
+            // Same last-span-wins rule as the LLM-gated hoist.
             found = Some(v.to_string());
         }
     }
@@ -2602,6 +2633,52 @@ mod tests {
             extract_llm_inference_string_attr(&stages, "provider").as_deref(),
             Some("openai"),
             "must take last-span provider, not first"
+        );
+    }
+
+    #[test]
+    fn extract_string_attr_from_any_span_reads_outer_execute_span() {
+        // Non-LLM events (ASR/TTS) carry `backend` on the outer
+        // `execute:<model>` span via `backend_label_from_template` —
+        // the LLM-gated hoist would skip it, dropping backend
+        // attribution from the wire payload. The any-span hoist must
+        // pick it up so ASR/TTS rows aren't blank in the billing column.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:wav2vec2-base-960h",
+                    "metadata": { "backend": "ort" }
+                }
+            ]
+        });
+        assert_eq!(
+            extract_string_attr_from_any_span(&stages, "backend").as_deref(),
+            Some("ort")
+        );
+    }
+
+    #[test]
+    fn extract_string_attr_from_any_span_prefers_last() {
+        // Same last-wins rule as the LLM-gated hoist, applied across
+        // any span. If both inner and outer spans carry `backend` (an
+        // LLM run that also annotates the outer `execute:` span), the
+        // last one in the array wins — matching the existing
+        // token-count hoist behaviour for retried runs.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:gpt-4o-mini",
+                    "metadata": { "backend": "first" }
+                },
+                {
+                    "name": "llm_inference",
+                    "metadata": { "backend": "second" }
+                }
+            ]
+        });
+        assert_eq!(
+            extract_string_attr_from_any_span(&stages, "backend").as_deref(),
+            Some("second")
         );
     }
 

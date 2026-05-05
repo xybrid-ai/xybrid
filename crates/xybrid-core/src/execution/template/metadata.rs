@@ -432,6 +432,7 @@ pub fn normalize_llm_backend_hint(hint: &str) -> Option<&'static str> {
     match hint {
         "llamacpp" => Some("llamacpp"),
         "mistral" | "mistralrs" => Some("mistralrs"),
+        "mlx" => Some("mlx"),
         _ => None,
     }
 }
@@ -456,7 +457,12 @@ pub fn backend_label_from_template(
 ) -> Option<&'static str> {
     match template {
         ExecutionTemplate::Onnx { .. } => Some("ort"),
-        ExecutionTemplate::SafeTensors { .. } => Some("candle"),
+        // SafeTensors is Candle's native format; an `mlx` hint on an
+        // Apple Silicon bundle overrides the default so the wire label
+        // reflects the actual runtime that will execute the model.
+        ExecutionTemplate::SafeTensors { .. } => {
+            hint.and_then(normalize_llm_backend_hint).or(Some("candle"))
+        }
         ExecutionTemplate::Gguf { .. } => hint.and_then(normalize_llm_backend_hint),
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
@@ -558,7 +564,9 @@ mod tests {
         };
         assert_eq!(backend_label_from_template(&onnx, None), Some("ort"));
 
-        // SafeTensors always rides the Candle runtime in this workspace.
+        // SafeTensors defaults to Candle when no hint is set; an
+        // `mlx` hint overrides for Apple-Silicon-targeted bundles
+        // where the runtime selector picks MLX over Candle.
         let safe = ExecutionTemplate::SafeTensors {
             model_file: "m.safetensors".into(),
             architecture: None,
@@ -566,6 +574,11 @@ mod tests {
             tokenizer_file: None,
         };
         assert_eq!(backend_label_from_template(&safe, None), Some("candle"));
+        assert_eq!(
+            backend_label_from_template(&safe, Some("mlx")),
+            Some("mlx"),
+            "mlx hint must override the candle default for SafeTensors bundles"
+        );
 
         // GGUF: hint required to disambiguate llama.cpp vs mistral.rs;
         // omit when the bundle didn't pin a backend so downstream can
@@ -590,6 +603,9 @@ mod tests {
             backend_label_from_template(&gguf, Some("mistralrs")),
             Some("mistralrs")
         );
+        // GGUF + mlx hint: the MLX runtime can also consume converted
+        // GGUFs, so the hint path must accept `"mlx"` here too.
+        assert_eq!(backend_label_from_template(&gguf, Some("mlx")), Some("mlx"));
     }
 
     #[test]
@@ -601,6 +617,9 @@ mod tests {
         assert_eq!(normalize_llm_backend_hint("mistral"), Some("mistralrs"));
         assert_eq!(normalize_llm_backend_hint("mistralrs"), Some("mistralrs"));
         assert_eq!(normalize_llm_backend_hint("llamacpp"), Some("llamacpp"));
+        // MLX is the Apple-Silicon-only LLM runtime; the wire label is
+        // already canonical so the mapping is identity.
+        assert_eq!(normalize_llm_backend_hint("mlx"), Some("mlx"));
         // Unknown hints must return None so callers omit the field
         // rather than emit a guessed value.
         assert_eq!(normalize_llm_backend_hint("unknown"), None);
