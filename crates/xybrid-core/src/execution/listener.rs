@@ -78,15 +78,22 @@ pub(crate) fn emit(event: ExecutionEvent) {
     }
 }
 
-/// RAII guard that emits `Started` on creation and `Completed`/`Failed` on drop.
+/// RAII guard that emits `Started` on creation and a terminal event on drop.
 ///
-/// Call [`set_failed`](ExecutionGuard::set_failed) before dropping to emit a
-/// `Failed` event instead of `Completed`.
+/// Call [`set_failed`](ExecutionGuard::set_failed) before dropping to emit
+/// `Failed`; call [`set_controlled_abort`](ExecutionGuard::set_controlled_abort)
+/// for aborts that are handled by a higher-level orchestrator event.
 pub(crate) struct ExecutionGuard {
     model_id: String,
     method: String,
     start: Instant,
-    error: Mutex<Option<String>>,
+    terminal: Mutex<ExecutionTerminal>,
+}
+
+enum ExecutionTerminal {
+    Completed,
+    Failed(String),
+    Suppressed,
 }
 
 impl ExecutionGuard {
@@ -102,15 +109,23 @@ impl ExecutionGuard {
             model_id,
             method,
             start: Instant::now(),
-            error: Mutex::new(None),
+            terminal: Mutex::new(ExecutionTerminal::Completed),
         }
     }
 
     /// Mark this execution as failed. The error message will be included
     /// in the `Failed` event emitted on drop.
     pub(crate) fn set_failed(&self, error: impl Into<String>) {
-        if let Ok(mut e) = self.error.lock() {
-            *e = Some(error.into());
+        if let Ok(mut terminal) = self.terminal.lock() {
+            *terminal = ExecutionTerminal::Failed(error.into());
+        }
+    }
+
+    /// Suppress the terminal event when a controlled abort is represented by a
+    /// richer orchestrator event such as `LocalAborted`.
+    pub(crate) fn set_controlled_abort(&self) {
+        if let Ok(mut terminal) = self.terminal.lock() {
+            *terminal = ExecutionTerminal::Suppressed;
         }
     }
 }
@@ -118,19 +133,55 @@ impl ExecutionGuard {
 impl Drop for ExecutionGuard {
     fn drop(&mut self) {
         let latency_ms = self.start.elapsed().as_millis() as u64;
-        let error = self.error.lock().ok().and_then(|mut e| e.take());
-        match error {
-            Some(err) => emit(ExecutionEvent::Failed {
+        let terminal = self
+            .terminal
+            .lock()
+            .map(|mut terminal| std::mem::replace(&mut *terminal, ExecutionTerminal::Suppressed))
+            .unwrap_or(ExecutionTerminal::Completed);
+        match terminal {
+            ExecutionTerminal::Failed(err) => emit(ExecutionEvent::Failed {
                 model_id: self.model_id.clone(),
                 method: self.method.clone(),
                 latency_ms,
                 error: err,
             }),
-            None => emit(ExecutionEvent::Completed {
+            ExecutionTerminal::Completed => emit(ExecutionEvent::Completed {
                 model_id: self.model_id.clone(),
                 method: self.method.clone(),
                 latency_ms,
             }),
+            ExecutionTerminal::Suppressed => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn controlled_abort_suppresses_terminal_execution_event() {
+        clear_execution_listener();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_for_listener = events.clone();
+
+        set_execution_listener(move |event| {
+            events_for_listener.lock().unwrap().push(event);
+        });
+
+        {
+            let guard = ExecutionGuard::new("local-model", "execute_streaming");
+            guard.set_controlled_abort();
+        }
+
+        clear_execution_listener();
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            ExecutionEvent::Started { model_id, method }
+                if model_id == "local-model" && method == "execute_streaming"
+        ));
     }
 }

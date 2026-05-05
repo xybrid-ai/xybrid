@@ -7,7 +7,9 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use xybrid_core::device::{MemoryPressure, ResourceMonitor, ResourceSnapshot, ThermalState};
+use xybrid_core::device::{
+    MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceSnapshotProvider, ThermalState,
+};
 use xybrid_core::runtime_adapter::types::GenerationConfig;
 
 const RESOURCE_ABORT_CHECK_INTERVAL: Duration = Duration::from_millis(500);
@@ -19,6 +21,18 @@ pub(crate) trait ResourceSnapshotReader: Send + Sync {
 impl ResourceSnapshotReader for ResourceMonitor {
     fn current_snapshot(&self, max_age: Duration) -> ResourceSnapshot {
         ResourceMonitor::current_snapshot(self, max_age)
+    }
+}
+
+/// Bridges any [`ResourceSnapshotProvider`] (the public xybrid-core trait) into
+/// this module's internal `ResourceSnapshotReader`. Lets demos and integration
+/// tests inject deterministic snapshots via `RunOptions::with_resource_provider`
+/// without exposing the SDK's internal trait surface.
+struct ProviderReader(Arc<dyn ResourceSnapshotProvider>);
+
+impl ResourceSnapshotReader for ProviderReader {
+    fn current_snapshot(&self, max_age: Duration) -> ResourceSnapshot {
+        self.0.current_snapshot(max_age)
     }
 }
 
@@ -98,6 +112,12 @@ pub struct RunOptions {
     pub abort_policy: AbortPolicy,
     pub cancellation_token: Option<CancellationToken>,
     pub correlation_id: Option<String>,
+    /// Optional [`ResourceSnapshotProvider`] override used by the per-token
+    /// abort check. Defaults to the process-wide [`ResourceMonitor`] when
+    /// absent. Set this from demos/tests (typically a provider from
+    /// `xybrid_core::orchestrator::authority::test_seams`) to drive
+    /// deterministic abort behavior.
+    pub resource_provider: Option<Arc<dyn ResourceSnapshotProvider>>,
 }
 
 impl RunOptions {
@@ -122,6 +142,15 @@ impl RunOptions {
 
     pub fn with_correlation_id(mut self, correlation_id: impl Into<String>) -> Self {
         self.correlation_id = Some(correlation_id.into());
+        self
+    }
+
+    /// Inject a custom [`ResourceSnapshotProvider`] used by the per-token
+    /// abort check. Intended for demos and integration tests; production
+    /// callers should leave this `None` so the global [`ResourceMonitor`]
+    /// supplies real device telemetry.
+    pub fn with_resource_provider(mut self, provider: Arc<dyn ResourceSnapshotProvider>) -> Self {
+        self.resource_provider = Some(provider);
         self
     }
 }
@@ -160,9 +189,12 @@ impl AbortReason {
         fallback_to_cloud: bool,
     ) -> Box<dyn std::error::Error + Send + Sync> {
         if fallback_to_cloud {
-            return Box::new(xybrid_core::abort::CloudFallbackAbort::new(
-                self.to_core_abort_reason(),
-            ));
+            return match self {
+                Self::UserCancelled => Box::new(Self::UserCancelled),
+                reason => Box::new(xybrid_core::abort::CloudFallbackAbort::new(
+                    reason.to_core_abort_reason(),
+                )),
+            };
         }
         Box::new(self)
     }
@@ -187,7 +219,11 @@ pub(crate) struct AbortState {
 
 impl AbortState {
     pub(crate) fn new(options: &RunOptions) -> Self {
-        Self::with_resource_reader(options, ResourceMonitor::global())
+        let reader: Arc<dyn ResourceSnapshotReader> = match options.resource_provider.as_ref() {
+            Some(provider) => Arc::new(ProviderReader(provider.clone())),
+            None => ResourceMonitor::global(),
+        };
+        Self::with_resource_reader(options, reader)
     }
 
     pub(crate) fn with_resource_reader(
@@ -305,6 +341,33 @@ fn abort_reason_from_snapshot(
         return Some(AbortReason::Thermal(snapshot.thermal_state));
     }
     None
+}
+
+/// Streaming-only gate around [`AbortState::check_before_token`]. Only
+/// invokes the abort check + the [`AbortReason::into_streaming_error`]
+/// conversion when the model actually streams tokens.
+///
+/// Non-streaming models execute the full local inference and then emit
+/// a single synthetic token through the streaming callback. Without this
+/// gate, an abort policy that trips while the batch was running would
+/// fire at the synthetic-emit boundary, after local already succeeded —
+/// silently discarding completed work and triggering an unnecessary
+/// cloud retry of the original prompt (privacy + cost surprise). Gating
+/// on `supports_streaming` makes the contract honest: cloud fallback
+/// only protects mid-stream aborts, which can only happen on a real
+/// stream.
+pub(crate) fn check_abort_for_streaming(
+    supports_streaming: bool,
+    abort_state: &mut AbortState,
+    fallback_to_cloud: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if !supports_streaming {
+        return Ok(());
+    }
+    if let Err(reason) = abort_state.check_before_token() {
+        return Err(reason.into_streaming_error(fallback_to_cloud));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -442,6 +505,17 @@ mod tests {
     }
 
     #[test]
+    fn user_cancelled_streaming_error_never_uses_cloud_fallback_marker() {
+        let error = AbortReason::UserCancelled.into_streaming_error(true);
+
+        assert_eq!(
+            xybrid_core::abort::cloud_fallback_reason_from_error(error.as_ref()),
+            None
+        );
+        assert!(error.downcast_ref::<AbortReason>().is_some());
+    }
+
+    #[test]
     fn non_fallback_streaming_error_does_not_use_core_abort_marker() {
         let error = AbortReason::Thermal(ThermalState::Hot).into_streaming_error(false);
 
@@ -500,8 +574,10 @@ mod tests {
                     .stop_on(AbortSignal::MemoryPressureCritical)
                     .with_max_grace_tokens(1),
             );
-        let mut snapshot = ResourceSnapshot::default();
-        snapshot.memory_pressure = MemoryPressure::Critical;
+        let snapshot = ResourceSnapshot {
+            memory_pressure: MemoryPressure::Critical,
+            ..Default::default()
+        };
         let reader = Arc::new(CountingResourceReader::new(snapshot));
         let mut state = AbortState::with_resource_reader(&options, reader);
 
@@ -535,5 +611,133 @@ mod tests {
         let options = RunOptions::new().with_correlation_id("run-123");
 
         assert_eq!(options.correlation_id.as_deref(), Some("run-123"));
+    }
+
+    /// Implements the **public** [`ResourceSnapshotProvider`] trait so demos
+    /// and integration tests can drive `RunOptions::with_resource_provider`
+    /// without touching the SDK's internal `ResourceSnapshotReader`.
+    #[derive(Debug)]
+    struct FixedProviderForTest(ResourceSnapshot);
+
+    impl ResourceSnapshotProvider for FixedProviderForTest {
+        fn current_snapshot(&self, _max_age: Duration) -> ResourceSnapshot {
+            self.0
+        }
+    }
+
+    #[test]
+    fn abort_state_uses_resource_provider_override_from_run_options() {
+        let snapshot = ResourceSnapshot {
+            memory_pressure: MemoryPressure::Critical,
+            ..Default::default()
+        };
+        let provider: Arc<dyn ResourceSnapshotProvider> = Arc::new(FixedProviderForTest(snapshot));
+
+        let options = RunOptions::new()
+            .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::MemoryPressureCritical))
+            .with_resource_provider(provider);
+
+        let mut state = AbortState::new(&options);
+
+        let err = state
+            .check_before_token()
+            .expect_err("provider override should drive abort");
+        assert_eq!(err, AbortReason::MemoryPressure(MemoryPressure::Critical));
+    }
+
+    #[test]
+    fn abort_state_falls_back_to_global_monitor_when_no_provider_override() {
+        // Without a provider override, AbortState consults the process-wide
+        // ResourceMonitor. Real device state is platform-dependent, but the
+        // policy here only fires on UserCancelled, so the resource path is
+        // unused and the run never aborts. This guards the default branch.
+        let options = RunOptions::new()
+            .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::UserCancelled));
+
+        let mut state = AbortState::new(&options);
+
+        state
+            .check_before_token()
+            .expect("no abort when only UserCancelled is observed and no token is cancelled");
+    }
+
+    /// Streaming-only gate must short-circuit when supports_streaming=false,
+    /// even if the AbortState would otherwise trip. This is the regression
+    /// test for the codex P2 finding: a non-streaming model whose batch
+    /// inference happens to overlap with critical memory pressure must not
+    /// silently retry the original prompt on cloud after local already
+    /// produced output.
+    #[test]
+    fn check_abort_for_streaming_skips_check_when_model_does_not_stream() {
+        let mut snapshot = ResourceSnapshot::unknown();
+        snapshot.memory_pressure = MemoryPressure::Critical;
+        let reader = Arc::new(CountingResourceReader::new(snapshot));
+
+        let options = RunOptions::new().with_abort_policy(
+            AbortPolicy::default()
+                .stop_on(AbortSignal::MemoryPressureCritical)
+                .with_max_grace_tokens(0),
+        );
+        let mut state = AbortState::with_resource_reader(&options, reader.clone());
+
+        let result =
+            check_abort_for_streaming(/* supports_streaming */ false, &mut state, true);
+
+        assert!(
+            result.is_ok(),
+            "non-streaming model must not propagate abort even under critical memory pressure"
+        );
+        assert_eq!(
+            reader.reads(),
+            0,
+            "non-streaming gate must not consult the resource reader at all"
+        );
+    }
+
+    /// Symmetric coverage: when the model DOES stream, the helper must
+    /// still surface the abort as before — the gate is a non-streaming
+    /// short-circuit, not a behavior change for streaming.
+    #[test]
+    fn check_abort_for_streaming_propagates_abort_when_model_streams() {
+        let mut snapshot = ResourceSnapshot::unknown();
+        snapshot.memory_pressure = MemoryPressure::Critical;
+        let reader = Arc::new(CountingResourceReader::new(snapshot));
+
+        let options = RunOptions::new().with_abort_policy(
+            AbortPolicy::default()
+                .stop_on(AbortSignal::MemoryPressureCritical)
+                .with_max_grace_tokens(0),
+        );
+        let mut state = AbortState::with_resource_reader(&options, reader);
+
+        let err = check_abort_for_streaming(/* supports_streaming */ true, &mut state, true)
+            .expect_err("streaming model under critical memory pressure must abort");
+
+        assert_eq!(
+            xybrid_core::abort::cloud_fallback_reason_from_error(err.as_ref()),
+            Some(xybrid_core::abort::AbortReason::StressMemory),
+            "streaming abort must carry the typed CloudFallbackAbort marker so dispatch_after_local can retry"
+        );
+    }
+
+    /// User cancellation must remain terminal even when the model streams,
+    /// per the prior codex HIGH finding. The gate must not regress this.
+    #[test]
+    fn check_abort_for_streaming_keeps_user_cancellation_terminal() {
+        let token = CancellationToken::new();
+        let options = RunOptions::new()
+            .with_cancellation_token(token.clone())
+            .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::UserCancelled));
+        let mut state = AbortState::new(&options);
+        token.cancel();
+
+        let err = check_abort_for_streaming(/* supports_streaming */ true, &mut state, true)
+            .expect_err("user cancellation must surface as a streaming error");
+
+        assert_eq!(
+            xybrid_core::abort::cloud_fallback_reason_from_error(err.as_ref()),
+            None,
+            "user cancellation must NOT carry the CloudFallbackAbort marker (terminal, no retry)"
+        );
     }
 }

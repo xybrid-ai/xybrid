@@ -30,6 +30,9 @@ mod local;
 mod remote;
 pub mod types;
 
+#[cfg(any(test, feature = "dev-tools"))]
+pub mod test_seams;
+
 pub use local::LocalAuthority;
 pub use remote::RemoteAuthority;
 pub use types::*;

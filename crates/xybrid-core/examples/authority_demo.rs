@@ -45,6 +45,7 @@ fn main() {
         network_rtt: 350,  // High latency (poor connection)
         battery: 12,       // Low battery
         temperature: 42.0, // Running hot
+        ..DeviceMetrics::default()
     };
 
     demo_single_model(&authority, "whisper-tiny", &low_end_metrics);
@@ -58,6 +59,7 @@ fn main() {
         network_rtt: 45,   // Low latency (fast connection)
         battery: 85,       // Good battery
         temperature: 32.0, // Cool
+        ..DeviceMetrics::default()
     };
 
     demo_single_model(&authority, "whisper-tiny", &high_end_metrics);
@@ -79,6 +81,7 @@ fn main() {
         network_rtt: 280, // Moderate-high latency
         battery: 25,      // Medium-low battery
         temperature: 38.0,
+        ..DeviceMetrics::default()
     };
 
     demo_pipeline(&authority, &low_end_metrics);
@@ -92,6 +95,7 @@ fn main() {
         network_rtt: 30,   // Excellent latency
         battery: 92,       // Full battery
         temperature: 28.0, // Cool
+        ..DeviceMetrics::default()
     };
 
     demo_pipeline(&authority, &high_end_metrics);

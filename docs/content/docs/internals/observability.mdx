@@ -124,8 +124,10 @@ available on the Xybrid dashboard and via the analytics API.
 
 | Field | Description |
 |-------|-------------|
-| `ttft_ms` | Time to first emitted stream chunk (ms) |
-| `tokens_generated` | Token count from mistralrs `Usage` |
+| `ttft_ms` | Local: time to first emitted stream chunk. Cloud: gateway round-trip time. |
+| `tokens_in` | Prompt token count. Local: captured before the streaming loop (survives mid-stream aborts). Cloud: from upstream `Usage.prompt_tokens`. |
+| `tokens_generated` | Local LLM output token count. |
+| `tokens_out` | Cloud-only: upstream `Usage.completion_tokens`. Hoisted alongside `tokens_generated`. |
 | `tokens_per_second` | Wallclock throughput (includes prefill) |
 | `decode_tps` | Decode-only throughput from `Usage.avg_compl_tok_per_sec` |
 | `prefill_tps` | Prefill throughput from `Usage.avg_prompt_tok_per_sec` |

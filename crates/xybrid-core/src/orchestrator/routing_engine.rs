@@ -332,9 +332,11 @@ mod tests {
         memory_pressure: MemoryPressure,
         cpu_pct: Option<f32>,
     ) -> DeviceMetrics {
-        let mut capabilities = HardwareCapabilities::default();
-        capabilities.battery_level = battery;
-        capabilities.thermal_state = thermal_state;
+        let capabilities = HardwareCapabilities {
+            battery_level: battery,
+            thermal_state,
+            ..Default::default()
+        };
 
         let mut resource = ResourceSnapshot::unknown();
         resource.memory_pressure = memory_pressure;

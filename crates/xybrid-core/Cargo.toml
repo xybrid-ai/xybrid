@@ -106,6 +106,12 @@ llm-mistral-cuda = ["llm-mistral", "mistralrs/cuda"]        # mistral.rs + CUDA 
 # Requires: vendor/llama.cpp directory with cloned llama.cpp source.
 llm-llamacpp = []
 
+# dev-tools — exposes test seams (e.g. resource-snapshot providers) for
+# downstream demos, integration tests, and benchmarks. Off by default.
+# Crates that depend on `xybrid-core` enable this when they need to inject
+# deterministic resource state without spinning up a real `ResourceMonitor`.
+dev-tools = []
+
 [build-dependencies]
 # For compiling llama.cpp C/C++ source (used by build.rs when llm-llamacpp is enabled)
 cc = "1.0"
