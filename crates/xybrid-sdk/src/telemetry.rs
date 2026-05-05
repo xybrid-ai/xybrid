@@ -1033,6 +1033,16 @@ fn convert_to_platform_event(
                 payload["task"] = serde_json::json!(v);
             }
         }
+        // Quantization label (q4_0 / q4_k_m / fp16 / …) sourced from
+        // `model_metadata.json` first, GGUF filename second. Two runs
+        // of "the same model" at different quantizations are now
+        // distinguishable in the analytics rollup. Open string —
+        // values outside the documented set still flow through.
+        if payload.get("quantization").is_none() {
+            if let Some(v) = extract_string_attr_from_any_span(&spans, "quantization") {
+                payload["quantization"] = serde_json::json!(v);
+            }
+        }
         Some(spans)
     } else {
         None
@@ -2773,6 +2783,44 @@ mod tests {
             Some("asr"),
             "task must be hoisted to payload top level: {}",
             payload_json
+        );
+    }
+
+    #[test]
+    fn quantization_field_hoists_to_payload_top_level() {
+        // INF-91: `quantization` is sourced by `TemplateExecutor` from
+        // `metadata.quantization` (or GGUF filename inference) and
+        // written onto the outer `execute:<model>` span. The hoist
+        // must surface it on the wire payload alongside `task` and
+        // `backend` so analytics rolls up
+        // `model_id × quantization` as distinct rows.
+        xybrid_core::tracing::init_tracing(true);
+        let data = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:qwen2.5-0.5b-instruct",
+                    "metadata": { "quantization": "q4_k_m", "backend": "llamacpp" }
+                }
+            ]
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("chat".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(1_200),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert_eq!(
+            parsed["quantization"].as_str(),
+            Some("q4_k_m"),
+            "quantization must be hoisted: {}",
+            serde_json::to_string(&parsed).unwrap()
         );
     }
 

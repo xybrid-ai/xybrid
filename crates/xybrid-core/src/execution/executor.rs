@@ -21,8 +21,8 @@
 use log::{debug, info, warn};
 
 use super::template::{
-    backend_label_from_template, span_kind_from_template, stage_kind_from_task, ExecutionMode,
-    ExecutionTemplate, ModelMetadata, PipelineStage,
+    backend_label_from_template, quantization_label_from_metadata, span_kind_from_template,
+    stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
 };
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::template::{normalize_llm_backend_hint, PostprocessingStep};
@@ -263,6 +263,17 @@ impl TemplateExecutor {
         if let Some(label) = backend_label_from_template(&metadata.execution_template, backend_hint)
         {
             xybrid_trace::add_metadata("backend", label);
+        }
+
+        // Quantization label for cost-attribution telemetry
+        // (per `PlatformEvent.quantization`). Two runs of "the same
+        // model" can differ by 4× in size / speed / quality based on
+        // quantization, so the dashboard needs this to avoid
+        // collapsing `kokoro-82m@q4_0` and `kokoro-82m@fp16` into one
+        // row. Source priority: bundle metadata > GGUF filename >
+        // omitted. See `quantization_label_from_metadata`.
+        if let Some(quant) = quantization_label_from_metadata(metadata) {
+            xybrid_trace::add_metadata("quantization", quant);
         }
 
         // Step 1: Handling ModelGraph (multi-model DAG)

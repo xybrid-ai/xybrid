@@ -14,9 +14,9 @@ mod voice;
 
 // Re-export metadata types + swim-lane grouping helpers
 pub use metadata::{
-    backend_label_from_template, normalize_llm_backend_hint, span_kind_from_template,
-    stage_kind_from_task, ExecutionMode, ExecutionTemplate, GenerationParams, ModelMetadata,
-    PipelineStage, RefinementSchedule,
+    backend_label_from_template, normalize_llm_backend_hint, quantization_label_from_metadata,
+    span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate,
+    GenerationParams, ModelMetadata, PipelineStage, RefinementSchedule,
 };
 
 // Re-export step types

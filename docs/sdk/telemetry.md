@@ -222,6 +222,7 @@ Inference events (`ModelComplete`, `PipelineComplete`) carry per-call attributio
 | `backend` | string | inference | `llamacpp` \| `mlx` \| `mistralrs` \| `ort` \| `candle` \| `cloud` | `ExecutionTemplate` variant + `metadata.backend` hint (GGUF requires the hint; SafeTensors defaults to `candle` and accepts `mlx` to override on Apple Silicon); `cloud` for the cloud adapter |
 | `provider` | string | inference (cloud only) | `openai` \| `anthropic` \| `google` \| `elevenlabs` \| `openrouter` \| `custom` | Cloud `IntegrationProvider` resolved from envelope metadata |
 | `task` | string | inference | `chat` \| `vlm` \| `asr` \| `tts` \| `embedding` \| `image-gen` \| `ocr` \| `rerank` \| `classify` (open string for forward-compat) | `ModelMetadata.metadata["task"]` from `model_metadata.json` |
+| `quantization` | string | inference | `q4_0` \| `q4_k_m` \| `q5_k_m` \| `q8_0` \| `fp16` \| `fp32` (open string — common GGUF labels) | `ModelMetadata.metadata["quantization"]` first; falls back to GGUF filename inference; absent (not empty) when unknown |
 | `tokens_in` | u64 | inference | — | LLM span (`prompt_tokens` for OpenAI; synthesized total for Anthropic) |
 | `tokens_out` | u64 | inference | — | LLM span (`completion_tokens`) |
 | `cache_read_input_tokens` | u64 | inference | — | Anthropic-canonical; OpenAI's nested `prompt_tokens_details.cached_tokens` maps here |

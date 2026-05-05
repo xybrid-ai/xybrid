@@ -470,6 +470,69 @@ pub fn backend_label_from_template(
     }
 }
 
+/// Normalise a quantization label to the canonical wire form.
+///
+/// GGUF filenames typically encode quantization in lowercase
+/// (`model-q4_k_m.gguf`); upstream tooling sometimes ships the label
+/// in uppercase (`Q4_K_M`) or with the GGUF-internal `f16` / `f32`
+/// instead of the platform-canonical `fp16` / `fp32`. This normaliser
+/// lowercases and rewrites those two aliases so the analytics column
+/// doesn't split a single quantization across multiple row keys.
+fn normalize_quantization_label(label: &str) -> String {
+    let lower = label.to_lowercase();
+    match lower.as_str() {
+        "f16" => "fp16".to_string(),
+        "f32" => "fp32".to_string(),
+        _ => lower,
+    }
+}
+
+/// Infer a quantization label from a GGUF model filename.
+///
+/// GGUF tooling encodes quantization in the filename by convention
+/// (`qwen2.5-0.5b-instruct-q4_k_m.gguf` → `q4_k_m`). Matched against
+/// the documented closed set; longer tokens are checked first so
+/// `q4_k_m` doesn't get clipped to `q4_0` by an earlier substring
+/// match. Returns `None` when no recognised pattern is found —
+/// callers must omit the field rather than emit a guess.
+fn infer_quantization_from_gguf_filename(filename: &str) -> Option<String> {
+    let lower = filename.to_lowercase();
+    // Order matters: check longer / more-specific patterns first.
+    for q in &[
+        "q3_k_l", "q3_k_m", "q3_k_s", "q4_k_m", "q4_k_s", "q5_k_m", "q5_k_s", "q2_k", "q4_0",
+        "q4_1", "q5_0", "q5_1", "q6_k", "q8_0", "f16", "f32",
+    ] {
+        if lower.contains(q) {
+            return Some(normalize_quantization_label(q));
+        }
+    }
+    None
+}
+
+/// Resolve the canonical quantization label for a model.
+///
+/// Source priority (per INF-91):
+///  1. Explicit `metadata.quantization` from `model_metadata.json` —
+///     publish-time, stable, preferred.
+///  2. GGUF filename inference (fallback) when the template is GGUF
+///     and the bundle didn't pin the label.
+///  3. `None` — when no signal is available the field stays absent
+///     rather than emitting an empty string or a guessed value.
+pub fn quantization_label_from_metadata(metadata: &ModelMetadata) -> Option<String> {
+    if let Some(declared) = metadata
+        .metadata
+        .get("quantization")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        return Some(normalize_quantization_label(declared));
+    }
+    if let ExecutionTemplate::Gguf { model_file, .. } = &metadata.execution_template {
+        return infer_quantization_from_gguf_filename(model_file);
+    }
+    None
+}
+
 /// Map a model's execution template to the `span_kind` colour hint used by
 /// the swim-lane bar renderer (`gpu` / `cpu` / `io` / `tool`).
 ///
@@ -646,6 +709,128 @@ mod tests {
             config: HashMap::new(),
         };
         assert!(backend_label_from_template(&graph, None).is_none());
+    }
+
+    #[test]
+    fn quantization_label_prefers_explicit_metadata_field() {
+        // Source-priority rule (INF-91): explicit `metadata.quantization`
+        // beats filename inference. Lets the bundle author override the
+        // filename-derived guess for cases where the filename is wrong
+        // or non-canonical (e.g. a re-uploaded model).
+        let mut metadata = ModelMetadata {
+            model_id: "qwen2.5-0.5b-instruct".into(),
+            version: "1".into(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "qwen2.5-0.5b-instruct-q4_k_m.gguf".into(),
+                chat_template: None,
+                context_length: 2048,
+                generation_params: None,
+            },
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: Vec::new(),
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+        // Explicit declaration wins over the filename's `q4_k_m`.
+        metadata
+            .metadata
+            .insert("quantization".into(), serde_json::json!("Q8_0"));
+        assert_eq!(
+            quantization_label_from_metadata(&metadata).as_deref(),
+            Some("q8_0"),
+            "explicit metadata.quantization must override filename inference and be lowercased"
+        );
+    }
+
+    #[test]
+    fn quantization_label_falls_back_to_gguf_filename() {
+        // No explicit metadata field → filename inference for GGUF.
+        // Must produce the lowercase canonical label, and `f16` /
+        // `f32` must rewrite to `fp16` / `fp32` for analytics-column
+        // stability.
+        let metadata = ModelMetadata {
+            model_id: "qwen2.5-0.5b".into(),
+            version: "1".into(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "qwen2.5-0.5b-instruct-q4_k_m.gguf".into(),
+                chat_template: None,
+                context_length: 2048,
+                generation_params: None,
+            },
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: Vec::new(),
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+        assert_eq!(
+            quantization_label_from_metadata(&metadata).as_deref(),
+            Some("q4_k_m")
+        );
+
+        let fp16 = ModelMetadata {
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "tinyllama-1.1b-chat-f16.gguf".into(),
+                chat_template: None,
+                context_length: 2048,
+                generation_params: None,
+            },
+            ..metadata.clone()
+        };
+        assert_eq!(
+            quantization_label_from_metadata(&fp16).as_deref(),
+            Some("fp16"),
+            "GGUF `f16` must rewrite to canonical `fp16`"
+        );
+    }
+
+    #[test]
+    fn quantization_label_omits_when_unknown() {
+        // Contract: the field stays absent (not empty string, not
+        // "unknown") when no signal is available — analytics rows
+        // with missing quantization must be distinguishable from
+        // legitimate `fp32` rows.
+        let onnx_no_meta = ModelMetadata {
+            model_id: "wav2vec2".into(),
+            version: "1".into(),
+            execution_template: ExecutionTemplate::Onnx {
+                model_file: "model.onnx".into(),
+            },
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: Vec::new(),
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+        assert!(
+            quantization_label_from_metadata(&onnx_no_meta).is_none(),
+            "ONNX with no metadata.quantization must omit the label"
+        );
+
+        // GGUF whose filename doesn't carry a recognised pattern.
+        let gguf_unknown = ModelMetadata {
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "custom-experimental.gguf".into(),
+                chat_template: None,
+                context_length: 2048,
+                generation_params: None,
+            },
+            ..onnx_no_meta
+        };
+        assert!(
+            quantization_label_from_metadata(&gguf_unknown).is_none(),
+            "GGUF with no quantization marker in filename must omit"
+        );
     }
 
     #[test]
