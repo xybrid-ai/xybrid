@@ -260,20 +260,25 @@ impl OrchestrationAuthority for RemoteAuthority {
     }
 
     fn resolve_target_with_feedback(&self, context: &StageContext) -> TargetResolution {
+        // Mirror LocalAuthority's live overlay so the SignalContext attached
+        // to a TargetResolution reflects the same real-time resource state
+        // the routing decision is implicitly conditioned on. Without this
+        // overlay, ExecutionOutcome.signal_context is bucketed under stale
+        // pre-run device metrics, and the embedded LocalAuthority's
+        // reliability history grows under buckets that no live request ever
+        // queries — silently disabling the history-bias circuit breaker.
+        let snapshot = context
+            .resource_monitor
+            .current_snapshot(Duration::from_millis(500));
+        let live_metrics = context.metrics.with_live_snapshot(snapshot);
+        let signal = Some(SignalContext::from_metrics(&live_metrics));
+
         if let Some(decision) = self.cached_target_advice(context) {
-            return TargetResolution::new(
-                decision,
-                context.model_id.clone(),
-                Some(SignalContext::from_metrics(&context.metrics)),
-            );
+            return TargetResolution::new(decision, context.model_id.clone(), signal);
         }
 
         if let Some(decision) = self.fetch_target_advice(context) {
-            return TargetResolution::new(
-                decision,
-                context.model_id.clone(),
-                Some(SignalContext::from_metrics(&context.metrics)),
-            );
+            return TargetResolution::new(decision, context.model_id.clone(), signal);
         }
 
         let mut resolution = self.fallback.resolve_target_with_feedback(context);

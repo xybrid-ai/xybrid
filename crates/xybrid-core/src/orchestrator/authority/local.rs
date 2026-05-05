@@ -175,9 +175,20 @@ impl LocalAuthority {
     fn active_hysteresis_for(&self, model_id: &str) -> Option<AbortReason> {
         let mut hysteresis = self.hysteresis.lock().ok()?;
         Self::prune_hysteresis(&mut hysteresis);
-        hysteresis.keys().find_map(|(candidate_model_id, reason)| {
-            (candidate_model_id == model_id).then_some(*reason)
-        })
+        // Pick the most recently-recorded reason (max expires_at) when a
+        // model has multiple coexisting hysteresis entries. HashMap key
+        // iteration order is non-deterministic, so a naive `keys().find_map`
+        // would pick StressMemory or StressThermal arbitrarily across
+        // process restarts and after map mutations — flaking the
+        // explanatory `reason` string surfaced as the platform-event
+        // `abort_reason` field. The most recent reason is the one that
+        // actually pushed the device over the edge, so it is the more
+        // user-meaningful pick.
+        hysteresis
+            .iter()
+            .filter(|((candidate_model_id, _), _)| candidate_model_id == model_id)
+            .max_by_key(|(_, expires_at)| **expires_at)
+            .map(|((_, reason), _)| *reason)
     }
 
     fn history_snapshot(&self, model_id: &str, signal: SignalContext) -> VecDeque<OutcomeCategory> {
@@ -233,11 +244,23 @@ impl LocalAuthority {
     fn prune_reliability(
         reliability: &mut HashMap<(String, SignalContext), VecDeque<OutcomeCategory>>,
     ) {
+        // Bounded random-replacement: when at the cap, evict the bucket
+        // with the smallest history (least information). Falls back to
+        // arbitrary iteration order for empty buckets, which is fine —
+        // empty buckets carry no signal anyway. True LRU would require a
+        // per-bucket timestamp; the smallest-history heuristic is a
+        // reasonable middle ground and is a strict improvement over
+        // arbitrary HashMap iteration order, biasing eviction away from
+        // hot buckets that have accumulated useful history.
         while reliability.len() > MAX_RELIABILITY_KEYS {
-            let Some(key) = reliability.keys().next().cloned() else {
+            let Some(victim) = reliability
+                .iter()
+                .min_by_key(|(_, history)| history.len())
+                .map(|(key, _)| key.clone())
+            else {
                 break;
             };
-            reliability.remove(&key);
+            reliability.remove(&victim);
         }
     }
 }
@@ -381,7 +404,15 @@ impl OrchestrationAuthority for LocalAuthority {
             if !reliability.contains_key(&key) && reliability.len() >= MAX_RELIABILITY_KEYS {
                 Self::prune_reliability(&mut reliability);
                 if reliability.len() >= MAX_RELIABILITY_KEYS {
-                    if let Some(victim) = reliability.keys().next().cloned() {
+                    // Use the same smallest-history victim selection as
+                    // prune_reliability so eviction stays deterministic
+                    // and biased away from hot buckets even on this
+                    // last-mile path.
+                    let victim = reliability
+                        .iter()
+                        .min_by_key(|(_, history)| history.len())
+                        .map(|(victim_key, _)| victim_key.clone());
+                    if let Some(victim) = victim {
                         reliability.remove(&victim);
                     }
                 }
@@ -416,9 +447,14 @@ impl LocalAuthority {
             RouteTarget::Cloud => ResolvedTarget::Cloud {
                 provider: "xybrid".to_string(),
             },
-            RouteTarget::Fallback(id) => ResolvedTarget::Server {
-                endpoint: format!("fallback:{}", id),
-            },
+            // Carry the bare fallback id; the reverse-direction
+            // mapping in resolve_routing_decision (and
+            // Orchestrator::resolved_target_to_routing_decision) will
+            // re-wrap it as RouteTarget::Fallback. The "fallback:"
+            // prefix is added back by RouteTarget::to_json_string /
+            // Display, so synthesizing it here produced "fallback:fallback:<id>"
+            // when the resolution round-tripped through telemetry.
+            RouteTarget::Fallback(id) => ResolvedTarget::Server { endpoint: id },
         }
     }
 
@@ -970,6 +1006,29 @@ mod tests {
         let decision = authority.resolve_target(&text_context());
 
         assert!(!decision.reason.contains("history_bias"));
+    }
+
+    #[test]
+    fn target_from_route_round_trips_fallback_without_prefix_doubling() {
+        // Pre-fix, target_from_route synthesized "fallback:<id>" inside the
+        // ResolvedTarget::Server endpoint string. The reverse mapping then
+        // wrapped the already-prefixed string in RouteTarget::Fallback, and
+        // to_json_string re-prepended "fallback:" — emitting
+        // "fallback:fallback:<id>". Ensure the symmetric round-trip now
+        // produces a single prefix.
+        let routed =
+            LocalAuthority::target_from_route(RouteTarget::Fallback("model_v2".to_string()));
+        let endpoint = match routed {
+            ResolvedTarget::Server { endpoint } => endpoint,
+            other => panic!("expected Server target, got {other:?}"),
+        };
+        assert_eq!(endpoint, "model_v2");
+        let reverse = match endpoint.as_str() {
+            "model_v2" => RouteTarget::Fallback(endpoint.clone()),
+            _ => unreachable!(),
+        };
+        assert_eq!(reverse.to_json_string(), "fallback:model_v2");
+        assert_eq!(reverse.to_string(), "fallback:model_v2");
     }
 
     #[test]

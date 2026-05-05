@@ -49,6 +49,19 @@ pub enum OrchestratorEvent {
         target: String,
         error: String,
     },
+    /// Local execution was cooperatively aborted (e.g. resource pressure
+    /// triggered an `AbortPolicy`). Distinct from `ExecutionFailed` because
+    /// the run is expected to be retried on cloud by a higher layer; the
+    /// `TemplateExecutor` deliberately suppresses its terminal listener
+    /// event for these aborts because the orchestrator emits this richer
+    /// `LocalAborted` event in its place. Without this variant, listener
+    /// consumers see `ExecutionStarted` with no terminal counterpart on the
+    /// orchestrator path.
+    LocalAborted {
+        stage_name: String,
+        target: String,
+        reason: String,
+    },
     /// Pipeline started.
     PipelineStart { stages: Vec<String> },
     /// Pipeline completed.

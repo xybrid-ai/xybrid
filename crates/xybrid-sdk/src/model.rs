@@ -8,7 +8,7 @@
 
 use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
-use crate::run_options::{check_abort_for_streaming, AbortState, RunOptions};
+use crate::run_options::{check_abort_for_streaming, AbortState, CancellationToken, RunOptions};
 use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::PathBuf;
@@ -173,6 +173,18 @@ fn streaming_callback_error(error: Box<dyn std::error::Error + Send + Sync>) -> 
     SdkError::InferenceError(format!("Streaming callback failed: {}", error))
 }
 
+fn streaming_pre_run_abort_error(
+    reason: crate::run_options::AbortReason,
+    fallback_to_cloud: bool,
+) -> SdkError {
+    if fallback_to_cloud && !matches!(reason, crate::run_options::AbortReason::UserCancelled) {
+        return SdkError::AbortedForCloudFallback {
+            reason: reason.to_core_abort_reason(),
+        };
+    }
+    SdkError::InferenceError(format!("Execution aborted: {reason}"))
+}
+
 /// Information about a local→cloud handoff "seam" surfaced by
 /// [`XybridModel::run_streaming_with_fallback`].
 ///
@@ -209,7 +221,13 @@ fn fallback_policy_metrics(options: &RunOptions) -> xybrid_core::context::Device
             xybrid_core::device::ResourceMonitor::global()
                 .current_snapshot(FALLBACK_POLICY_RESOURCE_MAX_AGE)
         });
-    xybrid_core::context::DeviceMetrics::default().with_live_snapshot(snapshot)
+    // Prefer caller-supplied DeviceMetrics so RTT- and battery-based deny
+    // rules in the policy engine see real values. `with_live_snapshot` then
+    // overlays the freshly sampled resource snapshot on top — best of both
+    // worlds. Falls back to `DeviceMetrics::default()` when the caller has
+    // no device adapter wired (the historical behaviour).
+    let base = options.device_metrics.clone().unwrap_or_default();
+    base.with_live_snapshot(snapshot)
 }
 
 fn cloud_target(provider: Option<&str>) -> ResolvedTarget {
@@ -264,6 +282,11 @@ fn record_cloud_outcome(
 /// [`InferenceResult`]. On any other shape the original result is returned
 /// unchanged.
 ///
+/// `cancellation_token`, when set, makes the cloud retry leg honour
+/// caller-driven cancellation. The cloud leg cannot meaningfully react to
+/// resource pressure on the device, so only `UserCancelled` is consulted —
+/// matching the local leg's contract.
+///
 /// Lives as a free function so unit tests can drive it directly without
 /// constructing a real [`XybridModel`].
 #[allow(clippy::too_many_arguments)]
@@ -278,6 +301,7 @@ fn dispatch_after_local<F, S>(
     authority: &dyn OrchestrationAuthority,
     policy_metrics: xybrid_core::context::DeviceMetrics,
     signal_context: Option<SignalContext>,
+    cancellation_token: Option<CancellationToken>,
     on_token: &mut F,
     on_seam: &mut S,
 ) -> SdkResult<InferenceResult>
@@ -316,6 +340,16 @@ where
             };
             on_seam(seam);
 
+            if cancellation_token
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Err(SdkError::InferenceError(format!(
+                    "Execution aborted: {}",
+                    crate::run_options::AbortReason::UserCancelled
+                )));
+            }
+
             // FR-6: reuse the original prompt; no partial-token reuse.
             let cloud_envelope = envelope.clone();
             let cloud_provider = cloud_envelope.metadata.get("provider").cloned();
@@ -340,40 +374,88 @@ where
                 envelope: cloud_envelope.clone(),
                 metrics: policy_metrics,
             });
-            if let PolicyOutcome::Deny {
-                reason: policy_reason,
-            } = policy_decision.result
-            {
-                crate::telemetry::publish_cloud_denied_by_policy(
-                    &correlation_id,
-                    cloud_model_id,
-                    reason,
-                    &policy_reason,
-                    local_latency_ms,
-                );
-                record_cloud_outcome(
-                    authority,
-                    cloud_model_id,
-                    cloud_provider.as_deref(),
-                    0,
-                    false,
-                    Some(format!("cloud_denied_by_policy: {}", policy_reason)),
-                    OutcomeCategory::HardFail {
-                        reason: "cloud_denied_by_policy".to_string(),
-                    },
-                    signal_context,
-                );
-                return Err(SdkError::InferenceError(format!(
-                    "cloud_denied_by_policy: {}",
-                    policy_reason
-                )));
+            match policy_decision.result {
+                PolicyOutcome::Allow => {}
+                PolicyOutcome::Deny {
+                    reason: policy_reason,
+                } => {
+                    crate::telemetry::publish_cloud_denied_by_policy(
+                        &correlation_id,
+                        cloud_model_id,
+                        reason,
+                        &policy_reason,
+                        local_latency_ms,
+                    );
+                    record_cloud_outcome(
+                        authority,
+                        cloud_model_id,
+                        cloud_provider.as_deref(),
+                        0,
+                        false,
+                        Some(format!("cloud_denied_by_policy: {}", policy_reason)),
+                        OutcomeCategory::HardFail {
+                            reason: "cloud_denied_by_policy".to_string(),
+                        },
+                        signal_context,
+                    );
+                    return Err(SdkError::InferenceError(format!(
+                        "cloud_denied_by_policy: {}",
+                        policy_reason
+                    )));
+                }
+                PolicyOutcome::Transform { transforms } => {
+                    // Defensive hard-fail: the orchestrator path applies
+                    // PolicyEngine::redact when this variant fires, but the
+                    // SDK fallback path does not yet plumb a redact seam.
+                    // Treating Transform as Allow would silently dispatch
+                    // the un-redacted envelope to cloud — a privacy
+                    // regression the orchestrator path explicitly avoids.
+                    // Fail closed until the redact seam is wired in.
+                    let policy_reason =
+                        format!("transforms_unsupported_in_fallback: {:?}", transforms);
+                    crate::telemetry::publish_cloud_denied_by_policy(
+                        &correlation_id,
+                        cloud_model_id,
+                        reason,
+                        &policy_reason,
+                        local_latency_ms,
+                    );
+                    record_cloud_outcome(
+                        authority,
+                        cloud_model_id,
+                        cloud_provider.as_deref(),
+                        0,
+                        false,
+                        Some(format!("cloud_denied_by_policy: {}", policy_reason)),
+                        OutcomeCategory::HardFail {
+                            reason: "cloud_denied_by_policy".to_string(),
+                        },
+                        signal_context,
+                    );
+                    return Err(SdkError::InferenceError(format!(
+                        "cloud_denied_by_policy: {}",
+                        policy_reason
+                    )));
+                }
             }
 
             let cloud_start = Instant::now();
             let cloud_tokens = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
             let cloud_tokens_for_cb = cloud_tokens.clone();
+            let cancellation_for_cb = cancellation_token.clone();
             let cloud_callback: xybrid_core::runtime_adapter::types::StreamingCallback<'_> =
                 Box::new(move |token| {
+                    // Honour user cancellation across the local→cloud seam.
+                    // Resource-pressure signals are not consulted: the device's
+                    // CPU/memory state says nothing about a cloud round-trip's
+                    // viability, and treating it as a cloud-leg abort would
+                    // surface CloudFallbackAbort errors at the wrong layer.
+                    if let Some(token_handle) = cancellation_for_cb.as_ref() {
+                        if token_handle.is_cancelled() {
+                            return Err(Box::new(crate::run_options::AbortReason::UserCancelled)
+                                as Box<dyn std::error::Error + Send + Sync>);
+                        }
+                    }
                     cloud_tokens_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     on_token(token)
                 });
@@ -1922,7 +2004,14 @@ impl XybridModel {
             + Send,
     {
         let mut abort_state = AbortState::new(options);
+        // Honour pre-run cancellation so a `token.cancel()` issued before
+        // invocation aborts immediately rather than running the full batch
+        // (or model load + prompt fill on streaming models) before the first
+        // token boundary checks the abort state.
         let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
+        abort_state
+            .check_before_run()
+            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
         self.run_streaming_with_context(
             envelope,
             context,
@@ -2072,7 +2161,14 @@ impl XybridModel {
         // privacy/cost rationale.
         let supports_streaming = self.supports_streaming;
         let mut abort_state = AbortState::new(options);
+        // Honour pre-run cancellation: without this, a non-streaming model
+        // whose `supports_streaming = false` would silently execute the full
+        // batch even when the cancellation token was set before invocation,
+        // because `check_abort_for_streaming` short-circuits in that case.
         let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
+        abort_state
+            .check_before_run()
+            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
         self.run_streaming(envelope, options.generation_config.as_ref(), move |token| {
             check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)?;
             on_token(token)
@@ -2119,6 +2215,18 @@ impl XybridModel {
     ///   for supported keys.
     /// - The wrapper is fully synchronous; cloud chunking is synthetic
     ///   (see `CloudStreaming`).
+    /// - **Cancellation timing across the seam.** A cancel set on the
+    ///   `cancellation_token` *before* `execute_streaming` is invoked
+    ///   (including from inside `on_seam`) short-circuits before the cloud
+    ///   adapter is called — the prompt is never sent. A cancel that arrives
+    ///   *during* the blocking cloud round-trip is observed at the next
+    ///   synthetic-chunk boundary: the user-visible token stream is suppressed,
+    ///   but the prompt has already been transmitted and the provider may
+    ///   bill for it. Stopping the in-flight HTTP request itself requires
+    ///   adapter-level cancellation, which is not yet plumbed through
+    ///   [`CloudStreaming`](xybrid_core::runtime_adapter::CloudStreaming) (the
+    ///   current implementation uses a blocking `ureq` client). Treat the
+    ///   token as "responsive on the seam, best-effort during cloud."
     pub fn run_streaming_with_fallback<F, S>(
         &self,
         envelope: &Envelope,
@@ -2168,6 +2276,7 @@ impl XybridModel {
             fallback_authority(),
             policy_metrics,
             signal_context,
+            options.cancellation_token.clone(),
             on_token,
             on_seam,
         )
@@ -2646,8 +2755,45 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct FixedUnitResourceProvider {
+        snapshot: xybrid_core::device::ResourceSnapshot,
+    }
+
+    impl FixedUnitResourceProvider {
+        fn new(snapshot: xybrid_core::device::ResourceSnapshot) -> Self {
+            Self { snapshot }
+        }
+    }
+
+    impl xybrid_core::device::ResourceSnapshotProvider for FixedUnitResourceProvider {
+        fn current_snapshot(
+            &self,
+            _max_age: std::time::Duration,
+        ) -> xybrid_core::device::ResourceSnapshot {
+            self.snapshot
+        }
+    }
+
     fn text_envelope(text: &str) -> xybrid_core::ir::Envelope {
         xybrid_core::ir::Envelope::new(xybrid_core::ir::EnvelopeKind::Text(text.to_string()))
+    }
+
+    fn test_loaded_model(supports_streaming: bool) -> XybridModel {
+        let metadata =
+            xybrid_core::execution::ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
+        XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: TemplateExecutor::default(),
+                metadata,
+                model_dir: PathBuf::from("."),
+                loaded: true,
+            })),
+            model_id: "local-test-model".to_string(),
+            version: "1.0".to_string(),
+            output_type: OutputType::Text,
+            supports_streaming,
+        }
     }
 
     fn default_metrics() -> xybrid_core::context::DeviceMetrics {
@@ -2786,6 +2932,7 @@ mod tests {
             &authority,
             default_metrics(),
             Some(default_signal()),
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -2802,6 +2949,48 @@ mod tests {
         let tokens = collected.lock().unwrap().clone();
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], "hello from cloud");
+    }
+
+    #[test]
+    fn run_streaming_with_fallback_retries_cloud_on_pre_run_resource_pressure() {
+        let model = test_loaded_model(true);
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let mut critical_snapshot = xybrid_core::device::ResourceSnapshot::unknown();
+        critical_snapshot.memory_pressure = xybrid_core::device::MemoryPressure::Critical;
+        let resource_provider = Arc::new(FixedUnitResourceProvider::new(critical_snapshot));
+        let options = RunOptions::new()
+            .with_abort_policy(
+                crate::run_options::AbortPolicy::default()
+                    .stop_on(crate::run_options::AbortSignal::MemoryPressureCritical)
+                    .with_cloud_fallback(true)
+                    .with_max_grace_tokens(0),
+            )
+            .with_resource_provider(resource_provider)
+            .with_correlation_id("corr-pre-run");
+        let envelope = text_envelope("write me a haiku");
+        let collected: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_for_cb = collected.clone();
+        let mut on_token = move |t: xybrid_core::runtime_adapter::types::PartialToken| {
+            collected_for_cb.lock().unwrap().push(t.token);
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        let seam_count = Arc::new(AtomicUsize::new(0));
+        let seam_count_for_cb = seam_count.clone();
+        let mut on_seam = move |s: SeamInfo| {
+            seam_count_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(s.reason, xybrid_core::abort::AbortReason::StressMemory);
+            assert_eq!(s.correlation_id, "corr-pre-run");
+            assert_eq!(s.local_tokens, 0);
+        };
+
+        let result = model
+            .run_streaming_with_fallback(&envelope, &options, &cloud, &mut on_token, &mut on_seam)
+            .expect("pre-run resource pressure should retry on cloud");
+
+        assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(cloud.call_count(), 1);
+        assert_eq!(result.text(), Some("hello from cloud"));
+        assert_eq!(collected.lock().unwrap().as_slice(), ["hello from cloud"]);
     }
 
     #[test]
@@ -2830,6 +3019,7 @@ mod tests {
             &authority,
             default_metrics(),
             Some(default_signal()),
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -2861,6 +3051,50 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_after_local_stops_before_cloud_when_cancelled_after_seam() {
+        let cloud = FakeCloudAdapter::new("must not run");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("prompt");
+        let cancellation = CancellationToken::new();
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let seam_count = Arc::new(AtomicUsize::new(0));
+        let seam_count_for_cb = seam_count.clone();
+        let cancellation_for_seam = cancellation.clone();
+        let mut on_seam = move |_s: SeamInfo| {
+            seam_count_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            cancellation_for_seam.cancel();
+        };
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-cancel-after-seam".to_string(),
+            "local-model",
+            0,
+            0,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            Some(cancellation),
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::InferenceError(message)) => assert!(message.contains("user_cancelled")),
+            other => panic!("expected user_cancelled error, got {other:?}"),
+        }
+        assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(cloud.call_count(), 0);
+        assert_eq!(authority.outcomes().len(), 1);
+    }
+
+    #[test]
     fn dispatch_after_local_stops_when_cloud_policy_is_denied() {
         let cloud = FakeCloudAdapter::new("should not run");
         let authority = FakeAuthority::deny("Policy rule 'rtt_rule' matched");
@@ -2886,6 +3120,7 @@ mod tests {
             &authority,
             default_metrics(),
             Some(default_signal()),
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -2942,6 +3177,7 @@ mod tests {
             &authority,
             default_metrics(),
             Some(default_signal()),
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -2977,6 +3213,7 @@ mod tests {
             &authority,
             default_metrics(),
             Some(default_signal()),
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -3012,6 +3249,7 @@ mod tests {
             &authority,
             default_metrics(),
             Some(default_signal()),
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -3050,6 +3288,7 @@ mod tests {
             &authority,
             default_metrics(),
             Some(default_signal()),
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -3091,6 +3330,7 @@ mod tests {
             &authority,
             default_metrics(),
             Some(default_signal()),
+            None,
             &mut on_token,
             &mut on_seam,
         );
