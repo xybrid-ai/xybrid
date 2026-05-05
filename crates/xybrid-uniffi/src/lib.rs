@@ -110,6 +110,9 @@ impl From<SdkError> for XybridError {
             SdkError::MetadataInvalid(s) => XybridError::MetadataInvalid { message: s },
             SdkError::LoadError(s) => XybridError::LoadError { message: s },
             SdkError::InferenceError(s) => XybridError::InferenceError { message: s },
+            SdkError::AbortedForCloudFallback { reason } => XybridError::InferenceError {
+                message: format!("Aborted for cloud fallback: {reason}"),
+            },
             SdkError::StreamingNotSupported => XybridError::StreamingNotSupported,
             SdkError::NotLoaded => XybridError::NotLoaded,
             SdkError::ConfigError(s) => XybridError::ConfigError { message: s },

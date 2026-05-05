@@ -452,6 +452,7 @@ impl Pipeline {
             "google" | "gemini" => Some(IntegrationProvider::Google),
             "elevenlabs" | "eleven" | "eleven_labs" => Some(IntegrationProvider::ElevenLabs),
             "openrouter" | "open_router" => Some(IntegrationProvider::OpenRouter),
+            "deepseek" | "deep_seek" => Some(IntegrationProvider::DeepSeek),
             _ => Some(IntegrationProvider::Custom),
         }
     }
@@ -1368,6 +1369,14 @@ stages:
             }
             .to_string(),
             "integration:openai"
+        );
+    }
+
+    #[test]
+    fn parse_provider_accepts_deepseek() {
+        assert_eq!(
+            Pipeline::parse_provider("deepseek"),
+            Some(IntegrationProvider::DeepSeek)
         );
     }
 

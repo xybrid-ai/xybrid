@@ -37,6 +37,7 @@ use crate::runtime_adapter::streaming_postprocess::{
     StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
 };
 use crate::runtime_adapter::AdapterError;
+use crate::tracing as xybrid_trace;
 use std::sync::Mutex;
 #[cfg(feature = "llm-llamacpp")]
 use std::sync::Once;
@@ -281,7 +282,20 @@ impl LlmBackend for LlamaCppBackend {
             // (no external emission) — generation still returns the full
             // token vector like `llama_generate_with_stops` did. Keeps the
             // non-streaming contract of this function intact.
-            let mut tel = StreamingTelemetry::new(tokens.len());
+            // Capture prompt size up-front so we can attach `tokens_in` to
+            // the active span after the loop. The executor opens
+            // `llm_inference_streaming` around this call, so this metadata
+            // lands on the same span as the rest of the LLM telemetry that
+            // `mirror_llm_metrics_to_span` writes post-return.
+            let prompt_token_count = tokens.len();
+            // Surface prompt size on the active span BEFORE the streaming
+            // loop, so cloud-fallback aborts (which short-circuit before
+            // tel.finalize runs) still attach tokens_in to LocalAborted.
+            // Without this the dashboard's TOKENS column shows `—` for the
+            // local leg of every aborted run. Successful runs harmlessly
+            // overwrite this with the same value after finalize.
+            xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
+            let mut tel = StreamingTelemetry::new(prompt_token_count);
             let (output_tokens, stopped_by_callback) = sys::llama_generate_streaming(
                 context,
                 model,
@@ -390,7 +404,15 @@ impl LlmBackend for LlamaCppBackend {
             // callback so raw generation gets the same TTFT / ITL /
             // decode-tps telemetry as `generate()`. Stop handling stays
             // raw — only user-supplied sequences, no chat markers.
-            let mut tel = StreamingTelemetry::new(tokens.len());
+            let prompt_token_count = tokens.len();
+            // Surface prompt size on the active span BEFORE the streaming
+            // loop, so cloud-fallback aborts (which short-circuit before
+            // tel.finalize runs) still attach tokens_in to LocalAborted.
+            // Without this the dashboard's TOKENS column shows `—` for the
+            // local leg of every aborted run. Successful runs harmlessly
+            // overwrite this with the same value after finalize.
+            xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
+            let mut tel = StreamingTelemetry::new(prompt_token_count);
             let (output_tokens, stopped_by_callback) = sys::llama_generate_streaming(
                 context,
                 model,
@@ -476,7 +498,15 @@ impl LlmBackend for LlamaCppBackend {
             // `_BROKEN` variants are intentionally excluded from streaming
             // (they false-positive on legitimate text) — they only run in
             // the final cleanup pass below.
-            let mut tel = StreamingTelemetry::new(tokens.len());
+            let prompt_token_count = tokens.len();
+            // Surface prompt size on the active span BEFORE the streaming
+            // loop, so cloud-fallback aborts (which short-circuit before
+            // tel.finalize runs) still attach tokens_in to LocalAborted.
+            // Without this the dashboard's TOKENS column shows `—` for the
+            // local leg of every aborted run. Successful runs harmlessly
+            // overwrite this with the same value after finalize.
+            xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
+            let mut tel = StreamingTelemetry::new(prompt_token_count);
             let stop_patterns = merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let mut filter = StreamingTextFilter::new(stop_patterns.clone());
             let mut token_index = 0usize;

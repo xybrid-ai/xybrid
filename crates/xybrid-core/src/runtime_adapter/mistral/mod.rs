@@ -16,6 +16,7 @@ use crate::runtime_adapter::llm::{
 #[cfg(feature = "llm-mistral")]
 use crate::runtime_adapter::llm_telemetry::compute_streaming_fields;
 use crate::runtime_adapter::AdapterError;
+use crate::tracing as xybrid_trace;
 
 #[cfg(feature = "llm-mistral")]
 use mistralrs::{
@@ -42,6 +43,13 @@ struct StreamState {
     text: String,
     finish_reason: String,
     tokens_reported: Option<usize>,
+    /// Prompt token count from mistralrs `Usage.prompt_tokens`. mistralrs
+    /// tokenizes internally so this is the only handle we have on prompt
+    /// size. Used both as the `prompt_token_count` argument to
+    /// `compute_streaming_fields` (so derived prefill_tps falls back when
+    /// the engine number is absent) and as the `tokens_in` value written
+    /// to span metadata for SDK hoisting into `payload.tokens_in`.
+    prompt_tokens_reported: Option<usize>,
     chunk_ts: Vec<std::time::Instant>,
     decode_tps_reported: Option<f32>,
     prefill_tps_reported: Option<f32>,
@@ -55,6 +63,7 @@ impl StreamState {
             text: String::new(),
             finish_reason: String::from("unknown"),
             tokens_reported: None,
+            prompt_tokens_reported: None,
             chunk_ts: Vec::new(),
             decode_tps_reported: None,
             prefill_tps_reported: None,
@@ -108,6 +117,7 @@ fn handle_response(
                 state.saw_terminal = true;
                 if let Some(u) = chunk.usage.as_ref() {
                     state.tokens_reported = Some(u.completion_tokens);
+                    state.prompt_tokens_reported = Some(u.prompt_tokens);
                     state.decode_tps_reported = nonzero(u.avg_compl_tok_per_sec);
                     state.prefill_tps_reported = nonzero(u.avg_prompt_tok_per_sec);
                 }
@@ -120,6 +130,7 @@ fn handle_response(
         Response::Done(final_resp) => {
             state.saw_terminal = true;
             state.tokens_reported = Some(final_resp.usage.completion_tokens);
+            state.prompt_tokens_reported = Some(final_resp.usage.prompt_tokens);
             state.decode_tps_reported = nonzero(final_resp.usage.avg_compl_tok_per_sec);
             state.prefill_tps_reported = nonzero(final_resp.usage.avg_prompt_tok_per_sec);
             if let Some(choice) = final_resp.choices.first() {
@@ -436,6 +447,7 @@ impl LlmBackend for MistralBackend {
             text,
             finish_reason,
             tokens_reported,
+            prompt_tokens_reported,
             chunk_ts,
             decode_tps_reported,
             prefill_tps_reported,
@@ -448,11 +460,19 @@ impl LlmBackend for MistralBackend {
         let tokens_generated = tokens_reported.unwrap_or(chunk_ts.len());
 
         // Shared telemetry derivation (TTFT, mean/p95 ITL, tokens_per_second).
-        // `prompt_token_count = 0` because mistralrs tokenizes internally
-        // and reports prefill_tps directly via `Usage.avg_prompt_tok_per_sec`
-        // — we override the (always-None) derived value with the engine
-        // number below via `.or()`.
-        let fields = compute_streaming_fields(start, &chunk_ts, 0, tokens_generated);
+        // mistralrs reports `Usage.prompt_tokens` on the terminal chunk;
+        // pass it through so derived prefill_tps has a real fallback when
+        // the engine's `avg_prompt_tok_per_sec` happens to be absent. The
+        // engine-reported value still wins via `.or()` below.
+        let prompt_token_count = prompt_tokens_reported.unwrap_or(0);
+        let fields =
+            compute_streaming_fields(start, &chunk_ts, prompt_token_count, tokens_generated);
+        // Surface prompt size on the active span so the SDK's
+        // extract_llm_token_counts promotes it to payload.tokens_in
+        // (parity with llama.cpp). 0 is a legitimate value when the
+        // engine didn't report usage; emitting it explicitly is more
+        // honest than dropping the field.
+        xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
 
         Ok(GenerationOutput {
             text,

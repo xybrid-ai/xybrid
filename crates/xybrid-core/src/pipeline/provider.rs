@@ -23,6 +23,9 @@ pub enum IntegrationProvider {
     /// Google AI (Gemini models).
     Google,
 
+    /// DeepSeek (OpenAI-compatible chat & reasoning models).
+    DeepSeek,
+
     /// ElevenLabs (TTS).
     ElevenLabs,
 
@@ -40,6 +43,7 @@ impl IntegrationProvider {
             IntegrationProvider::OpenAI => "OPENAI_API_KEY",
             IntegrationProvider::Anthropic => "ANTHROPIC_API_KEY",
             IntegrationProvider::Google => "GOOGLE_API_KEY",
+            IntegrationProvider::DeepSeek => "DEEPSEEK_API_KEY",
             IntegrationProvider::ElevenLabs => "ELEVENLABS_API_KEY",
             IntegrationProvider::OpenRouter => "OPENROUTER_API_KEY",
             IntegrationProvider::Custom => "CUSTOM_API_KEY",
@@ -52,6 +56,7 @@ impl IntegrationProvider {
             IntegrationProvider::OpenAI => "https://api.openai.com/v1",
             IntegrationProvider::Anthropic => "https://api.anthropic.com/v1",
             IntegrationProvider::Google => "https://generativelanguage.googleapis.com/v1beta",
+            IntegrationProvider::DeepSeek => "https://api.deepseek.com/v1",
             IntegrationProvider::ElevenLabs => "https://api.elevenlabs.io/v1",
             IntegrationProvider::OpenRouter => "https://openrouter.ai/api/v1",
             IntegrationProvider::Custom => "",
@@ -64,6 +69,7 @@ impl IntegrationProvider {
             IntegrationProvider::OpenAI => "openai",
             IntegrationProvider::Anthropic => "anthropic",
             IntegrationProvider::Google => "google",
+            IntegrationProvider::DeepSeek => "deepseek",
             IntegrationProvider::ElevenLabs => "elevenlabs",
             IntegrationProvider::OpenRouter => "openrouter",
             IntegrationProvider::Custom => "custom",
@@ -85,11 +91,12 @@ impl std::str::FromStr for IntegrationProvider {
             "openai" => Ok(IntegrationProvider::OpenAI),
             "anthropic" | "claude" => Ok(IntegrationProvider::Anthropic),
             "google" | "gemini" => Ok(IntegrationProvider::Google),
+            "deepseek" | "deep_seek" => Ok(IntegrationProvider::DeepSeek),
             "elevenlabs" | "eleven" | "eleven_labs" => Ok(IntegrationProvider::ElevenLabs),
             "openrouter" | "open_router" => Ok(IntegrationProvider::OpenRouter),
             "custom" => Ok(IntegrationProvider::Custom),
             _ => Err(format!(
-                "Unknown provider: '{}'. Valid values: openai, anthropic, google, elevenlabs, openrouter, custom",
+                "Unknown provider: '{}'. Valid values: openai, anthropic, google, deepseek, elevenlabs, openrouter, custom",
                 s
             )),
         }
@@ -374,7 +381,9 @@ impl ProviderConfig {
         let api_key = self.resolve_api_key()?;
 
         let headers = match self.provider {
-            IntegrationProvider::OpenAI | IntegrationProvider::OpenRouter => {
+            IntegrationProvider::OpenAI
+            | IntegrationProvider::OpenRouter
+            | IntegrationProvider::DeepSeek => {
                 vec![("Authorization".to_string(), format!("Bearer {}", api_key))]
             }
             IntegrationProvider::Anthropic => {

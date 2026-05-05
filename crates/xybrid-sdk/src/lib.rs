@@ -165,7 +165,9 @@ pub use llm::{
     LlmClientConfig, MessageRole, TokenUsage,
 };
 pub use model::SdkError;
-pub use model::{ModelLoader, SdkResult, StreamConfig, StreamEvent, StreamToken, XybridModel};
+pub use model::{
+    ModelLoader, SdkResult, SeamInfo, StreamConfig, StreamEvent, StreamToken, XybridModel,
+};
 pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
 pub use run_options::{AbortPolicy, AbortReason, AbortSignal, CancellationToken, RunOptions};

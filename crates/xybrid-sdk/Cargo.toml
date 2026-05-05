@@ -78,6 +78,9 @@ llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-core/llm-llamacpp"]
 
+# Dev-tools (test seams for demos and integration tests)
+dev-tools = ["xybrid-core/dev-tools"]
+
 [dev-dependencies]
 httpmock = "0.7"
 
@@ -85,3 +88,16 @@ httpmock = "0.7"
 [package.metadata.docs.rs]
 all-features = true
 
+# Demo: stress-driven local→cloud fallback. The user must also pass a
+# platform preset (e.g. `--features platform-macos`) so ORT and LLM
+# backends are linked. Requires a cached `qwen2.5-0.5b` and a reachable
+# cloud target (mock at http://localhost:3000 or a real provider).
+[[example]]
+name = "cloud_fallback_demo"
+path = "examples/cloud_fallback_demo.rs"
+required-features = ["llm-llamacpp", "dev-tools"]
+
+[[test]]
+name = "cloud_fallback_e2e"
+path = "tests/cloud_fallback_e2e.rs"
+required-features = ["dev-tools"]
