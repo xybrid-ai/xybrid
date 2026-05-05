@@ -20,8 +20,6 @@
 
 use log::{debug, info, warn};
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-use super::template::PostprocessingStep;
 use super::template::{
     backend_label_from_template, span_kind_from_template, stage_kind_from_task, ExecutionMode,
     ExecutionTemplate, ModelMetadata, PipelineStage,
