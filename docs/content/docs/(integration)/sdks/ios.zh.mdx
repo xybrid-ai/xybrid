@@ -15,11 +15,17 @@ Swift SDK 处于早期访问阶段，API 稳定但尚未作为正式版本发布
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
 ]
 ```
 
 或在 Xcode 中：**File > Add Package Dependencies**，输入仓库 URL。
+
+<Callout type="info">
+beta 阶段请使用 `exact:` 精确锁定标签 —— 按 SemVer 规则，SPM 的 `from:`
+会排除带预发布标识符（如 `-beta13`）的版本。`0.1.0` 稳定版发布后可改用
+`from: "0.1.0"`。
+</Callout>
 
 **支持的平台：** iOS 13.0+，macOS 10.15+
 

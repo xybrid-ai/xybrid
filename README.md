@@ -166,9 +166,11 @@ val result = model.run(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", exact: "0.1.0-beta13")
 ]
 ```
+
+> Once `0.1.0` ships, you'll be able to use `from: "0.1.0"`.
 
 **Run a model:**
 

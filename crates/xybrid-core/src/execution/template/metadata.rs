@@ -418,6 +418,58 @@ pub fn stage_kind_from_task(task: &str) -> Option<&'static str> {
     }
 }
 
+/// Normalise a GGUF `metadata.backend` hint to the canonical wire label.
+///
+/// Accepts both the canonical name and the historical `mistral` alias that
+/// flows through older bundle files; returns `None` for unrecognised hints
+/// so the caller can omit the field rather than emit a guessed value.
+///
+/// Used both by [`backend_label_from_template`] (outer `execute:` span)
+/// and by the inner `llm_inference` span sites so the wire payload's
+/// `backend` field is the same canonical string regardless of which span
+/// the SDK telemetry hoist reads.
+pub fn normalize_llm_backend_hint(hint: &str) -> Option<&'static str> {
+    match hint {
+        "llamacpp" => Some("llamacpp"),
+        "mistral" | "mistralrs" => Some("mistralrs"),
+        "mlx" => Some("mlx"),
+        _ => None,
+    }
+}
+
+/// Map a model's execution template (and optional `backend` hint from
+/// `ModelMetadata.metadata`) to the canonical backend label used by cost
+/// telemetry and the analytics ingest path. Values are aligned with the
+/// closed set documented for the `backend` field on `PlatformEvent`:
+/// `llamacpp` | `mlx` | `mistralrs` | `ort` | `candle` | `cloud`.
+///
+/// Returns `None` when the runtime is not yet covered by that closed set
+/// (e.g. CoreML, TFLite, ModelGraph) — the contract is "additive, omit
+/// when unknown" so unrecognised templates simply leave the field absent.
+///
+/// `cloud` is intentionally not represented here: the cloud adapter
+/// emits the label from its own span site (see
+/// `runtime_adapter::cloud::CloudRuntimeAdapter::execute`) where the
+/// provider identity is also in scope.
+pub fn backend_label_from_template(
+    template: &ExecutionTemplate,
+    hint: Option<&str>,
+) -> Option<&'static str> {
+    match template {
+        ExecutionTemplate::Onnx { .. } => Some("ort"),
+        // SafeTensors is Candle's native format; an `mlx` hint on an
+        // Apple Silicon bundle overrides the default so the wire label
+        // reflects the actual runtime that will execute the model.
+        ExecutionTemplate::SafeTensors { .. } => {
+            hint.and_then(normalize_llm_backend_hint).or(Some("candle"))
+        }
+        ExecutionTemplate::Gguf { .. } => hint.and_then(normalize_llm_backend_hint),
+        ExecutionTemplate::CoreMl { .. }
+        | ExecutionTemplate::TfLite { .. }
+        | ExecutionTemplate::ModelGraph { .. } => None,
+    }
+}
+
 /// Map a model's execution template to the `span_kind` colour hint used by
 /// the swim-lane bar renderer (`gpu` / `cpu` / `io` / `tool`).
 ///
@@ -502,6 +554,98 @@ mod tests {
             ExecutionMode::Autoregressive { max_tokens, .. } => assert_eq!(max_tokens, 100),
             _ => panic!("Expected autoregressive mode"),
         }
+    }
+
+    #[test]
+    fn backend_label_covers_canonical_runtimes() {
+        // ONNX → "ort" (analytics-canonical name for the ONNX Runtime path).
+        let onnx = ExecutionTemplate::Onnx {
+            model_file: "m.onnx".into(),
+        };
+        assert_eq!(backend_label_from_template(&onnx, None), Some("ort"));
+
+        // SafeTensors defaults to Candle when no hint is set; an
+        // `mlx` hint overrides for Apple-Silicon-targeted bundles
+        // where the runtime selector picks MLX over Candle.
+        let safe = ExecutionTemplate::SafeTensors {
+            model_file: "m.safetensors".into(),
+            architecture: None,
+            config_file: None,
+            tokenizer_file: None,
+        };
+        assert_eq!(backend_label_from_template(&safe, None), Some("candle"));
+        assert_eq!(
+            backend_label_from_template(&safe, Some("mlx")),
+            Some("mlx"),
+            "mlx hint must override the candle default for SafeTensors bundles"
+        );
+
+        // GGUF: hint required to disambiguate llama.cpp vs mistral.rs;
+        // omit when the bundle didn't pin a backend so downstream can
+        // tell "we don't know" from "we know it's X".
+        let gguf = ExecutionTemplate::Gguf {
+            model_file: "m.gguf".into(),
+            chat_template: None,
+            context_length: 2048,
+            generation_params: None,
+        };
+        assert_eq!(backend_label_from_template(&gguf, None), None);
+        assert_eq!(
+            backend_label_from_template(&gguf, Some("llamacpp")),
+            Some("llamacpp")
+        );
+        // Accept both the bundle-file alias and the canonical name.
+        assert_eq!(
+            backend_label_from_template(&gguf, Some("mistral")),
+            Some("mistralrs")
+        );
+        assert_eq!(
+            backend_label_from_template(&gguf, Some("mistralrs")),
+            Some("mistralrs")
+        );
+        // GGUF + mlx hint: the MLX runtime can also consume converted
+        // GGUFs, so the hint path must accept `"mlx"` here too.
+        assert_eq!(backend_label_from_template(&gguf, Some("mlx")), Some("mlx"));
+    }
+
+    #[test]
+    fn normalize_llm_backend_hint_canonicalises_aliases() {
+        // The legacy `mistral` alias must normalise to the canonical
+        // `mistralrs` so the inner `llm_inference` span (read by the SDK
+        // hoist for `PlatformEvent.backend`) and the outer `execute:`
+        // span agree on the closed-set wire value.
+        assert_eq!(normalize_llm_backend_hint("mistral"), Some("mistralrs"));
+        assert_eq!(normalize_llm_backend_hint("mistralrs"), Some("mistralrs"));
+        assert_eq!(normalize_llm_backend_hint("llamacpp"), Some("llamacpp"));
+        // MLX is the Apple-Silicon-only LLM runtime; the wire label is
+        // already canonical so the mapping is identity.
+        assert_eq!(normalize_llm_backend_hint("mlx"), Some("mlx"));
+        // Unknown hints must return None so callers omit the field
+        // rather than emit a guessed value.
+        assert_eq!(normalize_llm_backend_hint("unknown"), None);
+        assert_eq!(normalize_llm_backend_hint(""), None);
+    }
+
+    #[test]
+    fn backend_label_omits_unknown_runtimes() {
+        // Templates not yet covered by the closed-set contract must
+        // return None so the wire field stays absent rather than
+        // emitting a guessed value.
+        let coreml = ExecutionTemplate::CoreMl {
+            model_file: "m.mlmodel".into(),
+        };
+        assert!(backend_label_from_template(&coreml, None).is_none());
+
+        let tflite = ExecutionTemplate::TfLite {
+            model_file: "m.tflite".into(),
+        };
+        assert!(backend_label_from_template(&tflite, None).is_none());
+
+        let graph = ExecutionTemplate::ModelGraph {
+            stages: Vec::new(),
+            config: HashMap::new(),
+        };
+        assert!(backend_label_from_template(&graph, None).is_none());
     }
 
     #[test]

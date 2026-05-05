@@ -187,9 +187,11 @@ val result = model.run(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", exact: "0.1.0-beta13")
 ]
 ```
+
+> 稳定版 `0.1.0` 发布后即可改用 `from: "0.1.0"`。
 
 **运行模型：**
 
