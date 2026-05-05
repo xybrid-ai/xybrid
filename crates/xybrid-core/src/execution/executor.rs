@@ -240,6 +240,13 @@ impl TemplateExecutor {
             if let Some(kind) = stage_kind_from_task(task) {
                 xybrid_trace::add_metadata("stage_kind", kind);
             }
+            // Semantic task label for cost-attribution telemetry
+            // (per `PlatformEvent.task`). Echoes the raw value from
+            // `model_metadata.json` so the dashboard can filter
+            // chat/vlm/asr/tts/embedding/etc. without joining against
+            // the registry at render time. Omitted when the model
+            // bundle didn't declare a task.
+            xybrid_trace::add_metadata("task", task);
         }
         xybrid_trace::add_metadata(
             "span_kind",

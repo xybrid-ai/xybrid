@@ -1022,6 +1022,17 @@ fn convert_to_platform_event(
                 payload["provider"] = serde_json::json!(v);
             }
         }
+        // Semantic task label (chat / vlm / asr / tts / embedding / …)
+        // sourced from `model_metadata.json`. Lives on the outer
+        // `execute:<model>` span so it's always reachable via the
+        // any-span hoist regardless of modality. Promotes the field
+        // to the wire payload so the console can filter without
+        // joining model_id against the registry at render time.
+        if payload.get("task").is_none() {
+            if let Some(v) = extract_string_attr_from_any_span(&spans, "task") {
+                payload["task"] = serde_json::json!(v);
+            }
+        }
         Some(spans)
     } else {
         None
@@ -2720,6 +2731,88 @@ mod tests {
         let event = build_model_download_event("test-model", 42, "r2", 1);
         let data: serde_json::Value = serde_json::from_str(event.data.as_deref().unwrap()).unwrap();
         assert_eq!(data["source"].as_str(), Some("r2"));
+    }
+
+    #[test]
+    fn task_field_hoists_to_payload_top_level() {
+        // INF-93: `task` is a semantic label sourced from the model
+        // bundle's `metadata.task`, written by `TemplateExecutor` onto
+        // the outer `execute:<model>` span. This test exercises the
+        // full convert path so an accidental future regression (e.g.,
+        // dropping the hoist branch) is caught without depending on
+        // the executor.
+        //
+        // `convert_to_platform_event` only runs the hoist block when
+        // global tracing is on (it would otherwise have nothing to
+        // capture from the global collector); flip it on here so the
+        // embedded-spans branch fires.
+        xybrid_core::tracing::init_tracing(true);
+        let data = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:wav2vec2-base-960h",
+                    "metadata": { "task": "asr", "backend": "ort" }
+                }
+            ]
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("transcribe".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(420),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let payload_json = serde_json::to_string(&platform.payload).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&payload_json).unwrap();
+        assert_eq!(
+            parsed["task"].as_str(),
+            Some("asr"),
+            "task must be hoisted to payload top level: {}",
+            payload_json
+        );
+    }
+
+    #[test]
+    fn task_field_omitted_when_span_does_not_carry_it() {
+        // Contract: `task` is optional / additive. A bundle without a
+        // `task` declaration must produce a payload that omits the key
+        // entirely (not an empty string). Guards against a future
+        // refactor that emits `Some("")` or `Some("unknown")`.
+        //
+        // Tracing must be enabled for the hoist branch to fire;
+        // otherwise this test would pass trivially even if the hoist
+        // were emitting a stale empty-string default.
+        xybrid_core::tracing::init_tracing(true);
+        let data = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:custom-model",
+                    "metadata": { "backend": "ort" }
+                }
+            ]
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("custom".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(10),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert!(
+            parsed.get("task").is_none(),
+            "task must be absent (not empty string) when bundle didn't declare it: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
     }
 
     #[test]
