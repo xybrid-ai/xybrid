@@ -77,16 +77,38 @@ pub struct RoutingDecision {
 
 impl RoutingDecision {
     /// Convert RoutingDecision to JSON format for telemetry logging.
+    ///
+    /// Uses serde so that caller-supplied strings (model_id interpolated
+    /// into hysteresis/history_bias `reason` fields) are properly escaped.
+    /// A raw `format!()` template would corrupt the log line whenever
+    /// `reason` or `stage` contained `"`, `\`, or a control character.
     pub fn to_json(&self) -> String {
-        format!(
-            r#"{{"stage":"{}","target":"{}","reason":"{}","timestamp_ms":{},"local_reliability_hint":{{"recent_abort_rate":{},"sample_size":{}}}}}"#,
-            self.stage,
-            self.target.to_json_string(),
-            self.reason,
-            self.timestamp_ms,
-            self.local_reliability_hint.recent_abort_rate,
-            self.local_reliability_hint.sample_size
-        )
+        #[derive(serde::Serialize)]
+        struct LocalReliabilityHintWire {
+            recent_abort_rate: f32,
+            sample_size: u32,
+        }
+
+        #[derive(serde::Serialize)]
+        struct RoutingDecisionWire<'a> {
+            stage: &'a str,
+            target: String,
+            reason: &'a str,
+            timestamp_ms: u64,
+            local_reliability_hint: LocalReliabilityHintWire,
+        }
+
+        serde_json::to_string(&RoutingDecisionWire {
+            stage: &self.stage,
+            target: self.target.to_json_string(),
+            reason: &self.reason,
+            timestamp_ms: self.timestamp_ms,
+            local_reliability_hint: LocalReliabilityHintWire {
+                recent_abort_rate: self.local_reliability_hint.recent_abort_rate,
+                sample_size: self.local_reliability_hint.sample_size,
+            },
+        })
+        .unwrap_or_else(|_| String::from("{}"))
     }
 }
 
@@ -603,6 +625,31 @@ mod tests {
         assert!(json.contains("\"target\":\"cloud\""));
         assert!(json.contains("\"reason\":\"low network latency (110ms)\""));
         assert!(json.contains("\"timestamp_ms\":1730559412312"));
+    }
+
+    #[test]
+    fn routing_decision_json_escapes_special_characters_in_reason() {
+        // Pre-fix, the hand-rolled format!() template would emit a quote
+        // verbatim, producing a malformed JSON line whenever a model_id
+        // interpolated into the reason carried `"`, `\`, or a control char.
+        let decision = RoutingDecision {
+            stage: "stage-1".to_string(),
+            target: RouteTarget::Cloud,
+            reason: r#"hysteresis: recent local abort for model 'weird-"model' (stress_memory)"#
+                .to_string(),
+            timestamp_ms: 1730559412312,
+            local_reliability_hint: LocalReliabilityHint::EMPTY,
+        };
+
+        let json = decision.to_json();
+        // Must be parseable JSON post-fix.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("to_json output must be valid JSON");
+        assert_eq!(parsed["stage"], "stage-1");
+        assert_eq!(
+            parsed["reason"],
+            r#"hysteresis: recent local abort for model 'weird-"model' (stress_memory)"#
+        );
     }
 
     #[test]

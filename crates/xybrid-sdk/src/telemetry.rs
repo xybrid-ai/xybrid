@@ -1910,6 +1910,19 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             ),
             timestamp_ms,
         },
+        OrchestratorEvent::LocalAborted {
+            stage_name,
+            target,
+            reason,
+        } => TelemetryEvent {
+            event_type: "LocalAborted".to_string(),
+            stage_name: Some(stage_name.clone()),
+            target: Some(target.clone()),
+            latency_ms: None,
+            error: Some(reason.clone()),
+            data: Some(serde_json::json!({ "reason": reason }).to_string()),
+            timestamp_ms,
+        },
         _ => TelemetryEvent {
             event_type: format!("{:?}", event),
             stage_name: None,

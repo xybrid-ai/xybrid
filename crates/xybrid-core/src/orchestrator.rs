@@ -376,6 +376,24 @@ impl Orchestrator {
             Err(e) => {
                 let error_msg = format!("{:?}", e);
                 let category = Self::outcome_category_from_executor_error(&e);
+                // Publish a structured event before recording the outcome so
+                // listener-driven telemetry sees a terminal counterpart to
+                // ExecutionStarted. AbortedForCloudFallback errors have their
+                // listener event suppressed by TemplateExecutor (the
+                // suppression is contractually paired with this richer event).
+                if let Some(OutcomeCategory::AbortedForCloudFallback { reason }) = &category {
+                    self.event_bus.publish(OrchestratorEvent::LocalAborted {
+                        stage_name: stage.name.clone(),
+                        target: routing_decision.target.to_json_string(),
+                        reason: reason.as_str().to_string(),
+                    });
+                } else {
+                    self.event_bus.publish(OrchestratorEvent::ExecutionFailed {
+                        stage_name: stage.name.clone(),
+                        target: routing_decision.target.to_json_string(),
+                        error: error_msg.clone(),
+                    });
+                }
                 // Record failure outcome
                 let outcome = Self::build_execution_outcome(
                     stage,
@@ -594,6 +612,23 @@ impl Orchestrator {
             Err(e) => {
                 let error_msg = format!("{:?}", e);
                 let category = Self::outcome_category_from_executor_error(&e);
+                // Mirror execute_stage: emit a structured terminal event so
+                // listener-driven telemetry sees a counterpart to
+                // ExecutionStarted even when TemplateExecutor suppresses its
+                // own listener event for cooperative cloud-fallback aborts.
+                if let Some(OutcomeCategory::AbortedForCloudFallback { reason }) = &category {
+                    self.event_bus.publish(OrchestratorEvent::LocalAborted {
+                        stage_name: stage.name.clone(),
+                        target: routing_decision.target.to_json_string(),
+                        reason: reason.as_str().to_string(),
+                    });
+                } else {
+                    self.event_bus.publish(OrchestratorEvent::ExecutionFailed {
+                        stage_name: stage.name.clone(),
+                        target: routing_decision.target.to_json_string(),
+                        error: error_msg.clone(),
+                    });
+                }
                 // Record failure outcome
                 let outcome = Self::build_execution_outcome(
                     stage,

@@ -7,6 +7,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use xybrid_core::context::DeviceMetrics;
 use xybrid_core::device::{
     MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceSnapshotProvider, ThermalState,
 };
@@ -118,6 +119,14 @@ pub struct RunOptions {
     /// `xybrid_core::orchestrator::authority::test_seams`) to drive
     /// deterministic abort behavior.
     pub resource_provider: Option<Arc<dyn ResourceSnapshotProvider>>,
+    /// Optional caller-supplied device metrics used by the cloud-fallback
+    /// policy check. The `network_rtt` and `battery` legacy scalars only
+    /// flow into the policy engine through this seam — `with_live_snapshot`
+    /// (the only other source available to the SDK) does not touch them.
+    /// Without this, RTT-based or battery-based deny rules in the policy
+    /// engine evaluate against `DeviceMetrics::default()` (network_rtt=100,
+    /// battery=100) and are unreachable for any real-world value.
+    pub device_metrics: Option<DeviceMetrics>,
 }
 
 impl RunOptions {
@@ -151,6 +160,19 @@ impl RunOptions {
     /// supplies real device telemetry.
     pub fn with_resource_provider(mut self, provider: Arc<dyn ResourceSnapshotProvider>) -> Self {
         self.resource_provider = Some(provider);
+        self
+    }
+
+    /// Supply caller-owned [`DeviceMetrics`] for the cloud-fallback policy
+    /// check. Use this when your application already maintains a
+    /// `DeviceAdapter` (Flutter / Apple / Kotlin bindings) and can carry
+    /// real `network_rtt` and `battery` scalars across the SDK boundary.
+    /// When `None`, the SDK falls back to `DeviceMetrics::default()`
+    /// overlaid with the live `ResourceSnapshot` — sufficient for the
+    /// resource-derived signals (memory pressure, thermal, CPU) but unable
+    /// to evaluate RTT- or battery-based policy rules.
+    pub fn with_device_metrics(mut self, metrics: DeviceMetrics) -> Self {
+        self.device_metrics = Some(metrics);
         self
     }
 }
@@ -242,6 +264,18 @@ impl AbortState {
 
     pub(crate) fn check_before_token(&mut self) -> Result<(), AbortReason> {
         if let Some(reason) = self.detect_user_cancelled() {
+            // User cancellation gets its own fresh grace window. Without
+            // this reset, a cancel arriving mid-grace after a prior
+            // resource event would inherit the grace tokens already
+            // consumed by the resource event and lag by
+            // `max_grace_tokens - K` emitted tokens — making the cancel
+            // button feel unresponsive on policies that allow a graceful
+            // drain. Resetting on the transition keeps the documented
+            // grace semantics intact while honouring cancel as a
+            // distinct, caller-driven signal.
+            if !matches!(self.active_reason, Some(AbortReason::UserCancelled)) {
+                self.grace_tokens_seen = 0;
+            }
             self.active_reason = Some(reason);
         }
 
@@ -581,13 +615,65 @@ mod tests {
         let reader = Arc::new(CountingResourceReader::new(snapshot));
         let mut state = AbortState::with_resource_reader(&options, reader);
 
+        // Token 1: resource event, grace burned (grace=1, max=1).
         state.check_before_token().unwrap();
         token.cancel();
 
+        // Token 2: cancel transitions reason → UserCancelled, grace resets
+        // to 0 so cancel gets its own fresh grace window. With grace=0 and
+        // max=1, this token still emits.
+        state.check_before_token().unwrap();
+        // Token 3: cancel still active, grace exhausted → terminal.
+        assert_eq!(
+            state.check_before_token().expect_err(
+                "cancel must terminate within its own grace window, not inherit resource burn"
+            ),
+            AbortReason::UserCancelled
+        );
+    }
+
+    /// Regression for the grace-token-leak bug: with `max_grace_tokens > 1`,
+    /// a resource-pressure event that consumes part of the grace budget must
+    /// not delay user cancellation by `max_grace_tokens - K` tokens. The
+    /// cancel transition resets the grace counter so the cancel pathway
+    /// gets its own fresh grace window — the lag is bounded by the
+    /// configured grace, not by what the resource event happened to leave
+    /// behind.
+    #[test]
+    fn user_cancellation_resets_grace_on_transition_from_resource_abort() {
+        let token = CancellationToken::new();
+        let options = RunOptions::new()
+            .with_cancellation_token(token.clone())
+            .with_abort_policy(
+                AbortPolicy::default()
+                    .stop_on(AbortSignal::UserCancelled)
+                    .stop_on(AbortSignal::MemoryPressureCritical)
+                    .with_max_grace_tokens(5),
+            );
+        let snapshot = ResourceSnapshot {
+            memory_pressure: MemoryPressure::Critical,
+            ..Default::default()
+        };
+        let reader = Arc::new(CountingResourceReader::new(snapshot));
+        let mut state = AbortState::with_resource_reader(&options, reader);
+
+        // Resource event consumes 3 of 5 grace tokens.
+        state.check_before_token().unwrap();
+        state.check_before_token().unwrap();
+        state.check_before_token().unwrap();
+
+        token.cancel();
+
+        // Cancel resets the grace counter, so it must allow exactly
+        // max_grace_tokens (5) more emissions before firing — NOT
+        // max_grace_tokens - 3 = 2 (which is what the leak produced).
+        for _ in 0..5 {
+            state.check_before_token().expect("cancel grace window");
+        }
         assert_eq!(
             state
                 .check_before_token()
-                .expect_err("cancellation should be observed despite active resource abort"),
+                .expect_err("cancel grace must be exactly max_grace_tokens, not inherited"),
             AbortReason::UserCancelled
         );
     }
