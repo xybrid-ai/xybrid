@@ -10,7 +10,8 @@ use super::provider::IntegrationProvider;
 use super::stage::{FallbackConfig, StageConfig};
 use super::target::ExecutionTarget;
 use crate::context::DeviceMetrics;
-use crate::device::capabilities::{detect_capabilities, HardwareCapabilities};
+use crate::device::capabilities::HardwareCapabilities;
+use crate::device::MemoryPressure;
 use crate::orchestrator::routing_engine::{LocalAvailability, RouteTarget, RoutingDecision};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -36,7 +37,7 @@ pub struct ResolutionContext {
 impl ResolutionContext {
     /// Create a new resolution context with device metrics.
     pub fn new(metrics: DeviceMetrics) -> Self {
-        let capabilities = detect_capabilities(&metrics);
+        let capabilities = metrics.capabilities.clone();
         Self {
             metrics,
             local_available: false,
@@ -240,11 +241,6 @@ impl TargetResolver {
             return Err(ResolutionError::ServerUnavailable(model.to_string()));
         }
 
-        // Check network conditions
-        if context.metrics.network_rtt > 500 {
-            return Err(ResolutionError::NetworkTooSlow(context.metrics.network_rtt));
-        }
-
         Ok(ResolvedTarget::server(
             model,
             version,
@@ -315,11 +311,11 @@ impl TargetResolver {
         }
 
         // Try server
-        if context.server_available && context.metrics.network_rtt <= 250 {
+        if context.server_available {
             return Ok(ResolvedTarget::server(
                 model,
                 version,
-                "auto: server available with good network",
+                "auto: server available",
             ));
         }
 
@@ -337,13 +333,10 @@ impl TargetResolver {
 
     /// Check if device should be preferred based on conditions.
     fn should_prefer_device(context: &ResolutionContext) -> bool {
-        // Prefer device if:
-        // - Battery is good (>30%)
-        // - Not thermally throttled
-        // - Has hardware acceleration
-
-        context.metrics.battery > 30
-            && !context.capabilities.should_throttle()
+        // Prefer device when conditions are healthy: not throttled, memory not
+        // critical, and a real accelerator is available.
+        !context.capabilities.should_throttle()
+            && context.metrics.resource.memory_pressure != MemoryPressure::Critical
             && (context.capabilities.has_gpu
                 || context.capabilities.has_metal
                 || context.capabilities.has_nnapi)
@@ -442,13 +435,7 @@ mod tests {
     use super::*;
 
     fn test_context() -> ResolutionContext {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 80,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-        ResolutionContext::new(metrics).with_local_available(true)
+        ResolutionContext::new(DeviceMetrics::default()).with_local_available(true)
     }
 
     #[test]
@@ -560,14 +547,7 @@ mod tests {
 
     #[test]
     fn test_resolution_context_builder() {
-        let metrics = DeviceMetrics {
-            network_rtt: 50,
-            battery: 90,
-            temperature: 20.0,
-            ..DeviceMetrics::default()
-        };
-
-        let context = ResolutionContext::new(metrics)
+        let context = ResolutionContext::new(DeviceMetrics::default())
             .with_local_available(true)
             .with_server_available(true)
             .with_integration_available(IntegrationProvider::OpenAI, true)

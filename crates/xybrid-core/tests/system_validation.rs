@@ -1,7 +1,6 @@
 //! System Validation Integration Tests
 //!
 //! This test suite validates end-to-end integration of core system components:
-//! - DeviceAdapter metrics collection
 //! - SDK pipeline execution
 //! - CLI policy loading
 //! - Trace command telemetry analysis
@@ -12,39 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
-use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_sdk::run_pipeline;
-
-/// Test 1: DeviceAdapter::collect_metrics() returns realistic DeviceMetrics values
-#[test]
-fn test_device_adapter_metrics() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🔍 Test 1: DeviceAdapter metrics collection");
-    println!("{}", "=".repeat(60));
-
-    let adapter = LocalDeviceAdapter::new();
-    let metrics = adapter.collect_metrics();
-
-    println!("   Network RTT: {}ms", metrics.network_rtt);
-    println!("   Battery: {}%", metrics.battery);
-    println!("   Temperature: {}°C", metrics.temperature);
-
-    // Assertions
-    assert!(metrics.network_rtt > 0, "Network RTT must be > 0");
-    assert!(
-        metrics.battery <= 100,
-        "Battery level must be between 0-100, got {}",
-        metrics.battery
-    );
-    assert!(
-        metrics.temperature >= 0.0 && metrics.temperature < 100.0,
-        "Temperature should be reasonable (0-100°C), got {}°C",
-        metrics.temperature
-    );
-
-    println!("   ✅ DeviceAdapter metrics are realistic");
-    println!();
-    Ok(())
-}
 
 /// Test 2: xybrid_sdk::run_pipeline() executes successfully and returns 3 stage results
 #[test]

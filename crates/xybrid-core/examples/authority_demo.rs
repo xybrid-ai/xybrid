@@ -9,7 +9,7 @@
 //!   cargo run -p xybrid-core --example authority_demo
 
 use xybrid_core::context::DeviceMetrics;
-use xybrid_core::device::ResourceMonitor;
+use xybrid_core::device::{HardwareCapabilities, ResourceMonitor, ThermalState};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::{
     LocalAuthority, ModelConstraints, ModelRequest, OrchestrationAuthority, PolicyOutcome,
@@ -42,9 +42,11 @@ fn main() {
     println!("└─────────────────────────────────────────────────────────────────┘");
 
     let low_end_metrics = DeviceMetrics {
-        network_rtt: 350,  // High latency (poor connection)
-        battery: 12,       // Low battery
-        temperature: 42.0, // Running hot
+        capabilities: HardwareCapabilities {
+            battery_level: 12,
+            thermal_state: ThermalState::Hot,
+            ..Default::default()
+        },
         ..DeviceMetrics::default()
     };
 
@@ -52,13 +54,15 @@ fn main() {
 
     // --- HIGH-END DEVICE ---
     println!("\n┌─────────────────────────────────────────────────────────────────┐");
-    println!("│ HIGH-END DEVICE: Flagship phone, good battery, fast network    │");
+    println!("│ HIGH-END DEVICE: Flagship phone, good battery                  │");
     println!("└─────────────────────────────────────────────────────────────────┘");
 
     let high_end_metrics = DeviceMetrics {
-        network_rtt: 45,   // Low latency (fast connection)
-        battery: 85,       // Good battery
-        temperature: 32.0, // Cool
+        capabilities: HardwareCapabilities {
+            battery_level: 85,
+            thermal_state: ThermalState::Normal,
+            ..Default::default()
+        },
         ..DeviceMetrics::default()
     };
 
@@ -78,9 +82,11 @@ fn main() {
     println!("└─────────────────────────────────────────────────────────────────┘");
 
     let low_end_metrics = DeviceMetrics {
-        network_rtt: 280, // Moderate-high latency
-        battery: 25,      // Medium-low battery
-        temperature: 38.0,
+        capabilities: HardwareCapabilities {
+            battery_level: 25,
+            thermal_state: ThermalState::Warm,
+            ..Default::default()
+        },
         ..DeviceMetrics::default()
     };
 
@@ -88,13 +94,15 @@ fn main() {
 
     // --- HIGH-END DEVICE ---
     println!("\n┌─────────────────────────────────────────────────────────────────┐");
-    println!("│ HIGH-END DEVICE: Latest flagship, excellent connectivity       │");
+    println!("│ HIGH-END DEVICE: Latest flagship                               │");
     println!("└─────────────────────────────────────────────────────────────────┘");
 
     let high_end_metrics = DeviceMetrics {
-        network_rtt: 30,   // Excellent latency
-        battery: 92,       // Full battery
-        temperature: 28.0, // Cool
+        capabilities: HardwareCapabilities {
+            battery_level: 92,
+            thermal_state: ThermalState::Normal,
+            ..Default::default()
+        },
         ..DeviceMetrics::default()
     };
 
@@ -126,9 +134,8 @@ fn main() {
 /// Demo: Single model execution with policy and target resolution
 fn demo_single_model(authority: &LocalAuthority, model_id: &str, metrics: &DeviceMetrics) {
     println!("\nDevice Metrics:");
-    println!("  • Network RTT: {}ms", metrics.network_rtt);
-    println!("  • Battery: {}%", metrics.battery);
-    println!("  • Temperature: {}°C", metrics.temperature);
+    println!("  • Battery: {}%", metrics.capabilities.battery_level);
+    println!("  • Thermal: {:?}", metrics.capabilities.thermal_state);
 
     // Step 1: Apply Policy
     println!("\n[1] Policy Evaluation:");
@@ -168,9 +175,8 @@ fn demo_single_model(authority: &LocalAuthority, model_id: &str, metrics: &Devic
 /// Demo: Multi-stage pipeline execution
 fn demo_pipeline(authority: &LocalAuthority, metrics: &DeviceMetrics) {
     println!("\nDevice Metrics:");
-    println!("  • Network RTT: {}ms", metrics.network_rtt);
-    println!("  • Battery: {}%", metrics.battery);
-    println!("  • Temperature: {}°C", metrics.temperature);
+    println!("  • Battery: {}%", metrics.capabilities.battery_level);
+    println!("  • Thermal: {:?}", metrics.capabilities.thermal_state);
 
     let stages = vec![
         ("asr", "whisper-tiny", EnvelopeKind::Audio(vec![])),

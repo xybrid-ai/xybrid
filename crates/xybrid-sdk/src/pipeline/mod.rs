@@ -61,9 +61,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use xybrid_core::context::StageDescriptor;
+use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::device::ResourceMonitor;
-use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 use xybrid_core::orchestrator::{
@@ -665,8 +664,7 @@ impl Pipeline {
         let authority = LocalAuthority::new();
 
         // Get current device metrics for routing decisions
-        let device_adapter = LocalDeviceAdapter::new();
-        let metrics = device_adapter.collect_metrics();
+        let metrics = DeviceMetrics::default();
 
         let stages_to_fetch: Vec<_> = self
             .stages
@@ -895,8 +893,7 @@ impl Pipeline {
         drop(handle);
 
         // Collect runtime metrics from device
-        let device_adapter = LocalDeviceAdapter::new();
-        let metrics = device_adapter.collect_metrics();
+        let metrics = DeviceMetrics::default();
 
         // Set telemetry context
         let trace_id = uuid::Uuid::new_v4();
@@ -1028,8 +1025,7 @@ impl Pipeline {
 
         tokio::task::spawn_blocking(move || {
             // Collect runtime metrics from device
-            let device_adapter = LocalDeviceAdapter::new();
-            let metrics = device_adapter.collect_metrics();
+            let metrics = DeviceMetrics::default();
 
             let trace_id = uuid::Uuid::new_v4();
             let pipeline_id = name

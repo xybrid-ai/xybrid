@@ -139,12 +139,7 @@ mod tests {
     use crate::ir::{Envelope, EnvelopeKind};
 
     fn default_metrics() -> DeviceMetrics {
-        DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        }
+        DeviceMetrics::default()
     }
 
     fn text_envelope(text: &str) -> Envelope {

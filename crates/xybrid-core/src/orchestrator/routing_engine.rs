@@ -145,11 +145,18 @@ pub trait RoutingEngine {
 
 /// Default implementation of RoutingEngine using heuristic-based routing.
 ///
-/// This implementation follows the MVP algorithm:
-/// 1. If policy.allowed == false → target = Local (reason = "policy_deny")
-/// 2. Else if network_rtt > 250 ms → target = Local (reason = "high_latency")
-/// 3. Else if battery < 15% OR !availability.local_model_exists → target = Cloud
-/// 4. Otherwise → target = Cloud (reason = "optimal_conditions")
+/// The ladder is *evidence-only cloud, default-local*: we route to cloud only
+/// when (a) policy forbids local, (b) the local model isn't available, or (c)
+/// a current observation of device stress (memory, sustained CPU, throttle)
+/// argues that local will fail. Anything else stays local.
+///
+/// Order, first match wins:
+/// 1. `policy.allowed == false` → Local
+/// 2. `!availability.local_model_exists` → Cloud
+/// 3. `capabilities.should_throttle()` (battery low or thermal Hot/Critical) → Cloud
+/// 4. `resource.memory_pressure == Critical` → Cloud
+/// 5. Sustained CPU ≥ 95 % for N samples → Cloud
+/// 6. Default → Local
 pub struct DefaultRoutingEngine {
     cpu_sustain_samples: usize,
     cpu_sustain_threshold_pct: f32,
@@ -252,18 +259,7 @@ impl RoutingEngine for DefaultRoutingEngine {
             return decision;
         }
 
-        // Step 2: high RTT means cloud is likely slower or unavailable.
-        if metrics.network_rtt > 250 {
-            let reason = format!(
-                "high_latency: network RTT {}ms exceeds 250ms threshold",
-                metrics.network_rtt
-            );
-            let decision = Self::decision(stage, RouteTarget::Local, reason, timestamp_ms);
-            self.log_decision(&decision);
-            return decision;
-        }
-
-        // Step 3: if the local model is absent, cloud is the only usable target.
+        // Step 2: if the local model is absent, cloud is the only usable target.
         if !availability.local_model_exists {
             let decision = Self::decision(
                 stage,
@@ -275,7 +271,7 @@ impl RoutingEngine for DefaultRoutingEngine {
             return decision;
         }
 
-        // Step 4: route stressed devices to cloud when policy allows it.
+        // Step 3: route stressed devices to cloud when policy allows it.
         if metrics.capabilities.should_throttle() {
             let reason = format!(
                 "stress_throttle: battery {}%, thermal {:?}",
@@ -304,34 +300,9 @@ impl RoutingEngine for DefaultRoutingEngine {
             return decision;
         }
 
-        // Step 5: legacy battery scalar remains a cloud route for back-compat.
-        if metrics.battery < 15 {
-            let reason = format!("low_battery: {}% below 15% threshold", metrics.battery);
-            let decision = Self::decision(stage, RouteTarget::Cloud, reason, timestamp_ms);
-            self.log_decision(&decision);
-            return decision;
-        }
-
-        // Step 6: Check hardware capabilities (optional: prefer local if GPU/Metal/NNAPI available)
-        if metrics.capabilities.should_prefer_gpu()
-            || metrics.capabilities.should_prefer_metal()
-            || metrics.capabilities.should_prefer_nnapi()
-        {
-            let reason = format!(
-                "hardware_acceleration: GPU/Metal/NNAPI available, battery {}%, preferring local execution",
-                metrics.capabilities.battery_level()
-            );
-            let decision = Self::decision(stage, RouteTarget::Local, reason, timestamp_ms);
-            self.log_decision(&decision);
-            return decision;
-        }
-
-        // Step 7: Default to cloud for optimal conditions
-        let reason = format!(
-            "optimal_conditions: low network latency ({}ms)",
-            metrics.network_rtt
-        );
-        let decision = Self::decision(stage, RouteTarget::Cloud, reason, timestamp_ms);
+        // Default: prefer local. Cloud is opt-in via the rules above; we no
+        // longer speculate about "optimal conditions" or accelerator presence.
+        let decision = Self::decision(stage, RouteTarget::Local, "default_local", timestamp_ms);
         self.log_decision(&decision);
         decision
     }
@@ -367,9 +338,6 @@ mod tests {
         resource.battery_pct = Some(battery);
 
         DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
             capabilities,
             resource,
         }
@@ -378,12 +346,7 @@ mod tests {
     #[test]
     fn test_policy_deny_routes_local() {
         let mut engine = DefaultRoutingEngine::new();
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
+        let metrics = DeviceMetrics::default();
         let policy = PolicyResult::deny("test policy denial".to_string());
         let availability = LocalAvailability::new(true);
 
@@ -392,42 +355,6 @@ mod tests {
         assert_eq!(decision.target, RouteTarget::Local);
         assert!(decision.reason.contains("policy_deny"));
         assert_eq!(decision.stage, "test_stage");
-    }
-
-    #[test]
-    fn test_high_rtt_routes_local() {
-        let mut engine = DefaultRoutingEngine::new();
-        let metrics = DeviceMetrics {
-            network_rtt: 300,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-        let policy = PolicyResult::allow(Some("policy passed".to_string()));
-        let availability = LocalAvailability::new(true);
-
-        let decision = engine.decide("test_stage", &metrics, &policy, &availability);
-
-        assert_eq!(decision.target, RouteTarget::Local);
-        assert!(decision.reason.contains("high_latency"));
-    }
-
-    #[test]
-    fn test_low_battery_routes_cloud() {
-        let mut engine = DefaultRoutingEngine::new();
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 10,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-        let policy = PolicyResult::allow(Some("policy passed".to_string()));
-        let availability = LocalAvailability::new(true);
-
-        let decision = engine.decide("test_stage", &metrics, &policy, &availability);
-
-        assert_eq!(decision.target, RouteTarget::Cloud);
-        assert!(decision.reason.contains("low_battery"));
     }
 
     #[test]
@@ -484,21 +411,6 @@ mod tests {
         assert!(!first.reason.contains("stress_cpu_sustained"));
         assert_eq!(second.target, RouteTarget::Cloud);
         assert!(second.reason.contains("stress_cpu_sustained"));
-    }
-
-    #[test]
-    fn high_rtt_overrides_stress() {
-        let mut engine = DefaultRoutingEngine::new();
-        let mut metrics =
-            metrics_with_live_state(10, ThermalState::Hot, MemoryPressure::Critical, Some(99.0));
-        metrics.network_rtt = 300;
-        let policy = PolicyResult::allow(Some("policy passed".to_string()));
-        let availability = LocalAvailability::new(true);
-
-        let decision = engine.decide("test_stage", &metrics, &policy, &availability);
-
-        assert_eq!(decision.target, RouteTarget::Local);
-        assert!(decision.reason.contains("high_latency"));
     }
 
     #[test]
@@ -570,12 +482,7 @@ mod tests {
     #[test]
     fn test_missing_model_routes_cloud() {
         let mut engine = DefaultRoutingEngine::new();
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
+        let metrics = DeviceMetrics::default();
         let policy = PolicyResult::allow(Some("policy passed".to_string()));
         let availability = LocalAvailability::new(false);
 
@@ -586,28 +493,17 @@ mod tests {
     }
 
     #[test]
-    fn test_optimal_conditions_routes_cloud() {
+    fn default_unstressed_conditions_route_local() {
         let mut engine = DefaultRoutingEngine::new();
-        // Use low temperature to avoid GPU preference (GPU detection may prefer local)
-        // On non-mobile platforms, GPU detection may route to local
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
+        let metrics =
+            metrics_with_live_state(80, ThermalState::Normal, MemoryPressure::Normal, Some(20.0));
         let policy = PolicyResult::allow(Some("policy passed".to_string()));
         let availability = LocalAvailability::new(true);
 
         let decision = engine.decide("test_stage", &metrics, &policy, &availability);
 
-        // With capability detection, may route to local if GPU available, or cloud otherwise
-        // Both are valid routing decisions
-        assert!(decision.target == RouteTarget::Cloud || decision.target == RouteTarget::Local);
-        assert!(
-            decision.reason.contains("optimal_conditions")
-                || decision.reason.contains("hardware_acceleration")
-        );
+        assert_eq!(decision.target, RouteTarget::Local);
+        assert!(decision.reason.contains("default_local"));
     }
 
     #[test]
@@ -681,52 +577,24 @@ mod tests {
     }
 
     #[test]
-    fn test_boundary_conditions() {
+    fn boundary_battery_throttle_threshold() {
         let mut engine = DefaultRoutingEngine::new();
         let policy = PolicyResult::allow(Some("policy passed".to_string()));
         let availability = LocalAvailability::new(true);
 
-        // Test RTT exactly at threshold (250ms should still route to cloud if other conditions are good)
-        // Note: May route to local if GPU available due to capability detection
-        let metrics = DeviceMetrics {
-            network_rtt: 250,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
+        // Battery 19% with normal thermal: should_throttle() returns true
+        // (HardwareCapabilities throttles on battery < 20).
+        let metrics =
+            metrics_with_live_state(19, ThermalState::Normal, MemoryPressure::Normal, None);
         let decision = engine.decide("test_stage", &metrics, &policy, &availability);
-        // 250 is not > 250, so should route to cloud (unless GPU available)
-        assert!(decision.target == RouteTarget::Cloud || decision.target == RouteTarget::Local);
+        assert_eq!(decision.target, RouteTarget::Cloud);
+        assert!(decision.reason.contains("stress_throttle"));
 
-        // Test RTT just above threshold
-        let metrics = DeviceMetrics {
-            network_rtt: 251,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
+        // Battery 20% with normal thermal: should_throttle() returns false,
+        // and with no other stress signals we land on default_local.
+        let metrics =
+            metrics_with_live_state(20, ThermalState::Normal, MemoryPressure::Normal, None);
         let decision = engine.decide("test_stage", &metrics, &policy, &availability);
         assert_eq!(decision.target, RouteTarget::Local);
-
-        // Test battery exactly at threshold
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 15,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-        let decision = engine.decide("test_stage", &metrics, &policy, &availability);
-        assert_eq!(decision.target, RouteTarget::Cloud); // 15 is not < 15
-
-        // Test battery just below threshold
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 14,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-        let decision = engine.decide("test_stage", &metrics, &policy, &availability);
-        assert_eq!(decision.target, RouteTarget::Cloud); // Routes to cloud due to low battery
-        assert!(decision.reason.contains("low_battery"));
     }
 }

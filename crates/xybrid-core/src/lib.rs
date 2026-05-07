@@ -297,10 +297,6 @@ pub mod preprocessing;
 #[doc(hidden)]
 pub mod phonemizer;
 
-/// Device adapter traits
-#[doc(hidden)]
-pub mod device_adapter;
-
 /// Telemetry collection
 #[doc(hidden)]
 pub mod telemetry;

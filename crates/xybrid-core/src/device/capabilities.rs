@@ -2,7 +2,9 @@
 //!
 //! This module provides unified hardware capability detection across platforms,
 //! including GPU acceleration (Metal, Vulkan), neural processing units (CoreML, NNAPI),
-//! battery level, thermal state, and memory profiling.
+//! and memory/CPU profiling. Battery and thermal state default to safe values
+//! (`100%`, `Normal`); a future platform-bridge slice will populate them on
+//! mobile and Windows.
 //!
 //! ## Module Organization
 //!
@@ -19,15 +21,8 @@
 //!
 //! ```rust,ignore
 //! use xybrid_core::device::capabilities::{HardwareCapabilities, detect_capabilities};
-//! use xybrid_core::context::DeviceMetrics;
 //!
-//! let metrics = DeviceMetrics {
-//!     network_rtt: 100,
-//!     battery: 75,
-//!     temperature: 25.0,
-//! };
-//!
-//! let capabilities = detect_capabilities(&metrics);
+//! let capabilities = detect_capabilities();
 //! if capabilities.has_gpu() {
 //!     println!("GPU acceleration available");
 //! }
@@ -36,8 +31,6 @@
 //! }
 //! println!("Memory confidence: {:?}", capabilities.memory_confidence);
 //! ```
-
-use crate::context::DeviceMetrics;
 
 // Re-export types from submodules
 pub use super::types::{
@@ -56,37 +49,15 @@ use super::android::detect_nnapi_availability;
 
 /// Detects hardware capabilities for the current platform.
 ///
-/// This function performs platform-specific detection and returns a
-/// `HardwareCapabilities` struct with the detected capabilities.
+/// Returns a `HardwareCapabilities` struct populated from cross-platform
+/// detection (memory, CPU cores) and platform-specific accelerator probes
+/// (Metal/CoreML on Apple, NNAPI on Android, Vulkan/DirectX stubs elsewhere).
 ///
-/// - Uses `sysinfo` crate for accurate memory/CPU detection
-/// - Includes detection confidence indicators
-/// - Cross-platform CPU core count and usage
-///
-/// # Arguments
-///
-/// * `metrics` - Device metrics containing battery and temperature information
-///
-/// # Returns
-///
-/// A `HardwareCapabilities` struct with detected capabilities
-pub fn detect_capabilities(metrics: &DeviceMetrics) -> HardwareCapabilities {
+/// `battery_level` and `thermal_state` are NOT populated here — they live on
+/// the live `ResourceSnapshot` and are overlaid onto a `HardwareCapabilities`
+/// view at routing time via [`crate::context::DeviceMetrics::with_live_snapshot`].
+pub fn detect_capabilities() -> HardwareCapabilities {
     let mut capabilities = HardwareCapabilities::new();
-
-    // Set battery level from metrics
-    capabilities.battery_level = metrics.battery;
-
-    // Determine thermal state from temperature
-    // These thresholds are approximate and may need tuning per device
-    capabilities.thermal_state = if metrics.temperature > 80.0 {
-        ThermalState::Critical
-    } else if metrics.temperature > 70.0 {
-        ThermalState::Hot
-    } else if metrics.temperature > 60.0 {
-        ThermalState::Warm
-    } else {
-        ThermalState::Normal
-    };
 
     // Detect memory using sysinfo
     let memory_info = detect_memory();
@@ -352,102 +323,12 @@ mod tests {
 
     #[test]
     fn test_detect_capabilities() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 75,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.battery_level(), 75);
+        let caps = detect_capabilities();
+        // battery_level and thermal_state default to safe values; the live
+        // overlay (via DeviceMetrics::with_live_snapshot) populates them.
+        assert_eq!(caps.battery_level(), 100);
         assert_eq!(caps.thermal_state(), ThermalState::Normal);
         assert!(caps.memory_total_mb() > 0);
-    }
-
-    #[test]
-    fn test_detect_capabilities_hot_device() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 75,
-            temperature: 75.0,
-            ..DeviceMetrics::default()
-        };
-
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Hot);
-        assert!(caps.should_throttle());
-    }
-
-    #[test]
-    fn test_detect_capabilities_critical_device() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 75,
-            temperature: 85.0,
-            ..DeviceMetrics::default()
-        };
-
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Critical);
-        assert!(caps.should_throttle());
-    }
-
-    #[test]
-    fn test_detect_capabilities_low_battery() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 15,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.battery_level(), 15);
-        assert!(caps.should_throttle());
-    }
-
-    #[test]
-    fn test_thermal_state_thresholds() {
-        // Normal
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Normal);
-
-        // Warm
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 65.0,
-            ..DeviceMetrics::default()
-        };
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Warm);
-
-        // Hot
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 75.0,
-            ..DeviceMetrics::default()
-        };
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Hot);
-
-        // Critical
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 85.0,
-            ..DeviceMetrics::default()
-        };
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Critical);
     }
 
     #[test]
@@ -527,14 +408,7 @@ mod tests {
 
     #[test]
     fn test_detect_capabilities_has_confidence() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 75,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-
-        let caps = detect_capabilities(&metrics);
+        let caps = detect_capabilities();
         // Memory confidence should be High when using sysinfo
         assert_eq!(
             caps.memory_confidence,
@@ -551,14 +425,7 @@ mod tests {
 
     #[test]
     fn test_detect_capabilities_has_cpu_info() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 75,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-
-        let caps = detect_capabilities(&metrics);
+        let caps = detect_capabilities();
         // Should have CPU info
         assert!(caps.cpu_cores >= 1, "Should detect at least 1 CPU core");
         // Memory should be detected

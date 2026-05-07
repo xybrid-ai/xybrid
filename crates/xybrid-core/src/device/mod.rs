@@ -19,15 +19,8 @@
 //!
 //! ```rust,ignore
 //! use xybrid_core::device::{detect_capabilities, HardwareCapabilities};
-//! use xybrid_core::context::DeviceMetrics;
 //!
-//! let metrics = DeviceMetrics {
-//!     network_rtt: 100,
-//!     battery: 75,
-//!     temperature: 25.0,
-//! };
-//!
-//! let capabilities = detect_capabilities(&metrics);
+//! let capabilities = detect_capabilities();
 //! println!("GPU available: {}", capabilities.has_gpu());
 //! println!("Memory: {} MB", capabilities.memory_total_mb());
 //! ```

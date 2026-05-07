@@ -540,8 +540,12 @@ struct LegacyPipelineConfig {
     stages: Vec<String>,
     /// Input envelope configuration
     input: LegacyInputConfig,
-    /// Device metrics configuration
-    metrics: MetricsConfig,
+    /// Legacy device-metrics block. Still parsed so existing YAMLs load,
+    /// but the values are ignored — capabilities are detected at runtime
+    /// and live resource signals come from `ResourceMonitor`.
+    #[serde(default)]
+    #[allow(dead_code)]
+    metrics: Option<serde_yaml::Value>,
     /// Model availability mapping (stage name -> available locally)
     availability: HashMap<String, bool>,
 }
@@ -551,17 +555,6 @@ struct LegacyPipelineConfig {
 struct LegacyInputConfig {
     /// Envelope kind (e.g., "AudioRaw", "Text", etc.)
     kind: String,
-}
-
-/// Device metrics configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MetricsConfig {
-    /// Network round-trip time in milliseconds
-    network_rtt: u32,
-    /// Battery level (0-100)
-    battery: u8,
-    /// Device temperature in Celsius
-    temperature: f32,
 }
 
 /// Timing information for a single pipeline stage.
@@ -662,12 +655,7 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
     let input = Envelope::new(kind);
 
     // Create device metrics
-    let metrics = DeviceMetrics {
-        network_rtt: config.metrics.network_rtt,
-        battery: config.metrics.battery,
-        temperature: config.metrics.temperature,
-        ..DeviceMetrics::default()
-    };
+    let metrics = DeviceMetrics::default();
 
     // Create availability function from config
     let availability_map = config.availability.clone();
@@ -773,12 +761,7 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
     let input = Envelope::new(kind);
 
     // Create device metrics
-    let metrics = DeviceMetrics {
-        network_rtt: config.metrics.network_rtt,
-        battery: config.metrics.battery,
-        temperature: config.metrics.temperature,
-        ..DeviceMetrics::default()
-    };
+    let metrics = DeviceMetrics::default();
 
     // Create availability function from config
     let availability_map = config.availability.clone();
