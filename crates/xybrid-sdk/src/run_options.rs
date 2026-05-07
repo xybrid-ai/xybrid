@@ -164,13 +164,10 @@ impl RunOptions {
     }
 
     /// Supply caller-owned [`DeviceMetrics`] for the cloud-fallback policy
-    /// check. Use this when your application already maintains a
-    /// `DeviceAdapter` (Flutter / Apple / Kotlin bindings) and can carry
-    /// real `network_rtt` and `battery` scalars across the SDK boundary.
+    /// check. Use this when your application has its own platform bridge that
+    /// populates `HardwareCapabilities` (battery, thermal) ahead of routing.
     /// When `None`, the SDK falls back to `DeviceMetrics::default()`
-    /// overlaid with the live `ResourceSnapshot` — sufficient for the
-    /// resource-derived signals (memory pressure, thermal, CPU) but unable
-    /// to evaluate RTT- or battery-based policy rules.
+    /// overlaid with the live `ResourceSnapshot`.
     pub fn with_device_metrics(mut self, metrics: DeviceMetrics) -> Self {
         self.device_metrics = Some(metrics);
         self

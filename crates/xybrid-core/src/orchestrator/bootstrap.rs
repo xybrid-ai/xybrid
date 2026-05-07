@@ -19,8 +19,6 @@ use crate::control_sync::{
     NoopControlSyncHandler, NoopControlSyncProvider,
 };
 use crate::device::ResourceMonitor;
-use crate::device_adapter::DeviceAdapter;
-use crate::device_adapter::LocalDeviceAdapter;
 use crate::event_bus::{EventBus, OrchestratorEvent};
 use crate::executor::Executor;
 use crate::orchestrator::policy_engine::DefaultPolicyEngine;
@@ -45,23 +43,9 @@ struct BootstrapConfig {
     /// Execution mode (batch or streaming)
     #[serde(default)]
     execution_mode: Option<String>,
-    /// Device metrics overrides
-    #[serde(default)]
-    metrics: Option<DeviceMetricsConfig>,
     /// Adapter configuration
     #[serde(default)]
     adapters: Option<AdapterConfig>,
-}
-
-/// Device metrics configuration.
-#[derive(Debug, Clone, serde::Deserialize)]
-struct DeviceMetricsConfig {
-    /// Network RTT override (milliseconds)
-    network_rtt: Option<u32>,
-    /// Battery level override (0-100)
-    battery: Option<u8>,
-    /// Temperature override (Celsius)
-    temperature: Option<f32>,
 }
 
 /// Adapter configuration.
@@ -249,25 +233,9 @@ impl Orchestrator {
             })
             .unwrap_or(ExecutionMode::Batch);
 
-        // Collect device metrics (for future use in routing decisions)
-        let device_adapter = LocalDeviceAdapter::new();
-        let _device_metrics =
-            if let Some(metrics_config) = config.as_ref().and_then(|c| c.metrics.as_ref()) {
-                DeviceMetrics {
-                    network_rtt: metrics_config
-                        .network_rtt
-                        .unwrap_or_else(|| device_adapter.collect_metrics().network_rtt),
-                    battery: metrics_config
-                        .battery
-                        .unwrap_or_else(|| device_adapter.collect_metrics().battery),
-                    temperature: metrics_config
-                        .temperature
-                        .unwrap_or_else(|| device_adapter.collect_metrics().temperature),
-                    ..DeviceMetrics::default()
-                }
-            } else {
-                device_adapter.collect_metrics()
-            };
+        // Device metrics: capabilities are detected statically; live resource
+        // signals are sampled on demand via the ResourceMonitor at routing time.
+        let _device_metrics = DeviceMetrics::default();
 
         // Initialize control sync manager (noop defaults for now)
         let control_sync = {

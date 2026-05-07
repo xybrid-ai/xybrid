@@ -898,6 +898,7 @@ impl Default for Orchestrator {
 mod tests {
     use super::*;
     use crate::ir::{Envelope, EnvelopeKind};
+    use crate::pipeline::ExecutionTarget;
     use crate::runtime_adapter::{AdapterError, AdapterResult, RuntimeAdapter};
     use crate::testing::mocks::MockRuntimeAdapter;
     use std::sync::{Arc, Mutex};
@@ -1035,12 +1036,7 @@ mod tests {
     }
 
     fn local_routing_metrics() -> DeviceMetrics {
-        DeviceMetrics {
-            network_rtt: 300,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        }
+        DeviceMetrics::default()
     }
 
     fn hysteresis_probe_context(model_id: &str) -> StageContext {
@@ -1080,12 +1076,7 @@ mod tests {
         let mut orchestrator = Orchestrator::new();
         let stage = StageDescriptor::new("test_stage");
         let input = text_envelope("Text");
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
+        let metrics = DeviceMetrics::default();
         let availability = LocalAvailability::new(true);
 
         let result = orchestrator.execute_stage(&stage, &input, &metrics, &availability);
@@ -1111,12 +1102,7 @@ mod tests {
             StageDescriptor::new("tts"),
         ];
         let input = audio_envelope(&[0u8; 4]);
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
+        let metrics = DeviceMetrics::default();
 
         let availability_fn = |stage: &str| -> LocalAvailability {
             // Simulate Hiiipe demo: ASR and TTS available locally, motivator only in cloud
@@ -1144,12 +1130,7 @@ mod tests {
         let mut orchestrator = Orchestrator::new();
         let stage = StageDescriptor::new("test_stage");
         let input = audio_envelope(&[9, 9, 9, 9]);
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
+        let metrics = DeviceMetrics::default();
         let availability = LocalAvailability::new(true);
 
         let result = orchestrator.execute_stage(&stage, &input, &metrics, &availability);
@@ -1162,30 +1143,6 @@ mod tests {
             .routing_decision
             .reason
             .contains("model_unavailable"));
-    }
-
-    #[test]
-    fn test_high_rtt_routes_to_local() {
-        // High RTT routes to local, so the local adapter must actually run.
-        // Since the post-hardening Executor no longer synthesises mock-output
-        // envelopes for unloaded adapters, we need a pre-loaded mock adapter.
-        let mut orchestrator = orchestrator_with_mock_adapter(ExecutionMode::Batch);
-        let stage = StageDescriptor::new("test_stage");
-        let input = text_envelope("Text");
-        let metrics = DeviceMetrics {
-            network_rtt: 300, // High RTT should trigger local routing
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
-        let availability = LocalAvailability::new(true);
-
-        let result = orchestrator.execute_stage(&stage, &input, &metrics, &availability);
-
-        assert!(result.is_ok());
-        let exec_result = result.unwrap();
-        assert_eq!(exec_result.routing_decision.target.as_str(), "local");
-        assert!(exec_result.routing_decision.reason.contains("high_latency"));
     }
 
     #[test]
@@ -1208,12 +1165,7 @@ mod tests {
             .unwrap();
 
         // Execute streaming stage
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        };
+        let metrics = DeviceMetrics::default();
         let availability = LocalAvailability::new(true);
 
         let result = orchestrator.execute_streaming_stage(&stage, &metrics, &availability);
@@ -1248,7 +1200,9 @@ mod tests {
             outcomes.clone(),
             authority.clone(),
         );
-        let stage = StageDescriptor::new("abort_stage").with_model("effective-model");
+        let stage = StageDescriptor::new("abort_stage")
+            .with_model("effective-model")
+            .with_target(ExecutionTarget::Device);
         let input = text_envelope("Text");
         let availability = LocalAvailability::new(true);
 
@@ -1285,7 +1239,9 @@ mod tests {
                     outcomes.clone(),
                     authority.clone(),
                 );
-                let stage = StageDescriptor::new("abort_stage").with_model("async-model");
+                let stage = StageDescriptor::new("abort_stage")
+                    .with_model("async-model")
+                    .with_target(ExecutionTarget::Device);
                 let input = text_envelope("Text");
                 let availability = LocalAvailability::new(true);
 
@@ -1320,7 +1276,9 @@ mod tests {
             outcomes.clone(),
             authority.clone(),
         );
-        let stage = StageDescriptor::new("abort_stage").with_model("hard-fail-model");
+        let stage = StageDescriptor::new("abort_stage")
+            .with_model("hard-fail-model")
+            .with_target(ExecutionTarget::Device);
         let input = text_envelope("Text");
         let availability = LocalAvailability::new(true);
 

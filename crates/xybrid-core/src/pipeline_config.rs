@@ -30,7 +30,7 @@
 //! # Design Decisions
 //!
 //! - **No `input`/`output` fields**: Inferred from model_metadata.json preprocessing/postprocessing
-//! - **No `metrics` field**: Auto-detected at runtime via LocalDeviceAdapter
+//! - **No `metrics` field**: Auto-detected at runtime via `detect_capabilities()` + `ResourceMonitor`
 //! - **No `availability` field**: Auto-checked via cache status
 //!
 //! This keeps pipelines simple and portable - they don't need to know about

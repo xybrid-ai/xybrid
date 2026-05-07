@@ -5,22 +5,23 @@
 //! graduated into the IR layer (`crate::ir::Envelope`); we re-export them here
 //! to maintain backwards compatibility while downstream code migrates.
 
-use crate::device::{detect_capabilities, HardwareCapabilities, MemoryPressure, ResourceSnapshot};
+use crate::device::{detect_capabilities, HardwareCapabilities, ResourceSnapshot};
 pub use crate::ir::{Envelope, EnvelopeKind};
 use crate::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
 
-/// Live device metrics (network, battery, temperature, etc.).
+/// Live device signals consumed by the orchestrator.
+///
+/// Two members:
+/// - `capabilities` — static hardware view (memory total, GPU/Metal/NNAPI
+///   flags, CPU cores) captured at construction time.
+/// - `resource` — live resource snapshot (CPU, memory, thermal, battery)
+///   sampled by `ResourceMonitor`.
+///
+/// Battery and thermal state on `capabilities` are populated by overlaying a
+/// fresh `ResourceSnapshot` via [`Self::with_live_snapshot`]; the snapshot is
+/// the only authoritative source.
 #[derive(Debug, Clone)]
 pub struct DeviceMetrics {
-    /// Legacy network RTT field. Kept for back-compat while richer routing
-    /// signals live under `capabilities` and `resource`.
-    pub network_rtt: u32,
-    /// Legacy battery percentage. Prefer `capabilities.battery_level` for new
-    /// routing decisions.
-    pub battery: u8,
-    /// Legacy temperature in Celsius. Prefer `capabilities.thermal_state` for
-    /// new routing decisions.
-    pub temperature: f32,
     /// Hardware capability snapshot used by the routing engine.
     pub capabilities: HardwareCapabilities,
     /// Live resource snapshot sampled by `ResourceMonitor`.
@@ -28,39 +29,29 @@ pub struct DeviceMetrics {
 }
 
 impl DeviceMetrics {
-    /// Return a copy with live resource data overlaid onto the capability view.
+    /// Return a copy with the snapshot's live values overlaid onto the
+    /// capability view.
     ///
-    /// When a snapshot field is the structural default (Option::None for
-    /// memory/CPU, `MemoryPressure::Unknown` for memory_pressure), the
-    /// `detect_capabilities`-derived value is preserved instead of being
-    /// zeroed out. This matters because platform bridges currently leave
-    /// `thermal_state` hardcoded to `Normal` even on devices whose
-    /// `temperature` scalar derives `ThermalState::Critical` — overlaying
-    /// blindly would silently disable the temperature-driven routing.
+    /// `available_mem_mb`, `total_mem_mb`, `cpu_pct`, `battery_pct`, and
+    /// `thermal_state` flow from the snapshot into `capabilities` so callers
+    /// of `should_throttle()` and the routing ladder see live readings. When
+    /// a snapshot field is `None` the existing capability value is preserved.
     pub fn with_live_snapshot(&self, snapshot: ResourceSnapshot) -> Self {
         let mut metrics = self.clone();
-        let mut capabilities = detect_capabilities(self);
         metrics.resource = snapshot;
         if let Some(available_mb) = snapshot.available_mem_mb {
-            capabilities.memory_available_mb = available_mb as u64;
+            metrics.capabilities.memory_available_mb = available_mb as u64;
         }
         if let Some(total_mb) = snapshot.total_mem_mb {
-            capabilities.memory_total_mb = total_mb as u64;
+            metrics.capabilities.memory_total_mb = total_mb as u64;
         }
         if let Some(cpu_pct) = snapshot.cpu_pct {
-            capabilities.cpu_usage_percent = cpu_pct;
+            metrics.capabilities.cpu_usage_percent = cpu_pct;
         }
-        // ResourceSnapshot::thermal_state is not Option, so use
-        // memory_pressure as the unknown-placeholder marker: when the
-        // monitor returns the unknown snapshot it sets pressure to Unknown
-        // and thermal_state to Normal as defaults. In that case the
-        // temperature-derived value from detect_capabilities is the more
-        // trustworthy signal.
-        if snapshot.memory_pressure != MemoryPressure::Unknown {
-            capabilities.thermal_state = snapshot.thermal_state;
+        if let Some(battery_pct) = snapshot.battery_pct {
+            metrics.capabilities.battery_level = battery_pct;
         }
-        capabilities.battery_level = snapshot.battery_pct.unwrap_or(self.battery);
-        metrics.capabilities = capabilities;
+        metrics.capabilities.thermal_state = snapshot.thermal_state;
         metrics
     }
 }
@@ -68,10 +59,7 @@ impl DeviceMetrics {
 impl Default for DeviceMetrics {
     fn default() -> Self {
         Self {
-            network_rtt: 100,
-            battery: 100,
-            temperature: 25.0,
-            capabilities: HardwareCapabilities::default(),
+            capabilities: detect_capabilities(),
             resource: ResourceSnapshot::default(),
         }
     }
@@ -164,45 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn with_live_snapshot_preserves_temperature_thermal_when_snapshot_unknown() {
-        // Stress the regression: high temperature derives Critical via
-        // detect_capabilities. The unknown placeholder snapshot has
-        // thermal_state=Normal hardcoded; the overlay must NOT clobber the
-        // temperature-derived value.
-        let metrics = DeviceMetrics {
-            temperature: 85.0,
-            ..DeviceMetrics::default()
-        };
-        let snapshot = ResourceSnapshot::unknown();
-
-        let merged = metrics.with_live_snapshot(snapshot);
-
-        assert_eq!(merged.capabilities.thermal_state, ThermalState::Critical);
-    }
-
-    #[test]
-    fn with_live_snapshot_uses_snapshot_thermal_when_real() {
-        // When the snapshot carries a real reading (memory_pressure != Unknown),
-        // its thermal_state wins because the snapshot is treated as authoritative.
-        let metrics = DeviceMetrics {
-            temperature: 85.0,
-            ..DeviceMetrics::default()
-        };
-        let mut snapshot = ResourceSnapshot::unknown();
-        snapshot.memory_pressure = MemoryPressure::Normal;
-        snapshot.thermal_state = ThermalState::Hot;
-
-        let merged = metrics.with_live_snapshot(snapshot);
-
-        assert_eq!(merged.capabilities.thermal_state, ThermalState::Hot);
-    }
-
-    #[test]
     fn with_live_snapshot_preserves_capability_memory_when_snapshot_missing() {
-        // Snapshot without memory measurements must not zero out the
-        // sysinfo-derived capability values. (We can't compare against a
-        // baseline detect_capabilities call because sysinfo re-samples on
-        // each call and minor drift between samples is expected.)
         let metrics = DeviceMetrics::default();
         let snapshot = ResourceSnapshot::unknown();
 
@@ -216,8 +166,6 @@ mod tests {
 
     #[test]
     fn with_live_snapshot_uses_snapshot_memory_when_present() {
-        // When the snapshot carries real memory measurements, those
-        // values flow into the capability view.
         let metrics = DeviceMetrics::default();
         let mut snapshot = ResourceSnapshot::unknown();
         snapshot.memory_pressure = MemoryPressure::Normal;
@@ -230,5 +178,18 @@ mod tests {
         assert_eq!(merged.capabilities.memory_available_mb, 2048);
         assert_eq!(merged.capabilities.memory_total_mb, 8192);
         assert_eq!(merged.capabilities.cpu_usage_percent, 42.5);
+    }
+
+    #[test]
+    fn with_live_snapshot_overlays_battery_and_thermal_when_snapshot_carries_them() {
+        let metrics = DeviceMetrics::default();
+        let mut snapshot = ResourceSnapshot::unknown();
+        snapshot.battery_pct = Some(42);
+        snapshot.thermal_state = ThermalState::Hot;
+
+        let merged = metrics.with_live_snapshot(snapshot);
+
+        assert_eq!(merged.capabilities.battery_level, 42);
+        assert_eq!(merged.capabilities.thermal_state, ThermalState::Hot);
     }
 }

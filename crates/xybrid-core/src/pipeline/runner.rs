@@ -194,12 +194,7 @@ pub struct RunnerConfig {
 impl Default for RunnerConfig {
     fn default() -> Self {
         Self {
-            metrics: DeviceMetrics {
-                network_rtt: 100,
-                battery: 100,
-                temperature: 25.0,
-                ..DeviceMetrics::default()
-            },
+            metrics: DeviceMetrics::default(),
             capabilities: HardwareCapabilities::default(),
             local_models: HashMap::new(),
             server_models: HashMap::new(),
@@ -606,22 +601,19 @@ mod tests {
     #[test]
     fn test_pipeline_runner_new() {
         let runner = PipelineRunner::new();
-        assert_eq!(runner.config().metrics.battery, 100);
+        assert_eq!(runner.config().metrics.capabilities.battery_level, 100);
     }
 
     #[test]
     fn test_pipeline_runner_with_config() {
+        let mut metrics = DeviceMetrics::default();
+        metrics.capabilities.battery_level = 80;
         let config = RunnerConfig {
-            metrics: DeviceMetrics {
-                network_rtt: 50,
-                battery: 80,
-                temperature: 30.0,
-                ..DeviceMetrics::default()
-            },
+            metrics,
             ..Default::default()
         };
         let runner = PipelineRunner::with_config(config);
-        assert_eq!(runner.config().metrics.battery, 80);
+        assert_eq!(runner.config().metrics.capabilities.battery_level, 80);
     }
 
     #[test]

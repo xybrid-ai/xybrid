@@ -567,12 +567,20 @@ mod tests {
     use std::path::PathBuf;
 
     fn default_metrics() -> DeviceMetrics {
-        DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        }
+        DeviceMetrics::default()
+    }
+
+    /// YAML policy bundle that denies any text envelope. Used to exercise the
+    /// `policy_deny` branch in tests now that the legacy RTT-based default
+    /// rule is gone.
+    fn deny_all_text_policy() -> String {
+        r#"
+version: "0.1.0"
+deny_cloud_if:
+  - input.kind == "text"
+signature: "test-deny-all"
+"#
+        .to_string()
     }
 
     fn text_envelope(text: &str) -> Envelope {
@@ -641,25 +649,6 @@ mod tests {
         assert!(decision.result.is_allowed());
         assert_eq!(decision.source, DecisionSource::Local);
         assert_eq!(decision.confidence, 1.0);
-    }
-
-    #[test]
-    fn test_local_authority_high_rtt_denies() {
-        let authority = LocalAuthority::new();
-        let request = PolicyRequest {
-            stage_id: "test".to_string(),
-            envelope: text_envelope("hello"),
-            metrics: DeviceMetrics {
-                network_rtt: 350, // Above 300ms threshold
-                battery: 50,
-                temperature: 25.0,
-                ..DeviceMetrics::default()
-            },
-        };
-
-        let decision = authority.apply_policy(&request);
-        // Policy should deny due to high RTT
-        assert!(!decision.result.is_allowed());
     }
 
     #[test]
@@ -803,12 +792,15 @@ mod tests {
 
     #[test]
     fn policy_deny_overrides_hysteresis() {
-        let authority = LocalAuthority::with_cache_provider(Arc::new(CachedProvider));
+        let mut policy = DefaultPolicyEngine::new();
+        policy
+            .load_policies(deny_all_text_policy().into_bytes())
+            .expect("load deny-all policy");
+        let authority =
+            LocalAuthority::with_policy_and_cache(policy, Arc::new(CachedProvider));
         authority.record_abort_for_hysteresis_default_ttl("test-model", AbortReason::StressMemory);
-        let mut context = text_context();
-        context.metrics.network_rtt = 350;
 
-        let decision = authority.resolve_target(&context);
+        let decision = authority.resolve_target(&text_context());
 
         assert_eq!(decision.result, ResolvedTarget::Device);
         assert!(decision.reason.contains("policy_deny"));
@@ -873,8 +865,13 @@ mod tests {
 
     #[test]
     fn policy_deny_overrides_history_bias() {
+        let mut policy = DefaultPolicyEngine::new();
+        policy
+            .load_policies(deny_all_text_policy().into_bytes())
+            .expect("load deny-all policy");
         let authority =
-            LocalAuthority::with_cache_provider(Arc::new(CachedProvider)).with_history_bias_k(3);
+            LocalAuthority::with_policy_and_cache(policy, Arc::new(CachedProvider))
+                .with_history_bias_k(3);
         for idx in 0..3 {
             authority.record_outcome(&ExecutionOutcome {
                 stage_id: "test-stage".to_string(),
@@ -889,10 +886,8 @@ mod tests {
                 signal_context: Some(signal()),
             });
         }
-        let mut context = text_context();
-        context.metrics.network_rtt = 350;
 
-        let decision = authority.resolve_target(&context);
+        let decision = authority.resolve_target(&text_context());
 
         assert_eq!(decision.result, ResolvedTarget::Device);
         assert!(decision.reason.contains("policy_deny"));

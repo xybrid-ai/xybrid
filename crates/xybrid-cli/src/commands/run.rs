@@ -5,8 +5,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
-use xybrid_core::context::StageDescriptor;
-use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
+use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::policy_engine::PolicyEngine;
@@ -52,8 +51,7 @@ pub(crate) fn run_pipeline(
     let stages = resolve_pipeline_stages(&config, &client)?;
     let input = build_input_envelope(input_audio, input_text, voice)?;
 
-    let device_adapter = LocalDeviceAdapter::new();
-    let metrics = device_adapter.collect_metrics();
+    let metrics = DeviceMetrics::default();
     let availability_fn = build_availability_fn(&stages);
 
     print_pipeline_config(&stages, &input, &metrics, target);
@@ -241,11 +239,13 @@ fn print_pipeline_config(
 
     ui::section("Device");
     println!();
-    ui::kv("RTT", &format!("{}ms", metrics.network_rtt));
-    ui::kv("Battery", &format!("{}%", metrics.battery));
     ui::kv(
-        "Temperature",
-        &format!("{:.1}\u{00B0}C", metrics.temperature),
+        "Battery",
+        &format!("{}%", metrics.capabilities.battery_level),
+    );
+    ui::kv(
+        "Thermal",
+        &format!("{:?}", metrics.capabilities.thermal_state),
     );
 
     let platform = Platform::detect();

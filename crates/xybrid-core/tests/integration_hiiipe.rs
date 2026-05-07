@@ -53,11 +53,7 @@ fn test_hiiipe_pipeline() {
     let mic_input = audio_envelope();
 
     // Simulate device metrics (good conditions for cloud routing)
-    let metrics = DeviceMetrics {
-        network_rtt: 100,  // Good network
-        battery: 80,       // Good battery
-        temperature: 25.0, // Normal temperature
-        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
     };
 
     // Define model availability function
@@ -126,11 +122,7 @@ fn test_hiiipe_policy_enforcement() {
     // AudioRaw should trigger policy denial for cloud
     let audio_input = audio_envelope();
 
-    let metrics = DeviceMetrics {
-        network_rtt: 50, // Excellent network
-        battery: 90,     // Excellent battery
-        temperature: 20.0,
-        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
     };
 
     let availability = LocalAvailability::new(true);
@@ -165,11 +157,7 @@ fn test_hiiipe_pipeline_with_events() {
 
     let mic_input = audio_envelope();
 
-    let metrics = DeviceMetrics {
-        network_rtt: 100,
-        battery: 80,
-        temperature: 25.0,
-        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
     };
 
     let availability_fn = |stage: &str| -> LocalAvailability {
@@ -226,11 +214,7 @@ fn test_hiiipe_pipeline_high_latency() {
     let mic_input = audio_envelope();
 
     // High network latency should force local routing for motivator
-    let metrics = DeviceMetrics {
-        network_rtt: 300, // High latency (> 250ms threshold)
-        battery: 50,
-        temperature: 25.0,
-        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
     };
 
     let availability_fn = |stage: &str| -> LocalAvailability {
@@ -278,11 +262,7 @@ fn test_hiiipe_pipeline_streaming() {
 
     let stage = StageDescriptor::new("asr");
 
-    let metrics = DeviceMetrics {
-        network_rtt: 100,
-        battery: 80,
-        temperature: 25.0,
-        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
     };
 
     let availability = LocalAvailability::new(true);
@@ -343,11 +323,7 @@ fn test_hiiipe_complete_workflow() {
     let mic_input = audio_envelope();
 
     // Good device conditions
-    let metrics = DeviceMetrics {
-        network_rtt: 110, // Good network (under 250ms threshold)
-        battery: 75,      // Good battery (above 15%)
-        temperature: 24.0,
-        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
     };
 
     // Model availability matching the demo
@@ -439,11 +415,7 @@ signature: "test_policy"
 
     let audio_input = audio_envelope();
 
-    let metrics = DeviceMetrics {
-        network_rtt: 50,
-        battery: 90,
-        temperature: 20.0,
-        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
     };
 
     let availability = LocalAvailability::new(true);

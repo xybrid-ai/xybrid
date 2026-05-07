@@ -125,8 +125,8 @@ impl RemoteAuthority {
             context.stage_id,
             context.model_id,
             context.input_kind.as_str(),
-            context.metrics.network_rtt,
-            context.metrics.battery,
+            context.metrics.capabilities.battery_level,
+            context.metrics.capabilities.thermal_state.as_str(),
             context.metrics.resource.memory_pressure.as_str(),
             context
                 .metrics
@@ -147,8 +147,14 @@ impl RemoteAuthority {
             qp.append_pair("stage_id", &context.stage_id);
             qp.append_pair("model_id", &context.model_id);
             qp.append_pair("input_kind", context.input_kind.as_str());
-            qp.append_pair("network_rtt_ms", &context.metrics.network_rtt.to_string());
-            qp.append_pair("battery_pct", &context.metrics.battery.to_string());
+            qp.append_pair(
+                "battery_pct",
+                &context.metrics.capabilities.battery_level.to_string(),
+            );
+            qp.append_pair(
+                "thermal_state",
+                context.metrics.capabilities.thermal_state.as_str(),
+            );
             qp.append_pair(
                 "memory_pressure",
                 context.metrics.resource.memory_pressure.as_str(),
@@ -337,12 +343,7 @@ mod tests {
     use std::thread;
 
     fn default_metrics() -> DeviceMetrics {
-        DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-            ..DeviceMetrics::default()
-        }
+        DeviceMetrics::default()
     }
 
     fn text_envelope(text: &str) -> Envelope {
