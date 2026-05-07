@@ -445,18 +445,23 @@ impl ResourceMonitor {
                 .unwrap_or(None)
         });
 
+        // Pull platform-bridged signals (battery + thermal). On Linux the
+        // native poller fills them from sysfs in-process; on other
+        // platforms hosts push values via `device::platform_state` setters.
+        // Either way we treat the bridge cache as authoritative — when no
+        // value has been pushed the snapshot reports `Normal` / `None`,
+        // which downstream code already interprets as "unknown".
+        super::platform_state::refresh_native_platform_state();
+        let platform = super::platform_state::current_platform_state();
+
         let snap = ResourceSnapshot {
             cpu_pct,
             process_rss_mb,
             available_mem_mb: available_mb,
             total_mem_mb: inner.total_mem_mb.or(total_mb),
             memory_pressure: MemoryPressure::derive(available_mb, inner.total_mem_mb.or(total_mb)),
-            // Thermal + battery come from platform-specific bridges in a
-            // later slice (iOS thermal state, Android power manager, etc.).
-            // For now desktop/server report Normal thermal and no battery —
-            // see the spec's availability table.
-            thermal_state: ThermalState::Normal,
-            battery_pct: None,
+            thermal_state: platform.thermal_state.unwrap_or(ThermalState::Normal),
+            battery_pct: platform.battery_pct,
             captured_at_ms: now_ms(),
         };
         inner.cached = Some(snap);

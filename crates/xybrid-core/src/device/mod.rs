@@ -45,12 +45,20 @@ pub mod profile;
 // See `docs/sdk/resource-telemetry.md` for the public contract.
 pub mod resource;
 
+// Platform-bridged signals (battery, thermal) — consumed by `resource`.
+pub mod platform_state;
+
 // Platform tests
 #[cfg(test)]
 mod tests;
 
 // Re-exports for convenience
 pub use capabilities::detect_capabilities;
+pub use platform_state::{
+    clear_battery_level, clear_thermal_state, current_platform_state,
+    refresh_native_platform_state, set_battery_level, set_platform_state, set_thermal_state,
+    PlatformState,
+};
 pub use profile::DeviceProfile;
 pub use resource::{
     MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceSnapshotProvider,
