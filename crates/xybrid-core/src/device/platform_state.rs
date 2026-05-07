@@ -55,10 +55,7 @@ static GLOBAL: RwLock<PlatformState> = RwLock::new(PlatformState::EMPTY);
 /// panicking — a poisoned lock means a previous writer panicked, which
 /// shouldn't take down inference.
 pub fn current_platform_state() -> PlatformState {
-    GLOBAL
-        .read()
-        .map(|g| *g)
-        .unwrap_or(PlatformState::EMPTY)
+    GLOBAL.read().map(|g| *g).unwrap_or(PlatformState::EMPTY)
 }
 
 /// Replace the entire platform state in one write. Use the per-field
