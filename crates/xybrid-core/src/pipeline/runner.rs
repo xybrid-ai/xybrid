@@ -177,7 +177,7 @@ pub enum OutputResult {
 }
 
 /// Configuration for the pipeline runner.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RunnerConfig {
     /// Device metrics for routing decisions.
     pub metrics: DeviceMetrics,
@@ -189,18 +189,6 @@ pub struct RunnerConfig {
     pub server_models: HashMap<String, bool>,
     /// Map of integration provider availability.
     pub integrations: HashMap<IntegrationProvider, bool>,
-}
-
-impl Default for RunnerConfig {
-    fn default() -> Self {
-        Self {
-            metrics: DeviceMetrics::default(),
-            capabilities: HardwareCapabilities::default(),
-            local_models: HashMap::new(),
-            server_models: HashMap::new(),
-            integrations: HashMap::new(),
-        }
-    }
 }
 
 /// Pipeline Runner - executes Pipeline DSL configurations through the Orchestrator.

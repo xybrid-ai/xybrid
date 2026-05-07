@@ -796,8 +796,7 @@ signature: "test-deny-all"
         policy
             .load_policies(deny_all_text_policy().into_bytes())
             .expect("load deny-all policy");
-        let authority =
-            LocalAuthority::with_policy_and_cache(policy, Arc::new(CachedProvider));
+        let authority = LocalAuthority::with_policy_and_cache(policy, Arc::new(CachedProvider));
         authority.record_abort_for_hysteresis_default_ttl("test-model", AbortReason::StressMemory);
 
         let decision = authority.resolve_target(&text_context());
@@ -869,9 +868,8 @@ signature: "test-deny-all"
         policy
             .load_policies(deny_all_text_policy().into_bytes())
             .expect("load deny-all policy");
-        let authority =
-            LocalAuthority::with_policy_and_cache(policy, Arc::new(CachedProvider))
-                .with_history_bias_k(3);
+        let authority = LocalAuthority::with_policy_and_cache(policy, Arc::new(CachedProvider))
+            .with_history_bias_k(3);
         for idx in 0..3 {
             authority.record_outcome(&ExecutionOutcome {
                 stage_id: "test-stage".to_string(),

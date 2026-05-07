@@ -169,7 +169,8 @@ stages:
 "#;
 
     let config = RunnerConfig {
-        metrics: DeviceMetrics {            ..DeviceMetrics::default()
+        metrics: DeviceMetrics {
+            ..DeviceMetrics::default()
         },
         ..Default::default()
     };

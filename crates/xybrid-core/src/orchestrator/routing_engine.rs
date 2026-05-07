@@ -302,8 +302,7 @@ impl RoutingEngine for DefaultRoutingEngine {
 
         // Default: prefer local. Cloud is opt-in via the rules above; we no
         // longer speculate about "optimal conditions" or accelerator presence.
-        let decision =
-            Self::decision(stage, RouteTarget::Local, "default_local", timestamp_ms);
+        let decision = Self::decision(stage, RouteTarget::Local, "default_local", timestamp_ms);
         self.log_decision(&decision);
         decision
     }

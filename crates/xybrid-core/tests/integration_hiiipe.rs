@@ -53,7 +53,8 @@ fn test_hiiipe_pipeline() {
     let mic_input = audio_envelope();
 
     // Simulate device metrics (good conditions for cloud routing)
-    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {
+        ..DeviceMetrics::default()
     };
 
     // Define model availability function
@@ -122,7 +123,8 @@ fn test_hiiipe_policy_enforcement() {
     // AudioRaw should trigger policy denial for cloud
     let audio_input = audio_envelope();
 
-    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {
+        ..DeviceMetrics::default()
     };
 
     let availability = LocalAvailability::new(true);
@@ -157,7 +159,8 @@ fn test_hiiipe_pipeline_with_events() {
 
     let mic_input = audio_envelope();
 
-    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {
+        ..DeviceMetrics::default()
     };
 
     let availability_fn = |stage: &str| -> LocalAvailability {
@@ -214,7 +217,8 @@ fn test_hiiipe_pipeline_high_latency() {
     let mic_input = audio_envelope();
 
     // High network latency should force local routing for motivator
-    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {
+        ..DeviceMetrics::default()
     };
 
     let availability_fn = |stage: &str| -> LocalAvailability {
@@ -262,7 +266,8 @@ fn test_hiiipe_pipeline_streaming() {
 
     let stage = StageDescriptor::new("asr");
 
-    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {
+        ..DeviceMetrics::default()
     };
 
     let availability = LocalAvailability::new(true);
@@ -323,7 +328,8 @@ fn test_hiiipe_complete_workflow() {
     let mic_input = audio_envelope();
 
     // Good device conditions
-    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {
+        ..DeviceMetrics::default()
     };
 
     // Model availability matching the demo
@@ -415,7 +421,8 @@ signature: "test_policy"
 
     let audio_input = audio_envelope();
 
-    let metrics = DeviceMetrics {        ..DeviceMetrics::default()
+    let metrics = DeviceMetrics {
+        ..DeviceMetrics::default()
     };
 
     let availability = LocalAvailability::new(true);
