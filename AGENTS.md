@@ -22,10 +22,15 @@ The compiler and lints are your automatic reviewer. Before declaring a task
 done, run these three commands locally — and assume CI will run them again:
 
 ```bash
-cargo fmt --all -- --check        # formatting (CI: .github/workflows/ci.yml job `fmt`)
+cargo fmt --all -- --check                              # CI: job `fmt`
 cargo clippy --workspace --all-targets -- -D warnings   # CI: job `clippy`
-cargo test  --workspace           # CI: job `test` (per-OS matrix)
+cargo test  --workspace --features ort-download         # CI: job `test` (per-OS matrix)
 ```
+
+CI's `test` job runs with `--features ort-download` — match it locally so you
+don't get surprised by feature-gated failures. `just test` (plain
+`cargo test --workspace`) still runs most tests, but may skip or compile
+differently against ORT-backed paths.
 
 Equivalent `just` recipes are defined in `/justfile`:
 
@@ -56,9 +61,6 @@ the lint locally if it's a real issue.
 
 Never bypass hooks (`--no-verify`) or skip CI gates to land code. If a check
 fails, fix the cause.
-
----
-
 
 ---
 
