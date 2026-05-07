@@ -35,33 +35,54 @@ xtask ────────────────────────�
 integration-tests ──────────────► xybrid-core
 ```
 
-Workspace dependencies are inherited via `[workspace.dependencies]` in the
-root `Cargo.toml`. **Add new shared deps there**, then `dep.workspace = true`
-in the member `Cargo.toml` (rust-skills `proj-workspace-deps`).
+Workspace **package metadata** is inherited via `[workspace.package]` —
+member crates use `version.workspace = true`, `edition.workspace = true`,
+etc. Keep that pattern.
+
+Workspace **dependencies** are *not* uniformly inherited today. The root
+`[workspace.dependencies]` block exists, but most member crates still pin
+versions per-crate (e.g. `serde = "1.0"`, `tokio = { version = "1.0", … }`).
+When adding a dep, match the surrounding crate's existing style — don't
+unilaterally migrate one crate to `dep.workspace = true` while the rest stay
+version-pinned. Full `proj-workspace-deps` migration is a deliberate
+refactor, not a drive-by change.
 
 ---
 
 ## Error handling
 
-Library crates (`xybrid-core`, `xybrid-sdk`, FFI crates) use **`thiserror`**
-with a single canonical error enum and a `Result` alias per crate:
+Rust-API library crates (`xybrid-core`, `xybrid-sdk`, `xybrid-uniffi`) use
+**`thiserror`** with a single canonical error enum and a `Result` alias per
+crate:
 
-| Crate         | Error type     | Result alias    | Defined in                        |
-|---------------|----------------|-----------------|-----------------------------------|
-| `xybrid-core` | `XybridError`  | `XybridResult`  | `crates/xybrid-core/src/error.rs` |
-| `xybrid-sdk`  | `SdkError`     | `SdkResult`     | `crates/xybrid-sdk/src/model.rs`  |
+| Crate           | Error type     | Result alias    | Defined in                        |
+|-----------------|----------------|-----------------|-----------------------------------|
+| `xybrid-core`   | `XybridError`  | `XybridResult`  | `crates/xybrid-core/src/error.rs` |
+| `xybrid-sdk`    | `SdkError`     | `SdkResult`     | `crates/xybrid-sdk/src/model.rs`  |
+| `xybrid-uniffi` | `XybridError`  | —               | `crates/xybrid-uniffi/src/lib.rs` (also derives `uniffi::Error`) |
 
 Sub-error enums (`InferenceError`, `PipelineError`, `AdapterError`, …) live
 next to the modules that raise them and convert into the canonical type via
 `#[from]` / `impl From`. Follow that pattern for new modules — don't invent
 parallel top-level error types.
 
+`xybrid-ffi` is **different**: it's a C-ABI crate and uses opaque handles
+plus error strings/codes carried in result structs (see
+`crates/xybrid-ffi/src/lib.rs`). Don't bolt a public `thiserror` enum onto
+it — match the existing C-ABI pattern when adding new endpoints, and only
+surface error info through the documented handle/result conventions.
+
 Binaries (`xybrid-cli`, `xtask`) use **`anyhow`** with `.context(...)` at the
 boundaries where errors get printed.
 
 `SdkError` implements a `RetryableError` trait (`is_retryable`, `retry_after`)
-— preserve those semantics when adding variants. Rate-limit / circuit-breaker
-/ timeout / network errors are retryable; config and not-found errors are not.
+— preserve those semantics when adding variants. As of today
+(`crates/xybrid-sdk/src/model.rs`) the retryable variants are
+`NetworkError`, `RateLimited`, `Timeout`, and `Offline`; everything else
+(including `CircuitOpen`, `ConfigError`, `ModelNotFound`, `LoadError`,
+`InferenceError`, `IoError`, `CacheError`, `PipelineError`, …) is
+explicitly **non-retryable**. Read the current `is_retryable` match arm
+before changing or extending it — don't infer the rule from the variant name.
 
 Don't use `Box<dyn Error>` in public signatures. Don't `.unwrap()` outside
 tests, examples, and clearly-marked invariant checks (use `.expect("...")`
