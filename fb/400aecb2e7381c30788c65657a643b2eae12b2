@@ -1,0 +1,21 @@
+.gitmodules
+  s_0abc1a81702440::t_427df667e67ce4 3
+crates/xybrid-core/build.rs
+  s_0abc1a81702440::t_243d5d3fc69003 176-182,188-191,198-215,218-219,221,223-249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "fb400aecb2e7381c30788c65657a643b2eae12b2",
+  "prompts": {},
+  "sessions": {
+    "s_0abc1a81702440": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb2b0211-4375-4a67-98b4-16c759d68d2d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
