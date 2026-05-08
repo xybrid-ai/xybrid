@@ -1,0 +1,30 @@
+.github/workflows/ci.yml
+  s_18b28350277ace::t_128fd9095242ea 101-102,113,118-119,129
+  s_18b28350277ace::t_fe17354cafa2ab 55-56,64
+  s_18b28350277ace::t_97fb31512ee24e 133-135,137-138,148,151,153,155-156,165,169,172
+.github/workflows/build-flutter.yml
+  s_18b28350277ace::t_1de8bb83a525d7 33-35
+  s_18b28350277ace::t_73d510d02c4a9e 5-10,12-17,20-22
+.github/workflows/build-apple.yml
+  s_18b28350277ace::t_3cedcae4944819 5-10,12-21
+.github/workflows/build-android.yml
+  s_18b28350277ace::t_af81e04f4843cf 5-10,12-21
+.github/workflows/scorecard.yml
+  s_18b28350277ace::t_3d228de77e4f80 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "32220092227f305e18c7a407b7c2182801474921",
+  "prompts": {},
+  "sessions": {
+    "s_18b28350277ace": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a422681b-802e-4b38-93d6-7bb354b7892a",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
