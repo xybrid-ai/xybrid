@@ -1,13 +1,6 @@
 name: Build Flutter
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'bindings/flutter/**'
-      - 'crates/xybrid-uniffi/**'
-      - 'xtask/**'
-      - '.github/workflows/build-flutter.yml'
   pull_request:
     branches: [master]
     paths:

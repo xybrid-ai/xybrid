@@ -1,13 +1,6 @@
 name: Build Android
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'bindings/kotlin/**'
-      - 'crates/xybrid-uniffi/**'
-      - 'xtask/**'
-      - '.github/workflows/build-android.yml'
   pull_request:
     branches: [master]
     paths:
@@ -15,6 +8,7 @@ on:
       - 'crates/xybrid-uniffi/**'
       - 'xtask/**'
       - '.github/workflows/build-android.yml'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
