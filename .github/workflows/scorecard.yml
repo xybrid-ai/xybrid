@@ -1,11 +1,10 @@
 name: Scorecard
 
 on:
-  push:
-    branches: [master]
   schedule:
     # Weekly Monday 6:00 UTC
     - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 # Scorecard's publish_results restrictions: no top-level env or defaults,
 # no workflow-level write permissions.

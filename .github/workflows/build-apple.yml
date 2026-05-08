@@ -2,9 +2,23 @@ name: Build Apple
 
 on:
   push:
-    branches: [main]
+    branches: [master]
+    paths:
+      - 'bindings/apple/**'
+      - 'crates/xybrid-uniffi/**'
+      - 'xtask/**'
+      - '.github/workflows/build-apple.yml'
   pull_request:
-    branches: [main]
+    branches: [master]
+    paths:
+      - 'bindings/apple/**'
+      - 'crates/xybrid-uniffi/**'
+      - 'xtask/**'
+      - '.github/workflows/build-apple.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions: read-all
 

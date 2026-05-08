@@ -52,12 +52,8 @@ jobs:
 
   # Feature combination checks - ensure platform builds don't break
   check-no-default-features:
-    name: check (no-default-features, ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    name: check (no-default-features, ubuntu-latest)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
@@ -65,7 +61,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: ${{ matrix.os }}-no-default
+          key: ubuntu-latest-no-default
       - name: Check without default features
         run: cargo check -p xybrid-core --no-default-features
 
@@ -102,8 +98,8 @@ jobs:
         run: cargo check -p xybrid-sdk --features platform-desktop
 
   clippy-llm:
-    name: clippy (llm-llamacpp, macos-latest)
-    runs-on: macos-latest
+    name: clippy (llm-llamacpp, ubuntu-latest)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -114,13 +110,13 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: macos-clippy-llm
+          key: ubuntu-clippy-llm
       - name: Clippy with llm-llamacpp
         run: cargo clippy -p xybrid-core --features "ort-download,llm-llamacpp" -- -D warnings
 
   test-llm:
-    name: test (llm-llamacpp, macos-latest)
-    runs-on: macos-latest
+    name: test (llm-llamacpp, ubuntu-latest)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -130,30 +126,16 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: macos-test-llm
+          key: ubuntu-test-llm
       - name: Test with llm-llamacpp
         run: cargo test -p xybrid-core --features "ort-download,llm-llamacpp" --lib
 
+  # Linux-only on push/PR. macOS + Windows validation runs in release.yml at
+  # release time, and check-platform-macos / build-apple.yml cover Apple-specific
+  # compilation when bindings/apple changes.
   test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # macOS ARM64 - Full features
-          - os: macos-14
-            features: ort-download
-            # Note: candle-metal and ort-coreml available but skipped for CI speed
-
-          # Linux x86_64
-          - os: ubuntu-latest
-            features: ort-download
-
-          # Windows x86_64
-          - os: windows-latest
-            features: ort-download
-
+    name: Test (ubuntu-latest)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -163,29 +145,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: ${{ matrix.os }}-${{ matrix.features }}
+          key: ubuntu-latest-ort-download
 
       - name: Run tests
-        run: cargo test --workspace --features ${{ matrix.features }}
+        run: cargo test --workspace --features ort-download
 
-  # Build CLI binary to verify it compiles
+  # Linux-only on push/PR. Per-platform CLI builds run in release.yml.
   build-cli:
-    name: Build CLI (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            target: aarch64-apple-darwin
-            features: platform-macos
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            features: platform-desktop
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            features: platform-desktop
-
+    name: Build CLI (ubuntu-latest)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -194,14 +162,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
-          targets: ${{ matrix.target }}
+          targets: x86_64-unknown-linux-gnu
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: ${{ matrix.os }}-cli
+          key: ubuntu-latest-cli
 
       - name: Build CLI
-        run: cargo build --release -p xybrid-cli --target ${{ matrix.target }} --features ${{ matrix.features }}
+        run: cargo build --release -p xybrid-cli --target x86_64-unknown-linux-gnu --features platform-desktop
 
   # Candle feature (optional, macOS only for Metal)
   test-candle:
