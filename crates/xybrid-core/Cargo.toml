@@ -161,10 +161,21 @@ objc2-foundation = { version = "0.2", features = ["NSProcessInfo", "NSString"] }
 objc2-io-kit = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFString", "CFNumber", "CFArray", "CFDictionary"] }
 
-# Windows native platform-state poller: GetSystemPowerStatus (Win32). Use
-# windows-sys (raw FFI) rather than the high-level `windows` crate — we need
-# exactly one syscall and `windows` would pull ~400 transitive deps. Thermal
-# on Windows lacks a clean Win32 API (WMI MSAcpi_ThermalZoneTemperature is
-# heavy and requires COM init) and is left to a follow-up.
+# Windows native platform-state pollers.
+#
+# Battery uses `windows-sys` for `GetSystemPowerStatus` — a single Win32
+# syscall, no COM. Thermal needs WMI's `MSAcpi_ThermalZoneTemperature`,
+# which means COM interface vtables (`IWbemLocator`, `IWbemServices`,
+# `IEnumWbemClassObject`, `IWbemClassObject`) and `VARIANT` plumbing —
+# none of which `windows-sys` exposes (it ships constants and free
+# functions, not interfaces). The `windows` crate is the supported path
+# for COM/WMI, so it joins `windows-sys` here scoped to the WMI feature
+# set. Lazy-linked bindings keep the binary impact minimal.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Power", "Win32_Foundation"] }
+windows = { version = "0.61", features = [
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+    "Win32_System_Wmi",
+] }

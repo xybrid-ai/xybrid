@@ -105,10 +105,13 @@ pub fn clear_thermal_state() {
 ///   in-process and thread-safe per Apple's docs — no fork/exec, no
 ///   COM, safe on the runtime thread that
 ///   `Orchestrator::execute_stage_async` lands on.
-/// - **Windows**: reads `GetSystemPowerStatus` (Win32, in-process).
-///   Thermal on Windows is deferred to a follow-up — no clean Win32
-///   API exists; WMI `MSAcpi_ThermalZoneTemperature` requires COM
-///   init and lives in its own PR.
+/// - **Windows**: reads `GetSystemPowerStatus` (Win32, in-process)
+///   for battery on the cache-miss path. Thermal is sourced from
+///   `MSAcpi_ThermalZoneTemperature` over WMI (`ROOT\WMI`); COM
+///   init and `IWbemServices::ExecQuery` would freeze the runtime
+///   thread that `Orchestrator::execute_stage_async` lands on, so
+///   the WMI loop runs on a dedicated background thread that pushes
+///   results through the public setters.
 /// - **iOS, Android**: no-op for now. Hosts push state via the public
 ///   setters from platform observers; native in-process pollers come
 ///   later.
@@ -460,22 +463,44 @@ mod macos {
 
 #[cfg(target_os = "windows")]
 mod windows {
-    //! Windows native poller.
+    //! Windows native pollers.
     //!
     //! Battery via `GetSystemPowerStatus` — a single Win32 syscall, no
-    //! fork, no COM, no WMI. Returns `SYSTEM_POWER_STATUS` whose
-    //! `BatteryLifePercent` field carries the charge in 0..=100, with
-    //! `BATTERY_PERCENTAGE_UNKNOWN` (255) signalling "no battery / unknown"
-    //! on desktops.
+    //! fork, no COM, no WMI. Runs synchronously on the cache-miss path.
+    //! Returns `SYSTEM_POWER_STATUS` whose `BatteryLifePercent` field
+    //! carries the charge in 0..=100, with `BATTERY_PERCENTAGE_UNKNOWN`
+    //! (255) signalling "no battery / unknown" on desktops.
     //!
-    //! Thermal is deliberately not implemented here — Windows lacks a
-    //! clean Win32 API for CPU/package temperature. WMI's
-    //! `MSAcpi_ThermalZoneTemperature` requires COM initialization and
-    //! is heavy enough to deserve its own PR. Hosts that need thermal
-    //! on Windows can push via [`super::set_thermal_state`].
+    //! Thermal via WMI's `MSAcpi_ThermalZoneTemperature` (`ROOT\WMI`).
+    //! Each query path — `CoInitializeEx`, `IWbemLocator::ConnectServer`,
+    //! `IWbemServices::ExecQuery`, `IEnumWbemClassObject::Next` — costs
+    //! milliseconds and would block whatever Tokio runtime thread the
+    //! orchestrator's cache-miss happens to land on. Instead a dedicated
+    //! background thread polls every [`THERMAL_POLL_INTERVAL`] and pushes
+    //! results through [`super::set_thermal_state`]. The thread is
+    //! spawned lazily on first refresh and lives for the process lifetime;
+    //! transient WMI errors are logged and the loop continues.
+    //!
+    //! Devices without an ACPI thermal zone (some VMs, headless servers)
+    //! return zero rows — we leave thermal state unset rather than
+    //! lying with `Normal`.
 
-    use super::set_battery_level;
+    use std::sync::OnceLock;
+    use std::thread;
+    use std::time::Duration;
+
+    use windows::core::{BSTR, PCWSTR};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+    };
+    use windows::Win32::System::Variant::{VariantClear, VARIANT, VT_I4, VT_UI4};
+    use windows::Win32::System::Wmi::{
+        IEnumWbemClassObject, IWbemClassObject, IWbemLocator, IWbemServices, WbemLocator,
+        WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_INFINITE,
+    };
     use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+
+    use super::{set_battery_level, set_thermal_state, ThermalState};
 
     /// `SYSTEM_POWER_STATUS::BatteryLifePercent` sentinel for "unknown
     /// or no battery". Documented in the Win32 SDK; reproduced here so
@@ -483,10 +508,28 @@ mod windows {
     /// re-export across versions.
     const BATTERY_PERCENTAGE_UNKNOWN: u8 = 255;
 
+    /// How often the background thread re-queries WMI. Each query is
+    /// a cross-apartment COM round-trip (single-digit milliseconds);
+    /// the cache TTL inside `ResourceMonitor` is 500 ms so a few-second
+    /// cadence keeps the thermal signal fresh enough for routing
+    /// decisions without burning CPU on a tight loop. Tuned by hand
+    /// against the same bands the Linux sysfs path uses.
+    const THERMAL_POLL_INTERVAL: Duration = Duration::from_secs(3);
+
+    /// VARENUM raw value for `VT_I4`. Compared against the variant tag
+    /// returned by `IWbemClassObject::Get` for `CIM_UINT32` properties,
+    /// which WMI marshals as a signed 32-bit integer.
+    const VT_I4_RAW: u16 = VT_I4.0;
+    /// VARENUM raw value for `VT_UI4`. Some WMI providers report
+    /// `CIM_UINT32` values directly as `VT_UI4` instead of `VT_I4`;
+    /// accept both rather than dropping the reading.
+    const VT_UI4_RAW: u16 = VT_UI4.0;
+
     pub(super) fn refresh() {
         if let Some(pct) = read_battery_pct() {
             set_battery_level(pct);
         }
+        ensure_thermal_poller();
     }
 
     fn read_battery_pct() -> Option<u8> {
@@ -513,6 +556,179 @@ mod windows {
         } else {
             Some(raw)
         }
+    }
+
+    /// Map deci-Kelvin (the unit `MSAcpi_ThermalZoneTemperature` reports)
+    /// to a [`ThermalState`] using the same bands the Linux sysfs path
+    /// uses. The conversion is `(dK / 10) - 273.15`.
+    fn thermal_from_dk(deci_kelvin: u32) -> ThermalState {
+        let celsius = (deci_kelvin as f32 / 10.0) - 273.15;
+        if celsius >= 80.0 {
+            ThermalState::Critical
+        } else if celsius >= 70.0 {
+            ThermalState::Hot
+        } else if celsius >= 60.0 {
+            ThermalState::Warm
+        } else {
+            ThermalState::Normal
+        }
+    }
+
+    /// Spawn the WMI thermal poller exactly once per process. Subsequent
+    /// calls are O(1) and do not touch COM. Spawn failure is logged and
+    /// the routing engine continues with `thermal_state = None` — a
+    /// degraded but non-fatal mode.
+    fn ensure_thermal_poller() {
+        static POLLER: OnceLock<()> = OnceLock::new();
+        POLLER.get_or_init(|| {
+            let spawn = thread::Builder::new()
+                .name("xybrid-wmi-thermal".into())
+                .spawn(thermal_poller_main);
+            if let Err(err) = spawn {
+                log::warn!("xybrid-wmi-thermal: failed to spawn poller thread: {err}");
+            }
+        });
+    }
+
+    fn thermal_poller_main() {
+        // SAFETY: `CoInitializeEx` runs exactly once on this dedicated
+        // thread, before any other COM call. `COINIT_MULTITHREADED`
+        // matches the WMI client model — we never marshal proxies into
+        // another apartment. `CoUninitialize` is intentionally not
+        // called: the thread runs for the process lifetime and the
+        // OS reclaims COM state at exit.
+        let init = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        if init.is_err() {
+            // S_FALSE here would mean COM was already initialised on
+            // this thread, which can't happen for a thread we just
+            // spawned — anything other than S_OK is a real failure.
+            log::warn!(
+                "xybrid-wmi-thermal: CoInitializeEx failed ({init:?}), thermal poller exiting"
+            );
+            return;
+        }
+
+        loop {
+            match poll_once() {
+                Ok(Some(state)) => set_thermal_state(state),
+                Ok(None) => {}
+                Err(err) => {
+                    log::debug!("xybrid-wmi-thermal: query failed (continuing): {err:?}");
+                }
+            }
+            thread::sleep(THERMAL_POLL_INTERVAL);
+        }
+    }
+
+    fn poll_once() -> windows::core::Result<Option<ThermalState>> {
+        // SAFETY: `CoCreateInstance` is the documented entry point for
+        // creating an `IWbemLocator`; the windows crate enforces that
+        // `T::IID` matches the requested class.
+        let locator: IWbemLocator =
+            unsafe { CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER)? };
+
+        // SAFETY: `ConnectServer` accepts BSTR arguments — empty BSTRs
+        // are the documented way to request defaults for user, password,
+        // locale, and authority on a local connection. `ROOT\WMI` is the
+        // namespace where `MSAcpi_ThermalZoneTemperature` lives.
+        let services: IWbemServices = unsafe {
+            locator.ConnectServer(
+                &BSTR::from("ROOT\\WMI"),
+                &BSTR::new(),
+                &BSTR::new(),
+                &BSTR::new(),
+                0,
+                &BSTR::new(),
+                None,
+            )?
+        };
+
+        // SAFETY: `ExecQuery` is the canonical fast-forward enumeration
+        // entry point; `WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY`
+        // is the documented combination for read-only WQL queries.
+        let enumerator: IEnumWbemClassObject = unsafe {
+            services.ExecQuery(
+                &BSTR::from("WQL"),
+                &BSTR::from("SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature"),
+                WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+                None,
+            )?
+        };
+
+        let mut warmest_dk: Option<u32> = None;
+        loop {
+            let mut row: [Option<IWbemClassObject>; 1] = [None];
+            let mut returned: u32 = 0;
+            // SAFETY: `Next` writes up to `row.len()` objects and stores
+            // the actual count into `returned`; both pointers reference
+            // stack storage that outlives the call.
+            let _hr = unsafe { enumerator.Next(WBEM_INFINITE, &mut row, &mut returned) };
+            if returned == 0 {
+                break;
+            }
+            if let Some(obj) = &row[0] {
+                if let Some(dk) = read_current_temperature(obj) {
+                    warmest_dk = Some(warmest_dk.map_or(dk, |w| w.max(dk)));
+                }
+            }
+        }
+
+        Ok(warmest_dk.map(thermal_from_dk))
+    }
+
+    /// Read the `CurrentTemperature` property from a single WMI row.
+    /// Returns `None` if the property is missing, has an unexpected
+    /// VARIANT type, or `Get` itself fails — any of which we treat as
+    /// "skip this zone" rather than failing the whole poll.
+    fn read_current_temperature(obj: &IWbemClassObject) -> Option<u32> {
+        let name: [u16; 19] = [
+            b'C' as u16,
+            b'u' as u16,
+            b'r' as u16,
+            b'r' as u16,
+            b'e' as u16,
+            b'n' as u16,
+            b't' as u16,
+            b'T' as u16,
+            b'e' as u16,
+            b'm' as u16,
+            b'p' as u16,
+            b'e' as u16,
+            b'r' as u16,
+            b'a' as u16,
+            b't' as u16,
+            b'u' as u16,
+            b'r' as u16,
+            b'e' as u16,
+            0,
+        ];
+        let mut value = VARIANT::default();
+        // SAFETY: `name` is a UTF-16 null-terminated string with stable
+        // backing storage for the duration of the call; `value` is a
+        // freshly-zeroed VARIANT. `ptype`/`plflavor` are optional and
+        // we don't need either.
+        let res = unsafe { obj.Get(PCWSTR(name.as_ptr()), 0, &mut value, None, None) };
+        if res.is_err() {
+            return None;
+        }
+        // SAFETY: VARIANT layout is `vt` followed by a union of value
+        // arms; we read the union arm matching the tag we just inspected.
+        // CIM_UINT32 is documented to marshal as VT_I4 but some providers
+        // return VT_UI4 — accept both.
+        let extracted = unsafe {
+            let inner = &value.Anonymous.Anonymous;
+            match inner.vt.0 {
+                VT_I4_RAW => Some(inner.Anonymous.lVal as u32),
+                VT_UI4_RAW => Some(inner.Anonymous.ulVal),
+                _ => None,
+            }
+        };
+        // SAFETY: `value` is a VARIANT we own; `VariantClear` releases
+        // any allocations the marshaller attached (BSTRs, IUnknowns).
+        // Ignoring the result mirrors how the windows-rs samples
+        // handle the cleanup path.
+        let _ = unsafe { VariantClear(&mut value) };
+        extracted
     }
 
     #[cfg(test)]
@@ -551,6 +767,23 @@ mod windows {
             if let Some(pct) = read_battery_pct() {
                 assert!(pct <= 100, "battery percent out of range: {}", pct);
             }
+        }
+
+        #[test]
+        fn deci_kelvin_bands_match_thermal_state_docs() {
+            // Conversion: dK / 10 - 273.15 → °C. The band cutoffs are
+            // 60/70/80 °C, which fall between integer dK values
+            // (60.0 °C = 3331.5 dK), so the closest integer dK on
+            // either side is the strongest boundary check available.
+            assert_eq!(thermal_from_dk(2731), ThermalState::Normal); // 0.0 °C
+            assert_eq!(thermal_from_dk(3231), ThermalState::Normal); // 50.0 °C
+            assert_eq!(thermal_from_dk(3331), ThermalState::Normal); // 59.95 °C
+            assert_eq!(thermal_from_dk(3332), ThermalState::Warm); // 60.05 °C
+            assert_eq!(thermal_from_dk(3431), ThermalState::Warm); // 69.95 °C
+            assert_eq!(thermal_from_dk(3432), ThermalState::Hot); // 70.05 °C
+            assert_eq!(thermal_from_dk(3531), ThermalState::Hot); // 79.95 °C
+            assert_eq!(thermal_from_dk(3532), ThermalState::Critical); // 80.05 °C
+            assert_eq!(thermal_from_dk(3731), ThermalState::Critical); // 100.0 °C
         }
     }
 }
