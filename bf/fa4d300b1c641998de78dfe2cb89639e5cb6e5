@@ -1,0 +1,19 @@
+bindings/flutter/lib/src/rust/api/context.dart
+  s_18b28350277ace::t_e120d0b50bc3fa 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "bffa4d300b1c641998de78dfe2cb89639e5cb6e5",
+  "prompts": {},
+  "sessions": {
+    "s_18b28350277ace": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a422681b-802e-4b38-93d6-7bb354b7892a",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
