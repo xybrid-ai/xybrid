@@ -105,9 +105,13 @@ pub fn clear_thermal_state() {
 ///   `pmset` shellout would fork+exec on every cache miss and block
 ///   whatever runtime thread `Orchestrator::execute_stage_async`
 ///   landed on.
-/// - **iOS, Android, Windows**: no-op for now. Hosts push state today via
-///   the public setters; native in-process pollers come in subsequent
-///   commits.
+/// - **Windows**: reads `GetSystemPowerStatus` (Win32, in-process).
+///   Thermal on Windows is deferred to a follow-up — no clean Win32
+///   API exists; WMI `MSAcpi_ThermalZoneTemperature` requires COM
+///   init and lives in its own PR.
+/// - **iOS, Android**: no-op for now. Hosts push state via the public
+///   setters from platform observers; native in-process pollers come
+///   later.
 ///
 /// All in-process refreshers go through the same setters a host would
 /// use, so behaviour is uniform whether data comes from sysfs, IOKit, or
@@ -120,6 +124,8 @@ pub fn refresh_native_platform_state() {
     linux::refresh();
     #[cfg(target_os = "macos")]
     macos::refresh();
+    #[cfg(target_os = "windows")]
+    windows::refresh();
 }
 
 #[cfg(target_os = "linux")]
@@ -300,6 +306,103 @@ mod macos {
             // All four variants are valid; we just want to confirm the
             // call returned without panicking.
             let _ = state;
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod windows {
+    //! Windows native poller.
+    //!
+    //! Battery via `GetSystemPowerStatus` — a single Win32 syscall, no
+    //! fork, no COM, no WMI. Returns `SYSTEM_POWER_STATUS` whose
+    //! `BatteryLifePercent` field carries the charge in 0..=100, with
+    //! `BATTERY_PERCENTAGE_UNKNOWN` (255) signalling "no battery / unknown"
+    //! on desktops.
+    //!
+    //! Thermal is deliberately not implemented here — Windows lacks a
+    //! clean Win32 API for CPU/package temperature. WMI's
+    //! `MSAcpi_ThermalZoneTemperature` requires COM initialization and
+    //! is heavy enough to deserve its own PR. Hosts that need thermal
+    //! on Windows can push via [`super::set_thermal_state`].
+
+    use super::set_battery_level;
+    use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+
+    /// `SYSTEM_POWER_STATUS::BatteryLifePercent` sentinel for "unknown
+    /// or no battery". Documented in the Win32 SDK; reproduced here so
+    /// we don't depend on a constant that windows-sys may or may not
+    /// re-export across versions.
+    const BATTERY_PERCENTAGE_UNKNOWN: u8 = 255;
+
+    pub(super) fn refresh() {
+        if let Some(pct) = read_battery_pct() {
+            set_battery_level(pct);
+        }
+    }
+
+    fn read_battery_pct() -> Option<u8> {
+        // SAFETY: GetSystemPowerStatus writes a SYSTEM_POWER_STATUS into
+        // the provided pointer and returns BOOL. Zero-initializing the
+        // struct first ensures every field is valid even on the
+        // never-observed-but-documented case where the OS leaves a field
+        // untouched. The call has no caller-side preconditions and is
+        // thread-safe per Microsoft docs.
+        let mut status: SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
+        let ok = unsafe { GetSystemPowerStatus(&mut status) };
+        if ok == 0 {
+            return None;
+        }
+        battery_pct_from_status(status.BatteryLifePercent)
+    }
+
+    /// Map raw `BatteryLifePercent` to our 0..=100 representation.
+    /// 255 (BATTERY_PERCENTAGE_UNKNOWN) and any out-of-range value
+    /// surface as `None`; everything else clamps into u8.
+    fn battery_pct_from_status(raw: u8) -> Option<u8> {
+        if raw == BATTERY_PERCENTAGE_UNKNOWN || raw > 100 {
+            None
+        } else {
+            Some(raw)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn raw_battery_in_range_round_trips() {
+            assert_eq!(battery_pct_from_status(0), Some(0));
+            assert_eq!(battery_pct_from_status(50), Some(50));
+            assert_eq!(battery_pct_from_status(100), Some(100));
+        }
+
+        #[test]
+        fn unknown_sentinel_maps_to_none() {
+            assert_eq!(battery_pct_from_status(BATTERY_PERCENTAGE_UNKNOWN), None);
+        }
+
+        #[test]
+        fn out_of_range_maps_to_none() {
+            // 101..=254 is not a documented value but Microsoft's
+            // BatteryLifePercent field is u8 so the OS could theoretically
+            // hand us anything. Treating these as "unknown" rather than
+            // clamping prevents lying to should_throttle().
+            assert_eq!(battery_pct_from_status(101), None);
+            assert_eq!(battery_pct_from_status(200), None);
+            assert_eq!(battery_pct_from_status(254), None);
+        }
+
+        #[test]
+        fn read_battery_pct_does_not_panic() {
+            // Smoke test: GetSystemPowerStatus is always callable on
+            // every supported Windows version. We can't assert the
+            // exact value (depends on host hardware) but we can verify
+            // it returns a well-formed Option<u8>.
+            if let Some(pct) = read_battery_pct() {
+                assert!(pct <= 100, "battery percent out of range: {}", pct);
+            }
         }
     }
 }

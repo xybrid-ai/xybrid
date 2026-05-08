@@ -9786,6 +9786,7 @@ dependencies = [
  "url",
  "uuid 1.23.1",
  "walkdir",
+ "windows-sys 0.59.0",
  "xybrid-sdk",
  "zstd",
 ]

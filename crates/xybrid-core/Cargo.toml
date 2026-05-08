@@ -157,3 +157,11 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSProcessInfo", "NSString"] }
+
+# Windows native platform-state poller: GetSystemPowerStatus (Win32). Use
+# windows-sys (raw FFI) rather than the high-level `windows` crate — we need
+# exactly one syscall and `windows` would pull ~400 transitive deps. Thermal
+# on Windows lacks a clean Win32 API (WMI MSAcpi_ThermalZoneTemperature is
+# heavy and requires COM init) and is left to a follow-up.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_Power", "Win32_Foundation"] }
