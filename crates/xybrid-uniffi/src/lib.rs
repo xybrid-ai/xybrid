@@ -84,6 +84,7 @@ fn resolve_binding(binding: &str) -> &'static str {
 /// with the same Celsius bands as the desktop pollers so host code can
 /// quantize the OS signal consistently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[non_exhaustive]
 pub enum XybridThermalState {
     /// Normal operating temperature (< 60 °C). No throttling expected.
     Normal,
@@ -91,7 +92,7 @@ pub enum XybridThermalState {
     Warm,
     /// Hot — performance reduced (70–80 °C).
     Hot,
-    /// Critical — heavy operations should pause (>= 80 °C).
+    /// Critical — heavy operations should pause (> 80 °C).
     Critical,
 }
 
