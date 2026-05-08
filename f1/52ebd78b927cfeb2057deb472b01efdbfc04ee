@@ -1,0 +1,21 @@
+.github/workflows/build-android.yml
+  s_18b28350277ace::t_08cf6bc5156629 11
+.github/workflows/build-apple.yml
+  s_18b28350277ace::t_92d211e1cea25d 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "f152ebd78b927cfeb2057deb472b01efdbfc04ee",
+  "prompts": {},
+  "sessions": {
+    "s_18b28350277ace": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a422681b-802e-4b38-93d6-7bb354b7892a",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
