@@ -100,8 +100,11 @@ pub fn clear_thermal_state() {
 /// - **Linux**: reads `/sys/class/power_supply/BAT[01]/capacity` and
 ///   `/sys/class/thermal/thermal_zone*/temp`.
 /// - **macOS**: reads `NSProcessInfo.thermalState` (no entitlement
-///   required) and shells out to `pmset -g batt` for battery percent
-///   (transitional — IOKit `IOPSCopyPowerSourcesInfo` follow-up).
+///   required, fast Foundation call). Battery on macOS is deferred to
+///   a follow-up that uses IOKit `IOPSCopyPowerSourcesInfo` — a
+///   `pmset` shellout would fork+exec on every cache miss and block
+///   whatever runtime thread `Orchestrator::execute_stage_async`
+///   landed on.
 /// - **iOS, Android, Windows**: no-op for now. Hosts push state today via
 ///   the public setters; native in-process pollers come in subsequent
 ///   commits.
@@ -206,22 +209,30 @@ mod linux {
 mod macos {
     //! macOS native pollers.
     //!
-    //! Thermal: `NSProcessInfo.thermalState` (Foundation, no entitlement).
-    //! Battery: `pmset -g batt` shellout — transitional. The proper IOKit
-    //! path (`IOPSCopyPowerSourcesInfo` + `IOPSGetPowerSourceDescription`)
-    //! is a follow-up; the shellout works on every supported macOS without
-    //! needing IOKit framework linkage and matches what `device_adapter.rs`
-    //! did pre-#70.
+    //! Thermal: `NSProcessInfo.thermalState` — direct Foundation call,
+    //! no entitlement, microsecond-class. Safe on the cache-miss hot
+    //! path that `Orchestrator::execute_stage_async` invokes via
+    //! `ResourceMonitor::current_snapshot`.
+    //!
+    //! Battery: deliberately **not** implemented here. A `pmset -g batt`
+    //! shellout would fork+exec (10–50 ms typical) inside
+    //! `refresh_locked` while holding the `ResourceMonitor::inner`
+    //! mutex — every async stage on the runtime thread would stall and
+    //! every other `current_snapshot` caller would serialize behind it.
+    //! The IOKit replacement (`IOPSCopyPowerSourcesInfo` + CF dictionary
+    //! reads, all in-process and thread-safe) is the right shape for
+    //! this seam and is tracked as a follow-up. Until it lands, hosts
+    //! that need battery on macOS can push via
+    //! [`super::set_battery_level`].
+    //!
+    //! Net effect of this module: macOS thermal goes from dormant to
+    //! real; macOS battery stays dormant until the IOKit follow-up.
 
-    use super::{set_battery_level, set_thermal_state, ThermalState};
+    use super::{set_thermal_state, ThermalState};
     use objc2_foundation::NSProcessInfo;
-    use std::process::Command;
 
     pub(super) fn refresh() {
         set_thermal_state(read_thermal_state());
-        if let Some(pct) = read_battery_pct() {
-            set_battery_level(pct);
-        }
     }
 
     fn read_thermal_state() -> ThermalState {
@@ -259,24 +270,6 @@ mod macos {
         }
     }
 
-    fn read_battery_pct() -> Option<u8> {
-        // pmset -g batt prints lines like:
-        //   -InternalBattery-0 (id=12345)	75%; charging; ...
-        // Desktop Macs without a battery print "Now drawing from 'AC Power'"
-        // and no percent — the parse falls through to None, which is the
-        // right answer.
-        let output = Command::new("pmset").arg("-g").arg("batt").output().ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let percent_pos = stdout.find('%')?;
-        let prefix = &stdout[..percent_pos];
-        let space_pos = prefix.rfind(|c: char| c.is_whitespace())?;
-        let percent_str = &prefix[space_pos + 1..];
-        percent_str.parse::<u8>().ok().map(|p| p.min(100))
-    }
-
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -307,16 +300,6 @@ mod macos {
             // All four variants are valid; we just want to confirm the
             // call returned without panicking.
             let _ = state;
-        }
-
-        #[test]
-        fn read_battery_pct_returns_well_formed_or_none() {
-            // On laptops this returns Some(0..=100); on desktops or in CI
-            // sandboxes without pmset access it returns None. Both are
-            // acceptable — the assertion is just that the value is sane.
-            if let Some(pct) = read_battery_pct() {
-                assert!(pct <= 100, "battery percent out of range: {}", pct);
-            }
         }
     }
 }
