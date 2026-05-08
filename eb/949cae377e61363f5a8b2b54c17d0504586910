@@ -1,0 +1,19 @@
+crates/xybrid-uniffi/src/lib.rs
+  s_7eeaac916ddaff::t_85f4e356ef89a9 87,95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "eb949cae377e61363f5a8b2b54c17d0504586910",
+  "prompts": {},
+  "sessions": {
+    "s_7eeaac916ddaff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35e5cb35-0ce2-426f-8fe3-02be6f735ddd",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
