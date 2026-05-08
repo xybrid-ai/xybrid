@@ -149,3 +149,11 @@ ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
 ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
 # Force rustls to use ring crypto backend instead of aws-lc-rs
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
+# macOS native platform-state pollers: NSProcessInfo.thermalState lives in
+# Foundation, accessed via the safe objc2-foundation bindings. Battery uses
+# a transitional `pmset` shellout (same pattern device_adapter.rs used pre-#70);
+# follow-up will replace it with IOKit IOPSCopyPowerSourcesInfo.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+objc2-foundation = { version = "0.2", features = ["NSProcessInfo", "NSString"] }
