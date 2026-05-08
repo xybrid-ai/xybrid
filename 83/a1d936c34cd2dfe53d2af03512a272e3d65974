@@ -1,0 +1,26 @@
+crates/xybrid-core/Cargo.toml
+  s_e8f05c7fd2beb5::t_6f6252c28fc9af 164-173,176-181
+crates/xybrid-core/src/device/platform_state.rs
+  s_e8f05c7fd2beb5::t_bc430741eef4cf 466,469-472,474-490,492-500,503-504,511-527,532
+  s_e8f05c7fd2beb5::t_bb203a248302d4 561-587,589-615,617-684,703-709,711-733
+  s_e8f05c7fd2beb5::t_b29d4a22818900 588,616,685-702,710
+  s_e8f05c7fd2beb5::t_e28068453f1d2c 774-786
+  s_e8f05c7fd2beb5::t_441d64b91dbf0d 108-114
+  s_e8f05c7fd2beb5::t_eb1cad7a126e6c 771-773,787
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "83a1d936c34cd2dfe53d2af03512a272e3d65974",
+  "prompts": {},
+  "sessions": {
+    "s_e8f05c7fd2beb5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1fa47ad-790b-47ee-aab2-6e71e2bc17b9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
