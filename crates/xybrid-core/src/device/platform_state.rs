@@ -100,11 +100,11 @@ pub fn clear_thermal_state() {
 /// - **Linux**: reads `/sys/class/power_supply/BAT[01]/capacity` and
 ///   `/sys/class/thermal/thermal_zone*/temp`.
 /// - **macOS**: reads `NSProcessInfo.thermalState` (no entitlement
-///   required, fast Foundation call). Battery on macOS is deferred to
-///   a follow-up that uses IOKit `IOPSCopyPowerSourcesInfo` — a
-///   `pmset` shellout would fork+exec on every cache miss and block
-///   whatever runtime thread `Orchestrator::execute_stage_async`
-///   landed on.
+///   required, fast Foundation call) and queries IOKit
+///   `IOPSCopyPowerSourcesInfo` for battery charge. Both calls are
+///   in-process and thread-safe per Apple's docs — no fork/exec, no
+///   COM, safe on the runtime thread that
+///   `Orchestrator::execute_stage_async` lands on.
 /// - **Windows**: reads `GetSystemPowerStatus` (Win32, in-process).
 ///   Thermal on Windows is deferred to a follow-up — no clean Win32
 ///   API exists; WMI `MSAcpi_ThermalZoneTemperature` requires COM
@@ -216,29 +216,36 @@ mod macos {
     //! macOS native pollers.
     //!
     //! Thermal: `NSProcessInfo.thermalState` — direct Foundation call,
-    //! no entitlement, microsecond-class. Safe on the cache-miss hot
-    //! path that `Orchestrator::execute_stage_async` invokes via
-    //! `ResourceMonitor::current_snapshot`.
+    //! no entitlement, microsecond-class.
     //!
-    //! Battery: deliberately **not** implemented here. A `pmset -g batt`
-    //! shellout would fork+exec (10–50 ms typical) inside
-    //! `refresh_locked` while holding the `ResourceMonitor::inner`
-    //! mutex — every async stage on the runtime thread would stall and
-    //! every other `current_snapshot` caller would serialize behind it.
-    //! The IOKit replacement (`IOPSCopyPowerSourcesInfo` + CF dictionary
-    //! reads, all in-process and thread-safe) is the right shape for
-    //! this seam and is tracked as a follow-up. Until it lands, hosts
-    //! that need battery on macOS can push via
-    //! [`super::set_battery_level`].
+    //! Battery: IOKit `IOPSCopyPowerSourcesInfo` →
+    //! `IOPSCopyPowerSourcesList` → `IOPSGetPowerSourceDescription`,
+    //! reading `kIOPSCurrentCapacityKey` / `kIOPSMaxCapacityKey` from
+    //! the per-source dictionary. All three calls are in-process and
+    //! documented thread-safe; no fork+exec (which is what a `pmset
+    //! -g batt` shellout would cost on every cache miss).
     //!
-    //! Net effect of this module: macOS thermal goes from dormant to
-    //! real; macOS battery stays dormant until the IOKit follow-up.
+    //! Both pollers are safe on the cache-miss hot path that
+    //! `Orchestrator::execute_stage_async` invokes via
+    //! `ResourceMonitor::current_snapshot`. Devices without a battery
+    //! (Mac mini, Mac Studio, etc.) return an empty source list and
+    //! we report `None`.
 
-    use super::{set_thermal_state, ThermalState};
+    use core::ffi::{c_void, CStr};
+
+    use super::{set_battery_level, set_thermal_state, ThermalState};
+    use objc2_core_foundation::{CFDictionary, CFNumber, CFString, CFType};
     use objc2_foundation::NSProcessInfo;
+    use objc2_io_kit::{
+        kIOPSCurrentCapacityKey, kIOPSMaxCapacityKey, IOPSCopyPowerSourcesInfo,
+        IOPSCopyPowerSourcesList, IOPSGetPowerSourceDescription,
+    };
 
     pub(super) fn refresh() {
         set_thermal_state(read_thermal_state());
+        if let Some(pct) = read_battery_pct() {
+            set_battery_level(pct);
+        }
     }
 
     fn read_thermal_state() -> ThermalState {
@@ -276,6 +283,106 @@ mod macos {
         }
     }
 
+    fn read_battery_pct() -> Option<u8> {
+        // `IOPSCopyPowerSourcesInfo` is the documented entry point; per
+        // Apple's docs it does no I/O of its own, just snapshots a
+        // pre-aggregated registry blob. Returns `None` on systems where
+        // power-source info is unavailable (sandboxed contexts, edge cases).
+        let blob = IOPSCopyPowerSourcesInfo()?;
+
+        // SAFETY: `blob` was just produced by IOPSCopyPowerSourcesInfo,
+        // which is the documented input contract for IOPSCopyPowerSourcesList.
+        let sources = unsafe { IOPSCopyPowerSourcesList(Some(&blob)) }?;
+
+        let count = sources.count();
+        if count == 0 {
+            // No power sources — Mac mini, Mac Studio, Mac Pro, etc. The
+            // routing engine treats `None` as "battery unknown / not
+            // applicable" and falls back to other evidence.
+            return None;
+        }
+
+        for i in 0..count {
+            // SAFETY: `i` is in 0..count, and `sources` is the CFArray
+            // returned by IOPSCopyPowerSourcesList — its elements are
+            // the IOKit-owned power-source handles documented to be
+            // valid for the lifetime of the array.
+            let raw = unsafe { sources.value_at_index(i) };
+            if raw.is_null() {
+                continue;
+            }
+            // SAFETY: `raw` is a non-null pointer to a CFTypeRef owned
+            // by `sources`; the borrow is bounded by `sources`'s scope.
+            let ps: &CFType = unsafe { &*(raw as *const CFType) };
+
+            // SAFETY: `blob` and `ps` came from the matching pair of
+            // IOPSCopyPowerSourcesInfo / IOPSCopyPowerSourcesList calls
+            // above — the documented preconditions for
+            // IOPSGetPowerSourceDescription.
+            let Some(desc) = (unsafe { IOPSGetPowerSourceDescription(Some(&blob), Some(ps)) })
+            else {
+                continue;
+            };
+
+            // Some power sources (UPS, keyboard battery, etc.) may omit
+            // capacity keys. Skip rather than fail — the next source
+            // might be the laptop's internal battery.
+            let Some(current) = lookup_int(&desc, kIOPSCurrentCapacityKey) else {
+                continue;
+            };
+            let Some(max) = lookup_int(&desc, kIOPSMaxCapacityKey) else {
+                continue;
+            };
+            if let Some(pct) = compute_pct(current, max) {
+                return Some(pct);
+            }
+        }
+        None
+    }
+
+    fn lookup_int(dict: &CFDictionary, key_cstr: &CStr) -> Option<i64> {
+        // IOKit defines its dictionary keys as C strings (e.g.
+        // `kIOPSCurrentCapacityKey == "Current Capacity"`). The
+        // dictionary itself stores CFString keys, so we wrap before
+        // lookup. UTF-8 conversion never fails for these constants but
+        // we propagate the Result for hygiene.
+        let key_str = key_cstr.to_str().ok()?;
+        let cf_key = CFString::from_str(key_str);
+        let key_ptr: *const c_void = (&*cf_key as *const CFString).cast();
+
+        // SAFETY: `key_ptr` points to a live CFString (held by
+        // `cf_key`), and `dict` is a power-source description
+        // dictionary with CFString keys — equality uses CFEqual.
+        let raw = unsafe { dict.value(key_ptr) };
+        if raw.is_null() {
+            return None;
+        }
+
+        // SAFETY: `raw` is a non-null CFTypeRef value owned by `desc`
+        // (which the caller holds alive); converting to `&CFType` for
+        // a runtime type-check is the documented pattern.
+        let cf: &CFType = unsafe { &*(raw as *const CFType) };
+        let num = cf.downcast_ref::<CFNumber>()?;
+        num.as_i64()
+    }
+
+    /// Map IOKit `(current, max)` capacities to a 0..=100 charge percent.
+    ///
+    /// Returns `None` if `max <= 0` (would divide by zero, indicates a
+    /// sensor glitch or uninitialized source) or `current < 0`.
+    /// Otherwise clamps to 0..=100 — some power sources briefly report
+    /// `current > max` while recalibrating.
+    fn compute_pct(current: i64, max: i64) -> Option<u8> {
+        if max <= 0 || current < 0 {
+            return None;
+        }
+        // saturating_mul guards against pathological values from a
+        // misbehaving driver — the division by `max > 0` then yields
+        // a sane, in-range number after the clamp.
+        let raw = current.saturating_mul(100) / max;
+        Some(raw.clamp(0, 100) as u8)
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -306,6 +413,47 @@ mod macos {
             // All four variants are valid; we just want to confirm the
             // call returned without panicking.
             let _ = state;
+        }
+
+        #[test]
+        fn compute_pct_handles_normal_values() {
+            assert_eq!(compute_pct(0, 100), Some(0));
+            assert_eq!(compute_pct(50, 100), Some(50));
+            assert_eq!(compute_pct(100, 100), Some(100));
+            assert_eq!(compute_pct(75, 100), Some(75));
+            // Real IOKit values (laptop battery, mAh-scale).
+            assert_eq!(compute_pct(4_200, 5_000), Some(84));
+        }
+
+        #[test]
+        fn compute_pct_zero_or_negative_max_is_none() {
+            assert_eq!(compute_pct(50, 0), None);
+            assert_eq!(compute_pct(50, -100), None);
+        }
+
+        #[test]
+        fn compute_pct_negative_current_is_none() {
+            // A negative `current` is a sensor glitch — don't fold that
+            // through to should_throttle as an artificial 0%.
+            assert_eq!(compute_pct(-1, 100), None);
+        }
+
+        #[test]
+        fn compute_pct_clamps_above_max() {
+            // Power sources can briefly report current > max during
+            // calibration. Clamp rather than reject.
+            assert_eq!(compute_pct(105, 100), Some(100));
+            assert_eq!(compute_pct(200, 100), Some(100));
+        }
+
+        #[test]
+        fn read_battery_pct_returns_none_or_valid_percent() {
+            // Smoke test: don't assert exact values — laptops, desktops,
+            // sandboxed test runners all behave differently. Just verify
+            // the IOKit path returns a well-formed Option<u8>.
+            if let Some(pct) = read_battery_pct() {
+                assert!(pct <= 100, "battery percent out of range: {}", pct);
+            }
         }
     }
 }
