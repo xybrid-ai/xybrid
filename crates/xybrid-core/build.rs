@@ -221,11 +221,18 @@ fn compile_llama_cpp() {
             && run(&["-C", &dir_str, "checkout", "--detach", "FETCH_HEAD"]);
 
         if ok {
-            println!("cargo:warning=llama.cpp cloned successfully at {}", LLAMA_CPP_COMMIT);
+            println!(
+                "cargo:warning=llama.cpp cloned successfully at {}",
+                LLAMA_CPP_COMMIT
+            );
         } else {
-            println!("cargo:warning=================================================================");
+            println!(
+                "cargo:warning================================================================="
+            );
             println!("cargo:warning=ERROR: Failed to clone llama.cpp!");
-            println!("cargo:warning=================================================================");
+            println!(
+                "cargo:warning================================================================="
+            );
             println!(
                 "cargo:warning=Expected location: {}",
                 llama_cpp_dir.display()
@@ -245,7 +252,9 @@ fn compile_llama_cpp() {
             println!("cargo:warning=");
             println!("cargo:warning=Or disable the llm-llamacpp feature:");
             println!("cargo:warning=  cargo build --no-default-features");
-            println!("cargo:warning=================================================================");
+            println!(
+                "cargo:warning================================================================="
+            );
             process::exit(1);
         }
     }
