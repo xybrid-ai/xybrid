@@ -11,6 +11,7 @@
 mod adapter;
 mod backend;
 mod execution_provider;
+mod profiling;
 mod runtime;
 mod session; // New runtime wrapper
 
@@ -25,6 +26,7 @@ pub use execution_provider::{
 };
 #[cfg(feature = "ort-coreml")]
 pub use execution_provider::{CoreMLComputeUnits, CoreMLConfig};
+pub use profiling::ResolvedExecutionProviders;
 pub use runtime::OnnxRuntime;
 pub use session::ONNXSession;
 
