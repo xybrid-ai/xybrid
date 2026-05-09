@@ -978,11 +978,15 @@ impl TemplateExecutor {
             cfg
         };
 
-        // Execute with streaming
-        let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            adapter
+        // Execute with streaming. Capture the backend name alongside
+        // the output so the metric mirror can label the resolved
+        // execution provider for the wire payload.
+        let (output, backend_name) = if let Some((_, adapter)) = &self.llm_adapter_cache {
+            let out = adapter
                 .backend()
-                .generate_streaming(&messages, &gen_config, on_token)?
+                .generate_streaming(&messages, &gen_config, on_token)?;
+            let name = adapter.backend().name().to_string();
+            (out, name)
         } else {
             return Err(AdapterError::RuntimeError(
                 "LLM adapter cache unexpectedly empty".to_string(),
@@ -1005,7 +1009,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output);
+        mirror_llm_metrics_to_span(&output, &backend_name);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1064,9 +1068,12 @@ impl TemplateExecutor {
         // Use explicit config or fall back to defaults
         let gen_config = config.cloned().unwrap_or_default();
 
-        // Execute with ChatMessages directly — backend applies template once
-        let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            adapter.backend().generate(messages, &gen_config)?
+        // Execute with ChatMessages directly — backend applies template once.
+        // Capture backend name for the resolved-EP mirror.
+        let (output, backend_name) = if let Some((_, adapter)) = &self.llm_adapter_cache {
+            let out = adapter.backend().generate(messages, &gen_config)?;
+            let name = adapter.backend().name().to_string();
+            (out, name)
         } else {
             return Err(AdapterError::RuntimeError(
                 "LLM adapter cache unexpectedly empty".to_string(),
@@ -1089,7 +1096,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output);
+        mirror_llm_metrics_to_span(&output, &backend_name);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1151,11 +1158,14 @@ impl TemplateExecutor {
         // Use explicit config or fall back to defaults
         let gen_config = config.cloned().unwrap_or_default();
 
-        // Execute with streaming - pass ChatMessages directly to backend
-        let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            adapter
+        // Execute with streaming - pass ChatMessages directly to backend.
+        // Capture backend name for the resolved-EP mirror.
+        let (output, backend_name) = if let Some((_, adapter)) = &self.llm_adapter_cache {
+            let out = adapter
                 .backend()
-                .generate_streaming(messages, &gen_config, on_token)?
+                .generate_streaming(messages, &gen_config, on_token)?;
+            let name = adapter.backend().name().to_string();
+            (out, name)
         } else {
             return Err(AdapterError::RuntimeError(
                 "LLM adapter cache unexpectedly empty".to_string(),
@@ -1178,7 +1188,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output);
+        mirror_llm_metrics_to_span(&output, &backend_name);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1304,9 +1314,12 @@ impl TemplateExecutor {
         }
         messages.push(ChatMessage::user(&prompt));
 
-        // Execute inference using cached adapter's backend directly
-        let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            adapter.backend().generate(&messages, &gen_config)?
+        // Execute inference using cached adapter's backend directly.
+        // Capture backend name for the resolved-EP mirror.
+        let (output, backend_name) = if let Some((_, adapter)) = &self.llm_adapter_cache {
+            let out = adapter.backend().generate(&messages, &gen_config)?;
+            let name = adapter.backend().name().to_string();
+            (out, name)
         } else {
             return Err(AdapterError::RuntimeError(
                 "LLM adapter cache unexpectedly empty".to_string(),
@@ -1334,7 +1347,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output);
+        mirror_llm_metrics_to_span(&output, &backend_name);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -2086,7 +2099,10 @@ fn insert_llm_streaming_metrics(
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-fn mirror_llm_metrics_to_span(output: &crate::runtime_adapter::llm::GenerationOutput) {
+fn mirror_llm_metrics_to_span(
+    output: &crate::runtime_adapter::llm::GenerationOutput,
+    backend_name: &str,
+) {
     // Always-present scalars. These reach the platform via
     // `PlatformEvent.stages[].spans[].metadata` (populated by
     // `xybrid_core::tracing::add_metadata` on the currently active span).
@@ -2097,6 +2113,17 @@ fn mirror_llm_metrics_to_span(output: &crate::runtime_adapter::llm::GenerationOu
         format!("{:.2}", output.tokens_per_second),
     );
     xybrid_trace::add_metadata("finish_reason", &output.finish_reason);
+
+    // Resolved execution provider: which on-device engine path actually
+    // ran. Cost-attribution telemetry uses this to explain latency
+    // variance on the same chip + model. Sourced from build flags via
+    // `local_execution_provider` because backend selection is compile-
+    // time. Cloud LLMs go through a different adapter and get
+    // attribution from the `provider` field instead.
+    xybrid_trace::add_metadata(
+        "execution_provider",
+        crate::runtime_adapter::llm::local_execution_provider(backend_name),
+    );
 
     // Streaming-derived scalars. Only mirror when the backend reported them;
     // the `Option<_>` + `nonzero` filter in mistral keeps misleading zeros

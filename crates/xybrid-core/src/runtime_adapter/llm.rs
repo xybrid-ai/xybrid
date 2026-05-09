@@ -35,6 +35,60 @@ pub use super::types::{
 /// Result type for LLM backend operations.
 pub type LlmResult<T> = Result<T, AdapterError>;
 
+/// Resolve the execution-provider label for the local LLM path. The
+/// value lands on the inference span via `add_metadata` and is hoisted
+/// to the wire payload by the SDK so the analytics backend can attribute
+/// latency to the engine that actually ran (Metal vs CPU vs CUDA).
+///
+/// Build flags determine the answer because backend selection happens at
+/// compile time: `llm-mistral-metal` and `llm-mistral-cuda` switch
+/// mistralrs to the corresponding accelerator; `llm-llamacpp` on macOS
+/// builds with `GGML_METAL=ON` by default (see `build.rs`). For unknown
+/// or mock backends we report `cpu` rather than guessing — wrong is
+/// worse than missing on a diagnostic field.
+pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
+    match backend_name {
+        "llama-cpp" => llamacpp_execution_provider(),
+        "mistral" => mistral_execution_provider(),
+        _ => "cpu",
+    }
+}
+
+#[cfg(all(feature = "llm-llamacpp", target_os = "macos"))]
+fn llamacpp_execution_provider() -> &'static str {
+    // build.rs sets GGML_METAL=ON unconditionally on macOS targets.
+    "metal"
+}
+
+#[cfg(all(feature = "llm-llamacpp", not(target_os = "macos")))]
+fn llamacpp_execution_provider() -> &'static str {
+    // Linux / Windows / Android currently build llama.cpp without
+    // GGML_CUDA. When we add a CUDA build flag, switch on it here.
+    "cpu"
+}
+
+#[cfg(not(feature = "llm-llamacpp"))]
+fn llamacpp_execution_provider() -> &'static str {
+    // Compiled without llama.cpp — should be unreachable from a
+    // LlamaCppBackend instance, but pick a safe fallback for tests.
+    "cpu"
+}
+
+#[cfg(feature = "llm-mistral-metal")]
+fn mistral_execution_provider() -> &'static str {
+    "metal"
+}
+
+#[cfg(all(feature = "llm-mistral-cuda", not(feature = "llm-mistral-metal")))]
+fn mistral_execution_provider() -> &'static str {
+    "cuda"
+}
+
+#[cfg(not(any(feature = "llm-mistral-metal", feature = "llm-mistral-cuda")))]
+fn mistral_execution_provider() -> &'static str {
+    "cpu"
+}
+
 // =============================================================================
 // Generation Output
 // =============================================================================
@@ -488,6 +542,16 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
                 )))]
                 crate::tracing::add_metadata("span_kind", "cpu");
 
+                // Resolved execution provider: which on-device engine
+                // path actually ran. Cost-attribution telemetry needs
+                // this to explain latency variance on the same chip +
+                // model. Cloud LLMs get attribution from the `provider`
+                // field on their adapter span instead, so we omit here.
+                crate::tracing::add_metadata(
+                    "execution_provider",
+                    local_execution_provider(self.backend.name()),
+                );
+
                 Ok(Envelope {
                     kind: EnvelopeKind::Text(output.text),
                     metadata: response_metadata,
@@ -547,6 +611,28 @@ mod tests {
 
     // Note: Tests for PartialToken, ChatMessage, GenerationConfig, and LlmConfig
     // are in runtime_adapter/types.rs since those types are now defined there.
+
+    #[test]
+    fn local_execution_provider_maps_known_backends() {
+        // We only assert the names we ship: backend names "llama-cpp"
+        // and "mistral" must round-trip through the helper into a
+        // non-empty string. Exact label depends on build flags + target,
+        // so the assertions here stay shape-only — full per-cfg coverage
+        // is enforced at compile time by the `#[cfg]` arms themselves.
+        let llama = local_execution_provider("llama-cpp");
+        assert!(!llama.is_empty(), "llama-cpp must map to a label");
+        let mistral = local_execution_provider("mistral");
+        assert!(!mistral.is_empty(), "mistral must map to a label");
+    }
+
+    #[test]
+    fn local_execution_provider_unknown_backend_falls_back_to_cpu() {
+        // Mock backends in tests, or any name we don't recognise, get
+        // "cpu" rather than a guess — wrong is worse than missing on
+        // a diagnostic field.
+        assert_eq!(local_execution_provider("mock"), "cpu");
+        assert_eq!(local_execution_provider(""), "cpu");
+    }
 
     #[test]
     fn test_generation_output_structure() {

@@ -1076,6 +1076,20 @@ fn convert_to_platform_event(
                 payload["quantization"] = serde_json::json!(v);
             }
         }
+        // Resolved execution provider — which on-device engine path
+        // actually ran (coreml / cpu / metal / cuda / mlx-metal / …).
+        // ORT path: harvested from per-session profiling JSON after the
+        // first inference (bypasses the API gap where ORT exposes no
+        // session-level resolved-EP getter). LLM path: build-flag-derived
+        // label keyed on the backend name. Cloud paths omit — `provider`
+        // already carries the attribution. Lives on whichever inner span
+        // emitted it, hoisted via the any-span lookup so all modalities
+        // produce the same wire shape.
+        if payload.get("execution_provider").is_none() {
+            if let Some(v) = extract_string_attr_from_any_span(&spans, "execution_provider") {
+                payload["execution_provider"] = serde_json::json!(v);
+            }
+        }
         Some(spans)
     } else {
         None

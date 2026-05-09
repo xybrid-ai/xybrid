@@ -214,6 +214,17 @@ impl OnnxRuntimeAdapter {
             AdapterError::InferenceFailed(format!("ONNX Runtime inference failed: {e}"))
         })?;
 
+        // Hoist the resolved execution provider onto the current span as
+        // soon as we have it. The session caches the first-inference
+        // harvest so this is a cheap accessor on every subsequent call;
+        // emitting on every run keeps the span metadata uniform across
+        // warm-up and steady-state inferences. Absent on the very first
+        // call only if profiling failed (logged inside the session); we
+        // skip emission in that case rather than emit a bogus value.
+        if let Some(resolved) = session.resolved_providers() {
+            crate::tracing::add_metadata("execution_provider", resolved.primary);
+        }
+
         // DEBUG: Log raw output tensor info before conversion
         eprintln!("🔵 DEBUG: Raw ONNX Output Tensors");
         eprintln!("   Number of outputs: {}", output_tensors.len());
@@ -318,8 +329,14 @@ impl RuntimeAdapter for OnnxRuntimeAdapter {
             return Ok(());
         }
 
-        // Create ONNX Runtime session with configured execution provider
-        let session = ONNXSession::with_provider(path, self.execution_provider)?;
+        // Build with resolved-EP capture so the first inference will
+        // surface the EP that *actually* ran (not just the one we
+        // requested) — ORT can silently fall back from CoreML to CPU
+        // per-op when an op isn't supported, and that fallback is the
+        // single biggest reason latency varies on the same chip + model.
+        // The capture costs ~10-15% on the first inference (the warm-up
+        // call) and zero on every subsequent call.
+        let session = ONNXSession::with_resolved_ep_capture(path, self.execution_provider)?;
 
         log::info!(
             "Loaded model '{}' with {} execution provider",
