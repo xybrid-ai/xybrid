@@ -1,0 +1,31 @@
+bindings/flutter/lib/src/rust/frb_generated.io.dart
+  s_e8f05c7fd2beb5::t_18d762c14ea8be 11,51-54,87-91,147-151,219-221,314-318,374-378,450-452,548-552,608-612,689-692,939-968
+bindings/flutter/lib/src/rust/frb_generated.web.dart
+  s_e8f05c7fd2beb5::t_18d762c14ea8be 14,53-56,89-93,149-153,221-223,316-320,376-380,452-454,550-554,610-614,691-694,832-843,903-908
+bindings/flutter/rust/src/frb_generated.rs
+  s_e8f05c7fd2beb5::t_18d762c14ea8be 29,46,1631-1756,1931-1933,1998-2007,2070-2079,2257-2270,2580-2585,2590,2595,2600,2605-2620,2709-2723,2890-2912,2961-2967,3032-3042,3197-3214,3397,3482-3495,3523,3610-3621
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_e8f05c7fd2beb5::t_18d762c14ea8be 11,82,203-211,265-272,1256-1350,1358,1383,1407,1430,1453,1511-1518,1574-1581,1672-1679,1868-1873,2055-2063,2163-2171,2370-2376,2619-2628,2735-2744,2931-2937,3409-3426
+bindings/flutter/rust/src/api/mod.rs
+  s_e8f05c7fd2beb5::t_b216e3cf6624a7 5,14
+bindings/flutter/lib/src/rust/api/device.dart
+  s_e8f05c7fd2beb5::t_18d762c14ea8be 1-64
+bindings/flutter/rust/src/api/device.rs
+  s_e8f05c7fd2beb5::t_8c26ba5f74d15b 1-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "b27ed72da7ff29f8861b6a87f4bddbbd97ecd58a",
+  "prompts": {},
+  "sessions": {
+    "s_e8f05c7fd2beb5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1fa47ad-790b-47ee-aab2-6e71e2bc17b9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
