@@ -31,8 +31,8 @@ use std::path::Path;
 /// EP names are normalised (lower-cased and stripped of the
 /// `"ExecutionProvider"` suffix ORT bakes into its profile output), so
 /// callers see e.g. `"coreml"` and `"cpu"` rather than
-/// `"CoreMLExecutionProvider"`. This matches the wire format INF-90 will
-/// emit on telemetry events.
+/// `"CoreMLExecutionProvider"`. This matches the wire format the
+/// telemetry layer emits on events.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedExecutionProviders {
     /// EP that ran the most ops. Suffix-stripped, lower-cased.

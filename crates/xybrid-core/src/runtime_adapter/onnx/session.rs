@@ -40,7 +40,7 @@ use tempfile::TempDir;
 /// Metadata extracted from ONNX model inputs: (names, shapes, element types).
 type InputMetadata = (Vec<String>, Vec<Vec<i64>>, Vec<Option<TensorElementType>>);
 
-/// Lifecycle state for the resolved-EP capture (INF-98).
+/// Lifecycle state for the resolved-EP capture.
 ///
 /// `Disabled` is the legacy default and what every caller of
 /// [`ONNXSession::with_provider`] sees. `Pending` means profiling was
@@ -88,8 +88,8 @@ pub struct ONNXSession {
     input_dtypes: Vec<Option<TensorElementType>>,
     /// The execution provider used for this session
     execution_provider: ExecutionProviderKind,
-    /// Resolved-EP capture state (INF-98). `Disabled` for sessions built
-    /// via [`ONNXSession::with_provider`]; `Pending → Harvested/Failed`
+    /// Resolved-EP capture state. `Disabled` for sessions built via
+    /// [`ONNXSession::with_provider`]; `Pending → Harvested/Failed`
     /// for sessions built via [`ONNXSession::with_resolved_ep_capture`].
     /// Wrapped in [`Mutex`] so the auto-harvest path inside
     /// [`run_with_values`] (which only has `&self`) can mutate it.
@@ -207,7 +207,7 @@ impl ONNXSession {
 
     /// Creates an ONNX session with profiling enabled so the *resolved*
     /// execution provider (the one that actually ran each op) can be
-    /// captured after the first inference. INF-98.
+    /// captured after the first inference.
     ///
     /// Same arguments + behaviour as [`ONNXSession::with_provider`], plus:
     /// - profiling is turned on at session-build time, writing to a
@@ -223,9 +223,8 @@ impl ONNXSession {
     /// ORT's profiling adds roughly 10-15 % wall-clock overhead, but
     /// that hits exactly one inference — typically the warm-up call
     /// telemetry already discards. Use this constructor only for
-    /// sessions where INF-90 needs the resolved EP for telemetry; the
-    /// default path stays on [`ONNXSession::with_provider`] with no
-    /// regression.
+    /// sessions that need the resolved EP for telemetry; the default
+    /// path stays on [`ONNXSession::with_provider`] with no regression.
     pub fn with_resolved_ep_capture(
         model_path: &str,
         execution_provider: ExecutionProviderKind,
@@ -524,11 +523,11 @@ impl ONNXSession {
             result.insert(output_name.clone(), array_d);
         }
 
-        // INF-98: after the first inference, end profiling and parse
-        // the JSON to surface the resolved EP. `outputs` has been fully
-        // converted into owned `result` entries above, so we no longer
-        // borrow from `session_guard` and can take a `&mut` reborrow
-        // for `end_profiling`. Drop `outputs` explicitly to make that
+        // After the first inference, end profiling and parse the JSON
+        // to surface the resolved EP. `outputs` has been fully converted
+        // into owned `result` entries above, so we no longer borrow
+        // from `session_guard` and can take a `&mut` reborrow for
+        // `end_profiling`. Drop `outputs` explicitly to make that
         // borrow lifetime obvious to the reader.
         drop(outputs);
         self.maybe_harvest_resolved_ep(&mut session_guard);
@@ -567,13 +566,13 @@ impl ONNXSession {
     }
 
     /// Returns the resolved-EP summary from the first inference's
-    /// profile output (INF-98), if and only if the session was built
-    /// with [`ONNXSession::with_resolved_ep_capture`] **and** at least
-    /// one inference has completed since.
+    /// profile output, if and only if the session was built with
+    /// [`ONNXSession::with_resolved_ep_capture`] **and** at least one
+    /// inference has completed since.
     ///
     /// Returns `None` for sessions without capture enabled, sessions
     /// where capture is still pending, or sessions where harvest
-    /// failed (the failure reason is logged but not surfaced — INF-90's
+    /// failed (the failure reason is logged but not surfaced — the
     /// telemetry layer treats absence as "EP unknown").
     pub fn resolved_providers(&self) -> Option<ResolvedExecutionProviders> {
         let state = self.resolved_state.lock().ok()?;
@@ -828,8 +827,8 @@ mod tests {
     #[test]
     fn resolved_providers_returns_none_when_capture_disabled() {
         // Default `with_provider` path must leave the resolved-EP API
-        // dormant — INF-98's contract is that capture is opt-in and the
-        // legacy code path is unaffected. Uses a nonexistent model so we
+        // dormant — capture is opt-in and the legacy code path is
+        // unaffected. Uses a nonexistent model so we
         // never have to load the runtime; constructor errors before the
         // accessor is reachable, so we skip the assertion when ort fails
         // to initialise (e.g. in environments without the binary).
@@ -840,10 +839,10 @@ mod tests {
 
     #[test]
     fn resolved_providers_populates_after_first_inference() {
-        // INF-98 end-to-end: build with `with_resolved_ep_capture`, run
-        // one inference, expect `resolved_providers()` to surface a
-        // primary EP. Skips when the MNIST fixture isn't present so CI
-        // without the model still passes.
+        // End-to-end: build with `with_resolved_ep_capture`, run one
+        // inference, expect `resolved_providers()` to surface a primary
+        // EP. Skips when the MNIST fixture isn't present so CI without
+        // the model still passes.
         let possible_paths = [
             PathBuf::from("test_models/mnist-12.onnx"),
             PathBuf::from("../test_models/mnist-12.onnx"),
