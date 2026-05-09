@@ -1,0 +1,30 @@
+crates/xybrid-core/src/runtime_adapter/onnx/session.rs
+  s_52f1b771f4619e::t_609d66b544fd57 829
+  s_52f1b771f4619e::t_1667e6ea10bb85 809-828,830-858,860-897
+  s_52f1b771f4619e::t_8e08074261a895 29,36,38
+  s_52f1b771f4619e::t_ae809115362ec9 204-292
+  s_52f1b771f4619e::t_f296a1aac5fc6c 91-96
+  s_52f1b771f4619e::t_547e60ead8f082 43-68
+  s_52f1b771f4619e::t_11b13bd0d3ed83 568-632
+  s_52f1b771f4619e::t_ee4a3aec23455a 527-535
+crates/xybrid-core/src/runtime_adapter/onnx/profiling.rs
+  s_52f1b771f4619e::t_514dbe09542aed 1-198
+crates/xybrid-core/src/runtime_adapter/onnx/mod.rs
+  s_52f1b771f4619e::t_c9186bd528f366 14,29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "c22da6cee9c15fe4cdcf25a813a2f3d501598b2c",
+  "prompts": {},
+  "sessions": {
+    "s_52f1b771f4619e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13ba0690-d40b-4247-a3a0-cc753058fb67",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
