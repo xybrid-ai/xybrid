@@ -1,0 +1,28 @@
+crates/xybrid-core/src/runtime_adapter/onnx/session.rs
+  s_a2154402101705::t_15d47300375d5a 91-92
+  s_a2154402101705::t_422cc3631beb8a 842-845
+  s_a2154402101705::t_a352c1af4fa80d 526-530
+  s_a2154402101705::t_21af2046ecfb31 569-571,575
+  s_a2154402101705::t_ee079e467e9200 830-831
+  s_a2154402101705::t_9f067dca9ab879 43
+  s_a2154402101705::t_f863347b53ac3e 210
+  s_a2154402101705::t_d7465eab22b41a 226-227
+crates/xybrid-core/src/runtime_adapter/onnx/profiling.rs
+  s_a2154402101705::t_77dbe7b47d6980 34-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "becc5becbf79376fd4f4c48cd93dac1d6843c99b",
+  "prompts": {},
+  "sessions": {
+    "s_a2154402101705": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5892ec4d-cdd0-47a7-8bd2-a0e2916ece80",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
