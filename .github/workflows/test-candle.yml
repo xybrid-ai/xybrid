@@ -1,0 +1,48 @@
+name: Test Candle
+
+# Candle is the pure-Rust ML framework gated behind a feature flag in
+# xybrid-core. macOS is the only place its Metal backend can run, so this
+# workflow lives outside ci.yml and is scoped to paths that can actually
+# affect Candle compilation or runtime behavior.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'crates/xybrid-core/src/runtime_adapter/candle/**'
+      - 'crates/xybrid-core/Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/test-candle.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'crates/xybrid-core/src/runtime_adapter/candle/**'
+      - 'crates/xybrid-core/Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/test-candle.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-candle:
+    name: Test Candle
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: candle
+      - name: Test Candle (xybrid-core only)
+        run: cargo test -p xybrid-core --features "ort-download,candle" --lib --tests

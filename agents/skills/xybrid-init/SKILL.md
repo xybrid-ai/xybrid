@@ -315,8 +315,8 @@ After saving, print:
 ```
 Your model is ready. Next steps:
 
-# Test it works
-xybrid run {model_id} --input "test input"
+# Test it works (use --input-audio <file>.wav for ASR models)
+xybrid run --model {model_id} --input-text "test input"
 
 # Or from Rust
 cargo run --example your_test -p xybrid-core

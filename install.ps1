@@ -65,5 +65,5 @@ Write-Host ""
 Write-Host "  Get started:"
 Write-Host "    xybrid --help"
 Write-Host "    xybrid models list"
-Write-Host '    xybrid run kokoro-82m --input "Hello world" -o output.wav'
+Write-Host '    xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav'
 Write-Host ""
