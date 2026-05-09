@@ -134,7 +134,7 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 **モデルを実行:**
 
 ```sh
-xybrid run kokoro-82m --input "Hello world" -o output.wav
+xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 ```
 
 </details>
@@ -260,7 +260,7 @@ stages:
 
 **CLI:**
 ```sh
-xybrid run voice-assistant.yaml --input question.wav -o response.wav
+xybrid run --config voice-assistant.yaml --input-audio question.wav -o response.wav
 ```
 
 **Flutter:**
