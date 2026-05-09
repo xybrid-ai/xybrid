@@ -1,0 +1,19 @@
+.github/workflows/test-candle.yml
+  s_4803c860537239::t_6bc1cff42fce97 1-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "20c8355f0b73c9f5a27dfdc8bd25e2548321338c",
+  "prompts": {},
+  "sessions": {
+    "s_4803c860537239": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc58a69c-ca01-4ef4-9cda-ff1444b28de6",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
