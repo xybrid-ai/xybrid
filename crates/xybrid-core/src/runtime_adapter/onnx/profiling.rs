@@ -3,8 +3,9 @@
 //! ONNX Runtime's C API has no session-level "what providers did this session
 //! resolve to" getter. EPs are appended in fallback order and per-op
 //! resolution is opaque to the API. The only authoritative source is the
-//! per-session profiling JSON, which records `provider_type` on every Node
-//! event.
+//! per-session profiling JSON, which records the EP under
+//! `args.provider` on every Node event (older / external profiling
+//! tooling sometimes uses `args.provider_type`; we accept either).
 //!
 //! This module exposes:
 //! - [`ResolvedExecutionProviders`] — the parsed summary surfaced to callers.
@@ -56,19 +57,26 @@ pub enum ProfileParseError {
     },
     #[error("failed to parse profile JSON: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("profile contained no Node events; session may not have run any inference")]
-    NoNodeEvents,
+    #[error(
+        "profile contained no Node events; session may not have run any inference. \
+         Categories seen: {seen_categories:?}; sample event keys: {sample_keys:?}"
+    )]
+    NoNodeEvents {
+        seen_categories: Vec<String>,
+        sample_keys: Vec<String>,
+    },
 }
 
-/// Read an ORT-emitted profile JSON file and aggregate the per-Node
-/// `provider_type` values into a [`ResolvedExecutionProviders`] summary.
+/// Read an ORT-emitted profile JSON file and aggregate the per-Node EP
+/// values into a [`ResolvedExecutionProviders`] summary.
 ///
 /// ORT writes Chrome-trace-format JSON: an array of event objects, each
 /// with a `cat` and an `args` map. Node-execution events have
-/// `cat == "Node"` and carry `args.provider_type`; fence / kernel-internal
-/// events use other categories and are ignored. Events whose
-/// `provider_type` is missing are also skipped — they don't represent
-/// actual op execution.
+/// `cat == "Node"` and carry the EP under `args.provider` (preferred,
+/// what ORT 2.x emits) or `args.provider_type` (older / external
+/// tooling). Fence / kernel-internal events use other categories and
+/// are ignored, as are Node events missing both keys — they don't
+/// represent actual op execution.
 pub fn parse_profile_json(path: &Path) -> Result<ResolvedExecutionProviders, ProfileParseError> {
     let raw = fs::read_to_string(path).map_err(|source| ProfileParseError::Io {
         path: path.display().to_string(),
@@ -77,14 +85,37 @@ pub fn parse_profile_json(path: &Path) -> Result<ResolvedExecutionProviders, Pro
     let events: Vec<serde_json::Value> = serde_json::from_str(&raw)?;
 
     let mut counts: HashMap<String, usize> = HashMap::new();
-    for event in events {
+    let mut seen_categories: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut sample_keys: Vec<String> = Vec::new();
+    for event in &events {
+        if let Some(cat) = event.get("cat").and_then(|c| c.as_str()) {
+            seen_categories.insert(cat.to_string());
+        }
         if event.get("cat").and_then(|c| c.as_str()) != Some("Node") {
             continue;
         }
-        let Some(provider) = event
-            .get("args")
-            .and_then(|a| a.get("provider_type"))
+        // Sample the first Node event's full shape (top-level keys + args
+        // keys) so a parse failure surfaces what ORT actually wrote.
+        if sample_keys.is_empty() {
+            if let Some(obj) = event.as_object() {
+                let top: Vec<String> = obj.keys().cloned().collect();
+                let args: Vec<String> = event
+                    .get("args")
+                    .and_then(|a| a.as_object())
+                    .map(|m| m.keys().cloned().collect())
+                    .unwrap_or_default();
+                sample_keys = top;
+                sample_keys.push(format!("args=[{}]", args.join(",")));
+            }
+        }
+        let args = event.get("args");
+        let Some(provider) = args
+            .and_then(|a| a.get("provider"))
             .and_then(|p| p.as_str())
+            .or_else(|| {
+                args.and_then(|a| a.get("provider_type"))
+                    .and_then(|p| p.as_str())
+            })
         else {
             continue;
         };
@@ -92,7 +123,10 @@ pub fn parse_profile_json(path: &Path) -> Result<ResolvedExecutionProviders, Pro
     }
 
     if counts.is_empty() {
-        return Err(ProfileParseError::NoNodeEvents);
+        return Err(ProfileParseError::NoNodeEvents {
+            seen_categories: seen_categories.into_iter().collect(),
+            sample_keys,
+        });
     }
 
     let mut breakdown: Vec<(String, usize)> = counts.into_iter().collect();
@@ -127,9 +161,9 @@ mod tests {
     #[test]
     fn parse_picks_majority_ep_as_primary() {
         let events = vec![
-            serde_json::json!({"cat": "Node", "args": {"provider_type": "CPUExecutionProvider"}}),
-            serde_json::json!({"cat": "Node", "args": {"provider_type": "CPUExecutionProvider"}}),
-            serde_json::json!({"cat": "Node", "args": {"provider_type": "CoreMLExecutionProvider"}}),
+            serde_json::json!({"cat": "Node", "args": {"provider": "CPUExecutionProvider"}}),
+            serde_json::json!({"cat": "Node", "args": {"provider": "CPUExecutionProvider"}}),
+            serde_json::json!({"cat": "Node", "args": {"provider": "CoreMLExecutionProvider"}}),
         ];
         let f = write_profile(&events);
 
@@ -144,8 +178,8 @@ mod tests {
     #[test]
     fn parse_ignores_non_node_events() {
         let events = vec![
-            serde_json::json!({"cat": "Session", "args": {"provider_type": "CPUExecutionProvider"}}),
-            serde_json::json!({"cat": "Node", "args": {"provider_type": "CoreMLExecutionProvider"}}),
+            serde_json::json!({"cat": "Session", "args": {"provider": "CPUExecutionProvider"}}),
+            serde_json::json!({"cat": "Node", "args": {"provider": "CoreMLExecutionProvider"}}),
         ];
         let f = write_profile(&events);
 
@@ -158,7 +192,7 @@ mod tests {
     fn parse_skips_events_without_provider_type() {
         let events = vec![
             serde_json::json!({"cat": "Node", "args": {}}),
-            serde_json::json!({"cat": "Node", "args": {"provider_type": "CoreMLExecutionProvider"}}),
+            serde_json::json!({"cat": "Node", "args": {"provider": "CoreMLExecutionProvider"}}),
         ];
         let f = write_profile(&events);
 
@@ -172,20 +206,52 @@ mod tests {
         let f = write_profile(&events);
 
         let err = parse_profile_json(f.path()).unwrap_err();
-        assert!(matches!(err, ProfileParseError::NoNodeEvents));
+        assert!(matches!(err, ProfileParseError::NoNodeEvents { .. }));
     }
 
     #[test]
     fn parse_ties_break_alphabetically_for_determinism() {
         let events = vec![
-            serde_json::json!({"cat": "Node", "args": {"provider_type": "CoreMLExecutionProvider"}}),
-            serde_json::json!({"cat": "Node", "args": {"provider_type": "CPUExecutionProvider"}}),
+            serde_json::json!({"cat": "Node", "args": {"provider": "CoreMLExecutionProvider"}}),
+            serde_json::json!({"cat": "Node", "args": {"provider": "CPUExecutionProvider"}}),
         ];
         let f = write_profile(&events);
 
         let summary = parse_profile_json(f.path()).unwrap();
         // Both have count = 1; "coreml" sorts before "cpu" alphabetically.
         assert_eq!(summary.primary, "coreml");
+    }
+
+    #[test]
+    fn parse_falls_back_to_legacy_provider_type_key() {
+        // Some external profiling tooling (and pre-2.x ORT) wrote
+        // `args.provider_type` instead of `args.provider`. We accept
+        // both so we don't strand callers on the older shape.
+        let events = vec![
+            serde_json::json!({"cat": "Node", "args": {"provider_type": "CoreMLExecutionProvider"}}),
+        ];
+        let f = write_profile(&events);
+
+        let summary = parse_profile_json(f.path()).unwrap();
+        assert_eq!(summary.primary, "coreml");
+    }
+
+    #[test]
+    fn parse_prefers_provider_over_provider_type_when_both_present() {
+        // Forward-compat guard: if a future ORT writes both, the
+        // canonical key wins. (Today only one is set per event, but
+        // the precedence is documented behaviour.)
+        let events = vec![serde_json::json!({
+            "cat": "Node",
+            "args": {
+                "provider": "CPUExecutionProvider",
+                "provider_type": "CoreMLExecutionProvider",
+            }
+        })];
+        let f = write_profile(&events);
+
+        let summary = parse_profile_json(f.path()).unwrap();
+        assert_eq!(summary.primary, "cpu");
     }
 
     #[test]

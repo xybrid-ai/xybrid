@@ -583,6 +583,24 @@ impl ONNXSession {
         }
     }
 
+    /// Diagnostic accessor for the raw resolved-EP state — used by tests
+    /// (and surfaced for ad-hoc debugging) to distinguish
+    /// `Disabled` / `Pending` / `Harvested` / `Failed(reason)` after a
+    /// harvest attempt. Production callers should use
+    /// [`ONNXSession::resolved_providers`] instead.
+    #[doc(hidden)]
+    pub fn resolved_state_debug(&self) -> String {
+        match self.resolved_state.lock() {
+            Ok(state) => match &*state {
+                ResolvedEpState::Disabled => "Disabled".into(),
+                ResolvedEpState::Pending { .. } => "Pending".into(),
+                ResolvedEpState::Harvested(s) => format!("Harvested({s:?})"),
+                ResolvedEpState::Failed(e) => format!("Failed({e})"),
+            },
+            Err(e) => format!("MutexPoisoned({e})"),
+        }
+    }
+
     /// Idempotent hook called after every successful inference: when the
     /// session is in [`ResolvedEpState::Pending`], end profiling, parse
     /// the resulting JSON, and transition to `Harvested`/`Failed`.
@@ -865,9 +883,13 @@ mod tests {
         // build asking for CPU, same result. We only assert the shape
         // (non-empty primary, breakdown sums >= 1) so the test is
         // robust across feature combinations and ORT versions.
-        let summary = session
-            .resolved_providers()
-            .expect("resolved_providers() must populate after the first inference");
+        let summary = session.resolved_providers().unwrap_or_else(|| {
+            panic!(
+                "resolved_providers() must populate after the first inference; \
+                 actual state: {}",
+                session.resolved_state_debug()
+            )
+        });
         assert!(
             !summary.primary.is_empty(),
             "primary EP should be a non-empty string; got {:?}",
