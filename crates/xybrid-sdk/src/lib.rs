@@ -133,8 +133,9 @@ pub use xybrid_core::cache_provider::CacheProvider;
 pub use xybrid_core::context;
 pub use xybrid_core::conversation::ConversationContext;
 pub use xybrid_core::device::{
-    DeviceProfile, MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceTelemetryMode,
-    ResourceUsageSummary, RunGuard as ResourceRunGuard,
+    clear_battery_level, clear_thermal_state, set_battery_level, set_thermal_state, DeviceProfile,
+    MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceTelemetryMode, ResourceUsageSummary,
+    RunGuard as ResourceRunGuard, ThermalState,
 };
 pub use xybrid_core::execution;
 pub use xybrid_core::features;

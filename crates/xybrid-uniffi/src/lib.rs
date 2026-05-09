@@ -58,6 +58,99 @@ fn resolve_binding(binding: &str) -> &'static str {
     }
 }
 
+// -- Platform-state push API --
+//
+// Mobile telemetry APIs (`UIDevice.batteryLevel` on iOS,
+// `BatteryManager.ACTION_BATTERY_CHANGED` on Android,
+// `PowerManager.OnThermalStatusChangedListener` on Android) are
+// notification-based and live in the host runtime — there is no clean
+// in-Rust path on those platforms. The host SDK wrappers
+// (`Xybrid.init(context)` on Kotlin, `Xybrid.initialize()` on Swift)
+// register the OS observers and forward each value through these FFI
+// calls. The Rust side just stores into the same `RwLock<PlatformState>`
+// the desktop pollers feed, so routing decisions are uniform across
+// platforms.
+//
+// One-way push (host → Rust) is intentional: a callback-interface design
+// would marshal a `Context` / `NotificationCenter` handle across the
+// boundary and re-enter Rust on every change, which is much more surface
+// for marginal benefit.
+
+/// Thermal pressure state forwarded by the host.
+///
+/// Maps directly to [`xybrid_sdk::ThermalState`] — mirrored here as a
+/// UniFFI-exposed enum so Swift gets `enum XybridThermalState` and
+/// Kotlin gets `enum class XybridThermalState`. Variants are documented
+/// with the same Celsius bands as the desktop pollers so host code can
+/// quantize the OS signal consistently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[non_exhaustive]
+pub enum XybridThermalState {
+    /// Normal operating temperature (< 60 °C). No throttling expected.
+    Normal,
+    /// Warm — first throttling tier (60–70 °C).
+    Warm,
+    /// Hot — performance reduced (70–80 °C).
+    Hot,
+    /// Critical — heavy operations should pause (> 80 °C).
+    Critical,
+}
+
+impl From<XybridThermalState> for xybrid_sdk::ThermalState {
+    fn from(value: XybridThermalState) -> Self {
+        match value {
+            XybridThermalState::Normal => xybrid_sdk::ThermalState::Normal,
+            XybridThermalState::Warm => xybrid_sdk::ThermalState::Warm,
+            XybridThermalState::Hot => xybrid_sdk::ThermalState::Hot,
+            XybridThermalState::Critical => xybrid_sdk::ThermalState::Critical,
+        }
+    }
+}
+
+impl From<xybrid_sdk::ThermalState> for XybridThermalState {
+    fn from(value: xybrid_sdk::ThermalState) -> Self {
+        match value {
+            xybrid_sdk::ThermalState::Normal => XybridThermalState::Normal,
+            xybrid_sdk::ThermalState::Warm => XybridThermalState::Warm,
+            xybrid_sdk::ThermalState::Hot => XybridThermalState::Hot,
+            xybrid_sdk::ThermalState::Critical => XybridThermalState::Critical,
+        }
+    }
+}
+
+/// Forward a battery charge percentage (0..=100) from the host.
+///
+/// Values above 100 are clamped by the underlying setter — pass through
+/// whatever the OS observer reports without rounding host-side, so the
+/// SDK has the freshest possible signal.
+#[uniffi::export]
+fn set_battery_level(percent: u8) {
+    xybrid_sdk::set_battery_level(percent);
+}
+
+/// Mark the battery level as unknown.
+///
+/// Hosts call this on observer teardown or when the OS reports an
+/// unknown / unavailable charge (e.g. desktop docks without battery
+/// sensors). The routing engine treats `None` as "no signal" rather
+/// than substituting an optimistic default.
+#[uniffi::export]
+fn clear_battery_level() {
+    xybrid_sdk::clear_battery_level();
+}
+
+/// Forward a thermal pressure reading from the host.
+#[uniffi::export]
+fn set_thermal_state(state: XybridThermalState) {
+    xybrid_sdk::set_thermal_state(state.into());
+}
+
+/// Mark the thermal state as unknown.
+#[uniffi::export]
+fn clear_thermal_state() {
+    xybrid_sdk::clear_thermal_state();
+}
+
 /// Error type exposed via UniFFI to Swift/Kotlin consumers.
 ///
 /// This enum represents all possible errors that can occur during
@@ -578,5 +671,44 @@ mod tests {
         // exercised directly by `resolve_binding_unknown_returns_default`.
         set_binding("evil_unknown".to_string());
         assert_eq!(xybrid_sdk::get_binding(), "kotlin");
+    }
+
+    // Pure conversion tests for XybridThermalState. The push setters
+    // themselves write into a process-global RwLock that other tests
+    // (and other crates' integration tests) also touch — covering the
+    // mapping at the conversion layer keeps these tests deterministic
+    // regardless of test ordering.
+    #[test]
+    fn thermal_state_round_trips_through_sdk_type() {
+        for variant in [
+            XybridThermalState::Normal,
+            XybridThermalState::Warm,
+            XybridThermalState::Hot,
+            XybridThermalState::Critical,
+        ] {
+            let sdk: xybrid_sdk::ThermalState = variant.into();
+            let back: XybridThermalState = sdk.into();
+            assert_eq!(variant, back);
+        }
+    }
+
+    #[test]
+    fn thermal_state_maps_to_documented_sdk_variants() {
+        assert_eq!(
+            xybrid_sdk::ThermalState::from(XybridThermalState::Normal),
+            xybrid_sdk::ThermalState::Normal
+        );
+        assert_eq!(
+            xybrid_sdk::ThermalState::from(XybridThermalState::Warm),
+            xybrid_sdk::ThermalState::Warm
+        );
+        assert_eq!(
+            xybrid_sdk::ThermalState::from(XybridThermalState::Hot),
+            xybrid_sdk::ThermalState::Hot
+        );
+        assert_eq!(
+            xybrid_sdk::ThermalState::from(XybridThermalState::Critical),
+            xybrid_sdk::ThermalState::Critical
+        );
     }
 }
