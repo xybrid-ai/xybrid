@@ -26,6 +26,7 @@
 // Section: imports
 
 use crate::api::context::*;
+use crate::api::device::*;
 use crate::api::envelope::*;
 use crate::api::model::*;
 use crate::api::pipeline::*;
@@ -42,7 +43,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -101373461;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1487364937;
 
 // Section: executor
 
@@ -1627,6 +1628,132 @@ fn wire__crate__api__pipeline__FfiPipeline_stage_names_impl(
         },
     )
 }
+fn wire__crate__api__device__XybridDevice_clear_battery_level_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "XybridDevice_clear_battery_level",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Result::<_, ()>::Ok({
+                    crate::api::device::XybridDevice::clear_battery_level();
+                })?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__device__XybridDevice_clear_thermal_state_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "XybridDevice_clear_thermal_state",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Result::<_, ()>::Ok({
+                    crate::api::device::XybridDevice::clear_thermal_state();
+                })?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__device__XybridDevice_set_battery_level_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "XybridDevice_set_battery_level",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_percent = <u8>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Result::<_, ()>::Ok({
+                    crate::api::device::XybridDevice::set_battery_level(api_percent);
+                })?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__device__XybridDevice_set_thermal_state_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "XybridDevice_set_thermal_state",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_state = <crate::api::device::FfiThermalState>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Result::<_, ()>::Ok({
+                    crate::api::device::XybridDevice::set_thermal_state(api_state);
+                })?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -1802,6 +1929,9 @@ flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
     flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>
 );
 flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
+    flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>
+);
+flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
     flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridSdkClient>
 );
 
@@ -1865,6 +1995,16 @@ impl SseDecode for FfiPipeline {
     }
 }
 
+impl SseDecode for XybridDevice {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>,
+        >>::sse_decode(deserializer);
+        return flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(inner);
+    }
+}
+
 impl SseDecode for XybridSdkClient {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1919,6 +2059,16 @@ impl SseDecode
 
 impl SseDecode
     for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <usize>::sse_decode(deserializer);
+        return decode_rust_opaque_moi(inner);
+    }
+}
+
+impl SseDecode
+    for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>>
 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2100,6 +2250,20 @@ impl SseDecode for crate::api::model::FfiStreamToken {
             index: var_index,
             cumulative_text: var_cumulativeText,
             finish_reason: var_finishReason,
+        };
+    }
+}
+
+impl SseDecode for crate::api::device::FfiThermalState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::device::FfiThermalState::Normal,
+            1 => crate::api::device::FfiThermalState::Warm,
+            2 => crate::api::device::FfiThermalState::Hot,
+            3 => crate::api::device::FfiThermalState::Critical,
+            _ => unreachable!("Invalid variant for FfiThermalState: {}", inner),
         };
     }
 }
@@ -2413,27 +2577,47 @@ fn pde_ffi_dispatcher_sync_impl(
         32 => wire__crate__api__pipeline__FfiPipeline_name_impl(ptr, rust_vec_len, data_len),
         34 => wire__crate__api__pipeline__FfiPipeline_stage_count_impl(ptr, rust_vec_len, data_len),
         35 => wire__crate__api__pipeline__FfiPipeline_stage_names_impl(ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
+        36 => wire__crate__api__device__XybridDevice_clear_battery_level_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        37 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
+        37 => wire__crate__api__device__XybridDevice_clear_thermal_state_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        38 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
+        38 => wire__crate__api__device__XybridDevice_set_battery_level_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        39 => wire__crate__api__model__ffi_generation_config_creative_impl(
+        39 => wire__crate__api__device__XybridDevice_set_thermal_state_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        40 => {
+        40 => wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        41 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        42 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        43 => wire__crate__api__model__ffi_generation_config_creative_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        44 => {
             wire__crate__api__model__ffi_generation_config_greedy_impl(ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -2518,6 +2702,21 @@ impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<
 
 impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<FfiPipeline>> for FfiPipeline {
     fn into_into_dart(self) -> FrbWrapper<FfiPipeline> {
+        self.into()
+    }
+}
+
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<XybridDevice> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self.0)
+            .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<XybridDevice> {}
+
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<XybridDevice>> for XybridDevice {
+    fn into_into_dart(self) -> FrbWrapper<XybridDevice> {
         self.into()
     }
 }
@@ -2688,6 +2887,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiStreamToken>
         self
     }
 }
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::device::FfiThermalState {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Normal => 0.into_dart(),
+            Self::Warm => 1.into_dart(),
+            Self::Hot => 2.into_dart(),
+            Self::Critical => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::device::FfiThermalState
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::device::FfiThermalState>
+    for crate::api::device::FfiThermalState
+{
+    fn into_into_dart(self) -> crate::api::device::FfiThermalState {
+        self
+    }
+}
 
 impl SseEncode for flutter_rust_bridge::for_generated::anyhow::Error {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -2733,6 +2955,13 @@ impl SseEncode for FfiPipeline {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>>::sse_encode(flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self), serializer);
+    }
+}
+
+impl SseEncode for XybridDevice {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>>>::sse_encode(flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self), serializer);
     }
 }
 
@@ -2791,6 +3020,17 @@ impl SseEncode
 
 impl SseEncode
     for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        let (ptr, size) = self.sse_encode_raw();
+        <usize>::sse_encode(ptr, serializer);
+        <i32>::sse_encode(size, serializer);
+    }
+}
+
+impl SseEncode
+    for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>>
 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2951,6 +3191,24 @@ impl SseEncode for crate::api::model::FfiStreamToken {
         <u32>::sse_encode(self.index, serializer);
         <String>::sse_encode(self.cumulative_text, serializer);
         <Option<String>>::sse_encode(self.finish_reason, serializer);
+    }
+}
+
+impl SseEncode for crate::api::device::FfiThermalState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::device::FfiThermalState::Normal => 0,
+                crate::api::device::FfiThermalState::Warm => 1,
+                crate::api::device::FfiThermalState::Hot => 2,
+                crate::api::device::FfiThermalState::Critical => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 
@@ -3136,6 +3394,7 @@ mod io {
 
     use super::*;
     use crate::api::context::*;
+    use crate::api::device::*;
     use crate::api::envelope::*;
     use crate::api::model::*;
     use crate::api::pipeline::*;
@@ -3221,6 +3480,20 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>>::increment_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>>::decrement_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
         ptr: *const std::ffi::c_void,
     ) {
@@ -3247,6 +3520,7 @@ mod web {
 
     use super::*;
     use crate::api::context::*;
+    use crate::api::device::*;
     use crate::api::envelope::*;
     use crate::api::model::*;
     use crate::api::pipeline::*;
@@ -3331,6 +3605,20 @@ mod web {
         ptr: *const std::ffi::c_void,
     ) {
         MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>::decrement_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>>::increment_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>>::decrement_strong_count(ptr as _);
     }
 
     #[wasm_bindgen]
