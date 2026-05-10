@@ -1,0 +1,35 @@
+crates/xybrid-core/Cargo.toml
+  s_e8f05c7fd2beb5::t_7952d6d4581946 153-157,160-168
+bindings/apple/Sources/Xybrid/xybrid_uniffi.swift
+  s_e8f05c7fd2beb5::t_b45b79ed2aefde 300-312,1198-1263,1602-1617,1627-1635,1645-1653,1669-1674,1678-1680,1684
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_e8f05c7fd2beb5::t_91274c0ee0904c 10-12
+  s_e8f05c7fd2beb5::t_0b2f0732075d1d 29-35,42-50,56,66-104
+crates/xybrid-core/src/device/platform_state.rs
+  s_e8f05c7fd2beb5::t_9b13eaf13db5fe 223-225,228-229,234-239,241,243-245,247,249-251,253,259-262,265-267
+  s_e8f05c7fd2beb5::t_4e1d219540db6a 443,454,461,469,478
+  s_e8f05c7fd2beb5::t_76be9a2521f2ec 366
+  s_e8f05c7fd2beb5::t_9d7fc7c76ac14a 399
+  s_e8f05c7fd2beb5::t_6c6cc9f06cdc06 108-112
+  s_e8f05c7fd2beb5::t_13f6d7d22cd596 308
+  s_e8f05c7fd2beb5::t_a210c2c4765304 120-123
+  s_e8f05c7fd2beb5::t_debda5ebb52f05 134-135
+bindings/apple/Sources/xybrid_uniffiFFI/include/xybrid_uniffiFFI.h
+  s_e8f05c7fd2beb5::t_b45b79ed2aefde 90-94,98-99,102-103,217-222,226-228,232-233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "16fd8f33bf4ba72648f37a55da282cfaed6f1bbe",
+  "prompts": {},
+  "sessions": {
+    "s_e8f05c7fd2beb5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1fa47ad-790b-47ee-aab2-6e71e2bc17b9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
