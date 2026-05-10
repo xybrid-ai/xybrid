@@ -7,7 +7,13 @@
 
 package ai.xybrid
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
+import android.os.Build
+import android.os.PowerManager
 import java.io.File
 
 // -- SDK Initialization --
@@ -38,6 +44,18 @@ object Xybrid {
      *
      * Typically called from `Application.onCreate()` or `Activity.onCreate()`.
      *
+     * Also subscribes to OS-level battery and thermal notifications and
+     * forwards each value through the SDK's push-state surface so the
+     * routing engine has live telemetry without consumer apps writing
+     * boilerplate. Receivers/listeners are registered against the
+     * application context so they survive Activity rotation. Battery
+     * monitoring uses the sticky `ACTION_BATTERY_CHANGED` broadcast,
+     * which delivers the current value immediately on registration —
+     * no separate seed call is needed. Thermal monitoring requires
+     * API 29+ ([`PowerManager.OnThermalStatusChangedListener`]); on
+     * older devices the routing engine sees `thermal_state = None`
+     * (treated as "no signal" rather than an optimistic default).
+     *
      * @param context Android context (application or activity).
      */
     @JvmStatic
@@ -48,6 +66,7 @@ object Xybrid {
             setBinding("kotlin")
             val cacheDir = File(context.filesDir, "xybrid/models")
             initSdkCacheDir(cacheDir.absolutePath)
+            registerPlatformObservers(context.applicationContext)
             initialized = true
         }
     }
@@ -55,6 +74,59 @@ object Xybrid {
     /** Returns `true` if [init] has been called successfully. */
     @JvmStatic
     val isInitialized: Boolean get() = initialized
+
+    private fun registerPlatformObservers(appContext: Context) {
+        // Sticky-broadcast registration delivers the latest battery state
+        // synchronously, so the receiver's first onReceive seeds the value
+        // without a separate read.
+        val batteryReceiver = object : BroadcastReceiver() {
+            override fun onReceive(received: Context, intent: Intent) {
+                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                if (level < 0 || scale <= 0) {
+                    clearBatteryLevel()
+                    return
+                }
+                // Scale to 0..=100; clamp so a brief sensor blip can't
+                // overflow the UByte the FFI expects.
+                val pct = ((level * 100) / scale).coerceIn(0, 100)
+                setBatteryLevel(pct.toUByte())
+            }
+        }
+        appContext.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+
+        // Thermal status listener is API 29+ — older devices simply
+        // don't get a thermal signal, which the routing engine treats
+        // as `thermal_state = None`.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+            // Push the current status immediately so first cache miss isn't
+            // blind, then keep updating on every transition.
+            setThermalState(thermalStatusToXybrid(pm.currentThermalStatus))
+            pm.addThermalStatusListener { status ->
+                setThermalState(thermalStatusToXybrid(status))
+            }
+        }
+    }
+
+    /**
+     * Map Android's 7-bucket thermal status to xybrid's 4-band
+     * [`XybridThermalState`].
+     *
+     * Android (API 29+) reports `THERMAL_STATUS_NONE`/`LIGHT`/`MODERATE`/
+     * `SEVERE`/`CRITICAL`/`EMERGENCY`/`SHUTDOWN`. The last three all
+     * indicate the device is on the verge of forced throttling or shutdown,
+     * so they collapse to `Critical` — the routing engine should treat
+     * them identically (pause heavy work).
+     */
+    private fun thermalStatusToXybrid(status: Int): XybridThermalState = when (status) {
+        PowerManager.THERMAL_STATUS_NONE,
+        PowerManager.THERMAL_STATUS_LIGHT,
+        -> XybridThermalState.NORMAL
+        PowerManager.THERMAL_STATUS_MODERATE -> XybridThermalState.WARM
+        PowerManager.THERMAL_STATUS_SEVERE -> XybridThermalState.HOT
+        else -> XybridThermalState.CRITICAL
+    }
 }
 
 // -- Public Type Aliases --
