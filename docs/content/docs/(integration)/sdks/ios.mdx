@@ -34,6 +34,12 @@ Or in Xcode: **File > Add Package Dependencies** and enter the repository URL.
 ```swift
 import Xybrid
 
+@main
+struct MyApp: App {
+    init() { Xybrid.initialize() }
+    var body: some Scene { /* ... */ }
+}
+
 // Load a model from the registry
 let loader = ModelLoader.fromRegistry(modelId: "kokoro-82m")
 let model = try loader.load()
@@ -47,6 +53,8 @@ if result.success {
     print("Latency: \(result.latency)s")
 }
 ```
+
+On iOS, `Xybrid.initialize()` enables `UIDevice` battery monitoring and subscribes to `UIDevice.batteryLevelDidChangeNotification`, forwarding readings to the routing engine. Thermal state on Apple platforms is sourced from `NSProcessInfo.thermalState` directly in `xybrid-core`. See [Host Integration](/docs/internals/host-integration) for the per-platform picture.
 
 ---
 
