@@ -1,0 +1,24 @@
+bindings/kotlin/src/main/kotlin/ai/xybrid/xybrid_uniffi.kt
+  s_e8f05c7fd2beb5::t_e767308ed2aa09 414-417,420-421,424-425,540-543,546-547,550-551,589-594,598-600,604-606,688-707,1846-1869,2236-2251,2260-2267,2276-2279
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_e8f05c7fd2beb5::t_b7719eb53c8477 10,12-16
+  s_e8f05c7fd2beb5::t_2a0ebc411f1edd 47-58,69,77-129
+bindings/kotlin/src/main/kotlin/ai/xybrid/uniffi/xybrid_uniffi/xybrid_uniffi.kt
+  s_e8f05c7fd2beb5::t_e767308ed2aa09 414-417,420-421,424-425,540-543,546-547,550-551,589-594,598-600,604-606,688-707,1846-1869,2236-2251,2260-2267,2276-2279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "cdc435e3021359bac2688b81916a0bfab18cf6f2",
+  "prompts": {},
+  "sessions": {
+    "s_e8f05c7fd2beb5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1fa47ad-790b-47ee-aab2-6e71e2bc17b9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
