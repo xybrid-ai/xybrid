@@ -54,13 +54,19 @@ pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
     }
 }
 
-#[cfg(all(feature = "llm-llamacpp", target_os = "macos"))]
+#[cfg(all(
+    feature = "llm-llamacpp",
+    any(target_os = "macos", target_os = "ios")
+))]
 fn llamacpp_execution_provider() -> &'static str {
-    // build.rs sets GGML_METAL=ON unconditionally on macOS targets.
+    // build.rs sets GGML_METAL=ON for both macOS and iOS Apple targets.
     "metal"
 }
 
-#[cfg(all(feature = "llm-llamacpp", not(target_os = "macos")))]
+#[cfg(all(
+    feature = "llm-llamacpp",
+    not(any(target_os = "macos", target_os = "ios"))
+))]
 fn llamacpp_execution_provider() -> &'static str {
     // Linux / Windows / Android currently build llama.cpp without
     // GGML_CUDA. When we add a CUDA build flag, switch on it here.
