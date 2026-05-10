@@ -1,0 +1,37 @@
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_52f1b771f4619e::t_4d5cfde8b5f659 752-760
+crates/xybrid-core/src/execution/executor.rs
+  s_52f1b771f4619e::t_3f4ef2f1154ce2 1074-1086,1104
+  s_52f1b771f4619e::t_90bb6024ba6fec 1167-1179,1197
+  s_52f1b771f4619e::t_632d77efc1dd5d 1324-1336
+  s_52f1b771f4619e::t_1f0848b8c0903e 1359
+  s_52f1b771f4619e::t_473d999fb5d581 2138-2151
+  s_52f1b771f4619e::t_b7383ba96acd04 981-996,1014
+  s_52f1b771f4619e::t_55ed8a78f1420b 2114
+crates/xybrid-sdk/src/telemetry.rs
+  s_52f1b771f4619e::t_7786cba19cedd9 3027-3092
+  s_52f1b771f4619e::t_17ad55c22fd063 1093-1103
+  s_52f1b771f4619e::t_25e2d328e00c27 1230-1271
+docs/sdk/telemetry.md
+  s_52f1b771f4619e::t_381d4db50ee4e3 239-240
+  s_52f1b771f4619e::t_d204a3d6645bcb 227
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_52f1b771f4619e::t_1c3915e0e2fa11 576-586
+  s_52f1b771f4619e::t_e448d34a8d26cc 223-240
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "ec0bdbcfaf7afa62654504a555dd4253c465afaa",
+  "prompts": {},
+  "sessions": {
+    "s_52f1b771f4619e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13ba0690-d40b-4247-a3a0-cc753058fb67",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
