@@ -1,0 +1,9 @@
+{
+  "extends": "@react-native/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "react-native-xybrid": ["../src"]
+    }
+  },
+  "include": ["App.tsx", "index.js"]
+}

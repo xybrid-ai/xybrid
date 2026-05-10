@@ -357,6 +357,43 @@ enum Commands {
         version: Option<String>,
     },
 
+    /// Stage native artifacts into bindings/react-native for npm packaging
+    ///
+    /// Builds the iOS XCFramework (macOS hosts only) and the Android .so files,
+    /// then copies them — alongside the existing UniFFI-generated Swift/Kotlin
+    /// wrapper sources — into `bindings/react-native/{ios,android}/`. The RN
+    /// module is then ready to be packaged with `npm pack`.
+    BuildReactNative {
+        /// Build in release mode (default: true)
+        #[arg(long, default_value = "true")]
+        release: bool,
+
+        /// Build in debug mode (overrides --release)
+        #[arg(long)]
+        debug: bool,
+
+        /// Skip iOS staging (e.g. when running on Linux CI)
+        #[arg(long)]
+        skip_ios: bool,
+
+        /// Skip Android staging
+        #[arg(long)]
+        skip_android: bool,
+
+        /// Allow staging a macOS-only XCFramework (no iOS slice).
+        ///
+        /// `build_xcframework` falls back to a macOS-only build when ORT iOS
+        /// isn't vendored. That artifact is fine for desktop dev but unsafe
+        /// to ship in an npm package — consumers would link successfully on
+        /// macOS test hosts and crash on real iOS devices. Off by default.
+        #[arg(long)]
+        allow_macos_only: bool,
+
+        /// Override the version (defaults to Cargo.toml version or git tag)
+        #[arg(long)]
+        version: Option<String>,
+    },
+
     /// Build xybrid-ffi for Unity target platforms
     ///
     /// Convenience wrapper around build-ffi that orchestrates builds for all Unity-supported
@@ -604,6 +641,18 @@ fn main() -> Result<()> {
             let is_release = !debug && release;
             let ver = get_version(version.as_deref());
             build_all(is_release, parallel, &ver)?;
+        }
+        Commands::BuildReactNative {
+            release,
+            debug,
+            skip_ios,
+            skip_android,
+            allow_macos_only,
+            version,
+        } => {
+            let is_release = !debug && release;
+            let ver = get_version(version.as_deref());
+            build_react_native(is_release, skip_ios, skip_android, allow_macos_only, &ver)?;
         }
         Commands::BuildUnity {
             all_platforms,
@@ -1674,6 +1723,234 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
             std::fs::copy(&src_path, &dst_path)?;
         }
     }
+    Ok(())
+}
+
+/// Stage native artifacts into bindings/react-native for npm packaging.
+///
+/// Re-runs `build_xcframework` and `build_android` so the staging step has
+/// up-to-date artifacts to copy. The npm package itself ships those binaries
+/// vendored — consumers don't need a Rust toolchain to install it. Mirrors
+/// the existing build-flutter / build-apple / build-android flow but lands
+/// everything in one tree the codegen + autolinking pipeline understands.
+fn build_react_native(
+    release: bool,
+    skip_ios: bool,
+    skip_android: bool,
+    allow_macos_only: bool,
+    version: &str,
+) -> Result<()> {
+    let rn_root = PathBuf::from("bindings/react-native");
+    if !rn_root.exists() {
+        anyhow::bail!(
+            "{} not found — has the RN binding been removed?",
+            rn_root.display()
+        );
+    }
+
+    println!("Staging React Native native artifacts (version {version})...");
+    println!();
+
+    let mut staged_platforms: Vec<&str> = Vec::new();
+
+    if !skip_ios {
+        if cfg!(target_os = "macos") {
+            stage_react_native_ios(release, version, allow_macos_only, &rn_root)?;
+            staged_platforms.push("iOS");
+        } else {
+            eprintln!("⚠ Skipping iOS staging (XCFramework builds require macOS)");
+        }
+    }
+
+    if !skip_android {
+        stage_react_native_android(release, version, &rn_root)?;
+        staged_platforms.push("Android");
+    }
+
+    if staged_platforms.is_empty() {
+        anyhow::bail!("No platforms staged — nothing to do");
+    }
+
+    println!();
+    println!("✓ React Native staging complete!");
+    println!("  Version:   {}", version);
+    println!("  Platforms: {}", staged_platforms.join(", "));
+    println!("  Output:    {}/", rn_root.display());
+    println!();
+    println!("Next steps:");
+    println!("  cd {} && npm pack", rn_root.display());
+
+    Ok(())
+}
+
+fn stage_react_native_ios(
+    release: bool,
+    version: &str,
+    allow_macos_only: bool,
+    rn_root: &Path,
+) -> Result<()> {
+    println!("=== Staging iOS artifacts ===");
+
+    // 1. Regenerate the Swift bindings before the XCFramework so the wrapper
+    //    sources we stage in step 4 match the FFI symbols inside the
+    //    XCFramework. Skipping this would let a fresh xybrid-uniffi build
+    //    pair with a stale `Xybrid.swift` checked into bindings/apple, which
+    //    crashes at iOS runtime with FFI signature mismatches that no
+    //    existence-check would catch (mirrors what `generate_kotlin_bindings`
+    //    does for Android in stage_react_native_android).
+    generate_bindings(BindingsLanguage::Swift, None)?;
+
+    // 2. Build the XCFramework. `build_xcframework` falls back to a
+    //    macOS-only build when ORT iOS isn't vendored — useful for desktop
+    //    development against the simulator, but unsafe to ship to a real
+    //    iOS device. We detect that fallback by inspecting the XCFramework
+    //    layout below and bail unless the caller opted in.
+    build_xcframework(release, version)?;
+
+    // 3. Stage the XCFramework. Use the unversioned copy so the podspec
+    //    doesn't need to update its `vendored_frameworks` path on every bump.
+    let src_xcfw = PathBuf::from("bindings/apple/XCFrameworks/XybridFFI.xcframework");
+    if !src_xcfw.exists() {
+        anyhow::bail!(
+            "Expected XCFramework at {} after build — build_xcframework failed silently?",
+            src_xcfw.display()
+        );
+    }
+
+    let has_ios_slice = src_xcfw.read_dir().ok().is_some_and(|entries| {
+        entries.flatten().any(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with("ios-"))
+        })
+    });
+    if !has_ios_slice && !allow_macos_only {
+        anyhow::bail!(
+            "XCFramework at {} contains no iOS slice (macOS-only fallback). \
+             Refusing to stage an unshippable RN package — vendor ORT iOS or \
+             pass --allow-macos-only to override for local development.\n\
+             See xtask docs around `resolve_ort_lib_location` for the ORT setup.",
+            src_xcfw.display()
+        );
+    }
+    if !has_ios_slice {
+        eprintln!(
+            "⚠ Staging macOS-only XCFramework into RN package because \
+             --allow-macos-only was passed. The resulting npm tarball will \
+             NOT run on iOS devices or simulators."
+        );
+    }
+
+    let dst_frameworks = rn_root.join("ios/Frameworks");
+    let dst_xcfw = dst_frameworks.join("XybridFFI.xcframework");
+    if dst_xcfw.exists() {
+        std::fs::remove_dir_all(&dst_xcfw)
+            .with_context(|| format!("Failed to remove existing XCFramework at {dst_xcfw:?}"))?;
+    }
+    std::fs::create_dir_all(&dst_frameworks)?;
+    copy_dir_recursive(&src_xcfw, &dst_xcfw)
+        .context("Failed to copy XCFramework into RN module")?;
+    println!("  ✓ XCFramework -> {}", dst_xcfw.display());
+
+    // 4. Stage the Swift wrapper sources. The RN Swift glue
+    //    (XybridModuleImpl.swift) calls into these directly.
+    let dst_swift = rn_root.join("ios/XybridSwift");
+    if dst_swift.exists() {
+        std::fs::remove_dir_all(&dst_swift)
+            .with_context(|| format!("Failed to clean {dst_swift:?}"))?;
+    }
+    std::fs::create_dir_all(&dst_swift)?;
+    for fname in ["Xybrid.swift", "xybrid_uniffi.swift"] {
+        let src = PathBuf::from("bindings/apple/Sources/Xybrid").join(fname);
+        let dst = dst_swift.join(fname);
+        if !src.exists() {
+            anyhow::bail!(
+                "Expected {src:?} — run `cargo xtask generate-bindings --language swift` first"
+            );
+        }
+        std::fs::copy(&src, &dst).with_context(|| format!("Failed to copy {src:?} to {dst:?}"))?;
+        println!("  ✓ {} -> {}", fname, dst.display());
+    }
+
+    Ok(())
+}
+
+fn stage_react_native_android(release: bool, version: &str, rn_root: &Path) -> Result<()> {
+    println!("=== Staging Android artifacts ===");
+
+    // 1. Generate Kotlin bindings (host build + uniffi-bindgen + post-fixes).
+    //    build-android consumes these files implicitly via the kotlin-bindings
+    //    layout, so they must be fresh before the cross-build.
+    generate_kotlin_bindings()?;
+
+    // 2. Cross-build for all ABIs.
+    build_android(release, AndroidAbi::all(), version)?;
+
+    // 3. Stage the .so files + ORT runtime libs from the kotlin module's
+    //    libs/ directory (already populated by build_android).
+    let dst_libs = rn_root.join("android/libs");
+    if dst_libs.exists() {
+        std::fs::remove_dir_all(&dst_libs)
+            .with_context(|| format!("Failed to clean {dst_libs:?}"))?;
+    }
+    let src_libs = PathBuf::from("bindings/kotlin/libs");
+    copy_dir_recursive(&src_libs, &dst_libs)
+        .context("Failed to copy Android .so files into RN module")?;
+    println!("  ✓ JNI libs -> {}", dst_libs.display());
+
+    // 4. Stage the Kotlin wrapper sources. The RN Kotlin module
+    //    (XybridModule.kt) imports from `ai.xybrid.*` directly.
+    //
+    // Clean every staged file under ai/xybrid/ first so a previous run can't
+    // leave obsolete classes on the consumer classpath. The hand-written
+    // `ai/xybrid/reactnative/` tree (XybridModule.kt + XybridPackage.kt) is
+    // preserved — only the auto-staged Xybrid.kt / xybrid_uniffi.kt and the
+    // generated `uniffi/` subtree get wiped. Without this, dropping a class
+    // from the upstream Kotlin wrapper between staging runs would silently
+    // ship the old copy in the npm tarball.
+    let dst_pkg = rn_root.join("android/src/main/java/ai/xybrid");
+    for stale in ["Xybrid.kt", "xybrid_uniffi.kt"] {
+        let p = dst_pkg.join(stale);
+        if p.exists() {
+            std::fs::remove_file(&p).with_context(|| format!("Failed to remove stale {p:?}"))?;
+        }
+    }
+    let dst_uniffi_dir = dst_pkg.join("uniffi");
+    if dst_uniffi_dir.exists() {
+        std::fs::remove_dir_all(&dst_uniffi_dir)
+            .with_context(|| format!("Failed to clean {dst_uniffi_dir:?}"))?;
+    }
+    std::fs::create_dir_all(&dst_pkg)?;
+    for fname in ["Xybrid.kt", "xybrid_uniffi.kt"] {
+        let src = PathBuf::from("bindings/kotlin/src/main/kotlin/ai/xybrid").join(fname);
+        let dst = dst_pkg.join(fname);
+        if !src.exists() {
+            anyhow::bail!(
+                "Expected {src:?} — run `cargo xtask generate-bindings --language kotlin` first"
+            );
+        }
+        std::fs::copy(&src, &dst).with_context(|| format!("Failed to copy {src:?} to {dst:?}"))?;
+        println!("  ✓ {} -> {}", fname, dst.display());
+    }
+
+    // 5. Stage the uniffi-package copy as well — Xybrid.kt's `setBinding`
+    //    etc. resolve from `ai.xybrid` but the JNA-loading bootstrap in
+    //    the generated file lives at `uniffi.xybrid_uniffi`. Both must be
+    //    on the classpath for the runtime to load libxybrid_uniffi.so.
+    let src_uniffi_pkg = PathBuf::from(KOTLIN_UNIFFI_BINDING);
+    let dst_uniffi_pkg = rn_root
+        .join("android/src/main/java/ai/xybrid/uniffi/xybrid_uniffi")
+        .join("xybrid_uniffi.kt");
+    if !src_uniffi_pkg.exists() {
+        anyhow::bail!("Expected {src_uniffi_pkg:?} — generate-bindings should have produced it");
+    }
+    if let Some(parent) = dst_uniffi_pkg.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(&src_uniffi_pkg, &dst_uniffi_pkg)
+        .with_context(|| format!("Failed to copy {src_uniffi_pkg:?} to {dst_uniffi_pkg:?}"))?;
+    println!("  ✓ uniffi.xybrid_uniffi -> {}", dst_uniffi_pkg.display());
+
     Ok(())
 }
 

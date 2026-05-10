@@ -1,0 +1,14 @@
+# Build outputs
+lib/
+node_modules/
+
+# Native artifacts staged by `cargo xtask build-react-native`. These are
+# produced from the Rust core and should not be checked in — the npm
+# `prepare` script (or CI) regenerates them on publish. See README.md.
+ios/Frameworks/
+ios/XybridSwift/Xybrid.swift
+ios/XybridSwift/xybrid_uniffi.swift
+android/libs/
+android/src/main/java/ai/xybrid/Xybrid.kt
+android/src/main/java/ai/xybrid/xybrid_uniffi.kt
+android/src/main/java/ai/xybrid/uniffi/

@@ -1,0 +1,317 @@
+name: Build React Native
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'bindings/react-native/**'
+      - 'bindings/apple/**'
+      - 'bindings/kotlin/**'
+      - 'crates/xybrid-uniffi/**'
+      - 'xtask/**'
+      - '.github/workflows/build-react-native.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  NDK_VERSION: "26.1.10909125"
+
+jobs:
+  # iOS staging needs macOS for the XCFramework. Android staging cross-builds
+  # from Linux. We split into two jobs and let a third job consume both
+  # artifacts to assemble + lint + pack the npm package.
+
+  stage-ios:
+    name: Stage iOS artifacts
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            aarch64-apple-ios,
+            aarch64-apple-ios-sim,
+            aarch64-apple-darwin
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "rn-ios"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Stage iOS artifacts
+        # `--allow-macos-only` matches the current state of the apple build
+        # pipeline, which doesn't yet vendor ORT iOS — `build_xcframework`
+        # falls back to a macOS-only XCFramework. The override keeps this
+        # workflow runnable while the ORT iOS setup is wired up separately
+        # (tracked alongside `build-apple.yml`). Drop the flag once iOS
+        # slices are produced reliably.
+        run: cargo xtask build-react-native --release --skip-android --allow-macos-only
+
+      - name: Verify iOS staging
+        run: |
+          set -euo pipefail
+          XCFW="bindings/react-native/ios/Frameworks/XybridFFI.xcframework"
+          [ -d "$XCFW" ] || { echo "Missing $XCFW"; exit 1; }
+          for f in Xybrid.swift xybrid_uniffi.swift; do
+            [ -f "bindings/react-native/ios/XybridSwift/$f" ] \
+              || { echo "Missing bindings/react-native/ios/XybridSwift/$f"; exit 1; }
+          done
+          echo "iOS staging looks good:"
+          ls -la "$XCFW"
+          ls -la bindings/react-native/ios/XybridSwift/
+
+      - name: Upload iOS staged artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rn-ios-staged
+          path: |
+            bindings/react-native/ios/Frameworks/
+            bindings/react-native/ios/XybridSwift/
+          if-no-files-found: error
+
+  stage-android:
+    name: Stage Android artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "rn-android"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          key: android-ndk-${{ env.NDK_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install NDK
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Set NDK environment
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Cache cargo-ndk
+        id: cache-cargo-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-ndk-${{ runner.os }}-
+
+      - name: Install cargo-ndk
+        if: steps.cache-cargo-ndk.outputs.cache-hit != 'true'
+        run: cargo install cargo-ndk
+
+      - name: Stage Android artifacts
+        run: cargo xtask build-react-native --release --skip-ios
+
+      - name: Verify Android staging
+        run: |
+          set -euo pipefail
+          BASE="bindings/react-native/android/libs"
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            [ -f "$BASE/$abi/libxybrid_uniffi.so" ] \
+              || { echo "Missing $BASE/$abi/libxybrid_uniffi.so"; exit 1; }
+          done
+          PKG="bindings/react-native/android/src/main/java/ai/xybrid"
+          [ -f "$PKG/Xybrid.kt" ] || { echo "Missing $PKG/Xybrid.kt"; exit 1; }
+          [ -f "$PKG/xybrid_uniffi.kt" ] || { echo "Missing $PKG/xybrid_uniffi.kt"; exit 1; }
+          [ -f "$PKG/uniffi/xybrid_uniffi/xybrid_uniffi.kt" ] \
+            || { echo "Missing uniffi-package copy"; exit 1; }
+          echo "Android staging looks good:"
+          find "$BASE" -name "*.so" -exec ls -la {} \;
+
+      - name: Upload Android staged artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rn-android-staged
+          path: |
+            bindings/react-native/android/libs/
+            bindings/react-native/android/src/main/java/ai/xybrid/
+          if-no-files-found: error
+
+  package:
+    name: Typecheck + npm pack
+    needs: [stage-ios, stage-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '20'
+
+      - name: Download iOS staged artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rn-ios-staged
+          path: bindings/react-native/ios/
+
+      - name: Download Android staged artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rn-android-staged
+          path: bindings/react-native/android/
+
+      - name: Install RN module deps
+        working-directory: bindings/react-native
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        working-directory: bindings/react-native
+        run: npm run typecheck
+
+      - name: Build TS
+        working-directory: bindings/react-native
+        run: npm run build
+
+      - name: npm pack (dry-run)
+        working-directory: bindings/react-native
+        run: npm pack --dry-run
+
+      - name: npm pack (real)
+        working-directory: bindings/react-native
+        run: npm pack
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: react-native-xybrid-tarball
+          path: bindings/react-native/react-native-xybrid-*.tgz
+          if-no-files-found: error
+
+  smoke-android:
+    name: Smoke build (Android example app)
+    needs: stage-android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '20'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Download Android staged artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rn-android-staged
+          path: bindings/react-native/android/
+
+      - name: Bootstrap example host shell
+        working-directory: bindings/react-native/example
+        run: ./bootstrap.sh
+
+      - name: Install example deps
+        working-directory: bindings/react-native/example
+        # `link:..` resolves the parent package by symlink — fast and ensures
+        # we exercise the staged artifacts, not a published version.
+        run: npm install --no-audit --no-fund
+
+      - name: Build Android (assembleDebug)
+        working-directory: bindings/react-native/example/android
+        # assembleDebug compiles Kotlin + packages the .so files, exercising
+        # the gradle path end-to-end. We skip running the emulator — that's
+        # an order of magnitude more CI time for marginal extra coverage.
+        run: ./gradlew assembleDebug --stacktrace
+        env:
+          GRADLE_OPTS: '-Dorg.gradle.daemon=false'
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: example-android-debug-apk
+          path: bindings/react-native/example/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  smoke-ios:
+    name: Smoke build (iOS podspec lint)
+    needs: stage-ios
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download iOS staged artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rn-ios-staged
+          path: bindings/react-native/ios/
+
+      # `pod lib lint` validates the podspec is well-formed, the Swift sources
+      # compile against the bundled XCFramework, and all referenced files
+      # exist. It's a fraction of the cost of bootstrapping a full RN host
+      # app and running xcodebuild — and catches the same failure modes that
+      # would show up in an `npx pod-install` from a consumer app.
+      #
+      # `--use-libraries` mirrors how the host Podfile installs the module
+      # (RN's `use_react_native!` helper opts every pod into static libraries
+      # by default).
+      - name: Lint podspec
+        working-directory: bindings/react-native
+        run: |
+          pod lib lint react-native-xybrid.podspec \
+            --allow-warnings \
+            --use-libraries \
+            --skip-import-validation \
+            --verbose
