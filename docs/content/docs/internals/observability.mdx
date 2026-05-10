@@ -48,6 +48,8 @@ pub struct HardwareCapabilities {
 | `Hot` | 70-80°C | Reduce workload |
 | `Critical` | > 80°C | Pause heavy operations |
 
+The source of `battery_level` and `thermal_state` differs by platform — desktop builds poll the OS in-process, mobile bindings push values from host observers. See [Host Integration](/docs/internals/host-integration) for the per-platform wiring and the override surface.
+
 ### Decision Methods
 
 ```rust
