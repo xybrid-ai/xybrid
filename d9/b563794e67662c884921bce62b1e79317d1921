@@ -1,0 +1,19 @@
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_a2154402101705::t_7c77b99e5b0253 57-60,62,66-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "d9b563794e67662c884921bce62b1e79317d1921",
+  "prompts": {},
+  "sessions": {
+    "s_a2154402101705": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5892ec4d-cdd0-47a7-8bd2-a0e2916ece80",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
