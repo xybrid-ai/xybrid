@@ -1,0 +1,21 @@
+bindings/flutter/pubspec.yaml
+  s_e8f05c7fd2beb5::t_c199a813f76edf 24-29
+bindings/flutter/lib/src/xybrid.dart
+  s_e8f05c7fd2beb5::t_c199a813f76edf 9,11,37-49,97-98,192-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "6a080cfac2a8cee661d277570787700475413ec8",
+  "prompts": {},
+  "sessions": {
+    "s_e8f05c7fd2beb5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1fa47ad-790b-47ee-aab2-6e71e2bc17b9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
