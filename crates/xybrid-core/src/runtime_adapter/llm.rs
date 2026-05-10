@@ -54,10 +54,7 @@ pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
     }
 }
 
-#[cfg(all(
-    feature = "llm-llamacpp",
-    any(target_os = "macos", target_os = "ios")
-))]
+#[cfg(all(feature = "llm-llamacpp", any(target_os = "macos", target_os = "ios")))]
 fn llamacpp_execution_provider() -> &'static str {
     // build.rs sets GGML_METAL=ON for both macOS and iOS Apple targets.
     "metal"
