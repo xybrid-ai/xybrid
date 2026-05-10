@@ -224,6 +224,7 @@ Inference events (`ModelComplete`, `PipelineComplete`) carry per-call attributio
 | `task` | string | inference | `chat` \| `vlm` \| `asr` \| `tts` \| `embedding` \| `image-gen` \| `ocr` \| `rerank` \| `classify` (open string for forward-compat) | `ModelMetadata.metadata["task"]` from `model_metadata.json` |
 | `quantization` | string | inference | `q4_0` \| `q4_k_m` \| `q5_k_m` \| `q8_0` \| `fp16` \| `fp32` (open string — common GGUF labels) | `ModelMetadata.metadata["quantization"]` first; falls back to GGUF filename inference; absent (not empty) when unknown |
 | `execution_provider` | string | inference (local only) | `coreml` \| `cpu` \| `metal` \| `cuda` \| `mlx-metal` \| `ane` (open string) | ORT path: harvested from per-session profiling JSON after the first inference (ORT exposes no session-level resolved-EP getter, so we read `args.provider` from the Chrome-trace output and pick the EP that ran the most ops). LLM path: build-flag-derived label keyed on the backend name. Cloud paths omit — `provider` carries attribution. |
+| `prompt_cached_tokens` | u64 | inference (local LLM, llama.cpp only) | — | Count of prompt tokens served from the backend's KV cache on this call (longest common prefix with the previous turn). Local mirror of cloud's `cache_read_input_tokens`. Absent on first turns and for backends that don't track prefix reuse (cloud, mistralrs, mock). Only emitted when positive — `0` looks indistinguishable from "no cache" so the field stays absent rather than reporting a misleading zero. |
 | `tokens_in` | u64 | inference | — | LLM span (`prompt_tokens` for OpenAI; synthesized total for Anthropic) |
 | `tokens_out` | u64 | inference | — | LLM span (`completion_tokens`) |
 | `cache_read_input_tokens` | u64 | inference | — | Anthropic-canonical; OpenAI's nested `prompt_tokens_details.cached_tokens` maps here |
@@ -234,6 +235,8 @@ The closed set for `backend` is intentionally narrow — values outside it are n
 For local LLM events `provider` is always absent; for cloud events it is always present alongside `backend = "cloud"`.
 
 `execution_provider` is the diagnostic complement to `backend`: `backend` says *which engine we asked for*, `execution_provider` says *what actually ran*. The two diverge most often on the ORT path (CoreML can silently fall back to CPU per-op when an op isn't supported) — the field is the analytics signal that explains "why is this run slow on this chip?" The field is absent for cloud events because cloud `provider` already attributes execution end-to-end.
+
+`prompt_cached_tokens` is the local-LLM analogue of cloud's `cache_read_input_tokens`. Multi-turn workloads with a stable system prompt and conversation prefix routinely see 70-90% of the prompt served from the backend's KV cache on every call after the first — that's the difference between a 7B model feeling responsive and feeling sluggish, and it's also a billing-correctness signal (prefill is the expensive part; cached tokens shouldn't count toward "tokens processed"). Stack with `cache_read_input_tokens` on the same dashboard axis to compare local vs cloud cache savings.
 
 ## `ModelDownload` event
 

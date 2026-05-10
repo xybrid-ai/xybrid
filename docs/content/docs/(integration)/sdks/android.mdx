@@ -22,6 +22,13 @@ Minimum SDK: **24** (Android 7.0)
 ```kotlin
 import ai.xybrid.*
 
+class MyApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        Xybrid.init(this)
+    }
+}
+
 // Load a model from the registry
 val loader = XybridModelLoader.fromRegistry("kokoro-82m")
 val model = loader.load()
@@ -34,6 +41,8 @@ if (result.success) {
     println("Latency: ${result.latencyMs}ms")
 }
 ```
+
+`Xybrid.init(context)` also registers `BatteryManager` and (on API 29+) `PowerManager.OnThermalStatusChangedListener` observers, forwarding readings to the routing engine. See [Host Integration](/docs/internals/host-integration) for what's wired automatically and the override surface.
 
 ---
 

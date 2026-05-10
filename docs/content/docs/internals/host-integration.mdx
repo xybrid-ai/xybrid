@@ -1,0 +1,53 @@
+---
+title: Host Integration
+description: How battery and thermal signals reach the routing engine on each platform
+---
+
+The routing engine reads `battery_level` and `thermal_state` to decide whether to run a stage on-device or fall back to the cloud (see [Decision Methods](/docs/internals/observability#decision-methods)). On desktop those signals come from in-process pollers in `xybrid-core`. On mobile the platform's notification APIs live in the host runtime, so the SDK wrappers subscribe and push values across the FFI.
+
+| Platform | Battery | Thermal |
+|----------|---------|---------|
+| Linux    | sysfs (in-Rust) | sysfs (in-Rust) |
+| macOS    | IOKit (in-Rust) | NSProcessInfo (in-Rust) |
+| Windows  | `GetSystemPowerStatus` (in-Rust) | WMI, background thread (in-Rust) |
+| iOS      | host push | NSProcessInfo (in-Rust) |
+| Android  | host push | host push (API 29+) |
+
+## Auto-wiring at init
+
+Each SDK's init entry point registers the host observers so consumer apps don't write platform-channel boilerplate.
+
+```kotlin
+// Android — Application.onCreate()
+Xybrid.init(this) // BatteryManager + PowerManager (API 29+)
+```
+
+```swift
+// iOS — UIDevice battery observer; macOS does nothing extra
+Xybrid.initialize()
+```
+
+```dart
+// Flutter — battery_plus on iOS / Android; desktops use in-Rust pollers
+await Xybrid.init();
+```
+
+## Override surface
+
+If you have your own observer infrastructure or want to forward a signal the SDK doesn't auto-wire (Flutter Android thermal, custom power management), the push-state setters are exposed in every binding:
+
+| Function | Effect |
+|----------|--------|
+| `setBatteryLevel(percent)` | Replace cached battery percentage (0–100). |
+| `clearBatteryLevel()` | Mark battery as unknown. |
+| `setThermalState(state)` | Replace cached thermal state. |
+| `clearThermalState()` | Mark thermal as unknown. |
+
+Setters are idempotent and process-global; the most recent push wins, so it's safe to call them on top of the SDK's default wiring. The routing engine treats `None` as "no signal" rather than substituting an optimistic default.
+
+## Known gaps
+
+- **Flutter Android thermal**: no widely-adopted Dart package wraps `PowerManager.OnThermalStatusChangedListener`. Push via your own `MethodChannel` if you need it.
+- **Android API 24–28**: `addThermalStatusListener` is API 29+. Older devices report `thermal_state = None` and the routing engine throttles on battery alone.
+
+For the underlying API, see [`xybrid_core::device::platform_state`](https://docs.rs/xybrid-core/latest/xybrid_core/device/platform_state/).
