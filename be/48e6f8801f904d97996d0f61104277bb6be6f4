@@ -1,0 +1,92 @@
+bindings/react-native/android/build.gradle
+  s_9f87bfb9c88973::t_8fbb3c82616dce 1-75,82-88
+  s_9f87bfb9c88973::t_4be305198c7d69 76-81
+bindings/react-native/example/index.js
+  s_9f87bfb9c88973::t_e4e7d5ca4a3242 1-5
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_9f87bfb9c88973::t_7b468eda73ea6d 1-159,163-167,169-184,186-190,192-313
+  s_9f87bfb9c88973::t_f67f562fca4915 160-162,168,185,191
+bindings/react-native/ios/XybridModule.mm
+  s_9f87bfb9c88973::t_1c2f68edc61d57 1-143
+bindings/react-native/example/metro.config.js
+  s_9f87bfb9c88973::t_d9ff1a0172e99e 1-30
+bindings/react-native/example/tsconfig.json
+  s_9f87bfb9c88973::t_56952af7eaf9a6 1-9
+bindings/react-native/README.md
+  s_9f87bfb9c88973::t_5bc5fc50e9eef8 1-99
+bindings/react-native/example/app.json
+  s_9f87bfb9c88973::t_8cc7637277ab6d 1-4
+xtask/src/main.rs
+  s_9f87bfb9c88973::t_7276c4b23c7c6e 650
+  s_9f87bfb9c88973::t_b42a773a9a4be5 1740,1758
+  s_9f87bfb9c88973::t_932e9ed3f942d5 645-649,651-654,656
+  s_9f87bfb9c88973::t_6f170fa8482dcd 360-382,392-396
+  s_9f87bfb9c88973::t_7e00ec5b34f775 1786-1791,1794-1807,1810,1816-1832,1834-1840,1843,1855,1858-1861
+  s_9f87bfb9c88973::t_d66aeb175220f0 1903-1910,1912-1914,1916-1922
+  s_9f87bfb9c88973::t_a2896ad9ee8e40 655,1915
+  s_9f87bfb9c88973::t_caeeb9a2f17b2e 1847-1848,1871,1932,1945
+  s_9f87bfb9c88973::t_3c3b21322777d7 383-391
+  s_9f87bfb9c88973::t_f91bd80df732c0 1729-1739,1741-1757,1759-1785,1792-1793,1808-1809,1811-1815,1833,1841-1842,1844-1846,1849-1854,1856-1857,1862-1870,1872-1902,1911,1923-1931,1933-1944,1946-1956
+bindings/react-native/android/src/main/AndroidManifest.xml
+  s_9f87bfb9c88973::t_b09d5bba87eb9e 1
+bindings/react-native/example/babel.config.js
+  s_9f87bfb9c88973::t_f37f4b196627aa 1-3
+bindings/react-native/example/bootstrap.sh
+  s_9f87bfb9c88973::t_2c09b924c55cda 1-83
+bindings/react-native/src/NativeXybrid.ts
+  s_9f87bfb9c88973::t_04028cf41dbf6e 1-49
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridPackage.kt
+  s_9f87bfb9c88973::t_cfc5d0a4728a86 1-14
+bindings/react-native/example/package.json
+  s_9f87bfb9c88973::t_5a6fc24f9aa302 1-30
+bindings/react-native/ios/XybridModule.h
+  s_9f87bfb9c88973::t_787a863117dc4a 1-14
+bindings/react-native/example/README.md
+  s_9f87bfb9c88973::t_ad2d71e30c3619 1-60
+bindings/react-native/tsconfig.json
+  s_9f87bfb9c88973::t_adb6a740ad76d8 1-21
+bindings/react-native/example/.gitignore
+  s_9f87bfb9c88973::t_a702ad3d051cff 1-16
+bindings/react-native/src/types.ts
+  s_9f87bfb9c88973::t_3d6e5e4e971c3b 1-58
+.github/workflows/build-react-native.yml
+  s_9f87bfb9c88973::t_26c7f5606e74d4 1-63,71-233
+  s_9f87bfb9c88973::t_8b8c4a1366b9b0 64-70
+  s_9f87bfb9c88973::t_754a4dfa319ca2 234-317
+bindings/react-native/react-native-xybrid.podspec
+  s_9f87bfb9c88973::t_9f8c638290af96 1-49
+bindings/react-native/src/index.ts
+  s_9f87bfb9c88973::t_6d189fb6c789da 42,46,54-55
+  s_9f87bfb9c88973::t_964556fbba6d82 1-22,31-36,39,56-59,61-100,105-147
+  s_9f87bfb9c88973::t_947254de9024ca 23-29,37-38,40-41
+  s_9f87bfb9c88973::t_47da2fb98e02af 101-104
+  s_9f87bfb9c88973::t_6ff12091f34024 30,43-45,47-53,60
+bindings/react-native/.npmignore
+  s_9f87bfb9c88973::t_130dbd9f6dd013 1-9
+bindings/react-native/tsconfig.build.json
+  s_9f87bfb9c88973::t_d9a6d34f70669f 1-10
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_9f87bfb9c88973::t_9cd6126c99e83f 1-329
+bindings/react-native/package.json
+  s_9f87bfb9c88973::t_bcadfb4c6c63ac 1-63
+bindings/react-native/example/App.tsx
+  s_9f87bfb9c88973::t_c3ad906916fc23 1-177
+bindings/react-native/.gitignore
+  s_9f87bfb9c88973::t_bf6a919c636c1a 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "be48e6f8801f904d97996d0f61104277bb6be6f4",
+  "prompts": {},
+  "sessions": {
+    "s_9f87bfb9c88973": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "960d065d-74dd-49d6-b24f-b0fd6f06eb14",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
