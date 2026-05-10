@@ -6,7 +6,9 @@ library;
 import 'dart:async';
 import 'dart:io' show Platform;
 
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:xybrid_flutter/src/rust/api/device.dart';
 import 'package:xybrid_flutter/src/rust/api/sdk_client.dart';
 import 'package:path_provider/path_provider.dart';
 import 'rust/frb_generated.dart';
@@ -31,6 +33,19 @@ class Xybrid {
   static bool _initialized = false;
   static final Completer<void> _initCompleter = Completer<void>();
   static bool _initializing = false;
+
+  /// Battery state subscription retained for the process lifetime so
+  /// the underlying platform stream isn't garbage-collected. `null`
+  /// outside iOS / Android — desktop platforms use xybrid-core's
+  /// in-process pollers and don't subscribe here.
+  ///
+  /// The two lints below are intentional: the field exists solely
+  /// to anchor the subscription against GC, and the SDK is a
+  /// process-lifetime singleton (matches the Kotlin
+  /// `Xybrid.init(context)` and Swift `Xybrid.initialize()` shapes —
+  /// neither of which exposes a teardown either).
+  // ignore: cancel_subscriptions, unused_field
+  static StreamSubscription<BatteryState>? _batterySubscription;
 
   /// Private constructor to prevent instantiation.
   Xybrid._();
@@ -78,6 +93,8 @@ class Xybrid {
         final cacheDir = '${appDir.path}/xybrid/models';
         XybridSdkClient.initSdkCacheDir(cacheDir: cacheDir);
       }
+
+      await _registerPlatformObservers();
 
       _initialized = true;
       _initCompleter.complete();
@@ -171,5 +188,57 @@ class Xybrid {
     }
 
     return XybridPipeline.fromFile(filePath!);
+  }
+
+  /// Subscribe to OS-level battery state on mobile platforms and
+  /// forward each reading into the routing engine via the FRB
+  /// push-state surface. Desktop platforms (macOS / Linux / Windows)
+  /// use xybrid-core's in-process pollers, and Flutter on iOS gets
+  /// thermal in-Rust via NSProcessInfo, so this only runs on iOS and
+  /// Android.
+  ///
+  /// `battery_plus` exposes a snapshot getter (`batteryLevel`) and a
+  /// stream of high-level state changes (`onBatteryStateChanged`) but
+  /// no continuous level stream. The level is therefore re-read on
+  /// each state-change event (plug/unplug, charge full, etc.) plus
+  /// once at init so the first cache miss isn't blind. Routing
+  /// decisions are bucket-based (low / mid / high), so the resulting
+  /// granularity is sufficient — the cache TTL inside `ResourceMonitor`
+  /// is the limiting factor on freshness regardless.
+  ///
+  /// Thermal on Flutter Android is currently a gap: Dart has no
+  /// cross-platform package wrapping `PowerManager.OnThermalStatusChangedListener`,
+  /// and adding a Kotlin plugin layer is out of scope here. Consumer
+  /// apps that need it can call `XybridDevice.setThermalState(...)`
+  /// directly from their own platform channel.
+  static Future<void> _registerPlatformObservers() async {
+    if (!(Platform.isAndroid || Platform.isIOS)) {
+      return;
+    }
+    final battery = Battery();
+    await _pushBatteryLevel(battery);
+    _batterySubscription = battery.onBatteryStateChanged.listen((_) {
+      // Re-read the level on each state transition; battery_plus
+      // doesn't expose a level stream so this is the canonical
+      // refresh point.
+      unawaited(_pushBatteryLevel(battery));
+    });
+  }
+
+  static Future<void> _pushBatteryLevel(Battery battery) async {
+    try {
+      final level = await battery.batteryLevel;
+      // battery_plus returns 0..=100 already; clamp defensively in case
+      // a future platform impl reports out-of-range values rather than
+      // throwing.
+      final pct = level.clamp(0, 100);
+      XybridDevice.setBatteryLevel(percent: pct);
+    } catch (_) {
+      // Sensor unavailable (emulator, sandboxed context, etc.) —
+      // surface as "unknown" rather than a fake reading. The routing
+      // engine treats `None` as "no signal" and falls back to other
+      // evidence.
+      XybridDevice.clearBatteryLevel();
+    }
   }
 }
