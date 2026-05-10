@@ -207,7 +207,13 @@ extern "C" {
         n_stop_seqs: c_int,
         callback: Option<TokenCallback>,
         user_data: *mut c_void,
+        n_past_in: c_int,
     ) -> c_int;
+
+    // Truncate the KV cache to a prefix length, dropping tokens past it.
+    // Pairs with the n_past_in parameter on llama_generate_streaming_c —
+    // see the C wrapper for the prefix-reuse contract.
+    fn llama_kv_cache_seq_rm_c(ctx: *mut c_void, seq_id: c_int, p_keep: c_int) -> c_int;
 }
 
 /// Callback type for streaming token generation.
@@ -345,6 +351,24 @@ pub fn llama_free(mut ctx: LlamaContext) {
 pub fn llama_kv_cache_clear(ctx: &LlamaContext) {
     unsafe {
         llama_kv_cache_clear_c(ctx.ptr);
+    }
+}
+
+/// Truncate the KV cache for `seq_id` to a prefix length, dropping tokens
+/// at positions `[p_keep, ∞)`. Used by the multi-turn prefix-reuse path:
+/// caller computes the longest common prefix between the new prompt and
+/// the previously-tokenized prompt, then calls this to drop the diverged
+/// tail before re-prefilling only the new tail at position `p_keep`.
+/// Pairs with `n_past_in` on [`llama_generate_streaming`].
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_kv_cache_seq_rm(ctx: &LlamaContext, seq_id: i32, p_keep: usize) {
+    unsafe {
+        // Caller-side bounds check: p_keep is unsigned in our API but
+        // the C signature is c_int. Saturate at i32::MAX to keep the
+        // FFI call total — the legitimate range is [0, n_ctx) which is
+        // always well below i32::MAX in practice.
+        let p_keep_c = p_keep.min(c_int::MAX as usize) as c_int;
+        let _ = llama_kv_cache_seq_rm_c(ctx.ptr, seq_id, p_keep_c);
     }
 }
 
@@ -914,6 +938,7 @@ where
 /// # Returns
 /// Vector of generated token IDs and whether generation was stopped by callback.
 #[cfg(feature = "llm-llamacpp")]
+#[allow(clippy::too_many_arguments)]
 pub fn llama_generate_streaming<F>(
     ctx: &LlamaContext,
     model: &LlamaModel,
@@ -926,6 +951,12 @@ pub fn llama_generate_streaming<F>(
     repeat_penalty: f32,
     stop_sequences: &[String],
     mut on_token: F,
+    // Position in the KV cache where `input_tokens` should be prefilled.
+    // Pass 0 for the legacy "fresh prefill from scratch" behaviour.
+    // Positive values let the caller skip prefill for a shared prefix
+    // already in the cache (truncate the cache via
+    // [`llama_kv_cache_seq_rm`] first, then call with the diverged tail).
+    n_past_in: usize,
 ) -> Result<(Vec<i32>, bool), AdapterError>
 where
     F: FnMut(i32, &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
@@ -992,6 +1023,7 @@ where
             n_stop_seqs,
             Some(streaming_trampoline::<F>),
             &mut streaming_ctx as *mut StreamingContext<F> as *mut c_void,
+            n_past_in.min(c_int::MAX as usize) as c_int,
         )
     };
 
@@ -1078,6 +1110,9 @@ pub fn llama_free(_ctx: LlamaContext) {}
 pub fn llama_kv_cache_clear(_ctx: &LlamaContext) {}
 
 #[cfg(not(feature = "llm-llamacpp"))]
+pub fn llama_kv_cache_seq_rm(_ctx: &LlamaContext, _seq_id: i32, _p_keep: usize) {}
+
+#[cfg(not(feature = "llm-llamacpp"))]
 pub fn llama_format_chat(
     _model: &LlamaModel,
     _messages: &[ChatMessage],
@@ -1150,6 +1185,7 @@ pub fn llama_generate(
 }
 
 #[cfg(not(feature = "llm-llamacpp"))]
+#[allow(clippy::too_many_arguments)]
 pub fn llama_generate_streaming<F>(
     _ctx: &LlamaContext,
     _model: &LlamaModel,
@@ -1162,6 +1198,7 @@ pub fn llama_generate_streaming<F>(
     _repeat_penalty: f32,
     _stop_sequences: &[String],
     _on_token: F,
+    _n_past_in: usize,
 ) -> Result<(Vec<i32>, bool), AdapterError>
 where
     F: FnMut(i32, &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,

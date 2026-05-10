@@ -151,6 +151,30 @@ void llama_kv_cache_clear_c(llama_context* ctx) {
     }
 }
 
+// Truncate the KV cache for a single sequence to a prefix length, keeping
+// positions [0, p_keep) and dropping [p_keep, ∞). Used by the multi-turn
+// prefix-reuse path: caller computes the longest common prefix between the
+// new prompt and the previously-tokenized prompt, then calls this to drop
+// the diverged tail from the cache before re-prefilling only the new tail
+// at position p_keep. Pairs with the n_past_in parameter on
+// llama_generate_streaming_c.
+//
+// Returns 0 on success, -1 on null context / no memory available.
+int llama_kv_cache_seq_rm_c(llama_context* ctx, int seq_id, int p_keep) {
+    if (!ctx) {
+        return -1;
+    }
+    llama_memory_t mem = llama_get_memory(ctx);
+    if (!mem) {
+        return -1;
+    }
+    // llama.cpp's seq_rm semantics: remove tokens in the half-open range
+    // [p0, p1). p1 = -1 means "to the end". We keep [0, p_keep) and drop
+    // everything from p_keep onward.
+    llama_memory_seq_rm(mem, (llama_seq_id) seq_id, (llama_pos) p_keep, -1);
+    return 0;
+}
+
 // =============================================================================
 // Tokenization (using new vocab API)
 // =============================================================================
@@ -670,16 +694,29 @@ int llama_generate_streaming_c(
     const int* stop_lens,
     int n_stop_seqs,
     token_callback_t callback,
-    void* user_data
+    void* user_data,
+    // Position in the KV cache where input_tokens should be prefilled.
+    // Pass 0 for the legacy "fresh prefill from scratch" behaviour. Positive
+    // values let the caller skip prefill for a shared prefix that's already
+    // in the cache: truncate the cache to length n_past_in (via
+    // llama_kv_cache_seq_rm_c above), then call this with input_tokens =
+    // the diverged tail and n_past_in = the prefix length. The wrapper
+    // prefills the tail at positions [n_past_in, n_past_in + n_input).
+    int n_past_in
 ) {
     if (!ctx || !model || !input_tokens || !output_tokens || n_input <= 0 || max_tokens <= 0) {
         return -1;
     }
+    if (n_past_in < 0) {
+        return -1;
+    }
 
-    // Validate input tokens fit within context window.
+    // Validate the prefilled prefix + new tail fits within the context window.
+    // Without n_past_in this collapses to the original n_input >= n_ctx check.
     const int n_ctx = llama_n_ctx(ctx);
-    if (n_input >= n_ctx) {
-        fprintf(stderr, "llama_generate_streaming_c: input tokens (%d) >= context window (%d)\n", n_input, n_ctx);
+    if (n_past_in + n_input >= n_ctx) {
+        fprintf(stderr, "llama_generate_streaming_c: prefix (%d) + input (%d) >= context window (%d)\n",
+                n_past_in, n_input, n_ctx);
         return -4;  // Input too long for context window
     }
 
@@ -699,7 +736,10 @@ int llama_generate_streaming_c(
     llama_batch batch = llama_batch_init(n_batch > 0 ? n_batch : 512, 0, 1);
 
     int n_generated = 0;
-    int n_cur = 0;  // Current position in context
+    // Start prefill at the caller-supplied position so we slot the new
+    // tail in right after whatever shared prefix is already in the cache.
+    // Generation loop continues from the same counter post-prefill.
+    int n_cur = n_past_in;
     bool stopped_by_callback = false;
 
     // Pre-allocate candidates buffer once — reused every token.
