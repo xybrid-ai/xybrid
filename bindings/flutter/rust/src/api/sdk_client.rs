@@ -1,10 +1,6 @@
 use flutter_rust_bridge::frb;
 
-/// Binding identifier reported in the `X-Xybrid-Client` registry header for
-/// Flutter apps. Routed through `xybrid_sdk::set_binding` at every FFI entry
-/// so registry calls are attributed correctly even on platforms that skip
-/// `init_sdk_cache_dir` (iOS/macOS).
-const FLUTTER_BINDING: &str = "flutter";
+use super::FLUTTER_BINDING;
 
 #[frb(opaque)]
 pub struct XybridSdkClient;

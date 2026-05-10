@@ -17,12 +17,7 @@
 
 use flutter_rust_bridge::frb;
 
-/// Binding identifier reported in the `X-Xybrid-Client` registry header
-/// for Flutter apps. Mirrors `sdk_client::FLUTTER_BINDING` so the
-/// telemetry attribution stays consistent even when a Flutter app
-/// only exercises the push-state surface (no `init_sdk_cache_dir`
-/// call, common on iOS/macOS hosts).
-const FLUTTER_BINDING: &str = "flutter";
+use super::FLUTTER_BINDING;
 
 /// Thermal pressure state forwarded by the host.
 ///
