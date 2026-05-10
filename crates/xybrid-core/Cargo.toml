@@ -150,14 +150,22 @@ ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
 # Force rustls to use ring crypto backend instead of aws-lc-rs
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
-# macOS native platform-state poller: NSProcessInfo.thermalState (Foundation)
-# for thermal, IOKit IOPSCopyPowerSourcesInfo for battery — both in-process
-# and microsecond-class. A `pmset` shellout would fork+exec on every cache
-# miss inside the orchestrator hot path; IOKit's IOPS APIs are documented
-# thread-safe and avoid that.
-[target.'cfg(target_os = "macos")'.dependencies]
+# Apple thermal poller (macOS + iOS): NSProcessInfo.thermalState — same
+# Foundation API on both, no entitlement, microsecond-class. The
+# Foundation crates work cross-platform under the same target_os check
+# clang's apple compilation matrix uses.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSProcessInfo", "NSString"] }
+
+# macOS-only battery poller: IOKit IOPSCopyPowerSourcesInfo. The IOPS
+# APIs are gated behind a private entitlement on iOS; the public
+# UIDevice.batteryLevel path requires UIKit which doesn't belong in
+# xybrid-core, so iOS hosts push battery via the UniFFI surface.
+# A `pmset` shellout would fork+exec on every cache miss inside the
+# orchestrator hot path; IOKit's IOPS APIs are documented thread-safe
+# and avoid that.
+[target.'cfg(target_os = "macos")'.dependencies]
 objc2-io-kit = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFString", "CFNumber", "CFArray", "CFDictionary"] }
 

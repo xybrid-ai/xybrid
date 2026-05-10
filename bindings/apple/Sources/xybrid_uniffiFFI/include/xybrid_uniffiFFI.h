@@ -87,9 +87,19 @@ void*_Nonnull uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_registr
 );
 void* _Nonnull uniffi_xybrid_uniffi_fn_method_xybridmodelloader_load(void*_Nonnull ptr
 );
+void uniffi_xybrid_uniffi_fn_func_clear_battery_level(RustCallStatus *_Nonnull out_status
+    
+);
+void uniffi_xybrid_uniffi_fn_func_clear_thermal_state(RustCallStatus *_Nonnull out_status
+    
+);
 void uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(RustBuffer cache_dir, RustCallStatus *_Nonnull out_status
 );
+void uniffi_xybrid_uniffi_fn_func_set_battery_level(uint8_t percent, RustCallStatus *_Nonnull out_status
+);
 void uniffi_xybrid_uniffi_fn_func_set_binding(RustBuffer binding, RustCallStatus *_Nonnull out_status
+);
+void uniffi_xybrid_uniffi_fn_func_set_thermal_state(RustBuffer state, RustCallStatus *_Nonnull out_status
 );
 RustBuffer ffi_xybrid_uniffi_rustbuffer_alloc(int32_t size, RustCallStatus *_Nonnull out_status
 );
@@ -205,10 +215,22 @@ void ffi_xybrid_uniffi_rust_future_free_void(void* _Nonnull handle
 );
 void ffi_xybrid_uniffi_rust_future_complete_void(void* _Nonnull handle, RustCallStatus *_Nonnull out_status
 );
+uint16_t uniffi_xybrid_uniffi_checksum_func_clear_battery_level(void
+    
+);
+uint16_t uniffi_xybrid_uniffi_checksum_func_clear_thermal_state(void
+    
+);
 uint16_t uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir(void
     
 );
+uint16_t uniffi_xybrid_uniffi_checksum_func_set_battery_level(void
+    
+);
 uint16_t uniffi_xybrid_uniffi_checksum_func_set_binding(void
+    
+);
+uint16_t uniffi_xybrid_uniffi_checksum_func_set_thermal_state(void
     
 );
 uint16_t uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id(void

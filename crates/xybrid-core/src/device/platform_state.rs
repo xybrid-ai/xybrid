@@ -105,6 +105,11 @@ pub fn clear_thermal_state() {
 ///   in-process and thread-safe per Apple's docs — no fork/exec, no
 ///   COM, safe on the runtime thread that
 ///   `Orchestrator::execute_stage_async` lands on.
+/// - **iOS**: reads `NSProcessInfo.thermalState` (same Foundation API
+///   as macOS, no entitlement). Battery comes from the host via the
+///   UniFFI surface — `UIDevice.batteryLevel` requires UIKit which
+///   doesn't belong in `xybrid-core`, so the Swift wrapper subscribes
+///   to `UIDevice.batteryLevelDidChangeNotification` and pushes.
 /// - **Windows**: reads `GetSystemPowerStatus` (Win32, in-process)
 ///   for battery on the cache-miss path. Thermal is sourced from
 ///   `MSAcpi_ThermalZoneTemperature` over WMI (`ROOT\WMI`); COM
@@ -112,9 +117,10 @@ pub fn clear_thermal_state() {
 ///   thread that `Orchestrator::execute_stage_async` lands on, so
 ///   the WMI loop runs on a dedicated background thread that pushes
 ///   results through the public setters.
-/// - **iOS, Android**: no-op for now. Hosts push state via the public
-///   setters from platform observers; native in-process pollers come
-///   later.
+/// - **Android**: no-op. Hosts push state via the public setters
+///   from platform observers; the Kotlin `Xybrid.init(context)`
+///   wrapper registers `BatteryManager.ACTION_BATTERY_CHANGED` and
+///   `PowerManager.OnThermalStatusChangedListener`.
 ///
 /// All in-process refreshers go through the same setters a host would
 /// use, so behaviour is uniform whether data comes from sysfs, IOKit, or
@@ -125,8 +131,8 @@ pub fn clear_thermal_state() {
 pub fn refresh_native_platform_state() {
     #[cfg(target_os = "linux")]
     linux::refresh();
-    #[cfg(target_os = "macos")]
-    macos::refresh();
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    apple::refresh();
     #[cfg(target_os = "windows")]
     windows::refresh();
 }
@@ -214,38 +220,51 @@ mod linux {
     }
 }
 
-#[cfg(target_os = "macos")]
-mod macos {
-    //! macOS native pollers.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod apple {
+    //! Apple native pollers (macOS + iOS).
     //!
     //! Thermal: `NSProcessInfo.thermalState` — direct Foundation call,
-    //! no entitlement, microsecond-class.
+    //! no entitlement, microsecond-class. Same Foundation API on both
+    //! platforms, so a single code path covers macOS and iOS.
     //!
     //! Battery: IOKit `IOPSCopyPowerSourcesInfo` →
     //! `IOPSCopyPowerSourcesList` → `IOPSGetPowerSourceDescription`,
     //! reading `kIOPSCurrentCapacityKey` / `kIOPSMaxCapacityKey` from
-    //! the per-source dictionary. All three calls are in-process and
-    //! documented thread-safe; no fork+exec (which is what a `pmset
-    //! -g batt` shellout would cost on every cache miss).
+    //! the per-source dictionary. **macOS only** — iOS gates the IOPS
+    //! APIs behind a private entitlement, and the public path
+    //! (`UIDevice.batteryLevel`) requires UIKit which doesn't belong in
+    //! `xybrid-core`. iOS hosts therefore push battery via the UniFFI
+    //! surface; the Swift wrapper subscribes to
+    //! `UIDevice.batteryLevelDidChangeNotification`.
     //!
-    //! Both pollers are safe on the cache-miss hot path that
+    //! All in-process pollers are safe on the cache-miss hot path that
     //! `Orchestrator::execute_stage_async` invokes via
-    //! `ResourceMonitor::current_snapshot`. Devices without a battery
-    //! (Mac mini, Mac Studio, etc.) return an empty source list and
-    //! we report `None`.
+    //! `ResourceMonitor::current_snapshot`. macOS devices without a
+    //! battery (Mac mini, Mac Studio, Mac Pro) return an empty source
+    //! list and we report `None`.
 
-    use core::ffi::{c_void, CStr};
-
-    use super::{set_battery_level, set_thermal_state, ThermalState};
-    use objc2_core_foundation::{CFDictionary, CFNumber, CFString, CFType};
     use objc2_foundation::NSProcessInfo;
+
+    #[cfg(target_os = "macos")]
+    use core::ffi::{c_void, CStr};
+    #[cfg(target_os = "macos")]
+    use objc2_core_foundation::{CFDictionary, CFNumber, CFString, CFType};
+    #[cfg(target_os = "macos")]
     use objc2_io_kit::{
         kIOPSCurrentCapacityKey, kIOPSMaxCapacityKey, IOPSCopyPowerSourcesInfo,
         IOPSCopyPowerSourcesList, IOPSGetPowerSourceDescription,
     };
 
+    #[cfg(target_os = "macos")]
+    use super::set_battery_level;
+    use super::{set_thermal_state, ThermalState};
+
     pub(super) fn refresh() {
         set_thermal_state(read_thermal_state());
+        // iOS routes battery through the host (Swift wrapper) since the
+        // public path needs UIKit. macOS uses IOKit in-process.
+        #[cfg(target_os = "macos")]
         if let Some(pct) = read_battery_pct() {
             set_battery_level(pct);
         }
@@ -286,6 +305,7 @@ mod macos {
         }
     }
 
+    #[cfg(target_os = "macos")]
     fn read_battery_pct() -> Option<u8> {
         // `IOPSCopyPowerSourcesInfo` is the documented entry point; per
         // Apple's docs it does no I/O of its own, just snapshots a
@@ -343,6 +363,7 @@ mod macos {
         None
     }
 
+    #[cfg(target_os = "macos")]
     fn lookup_int(dict: &CFDictionary, key_cstr: &CStr) -> Option<i64> {
         // IOKit defines its dictionary keys as C strings (e.g.
         // `kIOPSCurrentCapacityKey == "Current Capacity"`). The
@@ -375,6 +396,7 @@ mod macos {
     /// sensor glitch or uninitialized source) or `current < 0`.
     /// Otherwise clamps to 0..=100 — some power sources briefly report
     /// `current > max` while recalibrating.
+    #[cfg(target_os = "macos")]
     fn compute_pct(current: i64, max: i64) -> Option<u8> {
         if max <= 0 || current < 0 {
             return None;
@@ -418,6 +440,7 @@ mod macos {
             let _ = state;
         }
 
+        #[cfg(target_os = "macos")]
         #[test]
         fn compute_pct_handles_normal_values() {
             assert_eq!(compute_pct(0, 100), Some(0));
@@ -428,12 +451,14 @@ mod macos {
             assert_eq!(compute_pct(4_200, 5_000), Some(84));
         }
 
+        #[cfg(target_os = "macos")]
         #[test]
         fn compute_pct_zero_or_negative_max_is_none() {
             assert_eq!(compute_pct(50, 0), None);
             assert_eq!(compute_pct(50, -100), None);
         }
 
+        #[cfg(target_os = "macos")]
         #[test]
         fn compute_pct_negative_current_is_none() {
             // A negative `current` is a sensor glitch — don't fold that
@@ -441,6 +466,7 @@ mod macos {
             assert_eq!(compute_pct(-1, 100), None);
         }
 
+        #[cfg(target_os = "macos")]
         #[test]
         fn compute_pct_clamps_above_max() {
             // Power sources can briefly report current > max during
@@ -449,6 +475,7 @@ mod macos {
             assert_eq!(compute_pct(200, 100), Some(100));
         }
 
+        #[cfg(target_os = "macos")]
         #[test]
         fn read_battery_pct_returns_none_or_valid_percent() {
             // Smoke test: don't assert exact values — laptops, desktops,
