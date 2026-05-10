@@ -251,14 +251,6 @@ impl LlamaCppBackend {
         state.last_prefix_hit = Some(prefix_len);
         Ok((tail, prefix_len))
     }
-
-    /// Number of tokens served from the KV cache on the most recent
-    /// `generate*` call (= the longest-common-prefix length between the
-    /// previous prompt and this one). `None` before the first call.
-    /// Telemetry hook for surfacing `prompt_cached_tokens` on the wire.
-    pub fn last_cached_prefix_len(&self) -> Option<usize> {
-        self.kv_state.lock().ok().and_then(|s| s.last_prefix_hit)
-    }
 }
 
 /// Longest-common-prefix length between the cached tokens and the new
@@ -756,6 +748,15 @@ impl LlmBackend for LlamaCppBackend {
 
     fn context_length(&self) -> Option<usize> {
         self.config.as_ref().map(|c| c.context_length)
+    }
+
+    /// Surface the prefix length the most recent `generate*` reused from
+    /// the persisted KV cache. `Some(0)` on a first turn or a totally
+    /// divergent prompt, `None` only before any `generate*` has run.
+    /// Telemetry hoists this as `prompt_cached_tokens` on inference
+    /// events when the value is positive.
+    fn last_cached_prefix_len(&self) -> Option<usize> {
+        self.kv_state.lock().ok().and_then(|s| s.last_prefix_hit)
     }
 }
 

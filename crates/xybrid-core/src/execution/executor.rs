@@ -978,20 +978,22 @@ impl TemplateExecutor {
             cfg
         };
 
-        // Execute with streaming. Capture the backend name alongside
-        // the output so the metric mirror can label the resolved
-        // execution provider for the wire payload.
-        let (output, backend_name) = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            let out = adapter
-                .backend()
-                .generate_streaming(&messages, &gen_config, on_token)?;
-            let name = adapter.backend().name().to_string();
-            (out, name)
-        } else {
-            return Err(AdapterError::RuntimeError(
-                "LLM adapter cache unexpectedly empty".to_string(),
-            ));
-        };
+        // Execute with streaming. Capture the backend name + the prefix
+        // length the backend reused from its KV cache so the metric
+        // mirror can attach the resolved execution provider and the
+        // local-cache-hit count to the wire payload.
+        let (output, backend_name, cached_prefix) =
+            if let Some((_, adapter)) = &self.llm_adapter_cache {
+                let backend = adapter.backend();
+                let out = backend.generate_streaming(&messages, &gen_config, on_token)?;
+                let name = backend.name().to_string();
+                let cached = backend.last_cached_prefix_len();
+                (out, name, cached)
+            } else {
+                return Err(AdapterError::RuntimeError(
+                    "LLM adapter cache unexpectedly empty".to_string(),
+                ));
+            };
 
         // Build response envelope
         let mut response_metadata = std::collections::HashMap::new();
@@ -1009,7 +1011,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output, &backend_name);
+        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1069,16 +1071,19 @@ impl TemplateExecutor {
         let gen_config = config.cloned().unwrap_or_default();
 
         // Execute with ChatMessages directly — backend applies template once.
-        // Capture backend name for the resolved-EP mirror.
-        let (output, backend_name) = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            let out = adapter.backend().generate(messages, &gen_config)?;
-            let name = adapter.backend().name().to_string();
-            (out, name)
-        } else {
-            return Err(AdapterError::RuntimeError(
-                "LLM adapter cache unexpectedly empty".to_string(),
-            ));
-        };
+        // Capture backend name + cached-prefix length for the metric mirror.
+        let (output, backend_name, cached_prefix) =
+            if let Some((_, adapter)) = &self.llm_adapter_cache {
+                let backend = adapter.backend();
+                let out = backend.generate(messages, &gen_config)?;
+                let name = backend.name().to_string();
+                let cached = backend.last_cached_prefix_len();
+                (out, name, cached)
+            } else {
+                return Err(AdapterError::RuntimeError(
+                    "LLM adapter cache unexpectedly empty".to_string(),
+                ));
+            };
 
         // Build response envelope
         let mut response_metadata = std::collections::HashMap::new();
@@ -1096,7 +1101,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output, &backend_name);
+        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1159,18 +1164,19 @@ impl TemplateExecutor {
         let gen_config = config.cloned().unwrap_or_default();
 
         // Execute with streaming - pass ChatMessages directly to backend.
-        // Capture backend name for the resolved-EP mirror.
-        let (output, backend_name) = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            let out = adapter
-                .backend()
-                .generate_streaming(messages, &gen_config, on_token)?;
-            let name = adapter.backend().name().to_string();
-            (out, name)
-        } else {
-            return Err(AdapterError::RuntimeError(
-                "LLM adapter cache unexpectedly empty".to_string(),
-            ));
-        };
+        // Capture backend name + cached-prefix length for the metric mirror.
+        let (output, backend_name, cached_prefix) =
+            if let Some((_, adapter)) = &self.llm_adapter_cache {
+                let backend = adapter.backend();
+                let out = backend.generate_streaming(messages, &gen_config, on_token)?;
+                let name = backend.name().to_string();
+                let cached = backend.last_cached_prefix_len();
+                (out, name, cached)
+            } else {
+                return Err(AdapterError::RuntimeError(
+                    "LLM adapter cache unexpectedly empty".to_string(),
+                ));
+            };
 
         // Build response envelope
         let mut response_metadata = std::collections::HashMap::new();
@@ -1188,7 +1194,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output, &backend_name);
+        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1315,16 +1321,19 @@ impl TemplateExecutor {
         messages.push(ChatMessage::user(&prompt));
 
         // Execute inference using cached adapter's backend directly.
-        // Capture backend name for the resolved-EP mirror.
-        let (output, backend_name) = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            let out = adapter.backend().generate(&messages, &gen_config)?;
-            let name = adapter.backend().name().to_string();
-            (out, name)
-        } else {
-            return Err(AdapterError::RuntimeError(
-                "LLM adapter cache unexpectedly empty".to_string(),
-            ));
-        };
+        // Capture backend name + cached-prefix length for the metric mirror.
+        let (output, backend_name, cached_prefix) =
+            if let Some((_, adapter)) = &self.llm_adapter_cache {
+                let backend = adapter.backend();
+                let out = backend.generate(&messages, &gen_config)?;
+                let name = backend.name().to_string();
+                let cached = backend.last_cached_prefix_len();
+                (out, name, cached)
+            } else {
+                return Err(AdapterError::RuntimeError(
+                    "LLM adapter cache unexpectedly empty".to_string(),
+                ));
+            };
 
         info!(
             target: "xybrid_core",
@@ -1347,7 +1356,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output, &backend_name);
+        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -2102,6 +2111,7 @@ fn insert_llm_streaming_metrics(
 fn mirror_llm_metrics_to_span(
     output: &crate::runtime_adapter::llm::GenerationOutput,
     backend_name: &str,
+    cached_prefix_tokens: Option<usize>,
 ) {
     // Always-present scalars. These reach the platform via
     // `PlatformEvent.stages[].spans[].metadata` (populated by
@@ -2124,6 +2134,20 @@ fn mirror_llm_metrics_to_span(
         "execution_provider",
         crate::runtime_adapter::llm::local_execution_provider(backend_name),
     );
+
+    // Local KV cache hits: how many prompt tokens this call reused from
+    // the cache the previous turn left behind. Only emit when positive
+    // — `Some(0)` means a first turn or a totally divergent prompt
+    // (telemetry should look like a non-cached call), and `None` means
+    // the backend doesn't track prefix reuse at all (cloud, mistralrs,
+    // mock test backends). The local mirror of cloud's
+    // `cache_read_input_tokens` so analytics can stack them on the
+    // same axis.
+    if let Some(n) = cached_prefix_tokens {
+        if n > 0 {
+            xybrid_trace::add_metadata("prompt_cached_tokens", n.to_string());
+        }
+    }
 
     // Streaming-derived scalars. Only mirror when the backend reported them;
     // the `Option<_>` + `nonzero` filter in mistral keeps misleading zeros

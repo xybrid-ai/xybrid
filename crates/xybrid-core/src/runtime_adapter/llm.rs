@@ -220,6 +220,24 @@ pub trait LlmBackend: Send + Sync {
     fn context_length(&self) -> Option<usize> {
         None
     }
+
+    /// Number of prompt tokens served from the backend's local KV cache
+    /// on the most recent `generate*` call, when the backend supports
+    /// multi-turn cache reuse. `None` for backends without cross-call
+    /// cache state (the default — covers cloud, mistralrs, mock test
+    /// backends). `Some(0)` for backends that *do* keep cache state but
+    /// had no shared prefix on the most recent call (a fresh first
+    /// turn, or a totally divergent prompt).
+    ///
+    /// Telemetry uses this to surface `prompt_cached_tokens` on
+    /// inference events — the local-LLM mirror of the cloud-side
+    /// `cache_read_input_tokens` field. Multi-turn workloads with a
+    /// stable system prompt typically see 70-90% cache hits on every
+    /// call after the first, which is the difference between a 7B
+    /// model feeling responsive and feeling sluggish.
+    fn last_cached_prefix_len(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// Factory function type for creating LLM backends.
@@ -554,6 +572,17 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
                     "execution_provider",
                     local_execution_provider(self.backend.name()),
                 );
+
+                // Local KV cache hits: only emit when the backend
+                // actually reused a prefix (n > 0). `Some(0)` means
+                // first-turn / divergent prompt and we want telemetry
+                // to read like a non-cached call. `None` means the
+                // backend doesn't track prefix reuse at all.
+                if let Some(n) = self.backend.last_cached_prefix_len() {
+                    if n > 0 {
+                        crate::tracing::add_metadata("prompt_cached_tokens", n.to_string());
+                    }
+                }
 
                 Ok(Envelope {
                     kind: EnvelopeKind::Text(output.text),

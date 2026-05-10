@@ -1090,6 +1090,17 @@ fn convert_to_platform_event(
                 payload["execution_provider"] = serde_json::json!(v);
             }
         }
+        // Local KV cache hits (llama.cpp's multi-turn prefix reuse). The
+        // backend only emits this metadata key when the most recent call
+        // actually reused a prefix (n > 0), so a present value here is
+        // always meaningful — no need to filter out zeros at the SDK
+        // layer. Mirror of cloud's `cache_read_input_tokens` so the
+        // analytics column can stack local + cloud cache hits.
+        if payload.get("prompt_cached_tokens").is_none() {
+            if let Some(n) = extract_llm_prompt_cached_tokens(&spans) {
+                payload["prompt_cached_tokens"] = serde_json::json!(n);
+            }
+        }
         Some(spans)
     } else {
         None
@@ -1214,6 +1225,48 @@ fn extract_llm_token_counts(stages: &serde_json::Value) -> Option<(Option<u64>, 
     } else {
         None
     }
+}
+
+/// Lift the local-LLM `prompt_cached_tokens` value (count of prompt
+/// tokens served from the backend's KV cache on the most recent call)
+/// off the LAST LLM span. The local mirror of cloud's
+/// `cache_read_input_tokens` — emitted only when a backend that tracks
+/// prefix reuse (today: llama.cpp) actually reused tokens, so reading
+/// `Some(n)` from this helper means the value is meaningful and worth
+/// hoisting verbatim. Same last-span-wins / LLM-span detection rule as
+/// [`extract_llm_token_counts`] so retried runs and timing-only spans
+/// don't fight the count-bearing span.
+fn extract_llm_prompt_cached_tokens(stages: &serde_json::Value) -> Option<u64> {
+    let spans = stages.get("spans")?.as_array()?;
+    let mut latest: Option<u64> = None;
+    for span in spans {
+        let name = span.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let meta = span.get("metadata");
+        let is_llm_span = name.starts_with("llm_inference")
+            || name.starts_with("inference:")
+            || meta
+                .map(|m| {
+                    m.get("ttft_ms").is_some()
+                        || m.get("tokens_generated").is_some()
+                        || m.get("tokens_out").is_some()
+                        || m.get("completion_tokens").is_some()
+                })
+                .unwrap_or(false);
+        if !is_llm_span {
+            continue;
+        }
+        let Some(v) = meta.and_then(|m| m.get("prompt_cached_tokens")) else {
+            continue;
+        };
+        if let Some(n) = v.as_u64() {
+            latest = Some(n);
+        } else if let Some(s) = v.as_str() {
+            if let Ok(n) = s.parse::<u64>() {
+                latest = Some(n);
+            }
+        }
+    }
+    latest
 }
 
 /// Walk a `stages` JSON (same shape as [`extract_llm_token_counts`]) and
@@ -2968,6 +3021,73 @@ mod tests {
             ]
         });
         assert!(extract_llm_token_counts(&stages).is_none());
+    }
+
+    #[test]
+    fn extract_llm_prompt_cached_tokens_picks_last_llm_span_with_value() {
+        // Mirrors the token-count extractor's last-span-wins rule: a
+        // streaming run emits a timing-only span first, then a final
+        // span with the accounting numbers. The cached-tokens hoist
+        // must read from the final span — earlier values should be
+        // shadowed when a later span has its own.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "llm_inference_streaming",
+                    "metadata": { "ttft_ms": 120, "prompt_cached_tokens": "0" }
+                },
+                {
+                    "name": "llm_inference_with_messages",
+                    "metadata": { "tokens_in": 200, "prompt_cached_tokens": "150" }
+                }
+            ]
+        });
+        assert_eq!(extract_llm_prompt_cached_tokens(&stages), Some(150));
+    }
+
+    #[test]
+    fn extract_llm_prompt_cached_tokens_handles_numeric_value() {
+        // The runtime emits via add_metadata which always stringifies,
+        // but a future emit path or external producer might supply a
+        // raw number. Both shapes must extract correctly.
+        let stages = serde_json::json!({
+            "spans": [{
+                "name": "llm_inference_with_messages",
+                "metadata": { "prompt_cached_tokens": 96 }
+            }]
+        });
+        assert_eq!(extract_llm_prompt_cached_tokens(&stages), Some(96));
+    }
+
+    #[test]
+    fn extract_llm_prompt_cached_tokens_returns_none_when_absent() {
+        // Backends that don't track prefix reuse never emit the key —
+        // the SDK hoist must produce None so the wire payload omits the
+        // field entirely (rather than emitting a misleading 0).
+        let stages = serde_json::json!({
+            "spans": [{
+                "name": "llm_inference_with_messages",
+                "metadata": { "tokens_in": 32, "tokens_out": 96 }
+            }]
+        });
+        assert_eq!(extract_llm_prompt_cached_tokens(&stages), None);
+    }
+
+    #[test]
+    fn extract_llm_prompt_cached_tokens_ignores_non_llm_spans() {
+        // An ASR/TTS span carrying a stray `prompt_cached_tokens` would
+        // be a real bug to flag, but the extractor must not let that
+        // value leak onto the LLM hoist axis. Same LLM-span detection
+        // as the token-count extractor.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:asr.whisper-tiny",
+                    "metadata": { "prompt_cached_tokens": "999" }
+                }
+            ]
+        });
+        assert_eq!(extract_llm_prompt_cached_tokens(&stages), None);
     }
 
     #[test]
