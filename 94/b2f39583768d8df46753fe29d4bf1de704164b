@@ -1,0 +1,29 @@
+docs/content/docs/internals/index.mdx
+  s_e8f05c7fd2beb5::t_75ff44f16b1eab 42
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_e8f05c7fd2beb5::t_061e2f471bb952 31-32
+docs/content/docs/(integration)/sdks/android.mdx
+  s_e8f05c7fd2beb5::t_7bdbbcdd03f88a 25-31,45
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_e8f05c7fd2beb5::t_25a41ee2543a18 37-42,57
+docs/content/docs/internals/observability.mdx
+  s_e8f05c7fd2beb5::t_539fa372a99c00 51-52
+docs/content/docs/internals/host-integration.mdx
+  s_e8f05c7fd2beb5::t_fbfabec32c7dbe 1-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "94b2f39583768d8df46753fe29d4bf1de704164b",
+  "prompts": {},
+  "sessions": {
+    "s_e8f05c7fd2beb5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1fa47ad-790b-47ee-aab2-6e71e2bc17b9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
