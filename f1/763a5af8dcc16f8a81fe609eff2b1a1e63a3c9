@@ -1,0 +1,24 @@
+bindings/flutter/lib/src/device_snapshot.dart
+  s_0e794089aeb336::t_950ef74eea0807 1-111
+bindings/flutter/lib/xybrid.dart
+  s_0e794089aeb336::t_18716cbf3c3a28 75
+bindings/flutter/lib/src/xybrid.dart
+  s_0e794089aeb336::t_9bfd7db27ce72f 142-157
+  s_0e794089aeb336::t_434630665a4d14 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "f1763a5af8dcc16f8a81fe609eff2b1a1e63a3c9",
+  "prompts": {},
+  "sessions": {
+    "s_0e794089aeb336": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f714325d-69cc-4753-b80b-93a6667b7c3c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
