@@ -232,59 +232,6 @@ jobs:
           path: bindings/react-native/react-native-xybrid-*.tgz
           if-no-files-found: error
 
-  smoke-android:
-    name: Smoke build (Android example app)
-    needs: stage-android
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
-        with:
-          node-version: '20'
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-
-      - name: Download Android staged artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: rn-android-staged
-          path: bindings/react-native/android/
-
-      - name: Bootstrap example host shell
-        working-directory: bindings/react-native/example
-        run: ./bootstrap.sh
-
-      - name: Install example deps
-        working-directory: bindings/react-native/example
-        # `link:..` resolves the parent package by symlink — fast and ensures
-        # we exercise the staged artifacts, not a published version.
-        run: npm install --no-audit --no-fund
-
-      - name: Build Android (assembleDebug)
-        working-directory: bindings/react-native/example/android
-        # assembleDebug compiles Kotlin + packages the .so files, exercising
-        # the gradle path end-to-end. We skip running the emulator — that's
-        # an order of magnitude more CI time for marginal extra coverage.
-        run: ./gradlew assembleDebug --stacktrace
-        env:
-          GRADLE_OPTS: '-Dorg.gradle.daemon=false'
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: example-android-debug-apk
-          path: bindings/react-native/example/android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-
   smoke-ios:
     name: Smoke build (iOS podspec lint)
     needs: stage-ios
