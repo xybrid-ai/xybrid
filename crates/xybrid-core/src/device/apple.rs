@@ -202,9 +202,8 @@ fn read_hw_machine() -> Option<String> {
 /// `MLAllComputeDevices` and looks for an `MLNeuralEngineComputeDevice`
 /// in the result — confidence is High. On older OS where the class
 /// doesn't exist in the Objective-C runtime, falls through to the
-/// arch-based heuristic at Medium confidence (the heuristic is correct
-/// on most modern Apple hardware but wrong on older arm64 iPhones/iPads
-/// without ANE). Off Apple, returns `(false, Unknown)`.
+/// device-model/sysctl path and preserves that fallback's confidence.
+/// Off Apple, returns `(false, Unknown)`.
 pub fn detect_neural_engine_with_confidence() -> (bool, DetectionConfidence) {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
@@ -223,7 +222,7 @@ pub fn detect_neural_engine_with_confidence() -> (bool, DetectionConfidence) {
         // over the `CStr::from_bytes_with_nul` alternative.
         let Some(ne_class) = AnyClass::get(c"MLNeuralEngineComputeDevice") else {
             let info = detect_apple_device();
-            return (info.has_neural_engine, DetectionConfidence::Medium);
+            return (info.has_neural_engine, info.confidence);
         };
 
         // Second gate: resolve MLAllComputeDevices at runtime via dlsym
@@ -255,7 +254,7 @@ pub fn detect_neural_engine_with_confidence() -> (bool, DetectionConfidence) {
         };
         if raw.is_null() {
             let info = detect_apple_device();
-            return (info.has_neural_engine, DetectionConfidence::Medium);
+            return (info.has_neural_engine, info.confidence);
         }
 
         // SAFETY: `raw` is non-null (checked above). The transmute
@@ -269,10 +268,10 @@ pub fn detect_neural_engine_with_confidence() -> (bool, DetectionConfidence) {
         // SAFETY: `retain_autoreleased` balances the autorelease and
         // gives us a `Retained<...>` we own. It returns `None` if the
         // pointer is null, which we treat as "Apple gave us nothing"
-        // and fall back to the arch heuristic.
+        // and fall back to the device-model/sysctl path.
         let Some(devices) = (unsafe { Retained::retain_autoreleased(raw_array) }) else {
             let info = detect_apple_device();
-            return (info.has_neural_engine, DetectionConfidence::Medium);
+            return (info.has_neural_engine, info.confidence);
         };
 
         // `isKindOfClass:` is exposed as safe in objc2-foundation 0.3.
@@ -426,10 +425,10 @@ mod tests {
                 "Class present → real Core ML probe ran → High confidence",
             );
         } else {
+            let fallback = detect_apple_device();
             assert_eq!(
-                confidence,
-                DetectionConfidence::Medium,
-                "Class absent → arch fallback → Medium confidence",
+                confidence, fallback.confidence,
+                "Class absent → fallback confidence should be preserved",
             );
         }
     }
