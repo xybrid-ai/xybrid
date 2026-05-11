@@ -43,7 +43,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1487364937;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1942786553;
 
 // Section: executor
 
@@ -1690,6 +1690,36 @@ fn wire__crate__api__device__XybridDevice_clear_thermal_state_impl(
         },
     )
 }
+fn wire__crate__api__device__XybridDevice_current_snapshot_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "XybridDevice_current_snapshot",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok =
+                    Result::<_, ()>::Ok(crate::api::device::XybridDevice::current_snapshot())?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__device__XybridDevice_set_battery_level_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -2181,6 +2211,20 @@ impl SseDecode for crate::api::model::FfiLoadEvent {
     }
 }
 
+impl SseDecode for crate::api::device::FfiMemoryPressure {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::device::FfiMemoryPressure::Unknown,
+            1 => crate::api::device::FfiMemoryPressure::Normal,
+            2 => crate::api::device::FfiMemoryPressure::Warn,
+            3 => crate::api::device::FfiMemoryPressure::Critical,
+            _ => unreachable!("Invalid variant for FfiMemoryPressure: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::context::FfiMessageRole {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2190,6 +2234,31 @@ impl SseDecode for crate::api::context::FfiMessageRole {
             1 => crate::api::context::FfiMessageRole::User,
             2 => crate::api::context::FfiMessageRole::Assistant,
             _ => unreachable!("Invalid variant for FfiMessageRole: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::device::FfiResourceSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_cpuPct = <Option<f32>>::sse_decode(deserializer);
+        let mut var_processRssMb = <Option<u32>>::sse_decode(deserializer);
+        let mut var_availableMemMb = <Option<u32>>::sse_decode(deserializer);
+        let mut var_totalMemMb = <Option<u32>>::sse_decode(deserializer);
+        let mut var_memoryPressure =
+            <crate::api::device::FfiMemoryPressure>::sse_decode(deserializer);
+        let mut var_thermalState = <crate::api::device::FfiThermalState>::sse_decode(deserializer);
+        let mut var_batteryPct = <Option<u8>>::sse_decode(deserializer);
+        let mut var_capturedAtMs = <u64>::sse_decode(deserializer);
+        return crate::api::device::FfiResourceSnapshot {
+            cpu_pct: var_cpuPct,
+            process_rss_mb: var_processRssMb,
+            available_mem_mb: var_availableMemMb,
+            total_mem_mb: var_totalMemMb,
+            memory_pressure: var_memoryPressure,
+            thermal_state: var_thermalState,
+            battery_pct: var_batteryPct,
+            captured_at_ms: var_capturedAtMs,
         };
     }
 }
@@ -2399,6 +2468,17 @@ impl SseDecode for Option<u32> {
     }
 }
 
+impl SseDecode for Option<u8> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<u8>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<Vec<String>> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2436,6 +2516,13 @@ impl SseDecode for u32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_u32::<NativeEndian>().unwrap()
+    }
+}
+
+impl SseDecode for u64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_u64::<NativeEndian>().unwrap()
     }
 }
 
@@ -2587,37 +2674,42 @@ fn pde_ffi_dispatcher_sync_impl(
             rust_vec_len,
             data_len,
         ),
-        38 => wire__crate__api__device__XybridDevice_set_battery_level_impl(
+        38 => wire__crate__api__device__XybridDevice_current_snapshot_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        39 => wire__crate__api__device__XybridDevice_set_thermal_state_impl(
+        39 => wire__crate__api__device__XybridDevice_set_battery_level_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        40 => wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
+        40 => wire__crate__api__device__XybridDevice_set_thermal_state_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        41 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
+        41 => wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        42 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
+        42 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        43 => wire__crate__api__model__ffi_generation_config_creative_impl(
+        43 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        44 => {
+        44 => wire__crate__api__model__ffi_generation_config_creative_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        45 => {
             wire__crate__api__model__ffi_generation_config_greedy_impl(ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -2791,6 +2883,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiLoadEvent>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::device::FfiMemoryPressure {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Unknown => 0.into_dart(),
+            Self::Normal => 1.into_dart(),
+            Self::Warn => 2.into_dart(),
+            Self::Critical => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::device::FfiMemoryPressure
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::device::FfiMemoryPressure>
+    for crate::api::device::FfiMemoryPressure
+{
+    fn into_into_dart(self) -> crate::api::device::FfiMemoryPressure {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::context::FfiMessageRole {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -2809,6 +2924,33 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::context::FfiMessageRole>
     for crate::api::context::FfiMessageRole
 {
     fn into_into_dart(self) -> crate::api::context::FfiMessageRole {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::device::FfiResourceSnapshot {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.cpu_pct.into_into_dart().into_dart(),
+            self.process_rss_mb.into_into_dart().into_dart(),
+            self.available_mem_mb.into_into_dart().into_dart(),
+            self.total_mem_mb.into_into_dart().into_dart(),
+            self.memory_pressure.into_into_dart().into_dart(),
+            self.thermal_state.into_into_dart().into_dart(),
+            self.battery_pct.into_into_dart().into_dart(),
+            self.captured_at_ms.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::device::FfiResourceSnapshot
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::device::FfiResourceSnapshot>
+    for crate::api::device::FfiResourceSnapshot
+{
+    fn into_into_dart(self) -> crate::api::device::FfiResourceSnapshot {
         self
     }
 }
@@ -3132,6 +3274,24 @@ impl SseEncode for crate::api::model::FfiLoadEvent {
     }
 }
 
+impl SseEncode for crate::api::device::FfiMemoryPressure {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::device::FfiMemoryPressure::Unknown => 0,
+                crate::api::device::FfiMemoryPressure::Normal => 1,
+                crate::api::device::FfiMemoryPressure::Warn => 2,
+                crate::api::device::FfiMemoryPressure::Critical => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::context::FfiMessageRole {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3146,6 +3306,20 @@ impl SseEncode for crate::api::context::FfiMessageRole {
             },
             serializer,
         );
+    }
+}
+
+impl SseEncode for crate::api::device::FfiResourceSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<f32>>::sse_encode(self.cpu_pct, serializer);
+        <Option<u32>>::sse_encode(self.process_rss_mb, serializer);
+        <Option<u32>>::sse_encode(self.available_mem_mb, serializer);
+        <Option<u32>>::sse_encode(self.total_mem_mb, serializer);
+        <crate::api::device::FfiMemoryPressure>::sse_encode(self.memory_pressure, serializer);
+        <crate::api::device::FfiThermalState>::sse_encode(self.thermal_state, serializer);
+        <Option<u8>>::sse_encode(self.battery_pct, serializer);
+        <u64>::sse_encode(self.captured_at_ms, serializer);
     }
 }
 
@@ -3326,6 +3500,16 @@ impl SseEncode for Option<u32> {
     }
 }
 
+impl SseEncode for Option<u8> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <u8>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<Vec<String>> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3360,6 +3544,13 @@ impl SseEncode for u32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_u32::<NativeEndian>(self).unwrap();
+    }
+}
+
+impl SseEncode for u64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_u64::<NativeEndian>(self).unwrap();
     }
 }
 

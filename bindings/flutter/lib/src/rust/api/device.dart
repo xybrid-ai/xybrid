@@ -10,7 +10,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>>
 abstract class XybridDevice implements RustOpaqueInterface {
@@ -27,6 +27,23 @@ abstract class XybridDevice implements RustOpaqueInterface {
   static void clearThermalState() =>
       XybridRustLib.instance.api.crateApiDeviceXybridDeviceClearThermalState();
 
+  /// Read the routing-engine's current device snapshot.
+  ///
+  /// Returns whatever the global [`xybrid_sdk::ResourceMonitor`] last
+  /// observed — battery + thermal from the platform pollers / host
+  /// pushes, CPU + memory from sysinfo. Force-refreshes on every
+  /// call (passes [`Duration::ZERO`]) so a diagnostics surface that
+  /// polls at ~1 Hz sees fresh data each tick. The refresh cost is
+  /// bounded; the contract is documented in `resource-telemetry.md`
+  /// at `< 1 ms` on a warm monitor.
+  ///
+  /// Intended for app-side diagnostics views ("what does the routing
+  /// engine see on this device right now?"). Production code should
+  /// not poll this — the engine reads it internally on each routing
+  /// decision.
+  static FfiResourceSnapshot currentSnapshot() =>
+      XybridRustLib.instance.api.crateApiDeviceXybridDeviceCurrentSnapshot();
+
   /// Forward a battery charge percent (0..=100) from the host.
   ///
   /// Values above 100 are clamped by the underlying setter — pass
@@ -40,6 +57,72 @@ abstract class XybridDevice implements RustOpaqueInterface {
   static void setThermalState({required FfiThermalState state}) =>
       XybridRustLib.instance.api
           .crateApiDeviceXybridDeviceSetThermalState(state: state);
+}
+
+/// Derived memory-pressure classification mirrored onto the FFI surface.
+///
+/// Maps directly to [`xybrid_sdk::MemoryPressure`]. `Unknown` means the
+/// snapshot couldn't be computed (sysinfo refused to answer, or the
+/// host hasn't pushed an iOS / Android memory-warning observer yet).
+enum FfiMemoryPressure {
+  unknown,
+  normal,
+  warn,
+  critical,
+  ;
+}
+
+/// Snapshot of routing-engine signals as the runtime currently sees them.
+///
+/// Field-for-field mirror of [`xybrid_sdk::ResourceSnapshot`]. `Option`
+/// fields are `None` when the underlying sensor isn't available on the
+/// running platform — a `None` here is what the routing engine reads as
+/// "no signal," which downstream gates treat as "do not penalize."
+class FfiResourceSnapshot {
+  final double? cpuPct;
+  final int? processRssMb;
+  final int? availableMemMb;
+  final int? totalMemMb;
+  final FfiMemoryPressure memoryPressure;
+  final FfiThermalState thermalState;
+  final int? batteryPct;
+  final BigInt capturedAtMs;
+
+  const FfiResourceSnapshot({
+    this.cpuPct,
+    this.processRssMb,
+    this.availableMemMb,
+    this.totalMemMb,
+    required this.memoryPressure,
+    required this.thermalState,
+    this.batteryPct,
+    required this.capturedAtMs,
+  });
+
+  @override
+  int get hashCode =>
+      cpuPct.hashCode ^
+      processRssMb.hashCode ^
+      availableMemMb.hashCode ^
+      totalMemMb.hashCode ^
+      memoryPressure.hashCode ^
+      thermalState.hashCode ^
+      batteryPct.hashCode ^
+      capturedAtMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiResourceSnapshot &&
+          runtimeType == other.runtimeType &&
+          cpuPct == other.cpuPct &&
+          processRssMb == other.processRssMb &&
+          availableMemMb == other.availableMemMb &&
+          totalMemMb == other.totalMemMb &&
+          memoryPressure == other.memoryPressure &&
+          thermalState == other.thermalState &&
+          batteryPct == other.batteryPct &&
+          capturedAtMs == other.capturedAtMs;
 }
 
 /// Thermal pressure state forwarded by the host.
