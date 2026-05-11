@@ -13,6 +13,7 @@ use std::path::Path;
 use super::{ExecutionContext, ExecutionStrategy};
 use crate::execution::executor::extract_tts_speed;
 use crate::execution::modes::execute_tts_inference;
+use crate::execution::session_factory::OnnxSessionFactory;
 use crate::execution::template::{
     ExecutionTemplate, ModelMetadata, PostprocessingStep, PreprocessingStep,
 };
@@ -20,7 +21,6 @@ use crate::execution::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use crate::execution::voice_loader::TtsVoiceLoader;
 use crate::execution::{postprocessing, preprocessing};
 use crate::ir::{Envelope, EnvelopeKind};
-use crate::execution::session_factory::OnnxSessionFactory;
 use crate::runtime_adapter::onnx::{ExecutionProviderKind, SessionOptions};
 use crate::runtime_adapter::AdapterError;
 use crate::tracing as xybrid_trace;

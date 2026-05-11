@@ -49,7 +49,9 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
 // Internal: ONNX-specific types needed for optimized execution paths
 // These are implementation details, not part of the public API
 use crate::execution::session_factory::OnnxSessionFactory;
-use crate::runtime_adapter::onnx::{ExecutionProviderKind, ONNXSession, OnnxRuntime, SessionOptions};
+use crate::runtime_adapter::onnx::{
+    ExecutionProviderKind, ONNXSession, OnnxRuntime, SessionOptions,
+};
 
 #[cfg(feature = "candle")]
 use crate::runtime_adapter::candle::CandleRuntime;
