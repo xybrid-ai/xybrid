@@ -232,7 +232,8 @@ mod tests {
             // Successful path: silent guard goes through new → drop with
             // no `set_failed` call. Neither `Started` nor `Completed`
             // should surface to the listener.
-            let _guard = ExecutionGuard::new_silent("local-model", "execute_streaming_with_context");
+            let _guard =
+                ExecutionGuard::new_silent("local-model", "execute_streaming_with_context");
         }
 
         clear_execution_listener();
