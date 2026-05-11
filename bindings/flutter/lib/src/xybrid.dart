@@ -14,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 import 'rust/frb_generated.dart';
 
 import '../xybrid.dart';
+import 'device_snapshot.dart';
 
 /// Main entry point for the Xybrid SDK.
 ///
@@ -136,6 +137,22 @@ class Xybrid {
     // TODO - Implement telemetry
     // XybridSdkClient.enableTelemetry();
     throw UnimplementedError();
+  }
+
+  /// Read the routing-engine's current view of device state.
+  ///
+  /// Returns the same [DeviceSnapshot] the engine reads internally on
+  /// each routing decision — battery + thermal from the platform
+  /// pollers / host pushes, CPU + memory from sysinfo. Force-refreshes
+  /// on every call so a diagnostics surface that polls at ~1 Hz sees
+  /// fresh data each tick. The refresh cost is bounded at `< 1 ms` on
+  /// a warm monitor.
+  ///
+  /// Intended for app-side diagnostics views ("what does the routing
+  /// engine see on this device right now?"). Production code should
+  /// not poll this — the engine reads it internally.
+  static DeviceSnapshot currentDeviceSnapshot() {
+    return DeviceSnapshot.fromFfi(XybridDevice.currentSnapshot());
   }
 
   /// Create a ModelLoader for the specified model.
