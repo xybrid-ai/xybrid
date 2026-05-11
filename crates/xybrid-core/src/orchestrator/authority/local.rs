@@ -80,6 +80,12 @@ pub struct LocalAuthority {
 impl LocalAuthority {
     /// Create a new LocalAuthority with default policy, routing, and cache provider.
     pub fn new() -> Self {
+        // Prewarm the static-capability cache. First call to
+        // `detect_capabilities()` can take ~1s on macOS/iOS because
+        // `MLAllComputeDevices` lazy-loads Core ML. Doing it here keeps
+        // that cost out of latency-sensitive routing paths (e.g. the
+        // hysteresis check measured in tens of ms).
+        crate::device::capabilities::prewarm();
         Self {
             policy_engine: DefaultPolicyEngine::with_default_policy(),
             routing_engine: Mutex::new(DefaultRoutingEngine::new()),
@@ -93,6 +99,7 @@ impl LocalAuthority {
 
     /// Create a LocalAuthority with a custom cache provider.
     pub fn with_cache_provider(cache_provider: Arc<dyn CacheProvider>) -> Self {
+        crate::device::capabilities::prewarm();
         Self {
             policy_engine: DefaultPolicyEngine::with_default_policy(),
             routing_engine: Mutex::new(DefaultRoutingEngine::new()),
@@ -106,6 +113,7 @@ impl LocalAuthority {
 
     /// Create a LocalAuthority with a custom policy engine.
     pub fn with_policy_engine(policy_engine: DefaultPolicyEngine) -> Self {
+        crate::device::capabilities::prewarm();
         Self {
             policy_engine,
             routing_engine: Mutex::new(DefaultRoutingEngine::new()),
@@ -122,6 +130,7 @@ impl LocalAuthority {
         policy_engine: DefaultPolicyEngine,
         cache_provider: Arc<dyn CacheProvider>,
     ) -> Self {
+        crate::device::capabilities::prewarm();
         Self {
             policy_engine,
             routing_engine: Mutex::new(DefaultRoutingEngine::new()),

@@ -73,7 +73,7 @@ mod apple_tests {
         #[cfg(target_arch = "aarch64")]
         {
             assert!(info.has_neural_engine);
-            assert_eq!(info.confidence, DetectionConfidence::Medium);
+            assert_eq!(info.confidence, DetectionConfidence::High);
         }
 
         // On Intel, should NOT detect Neural Engine
@@ -100,6 +100,52 @@ mod android_tests {
         // (unless running in an Android environment)
         if info.api_level.is_none() {
             assert_eq!(info.confidence, DetectionConfidence::Low);
+        }
+    }
+}
+
+#[cfg(test)]
+mod cross_cutting_tests {
+    #[test]
+    fn test_unknown_serializes_capitalized() {
+        use crate::device::types::{DetectionConfidence, HardwareCapabilities};
+        let mut caps = HardwareCapabilities::new();
+        caps.gpu_confidence = DetectionConfidence::Unknown;
+        let json = caps.to_json();
+        assert!(
+            json.contains("\"gpu_confidence\":\"Unknown\""),
+            "no rename_all → capitalized; got: {json}",
+        );
+        let parsed = HardwareCapabilities::from_json(&json).expect("round-trip");
+        assert_eq!(parsed.gpu_confidence, DetectionConfidence::Unknown);
+    }
+
+    #[test]
+    fn test_legacy_capitalized_json_still_deserializes() {
+        use crate::device::types::HardwareCapabilities;
+        let legacy = r#"{
+            "has_gpu":true,"gpu_type":"Metal","has_nnapi":false,"has_metal":true,
+            "has_npu":false,"npu_type":"None","memory_available_mb":8192,
+            "memory_total_mb":16384,"cpu_usage_percent":0.0,"cpu_cores":8,
+            "battery_level":100,"thermal_state":"normal","platform":"MacOS",
+            "memory_confidence":"High","gpu_confidence":"High","npu_confidence":"Low"
+        }"#;
+        let parsed = HardwareCapabilities::from_json(legacy).expect("legacy must parse");
+        assert_eq!(
+            parsed.gpu_confidence,
+            crate::device::types::DetectionConfidence::High,
+        );
+    }
+
+    #[test]
+    fn test_no_silent_true_with_low_confidence() {
+        let caps = crate::device::capabilities::detect_capabilities();
+        if caps.has_gpu {
+            assert_ne!(
+                caps.gpu_confidence,
+                crate::device::types::DetectionConfidence::Low,
+                "has_gpu=true with Low confidence is the exact bug this PR fixed",
+            );
         }
     }
 }

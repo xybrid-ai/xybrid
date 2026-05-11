@@ -155,8 +155,32 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # Foundation crates work cross-platform under the same target_os check
 # clang's apple compilation matrix uses.
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-objc2 = "0.5"
-objc2-foundation = { version = "0.2", features = ["NSProcessInfo", "NSString"] }
+# objc2 + objc2-foundation pinned at 0.6 / 0.3 so the direct deps unify with
+# the transitive 0.6/0.3 versions pulled by objc2-metal/-core-graphics/-core-ml.
+# Mixing 0.5 + 0.6 in the same dep graph splits NSObjectProtocol/AnyObject
+# types and breaks isKindOfClass-style checks across them.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString"] }
+# Real Metal probe via MTLCreateSystemDefaultDevice.
+objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice"] }
+# Sibling dep to satisfy the CoreGraphics framework link objc2-metal documents
+# as a build requirement. 0.2 does not exist on crates.io — must be 0.3.
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std"] }
+# Real Apple Neural Engine probe via Core ML compute-device enumeration.
+# Note: we deliberately do NOT enable the `MLAllComputeDevices` feature.
+# That feature's generated wrapper emits a strong extern reference to the
+# `MLAllComputeDevices` C symbol — which would re-introduce the bind-at-load
+# risk on macOS 13 / iOS 16 that our libc::dlsym lookup in apple.rs avoids.
+# We need only the type bindings here; the function itself is resolved at
+# runtime via dlsym in detect_neural_engine_with_confidence.
+objc2-core-ml = { version = "0.3", default-features = false, features = [
+    "std",
+    "MLComputeDeviceProtocol",
+    "MLNeuralEngineComputeDevice",
+] }
+# libc for dlsym(RTLD_DEFAULT, ...) to resolve MLAllComputeDevices at runtime
+# instead of through the objc2-core-ml generated wrapper.
+libc = "0.2"
 
 # macOS-only battery poller: IOKit IOPSCopyPowerSourcesInfo. The IOPS
 # APIs are gated behind a private entitlement on iOS; the public
@@ -186,4 +210,6 @@ windows = { version = "0.61", features = [
     "Win32_System_Ole",
     "Win32_System_Variant",
     "Win32_System_Wmi",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
 ] }

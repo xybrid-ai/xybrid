@@ -35,6 +35,9 @@ pub mod common;
 pub mod android;
 pub mod apple;
 
+#[cfg(target_os = "windows")]
+pub mod windows;
+
 // Main detection logic
 pub mod capabilities;
 

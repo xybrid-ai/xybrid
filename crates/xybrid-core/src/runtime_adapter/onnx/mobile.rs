@@ -20,7 +20,7 @@
 
 use super::execution_provider::ExecutionProviderKind;
 use super::session::{ONNXSession, SessionOptions};
-use crate::device::capabilities::ThermalState;
+use crate::device::capabilities::{detect_capabilities, ThermalState};
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::tensor_utils::{envelope_to_tensors, tensors_to_envelope};
 use crate::runtime_adapter::{
@@ -50,9 +50,9 @@ pub struct ONNXMobileRuntimeAdapter {
     sessions: HashMap<String, ONNXSession>,
     /// Currently active model (for simple single-model execution)
     current_model: Option<String>,
-    /// NNAPI availability (stub: always true for now)
+    /// NNAPI availability (resolved from centralized hardware capability detection)
     nnapi_available: bool,
-    /// GPU/Vulkan availability (stub: always true for now)
+    /// GPU/Vulkan availability (resolved from centralized hardware capability detection)
     gpu_available: bool,
     /// Current battery level (0-100)
     battery_level: u8,
@@ -63,12 +63,13 @@ pub struct ONNXMobileRuntimeAdapter {
 impl ONNXMobileRuntimeAdapter {
     /// Creates a new ONNX Mobile Runtime Adapter instance.
     pub fn new() -> Self {
+        let caps = detect_capabilities();
         Self {
             models: HashMap::new(),
             sessions: HashMap::new(),
             current_model: None,
-            nnapi_available: Self::detect_nnapi_availability(),
-            gpu_available: Self::detect_gpu_availability(),
+            nnapi_available: caps.has_nnapi,
+            gpu_available: caps.has_gpu,
             battery_level: 100, // Default to full battery
             thermal_state: ThermalState::Normal,
         }
@@ -78,54 +79,16 @@ impl ONNXMobileRuntimeAdapter {
     ///
     /// Useful for testing mobile-specific scenarios.
     pub fn with_conditions(battery_level: u8, thermal_state: ThermalState) -> Self {
+        let caps = detect_capabilities();
         Self {
             models: HashMap::new(),
             sessions: HashMap::new(),
             current_model: None,
-            nnapi_available: Self::detect_nnapi_availability(),
-            gpu_available: Self::detect_gpu_availability(),
+            nnapi_available: caps.has_nnapi,
+            gpu_available: caps.has_gpu,
             battery_level,
             thermal_state,
         }
-    }
-
-    /// Detects NNAPI (Android Neural Networks API) availability.
-    ///
-    /// For MVP, this is a stub that returns true.
-    /// Real implementation would check:
-    /// - Android API level >= 27 (Android 8.1)
-    /// - NNAPI runtime availability via JNI
-    /// - Hardware accelerator support (DSP, NPU, GPU)
-    fn detect_nnapi_availability() -> bool {
-        // Stub: Always return true for now
-        // TODO: Real implementation would check:
-        // - Android API level
-        // - NNAPI runtime via JNI calls
-        // - Available accelerators
-        #[cfg(target_os = "android")]
-        {
-            true
-        }
-        #[cfg(not(target_os = "android"))]
-        {
-            false // NNAPI is Android-specific
-        }
-    }
-
-    /// Detects GPU/Vulkan acceleration availability.
-    ///
-    /// For MVP, this is a stub that returns true.
-    /// Real implementation would check:
-    /// - Vulkan API availability
-    /// - GPU compute capability
-    /// - Memory constraints
-    fn detect_gpu_availability() -> bool {
-        // Stub: Always return true for now
-        // TODO: Real implementation would check:
-        // - Vulkan device availability
-        // - GPU compute shader support
-        // - Sufficient memory available
-        true
     }
 
     /// Returns whether NNAPI is available.
@@ -452,18 +415,23 @@ mod tests {
     #[test]
     fn test_nnapi_detection() {
         let adapter = ONNXMobileRuntimeAdapter::new();
-        // NNAPI should be false on non-Android platforms
-        #[cfg(not(target_os = "android"))]
-        assert!(!adapter.has_nnapi());
-        #[cfg(target_os = "android")]
-        assert!(adapter.has_nnapi());
+        // Adapter's NNAPI availability must mirror centralized capability
+        // detection rather than a private stub.
+        assert_eq!(
+            adapter.has_nnapi(),
+            crate::device::capabilities::detect_capabilities().has_nnapi
+        );
     }
 
     #[test]
     fn test_gpu_detection() {
         let adapter = ONNXMobileRuntimeAdapter::new();
-        // Stub always returns true
-        assert!(adapter.has_gpu());
+        // Adapter's GPU availability must mirror centralized capability
+        // detection rather than a private stub.
+        assert_eq!(
+            adapter.has_gpu(),
+            crate::device::capabilities::detect_capabilities().has_gpu
+        );
     }
 
     #[test]
