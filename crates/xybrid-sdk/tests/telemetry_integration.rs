@@ -52,6 +52,16 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// Serial lock for tests that touch the global execution listener or
+/// telemetry-sender registry. `cargo test` parallelises by default and
+/// one test's listener install would otherwise capture another test's
+/// emitted events, masking real regressions as vacuous passes. Mirrors
+/// the same discipline `xybrid-core::execution::listener::tests` uses.
+fn listener_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn event(event_type: &str) -> TelemetryEvent {
     TelemetryEvent {
         event_type: event_type.to_string(),
@@ -378,6 +388,8 @@ fn telemetry_http_event_includes_device_profile() {
 fn automatic_execution_events() {
     use xybrid_core::execution::listener;
 
+    let _serial = listener_test_lock();
+
     let Some(model_dir) = model_fixtures::model_or_skip("mnist") else {
         return; // model not downloaded — skip gracefully
     };
@@ -491,6 +503,120 @@ fn automatic_execution_events() {
     println!(
         "OK — {} automatic execution events captured",
         collected.len()
+    );
+}
+
+/// Regression guard: `execute_streaming_with_context` must not emit
+/// `ExecutionStarted` / `ExecutionCompleted` events for its outer span.
+///
+/// A chat-context turn produced three Traces rows on the dashboard
+/// (outer `pipeline` / `execute_streaming_with_context`, inner LLM,
+/// and a phantom duplicate) because the outer executor span emitted
+/// its own `Started` / `Completed` events on top of the SDK's
+/// `ModelComplete`. The user-facing telemetry is the SDK event; the
+/// outer span is an executor implementation detail and must stay
+/// silent so the dashboard collapses each chat turn to one row.
+///
+/// Uses MNIST so the test doesn't require an LLM fixture — on a
+/// non-LLM model `execute_streaming_with_context` routes through the
+/// non-LLM streaming fallback, which has no inner `ExecutionGuard`
+/// either, so the captured event count is the cleanest possible
+/// signal for the outer-span suppression.
+#[test]
+fn execute_streaming_with_context_emits_no_outer_telemetry_events() {
+    use xybrid_core::conversation::ConversationContext;
+    use xybrid_core::execution::listener;
+
+    let _serial = listener_test_lock();
+
+    let Some(model_dir) = model_fixtures::model_or_skip("mnist") else {
+        return;
+    };
+
+    let metadata_path = model_dir.join("model_metadata.json");
+    let metadata: ModelMetadata =
+        serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
+
+    // Observe TelemetryEvents over a local channel — same pattern as
+    // `automatic_execution_events` above.
+    let (tx, rx) = mpsc::channel::<TelemetryEvent>();
+    register_telemetry_sender(tx);
+
+    listener::set_execution_listener(|event| {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let telemetry_event = match event {
+            xybrid_sdk::ExecutionEvent::Started { model_id, method } => TelemetryEvent {
+                event_type: "ExecutionStarted".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: None,
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Completed {
+                model_id,
+                method,
+                latency_ms,
+            } => TelemetryEvent {
+                event_type: "ExecutionCompleted".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Failed {
+                model_id,
+                method,
+                latency_ms,
+                error,
+            } => TelemetryEvent {
+                event_type: "ExecutionFailed".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: Some(error),
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+        };
+
+        publish_telemetry_event(telemetry_event);
+    });
+
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+    let input = mnist_input_envelope();
+    let ctx = ConversationContext::new();
+
+    let _ = executor
+        .execute_streaming_with_context(&metadata, &input, &ctx, Box::new(|_token| Ok(())), None)
+        .expect("MNIST execute_streaming_with_context should succeed via non-LLM fallback");
+
+    // Brief delay for channel delivery, then drain.
+    std::thread::sleep(Duration::from_millis(50));
+    listener::clear_execution_listener();
+
+    let mut collected: Vec<TelemetryEvent> = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        collected.push(ev);
+    }
+
+    let outer_events: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| e.stage_name.as_deref() == Some("execute_streaming_with_context"))
+        .collect();
+
+    assert!(
+        outer_events.is_empty(),
+        "execute_streaming_with_context outer span must not emit telemetry events; \
+         leaked: {:?}",
+        outer_events
     );
 }
 

@@ -1763,6 +1763,38 @@ pub fn set_telemetry_pipeline_context(pipeline_id: Option<Uuid>, trace_id: Optio
     }
 }
 
+/// RAII guard that installs a pipeline context on construction and
+/// clears it on drop.
+///
+/// Callers (e.g. `Pipeline::run`, `XybridModel::run_with_context`) need
+/// to scope a per-invocation `trace_id` so every telemetry event
+/// emitted during the call shares it. Pairing the install with a manual
+/// `set_telemetry_pipeline_context(None, None)` on every exit path is
+/// error-prone — any `?` between install and clear leaks the
+/// `trace_id` onto subsequent unrelated telemetry on the same thread,
+/// and a panic skips the cleanup entirely. This guard removes the
+/// duplication and closes the panic-leak hole.
+///
+/// The clear happens at the guard's `Drop`, which fires after any
+/// `publish_telemetry_event` call earlier in the scope — preserving
+/// the existing "publish before clear" ordering the exporter's
+/// lazy-read flush relies on.
+pub(crate) struct TelemetryPipelineContextGuard;
+
+impl TelemetryPipelineContextGuard {
+    /// Install a pipeline context for the lifetime of the guard.
+    pub(crate) fn install(pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) -> Self {
+        set_telemetry_pipeline_context(pipeline_id, trace_id);
+        Self
+    }
+}
+
+impl Drop for TelemetryPipelineContextGuard {
+    fn drop(&mut self) {
+        set_telemetry_pipeline_context(None, None);
+    }
+}
+
 /// Register the execution listener that converts `ExecutionEvent`s from
 /// xybrid-core's `TemplateExecutor` into `TelemetryEvent`s and publishes them.
 fn register_execution_listener() {

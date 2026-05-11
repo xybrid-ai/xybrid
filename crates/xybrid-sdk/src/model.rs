@@ -1805,6 +1805,16 @@ impl XybridModel {
         let start = Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
 
+        // Install a turn-scoped trace_id for the lifetime of this call.
+        // The guard's `Drop` clears the pipeline context on every exit —
+        // including the `?` error paths and panics below — so every
+        // telemetry event emitted between install and drop shares the
+        // same `trace_id` and the dashboard collapses the turn to one
+        // Traces row. Same discipline `Pipeline::run` uses for stages.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
         // Recover from poisoned RwLock to prevent permanent lock errors
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -1843,6 +1853,9 @@ impl XybridModel {
                 .unwrap_or(0),
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
+
+        // `_telemetry_ctx` drops here (and on every early return / unwind
+        // above), clearing the pipeline context after the publish.
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
@@ -1912,6 +1925,13 @@ impl XybridModel {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         let start = Instant::now();
+
+        // RAII pipeline context — see `run_with_context` for rationale.
+        // Cleared on drop at end of scope (after publish) or on any
+        // early return / unwind below.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -1985,6 +2005,9 @@ impl XybridModel {
                 .unwrap_or(0),
         };
         crate::telemetry::publish_telemetry_event(event);
+
+        // `_telemetry_ctx` drops here, clearing pipeline context after
+        // the publish — same ordering as before.
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }

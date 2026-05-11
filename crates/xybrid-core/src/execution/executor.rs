@@ -533,7 +533,13 @@ impl TemplateExecutor {
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute_with_context");
+        // Silent guard for the same reason as `execute_streaming_with_context`:
+        // the user-facing telemetry for a chat-context turn is the SDK's
+        // `ModelComplete` event from `XybridModel::run_with_context`. The
+        // outer executor span is an implementation detail and emitting
+        // `Started` / `Completed` from here surfaces as separate noise
+        // rows in the Traces dashboard. Error reporting is preserved.
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute_with_context");
         let result = self.execute_with_context_impl(metadata, input, context, config);
         if let Err(e) = &result {
             mark_execution_terminal(&guard, e);
@@ -772,7 +778,15 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute_streaming_with_context");
+        // Silent guard: the user-facing telemetry for a chat-context
+        // turn is the SDK's `ModelComplete` event from
+        // `XybridModel::run_streaming_with_context`. Emitting an outer
+        // `Started`/`Completed` pair here surfaces as separate noise
+        // rows in the Traces dashboard with the executor-internal span
+        // name. Error reporting is preserved — `mark_execution_terminal`
+        // still flips the guard to emit `Failed` on the error path.
+        let guard =
+            ExecutionGuard::new_silent(&metadata.model_id, "execute_streaming_with_context");
         let result =
             self.execute_streaming_with_context_impl(metadata, input, context, on_token, config);
         if let Err(e) = &result {
