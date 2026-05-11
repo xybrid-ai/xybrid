@@ -73,12 +73,15 @@ repositories {
 }
 
 dependencies {
-  // RN core. We pin a tested floor (matches the RN_VERSION the example app
-  // bootstraps against) but leave the `+` so a host app on a later minor
-  // wins. Without the floor, gradle can resolve to an ancient version that
-  // predates the codegen surface we depend on. Bump in lockstep with the
-  // example's RN_VERSION when upgrading.
-  implementation "com.facebook.react:react-native:0.76.0+"
+  // RN core. The Maven range `[0.74.0,)` ("0.74.0 or later") matches the
+  // npm peer dependency in package.json — without it a consumer on RN 0.74
+  // or 0.75 satisfies the npm peer check but trips a gradle resolution
+  // error. Note: Gradle's `+` suffix is a prefix wildcard (`0.74.0+` would
+  // ONLY match `0.74.0.*`, not 0.75/0.76/…), which is the opposite of what
+  // a community RN module wants. Real-world resolution: host apps pin RN
+  // to a specific version, which our open range trivially satisfies, and
+  // gradle's conflict resolver picks the host's pin.
+  implementation "com.facebook.react:react-native:[0.74.0,)"
 
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3"
 

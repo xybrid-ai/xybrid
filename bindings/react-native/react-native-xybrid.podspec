@@ -40,6 +40,13 @@ Pod::Spec.new do |s|
     # Codegen-emitted headers live under Pods/Headers/Public/RNXybridSpec
     # once the New Architecture is enabled in the host app.
     "HEADER_SEARCH_PATHS" => '"$(PODS_TARGET_SRCROOT)/ios" "$(PODS_ROOT)/Headers/Public/RNXybridSpec"',
+    # Apple Silicon required. The staged XCFramework does not contain
+    # `ios-x86_64-simulator` or `macos-x86_64` slices — xtask intentionally
+    # drops those targets because ort-sys (v2.0.0-rc.11) ships no prebuilt
+    # ONNX Runtime for Intel Mac / Intel iOS Simulator. Excluding x86_64
+    # here turns "missing library at link time" into "Xcode picks arm64
+    # automatically" on Apple Silicon hosts. Intel Mac and Rosetta-mode
+    # builds are unsupported by design — see README.md.
     "EXCLUDED_ARCHS[sdk=iphonesimulator*]" => "i386 x86_64"
   }
 

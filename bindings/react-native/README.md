@@ -80,6 +80,12 @@ await model.release();
 
 - React Native ≥ 0.74 (TurboModules + codegen).
 - iOS 13+, Android API 24+ (matches xybrid-kotlin and xybrid-apple).
+- **Apple Silicon Mac for iOS development.** The staged XCFramework
+  intentionally omits `ios-x86_64-simulator` and `macos-x86_64` slices —
+  ort-sys ships no prebuilt ONNX Runtime for Intel Mac / Intel iOS
+  Simulator, so the podspec excludes those archs explicitly. Apps built
+  for real iOS devices (arm64) work everywhere; only the simulator
+  workflow is constrained.
 - New Architecture enabled (`newArchEnabled=true` in `gradle.properties`,
   `RCT_NEW_ARCH_ENABLED=1` in the iOS Podfile env).
 
