@@ -245,20 +245,25 @@ jobs:
           name: rn-ios-staged
           path: bindings/react-native/ios/
 
-      # `pod lib lint` validates the podspec is well-formed, the Swift sources
-      # compile against the bundled XCFramework, and all referenced files
-      # exist. It's a fraction of the cost of bootstrapping a full RN host
-      # app and running xcodebuild — and catches the same failure modes that
-      # would show up in an `npx pod-install` from a consumer app.
+      # `--quick` validates the podspec's syntax, file paths, and dependency
+      # graph — which is what this gate is actually for. A full lint runs
+      # xcodebuild against the spec in isolation, but for a RN TurboModule
+      # that fails for two structural reasons that are not real bugs:
       #
-      # `--use-libraries` mirrors how the host Podfile installs the module
-      # (RN's `use_react_native!` helper opts every pod into static libraries
-      # by default).
+      #   1. The spec depends on React Native's codegen output and headers
+      #      (e.g. `<React/RCTBridgeModule.h>`), which `pod lib lint` can't
+      #      resolve without a host app's `use_react_native!` setup.
+      #   2. CI's staged XCFramework currently lacks an iOS slice
+      #      (build-react-native.yml's stage-ios job runs with
+      #      `--allow-macos-only` until ORT iOS vendoring lands), so
+      #      xcodebuild can't link an iphonesimulator target.
+      #
+      # Replace this with a real `pod install` against an example app once
+      # ORT iOS is vendored.
       - name: Lint podspec
         working-directory: bindings/react-native
         run: |
           pod lib lint react-native-xybrid.podspec \
             --allow-warnings \
-            --use-libraries \
-            --skip-import-validation \
+            --quick \
             --verbose
