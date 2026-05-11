@@ -1,0 +1,25 @@
+bindings/react-native/react-native-xybrid.podspec
+  s_9f87bfb9c88973::t_1a881b00002e56 43-49
+bindings/react-native/README.md
+  s_9f87bfb9c88973::t_bad3c177b33a1c 83-88
+bindings/react-native/.gitignore
+  s_9f87bfb9c88973::t_e15d49b1247256 6-16
+bindings/react-native/android/build.gradle
+  s_9f87bfb9c88973::t_d0b6aebc1faa79 76-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "38440a76a5ca57348e829afa363c771e7a5a2854",
+  "prompts": {},
+  "sessions": {
+    "s_9f87bfb9c88973": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "960d065d-74dd-49d6-b24f-b0fd6f06eb14",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
