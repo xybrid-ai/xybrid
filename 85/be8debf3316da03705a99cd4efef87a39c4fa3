@@ -1,0 +1,22 @@
+bindings/flutter/rust/src/api/device.rs
+  s_0e794089aeb336::t_77321452ff226b 73-129
+  s_0e794089aeb336::t_6224b427a0a985 173-194
+  s_0e794089aeb336::t_64509335150270 221-252
+  s_0e794089aeb336::t_626c5750f56e54 17-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "85be8debf3316da03705a99cd4efef87a39c4fa3",
+  "prompts": {},
+  "sessions": {
+    "s_0e794089aeb336": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f714325d-69cc-4753-b80b-93a6667b7c3c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
