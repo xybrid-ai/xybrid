@@ -16,6 +16,26 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiSdkClientXybridSdkClientInitSdkCacheDir(cacheDir: cacheDir);
 
+  /// Initialize the platform telemetry exporter for this process.
+  ///
+  /// Starts the HTTP telemetry sender targeting `endpoint`, authenticated
+  /// with `api_key`. Once initialized, the normal inference paths
+  /// (`Xybrid.model().run()`, `Xybrid.pipeline().run()`, conversation
+  /// turns, etc.) automatically emit `ExecutionStarted` /
+  /// `ExecutionCompleted` / `ExecutionFailed` events through it — no
+  /// per-call wiring required.
+  ///
+  /// Idempotent at the Rust layer: re-calling spawns a new exporter
+  /// that supersedes the previous one. Hosts should still guard against
+  /// double-init to avoid burning two senders.
+  ///
+  /// Sync because `init_platform_telemetry` is sync; the HTTP exporter
+  /// spins up its own background thread for batched sends.
+  static void initTelemetry(
+          {required String endpoint, required String apiKey}) =>
+      XybridRustLib.instance.api.crateApiSdkClientXybridSdkClientInitTelemetry(
+          endpoint: endpoint, apiKey: apiKey);
+
   /// Check if a model is cached locally (extracted and ready to use).
   ///
   /// This is a pure filesystem check — no network access required.

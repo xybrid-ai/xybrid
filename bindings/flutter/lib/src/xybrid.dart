@@ -133,11 +133,48 @@ class Xybrid {
     return XybridSdkClient.isModelCached(modelId: modelId);
   }
 
-  static void initTelemetry() {
-    // TODO - Implement telemetry
-    // XybridSdkClient.enableTelemetry();
-    throw UnimplementedError();
+  /// Tracks whether [initTelemetry] has wired the HTTP exporter. The
+  /// underlying Rust call is itself idempotent enough — it just spawns a
+  /// fresh exporter that supersedes the previous one — but we guard at
+  /// the Dart layer so accidental double-init doesn't burn two senders.
+  static bool _telemetryInitialized = false;
+
+  /// Initialize the platform telemetry exporter.
+  ///
+  /// Once initialized, the normal inference paths (`Xybrid.model().run()`,
+  /// `Xybrid.pipeline().run()`, conversation turns) automatically emit
+  /// `ExecutionStarted` / `ExecutionCompleted` / `ExecutionFailed` events
+  /// to the configured endpoint — no per-call wiring required.
+  ///
+  /// `endpoint` is the platform ingest URL (e.g. `https://ingest.xybrid.dev`
+  /// in production, or `http://192.168.1.78:8081` for a local dashboard on
+  /// the host machine). `apiKey` authenticates the sender.
+  ///
+  /// Must be called after [init] has completed. Safe to call multiple
+  /// times — subsequent calls are no-ops.
+  ///
+  /// Example:
+  /// ```dart
+  /// void main() async {
+  ///   await Xybrid.init();
+  ///   Xybrid.initTelemetry(
+  ///     endpoint: const String.fromEnvironment('XYBRID_PLATFORM_URL'),
+  ///     apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+  ///   );
+  ///   runApp(...);
+  /// }
+  /// ```
+  static void initTelemetry({required String endpoint, required String apiKey}) {
+    if (!_initialized) {
+      throw StateError('Xybrid.init() must complete before initTelemetry()');
+    }
+    if (_telemetryInitialized) return;
+    XybridSdkClient.initTelemetry(endpoint: endpoint, apiKey: apiKey);
+    _telemetryInitialized = true;
   }
+
+  /// Whether [initTelemetry] has been called successfully.
+  static bool get isTelemetryInitialized => _telemetryInitialized;
 
   /// Read the routing-engine's current view of device state.
   ///

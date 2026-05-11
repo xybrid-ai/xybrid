@@ -18,6 +18,28 @@ impl XybridSdkClient {
         xybrid_sdk::set_api_key(api_key);
     }
 
+    /// Initialize the platform telemetry exporter for this process.
+    ///
+    /// Starts the HTTP telemetry sender targeting `endpoint`, authenticated
+    /// with `api_key`. Once initialized, the normal inference paths
+    /// (`Xybrid.model().run()`, `Xybrid.pipeline().run()`, conversation
+    /// turns, etc.) automatically emit `ExecutionStarted` /
+    /// `ExecutionCompleted` / `ExecutionFailed` events through it — no
+    /// per-call wiring required.
+    ///
+    /// Idempotent at the Rust layer: re-calling spawns a new exporter
+    /// that supersedes the previous one. Hosts should still guard against
+    /// double-init to avoid burning two senders.
+    ///
+    /// Sync because `init_platform_telemetry` is sync; the HTTP exporter
+    /// spins up its own background thread for batched sends.
+    #[frb(sync)]
+    pub fn init_telemetry(endpoint: String, api_key: String) {
+        xybrid_sdk::set_binding(FLUTTER_BINDING);
+        let config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
+        xybrid_sdk::telemetry::init_platform_telemetry(config);
+    }
+
     /// Check if a model is cached locally (extracted and ready to use).
     ///
     /// This is a pure filesystem check — no network access required.
