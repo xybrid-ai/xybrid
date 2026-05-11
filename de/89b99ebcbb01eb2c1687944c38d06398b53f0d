@@ -1,0 +1,73 @@
+crates/xybrid-core/src/runtime_adapter/onnx/session.rs
+  s_8f7278c1334521::t_0a4ff0d8d66caa 756-761
+  s_8f7278c1334521::t_a1cdfa2ed94c28 813-823
+  s_8f7278c1334521::t_8ad501a1f5f6e0 846,849-851
+  s_8f7278c1334521::t_fd2c890322f10c 133-136
+  s_8f7278c1334521::t_0e47137a259c16 538-539
+  s_8f7278c1334521::t_86c442b7f129ef 829-832
+  s_8f7278c1334521::t_7550fac8675754 60-65
+  s_8f7278c1334521::t_fb4cfb30b64f9b 629-633,649-653
+  s_8f7278c1334521::t_81f804e0550ae0 9-16,20,22-27,29,31,33-34
+  s_8f7278c1334521::t_1bfa6a4caca655 142,144-148,152-155,160-164,169,171-176,178-179,181-182,185,188,201-204,214-224,230-233,245,247-248,259
+  s_8f7278c1334521::t_320db3c4db93dd 56-59,66-83,86-93
+  s_8f7278c1334521::t_a8ec226516986c 696-700
+crates/xybrid-core/src/execution/strategies/standard.rs
+  s_8f7278c1334521::t_be74e5e9e52fec 162-164
+  s_8f7278c1334521::t_29cd4978937bfb 14-15
+  s_8f7278c1334521::t_65be93cc97900a 157-161
+crates/xybrid-core/src/execution/executor.rs
+  s_8f7278c1334521::t_84f6aaf7b23998 417-419
+  s_8f7278c1334521::t_322bb8890f317b 1982-1984
+  s_8f7278c1334521::t_e8dafaa55026d5 52
+  s_8f7278c1334521::t_f797c9f305044b 1881-1883
+  s_8f7278c1334521::t_0e197b26c94cf9 51
+  s_8f7278c1334521::t_5b1b20c2635d19 1985-1987
+  s_8f7278c1334521::t_3f3de68c375d46 414-416
+  s_8f7278c1334521::t_5b2f767d6cf067 1879-1880
+crates/xybrid-core/src/execution/strategies/tts.rs
+  s_8f7278c1334521::t_92b5bb901e6695 151-153
+  s_8f7278c1334521::t_efee6c8a858315 23-24
+  s_8f7278c1334521::t_a274d82cb27671 145-150
+  s_8f7278c1334521::t_085b804cdd3f62 213-214
+  s_8f7278c1334521::t_ddbbb1390c74e5 215-217
+crates/xybrid-core/src/runtime_adapter/onnx/mobile.rs
+  s_8f7278c1334521::t_0ceb8ccd94cc17 21-22
+  s_8f7278c1334521::t_9308c06dbb8d62 308-315
+crates/xybrid-core/src/runtime_adapter/onnx/mod.rs
+  s_8f7278c1334521::t_9120afc824dd9a 31
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_8f7278c1334521::t_8b31d5a3bd4794 95
+crates/xybrid-core/benches/inference_backends.rs
+  s_8f7278c1334521::t_5d7d9586b7109d 331,338
+  s_8f7278c1334521::t_ffa270a8631315 386,393
+  s_8f7278c1334521::t_76abcd5fb5b43b 37
+  s_8f7278c1334521::t_e9c3c6cdab9128 275,278
+crates/xybrid-core/src/execution/session_factory.rs
+  s_8f7278c1334521::t_7d71d28ac08a8d 91-92,98,109-123,127-133,135-140
+  s_8f7278c1334521::t_313c2af1b8ab47 93-97,99-105
+  s_8f7278c1334521::t_b6e247f71d11ee 66
+crates/xybrid-core/src/runtime_adapter/onnx/adapter.rs
+  s_8f7278c1334521::t_b6b2892d3fc817 339-345
+  s_8f7278c1334521::t_9c8cfed0404a5e 25
+crates/xybrid-core/src/runtime_adapter/onnx/backend.rs
+  s_8f7278c1334521::t_0fdc6c85cc2ec7 9
+  s_8f7278c1334521::t_05cf33d042e775 7-8
+  s_8f7278c1334521::t_7f773d8fe41445 48-49,55-58
+  s_8f7278c1334521::t_a34a679dcbf0d7 50-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "de89b99ebcbb01eb2c1687944c38d06398b53f0d",
+  "prompts": {},
+  "sessions": {
+    "s_8f7278c1334521": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "343d3443-7bc0-419f-9adb-495ff9e8debb",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
