@@ -1,0 +1,36 @@
+crates/xybrid-core/src/execution/executor.rs
+  s_8f7278c1334521::t_f12910655bf78a 536-542
+  s_8f7278c1334521::t_0fcd60e7d079d7 781-789
+crates/xybrid-sdk/src/telemetry.rs
+  s_8f7278c1334521::t_c86efc9a08353a 1766-1797
+crates/xybrid-sdk/src/model.rs
+  s_8f7278c1334521::t_cd0d7b6b16ebd5 1814,1817
+  s_8f7278c1334521::t_c0ba9b8640d024 1929-1931,1933-1934,2009-2010
+  s_8f7278c1334521::t_da253c702b1342 1932,1935
+  s_8f7278c1334521::t_9e5c417302e6f6 1808-1813,1815-1816,1857-1858
+crates/xybrid-core/src/execution/listener.rs
+  s_8f7278c1334521::t_11d867470d844b 184-193,196,222,249
+  s_8f7278c1334521::t_9a942fc2a3926c 116-136
+  s_8f7278c1334521::t_229fa96a6dfd4a 219-221,223-248,250-276
+crates/xybrid-sdk/tests/telemetry_integration.rs
+  s_8f7278c1334521::t_975ae73b92ff79 509-529,532-622
+  s_8f7278c1334521::t_457924c3630895 530-531
+  s_8f7278c1334521::t_08272de01b8b11 55-64
+  s_8f7278c1334521::t_aafca1d63d7cb2 391-392
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "2df33dee726d470a0f4c14721bd9066b1d293d85",
+  "prompts": {},
+  "sessions": {
+    "s_8f7278c1334521": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "343d3443-7bc0-419f-9adb-495ff9e8debb",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
