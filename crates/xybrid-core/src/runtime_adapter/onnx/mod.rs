@@ -28,7 +28,7 @@ pub use execution_provider::{
 pub use execution_provider::{CoreMLComputeUnits, CoreMLConfig};
 pub use profiling::ResolvedExecutionProviders;
 pub use runtime::OnnxRuntime;
-pub use session::ONNXSession;
+pub use session::{ONNXSession, SessionOptions};
 
 #[cfg(any(target_os = "android", test))]
 pub use mobile::ONNXMobileRuntimeAdapter;

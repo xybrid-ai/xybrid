@@ -18,7 +18,8 @@
 //! adapter.load_model("/path/to/model.onnx")?;
 //! ```
 
-use super::session::ONNXSession;
+use super::execution_provider::ExecutionProviderKind;
+use super::session::{ONNXSession, SessionOptions};
 use crate::device::capabilities::ThermalState;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::tensor_utils::{envelope_to_tensors, tensors_to_envelope};
@@ -304,12 +305,14 @@ impl RuntimeAdapter for ONNXMobileRuntimeAdapter {
             return Ok(());
         }
 
-        // Create ONNX Runtime session
-        // Use NNAPI on Android if available and battery is sufficient
-        let use_nnapi = self.nnapi_available && self.battery_level > 20;
-        let use_metal = false; // Metal is for macOS/iOS, not Android
-
-        let session = ONNXSession::new(path, use_nnapi, use_metal)?;
+        // Create ONNX Runtime session. The legacy `new(path, use_nnapi,
+        // use_metal)` API silently dropped those flags, so this adapter
+        // has always loaded onto the CPU EP regardless of the captured
+        // `nnapi_available` / `battery_level` state. The unified `build`
+        // entry point keeps that behaviour explicit; wiring real
+        // NNAPI/Metal selection is a separate (overdue) change.
+        let session =
+            ONNXSession::build(path, ExecutionProviderKind::Cpu, SessionOptions::default())?;
 
         // Extract real input/output shapes from session
         let input_shapes = session.input_shapes();

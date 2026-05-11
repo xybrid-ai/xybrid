@@ -4,7 +4,9 @@
 //! It wraps the existing ONNXSession implementation to conform to the
 //! InferenceBackend trait.
 
-use super::session::ONNXSession;
+use super::execution_provider::ExecutionProviderKind;
+use super::session::{ONNXSession, SessionOptions};
+use crate::execution::session_factory::OnnxSessionFactory;
 use crate::runtime_adapter::inference_backend::{
     BackendError, BackendResult, InferenceBackend, RuntimeType,
 };
@@ -43,14 +45,17 @@ impl InferenceBackend for OnnxBackend {
     }
 
     fn load_model(&mut self, model_path: &Path, _config_path: Option<&Path>) -> BackendResult<()> {
-        // Load ONNX model using existing ONNXSession
-        let model_path_str = model_path
-            .to_str()
-            .ok_or_else(|| BackendError::LoadFailed("Invalid model path".to_string()))?;
-
-        // Create session with hardware acceleration hints (auto-detected by ort)
-        let session = ONNXSession::new(model_path_str, false, false)
-            .map_err(|e| BackendError::LoadFailed(format!("Failed to load ONNX model: {}", e)))?;
+        // Cheap path — this backend doesn't consume the resolved-EP
+        // signal, so we don't pay the profiling cost or require a
+        // writable tempdir on sandboxed targets. Routed through the
+        // shared factory entry so any future change to ONNX session
+        // construction picks this site up automatically.
+        let session = OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )
+        .map_err(|e| BackendError::LoadFailed(format!("Failed to load ONNX model: {}", e)))?;
 
         self.session = Some(session);
         Ok(())

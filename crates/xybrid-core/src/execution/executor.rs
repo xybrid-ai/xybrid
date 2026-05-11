@@ -48,7 +48,8 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
 
 // Internal: ONNX-specific types needed for optimized execution paths
 // These are implementation details, not part of the public API
-use crate::runtime_adapter::onnx::{ONNXSession, OnnxRuntime};
+use crate::execution::session_factory::OnnxSessionFactory;
+use crate::runtime_adapter::onnx::{ExecutionProviderKind, ONNXSession, OnnxRuntime, SessionOptions};
 
 #[cfg(feature = "candle")]
 use crate::runtime_adapter::candle::CandleRuntime;
@@ -410,8 +411,12 @@ impl TemplateExecutor {
                 .as_token_ids()
                 .ok_or_else(|| AdapterError::InvalidInput("Expected token IDs".to_string()))?;
 
-            // Create and run BERT session directly
-            let session = ONNXSession::new(model_full_path.to_str().unwrap(), false, false)?;
+            // Create and run BERT session through the shared factory entry.
+            let session = OnnxSessionFactory::create_session(
+                &model_full_path,
+                ExecutionProviderKind::Cpu,
+                SessionOptions::default(),
+            )?;
             let raw_outputs =
                 execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
 
@@ -1871,7 +1876,11 @@ impl TemplateExecutor {
         const CROSSFADE_SAMPLES: usize = 480;
 
         let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
-        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        let session = OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?;
         let speed = extract_tts_speed(input);
 
         for (i, chunk) in chunks.iter().enumerate() {
@@ -1970,8 +1979,12 @@ impl TemplateExecutor {
         let voice_loader = TtsVoiceLoader::new(&self.base_path);
         let voice_embedding = voice_loader.load(metadata, input)?;
 
-        // Create and run TTS session
-        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        // Create and run TTS session through the shared factory entry.
+        let session = OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?;
         let speed = extract_tts_speed(input);
         let mut raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
 

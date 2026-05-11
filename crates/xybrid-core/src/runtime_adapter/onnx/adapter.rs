@@ -22,7 +22,7 @@
 //! ```
 
 use super::execution_provider::ExecutionProviderKind;
-use super::session::ONNXSession;
+use super::session::{ONNXSession, SessionOptions};
 use crate::ir::Envelope;
 use crate::runtime_adapter::tensor_utils::{envelope_to_tensors, tensors_to_envelope};
 use crate::runtime_adapter::{
@@ -336,7 +336,13 @@ impl RuntimeAdapter for OnnxRuntimeAdapter {
         // single biggest reason latency varies on the same chip + model.
         // The capture costs ~10-15% on the first inference (the warm-up
         // call) and zero on every subsequent call.
-        let session = ONNXSession::with_resolved_ep_capture(path, self.execution_provider)?;
+        let session = ONNXSession::build(
+            path,
+            self.execution_provider,
+            SessionOptions {
+                capture_resolved_ep: true,
+            },
+        )?;
 
         log::info!(
             "Loaded model '{}' with {} execution provider",
