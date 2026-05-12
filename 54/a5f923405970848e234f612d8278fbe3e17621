@@ -1,0 +1,21 @@
+docs/sdk/telemetry.md
+  s_8f7278c1334521::t_554864d0b6ce54 7-8
+docs/sdk/trace-model.md
+  s_8f7278c1334521::t_be90ef6afbfb1e 1-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "54a5f923405970848e234f612d8278fbe3e17621",
+  "prompts": {},
+  "sessions": {
+    "s_8f7278c1334521": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "343d3443-7bc0-419f-9adb-495ff9e8debb",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
