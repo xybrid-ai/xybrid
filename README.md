@@ -252,9 +252,9 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 For platform-specific setup, see each SDK's README: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/).
 
 <details>
-<summary><h3>Pipelines (Experimental)</h3></summary>
+<summary><h3>Multi-Model Inference Pipelines — MMP (Experimental)</h3></summary>
 
-Chain models together — build a voice assistant in 3 lines of YAML:
+Chain models together into a single multi-model inference pipeline (MMP) — build a voice assistant in 3 lines of YAML:
 
 ```yaml
 # voice-assistant.yaml
@@ -278,17 +278,17 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// Pipeline support coming soon — use single model loading for now
+// Multi-model pipeline (MMP) support coming soon — use single model loading for now
 ```
 
 **Swift:**
 ```swift
-// Pipeline support coming soon — use single model loading for now
+// Multi-model pipeline (MMP) support coming soon — use single model loading for now
 ```
 
 **Unity (C#):**
 ```csharp
-// Pipeline support coming soon — use single model loading for now
+// Multi-model pipeline (MMP) support coming soon — use single model loading for now
 ```
 
 **Rust:**
@@ -402,11 +402,11 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Language Models | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Vision Models | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
-| Pipeline Orchestration | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
 
-**SDK pipeline support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
 ---
 
@@ -415,7 +415,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 - **Privacy first** — All inference runs on-device. Your data never leaves the device. The SDK attaches a small fleet-attribution header on registry metadata calls — see [registry telemetry](docs/telemetry/registry.md).
 - **Offline capable** — No internet required after initial model download.
 - **Cross-platform** — One API across iOS, Android, macOS, Linux, and Windows.
-- **Pipeline orchestration** — Chain models together (ASR → LLM → TTS) in a single call.
+- **Multi-model pipelines (MMP)** — Chain models together (ASR → LLM → TTS) in a single call.
 - **Automatic optimization** — Hardware acceleration on Apple Neural Engine, Metal, and CUDA.
 
 ### How it compares
@@ -424,7 +424,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 |---|---|---|---|---|
 | Mobile (iOS/Android) | ✅ | ❌ | ❌ | ✅ |
 | Game engine (Unity) | ✅ | ❌ | ❌ | ❌ |
-| Multi-stage pipelines | ✅ | ❌ | ❌ | ❌ |
+| Multi-model pipelines (MMP) | ✅ | ❌ | ❌ | ❌ |
 | ASR + TTS + LLM in one SDK | ✅ | ❌ | ❌ | ❌ |
 | Runs in-process (no server) | ✅ | ❌ | ✅ | ✅ |
 | No cloud required | ✅ | ✅ | ✅ | ✅ |
