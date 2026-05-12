@@ -381,11 +381,21 @@ fn telemetry_http_event_includes_device_profile() {
     );
 }
 
-/// Verify that TemplateExecutor automatically emits ExecutionStarted and
-/// ExecutionCompleted events when platform telemetry is initialized.
-/// This does NOT require env vars — uses a local channel to observe events.
+/// Verify that `TemplateExecutor::execute` does **not** emit
+/// `ExecutionStarted` / `ExecutionCompleted` events.
+///
+/// All `execute*` methods on `TemplateExecutor` now use the silent guard
+/// (`ExecutionGuard::new_silent`) because the SDK wrappers
+/// (`XybridModel::run` / `run_async` / `run_streaming` and the chat-context
+/// variants) emit their own user-facing `ModelComplete` event with full
+/// attribution. The outer executor span emitting on top of that would
+/// surface as a duplicate noise row on the Traces dashboard.
+///
+/// The listener wiring itself is still exercised by the unit tests in
+/// `xybrid-core/src/execution/listener.rs` and by the `_emits_no_outer_`
+/// tests below.
 #[test]
-fn automatic_execution_events() {
+fn executor_execute_emits_no_outer_telemetry_events() {
     use xybrid_core::execution::listener;
 
     let _serial = listener_test_lock();
@@ -398,12 +408,9 @@ fn automatic_execution_events() {
     let metadata: ModelMetadata =
         serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
 
-    // Register a local channel to observe events
     let (tx, rx) = mpsc::channel::<TelemetryEvent>();
     register_telemetry_sender(tx);
 
-    // Simulate what init_platform_telemetry does for the execution listener
-    // (we don't init the full HTTP exporter since we don't need it)
     listener::set_execution_listener(|event| {
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -440,11 +447,17 @@ fn automatic_execution_events() {
                 error,
             } => TelemetryEvent {
                 event_type: "ExecutionFailed".to_string(),
-                stage_name: Some(method),
+                // Match the production listener: surface model_id rather
+                // than method so error rows render with a meaningful
+                // operation column.
+                stage_name: Some(model_id.clone()),
                 target: Some("device".to_string()),
                 latency_ms: Some(latency_ms as u32),
                 error: Some(error),
-                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                data: Some(format!(
+                    r#"{{"model":"{}","method":"{}"}}"#,
+                    model_id, method
+                )),
                 timestamp_ms,
             },
         };
@@ -452,57 +465,29 @@ fn automatic_execution_events() {
         publish_telemetry_event(telemetry_event);
     });
 
-    // Run MNIST inference — should automatically emit events
     let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
     let input = mnist_input_envelope();
     let _output = executor
         .execute(&metadata, &input, None)
         .expect("MNIST inference should succeed");
 
-    // Small delay for channel delivery
     std::thread::sleep(Duration::from_millis(50));
-
-    // Clean up
     listener::clear_execution_listener();
 
-    // Collect and verify events
     let mut collected: Vec<TelemetryEvent> = Vec::new();
     while let Ok(ev) = rx.try_recv() {
         collected.push(ev);
     }
 
-    let types: Vec<&str> = collected.iter().map(|e| e.event_type.as_str()).collect();
+    let leaked: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| e.stage_name.as_deref() == Some("execute"))
+        .collect();
 
     assert!(
-        types.contains(&"ExecutionStarted"),
-        "Missing automatic ExecutionStarted event. Got: {:?}",
-        types
-    );
-    assert!(
-        types.contains(&"ExecutionCompleted"),
-        "Missing automatic ExecutionCompleted event. Got: {:?}",
-        types
-    );
-
-    // Verify ExecutionStarted has correct model_id
-    let started = collected
-        .iter()
-        .find(|e| e.event_type == "ExecutionStarted")
-        .unwrap();
-    assert_eq!(started.stage_name.as_deref(), Some("execute"));
-    assert!(started.data.as_ref().unwrap().contains("mnist"));
-
-    // Verify ExecutionCompleted has latency
-    let completed = collected
-        .iter()
-        .find(|e| e.event_type == "ExecutionCompleted")
-        .unwrap();
-    assert!(completed.latency_ms.is_some());
-    assert!(completed.latency_ms.unwrap() > 0);
-
-    println!(
-        "OK — {} automatic execution events captured",
-        collected.len()
+        leaked.is_empty(),
+        "executor.execute outer span must not emit telemetry events; leaked: {:?}",
+        leaked
     );
 }
 
@@ -578,11 +563,14 @@ fn execute_streaming_with_context_emits_no_outer_telemetry_events() {
                 error,
             } => TelemetryEvent {
                 event_type: "ExecutionFailed".to_string(),
-                stage_name: Some(method),
+                stage_name: Some(model_id.clone()),
                 target: Some("device".to_string()),
                 latency_ms: Some(latency_ms as u32),
                 error: Some(error),
-                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                data: Some(format!(
+                    r#"{{"model":"{}","method":"{}"}}"#,
+                    model_id, method
+                )),
                 timestamp_ms,
             },
         };
@@ -617,6 +605,110 @@ fn execute_streaming_with_context_emits_no_outer_telemetry_events() {
         "execute_streaming_with_context outer span must not emit telemetry events; \
          leaked: {:?}",
         outer_events
+    );
+}
+
+/// Regression guard for the broader scope of INF-159: non-context
+/// `executor.execute_streaming` must not emit `ExecutionStarted` /
+/// `ExecutionCompleted` events either. Same rationale as the chat-context
+/// test above — the SDK's `XybridModel::run_streaming` wrapper emits a
+/// `ModelComplete` with full attribution, so the outer executor span would
+/// be duplicate noise on the Traces dashboard.
+#[test]
+fn execute_streaming_emits_no_outer_telemetry_events() {
+    use xybrid_core::execution::listener;
+
+    let _serial = listener_test_lock();
+
+    let Some(model_dir) = model_fixtures::model_or_skip("mnist") else {
+        return;
+    };
+
+    let metadata_path = model_dir.join("model_metadata.json");
+    let metadata: ModelMetadata =
+        serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
+
+    let (tx, rx) = mpsc::channel::<TelemetryEvent>();
+    register_telemetry_sender(tx);
+
+    listener::set_execution_listener(|event| {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let telemetry_event = match event {
+            xybrid_sdk::ExecutionEvent::Started { model_id, method } => TelemetryEvent {
+                event_type: "ExecutionStarted".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: None,
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Completed {
+                model_id,
+                method,
+                latency_ms,
+            } => TelemetryEvent {
+                event_type: "ExecutionCompleted".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Failed {
+                model_id,
+                method,
+                latency_ms,
+                error,
+            } => TelemetryEvent {
+                event_type: "ExecutionFailed".to_string(),
+                stage_name: Some(model_id.clone()),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: Some(error),
+                data: Some(format!(
+                    r#"{{"model":"{}","method":"{}"}}"#,
+                    model_id, method
+                )),
+                timestamp_ms,
+            },
+        };
+
+        publish_telemetry_event(telemetry_event);
+    });
+
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+    let input = mnist_input_envelope();
+
+    let _ = executor
+        .execute_streaming(&metadata, &input, Box::new(|_token| Ok(())), None)
+        .expect("MNIST execute_streaming should succeed via non-LLM fallback");
+
+    std::thread::sleep(Duration::from_millis(50));
+    listener::clear_execution_listener();
+
+    let mut collected: Vec<TelemetryEvent> = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        collected.push(ev);
+    }
+
+    let leaked: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| {
+            e.stage_name.as_deref() == Some("execute_streaming")
+                || e.stage_name.as_deref() == Some("execute")
+        })
+        .collect();
+
+    assert!(
+        leaked.is_empty(),
+        "execute_streaming / execute outer spans must not emit telemetry events; leaked: {:?}",
+        leaked
     );
 }
 

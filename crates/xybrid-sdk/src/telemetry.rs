@@ -1834,11 +1834,19 @@ fn register_execution_listener() {
                 error,
             } => TelemetryEvent {
                 event_type: "ExecutionFailed".to_string(),
-                stage_name: Some(method),
+                // Surface the model_id in the operation column so error
+                // rows on the Traces dashboard read like the success rows
+                // (`pipeline / <model-id>`) instead of the executor-
+                // internal method name. The method is still preserved
+                // in `data` for forensics.
+                stage_name: Some(model_id.clone()),
                 target: Some("device".to_string()),
                 latency_ms: Some(latency_ms as u32),
                 error: Some(error),
-                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                data: Some(format!(
+                    r#"{{"model":"{}","method":"{}"}}"#,
+                    model_id, method
+                )),
                 timestamp_ms,
             },
         };

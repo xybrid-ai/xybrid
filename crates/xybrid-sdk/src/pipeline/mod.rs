@@ -895,13 +895,18 @@ impl Pipeline {
         // Collect runtime metrics from device
         let metrics = DeviceMetrics::default();
 
-        // Set telemetry context
+        // Install per-call pipeline context. The RAII guard clears on
+        // every exit (success, `?` error, panic) so we don't leak the
+        // global `trace_id` onto later unrelated telemetry — replaces
+        // the manual `set_telemetry_pipeline_context(None, None)` calls
+        // that previously had to be threaded through every exit.
         let trace_id = uuid::Uuid::new_v4();
         let pipeline_id = self
             .name
             .as_ref()
             .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-        crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(pipeline_id, Some(trace_id));
 
         let mut orchestrator = Orchestrator::new();
         // No need to set registry config - executor uses bundle_path from stage descriptors
@@ -915,16 +920,8 @@ impl Pipeline {
         let resource_guard = crate::telemetry::begin_resource_run();
         let results: Vec<StageExecutionResult> = orchestrator
             .execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn)
-            .map_err(|e| {
-                crate::telemetry::set_telemetry_pipeline_context(None, None);
-                SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
-            })?;
+            .map_err(|e| SdkError::PipelineError(format!("Pipeline execution failed: {}", e)))?;
         let total_latency_ms = start_time.elapsed().as_millis() as u32;
-
-        // Note: `set_telemetry_pipeline_context(None, None)` deferred to
-        // after `publish_telemetry_event` below. The exporter's flush
-        // thread reads pipeline_id/trace_id lazily at flush time; if we
-        // cleared here the PipelineComplete event would get null IDs.
 
         let stages: Vec<StageTiming> = results
             .iter()
@@ -950,45 +947,59 @@ impl Pipeline {
             )
         };
 
-        // Emit telemetry event. LLM metrics ride on the separate
-        // `PlatformEvent.stages[].spans[].metadata` path (populated via
-        // `xybrid_core::tracing::add_metadata` in the LLM adapter), so we
-        // intentionally keep this `data` blob compact — only the fields
-        // that already crossed the wire before llm_metrics existed.
-        let stage_data: Vec<serde_json::Value> = results
-            .iter()
-            .map(|result| {
-                serde_json::json!({
-                    "name": result.stage,
-                    "latency_ms": result.latency_ms,
-                    "target": result.routing_decision.target.to_string(),
+        // For single-stage pipelines, suppress the outer `PipelineComplete`
+        // emit. The lone inner stage's `ModelComplete` event already
+        // carries the user-facing attribution (model_id, backend, EP,
+        // duration, TTFT, …); emitting an additional pipeline row would
+        // show up on the Traces dashboard as a noisy `pipeline / <name>`
+        // entry with no attribution. Multi-stage pipelines still emit
+        // `PipelineComplete` so the dashboard can collapse ASR → LLM →
+        // TTS stages under one row via the shared `trace_id`.
+        if stage_descriptors.len() > 1 {
+            // Emit telemetry event. LLM metrics ride on the separate
+            // `PlatformEvent.stages[].spans[].metadata` path (populated
+            // via `xybrid_core::tracing::add_metadata` in the LLM
+            // adapter), so we intentionally keep this `data` blob compact
+            // — only the fields that already crossed the wire before
+            // llm_metrics existed.
+            let stage_data: Vec<serde_json::Value> = results
+                .iter()
+                .map(|result| {
+                    serde_json::json!({
+                        "name": result.stage,
+                        "latency_ms": result.latency_ms,
+                        "target": result.routing_decision.target.to_string(),
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
-        let event = crate::telemetry::TelemetryEvent {
-            event_type: "PipelineComplete".to_string(),
-            stage_name: self.name.clone(),
-            target: None,
-            latency_ms: Some(total_latency_ms),
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    "stages": stage_data,
-                    "output_type": format!("{:?}", output_type),
-                })
-                .to_string(),
-            ),
-            timestamp_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
-        };
-        crate::telemetry::publish_with_resource_summary(event, resource_guard);
+            let event = crate::telemetry::TelemetryEvent {
+                event_type: "PipelineComplete".to_string(),
+                stage_name: self.name.clone(),
+                target: None,
+                latency_ms: Some(total_latency_ms),
+                error: None,
+                data: Some(
+                    serde_json::json!({
+                        "stages": stage_data,
+                        "output_type": format!("{:?}", output_type),
+                    })
+                    .to_string(),
+                ),
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+            };
+            crate::telemetry::publish_with_resource_summary(event, resource_guard);
+        } else {
+            // Single-stage path: drop the resource_guard explicitly so
+            // its summary doesn't get attached to a phantom event later.
+            drop(resource_guard);
+        }
 
-        // Clear pipeline context AFTER publish so the event carried
-        // correlation IDs visible to the exporter's lazy-read flush.
-        crate::telemetry::set_telemetry_pipeline_context(None, None);
+        // `_telemetry_ctx` drops here, clearing the pipeline context
+        // after the publish — same ordering as before.
 
         Ok(PipelineExecutionResult {
             name: self.name.clone(),
@@ -1027,11 +1038,18 @@ impl Pipeline {
             // Collect runtime metrics from device
             let metrics = DeviceMetrics::default();
 
+            // RAII pipeline context — see sync `run` for rationale.
+            // Drops on every exit path (success, `?` error, panic) and
+            // replaces the manual `set_telemetry_pipeline_context(None, None)`
+            // cleanup the previous shape needed at every branch.
             let trace_id = uuid::Uuid::new_v4();
             let pipeline_id = name
                 .as_ref()
                 .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-            crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
+            let _telemetry_ctx = crate::telemetry::TelemetryPipelineContextGuard::install(
+                pipeline_id,
+                Some(trace_id),
+            );
 
             let mut orchestrator = Orchestrator::new();
             // No need to set registry config - executor uses bundle_path from stage descriptors
@@ -1050,15 +1068,8 @@ impl Pipeline {
                     &metrics,
                     &availability_fn,
                 )
-                .map_err(|e| {
-                    crate::telemetry::set_telemetry_pipeline_context(None, None);
-                    SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
-                })?;
+                .map_err(|e| SdkError::PipelineError(format!("Pipeline execution failed: {}", e)))?;
             let total_latency_ms = start_time.elapsed().as_millis() as u32;
-
-            // Note: `set_telemetry_pipeline_context(None, None)` deferred
-            // to after `publish_telemetry_event` below — see sync arm for
-            // the correlation-ID rationale.
 
             let stages: Vec<StageTiming> = results
                 .iter()
@@ -1084,45 +1095,47 @@ impl Pipeline {
                 )
             };
 
-            // Emit PipelineComplete telemetry event. Previously absent from
-            // this async path (existed only in sync `run`); attaching now
-            // brings the two paths to parity. LLM metrics ride on span
-            // metadata (see the sync arm above for rationale), so this
-            // `data` blob stays compact.
-            let stage_data: Vec<serde_json::Value> = results
-                .iter()
-                .map(|result| {
-                    serde_json::json!({
-                        "name": result.stage,
-                        "latency_ms": result.latency_ms,
-                        "target": result.routing_decision.target.to_string(),
+            // Single-stage pipelines: suppress the outer `PipelineComplete`.
+            // See sync `run` above for the full rationale (the inner
+            // stage's `ModelComplete` already carries everything; the
+            // outer would be a noisy attribution-less row).
+            if stage_descriptors.len() > 1 {
+                let stage_data: Vec<serde_json::Value> = results
+                    .iter()
+                    .map(|result| {
+                        serde_json::json!({
+                            "name": result.stage,
+                            "latency_ms": result.latency_ms,
+                            "target": result.routing_decision.target.to_string(),
+                        })
                     })
-                })
-                .collect();
+                    .collect();
 
-            let event = crate::telemetry::TelemetryEvent {
-                event_type: "PipelineComplete".to_string(),
-                stage_name: name.clone(),
-                target: None,
-                latency_ms: Some(total_latency_ms),
-                error: None,
-                data: Some(
-                    serde_json::json!({
-                        "stages": stage_data,
-                        "output_type": format!("{:?}", output_type),
-                    })
-                    .to_string(),
-                ),
-                timestamp_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0),
-            };
-            crate::telemetry::publish_with_resource_summary(event, resource_guard);
+                let event = crate::telemetry::TelemetryEvent {
+                    event_type: "PipelineComplete".to_string(),
+                    stage_name: name.clone(),
+                    target: None,
+                    latency_ms: Some(total_latency_ms),
+                    error: None,
+                    data: Some(
+                        serde_json::json!({
+                            "stages": stage_data,
+                            "output_type": format!("{:?}", output_type),
+                        })
+                        .to_string(),
+                    ),
+                    timestamp_ms: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
+                };
+                crate::telemetry::publish_with_resource_summary(event, resource_guard);
+            } else {
+                drop(resource_guard);
+            }
 
-            // Clear pipeline context after publish to keep the exporter's
-            // lazy-read flush correlated with the just-completed pipeline.
-            crate::telemetry::set_telemetry_pipeline_context(None, None);
+            // `_telemetry_ctx` drops here, clearing the pipeline context
+            // after the publish.
 
             Ok(PipelineExecutionResult {
                 name,

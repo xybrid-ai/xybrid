@@ -205,7 +205,13 @@ impl TemplateExecutor {
         input: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute");
+        // Silent guard: the SDK's `XybridModel::run` / `run_async` wrappers
+        // around this method emit `ModelComplete` with full attribution
+        // (model_id, backend, latency, etc.). Emitting an outer
+        // `Started` / `Completed` pair from here would surface as
+        // duplicate noise rows on the Traces dashboard. Failed-path
+        // emission via `mark_execution_terminal` is preserved.
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute");
         let result = self.execute_impl(metadata, input, config);
         if let Err(e) = &result {
             mark_execution_terminal(&guard, e);
@@ -683,7 +689,12 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute_streaming");
+        // Silent guard: the SDK's `XybridModel::run_streaming` wrapper
+        // around this method emits `ModelComplete` with full attribution.
+        // The outer `Started` / `Completed` pair would surface as
+        // duplicate noise rows on the Traces dashboard. Failed-path
+        // emission via `mark_execution_terminal` is preserved.
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute_streaming");
         let result = self.execute_streaming_impl(metadata, input, on_token, config);
         if let Err(e) = &result {
             mark_execution_terminal(&guard, e);

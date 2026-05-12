@@ -1703,6 +1703,15 @@ impl XybridModel {
         // `publish_with_resource_summary` at the end of this function.
         let resource_guard = crate::telemetry::begin_resource_run();
 
+        // Install a per-call trace_id for the lifetime of this run. Any
+        // telemetry events emitted between install and `Drop` (including
+        // any deferred adapter events) share the same `trace_id`, so the
+        // dashboard collapses them to a single Traces row. Same
+        // discipline `run_with_context` uses; see `docs/sdk/trace-model.md`.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
         // Recover from poisoned RwLock to prevent permanent lock errors
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -1740,6 +1749,9 @@ impl XybridModel {
                 .unwrap_or(0),
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
+
+        // `_telemetry_ctx` drops here, clearing the pipeline context after
+        // the publish — same ordering as `run_with_context`.
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
@@ -2094,6 +2106,12 @@ impl XybridModel {
 
         let start = Instant::now();
 
+        // Per-call trace_id scope — see `run` for rationale. Cleared on
+        // drop at end of scope (after publish) or on any early return.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
         // Get write lock on handle
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -2352,6 +2370,13 @@ impl XybridModel {
             let result = tokio::task::spawn_blocking(move || {
                 let start = Instant::now();
 
+                // Per-call trace_id scope — see `run` for rationale. Lives
+                // inside the spawn_blocking closure so the install + drop
+                // happen on the same thread the publish runs on.
+                let trace_id = uuid::Uuid::new_v4();
+                let _telemetry_ctx =
+                    crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
                 // Get write lock on handle
                 let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -2508,6 +2533,13 @@ impl XybridModel {
         tokio::task::spawn_blocking(move || {
             let start = Instant::now();
             let resource_guard = crate::telemetry::begin_resource_run();
+
+            // Per-call trace_id scope — see `run` for rationale. Cleared
+            // on drop at end of the spawn_blocking closure (after publish)
+            // or on any early return.
+            let trace_id = uuid::Uuid::new_v4();
+            let _telemetry_ctx =
+                crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
             // Recover from poisoned RwLock to prevent permanent lock errors
             let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
