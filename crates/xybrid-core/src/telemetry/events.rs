@@ -400,9 +400,16 @@ impl Telemetry {
     /// `recent_abort_rate` and `sample_size` come from the local reliability
     /// window the authority maintains per `(model_id, signal_context)`. Empty
     /// window callers pass `(0.0, 0)`. The pair travels in the event's
-    /// `local_reliability_hint` attribute and is hoisted to the platform
-    /// event payload top level by the SDK telemetry exporter so analytics
-    /// can column-extract it without descending into the nested data object.
+    /// `local_reliability_hint` attribute, alongside the routing reason. The
+    /// public bridge path
+    /// (`OrchestratorEvent::RoutingDecided` → SDK exporter) hoists the same
+    /// field to the platform-event payload top level so analytics can
+    /// column-extract it without descending into the nested data object.
+    ///
+    /// Non-finite `recent_abort_rate` values (NaN, ±Infinity) are clamped to
+    /// `0.0` before serialization so the analytics backend's typed Float32
+    /// column never receives a JSON `null`. The authority itself emits only
+    /// finite values; this clamp is defense-in-depth for direct callers.
     pub fn log_routing_decision(
         &self,
         stage_name: &str,
@@ -411,6 +418,11 @@ impl Telemetry {
         recent_abort_rate: f32,
         sample_size: u32,
     ) {
+        let safe_rate = if recent_abort_rate.is_finite() {
+            recent_abort_rate
+        } else {
+            0.0_f32
+        };
         let entry = TelemetryEntry::new(
             Severity::Info,
             TelemetryEvent::RoutingDecision,
@@ -423,7 +435,7 @@ impl Telemetry {
                 "target": target,
                 "reason": reason,
                 "local_reliability_hint": {
-                    "recent_abort_rate": recent_abort_rate,
+                    "recent_abort_rate": safe_rate,
                     "sample_size": sample_size,
                 }
             }),

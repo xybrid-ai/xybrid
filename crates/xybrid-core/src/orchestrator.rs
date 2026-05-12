@@ -353,6 +353,8 @@ impl Orchestrator {
             stage_name: stage.name.clone(),
             target: routing_decision.target.to_json_string(),
             reason: routing_decision.reason.clone(),
+            recent_abort_rate: routing_decision.local_reliability_hint.recent_abort_rate,
+            sample_size: routing_decision.local_reliability_hint.sample_size,
         });
         self.telemetry.log_routing_decision(
             &stage.name,
@@ -583,6 +585,8 @@ impl Orchestrator {
             stage_name: stage.name.clone(),
             target: routing_decision.target.to_json_string(),
             reason: routing_decision.reason.clone(),
+            recent_abort_rate: routing_decision.local_reliability_hint.recent_abort_rate,
+            sample_size: routing_decision.local_reliability_hint.sample_size,
         });
         self.telemetry.log_routing_decision(
             &stage.name,

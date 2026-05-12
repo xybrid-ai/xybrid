@@ -1948,13 +1948,35 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             target,
             reason,
+            recent_abort_rate,
+            sample_size,
         } => TelemetryEvent {
             event_type: "RoutingDecided".to_string(),
             stage_name: Some(stage_name.clone()),
             target: Some(target.clone()),
             latency_ms: None,
             error: None,
-            data: Some(serde_json::json!({"reason": reason}).to_string()),
+            // Embed the local reliability hint at the top level of event.data
+            // so the `convert_to_platform_event` hoist list can surface it on
+            // the payload at the top level (where the platform datasource's
+            // JSONPath extractors live, alongside correlation_id / outcome_*).
+            // Non-finite f32 values would serialize to JSON `null`, breaking
+            // the typed platform column; the authority emits only finite
+            // values, but we sanitize at the bridge for defense in depth.
+            data: Some(
+                serde_json::json!({
+                    "reason": reason,
+                    "local_reliability_hint": {
+                        "recent_abort_rate": if recent_abort_rate.is_finite() {
+                            *recent_abort_rate
+                        } else {
+                            0.0_f32
+                        },
+                        "sample_size": sample_size,
+                    },
+                })
+                .to_string(),
+            ),
             timestamp_ms,
         },
         OrchestratorEvent::ExecutionStarted { stage_name, target } => TelemetryEvent {
@@ -2782,6 +2804,8 @@ mod tests {
             stage_name: "asr".to_string(),
             target: "cloud".to_string(),
             reason: "network_optimal".to_string(),
+            recent_abort_rate: 0.0,
+            sample_size: 0,
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2791,6 +2815,76 @@ mod tests {
         assert!(telemetry.data.is_some());
         let data = telemetry.data.unwrap();
         assert!(data.contains("network_optimal"));
+    }
+
+    #[test]
+    fn routing_decided_event_carries_local_reliability_hint_end_to_end() {
+        // Production-shape regression test: walk the full
+        // OrchestratorEvent -> TelemetryEvent -> PlatformEvent pipeline
+        // so the hint flows through every seam the previous PR draft
+        // missed.
+        let event = OrchestratorEvent::RoutingDecided {
+            stage_name: "stage-1".to_string(),
+            target: "cloud".to_string(),
+            reason: "history_bias".to_string(),
+            recent_abort_rate: 0.75,
+            sample_size: 4,
+        };
+        let telemetry_event = convert_orchestrator_event(&event);
+
+        // Bridge embeds the hint in event.data so the hoist list picks it up.
+        let data_str = telemetry_event.data.as_ref().expect("data must be present");
+        let parsed_data: serde_json::Value = serde_json::from_str(data_str).unwrap();
+        assert_eq!(
+            parsed_data["local_reliability_hint"]["recent_abort_rate"]
+                .as_f64()
+                .unwrap_or(-1.0),
+            0.75
+        );
+        assert_eq!(
+            parsed_data["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(4)
+        );
+
+        // And the platform-event payload surfaces the hint at the top level.
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&telemetry_event, &config, None, None, None);
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["recent_abort_rate"]
+                .as_f64()
+                .unwrap_or(-1.0),
+            0.75
+        );
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn routing_decided_event_sanitizes_non_finite_recent_abort_rate() {
+        // Defense-in-depth: the authority emits only finite rates, but
+        // the bridge clamps NaN/Infinity to 0.0 so the platform's typed
+        // Float32 column never receives a JSON null. The clamp lives in
+        // the bridge so any future direct OrchestratorEvent caller (test,
+        // example, FFI) cannot poison the telemetry stream.
+        for bad_rate in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let event = OrchestratorEvent::RoutingDecided {
+                stage_name: "stage-1".to_string(),
+                target: "cloud".to_string(),
+                reason: "history_bias".to_string(),
+                recent_abort_rate: bad_rate,
+                sample_size: 1,
+            };
+            let telemetry_event = convert_orchestrator_event(&event);
+            let parsed_data: serde_json::Value =
+                serde_json::from_str(telemetry_event.data.as_ref().unwrap()).unwrap();
+            assert_eq!(
+                parsed_data["local_reliability_hint"]["recent_abort_rate"].as_f64(),
+                Some(0.0),
+                "non-finite rate {bad_rate} must be sanitized to 0.0"
+            );
+        }
     }
 
     #[test]

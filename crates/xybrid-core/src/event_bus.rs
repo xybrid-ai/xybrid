@@ -30,10 +30,20 @@ pub enum OrchestratorEvent {
         reason: Option<String>,
     },
     /// Routing decision was made.
+    ///
+    /// `recent_abort_rate` and `sample_size` carry the rolling-window-derived
+    /// local reliability hint that the authority computed for this
+    /// `(model_id, signal_context)`. Empty-window decisions emit `(0.0, 0)`
+    /// so consumers can distinguish "no history yet" from "field absent
+    /// because of an older event shape". The SDK bridge hoists these into
+    /// `event.data.local_reliability_hint` so the platform exporter can
+    /// surface them at the payload top level.
     RoutingDecided {
         stage_name: String,
         target: String,
         reason: String,
+        recent_abort_rate: f32,
+        sample_size: u32,
     },
     /// Execution started.
     ExecutionStarted { stage_name: String, target: String },
@@ -355,6 +365,8 @@ mod tests {
             stage_name: "test".to_string(),
             target: "cloud".to_string(),
             reason: "optimal".to_string(),
+            recent_abort_rate: 0.0,
+            sample_size: 0,
         };
 
         // Verify Clone works
@@ -365,11 +377,13 @@ mod tests {
                     stage_name: s1,
                     target: t1,
                     reason: r1,
+                    ..
                 },
                 OrchestratorEvent::RoutingDecided {
                     stage_name: s2,
                     target: t2,
                     reason: r2,
+                    ..
                 },
             ) => {
                 assert_eq!(s1, s2);
@@ -415,6 +429,8 @@ mod tests {
             stage_name: "test".to_string(),
             target: "cloud".to_string(),
             reason: "optimal".to_string(),
+            recent_abort_rate: 0.0,
+            sample_size: 0,
         });
         let _ = subscription.recv().unwrap();
 
