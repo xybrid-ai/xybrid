@@ -133,12 +133,6 @@ class Xybrid {
     return XybridSdkClient.isModelCached(modelId: modelId);
   }
 
-  /// Tracks whether [initTelemetry] has wired the HTTP exporter. The
-  /// underlying Rust call is itself idempotent enough — it just spawns a
-  /// fresh exporter that supersedes the previous one — but we guard at
-  /// the Dart layer so accidental double-init doesn't burn two senders.
-  static bool _telemetryInitialized = false;
-
   /// Initialize the platform telemetry exporter.
   ///
   /// Once initialized, the normal inference paths (`Xybrid.model().run()`,
@@ -150,8 +144,14 @@ class Xybrid {
   /// in production, or `http://192.168.1.78:8081` for a local dashboard on
   /// the host machine). `apiKey` authenticates the sender.
   ///
-  /// Must be called after [init] has completed. Safe to call multiple
-  /// times — subsequent calls are no-ops.
+  /// Must be called after [init] has completed. The Rust layer holds a
+  /// process-wide once-guard, so subsequent calls — including across
+  /// Flutter hot-restart or a second Dart isolate — are safe no-ops; the
+  /// HTTP exporter and execution listener are registered exactly once
+  /// per process.
+  ///
+  /// No reconfigure path: changing `endpoint` or `apiKey` requires
+  /// restarting the process.
   ///
   /// Example:
   /// ```dart
@@ -168,13 +168,16 @@ class Xybrid {
     if (!_initialized) {
       throw StateError('Xybrid.init() must complete before initTelemetry()');
     }
-    if (_telemetryInitialized) return;
     XybridSdkClient.initTelemetry(endpoint: endpoint, apiKey: apiKey);
-    _telemetryInitialized = true;
   }
 
-  /// Whether [initTelemetry] has been called successfully.
-  static bool get isTelemetryInitialized => _telemetryInitialized;
+  /// Whether the process-wide telemetry exporter is running.
+  ///
+  /// Reads from the Rust once-flag, so this stays correct across Flutter
+  /// hot-restart (which would reset any Dart-side state) and second
+  /// isolates that didn't themselves call [initTelemetry].
+  static bool get isTelemetryInitialized =>
+      XybridSdkClient.isTelemetryInitialized();
 
   /// Read the routing-engine's current view of device state.
   ///

@@ -25,9 +25,12 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   /// `ExecutionCompleted` / `ExecutionFailed` events through it — no
   /// per-call wiring required.
   ///
-  /// Idempotent at the Rust layer: re-calling spawns a new exporter
-  /// that supersedes the previous one. Hosts should still guard against
-  /// double-init to avoid burning two senders.
+  /// Process-wide idempotent via [`TELEMETRY_INITIALIZED`]: only the
+  /// first successful call enters `init_platform_telemetry`; subsequent
+  /// calls (duplicate caller, second Dart isolate, Flutter hot-restart
+  /// inside a surviving process) observe the guard and return without
+  /// spawning a second exporter. No reconfigure path — restart the
+  /// process to change endpoint/key.
   ///
   /// Sync because `init_platform_telemetry` is sync; the HTTP exporter
   /// spins up its own background thread for batched sends.
@@ -44,6 +47,12 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   static bool isModelCached({required String modelId}) =>
       XybridRustLib.instance.api
           .crateApiSdkClientXybridSdkClientIsModelCached(modelId: modelId);
+
+  /// Whether [`Self::init_telemetry`] has run at least once in this
+  /// process. Reflects the authoritative process-wide state, not any
+  /// Dart-side flag — survives hot-restart, multiple isolates, etc.
+  static bool isTelemetryInitialized() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientIsTelemetryInitialized();
 
   static void setApiKey({required String apiKey}) => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientSetApiKey(apiKey: apiKey);

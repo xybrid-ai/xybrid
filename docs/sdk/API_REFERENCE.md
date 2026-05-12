@@ -1039,7 +1039,7 @@ The full wire format and the list of enum values for each header field is docume
 | `WithDeviceAttribute()` | — | — | — | ✅ |
 | `WithBatchSize()` | — | — | — | ✅ |
 | `WithFlushInterval()` | — | — | — | ✅ |
-| `XybridClient.InitializeTelemetry()` | 🚧 | — | — | ✅ |
+| `XybridClient.InitializeTelemetry()` | ✅ | — | — | ✅ |
 | `XybridClient.FlushTelemetry()` | — | — | — | ✅ |
 | `XybridClient.ShutdownTelemetry()` | — | — | — | ✅ |
 
@@ -1048,11 +1048,14 @@ The full wire format and the list of enum values for each header field is docume
 | `with_binding(binding)` | ✅ |
 | `binding()` | ✅ |
 
-> **Note**: `initTelemetry()` exists in Dart as a stub that throws `UnimplementedError`.
-> The C# (Unity) SDK is the first non-Rust implementation of the telemetry surface;
-> the Dart, Kotlin, and Swift implementations are still planned. `SdkConfig.binding`
-> is Rust-only — non-Rust bindings register their identifier through the
-> platform-specific entry points listed in [`docs/telemetry/registry.md`](../telemetry/registry.md).
+> **Note**: Dart `Xybrid.initTelemetry(endpoint, apiKey)` ships in xybrid#97 —
+> minimal surface matching the C# `InitializeTelemetry()` shape (endpoint + key).
+> Flush / shutdown / batch configuration are not yet exposed on Dart; events flush
+> on the Rust exporter's default 5 s interval. The C# (Unity) SDK remains the
+> reference implementation of the wider telemetry-config surface; Kotlin and
+> Swift telemetry init are still planned. `SdkConfig.binding` is Rust-only —
+> non-Rust bindings register their identifier through the platform-specific
+> entry points listed in [`docs/telemetry/registry.md`](../telemetry/registry.md).
 
 ---
 
