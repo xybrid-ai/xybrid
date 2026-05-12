@@ -904,6 +904,13 @@ impl Pipeline {
         crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
 
         let mut orchestrator = Orchestrator::new();
+        // Subscribe the local orchestrator's event bus to the platform
+        // telemetry exporter. Without this, every OrchestratorEvent
+        // (RoutingDecided, ExecutionStarted, …) the orchestrator publishes
+        // dies inside this method's scope and never reaches the
+        // SDK->platform sink — most visibly, `local_reliability_hint` on
+        // routing decisions silently disappears.
+        crate::telemetry::bridge_orchestrator_events(&orchestrator);
         // No need to set registry config - executor uses bundle_path from stage descriptors
 
         let availability_fn = move |stage: &str| -> LocalAvailability {
@@ -1034,6 +1041,10 @@ impl Pipeline {
             crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
 
             let mut orchestrator = Orchestrator::new();
+            // Subscribe the local orchestrator's event bus to the platform
+            // telemetry exporter — see the matching comment on the sync
+            // `Pipeline::run` path above for rationale.
+            crate::telemetry::bridge_orchestrator_events(&orchestrator);
             // No need to set registry config - executor uses bundle_path from stage descriptors
 
             let availability_fn = move |stage: &str| -> LocalAvailability {
