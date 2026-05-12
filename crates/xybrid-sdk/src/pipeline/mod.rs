@@ -1068,7 +1068,9 @@ impl Pipeline {
                     &metrics,
                     &availability_fn,
                 )
-                .map_err(|e| SdkError::PipelineError(format!("Pipeline execution failed: {}", e)))?;
+                .map_err(|e| {
+                    SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
+                })?;
             let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
             let stages: Vec<StageTiming> = results
