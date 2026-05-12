@@ -1,0 +1,25 @@
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_0e794089aeb336::t_ff219d6fc8d213 46-51,58-63,68-73
+  s_0e794089aeb336::t_becc4245ea94fd 1-2,7-19
+bindings/flutter/lib/src/xybrid.dart
+  s_0e794089aeb336::t_a0d0d67b31f3a1 147-154,174-180
+docs/sdk/API_REFERENCE.md
+  s_0e794089aeb336::t_5540af43a9f705 1042
+  s_0e794089aeb336::t_03594c83bcfe70 1051-1058
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "392753ae5a1a7d2b3a3e99b31ae7f1297bf7d08a",
+  "prompts": {},
+  "sessions": {
+    "s_0e794089aeb336": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f714325d-69cc-4753-b80b-93a6667b7c3c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
