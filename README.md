@@ -12,7 +12,7 @@
 
 <p align="center">
   <strong>Run LLMs, ASR, and TTS natively in apps and games.</strong><br/>
-  Rust core · iOS · Android · Flutter · Unity<br/>
+  <a href="#flutter">Flutter</a> · <a href="#swift">Swift</a> · <a href="#kotlin">Kotlin</a> · <a href="#unity">Unity</a> · <a href="#rust">Rust</a><br/>
   Private, offline, no cloud required.
 </p>
 
@@ -118,6 +118,7 @@ Install and run a model in your language of choice. Each section includes the in
 
 See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) for all options.
 
+<a id="flutter"></a>
 <details>
 <summary><b>Flutter</summary>
 
@@ -138,6 +139,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 </details>
 
+<a id="kotlin"></a>
 <details>
 <summary><b>Kotlin</summary>
 
@@ -159,6 +161,7 @@ val result = model.run(Envelope.text("Hello world"))
 
 </details>
 
+<a id="swift"></a>
 <details>
 <summary><b>Swift</summary>
 
@@ -182,6 +185,7 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 
 </details>
 
+<a id="unity"></a>
 <details>
 <summary><b>Unity/C#</summary>
 
@@ -201,6 +205,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 </details>
 
+<a id="rust"></a>
 <details>
 <summary>Rust</summary>
 

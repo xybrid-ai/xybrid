@@ -12,7 +12,7 @@
 
 <p align="center">
   <strong>LLM、ASR、TTSをアプリやゲームでネイティブに実行。</strong><br/>
-  Rustコア · iOS · Android · Flutter · Unity<br/>
+  <a href="#flutter">Flutter</a> · <a href="#swift">Swift</a> · <a href="#kotlin">Kotlin</a> · <a href="#unity">Unity</a> · <a href="#rust">Rust</a><br/>
   プライベート、オフライン、クラウド不要。
 </p>
 
@@ -139,6 +139,7 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 </details>
 
+<a id="flutter"></a>
 <details>
 <summary><b>Flutter</b> — iOS、Android、macOS、Linux、Windows</summary>
 
@@ -159,6 +160,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 </details>
 
+<a id="kotlin"></a>
 <details>
 <summary><b>Kotlin</b> — Android</summary>
 
@@ -180,6 +182,7 @@ val result = model.run(Envelope.text("Hello world"))
 
 </details>
 
+<a id="swift"></a>
 <details>
 <summary><b>Swift</b> — iOS、macOS</summary>
 
@@ -203,6 +206,7 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 
 </details>
 
+<a id="unity"></a>
 <details>
 <summary><b>Unity (C#)</b> — macOS、Windows、Linux、iOS、Android</summary>
 
@@ -222,6 +226,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 </details>
 
+<a id="rust"></a>
 <details>
 <summary><b>Rust</b> — すべてのプラットフォーム</summary>
 
