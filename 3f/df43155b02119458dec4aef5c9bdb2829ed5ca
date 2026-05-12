@@ -1,0 +1,36 @@
+README.ja-JP.md
+  s_10ed1ca9bde110::t_755cd8806d568d 407
+  s_10ed1ca9bde110::t_9fcdbfe587ca33 416
+  s_10ed1ca9bde110::t_d208f02bcc87ef 253,255
+  s_10ed1ca9bde110::t_98b5a3386ca74f 279,284,289
+README.md
+  s_10ed1ca9bde110::t_7ddd7b4af713f6 418
+  s_10ed1ca9bde110::t_747bb485738fb4 255,257
+  s_10ed1ca9bde110::t_a2d8219148075c 427
+  s_10ed1ca9bde110::t_e3889b07a2fd4e 405
+  s_10ed1ca9bde110::t_9318cd20710dd5 281,286,291
+  s_10ed1ca9bde110::t_041d78364dca68 409
+README.zh-CN.md
+  s_10ed1ca9bde110::t_0533d122fcf661 279,284,289
+  s_10ed1ca9bde110::t_276138343bd582 416
+  s_10ed1ca9bde110::t_dc238695ba34c5 253,255
+  s_10ed1ca9bde110::t_cd968e883fded5 407
+  s_10ed1ca9bde110::t_88c807ebabb76d 425
+  s_10ed1ca9bde110::t_e39c7b14c9100e 403
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "3fdf43155b02119458dec4aef5c9bdb2829ed5ca",
+  "prompts": {},
+  "sessions": {
+    "s_10ed1ca9bde110": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dbc1b38f-c721-4e71-9eb0-dfedc86cdc2d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
