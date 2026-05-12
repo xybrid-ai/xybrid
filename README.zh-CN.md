@@ -139,9 +139,9 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 </details>
 
-<a id="flutter"></a>
 <details>
 <summary><b>Flutter</b> — iOS、Android、macOS、Linux、Windows</summary>
+<a id="flutter"></a>
 
 **安装** 在 `pubspec.yaml`：
 
@@ -160,9 +160,9 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 </details>
 
-<a id="kotlin"></a>
 <details>
 <summary><b>Kotlin</b> — Android</summary>
+<a id="kotlin"></a>
 
 **安装** 在 `build.gradle.kts`：
 
@@ -182,9 +182,9 @@ val result = model.run(Envelope.text("国破山河在，城春草木深"))
 
 </details>
 
-<a id="swift"></a>
 <details>
 <summary><b>Swift</b> — iOS、macOS</summary>
+<a id="swift"></a>
 
 **安装** 在 `Package.swift`：
 
@@ -206,9 +206,9 @@ let result = try model.run(envelope: Envelope.text("国破山河在，城春草�
 
 </details>
 
-<a id="unity"></a>
 <details>
 <summary><b>Unity (C#)</b> — macOS、Windows、Linux、iOS、Android</summary>
+<a id="unity"></a>
 
 **安装** 通过 Unity Package Manager：
 
@@ -226,9 +226,9 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 </details>
 
-<a id="rust"></a>
 <details>
 <summary><b>Rust</b> — 全平台</summary>
+<a id="rust"></a>
 
 **安装** 在 `Cargo.toml`：
 

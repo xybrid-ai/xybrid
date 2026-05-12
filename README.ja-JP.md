@@ -139,9 +139,9 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 </details>
 
-<a id="flutter"></a>
 <details>
 <summary><b>Flutter</b> — iOS、Android、macOS、Linux、Windows</summary>
+<a id="flutter"></a>
 
 **インストール** `pubspec.yaml`:
 
@@ -160,9 +160,9 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 </details>
 
-<a id="kotlin"></a>
 <details>
 <summary><b>Kotlin</b> — Android</summary>
+<a id="kotlin"></a>
 
 **インストール** `build.gradle.kts`:
 
@@ -182,9 +182,9 @@ val result = model.run(Envelope.text("Hello world"))
 
 </details>
 
-<a id="swift"></a>
 <details>
 <summary><b>Swift</b> — iOS、macOS</summary>
+<a id="swift"></a>
 
 **インストール** `Package.swift`:
 
@@ -206,9 +206,9 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 
 </details>
 
-<a id="unity"></a>
 <details>
 <summary><b>Unity (C#)</b> — macOS、Windows、Linux、iOS、Android</summary>
+<a id="unity"></a>
 
 **インストール** Unity Package Managerを使用:
 
@@ -226,9 +226,9 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 </details>
 
-<a id="rust"></a>
 <details>
 <summary><b>Rust</b> — すべてのプラットフォーム</summary>
+<a id="rust"></a>
 
 **インストール** `Cargo.toml`:
 

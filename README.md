@@ -118,9 +118,9 @@ Install and run a model in your language of choice. Each section includes the in
 
 See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) for all options.
 
-<a id="flutter"></a>
 <details>
 <summary><b>Flutter</summary>
+<a id="flutter"></a>
 
 **Install** in `pubspec.yaml`:
 
@@ -139,9 +139,9 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 </details>
 
-<a id="kotlin"></a>
 <details>
 <summary><b>Kotlin</summary>
+<a id="kotlin"></a>
 
 **Install** in `build.gradle.kts`:
 
@@ -161,9 +161,9 @@ val result = model.run(Envelope.text("Hello world"))
 
 </details>
 
-<a id="swift"></a>
 <details>
 <summary><b>Swift</summary>
+<a id="swift"></a>
 
 **Install** in `Package.swift`:
 
@@ -185,9 +185,9 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 
 </details>
 
-<a id="unity"></a>
 <details>
 <summary><b>Unity/C#</summary>
+<a id="unity"></a>
 
 **Install** via Unity Package Manager:
 
@@ -205,9 +205,9 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 </details>
 
-<a id="rust"></a>
 <details>
 <summary>Rust</summary>
+<a id="rust"></a>
 
 **Install** in `Cargo.toml`:
 
