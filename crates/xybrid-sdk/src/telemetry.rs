@@ -927,6 +927,12 @@ fn convert_to_platform_event(
                 "correlation_id",
                 "outcome_category",
                 "abort_reason",
+                // Per-routing-decision reliability hint (object with
+                // `recent_abort_rate` + `sample_size`). Lives in the SDK
+                // hoist list so the analytics backend can extract it via
+                // `json:$.local_reliability_hint.*` without descending
+                // into the nested data object.
+                "local_reliability_hint",
             ]
             .iter()
             {
@@ -2471,6 +2477,85 @@ mod tests {
             "aborted_for_cloud_fallback"
         );
         assert_eq!(platform.payload["abort_reason"], "stress_memory");
+    }
+
+    #[test]
+    fn local_reliability_hint_hoists_to_platform_event_top_level() {
+        // RoutingDecision events serialize the hint into event.data via
+        // `Telemetry::log_routing_decision`. The hoist list in
+        // convert_to_platform_event must copy that nested object to the
+        // payload top level so the analytics backend can column-extract
+        // `json:$.local_reliability_hint.recent_abort_rate` and
+        // `.sample_size` without descending into `data`.
+        let event = TelemetryEvent {
+            event_type: "RoutingDecision".to_string(),
+            stage_name: Some("stage-1".to_string()),
+            target: Some("cloud".to_string()),
+            latency_ms: None,
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "stage": "stage-1",
+                    "target": "cloud",
+                    "reason": "history_bias",
+                    "local_reliability_hint": {
+                        "recent_abort_rate": 0.75,
+                        "sample_size": 4_u32,
+                    }
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 1_700_000_000_000,
+        };
+
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["recent_abort_rate"]
+                .as_f64()
+                .unwrap_or(-1.0),
+            0.75
+        );
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn empty_local_reliability_hint_still_hoists_with_sample_size_zero() {
+        // Empty-window case: window has no entries yet. The SDK still
+        // emits (0.0, 0) so the platform can distinguish "no data" from
+        // "field missing because the SDK is older than the schema".
+        let event = TelemetryEvent {
+            event_type: "RoutingDecision".to_string(),
+            stage_name: Some("stage-1".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: None,
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "stage": "stage-1",
+                    "target": "local",
+                    "reason": "default_local",
+                    "local_reliability_hint": {
+                        "recent_abort_rate": 0.0,
+                        "sample_size": 0_u32,
+                    }
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 1_700_000_000_000,
+        };
+
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(0)
+        );
     }
 
     #[test]
