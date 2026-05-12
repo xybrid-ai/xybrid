@@ -1,0 +1,19 @@
+AGENTS.md
+  s_96e6484fdc1bc8::t_f85b3ca66a9236 3-6,8-12,16,18,20-24,26-28,30-33,35-37,41,43-45,47-48,50-51,53-55,57-61,63-64,66-232,248,251-253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "598703a8b02f3a4ad7a336b831f47abc1859025f",
+  "prompts": {},
+  "sessions": {
+    "s_96e6484fdc1bc8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dfffb79f-84b7-4073-8172-f25cc39303a2",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
