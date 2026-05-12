@@ -4,6 +4,8 @@
 
 The Rust SDK telemetry exporter sends pipeline events, a device profile, and the session and trace identifiers needed to group related events. Pipeline events describe inference lifecycle activity such as starts, completions, per-stage timings, and errors. Device context is attached so latency and throughput numbers can be interpreted against the machine that produced them.
 
+For the contract that determines **which events share a `trace_id` and how they collapse to a single Traces row on the dashboard**, see [`trace-model.md`](trace-model.md).
+
 ## Automatic device detection
 
 `TelemetryConfig` runs hardware detection by default when the HTTP exporter is created. Detection is best-effort: fields that cannot be determined are omitted from the `device` object rather than guessed.
