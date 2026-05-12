@@ -570,4 +570,34 @@ mod tests {
         assert_eq!(decision.reason, "test reason");
         assert!(decision.timestamp_ms > 0);
     }
+
+    #[test]
+    fn resolved_target_to_routing_decision_currently_drops_local_reliability_hint() {
+        // REGRESSION-PIN for a KNOWN GAP at `ResolvedTarget::to_routing_decision`
+        // (above in this file): the function hardcodes
+        // `LocalReliabilityHint::EMPTY` because it has no access to the
+        // `LocalAuthority`'s reliability history. Every routing decision
+        // emitted through this path carries `sample_size=0` and
+        // `recent_abort_rate=0.0`, regardless of the device's actual
+        // local-failure history.
+        //
+        // The main routing path (`DefaultRoutingEngine::decide`) populates
+        // the hint correctly via `LocalAuthority::history_hint`. This
+        // second emission seam was missed.
+        //
+        // When this gap is closed (the resolver gains access to an
+        // authority or accepts a pre-computed hint), this test will start
+        // failing. Update it to assert that the real hint flows through.
+        let resolved = ResolvedTarget::local("wav2vec2", Some("1.0"), "test reason");
+        let decision = resolved.to_routing_decision("asr");
+
+        assert_eq!(
+            decision.local_reliability_hint.recent_abort_rate, 0.0,
+            "regression-pin: see comment above — resolver drops the hint"
+        );
+        assert_eq!(
+            decision.local_reliability_hint.sample_size, 0,
+            "regression-pin: see comment above — resolver drops the hint"
+        );
+    }
 }

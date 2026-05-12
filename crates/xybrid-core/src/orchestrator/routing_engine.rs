@@ -524,6 +524,62 @@ mod tests {
     }
 
     #[test]
+    fn routing_decision_json_includes_local_reliability_hint() {
+        let decision = RoutingDecision {
+            stage: "stage-1".to_string(),
+            target: RouteTarget::Cloud,
+            reason: "history_bias".to_string(),
+            timestamp_ms: 1730559412312,
+            local_reliability_hint: LocalReliabilityHint {
+                recent_abort_rate: 1.0,
+                sample_size: 3,
+            },
+        };
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&decision.to_json()).expect("to_json output must be valid JSON");
+
+        let hint = parsed
+            .get("local_reliability_hint")
+            .expect("hint must be present at the payload top level");
+        assert_eq!(hint["recent_abort_rate"].as_f64(), Some(1.0));
+        assert_eq!(hint["sample_size"].as_u64(), Some(3));
+        // sample_size must serialize as an integer, not a float. The
+        // platform datasource binds the column as UInt32 and a float
+        // value (e.g. `3.0`) would fail JSONPath extraction.
+        assert!(
+            hint["sample_size"].is_u64(),
+            "sample_size must serialize as integer (got {:?})",
+            hint["sample_size"]
+        );
+    }
+
+    #[test]
+    fn routing_decision_json_emits_empty_local_reliability_hint() {
+        // Empty-window case: when the authority has no history yet, the
+        // serialized hint must still be present with sample_size=0 and
+        // recent_abort_rate=0.0. The platform datasource needs the field
+        // populated (even at zero) to distinguish "no history yet" from
+        // "field absent because the SDK is older than the schema".
+        let decision = RoutingDecision {
+            stage: "stage-1".to_string(),
+            target: RouteTarget::Local,
+            reason: "default_local".to_string(),
+            timestamp_ms: 1730559412312,
+            local_reliability_hint: LocalReliabilityHint::EMPTY,
+        };
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&decision.to_json()).expect("to_json output must be valid JSON");
+
+        let hint = parsed
+            .get("local_reliability_hint")
+            .expect("hint must be present even when EMPTY");
+        assert_eq!(hint["recent_abort_rate"].as_f64(), Some(0.0));
+        assert_eq!(hint["sample_size"].as_u64(), Some(0));
+    }
+
+    #[test]
     fn routing_decision_json_escapes_special_characters_in_reason() {
         // Pre-fix, the hand-rolled format!() template would emit a quote
         // verbatim, producing a malformed JSON line whenever a model_id
