@@ -116,8 +116,7 @@ Xybridは**Rustベースのランタイム**であり、すべての主要プラ
 
 お好みの言語でインストールしてモデルを実行できます。各セクションにはインストール手順と最小限のサンプルが含まれています。
 
-<details>
-<summary><b>CLI</b> — macOS、Linux、Windows</summary>
+### CLI
 
 **インストール:**
 
@@ -137,11 +136,7 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 ```
 
-</details>
-
-<details>
-<summary><b>Flutter</b> — iOS、Android、macOS、Linux、Windows</summary>
-<a id="flutter"></a>
+### Flutter
 
 **インストール** `pubspec.yaml`:
 
@@ -158,11 +153,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 // result → 24kHz WAVオーディオ
 ```
 
-</details>
-
-<details>
-<summary><b>Kotlin</b> — Android</summary>
-<a id="kotlin"></a>
+### Kotlin
 
 **インストール** `build.gradle.kts`:
 
@@ -180,11 +171,7 @@ val result = model.run(Envelope.text("Hello world"))
 // result → 24kHz WAVオーディオ
 ```
 
-</details>
-
-<details>
-<summary><b>Swift</b> — iOS、macOS</summary>
-<a id="swift"></a>
+### Swift
 
 **インストール** `Package.swift`:
 
@@ -204,11 +191,7 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 // result → 24kHz WAVオーディオ
 ```
 
-</details>
-
-<details>
-<summary><b>Unity (C#)</b> — macOS、Windows、Linux、iOS、Android</summary>
-<a id="unity"></a>
+### Unity
 
 **インストール** Unity Package Managerを使用:
 
@@ -224,11 +207,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 // result → 24kHz WAVオーディオ
 ```
 
-</details>
-
-<details>
-<summary><b>Rust</b> — すべてのプラットフォーム</summary>
-<a id="rust"></a>
+### Rust
 
 **インストール** `Cargo.toml`:
 
@@ -244,8 +223,6 @@ let model = Xybrid::model("kokoro-82m").load()?;
 let result = model.run(&Envelope::text("Hello world"))?;
 // result → 24kHz WAVオーディオ
 ```
-
-</details>
 
 すべてのオプション、ハードウェアアクセラレーション、CLIリファレンスについては、完全な[インストールガイド](docs/INSTALLATION.md)を参照してください。プラットフォーム固有のセットアップについては、各SDKのREADMEを参照してください: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
 

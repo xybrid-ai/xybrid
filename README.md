@@ -118,9 +118,7 @@ Install and run a model in your language of choice. Each section includes the in
 
 See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) for all options.
 
-<details>
-<summary><b>Flutter</summary>
-<a id="flutter"></a>
+### Flutter
 
 **Install** in `pubspec.yaml`:
 
@@ -137,11 +135,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 // result → 24kHz WAV audio
 ```
 
-</details>
-
-<details>
-<summary><b>Kotlin</summary>
-<a id="kotlin"></a>
+### Kotlin
 
 **Install** in `build.gradle.kts`:
 
@@ -159,11 +153,7 @@ val result = model.run(Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
 
-</details>
-
-<details>
-<summary><b>Swift</summary>
-<a id="swift"></a>
+### Swift
 
 **Install** in `Package.swift`:
 
@@ -183,11 +173,7 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
 
-</details>
-
-<details>
-<summary><b>Unity/C#</summary>
-<a id="unity"></a>
+### Unity
 
 **Install** via Unity Package Manager:
 
@@ -203,11 +189,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 // result → 24kHz WAV audio
 ```
 
-</details>
-
-<details>
-<summary>Rust</summary>
-<a id="rust"></a>
+### Rust
 
 **Install** in `Cargo.toml`:
 
@@ -224,10 +206,7 @@ let result = model.run(&Envelope::text("Hello world"))?;
 // result → 24kHz WAV audio
 ```
 
-</details>
-
-<details>
-<summary><b>CLI</b> — macOS, Linux, Windows</summary>
+### CLI
 
 **Install:**
 
@@ -246,8 +225,6 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 ```sh
 xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 ```
-
-</details>
 
 For platform-specific setup, see each SDK's README: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/).
 

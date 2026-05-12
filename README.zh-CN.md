@@ -116,8 +116,7 @@ Xybrid 是一个 **Rust 驱动的运行时**，为所有主流平台提供原生
 
 选择你喜欢的语言，安装并运行模型。每个语言下都包含安装片段和最小示例。
 
-<details>
-<summary><b>CLI</b> — macOS、Linux、Windows</summary>
+### CLI
 
 **安装：**
 
@@ -137,11 +136,7 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -o output.wav
 ```
 
-</details>
-
-<details>
-<summary><b>Flutter</b> — iOS、Android、macOS、Linux、Windows</summary>
-<a id="flutter"></a>
+### Flutter
 
 **安装** 在 `pubspec.yaml`：
 
@@ -158,11 +153,7 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 // 输出 → 24kHz WAV 音频
 ```
 
-</details>
-
-<details>
-<summary><b>Kotlin</b> — Android</summary>
-<a id="kotlin"></a>
+### Kotlin
 
 **安装** 在 `build.gradle.kts`：
 
@@ -180,11 +171,7 @@ val result = model.run(Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
 
-</details>
-
-<details>
-<summary><b>Swift</b> — iOS、macOS</summary>
-<a id="swift"></a>
+### Swift
 
 **安装** 在 `Package.swift`：
 
@@ -204,11 +191,7 @@ let result = try model.run(envelope: Envelope.text("国破山河在，城春草�
 // 输出 → 24kHz WAV 音频
 ```
 
-</details>
-
-<details>
-<summary><b>Unity (C#)</b> — macOS、Windows、Linux、iOS、Android</summary>
-<a id="unity"></a>
+### Unity
 
 **安装** 通过 Unity Package Manager：
 
@@ -224,11 +207,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 // 输出 → 24kHz WAV 音频
 ```
 
-</details>
-
-<details>
-<summary><b>Rust</b> — 全平台</summary>
-<a id="rust"></a>
+### Rust
 
 **安装** 在 `Cargo.toml`：
 
@@ -244,8 +223,6 @@ let model = Xybrid::model("kokoro-82m").load()?;
 let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 // 输出 → 24kHz WAV 音频
 ```
-
-</details>
 
 完整安装选项、硬件加速与 CLI 参考请参阅 [Installation Guide](docs/INSTALLATION.md)。各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
 
