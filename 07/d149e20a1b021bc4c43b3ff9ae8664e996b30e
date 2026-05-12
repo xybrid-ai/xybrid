@@ -1,0 +1,19 @@
+crates/xybrid-sdk/src/pipeline/mod.rs
+  s_5707e8d912c0b2::t_f0f4f7323ce3fe 1071-1073
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "07d149e20a1b021bc4c43b3ff9ae8664e996b30e",
+  "prompts": {},
+  "sessions": {
+    "s_5707e8d912c0b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "251016f9-df58-4ed1-aae5-8d46aa04344c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
