@@ -212,8 +212,10 @@ pub use telemetry::{
     register_telemetry_sender,
     set_telemetry_pipeline_context,
     shutdown_platform_telemetry,
-    HttpTelemetryExporter,
     // Platform telemetry exports
+    subscribe_orchestrator_events,
+    HttpTelemetryExporter,
+    OrchestratorEventBridge,
     TelemetryConfig,
     TelemetryEvent,
     TelemetrySender,
@@ -667,12 +669,17 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
 
     // Create orchestrator
     let mut orchestrator = Orchestrator::new();
+    let orchestrator_bridge = telemetry::subscribe_orchestrator_events(&orchestrator);
 
     // Execute the pipeline
     let start_time = std::time::Instant::now();
     let results: Vec<StageExecutionResult> = orchestrator
         .execute_pipeline(&stages, &input, &metrics, &availability_fn)
-        .map_err(|e| PipelineConfigError::ExecutionError(format!("{}", e)))?;
+        .map_err(|e| {
+            orchestrator_bridge.drain();
+            PipelineConfigError::ExecutionError(format!("{}", e))
+        })?;
+    orchestrator_bridge.drain();
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
     // Convert to SDK result format
@@ -773,13 +780,18 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
 
     // Create orchestrator
     let mut orchestrator = Orchestrator::new();
+    let orchestrator_bridge = telemetry::subscribe_orchestrator_events(&orchestrator);
 
     // Execute the pipeline asynchronously
     let start_time = std::time::Instant::now();
     let results: Vec<StageExecutionResult> = orchestrator
         .execute_pipeline_async(&stages, &input, &metrics, &availability_fn)
         .await
-        .map_err(|e| PipelineConfigError::ExecutionError(format!("{}", e)))?;
+        .map_err(|e| {
+            orchestrator_bridge.drain();
+            PipelineConfigError::ExecutionError(format!("{}", e))
+        })?;
+    orchestrator_bridge.drain();
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
     // Convert to SDK result format

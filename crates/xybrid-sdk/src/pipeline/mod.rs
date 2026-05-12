@@ -901,16 +901,18 @@ impl Pipeline {
             .name
             .as_ref()
             .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-        crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
+        let _context_guard =
+            crate::telemetry::TelemetryPipelineContextGuard::install(pipeline_id, Some(trace_id));
 
         let mut orchestrator = Orchestrator::new();
-        // Subscribe the local orchestrator's event bus to the platform
-        // telemetry exporter. Without this, every OrchestratorEvent
-        // (RoutingDecided, ExecutionStarted, …) the orchestrator publishes
-        // dies inside this method's scope and never reaches the
-        // SDK->platform sink — most visibly, `local_reliability_hint` on
-        // routing decisions silently disappears.
-        crate::telemetry::bridge_orchestrator_events(&orchestrator);
+        // Subscribe after construction: bootstrap events emitted by
+        // `Orchestrator::new()` are constructor-local, while execution events
+        // below must be drained before this short-lived orchestrator returns.
+        let orchestrator_bridge = crate::telemetry::subscribe_orchestrator_events_in_context(
+            &orchestrator,
+            pipeline_id,
+            Some(trace_id),
+        );
         // No need to set registry config - executor uses bundle_path from stage descriptors
 
         let availability_fn = move |stage: &str| -> LocalAvailability {
@@ -923,15 +925,11 @@ impl Pipeline {
         let results: Vec<StageExecutionResult> = orchestrator
             .execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn)
             .map_err(|e| {
-                crate::telemetry::set_telemetry_pipeline_context(None, None);
+                orchestrator_bridge.drain();
                 SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
             })?;
+        orchestrator_bridge.drain();
         let total_latency_ms = start_time.elapsed().as_millis() as u32;
-
-        // Note: `set_telemetry_pipeline_context(None, None)` deferred to
-        // after `publish_telemetry_event` below. The exporter's flush
-        // thread reads pipeline_id/trace_id lazily at flush time; if we
-        // cleared here the PipelineComplete event would get null IDs.
 
         let stages: Vec<StageTiming> = results
             .iter()
@@ -991,11 +989,12 @@ impl Pipeline {
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0),
         };
-        crate::telemetry::publish_with_resource_summary(event, resource_guard);
-
-        // Clear pipeline context AFTER publish so the event carried
-        // correlation IDs visible to the exporter's lazy-read flush.
-        crate::telemetry::set_telemetry_pipeline_context(None, None);
+        crate::telemetry::publish_with_resource_summary_in_context(
+            event,
+            resource_guard,
+            pipeline_id,
+            Some(trace_id),
+        );
 
         Ok(PipelineExecutionResult {
             name: self.name.clone(),
@@ -1038,13 +1037,18 @@ impl Pipeline {
             let pipeline_id = name
                 .as_ref()
                 .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-            crate::telemetry::set_telemetry_pipeline_context(pipeline_id, Some(trace_id));
+            let _context_guard = crate::telemetry::TelemetryPipelineContextGuard::install(
+                pipeline_id,
+                Some(trace_id),
+            );
 
             let mut orchestrator = Orchestrator::new();
-            // Subscribe the local orchestrator's event bus to the platform
-            // telemetry exporter — see the matching comment on the sync
-            // `Pipeline::run` path above for rationale.
-            crate::telemetry::bridge_orchestrator_events(&orchestrator);
+            // Subscribe after construction; see the sync path above.
+            let orchestrator_bridge = crate::telemetry::subscribe_orchestrator_events_in_context(
+                &orchestrator,
+                pipeline_id,
+                Some(trace_id),
+            );
             // No need to set registry config - executor uses bundle_path from stage descriptors
 
             let availability_fn = move |stage: &str| -> LocalAvailability {
@@ -1062,14 +1066,11 @@ impl Pipeline {
                     &availability_fn,
                 )
                 .map_err(|e| {
-                    crate::telemetry::set_telemetry_pipeline_context(None, None);
+                    orchestrator_bridge.drain();
                     SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
                 })?;
+            orchestrator_bridge.drain();
             let total_latency_ms = start_time.elapsed().as_millis() as u32;
-
-            // Note: `set_telemetry_pipeline_context(None, None)` deferred
-            // to after `publish_telemetry_event` below — see sync arm for
-            // the correlation-ID rationale.
 
             let stages: Vec<StageTiming> = results
                 .iter()
@@ -1129,11 +1130,12 @@ impl Pipeline {
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0),
             };
-            crate::telemetry::publish_with_resource_summary(event, resource_guard);
-
-            // Clear pipeline context after publish to keep the exporter's
-            // lazy-read flush correlated with the just-completed pipeline.
-            crate::telemetry::set_telemetry_pipeline_context(None, None);
+            crate::telemetry::publish_with_resource_summary_in_context(
+                event,
+                resource_guard,
+                pipeline_id,
+                Some(trace_id),
+            );
 
             Ok(PipelineExecutionResult {
                 name,
