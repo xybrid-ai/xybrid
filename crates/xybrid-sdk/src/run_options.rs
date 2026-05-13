@@ -440,6 +440,22 @@ mod tests {
     }
 
     #[test]
+    fn abort_policy_and_run_options_defaults_match_documented_contract() {
+        let policy = AbortPolicy::default();
+        assert!(policy.stop_on.is_empty());
+        assert!(!policy.fallback_to_cloud);
+        assert_eq!(policy.max_grace_tokens, 0);
+
+        let options = RunOptions::default();
+        assert!(options.generation_config.is_none());
+        assert_eq!(options.abort_policy, policy);
+        assert!(options.cancellation_token.is_none());
+        assert!(options.correlation_id.is_none());
+        assert!(options.resource_provider.is_none());
+        assert!(options.device_metrics.is_none());
+    }
+
+    #[test]
     fn abort_state_respects_grace_tokens() {
         let token = CancellationToken::new();
         let options = RunOptions::new()
