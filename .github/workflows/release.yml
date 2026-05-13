@@ -138,15 +138,46 @@ jobs:
           echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
           echo "XCFramework SHA256: $CHECKSUM"
 
-      - name: Verify root Package.swift checksum matches built XCFramework
-        # SPM resolves the manifest at the tagged commit, so the manifest's
-        # xybridFFIChecksum must already match the zip we just built. If it
-        # doesn't, the engineer who cut the tag forgot to run
-        # bindings/apple/scripts/sync-spm-checksum.sh and re-tag — fail fast.
+      - name: Patch Package.swift checksum and force-move tag
+        # SPM reads Package.swift at the tagged commit and refuses the package
+        # if xybridFFIChecksum doesn't match the downloaded zip's SHA. The
+        # xcframework build is non-deterministic between runs (zip mtimes,
+        # Rust codegen ordering), so we can't pre-bake a stable checksum at
+        # tag time. Instead: compute the SHA of the zip we just built, patch
+        # the manifest, commit, and force-move the tag to that commit. SPM
+        # consumers resolving v<version> see a manifest whose checksum
+        # matches the released zip.
+        #
+        # Pushes authored by GITHUB_TOKEN do not re-trigger workflow runs
+        # (https://docs.github.com/en/actions/security-guides/automatic-token-authentication),
+        # so the tag force-push does not loop the Release workflow.
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           VERSION=${GITHUB_REF#refs/tags/}
-          ./bindings/apple/scripts/sync-spm-checksum.sh --check dist/XybridFFI-${VERSION}.xcframework.zip
+
+          ./bindings/apple/scripts/sync-spm-checksum.sh "dist/XybridFFI-${VERSION}.xcframework.zip"
+
+          if git diff --quiet Package.swift; then
+            echo "Package.swift checksum already matches the built zip — nothing to do."
+            exit 0
+          fi
+
+          echo "Package.swift checksum patched:"
+          git diff Package.swift
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Package.swift
+          git commit -m "chore(release): pin XybridFFI checksum for ${VERSION}"
+
+          NEW_COMMIT=$(git rev-parse HEAD)
+          echo "::notice::Tag ${VERSION} now points at ${NEW_COMMIT} with the released zip's xybridFFIChecksum baked in"
+
+          git tag -f "${VERSION}" "${NEW_COMMIT}"
+          git push --force origin "refs/tags/${VERSION}"
 
       - name: Upload XCFramework artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
