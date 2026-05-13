@@ -1795,7 +1795,7 @@ pub fn set_telemetry_pipeline_context(pipeline_id: Option<Uuid>, trace_id: Optio
 }
 
 /// RAII guard that installs a pipeline context on construction and
-/// clears it on drop.
+/// restores the previous context on drop.
 ///
 /// Callers (e.g. `Pipeline::run`, `XybridModel::run_with_context`) need
 /// to scope a per-invocation `trace_id` so every telemetry event
@@ -1806,23 +1806,33 @@ pub fn set_telemetry_pipeline_context(pipeline_id: Option<Uuid>, trace_id: Optio
 /// and a panic skips the cleanup entirely. This guard removes the
 /// duplication and closes the panic-leak hole.
 ///
-/// The clear happens at the guard's `Drop`, which fires after any
-/// `publish_telemetry_event` call earlier in the scope. Direct SDK
-/// telemetry keeps the scoped IDs, while bridged orchestrator events
-/// capture producer context before they cross task/thread boundaries.
-pub(crate) struct TelemetryPipelineContextGuard;
+/// On `Drop` the guard restores whatever context was in place before
+/// `install` ran (rather than blanket-clearing), so nested installs
+/// compose correctly. The exporter's pipeline context is held behind
+/// a process-global `Arc<RwLock<...>>`; for fully race-free per-call
+/// scoping under concurrent threads, callers should also rely on the
+/// thread-local `EventContext` (see `xybrid-core::event_bus`) which
+/// `set_telemetry_pipeline_context` keeps in sync.
+pub(crate) struct TelemetryPipelineContextGuard {
+    previous_pipeline_id: Option<Uuid>,
+    previous_trace_id: Option<Uuid>,
+}
 
 impl TelemetryPipelineContextGuard {
     /// Install a pipeline context for the lifetime of the guard.
     pub(crate) fn install(pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) -> Self {
+        let (previous_pipeline_id, previous_trace_id) = current_telemetry_pipeline_context();
         set_telemetry_pipeline_context(pipeline_id, trace_id);
-        Self
+        Self {
+            previous_pipeline_id,
+            previous_trace_id,
+        }
     }
 }
 
 impl Drop for TelemetryPipelineContextGuard {
     fn drop(&mut self) {
-        set_telemetry_pipeline_context(None, None);
+        set_telemetry_pipeline_context(self.previous_pipeline_id, self.previous_trace_id);
     }
 }
 
@@ -1842,7 +1852,7 @@ fn register_execution_listener() {
                 target: Some("device".to_string()),
                 latency_ms: None,
                 error: None,
-                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                data: Some(serde_json::json!({ "model": model_id }).to_string()),
                 timestamp_ms,
             },
             ExecutionEvent::Completed {
@@ -1855,7 +1865,7 @@ fn register_execution_listener() {
                 target: Some("device".to_string()),
                 latency_ms: Some(latency_ms as u32),
                 error: None,
-                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                data: Some(serde_json::json!({ "model": model_id }).to_string()),
                 timestamp_ms,
             },
             ExecutionEvent::Failed {
@@ -1874,10 +1884,13 @@ fn register_execution_listener() {
                 target: Some("device".to_string()),
                 latency_ms: Some(latency_ms as u32),
                 error: Some(error),
-                data: Some(format!(
-                    r#"{{"model":"{}","method":"{}"}}"#,
-                    model_id, method
-                )),
+                data: Some(
+                    serde_json::json!({
+                        "model": model_id,
+                        "method": method,
+                    })
+                    .to_string(),
+                ),
                 timestamp_ms,
             },
         };

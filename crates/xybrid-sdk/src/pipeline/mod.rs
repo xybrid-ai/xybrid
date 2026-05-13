@@ -956,61 +956,64 @@ impl Pipeline {
             )
         };
 
-        // For single-stage pipelines, suppress the outer `PipelineComplete`
-        // emit. The lone inner stage's `ModelComplete` event already
-        // carries the user-facing attribution (model_id, backend, EP,
-        // duration, TTFT, …); emitting an additional pipeline row would
-        // show up on the Traces dashboard as a noisy `pipeline / <name>`
-        // entry with no attribution. Multi-stage pipelines still emit
-        // `PipelineComplete` so the dashboard can collapse ASR → LLM →
-        // TTS stages under one row via the shared `trace_id`.
-        if stage_descriptors.len() > 1 {
-            // Emit telemetry event. LLM metrics ride on the separate
-            // `PlatformEvent.stages[].spans[].metadata` path (populated
-            // via `xybrid_core::tracing::add_metadata` in the LLM
-            // adapter), so we intentionally keep this `data` blob compact
-            // — only the fields that already crossed the wire before
-            // llm_metrics existed.
-            let stage_data: Vec<serde_json::Value> = results
-                .iter()
-                .map(|result| {
-                    serde_json::json!({
-                        "name": result.stage,
-                        "latency_ms": result.latency_ms,
-                        "target": result.routing_decision.target.to_string(),
-                    })
+        // Emit telemetry event. LLM metrics ride on the separate
+        // `PlatformEvent.stages[].spans[].metadata` path (populated
+        // via `xybrid_core::tracing::add_metadata` in the LLM
+        // adapter), so we intentionally keep this `data` blob compact
+        // — only the fields that already crossed the wire before
+        // llm_metrics existed.
+        let stage_data: Vec<serde_json::Value> = results
+            .iter()
+            .map(|result| {
+                serde_json::json!({
+                    "name": result.stage,
+                    "latency_ms": result.latency_ms,
+                    "target": result.routing_decision.target.to_string(),
                 })
-                .collect();
+            })
+            .collect();
 
-            let event = crate::telemetry::TelemetryEvent {
-                event_type: "PipelineComplete".to_string(),
-                stage_name: self.name.clone(),
-                target: None,
-                latency_ms: Some(total_latency_ms),
-                error: None,
-                data: Some(
-                    serde_json::json!({
-                        "stages": stage_data,
-                        "output_type": format!("{:?}", output_type),
-                    })
-                    .to_string(),
-                ),
-                timestamp_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0),
-            };
-            crate::telemetry::publish_with_resource_summary_in_context(
-                event,
-                resource_guard,
-                pipeline_id,
-                Some(trace_id),
-            );
+        // For single-stage pipelines, attribute the `PipelineComplete`
+        // row to the inner stage so the Traces dashboard reads
+        // `pipeline / <stage>` (with a real `target`) instead of the
+        // less-informative `pipeline / <pipeline-name>` with `target:
+        // None`. Multi-stage pipelines keep the pipeline-level naming
+        // so ASR → LLM → TTS legs still collapse under one row via the
+        // shared `trace_id`.
+        let (event_stage_name, event_target) = if results.len() == 1 {
+            let only = &results[0];
+            (
+                Some(only.stage.clone()),
+                Some(only.routing_decision.target.to_string()),
+            )
         } else {
-            // Single-stage path: drop the resource_guard explicitly so
-            // its summary doesn't get attached to a phantom event later.
-            drop(resource_guard);
-        }
+            (self.name.clone(), None)
+        };
+
+        let event = crate::telemetry::TelemetryEvent {
+            event_type: "PipelineComplete".to_string(),
+            stage_name: event_stage_name,
+            target: event_target,
+            latency_ms: Some(total_latency_ms),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "stages": stage_data,
+                    "output_type": format!("{:?}", output_type),
+                })
+                .to_string(),
+            ),
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
+        crate::telemetry::publish_with_resource_summary_in_context(
+            event,
+            resource_guard,
+            pipeline_id,
+            Some(trace_id),
+        );
 
         Ok(PipelineExecutionResult {
             name: self.name.clone(),
@@ -1113,49 +1116,54 @@ impl Pipeline {
                 )
             };
 
-            // Single-stage pipelines: suppress the outer `PipelineComplete`.
-            // See sync `run` above for the full rationale (the inner
-            // stage's `ModelComplete` already carries everything; the
-            // outer would be a noisy attribution-less row).
-            if stage_descriptors.len() > 1 {
-                let stage_data: Vec<serde_json::Value> = results
-                    .iter()
-                    .map(|result| {
-                        serde_json::json!({
-                            "name": result.stage,
-                            "latency_ms": result.latency_ms,
-                            "target": result.routing_decision.target.to_string(),
-                        })
+            let stage_data: Vec<serde_json::Value> = results
+                .iter()
+                .map(|result| {
+                    serde_json::json!({
+                        "name": result.stage,
+                        "latency_ms": result.latency_ms,
+                        "target": result.routing_decision.target.to_string(),
                     })
-                    .collect();
+                })
+                .collect();
 
-                let event = crate::telemetry::TelemetryEvent {
-                    event_type: "PipelineComplete".to_string(),
-                    stage_name: name.clone(),
-                    target: None,
-                    latency_ms: Some(total_latency_ms),
-                    error: None,
-                    data: Some(
-                        serde_json::json!({
-                            "stages": stage_data,
-                            "output_type": format!("{:?}", output_type),
-                        })
-                        .to_string(),
-                    ),
-                    timestamp_ms: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0),
-                };
-                crate::telemetry::publish_with_resource_summary_in_context(
-                    event,
-                    resource_guard,
-                    pipeline_id,
-                    Some(trace_id),
-                );
+            // Single-stage pipelines attribute the row to the inner
+            // stage so the Traces dashboard reads `pipeline / <stage>`
+            // with a real `target`; see sync `run` above.
+            let (event_stage_name, event_target) = if results.len() == 1 {
+                let only = &results[0];
+                (
+                    Some(only.stage.clone()),
+                    Some(only.routing_decision.target.to_string()),
+                )
             } else {
-                drop(resource_guard);
-            }
+                (name.clone(), None)
+            };
+
+            let event = crate::telemetry::TelemetryEvent {
+                event_type: "PipelineComplete".to_string(),
+                stage_name: event_stage_name,
+                target: event_target,
+                latency_ms: Some(total_latency_ms),
+                error: None,
+                data: Some(
+                    serde_json::json!({
+                        "stages": stage_data,
+                        "output_type": format!("{:?}", output_type),
+                    })
+                    .to_string(),
+                ),
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+            };
+            crate::telemetry::publish_with_resource_summary_in_context(
+                event,
+                resource_guard,
+                pipeline_id,
+                Some(trace_id),
+            );
 
             Ok(PipelineExecutionResult {
                 name,
