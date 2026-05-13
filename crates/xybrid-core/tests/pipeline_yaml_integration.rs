@@ -170,9 +170,7 @@ stages:
 
     let config = RunnerConfig {
         metrics: DeviceMetrics {
-            network_rtt: 100,
-            battery: 80,
-            temperature: 25.0,
+            ..DeviceMetrics::default()
         },
         ..Default::default()
     };

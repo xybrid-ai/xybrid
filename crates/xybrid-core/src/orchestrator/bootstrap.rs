@@ -18,8 +18,7 @@ use crate::control_sync::{
     ControlSync, ControlSyncConfig, ControlSyncHandler, ControlSyncProvider,
     NoopControlSyncHandler, NoopControlSyncProvider,
 };
-use crate::device_adapter::DeviceAdapter;
-use crate::device_adapter::LocalDeviceAdapter;
+use crate::device::ResourceMonitor;
 use crate::event_bus::{EventBus, OrchestratorEvent};
 use crate::executor::Executor;
 use crate::orchestrator::policy_engine::DefaultPolicyEngine;
@@ -44,23 +43,9 @@ struct BootstrapConfig {
     /// Execution mode (batch or streaming)
     #[serde(default)]
     execution_mode: Option<String>,
-    /// Device metrics overrides
-    #[serde(default)]
-    metrics: Option<DeviceMetricsConfig>,
     /// Adapter configuration
     #[serde(default)]
     adapters: Option<AdapterConfig>,
-}
-
-/// Device metrics configuration.
-#[derive(Debug, Clone, serde::Deserialize)]
-struct DeviceMetricsConfig {
-    /// Network RTT override (milliseconds)
-    network_rtt: Option<u32>,
-    /// Battery level override (0-100)
-    battery: Option<u8>,
-    /// Temperature override (Celsius)
-    temperature: Option<f32>,
 }
 
 /// Adapter configuration.
@@ -118,7 +103,9 @@ impl Orchestrator {
     pub fn bootstrap(config_path: Option<&Path>) -> Result<Self, OrchestratorError> {
         // Emit bootstrap start event
         let event_bus = EventBus::new();
-        event_bus.publish(OrchestratorEvent::BootstrapStart);
+        event_bus.publish(OrchestratorEvent::BootstrapStart {
+            context: Default::default(),
+        });
 
         // Load configuration if provided
         let config = if let Some(path) = config_path {
@@ -135,12 +122,14 @@ impl Orchestrator {
         let policy_engine = Box::new(DefaultPolicyEngine::with_default_policy());
         event_bus.publish(OrchestratorEvent::ComponentInitialized {
             component: "policy_engine".to_string(),
+            context: Default::default(),
         });
 
         // Initialize routing engine
         let routing_engine = Box::new(DefaultRoutingEngine::new());
         event_bus.publish(OrchestratorEvent::ComponentInitialized {
             component: "routing_engine".to_string(),
+            context: Default::default(),
         });
 
         // Initialize executor
@@ -150,6 +139,7 @@ impl Orchestrator {
 
         event_bus.publish(OrchestratorEvent::ComponentInitialized {
             component: "executor".to_string(),
+            context: Default::default(),
         });
 
         // Register adapters based on configuration
@@ -172,6 +162,7 @@ impl Orchestrator {
                 executor.register_adapter(adapter);
                 event_bus.publish(OrchestratorEvent::AdapterRegistered {
                     name: "coreml".to_string(),
+                    context: Default::default(),
                 });
             }
 
@@ -182,6 +173,7 @@ impl Orchestrator {
                 executor.register_adapter(adapter);
                 event_bus.publish(OrchestratorEvent::AdapterRegistered {
                     name: "onnx-mobile".to_string(),
+                    context: Default::default(),
                 });
             }
 
@@ -192,6 +184,7 @@ impl Orchestrator {
                 executor.register_adapter(adapter);
                 event_bus.publish(OrchestratorEvent::AdapterRegistered {
                     name: "onnx".to_string(),
+                    context: Default::default(),
                 });
             }
 
@@ -202,6 +195,7 @@ impl Orchestrator {
                 executor.register_adapter(adapter);
                 event_bus.publish(OrchestratorEvent::AdapterRegistered {
                     name: "onnx".to_string(),
+                    context: Default::default(),
                 });
             }
 
@@ -212,6 +206,7 @@ impl Orchestrator {
                 executor.register_adapter(adapter);
                 event_bus.publish(OrchestratorEvent::AdapterRegistered {
                     name: "onnx".to_string(),
+                    context: Default::default(),
                 });
             }
         }
@@ -222,6 +217,7 @@ impl Orchestrator {
             executor.register_adapter(adapter);
             event_bus.publish(OrchestratorEvent::AdapterRegistered {
                 name: "cloud".to_string(),
+                context: Default::default(),
             });
         }
 
@@ -231,11 +227,13 @@ impl Orchestrator {
             executor.register_adapter(adapter);
             event_bus.publish(OrchestratorEvent::AdapterRegistered {
                 name: "mock".to_string(),
+                context: Default::default(),
             });
         }
 
         // Initialize stream manager
         let stream_manager = StreamManager::new();
+        let resource_monitor = ResourceMonitor::global();
 
         // Determine execution mode
         let execution_mode = config
@@ -247,24 +245,9 @@ impl Orchestrator {
             })
             .unwrap_or(ExecutionMode::Batch);
 
-        // Collect device metrics (for future use in routing decisions)
-        let device_adapter = LocalDeviceAdapter::new();
-        let _device_metrics =
-            if let Some(metrics_config) = config.as_ref().and_then(|c| c.metrics.as_ref()) {
-                DeviceMetrics {
-                    network_rtt: metrics_config
-                        .network_rtt
-                        .unwrap_or_else(|| device_adapter.collect_metrics().network_rtt),
-                    battery: metrics_config
-                        .battery
-                        .unwrap_or_else(|| device_adapter.collect_metrics().battery),
-                    temperature: metrics_config
-                        .temperature
-                        .unwrap_or_else(|| device_adapter.collect_metrics().temperature),
-                }
-            } else {
-                device_adapter.collect_metrics()
-            };
+        // Device metrics: capabilities are detected statically; live resource
+        // signals are sampled on demand via the ResourceMonitor at routing time.
+        let _device_metrics = DeviceMetrics::default();
 
         // Initialize control sync manager (noop defaults for now)
         let control_sync = {
@@ -292,10 +275,15 @@ impl Orchestrator {
         let authority: Box<dyn OrchestrationAuthority> = Box::new(LocalAuthority::new());
         event_bus.publish(OrchestratorEvent::ComponentInitialized {
             component: "authority".to_string(),
+            context: Default::default(),
         });
 
-        event_bus.publish(OrchestratorEvent::ExecutorReady);
-        event_bus.publish(OrchestratorEvent::OrchestratorReady);
+        event_bus.publish(OrchestratorEvent::ExecutorReady {
+            context: Default::default(),
+        });
+        event_bus.publish(OrchestratorEvent::OrchestratorReady {
+            context: Default::default(),
+        });
 
         // Create orchestrator instance
         let orchestrator = Orchestrator::with_all(
@@ -306,6 +294,7 @@ impl Orchestrator {
             stream_manager,
             event_bus,
             telemetry.clone(),
+            resource_monitor,
             control_sync,
             execution_mode,
         );

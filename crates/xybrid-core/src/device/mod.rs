@@ -19,15 +19,8 @@
 //!
 //! ```rust,ignore
 //! use xybrid_core::device::{detect_capabilities, HardwareCapabilities};
-//! use xybrid_core::context::DeviceMetrics;
 //!
-//! let metrics = DeviceMetrics {
-//!     network_rtt: 100,
-//!     battery: 75,
-//!     temperature: 25.0,
-//! };
-//!
-//! let capabilities = detect_capabilities(&metrics);
+//! let capabilities = detect_capabilities();
 //! println!("GPU available: {}", capabilities.has_gpu());
 //! println!("Memory: {} MB", capabilities.memory_total_mb());
 //! ```
@@ -42,6 +35,9 @@ pub mod common;
 pub mod android;
 pub mod apple;
 
+#[cfg(target_os = "windows")]
+pub mod windows;
+
 // Main detection logic
 pub mod capabilities;
 
@@ -52,16 +48,24 @@ pub mod profile;
 // See `docs/sdk/resource-telemetry.md` for the public contract.
 pub mod resource;
 
+// Platform-bridged signals (battery, thermal) — consumed by `resource`.
+pub mod platform_state;
+
 // Platform tests
 #[cfg(test)]
 mod tests;
 
 // Re-exports for convenience
 pub use capabilities::detect_capabilities;
+pub use platform_state::{
+    clear_battery_level, clear_thermal_state, current_platform_state,
+    refresh_native_platform_state, set_battery_level, set_platform_state, set_thermal_state,
+    PlatformState,
+};
 pub use profile::DeviceProfile;
 pub use resource::{
-    MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceTelemetryMode, ResourceUsageSummary,
-    RunGuard,
+    MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceSnapshotProvider,
+    ResourceTelemetryMode, ResourceUsageSummary, RunGuard,
 };
 pub use types::{
     DetectionConfidence, DetectionSource, GpuType, HardwareCapabilities, NpuType, Platform,

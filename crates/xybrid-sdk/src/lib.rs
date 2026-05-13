@@ -116,6 +116,7 @@ pub mod pipeline;
 pub mod platform;
 pub mod registry_client;
 pub mod result;
+pub mod run_options;
 pub mod source;
 pub mod stream;
 pub mod streaming;
@@ -132,8 +133,9 @@ pub use xybrid_core::cache_provider::CacheProvider;
 pub use xybrid_core::context;
 pub use xybrid_core::conversation::ConversationContext;
 pub use xybrid_core::device::{
-    DeviceProfile, MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceTelemetryMode,
-    ResourceUsageSummary, RunGuard as ResourceRunGuard,
+    clear_battery_level, clear_thermal_state, set_battery_level, set_thermal_state, DeviceProfile,
+    MemoryPressure, ResourceMonitor, ResourceSnapshot, ResourceTelemetryMode, ResourceUsageSummary,
+    RunGuard as ResourceRunGuard, ThermalState,
 };
 pub use xybrid_core::execution;
 pub use xybrid_core::features;
@@ -164,9 +166,12 @@ pub use llm::{
     LlmClientConfig, MessageRole, TokenUsage,
 };
 pub use model::SdkError;
-pub use model::{ModelLoader, SdkResult, StreamConfig, StreamEvent, StreamToken, XybridModel};
+pub use model::{
+    ModelLoader, SdkResult, SeamInfo, StreamConfig, StreamEvent, StreamToken, XybridModel,
+};
 pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
+pub use run_options::{AbortPolicy, AbortReason, AbortSignal, CancellationToken, RunOptions};
 // Pipeline API (PipelineRef → Pipeline)
 pub use pipeline::{
     // Config types for FFI bindings (Flutter, Kotlin, Swift)
@@ -207,8 +212,12 @@ pub use telemetry::{
     register_telemetry_sender,
     set_telemetry_pipeline_context,
     shutdown_platform_telemetry,
-    HttpTelemetryExporter,
     // Platform telemetry exports
+    subscribe_orchestrator_events,
+    BridgeError,
+    BridgeHandle,
+    HttpTelemetryExporter,
+    OrchestratorEventBridge,
     TelemetryConfig,
     TelemetryEvent,
     TelemetrySender,
@@ -536,8 +545,12 @@ struct LegacyPipelineConfig {
     stages: Vec<String>,
     /// Input envelope configuration
     input: LegacyInputConfig,
-    /// Device metrics configuration
-    metrics: MetricsConfig,
+    /// Legacy device-metrics block. Still parsed so existing YAMLs load,
+    /// but the values are ignored — capabilities are detected at runtime
+    /// and live resource signals come from `ResourceMonitor`.
+    #[serde(default)]
+    #[allow(dead_code)]
+    metrics: Option<serde_yaml::Value>,
     /// Model availability mapping (stage name -> available locally)
     availability: HashMap<String, bool>,
 }
@@ -547,17 +560,6 @@ struct LegacyPipelineConfig {
 struct LegacyInputConfig {
     /// Envelope kind (e.g., "AudioRaw", "Text", etc.)
     kind: String,
-}
-
-/// Device metrics configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MetricsConfig {
-    /// Network round-trip time in milliseconds
-    network_rtt: u32,
-    /// Battery level (0-100)
-    battery: u8,
-    /// Device temperature in Celsius
-    temperature: f32,
 }
 
 /// Timing information for a single pipeline stage.
@@ -658,11 +660,7 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
     let input = Envelope::new(kind);
 
     // Create device metrics
-    let metrics = DeviceMetrics {
-        network_rtt: config.metrics.network_rtt,
-        battery: config.metrics.battery,
-        temperature: config.metrics.temperature,
-    };
+    let metrics = DeviceMetrics::default();
 
     // Create availability function from config
     let availability_map = config.availability.clone();
@@ -673,12 +671,17 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
 
     // Create orchestrator
     let mut orchestrator = Orchestrator::new();
+    let orchestrator_bridge = telemetry::subscribe_orchestrator_events(&orchestrator);
 
     // Execute the pipeline
     let start_time = std::time::Instant::now();
     let results: Vec<StageExecutionResult> = orchestrator
         .execute_pipeline(&stages, &input, &metrics, &availability_fn)
-        .map_err(|e| PipelineConfigError::ExecutionError(format!("{}", e)))?;
+        .map_err(|e| {
+            orchestrator_bridge.drain();
+            PipelineConfigError::ExecutionError(format!("{}", e))
+        })?;
+    orchestrator_bridge.drain();
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
     // Convert to SDK result format
@@ -768,11 +771,7 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
     let input = Envelope::new(kind);
 
     // Create device metrics
-    let metrics = DeviceMetrics {
-        network_rtt: config.metrics.network_rtt,
-        battery: config.metrics.battery,
-        temperature: config.metrics.temperature,
-    };
+    let metrics = DeviceMetrics::default();
 
     // Create availability function from config
     let availability_map = config.availability.clone();
@@ -783,13 +782,18 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
 
     // Create orchestrator
     let mut orchestrator = Orchestrator::new();
+    let orchestrator_bridge = telemetry::subscribe_orchestrator_events(&orchestrator);
 
     // Execute the pipeline asynchronously
     let start_time = std::time::Instant::now();
     let results: Vec<StageExecutionResult> = orchestrator
         .execute_pipeline_async(&stages, &input, &metrics, &availability_fn)
         .await
-        .map_err(|e| PipelineConfigError::ExecutionError(format!("{}", e)))?;
+        .map_err(|e| {
+            orchestrator_bridge.drain();
+            PipelineConfigError::ExecutionError(format!("{}", e))
+        })?;
+    orchestrator_bridge.drain();
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
     // Convert to SDK result format

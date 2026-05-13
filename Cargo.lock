@@ -5038,8 +5038,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.11.1",
+ "block2",
  "dispatch2",
+ "libc",
  "objc2",
+]
+
+[[package]]
+name = "objc2-core-graphics"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e022c9d066895efa1345f8e33e584b9f958da2fd4cd116792e15e07e4720a807"
+dependencies = [
+ "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-core-ml"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "201b055e6acfa0f9f15568255d3f03ce2b54bc86d1814442dc69138e36813e18"
+dependencies = [
+ "objc2",
+ "objc2-foundation",
 ]
 
 [[package]]
@@ -5067,7 +5088,11 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33fafba39597d6dc1fb709123dfa8289d39406734be322956a69f0931c73bb15"
 dependencies = [
+ "bitflags 2.11.1",
+ "block2",
+ "dispatch2",
  "libc",
+ "objc2",
  "objc2-core-foundation",
 ]
 
@@ -9654,6 +9679,7 @@ dependencies = [
  "hound",
  "image 0.25.10",
  "lazy_static",
+ "libc",
  "log",
  "mel_spec",
  "mistralrs",
@@ -9661,6 +9687,13 @@ dependencies = [
  "ndarray-npy 0.10.0",
  "num-complex",
  "num-traits",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-core-ml",
+ "objc2-foundation",
+ "objc2-io-kit",
+ "objc2-metal",
  "ort",
  "regex",
  "rustfft",
@@ -9682,6 +9715,8 @@ dependencies = [
  "url",
  "uuid 1.23.1",
  "walkdir",
+ "windows 0.61.3",
+ "windows-sys 0.59.0",
  "xybrid-sdk",
  "zstd",
 ]

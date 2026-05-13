@@ -4,6 +4,8 @@
 
 The Rust SDK telemetry exporter sends pipeline events, a device profile, and the session and trace identifiers needed to group related events. Pipeline events describe inference lifecycle activity such as starts, completions, per-stage timings, and errors. Device context is attached so latency and throughput numbers can be interpreted against the machine that produced them.
 
+For the contract that determines **which events share a `trace_id` and how they collapse to a single Traces row on the dashboard**, see [`trace-model.md`](trace-model.md).
+
 ## Automatic device detection
 
 `TelemetryConfig` runs hardware detection by default when the HTTP exporter is created. Detection is best-effort: fields that cannot be determined are omitted from the `device` object rather than guessed.
@@ -212,6 +214,62 @@ The device profile is encoded as a typed `device` substructure. Platform ingest 
 ```
 
 Older SDKs continue to send the legacy top-level fields. Newer platform deployments should treat `device` as optional.
+
+## Cost-attribution fields
+
+Inference events (`ModelComplete`, `PipelineComplete`) carry per-call attribution scalars on the payload top level so the platform can compute cost without descending into the span tree. All fields are optional and absent when unknown — consumers must tolerate missing keys.
+
+| field | type | events | values | source |
+|---|---|---|---|---|
+| `backend` | string | inference | `llamacpp` \| `mlx` \| `mistralrs` \| `ort` \| `candle` \| `cloud` | `ExecutionTemplate` variant + `metadata.backend` hint (GGUF requires the hint; SafeTensors defaults to `candle` and accepts `mlx` to override on Apple Silicon); `cloud` for the cloud adapter |
+| `provider` | string | inference (cloud only) | `openai` \| `anthropic` \| `google` \| `elevenlabs` \| `openrouter` \| `custom` | Cloud `IntegrationProvider` resolved from envelope metadata |
+| `task` | string | inference | `chat` \| `vlm` \| `asr` \| `tts` \| `embedding` \| `image-gen` \| `ocr` \| `rerank` \| `classify` (open string for forward-compat) | `ModelMetadata.metadata["task"]` from `model_metadata.json` |
+| `quantization` | string | inference | `q4_0` \| `q4_k_m` \| `q5_k_m` \| `q8_0` \| `fp16` \| `fp32` (open string — common GGUF labels) | `ModelMetadata.metadata["quantization"]` first; falls back to GGUF filename inference; absent (not empty) when unknown |
+| `execution_provider` | string | inference (local only) | `coreml` \| `cpu` \| `metal` \| `cuda` \| `mlx-metal` \| `ane` (open string) | ORT path: harvested from per-session profiling JSON after the first inference (ORT exposes no session-level resolved-EP getter, so we read `args.provider` from the Chrome-trace output and pick the EP that ran the most ops). LLM path: build-flag-derived label keyed on the backend name. Cloud paths omit — `provider` carries attribution. |
+| `prompt_cached_tokens` | u64 | inference (local LLM, llama.cpp only) | — | Count of prompt tokens served from the backend's KV cache on this call (longest common prefix with the previous turn). Local mirror of cloud's `cache_read_input_tokens`. Absent on first turns and for backends that don't track prefix reuse (cloud, mistralrs, mock). Only emitted when positive — `0` looks indistinguishable from "no cache" so the field stays absent rather than reporting a misleading zero. |
+| `tokens_in` | u64 | inference | — | LLM span (`prompt_tokens` for OpenAI; synthesized total for Anthropic) |
+| `tokens_out` | u64 | inference | — | LLM span (`completion_tokens`) |
+| `cache_read_input_tokens` | u64 | inference | — | Anthropic-canonical; OpenAI's nested `prompt_tokens_details.cached_tokens` maps here |
+| `cache_creation_input_tokens` | u64 | inference | — | Anthropic-only |
+
+The closed set for `backend` is intentionally narrow — values outside it are not emitted (the field stays absent) so the analytics column can pin a closed enum without rejecting future runtimes mid-flight. Forward-declared backends (e.g. `mlx`) are added to the set only when a runtime adapter for them lands.
+
+For local LLM events `provider` is always absent; for cloud events it is always present alongside `backend = "cloud"`.
+
+`execution_provider` is the diagnostic complement to `backend`: `backend` says *which engine we asked for*, `execution_provider` says *what actually ran*. The two diverge most often on the ORT path (CoreML can silently fall back to CPU per-op when an op isn't supported) — the field is the analytics signal that explains "why is this run slow on this chip?" The field is absent for cloud events because cloud `provider` already attributes execution end-to-end.
+
+`prompt_cached_tokens` is the local-LLM analogue of cloud's `cache_read_input_tokens`. Multi-turn workloads with a stable system prompt and conversation prefix routinely see 70-90% of the prompt served from the backend's KV cache on every call after the first — that's the difference between a 7B model feeling responsive and feeling sluggish, and it's also a billing-correctness signal (prefill is the expensive part; cached tokens shouldn't count toward "tokens processed"). Stack with `cache_read_input_tokens` on the same dashboard axis to compare local vs cloud cache savings.
+
+## `ModelDownload` event
+
+Emitted exactly once per successful registry download, after the network transfer completes and (when applicable) SHA256 verification passes. Cache hits do **not** produce this event — the metric represents bytes-on-the-wire, not cache traffic.
+
+```json
+{
+  "event_type": "ModelDownload",
+  "session_id": "...",
+  "payload": {
+    "status": "success",
+    "latency_ms": 5432,
+    "data": {
+      "model_id": "kokoro-82m",
+      "bytes_downloaded": 132456789,
+      "source": "huggingface",
+      "duration_ms": 5432
+    }
+  },
+  "timestamp": "..."
+}
+```
+
+| field | type | description |
+|---|---|---|
+| `model_id` | string | Registry mask, e.g. `kokoro-82m` |
+| `bytes_downloaded` | u64 | Final on-disk size of the model file or `.xyb` bundle. Differs from the registry-declared expected size when upstream changed between resolve and fetch. |
+| `source` | string | Canonical download host: `r2` for Xybrid's R2 mirror, `huggingface` for direct HF pulls, `other` for any other host (forward-compat so a future provider doesn't lose attribution). |
+| `duration_ms` | u32 | Wallclock time inside the network download, excluding SHA256 verification and bundle extraction. Mirrored onto the top-level `latency_ms` so the existing latency column lights up. |
+
+The event respects the same opt-out as the registry call telemetry: when `XYBRID_TELEMETRY_OPTOUT=1` is set at process start, no `ModelDownload` event is emitted (the two leak the same kind of attribution surface — which model the user pulled — so they share one gate).
 
 ## Verification
 

@@ -90,11 +90,11 @@ pub mod mistral;
 pub mod llama_cpp;
 
 // Re-exports from runtime backends
-pub use cloud::CloudRuntimeAdapter;
+pub use cloud::{CloudRuntimeAdapter, CloudStreaming};
 pub use metadata_driven::MetadataDrivenAdapter;
-pub use onnx::ONNXSession;
 pub use onnx::OnnxBackend;
 pub use onnx::OnnxRuntimeAdapter;
+pub use onnx::{ExecutionProviderKind, ONNXSession, SessionOptions};
 
 #[cfg(any(target_os = "android", test))]
 pub use onnx::ONNXMobileRuntimeAdapter;
@@ -148,6 +148,24 @@ pub enum AdapterError {
     SerializationError(String),
     #[error("Runtime error: {0}")]
     RuntimeError(String),
+    #[error("Aborted for cloud fallback: {reason}")]
+    AbortedForCloudFallback { reason: crate::abort::AbortReason },
+}
+
+impl AdapterError {
+    pub fn from_streaming_callback_error(error: StreamingError) -> Self {
+        if let Some(reason) = crate::abort::cloud_fallback_reason_from_error(error.as_ref()) {
+            return Self::AbortedForCloudFallback { reason };
+        }
+        Self::RuntimeError(format!("Streaming callback error: {}", error))
+    }
+
+    pub fn cloud_fallback_abort_reason(&self) -> Option<crate::abort::AbortReason> {
+        match self {
+            Self::AbortedForCloudFallback { reason } => Some(*reason),
+            _ => None,
+        }
+    }
 }
 
 /// Result type for runtime adapter operations.

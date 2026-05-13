@@ -177,7 +177,7 @@ pub enum OutputResult {
 }
 
 /// Configuration for the pipeline runner.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RunnerConfig {
     /// Device metrics for routing decisions.
     pub metrics: DeviceMetrics,
@@ -189,22 +189,6 @@ pub struct RunnerConfig {
     pub server_models: HashMap<String, bool>,
     /// Map of integration provider availability.
     pub integrations: HashMap<IntegrationProvider, bool>,
-}
-
-impl Default for RunnerConfig {
-    fn default() -> Self {
-        Self {
-            metrics: DeviceMetrics {
-                network_rtt: 100,
-                battery: 100,
-                temperature: 25.0,
-            },
-            capabilities: HardwareCapabilities::default(),
-            local_models: HashMap::new(),
-            server_models: HashMap::new(),
-            integrations: HashMap::new(),
-        }
-    }
 }
 
 /// Pipeline Runner - executes Pipeline DSL configurations through the Orchestrator.
@@ -605,21 +589,19 @@ mod tests {
     #[test]
     fn test_pipeline_runner_new() {
         let runner = PipelineRunner::new();
-        assert_eq!(runner.config().metrics.battery, 100);
+        assert_eq!(runner.config().metrics.capabilities.battery_level, 100);
     }
 
     #[test]
     fn test_pipeline_runner_with_config() {
+        let mut metrics = DeviceMetrics::default();
+        metrics.capabilities.battery_level = 80;
         let config = RunnerConfig {
-            metrics: DeviceMetrics {
-                network_rtt: 50,
-                battery: 80,
-                temperature: 30.0,
-            },
+            metrics,
             ..Default::default()
         };
         let runner = PipelineRunner::with_config(config);
-        assert_eq!(runner.config().metrics.battery, 80);
+        assert_eq!(runner.config().metrics.capabilities.battery_level, 80);
     }
 
     #[test]

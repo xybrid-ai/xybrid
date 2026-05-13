@@ -11,6 +11,7 @@
 // ignore_for_file: argument_type_not_assignable
 
 import 'api/context.dart';
+import 'api/device.dart';
 import 'api/envelope.dart';
 import 'api/model.dart';
 import 'api/pipeline.dart';
@@ -50,6 +51,10 @@ abstract class XybridRustLibApiImplPlatform
           .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline;
 
   CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_XybridDevicePtr => wire
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice;
+
+  CrossPlatformFinalizerArg
       get rust_arc_decrement_strong_count_XybridSdkClientPtr => wire
           .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient;
 
@@ -79,6 +84,11 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   FfiPipeline
       dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+          dynamic raw);
+
+  @protected
+  XybridDevice
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
           dynamic raw);
 
   @protected
@@ -137,6 +147,11 @@ abstract class XybridRustLibApiImplPlatform
           dynamic raw);
 
   @protected
+  XybridDevice
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          dynamic raw);
+
+  @protected
   XybridSdkClient
       dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
           dynamic raw);
@@ -180,6 +195,9 @@ abstract class XybridRustLibApiImplPlatform
   int dco_decode_box_autoadd_u_32(dynamic raw);
 
   @protected
+  int dco_decode_box_autoadd_u_8(dynamic raw);
+
+  @protected
   double dco_decode_f_32(dynamic raw);
 
   @protected
@@ -192,7 +210,13 @@ abstract class XybridRustLibApiImplPlatform
   FfiLoadEvent dco_decode_ffi_load_event(dynamic raw);
 
   @protected
+  FfiMemoryPressure dco_decode_ffi_memory_pressure(dynamic raw);
+
+  @protected
   FfiMessageRole dco_decode_ffi_message_role(dynamic raw);
+
+  @protected
+  FfiResourceSnapshot dco_decode_ffi_resource_snapshot(dynamic raw);
 
   @protected
   FfiResult dco_decode_ffi_result(dynamic raw);
@@ -202,6 +226,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiStreamToken dco_decode_ffi_stream_token(dynamic raw);
+
+  @protected
+  FfiThermalState dco_decode_ffi_thermal_state(dynamic raw);
 
   @protected
   int dco_decode_i_32(dynamic raw);
@@ -247,6 +274,9 @@ abstract class XybridRustLibApiImplPlatform
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
+  int? dco_decode_opt_box_autoadd_u_8(dynamic raw);
+
+  @protected
   List<String>? dco_decode_opt_list_String(dynamic raw);
 
   @protected
@@ -257,6 +287,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   int dco_decode_u_32(dynamic raw);
+
+  @protected
+  BigInt dco_decode_u_64(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -293,6 +326,11 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   FfiPipeline
       sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+          SseDeserializer deserializer);
+
+  @protected
+  XybridDevice
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
           SseDeserializer deserializer);
 
   @protected
@@ -351,6 +389,11 @@ abstract class XybridRustLibApiImplPlatform
           SseDeserializer deserializer);
 
   @protected
+  XybridDevice
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          SseDeserializer deserializer);
+
+  @protected
   XybridSdkClient
       sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
           SseDeserializer deserializer);
@@ -397,6 +440,9 @@ abstract class XybridRustLibApiImplPlatform
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
+  int sse_decode_box_autoadd_u_8(SseDeserializer deserializer);
+
+  @protected
   double sse_decode_f_32(SseDeserializer deserializer);
 
   @protected
@@ -410,7 +456,15 @@ abstract class XybridRustLibApiImplPlatform
   FfiLoadEvent sse_decode_ffi_load_event(SseDeserializer deserializer);
 
   @protected
+  FfiMemoryPressure sse_decode_ffi_memory_pressure(
+      SseDeserializer deserializer);
+
+  @protected
   FfiMessageRole sse_decode_ffi_message_role(SseDeserializer deserializer);
+
+  @protected
+  FfiResourceSnapshot sse_decode_ffi_resource_snapshot(
+      SseDeserializer deserializer);
 
   @protected
   FfiResult sse_decode_ffi_result(SseDeserializer deserializer);
@@ -420,6 +474,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiStreamToken sse_decode_ffi_stream_token(SseDeserializer deserializer);
+
+  @protected
+  FfiThermalState sse_decode_ffi_thermal_state(SseDeserializer deserializer);
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
@@ -466,6 +523,9 @@ abstract class XybridRustLibApiImplPlatform
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
+  int? sse_decode_opt_box_autoadd_u_8(SseDeserializer deserializer);
+
+  @protected
   List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
 
   @protected
@@ -477,6 +537,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_u_64(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -515,6 +578,11 @@ abstract class XybridRustLibApiImplPlatform
   void
       sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
           FfiPipeline self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          XybridDevice self, SseSerializer serializer);
 
   @protected
   void
@@ -573,6 +641,11 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          XybridDevice self, SseSerializer serializer);
+
+  @protected
+  void
       sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
           XybridSdkClient self, SseSerializer serializer);
 
@@ -620,6 +693,9 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_u_8(int self, SseSerializer serializer);
+
+  @protected
   void sse_encode_f_32(double self, SseSerializer serializer);
 
   @protected
@@ -633,8 +709,16 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_ffi_load_event(FfiLoadEvent self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_memory_pressure(
+      FfiMemoryPressure self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_message_role(
       FfiMessageRole self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_resource_snapshot(
+      FfiResourceSnapshot self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_result(FfiResult self, SseSerializer serializer);
@@ -646,6 +730,10 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_ffi_stream_token(
       FfiStreamToken self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_thermal_state(
+      FfiThermalState self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
@@ -696,6 +784,9 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_u_8(int? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
 
   @protected
@@ -708,6 +799,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_64(BigInt self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer);
@@ -784,6 +878,18 @@ class XybridRustLibWire implements BaseWire {
           .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
               ptr);
 
+  void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          int ptr) =>
+      wasmModule
+          .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+              ptr);
+
+  void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          int ptr) =>
+      wasmModule
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+              ptr);
+
   void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
           int ptr) =>
       wasmModule
@@ -841,6 +947,14 @@ extension type XybridRustLibWasmModule._(JSObject _) implements JSObject {
 
   external void
       rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+          int ptr);
+
+  external void
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          int ptr);
+
+  external void
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
           int ptr);
 
   external void

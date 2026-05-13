@@ -16,6 +16,12 @@
 //! - **Circuit breaker**: Prevents hammering failing endpoints
 //! - **Automatic retry**: Exponential backoff with jitter for transient failures
 //! - **Failed event queue**: Retries failed events in the background
+//!
+//! # Orchestrator Bridge Context
+//!
+//! Producers attach context at orchestrator event publish time; bridge threads
+//! must not assume telemetry task-local or thread-local state is available when
+//! they drain events later.
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -27,7 +33,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 pub use xybrid_core::device::DeviceProfile;
 use xybrid_core::device::{ResourceMonitor, ResourceTelemetryMode, ResourceUsageSummary};
-use xybrid_core::event_bus::OrchestratorEvent;
+use xybrid_core::event_bus::{EventContext, OrchestratorEvent};
 use xybrid_core::execution::listener::{self as execution_listener, ExecutionEvent};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 use xybrid_core::tracing as core_tracing;
@@ -343,6 +349,12 @@ struct PlatformEvent {
     timestamp: Option<String>,
     pipeline_id: Option<Uuid>,
     trace_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    correlation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome_category: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    abort_reason: Option<String>,
     stages: Option<serde_json::Value>,
 }
 
@@ -863,6 +875,9 @@ fn convert_to_platform_event(
     let mut payload = serde_json::json!({});
     let mut event_pipeline_id = pipeline_id;
     let mut event_trace_id = trace_id;
+    let mut correlation_id = None;
+    let mut outcome_category = None;
+    let mut abort_reason = None;
 
     if let Some(stage) = &event.stage_name {
         payload["stage_name"] = serde_json::json!(stage);
@@ -915,6 +930,15 @@ fn convert_to_platform_event(
                 // flat JSON-path selectors without teaching each consumer
                 // the nested shape.
                 "resource_summary",
+                "correlation_id",
+                "outcome_category",
+                "abort_reason",
+                // Per-routing-decision reliability hint (object with
+                // `recent_abort_rate` + `sample_size`). Lives in the SDK
+                // hoist list so the analytics backend can extract it via
+                // `json:$.local_reliability_hint.*` without descending
+                // into the nested data object.
+                "local_reliability_hint",
             ]
             .iter()
             {
@@ -924,6 +948,15 @@ fn convert_to_platform_event(
                     }
                 }
             }
+            correlation_id = parsed
+                .get("correlation_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            outcome_category = parsed.get("outcome_category").cloned();
+            abort_reason = parsed
+                .get("abort_reason")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
             payload["data"] = parsed;
         } else {
             payload["data"] = serde_json::json!(data);
@@ -955,8 +988,20 @@ fn convert_to_platform_event(
     //      historical path, preserved for in-process local inference
     //      where only one model call is active at a time and the race
     //      doesn't manifest.
-    let stages = if (event.event_type == "PipelineComplete" || event.event_type == "ModelComplete")
-        && core_tracing::is_tracing_enabled()
+    // Span-bearing event types: completion-family events publish a final
+    // ModelComplete/PipelineComplete that drains the collector, AND the
+    // cloud-fallback flow publishes LocalAborted/CloudRetry as terminal
+    // markers for each leg without ever firing a *Complete. Both kinds
+    // need their flamegraph attached at the wire layer or the dashboard
+    // sees an empty trace detail. Adding LocalAborted/CloudRetry here is
+    // the symmetric counterpart of the same addition in
+    // `snapshot_spans_into_event` — both gates must agree, otherwise the
+    // SDK attaches spans to event.data["spans"] but `convert_to_platform_event`
+    // strips them again before the wire.
+    let stages = if matches!(
+        event.event_type.as_str(),
+        "PipelineComplete" | "ModelComplete" | "LocalAborted" | "CloudRetry"
+    ) && core_tracing::is_tracing_enabled()
     {
         let embedded_spans: Option<serde_json::Value> = payload
             .get("data")
@@ -1000,6 +1045,74 @@ fn convert_to_platform_event(
                 }
             }
         }
+        // Hoist cost-accounting string attrs onto the payload top level
+        // for the billing column.
+        //
+        // `backend` may live on any span — LLM events set it on the
+        // inner `llm_inference` span (via `LlmStrategy` / cloud adapter),
+        // non-LLM events (ASR/TTS) set it on the outer `execute:<model>`
+        // span via `backend_label_from_template`. Read from any span so
+        // both surfaces produce the same wire shape.
+        //
+        // `provider` is cloud-LLM-only and must stay gated to LLM spans:
+        // a non-LLM span carrying a stray `provider` key would emit a
+        // phantom value on an ASR/TTS payload.
+        if payload.get("backend").is_none() {
+            if let Some(v) = extract_string_attr_from_any_span(&spans, "backend") {
+                payload["backend"] = serde_json::json!(v);
+            }
+        }
+        if payload.get("provider").is_none() {
+            if let Some(v) = extract_llm_inference_string_attr(&spans, "provider") {
+                payload["provider"] = serde_json::json!(v);
+            }
+        }
+        // Semantic task label (chat / vlm / asr / tts / embedding / …)
+        // sourced from `model_metadata.json`. Lives on the outer
+        // `execute:<model>` span so it's always reachable via the
+        // any-span hoist regardless of modality. Promotes the field
+        // to the wire payload so the console can filter without
+        // joining model_id against the registry at render time.
+        if payload.get("task").is_none() {
+            if let Some(v) = extract_string_attr_from_any_span(&spans, "task") {
+                payload["task"] = serde_json::json!(v);
+            }
+        }
+        // Quantization label (q4_0 / q4_k_m / fp16 / …) sourced from
+        // `model_metadata.json` first, GGUF filename second. Two runs
+        // of "the same model" at different quantizations are now
+        // distinguishable in the analytics rollup. Open string —
+        // values outside the documented set still flow through.
+        if payload.get("quantization").is_none() {
+            if let Some(v) = extract_string_attr_from_any_span(&spans, "quantization") {
+                payload["quantization"] = serde_json::json!(v);
+            }
+        }
+        // Resolved execution provider — which on-device engine path
+        // actually ran (coreml / cpu / metal / cuda / mlx-metal / …).
+        // ORT path: harvested from per-session profiling JSON after the
+        // first inference (bypasses the API gap where ORT exposes no
+        // session-level resolved-EP getter). LLM path: build-flag-derived
+        // label keyed on the backend name. Cloud paths omit — `provider`
+        // already carries the attribution. Lives on whichever inner span
+        // emitted it, hoisted via the any-span lookup so all modalities
+        // produce the same wire shape.
+        if payload.get("execution_provider").is_none() {
+            if let Some(v) = extract_string_attr_from_any_span(&spans, "execution_provider") {
+                payload["execution_provider"] = serde_json::json!(v);
+            }
+        }
+        // Local KV cache hits (llama.cpp's multi-turn prefix reuse). The
+        // backend only emits this metadata key when the most recent call
+        // actually reused a prefix (n > 0), so a present value here is
+        // always meaningful — no need to filter out zeros at the SDK
+        // layer. Mirror of cloud's `cache_read_input_tokens` so the
+        // analytics column can stack local + cloud cache hits.
+        if payload.get("prompt_cached_tokens").is_none() {
+            if let Some(n) = extract_llm_prompt_cached_tokens(&spans) {
+                payload["prompt_cached_tokens"] = serde_json::json!(n);
+            }
+        }
         Some(spans)
     } else {
         None
@@ -1017,6 +1130,9 @@ fn convert_to_platform_event(
         timestamp,
         pipeline_id: event_pipeline_id,
         trace_id: event_trace_id,
+        correlation_id,
+        outcome_category,
+        abort_reason,
         stages,
     }
 }
@@ -1121,6 +1237,111 @@ fn extract_llm_token_counts(stages: &serde_json::Value) -> Option<(Option<u64>, 
     } else {
         None
     }
+}
+
+/// Lift the local-LLM `prompt_cached_tokens` value (count of prompt
+/// tokens served from the backend's KV cache on the most recent call)
+/// off the LAST LLM span. The local mirror of cloud's
+/// `cache_read_input_tokens` — emitted only when a backend that tracks
+/// prefix reuse (today: llama.cpp) actually reused tokens, so reading
+/// `Some(n)` from this helper means the value is meaningful and worth
+/// hoisting verbatim. Same last-span-wins / LLM-span detection rule as
+/// [`extract_llm_token_counts`] so retried runs and timing-only spans
+/// don't fight the count-bearing span.
+fn extract_llm_prompt_cached_tokens(stages: &serde_json::Value) -> Option<u64> {
+    let spans = stages.get("spans")?.as_array()?;
+    let mut latest: Option<u64> = None;
+    for span in spans {
+        let name = span.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let meta = span.get("metadata");
+        let is_llm_span = name.starts_with("llm_inference")
+            || name.starts_with("inference:")
+            || meta
+                .map(|m| {
+                    m.get("ttft_ms").is_some()
+                        || m.get("tokens_generated").is_some()
+                        || m.get("tokens_out").is_some()
+                        || m.get("completion_tokens").is_some()
+                })
+                .unwrap_or(false);
+        if !is_llm_span {
+            continue;
+        }
+        let Some(v) = meta.and_then(|m| m.get("prompt_cached_tokens")) else {
+            continue;
+        };
+        if let Some(n) = v.as_u64() {
+            latest = Some(n);
+        } else if let Some(s) = v.as_str() {
+            if let Ok(n) = s.parse::<u64>() {
+                latest = Some(n);
+            }
+        }
+    }
+    latest
+}
+
+/// Walk a `stages` JSON (same shape as [`extract_llm_token_counts`]) and
+/// return the value of `key` from the LAST LLM-flavoured span that
+/// carries it as a string. Used to lift cost-accounting string attrs
+/// (`backend`, `provider`) onto the wire payload's top level alongside
+/// the token counts.
+///
+/// LLM-span detection is identical to [`extract_llm_token_counts`]
+/// (name prefix `llm_inference*` / `inference:*` or LLM-style metadata
+/// keys) so the two hoists agree on which span is "the" LLM span when
+/// a trace contains other inference spans (e.g. ASR/TTS).
+fn extract_llm_inference_string_attr(stages: &serde_json::Value, key: &str) -> Option<String> {
+    let spans = stages.get("spans")?.as_array()?;
+    let mut found: Option<String> = None;
+    for span in spans {
+        let name = span.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let meta = span.get("metadata");
+        let is_llm_span = name.starts_with("llm_inference")
+            || name.starts_with("inference:")
+            || meta
+                .map(|m| {
+                    m.get("ttft_ms").is_some()
+                        || m.get("tokens_generated").is_some()
+                        || m.get("tokens_out").is_some()
+                        || m.get("completion_tokens").is_some()
+                })
+                .unwrap_or(false);
+        if !is_llm_span {
+            continue;
+        }
+        if let Some(v) = meta.and_then(|m| m.get(key)).and_then(|v| v.as_str()) {
+            // Same last-span-wins rule as the token-count hoist: a retried
+            // run emits one span per attempt and we want the final value.
+            found = Some(v.to_string());
+        }
+    }
+    found
+}
+
+/// Walk a `stages` JSON and return the value of `key` from the LAST span
+/// (any flavour) that carries it as a string. Used for cost-accounting
+/// scalars that must surface on every inference event regardless of
+/// modality — chiefly `backend`, which is set on the outer
+/// `execute:<model>` span for non-LLM events (ASR/TTS via
+/// `backend_label_from_template`) and on the inner `llm_inference` span
+/// for LLM events.
+///
+/// Intentionally NOT used for `provider`: that field is cloud-LLM-only
+/// and a stray match on a non-LLM span would emit a nonsense provider
+/// value on an ASR/TTS payload. Use [`extract_llm_inference_string_attr`]
+/// for provider.
+fn extract_string_attr_from_any_span(stages: &serde_json::Value, key: &str) -> Option<String> {
+    let spans = stages.get("spans")?.as_array()?;
+    let mut found: Option<String> = None;
+    for span in spans {
+        let meta = span.get("metadata");
+        if let Some(v) = meta.and_then(|m| m.get(key)).and_then(|v| v.as_str()) {
+            // Same last-span-wins rule as the LLM-gated hoist.
+            found = Some(v.to_string());
+        }
+    }
+    found
 }
 
 // ============================================================================
@@ -1270,6 +1491,258 @@ pub fn publish_with_resource_summary(
     publish_telemetry_event(event);
 }
 
+pub(crate) fn publish_with_resource_summary_in_context(
+    mut event: TelemetryEvent,
+    guard: xybrid_core::device::RunGuard,
+    pipeline_id: Option<Uuid>,
+    trace_id: Option<Uuid>,
+) {
+    attach_resource_summary(&mut event, guard.finish());
+    publish_telemetry_event_in_context(event, pipeline_id, trace_id);
+}
+
+/// Build a `LocalAborted` telemetry event for a resource-driven cloud-fallback
+/// abort.
+///
+/// The event carries the abort reason, the local leg's latency and partial
+/// token count, and a `correlation_id` shared with the paired `CloudRetry`
+/// event so analytics joins on the two halves of one logical inference.
+/// `correlation_id`, `outcome_category`, and `abort_reason` ride in
+/// `event.data`; the platform-event hoist (see `convert_to_platform_event`)
+/// promotes them to top-level columns.
+pub fn local_aborted_event(
+    correlation_id: &str,
+    model_id: &str,
+    abort_reason: xybrid_core::abort::AbortReason,
+    latency_ms: u32,
+    tokens_emitted: u32,
+) -> TelemetryEvent {
+    TelemetryEvent {
+        event_type: "LocalAborted".to_string(),
+        stage_name: Some(model_id.to_string()),
+        target: Some("local".to_string()),
+        latency_ms: Some(latency_ms),
+        error: None,
+        data: Some(
+            serde_json::json!({
+                "model_id": model_id,
+                "correlation_id": correlation_id,
+                "outcome_category": {
+                    "kind": "aborted_for_cloud_fallback",
+                    "reason": abort_reason.as_str(),
+                },
+                "abort_reason": abort_reason.as_str(),
+                "tokens_emitted": tokens_emitted,
+            })
+            .to_string(),
+        ),
+        timestamp_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    }
+}
+
+/// Convenience wrapper: build and publish a `LocalAborted` event.
+pub fn publish_local_aborted(
+    correlation_id: &str,
+    model_id: &str,
+    abort_reason: xybrid_core::abort::AbortReason,
+    latency_ms: u32,
+    tokens_emitted: u32,
+) {
+    publish_telemetry_event(local_aborted_event(
+        correlation_id,
+        model_id,
+        abort_reason,
+        latency_ms,
+        tokens_emitted,
+    ));
+}
+
+pub(crate) fn redact_error_for_telemetry(message: &str) -> String {
+    let redacted = [
+        "Authorization: Bearer ",
+        "authorization: Bearer ",
+        "Bearer ",
+        "api_key=",
+        "api-key=",
+        "x-api-key: ",
+        "X-API-Key: ",
+    ]
+    .iter()
+    .fold(message.to_string(), |current, marker| {
+        redact_value_after_marker(&current, marker)
+    });
+
+    redact_secret_like_tokens(&redacted)
+}
+
+fn redact_value_after_marker(input: &str, marker: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut rest = input;
+
+    while let Some(index) = rest.find(marker) {
+        let marker_end = index + marker.len();
+        output.push_str(&rest[..marker_end]);
+        rest = &rest[marker_end..];
+
+        let value_len = rest
+            .find(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | ')' | ']'))
+            .unwrap_or(rest.len());
+        output.push_str("[REDACTED]");
+        rest = &rest[value_len..];
+    }
+
+    output.push_str(rest);
+    output
+}
+
+fn redact_secret_like_tokens(input: &str) -> String {
+    input
+        .split_whitespace()
+        .map(redact_secret_like_token)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn redact_secret_like_token(token: &str) -> String {
+    let trimmed =
+        token.trim_matches(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')));
+    if trimmed.starts_with("sk_")
+        || trimmed.starts_with("sk-")
+        || trimmed.starts_with("hf_")
+        || trimmed.starts_with("ghp_")
+        || trimmed.starts_with("gho_")
+        || trimmed.starts_with("xoxb-")
+        || trimmed.starts_with("xoxp-")
+    {
+        token.replacen(trimmed, "[REDACTED]", 1)
+    } else {
+        token.to_string()
+    }
+}
+
+/// Build a terminal event for a local abort whose cloud retry was blocked by
+/// live policy. This is the one fallback path that remains a hard failure.
+pub fn cloud_denied_by_policy_event(
+    correlation_id: &str,
+    model_id: &str,
+    abort_reason: xybrid_core::abort::AbortReason,
+    policy_reason: &str,
+    latency_ms: u32,
+) -> TelemetryEvent {
+    let policy_reason = redact_error_for_telemetry(policy_reason);
+    TelemetryEvent {
+        event_type: "LocalFailed".to_string(),
+        stage_name: Some(model_id.to_string()),
+        target: Some("local".to_string()),
+        latency_ms: Some(latency_ms),
+        error: Some(format!("cloud_denied_by_policy: {}", policy_reason)),
+        data: Some(
+            serde_json::json!({
+                "model_id": model_id,
+                "correlation_id": correlation_id,
+                "outcome_category": {
+                    "kind": "hard_fail",
+                    "reason": "cloud_denied_by_policy",
+                },
+                "terminal_state_tag": {
+                    "kind": "cloud_denied_by_policy",
+                    "abort_reason": abort_reason.as_str(),
+                },
+                "abort_reason": abort_reason.as_str(),
+                "policy_reason": policy_reason,
+                "status": "error",
+            })
+            .to_string(),
+        ),
+        timestamp_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    }
+}
+
+pub fn publish_cloud_denied_by_policy(
+    correlation_id: &str,
+    model_id: &str,
+    abort_reason: xybrid_core::abort::AbortReason,
+    policy_reason: &str,
+    latency_ms: u32,
+) {
+    publish_telemetry_event(cloud_denied_by_policy_event(
+        correlation_id,
+        model_id,
+        abort_reason,
+        policy_reason,
+        latency_ms,
+    ));
+}
+
+/// Build a `CloudRetry` telemetry event for the cloud leg of a fallback run.
+///
+/// Emits with the shared `correlation_id` and the cloud provider name when
+/// known. Pair with [`local_aborted_event`] (same `correlation_id`) to
+/// reconstruct one logical inference across two execution targets.
+///
+/// `error` is `None` when the cloud leg streamed successfully; `Some(msg)`
+/// when it failed before producing a final result. The failure branch sets
+/// `event.error` and tags the payload with `status = "error"` so traces
+/// list views and dashboards can distinguish a cloud-attempt-that-failed
+/// from a cloud-attempt-that-succeeded.
+pub fn cloud_retry_event(
+    correlation_id: &str,
+    model_id: &str,
+    provider: Option<&str>,
+    latency_ms: u32,
+    tokens_emitted: u32,
+    error: Option<&str>,
+) -> TelemetryEvent {
+    let provider_value = provider.unwrap_or("xybrid");
+    let status = if error.is_some() { "error" } else { "ok" };
+    TelemetryEvent {
+        event_type: "CloudRetry".to_string(),
+        stage_name: Some(model_id.to_string()),
+        target: Some("cloud".to_string()),
+        latency_ms: Some(latency_ms),
+        error: error.map(redact_error_for_telemetry),
+        data: Some(
+            serde_json::json!({
+                "model_id": model_id,
+                "correlation_id": correlation_id,
+                "provider": provider_value,
+                "tokens_emitted": tokens_emitted,
+                "status": status,
+            })
+            .to_string(),
+        ),
+        timestamp_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    }
+}
+
+/// Convenience wrapper: build and publish a `CloudRetry` event.
+pub fn publish_cloud_retry(
+    correlation_id: &str,
+    model_id: &str,
+    provider: Option<&str>,
+    latency_ms: u32,
+    tokens_emitted: u32,
+    error: Option<&str>,
+) {
+    publish_telemetry_event(cloud_retry_event(
+        correlation_id,
+        model_id,
+        provider,
+        latency_ms,
+        tokens_emitted,
+        error,
+    ));
+}
+
 /// Initialize platform telemetry from environment variables
 ///
 /// Returns `true` if initialization succeeded, `false` if XYBRID_API_KEY is not set.
@@ -1305,10 +1778,61 @@ pub fn init_platform_telemetry_from_env() -> bool {
 
 /// Set pipeline context for event enrichment
 pub fn set_telemetry_pipeline_context(pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) {
+    let mut event_context = xybrid_core::event_bus::EventContext::current();
+    event_context.pipeline_id = pipeline_id;
+    event_context.trace_id = trace_id;
+    if event_context.is_empty() {
+        xybrid_core::event_bus::clear_current_event_context();
+    } else {
+        xybrid_core::event_bus::set_current_event_context(event_context);
+    }
+
     if let Ok(exporter) = PLATFORM_EXPORTER.read() {
         if let Some(exp) = exporter.as_ref() {
             exp.set_pipeline_context(pipeline_id, trace_id);
         }
+    }
+}
+
+/// RAII guard that installs a pipeline context on construction and
+/// restores the previous context on drop.
+///
+/// Callers (e.g. `Pipeline::run`, `XybridModel::run_with_context`) need
+/// to scope a per-invocation `trace_id` so every telemetry event
+/// emitted during the call shares it. Pairing the install with a manual
+/// `set_telemetry_pipeline_context(None, None)` on every exit path is
+/// error-prone — any `?` between install and clear leaks the
+/// `trace_id` onto subsequent unrelated telemetry on the same thread,
+/// and a panic skips the cleanup entirely. This guard removes the
+/// duplication and closes the panic-leak hole.
+///
+/// On `Drop` the guard restores whatever context was in place before
+/// `install` ran (rather than blanket-clearing), so nested installs
+/// compose correctly. The exporter's pipeline context is held behind
+/// a process-global `Arc<RwLock<...>>`; for fully race-free per-call
+/// scoping under concurrent threads, callers should also rely on the
+/// thread-local `EventContext` (see `xybrid-core::event_bus`) which
+/// `set_telemetry_pipeline_context` keeps in sync.
+pub(crate) struct TelemetryPipelineContextGuard {
+    previous_pipeline_id: Option<Uuid>,
+    previous_trace_id: Option<Uuid>,
+}
+
+impl TelemetryPipelineContextGuard {
+    /// Install a pipeline context for the lifetime of the guard.
+    pub(crate) fn install(pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) -> Self {
+        let (previous_pipeline_id, previous_trace_id) = current_telemetry_pipeline_context();
+        set_telemetry_pipeline_context(pipeline_id, trace_id);
+        Self {
+            previous_pipeline_id,
+            previous_trace_id,
+        }
+    }
+}
+
+impl Drop for TelemetryPipelineContextGuard {
+    fn drop(&mut self) {
+        set_telemetry_pipeline_context(self.previous_pipeline_id, self.previous_trace_id);
     }
 }
 
@@ -1328,7 +1852,7 @@ fn register_execution_listener() {
                 target: Some("device".to_string()),
                 latency_ms: None,
                 error: None,
-                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                data: Some(serde_json::json!({ "model": model_id }).to_string()),
                 timestamp_ms,
             },
             ExecutionEvent::Completed {
@@ -1341,7 +1865,7 @@ fn register_execution_listener() {
                 target: Some("device".to_string()),
                 latency_ms: Some(latency_ms as u32),
                 error: None,
-                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                data: Some(serde_json::json!({ "model": model_id }).to_string()),
                 timestamp_ms,
             },
             ExecutionEvent::Failed {
@@ -1351,11 +1875,22 @@ fn register_execution_listener() {
                 error,
             } => TelemetryEvent {
                 event_type: "ExecutionFailed".to_string(),
-                stage_name: Some(method),
+                // Surface the model_id in the operation column so error
+                // rows on the Traces dashboard read like the success rows
+                // (`pipeline / <model-id>`) instead of the executor-
+                // internal method name. The method is still preserved
+                // in `data` for forensics.
+                stage_name: Some(model_id.clone()),
                 target: Some("device".to_string()),
                 latency_ms: Some(latency_ms as u32),
                 error: Some(error),
-                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                data: Some(
+                    serde_json::json!({
+                        "model": model_id,
+                        "method": method,
+                    })
+                    .to_string(),
+                ),
                 timestamp_ms,
             },
         };
@@ -1405,8 +1940,9 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
         .unwrap()
         .as_millis() as u64;
 
-    match event {
-        OrchestratorEvent::PipelineStart { stages } => TelemetryEvent {
+    let context = event.context().clone();
+    let telemetry_event = match event {
+        OrchestratorEvent::PipelineStart { stages, .. } => TelemetryEvent {
             event_type: "PipelineStart".to_string(),
             stage_name: None,
             target: None,
@@ -1415,7 +1951,9 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             data: Some(serde_json::json!({"stages": stages}).to_string()),
             timestamp_ms,
         },
-        OrchestratorEvent::PipelineComplete { total_latency_ms } => TelemetryEvent {
+        OrchestratorEvent::PipelineComplete {
+            total_latency_ms, ..
+        } => TelemetryEvent {
             event_type: "PipelineComplete".to_string(),
             stage_name: None,
             target: None,
@@ -1424,7 +1962,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             data: None,
             timestamp_ms,
         },
-        OrchestratorEvent::StageStart { stage_name } => TelemetryEvent {
+        OrchestratorEvent::StageStart { stage_name, .. } => TelemetryEvent {
             event_type: "StageStart".to_string(),
             stage_name: Some(stage_name.clone()),
             target: None,
@@ -1437,6 +1975,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             target,
             latency_ms,
+            ..
         } => TelemetryEvent {
             event_type: "StageComplete".to_string(),
             stage_name: Some(stage_name.clone()),
@@ -1446,7 +1985,9 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             data: None,
             timestamp_ms,
         },
-        OrchestratorEvent::StageError { stage_name, error } => TelemetryEvent {
+        OrchestratorEvent::StageError {
+            stage_name, error, ..
+        } => TelemetryEvent {
             event_type: "StageError".to_string(),
             stage_name: Some(stage_name.clone()),
             target: None,
@@ -1459,16 +2000,41 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             target,
             reason,
+            recent_abort_rate,
+            sample_size,
+            ..
         } => TelemetryEvent {
             event_type: "RoutingDecided".to_string(),
             stage_name: Some(stage_name.clone()),
             target: Some(target.clone()),
             latency_ms: None,
             error: None,
-            data: Some(serde_json::json!({"reason": reason}).to_string()),
+            // Embed the local reliability hint at the top level of event.data
+            // so the `convert_to_platform_event` hoist list can surface it on
+            // the payload at the top level (where the platform datasource's
+            // JSONPath extractors live, alongside correlation_id / outcome_*).
+            // Non-finite f32 values would serialize to JSON `null`, breaking
+            // the typed platform column; the authority emits only finite
+            // values, but we sanitize at the bridge for defense in depth.
+            data: Some(
+                serde_json::json!({
+                    "reason": reason,
+                    "local_reliability_hint": {
+                        "recent_abort_rate": if recent_abort_rate.is_finite() {
+                            *recent_abort_rate
+                        } else {
+                            0.0_f32
+                        },
+                        "sample_size": sample_size,
+                    },
+                })
+                .to_string(),
+            ),
             timestamp_ms,
         },
-        OrchestratorEvent::ExecutionStarted { stage_name, target } => TelemetryEvent {
+        OrchestratorEvent::ExecutionStarted {
+            stage_name, target, ..
+        } => TelemetryEvent {
             event_type: "ExecutionStarted".to_string(),
             stage_name: Some(stage_name.clone()),
             target: Some(target.clone()),
@@ -1481,6 +2047,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             target,
             execution_time_ms,
+            ..
         } => TelemetryEvent {
             event_type: "ExecutionCompleted".to_string(),
             stage_name: Some(stage_name.clone()),
@@ -1494,6 +2061,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             target,
             error,
+            ..
         } => TelemetryEvent {
             event_type: "ExecutionFailed".to_string(),
             stage_name: Some(stage_name.clone()),
@@ -1507,6 +2075,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             allowed,
             reason,
+            ..
         } => TelemetryEvent {
             event_type: "PolicyEvaluated".to_string(),
             stage_name: Some(stage_name.clone()),
@@ -1526,6 +2095,20 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             ),
             timestamp_ms,
         },
+        OrchestratorEvent::LocalAborted {
+            stage_name,
+            target,
+            reason,
+            ..
+        } => TelemetryEvent {
+            event_type: "LocalAborted".to_string(),
+            stage_name: Some(stage_name.clone()),
+            target: Some(target.clone()),
+            latency_ms: None,
+            error: Some(reason.clone()),
+            data: Some(serde_json::json!({ "reason": reason }).to_string()),
+            timestamp_ms,
+        },
         _ => TelemetryEvent {
             event_type: format!("{:?}", event),
             stage_name: None,
@@ -1535,6 +2118,55 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             data: Some(format!("{:?}", event)),
             timestamp_ms,
         },
+    };
+
+    attach_event_context(telemetry_event, &context)
+}
+
+fn attach_event_context(event: TelemetryEvent, context: &EventContext) -> TelemetryEvent {
+    if context.is_empty() {
+        return event;
+    }
+
+    let mut data = match event.data.as_ref() {
+        Some(raw) => match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(value) if value.is_object() => value,
+            Ok(value) => serde_json::json!({ "value": value }),
+            Err(_) => serde_json::json!({ "value": raw }),
+        },
+        None => serde_json::json!({}),
+    };
+
+    if let Some(obj) = data.as_object_mut() {
+        if let Some(id) = context.pipeline_id {
+            obj.entry(CONTEXT_PIPELINE_ID_KEY.to_string())
+                .or_insert_with(|| serde_json::json!(id.to_string()));
+        }
+        if let Some(id) = context.trace_id {
+            obj.entry(CONTEXT_TRACE_ID_KEY.to_string())
+                .or_insert_with(|| serde_json::json!(id.to_string()));
+        }
+        if let Some(id) = context.correlation_id.as_ref() {
+            obj.entry("correlation_id".to_string())
+                .or_insert_with(|| serde_json::json!(id));
+        }
+        if let Some(id) = context.request_id.as_ref() {
+            obj.entry("request_id".to_string())
+                .or_insert_with(|| serde_json::json!(id));
+        }
+        if let Some(id) = context.model_id.as_ref() {
+            obj.entry("model_id".to_string())
+                .or_insert_with(|| serde_json::json!(id));
+        }
+        if let Some(id) = context.span_id.as_ref() {
+            obj.entry("span_id".to_string())
+                .or_insert_with(|| serde_json::json!(id));
+        }
+    }
+
+    TelemetryEvent {
+        data: Some(data.to_string()),
+        ..event
     }
 }
 
@@ -1544,11 +2176,17 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
 /// When it does act, it drains the global collector so the next unit of
 /// work on this thread starts with a clean slate.
 fn snapshot_spans_into_event(event: TelemetryEvent) -> TelemetryEvent {
-    let is_completion = matches!(
+    // Span-bearing event types — see the matching list in
+    // `convert_to_platform_event` for why LocalAborted/CloudRetry are here.
+    // The cloud-fallback flow never fires a ModelComplete/PipelineComplete,
+    // so without these the cloud-leg `SpanGuard`s in
+    // `runtime_adapter/cloud/mod.rs` get stranded in the global collector
+    // and the dashboard's flamegraph stays empty.
+    let is_span_bearing = matches!(
         event.event_type.as_str(),
-        "PipelineComplete" | "ModelComplete"
+        "PipelineComplete" | "ModelComplete" | "LocalAborted" | "CloudRetry"
     );
-    if !is_completion || !core_tracing::is_tracing_enabled() {
+    if !is_span_bearing || !core_tracing::is_tracing_enabled() {
         return event;
     }
 
@@ -1601,6 +2239,14 @@ fn current_telemetry_pipeline_context() -> (Option<Uuid>, Option<Uuid>) {
 
 fn snapshot_context_into_event(event: TelemetryEvent) -> TelemetryEvent {
     let (pipeline_id, trace_id) = current_telemetry_pipeline_context();
+    snapshot_context_into_event_with(event, pipeline_id, trace_id)
+}
+
+fn snapshot_context_into_event_with(
+    event: TelemetryEvent,
+    pipeline_id: Option<Uuid>,
+    trace_id: Option<Uuid>,
+) -> TelemetryEvent {
     if pipeline_id.is_none() && trace_id.is_none() {
         return event;
     }
@@ -1629,6 +2275,77 @@ fn snapshot_context_into_event(event: TelemetryEvent) -> TelemetryEvent {
     }
 }
 
+/// Build a `ModelDownload` event for a successful registry fetch.
+///
+/// Carries the cost-attribution fields agreed with the platform schema:
+/// `model_id` (registry mask), `bytes_downloaded` (final on-disk size of
+/// the model file or .xyb bundle), `source` (canonical download host
+/// label — `r2` for Xybrid's R2 mirror, `huggingface` for direct HF
+/// pulls; other hosts pass through as-is so a future provider doesn't
+/// silently lose attribution), and `duration_ms` (wallclock time spent
+/// inside the network download, excluding hash verification and cache
+/// extraction so the field reflects bytes-on-the-wire latency).
+///
+/// The wire `event_type` is the literal string `"ModelDownload"`. The
+/// fields land under `payload.data` after `convert_to_platform_event`
+/// runs; ingest reads them from there.
+///
+/// Pure builder — does not publish, allows unit tests to inspect the
+/// event shape without standing up the global exporter.
+fn build_model_download_event(
+    model_id: &str,
+    bytes_downloaded: u64,
+    source: &str,
+    duration_ms: u32,
+) -> TelemetryEvent {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let data = serde_json::json!({
+        "model_id": model_id,
+        "bytes_downloaded": bytes_downloaded,
+        "source": source,
+        "duration_ms": duration_ms,
+    });
+    TelemetryEvent {
+        event_type: "ModelDownload".to_string(),
+        stage_name: None,
+        target: None,
+        // Mirror duration onto the canonical `latency_ms` field so the
+        // platform's existing latency column lights up for downloads
+        // without a schema migration.
+        latency_ms: Some(duration_ms),
+        error: None,
+        data: Some(data.to_string()),
+        timestamp_ms: now_ms,
+    }
+}
+
+/// Publish a `ModelDownload` event for a successful registry fetch.
+///
+/// Honors [`crate::telemetry_optout::is_telemetry_opted_out`]: when the
+/// user has set `XYBRID_TELEMETRY_OPTOUT=1` no event is emitted, since
+/// the same opt-out already gates the registry call telemetry header
+/// and a model-download event would leak the same attribution surface
+/// (which model the user pulled, how big it was).
+///
+/// Cache hits MUST NOT call this — the event represents a real network
+/// transfer for cost accounting; emitting it on cache hits would
+/// double-count and hide cache-effectiveness metrics.
+pub fn publish_model_download(
+    model_id: &str,
+    bytes_downloaded: u64,
+    source: &str,
+    duration_ms: u32,
+) {
+    if crate::telemetry_optout::is_telemetry_opted_out() {
+        return;
+    }
+    let event = build_model_download_event(model_id, bytes_downloaded, source, duration_ms);
+    publish_telemetry_event(event);
+}
+
 /// Publish a telemetry event to all registered subscribers
 pub fn publish_telemetry_event(event: TelemetryEvent) {
     // Span snapshot: capture spans synchronously at publish time.
@@ -1650,7 +2367,20 @@ pub fn publish_telemetry_event(event: TelemetryEvent) {
     // composability) are left untouched so they keep full control.
     let event = snapshot_spans_into_event(event);
     let event = snapshot_context_into_event(event);
+    dispatch_telemetry_event(event);
+}
 
+pub(crate) fn publish_telemetry_event_in_context(
+    event: TelemetryEvent,
+    pipeline_id: Option<Uuid>,
+    trace_id: Option<Uuid>,
+) {
+    let event = snapshot_spans_into_event(event);
+    let event = snapshot_context_into_event_with(event, pipeline_id, trace_id);
+    dispatch_telemetry_event(event);
+}
+
+fn dispatch_telemetry_event(event: TelemetryEvent) {
     // Use unwrap_or_else to recover from poisoned mutex - this prevents
     // a panic in one component from permanently breaking telemetry
     let Ok(senders) = TELEMETRY_SENDERS.lock() else {
@@ -1676,30 +2406,148 @@ pub fn publish_telemetry_event(event: TelemetryEvent) {
     }
 }
 
-/// Bridge orchestrator events to telemetry stream
+#[derive(Debug, thiserror::Error)]
+pub enum BridgeError {
+    #[error("orchestrator event bridge is no longer running")]
+    Stopped,
+    #[error("orchestrator event bridge flush acknowledgement was dropped")]
+    FlushAckDropped,
+    #[error("orchestrator event bridge thread panicked")]
+    ThreadPanicked,
+}
+
+enum BridgeCommand {
+    Flush(mpsc::Sender<()>),
+}
+
+/// Handle for a scoped orchestrator-to-telemetry event bridge.
+#[must_use = "BridgeHandle must be flushed or joined, otherwise queued orchestrator telemetry can be dropped"]
+pub struct BridgeHandle {
+    join_handle: thread::JoinHandle<()>,
+    command_tx: mpsc::Sender<BridgeCommand>,
+}
+
+impl BridgeHandle {
+    /// Block until all events queued before this call have been delivered to
+    /// the SDK telemetry stream.
+    pub fn flush(&self) -> Result<(), BridgeError> {
+        let (ack_tx, ack_rx) = mpsc::channel();
+        self.command_tx
+            .send(BridgeCommand::Flush(ack_tx))
+            .map_err(|_| BridgeError::Stopped)?;
+        ack_rx.recv().map_err(|_| BridgeError::FlushAckDropped)
+    }
+
+    /// Compatibility alias for callers that used the previous scoped bridge
+    /// drain API. New code should prefer [`Self::flush`] and handle errors.
+    pub fn drain(&self) {
+        let _ = self.flush();
+    }
+
+    /// Wait for the bridge thread to finish draining after the orchestrator's
+    /// event bus has been dropped.
+    pub fn join(self) -> Result<(), BridgeError> {
+        let Self {
+            join_handle,
+            command_tx,
+        } = self;
+        drop(command_tx);
+        join_handle.join().map_err(|_| BridgeError::ThreadPanicked)
+    }
+}
+
+pub type OrchestratorEventBridge = BridgeHandle;
+
+const BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(1);
+
+/// Bridge orchestrator events to telemetry stream.
 ///
-/// This function subscribes to orchestrator events and converts them
-/// to telemetry events, publishing them to all registered subscribers.
-pub fn bridge_orchestrator_events(orchestrator: &xybrid_core::orchestrator::Orchestrator) {
+/// This function subscribes to orchestrator events and converts them to
+/// telemetry events. The returned handle must be joined after the orchestrator
+/// is dropped so queued events are drained before the caller tears down
+/// telemetry subscribers or the runtime.
+pub fn bridge_orchestrator_events(
+    orchestrator: &xybrid_core::orchestrator::Orchestrator,
+) -> BridgeHandle {
     let event_bus = orchestrator.event_bus();
     let subscription = event_bus.subscribe();
+    let (command_tx, command_rx) = mpsc::channel();
 
-    thread::spawn(move || {
-        loop {
-            match subscription.recv() {
-                Ok(event) => {
-                    let telemetry_event = convert_orchestrator_event(&event);
-                    publish_telemetry_event(telemetry_event);
-                }
-                Err(_) => break, // Event bus closed
+    let join_handle = thread::spawn(move || bridge_loop(subscription, command_rx));
+
+    BridgeHandle {
+        join_handle,
+        command_tx,
+    }
+}
+
+/// Subscribe to orchestrator events and return a drainable bridge handle.
+pub fn subscribe_orchestrator_events(
+    orchestrator: &xybrid_core::orchestrator::Orchestrator,
+) -> BridgeHandle {
+    bridge_orchestrator_events(orchestrator)
+}
+
+pub(crate) fn subscribe_orchestrator_events_in_context(
+    orchestrator: &xybrid_core::orchestrator::Orchestrator,
+    _pipeline_id: Option<Uuid>,
+    _trace_id: Option<Uuid>,
+) -> BridgeHandle {
+    bridge_orchestrator_events(orchestrator)
+}
+
+fn bridge_loop(
+    subscription: xybrid_core::event_bus::Subscription,
+    command_rx: mpsc::Receiver<BridgeCommand>,
+) {
+    loop {
+        drain_bridge_commands(&subscription, &command_rx);
+        match subscription.recv_timeout(BRIDGE_POLL_INTERVAL) {
+            Ok(event) => publish_orchestrator_event(event),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                drain_available_orchestrator_events(&subscription);
+                drain_bridge_commands(&subscription, &command_rx);
+                break;
             }
         }
-    });
+    }
+}
+
+fn drain_bridge_commands(
+    subscription: &xybrid_core::event_bus::Subscription,
+    command_rx: &mpsc::Receiver<BridgeCommand>,
+) {
+    while let Ok(command) = command_rx.try_recv() {
+        match command {
+            BridgeCommand::Flush(ack_tx) => {
+                drain_available_orchestrator_events(subscription);
+                let _ = ack_tx.send(());
+            }
+        }
+    }
+}
+
+fn drain_available_orchestrator_events(subscription: &xybrid_core::event_bus::Subscription) {
+    loop {
+        match subscription.try_recv() {
+            Ok(event) => publish_orchestrator_event(event),
+            Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
+        }
+    }
+}
+
+fn publish_orchestrator_event(event: OrchestratorEvent) {
+    let telemetry_event = convert_orchestrator_event(&event);
+    publish_telemetry_event(telemetry_event);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::MutexGuard;
+
+    static TELEMETRY_SENDER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn platform_event_payload_has_no_legacy_cache_keys() {
@@ -1858,6 +2706,229 @@ mod tests {
     }
 
     #[test]
+    fn routing_outcome_fields_hoist_to_platform_event_top_level() {
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(420),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": "qwen2.5-0.5b",
+                    "correlation_id": "run-string-123",
+                    "outcome_category": {
+                        "kind": "aborted_for_cloud_fallback",
+                        "reason": "stress_memory"
+                    },
+                    "abort_reason": "stress_memory"
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 1_700_000_000_000,
+        };
+
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+
+        assert_eq!(platform.correlation_id.as_deref(), Some("run-string-123"));
+        assert_eq!(
+            platform
+                .outcome_category
+                .as_ref()
+                .and_then(|v| v.get("kind")),
+            Some(&serde_json::json!("aborted_for_cloud_fallback"))
+        );
+        assert_eq!(platform.abort_reason.as_deref(), Some("stress_memory"));
+        assert_eq!(platform.payload["correlation_id"], "run-string-123");
+        assert_eq!(
+            platform.payload["outcome_category"]["kind"],
+            "aborted_for_cloud_fallback"
+        );
+        assert_eq!(platform.payload["abort_reason"], "stress_memory");
+    }
+
+    #[test]
+    fn local_reliability_hint_hoists_to_platform_event_top_level() {
+        // RoutingDecision events serialize the hint into event.data via
+        // `Telemetry::log_routing_decision`. The hoist list in
+        // convert_to_platform_event must copy that nested object to the
+        // payload top level so the analytics backend can column-extract
+        // `json:$.local_reliability_hint.recent_abort_rate` and
+        // `.sample_size` without descending into `data`.
+        let event = TelemetryEvent {
+            event_type: "RoutingDecision".to_string(),
+            stage_name: Some("stage-1".to_string()),
+            target: Some("cloud".to_string()),
+            latency_ms: None,
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "stage": "stage-1",
+                    "target": "cloud",
+                    "reason": "history_bias",
+                    "local_reliability_hint": {
+                        "recent_abort_rate": 0.75,
+                        "sample_size": 4_u32,
+                    }
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 1_700_000_000_000,
+        };
+
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["recent_abort_rate"]
+                .as_f64()
+                .unwrap_or(-1.0),
+            0.75
+        );
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn empty_local_reliability_hint_still_hoists_with_sample_size_zero() {
+        // Empty-window case: window has no entries yet. The SDK still
+        // emits (0.0, 0) so the platform can distinguish "no data" from
+        // "field missing because the SDK is older than the schema".
+        let event = TelemetryEvent {
+            event_type: "RoutingDecision".to_string(),
+            stage_name: Some("stage-1".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: None,
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "stage": "stage-1",
+                    "target": "local",
+                    "reason": "default_local",
+                    "local_reliability_hint": {
+                        "recent_abort_rate": 0.0,
+                        "sample_size": 0_u32,
+                    }
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 1_700_000_000_000,
+        };
+
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn local_aborted_and_cloud_retry_events_share_correlation_id() {
+        let local = local_aborted_event(
+            "run-abc-123",
+            "qwen2.5-0.5b",
+            xybrid_core::abort::AbortReason::StressMemory,
+            180,
+            4,
+        );
+        let cloud = cloud_retry_event("run-abc-123", "qwen2.5-0.5b", Some("openai"), 920, 38, None);
+
+        assert_eq!(local.event_type, "LocalAborted");
+        assert_eq!(local.target.as_deref(), Some("local"));
+        assert_eq!(local.latency_ms, Some(180));
+
+        assert_eq!(cloud.event_type, "CloudRetry");
+        assert_eq!(cloud.target.as_deref(), Some("cloud"));
+        assert_eq!(cloud.latency_ms, Some(920));
+
+        let local_data: serde_json::Value =
+            serde_json::from_str(local.data.as_ref().unwrap()).unwrap();
+        let cloud_data: serde_json::Value =
+            serde_json::from_str(cloud.data.as_ref().unwrap()).unwrap();
+
+        assert_eq!(local_data["correlation_id"], "run-abc-123");
+        assert_eq!(cloud_data["correlation_id"], "run-abc-123");
+        assert_eq!(local_data["abort_reason"], "stress_memory");
+        assert_eq!(
+            local_data["outcome_category"]["kind"],
+            "aborted_for_cloud_fallback"
+        );
+        assert_eq!(local_data["outcome_category"]["reason"], "stress_memory");
+        assert_eq!(local_data["tokens_emitted"], 4);
+        assert_eq!(cloud_data["provider"], "openai");
+        assert_eq!(cloud_data["tokens_emitted"], 38);
+
+        // The platform-event hoist promotes `correlation_id` and `abort_reason`
+        // out of `event.data` so analytics can join on top-level columns.
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform_local = convert_to_platform_event(&local, &config, None, None, None);
+        let platform_cloud = convert_to_platform_event(&cloud, &config, None, None, None);
+
+        assert_eq!(
+            platform_local.correlation_id.as_deref(),
+            Some("run-abc-123")
+        );
+        assert_eq!(
+            platform_cloud.correlation_id.as_deref(),
+            Some("run-abc-123")
+        );
+        assert_eq!(
+            platform_local.abort_reason.as_deref(),
+            Some("stress_memory")
+        );
+    }
+
+    #[test]
+    fn cloud_retry_event_defaults_provider_when_unspecified() {
+        let cloud = cloud_retry_event("run-xyz", "model-x", None, 50, 10, None);
+        let cloud_data: serde_json::Value =
+            serde_json::from_str(cloud.data.as_ref().unwrap()).unwrap();
+        assert_eq!(cloud_data["provider"], "xybrid");
+        assert_eq!(cloud_data["status"], "ok");
+        assert!(cloud.error.is_none());
+    }
+
+    #[test]
+    fn cloud_retry_event_marks_failure_branch() {
+        let cloud = cloud_retry_event(
+            "run-fail-1",
+            "deepseek-chat",
+            Some("deepseek"),
+            842,
+            0,
+            Some("Gateway returned 502: Provider error"),
+        );
+        let cloud_data: serde_json::Value =
+            serde_json::from_str(cloud.data.as_ref().unwrap()).unwrap();
+        assert_eq!(cloud.event_type, "CloudRetry");
+        assert_eq!(cloud.target.as_deref(), Some("cloud"));
+        assert_eq!(cloud.latency_ms, Some(842));
+        assert_eq!(
+            cloud.error.as_deref(),
+            Some("Gateway returned 502: Provider error")
+        );
+        assert_eq!(cloud_data["status"], "error");
+        assert_eq!(cloud_data["tokens_emitted"], 0);
+    }
+
+    #[test]
+    fn telemetry_error_redaction_removes_api_keys_and_bearer_tokens() {
+        let redacted = redact_error_for_telemetry(
+            "Gateway returned 401: Authorization: Bearer sk_test_abc123 and api_key=hf_secret_xyz",
+        );
+
+        assert!(redacted.contains("Authorization: Bearer [REDACTED]"));
+        assert!(redacted.contains("api_key=[REDACTED]"));
+        assert!(!redacted.contains("sk_test_abc123"));
+        assert!(!redacted.contains("hf_secret_xyz"));
+    }
+
+    #[test]
     fn attach_resource_summary_with_none_is_noop() {
         let original = TelemetryEvent {
             event_type: "ModelComplete".to_string(),
@@ -1907,6 +2978,7 @@ mod tests {
     fn test_convert_stage_start_event() {
         let event = OrchestratorEvent::StageStart {
             stage_name: "asr".to_string(),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -1924,6 +2996,7 @@ mod tests {
             stage_name: "tts".to_string(),
             target: "local".to_string(),
             latency_ms: 150,
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -1939,6 +3012,7 @@ mod tests {
         let event = OrchestratorEvent::StageError {
             stage_name: "asr".to_string(),
             error: "Model not found".to_string(),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -1951,6 +3025,7 @@ mod tests {
     fn test_convert_pipeline_start_event() {
         let event = OrchestratorEvent::PipelineStart {
             stages: vec!["asr".to_string(), "llm".to_string(), "tts".to_string()],
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -1967,6 +3042,7 @@ mod tests {
     fn test_convert_pipeline_complete_event() {
         let event = OrchestratorEvent::PipelineComplete {
             total_latency_ms: 500,
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -1980,6 +3056,9 @@ mod tests {
             stage_name: "asr".to_string(),
             target: "cloud".to_string(),
             reason: "network_optimal".to_string(),
+            recent_abort_rate: 0.0,
+            sample_size: 0,
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -1992,10 +3071,146 @@ mod tests {
     }
 
     #[test]
+    fn routing_decided_event_carries_local_reliability_hint_end_to_end() {
+        // Production-shape regression test: walk the full
+        // OrchestratorEvent -> TelemetryEvent -> PlatformEvent pipeline
+        // so the hint flows through every seam the previous PR draft
+        // missed.
+        let event = OrchestratorEvent::RoutingDecided {
+            stage_name: "stage-1".to_string(),
+            target: "cloud".to_string(),
+            reason: "history_bias".to_string(),
+            recent_abort_rate: 0.75,
+            sample_size: 4,
+            context: Default::default(),
+        };
+        let telemetry_event = convert_orchestrator_event(&event);
+
+        // Bridge embeds the hint in event.data so the hoist list picks it up.
+        let data_str = telemetry_event.data.as_ref().expect("data must be present");
+        let parsed_data: serde_json::Value = serde_json::from_str(data_str).unwrap();
+        assert_eq!(
+            parsed_data["local_reliability_hint"]["recent_abort_rate"]
+                .as_f64()
+                .unwrap_or(-1.0),
+            0.75
+        );
+        assert_eq!(
+            parsed_data["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(4)
+        );
+
+        // And the platform-event payload surfaces the hint at the top level.
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&telemetry_event, &config, None, None, None);
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["recent_abort_rate"]
+                .as_f64()
+                .unwrap_or(-1.0),
+            0.75
+        );
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn routing_decided_event_sanitizes_non_finite_recent_abort_rate() {
+        // Defense-in-depth: the authority emits only finite rates, but
+        // the bridge clamps NaN/Infinity to 0.0 so the platform's typed
+        // Float32 column never receives a JSON null. The clamp lives in
+        // the bridge so any future direct OrchestratorEvent caller (test,
+        // example, FFI) cannot poison the telemetry stream.
+        for bad_rate in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let event = OrchestratorEvent::RoutingDecided {
+                stage_name: "stage-1".to_string(),
+                target: "cloud".to_string(),
+                reason: "history_bias".to_string(),
+                recent_abort_rate: bad_rate,
+                sample_size: 1,
+                context: Default::default(),
+            };
+            let telemetry_event = convert_orchestrator_event(&event);
+            let parsed_data: serde_json::Value =
+                serde_json::from_str(telemetry_event.data.as_ref().unwrap()).unwrap();
+            assert_eq!(
+                parsed_data["local_reliability_hint"]["recent_abort_rate"].as_f64(),
+                Some(0.0),
+                "non-finite rate {bad_rate} must be sanitized to 0.0"
+            );
+        }
+    }
+
+    #[test]
+    fn scoped_orchestrator_bridge_drains_queued_events_with_captured_context() {
+        let _guard = TelemetrySenderTestGuard::acquire();
+        let (tx, rx) = mpsc::channel();
+        register_telemetry_sender(tx);
+
+        let pipeline_id = Uuid::new_v4();
+        let trace_id = Uuid::new_v4();
+        let _event_context = xybrid_core::event_bus::EventContextGuard::install(
+            xybrid_core::event_bus::EventContext::default()
+                .with_pipeline_id(pipeline_id)
+                .with_trace_id(trace_id),
+        );
+        let orchestrator = xybrid_core::orchestrator::Orchestrator::new();
+        let bridge = bridge_orchestrator_events(&orchestrator);
+
+        orchestrator
+            .event_bus()
+            .publish(OrchestratorEvent::RoutingDecided {
+                stage_name: "scoped-bridge-context".to_string(),
+                target: "cloud".to_string(),
+                reason: "history_bias".to_string(),
+                recent_abort_rate: 0.5,
+                sample_size: 2,
+                context: Default::default(),
+            });
+        bridge.drain();
+
+        let mut received = None;
+        for _ in 0..20 {
+            match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                Ok(event)
+                    if event.event_type == "RoutingDecided"
+                        && event.stage_name.as_deref() == Some("scoped-bridge-context") =>
+                {
+                    received = Some(event);
+                    break;
+                }
+                Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("telemetry receiver disconnected before RoutingDecided arrived")
+                }
+            }
+        }
+        let received = received.expect("drained bridge should publish queued orchestrator event");
+
+        let data: serde_json::Value =
+            serde_json::from_str(received.data.as_ref().expect("context-bearing data")).unwrap();
+        assert_eq!(
+            data[CONTEXT_PIPELINE_ID_KEY],
+            serde_json::json!(pipeline_id)
+        );
+        assert_eq!(data[CONTEXT_TRACE_ID_KEY], serde_json::json!(trace_id));
+        assert_eq!(
+            data["local_reliability_hint"]["recent_abort_rate"].as_f64(),
+            Some(0.5)
+        );
+        assert_eq!(
+            data["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(2)
+        );
+    }
+
+    #[test]
     fn test_convert_execution_started_event() {
         let event = OrchestratorEvent::ExecutionStarted {
             stage_name: "asr".to_string(),
             target: "local".to_string(),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2010,6 +3225,7 @@ mod tests {
             stage_name: "asr".to_string(),
             target: "local".to_string(),
             execution_time_ms: 75,
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2025,6 +3241,7 @@ mod tests {
             stage_name: "tts".to_string(),
             target: "cloud".to_string(),
             error: "Timeout".to_string(),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2040,6 +3257,7 @@ mod tests {
             stage_name: "asr".to_string(),
             allowed: true,
             reason: Some("All conditions met".to_string()),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2055,6 +3273,7 @@ mod tests {
             stage_name: "llm".to_string(),
             allowed: false,
             reason: Some("Privacy policy violation".to_string()),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2064,6 +3283,176 @@ mod tests {
             telemetry.error,
             Some("Privacy policy violation".to_string())
         );
+    }
+
+    fn routing_decided_event(stage_name: impl Into<String>) -> OrchestratorEvent {
+        OrchestratorEvent::RoutingDecided {
+            stage_name: stage_name.into(),
+            target: "local".to_string(),
+            reason: "test_route".to_string(),
+            recent_abort_rate: 0.0,
+            sample_size: 0,
+            context: xybrid_core::event_bus::EventContext::default(),
+        }
+    }
+
+    fn clear_registered_telemetry_senders() {
+        TELEMETRY_SENDERS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
+
+    struct TelemetrySenderTestGuard {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl TelemetrySenderTestGuard {
+        fn acquire() -> Self {
+            let guard = TELEMETRY_SENDER_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            clear_registered_telemetry_senders();
+            Self { _guard: guard }
+        }
+    }
+
+    impl Drop for TelemetrySenderTestGuard {
+        fn drop(&mut self) {
+            clear_registered_telemetry_senders();
+        }
+    }
+
+    #[test]
+    fn bridge_drains_all_events_on_orchestrator_drop() {
+        let _guard = TelemetrySenderTestGuard::acquire();
+        let (tx, rx) = mpsc::channel();
+        register_telemetry_sender(tx);
+
+        let orchestrator = xybrid_core::orchestrator::Orchestrator::new();
+        let bridge = bridge_orchestrator_events(&orchestrator);
+        for idx in 0..100 {
+            orchestrator
+                .event_bus()
+                .publish(routing_decided_event(format!("bridge-drain-{idx:03}")));
+        }
+
+        drop(orchestrator);
+        bridge.join().expect("bridge should drain cleanly");
+
+        let events: Vec<_> = rx
+            .try_iter()
+            .filter(|event| {
+                event.event_type == "RoutingDecided"
+                    && event
+                        .stage_name
+                        .as_deref()
+                        .is_some_and(|stage| stage.starts_with("bridge-drain-"))
+            })
+            .collect();
+        assert_eq!(events.len(), 100);
+        for idx in 0..100 {
+            assert!(
+                events
+                    .iter()
+                    .any(|event| event.stage_name.as_deref()
+                        == Some(&format!("bridge-drain-{idx:03}"))),
+                "missing routed event bridge-drain-{idx:03}; got {events:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bridge_preserves_correlation_id_across_task_boundary() {
+        let _guard = TelemetrySenderTestGuard::acquire();
+        let (tx, rx) = mpsc::channel();
+        register_telemetry_sender(tx);
+
+        let publishers: Vec<_> = ["A", "B"]
+            .into_iter()
+            .map(|correlation_id| {
+                thread::spawn(move || {
+                    let _context = xybrid_core::event_bus::EventContextGuard::install(
+                        xybrid_core::event_bus::EventContext::default()
+                            .with_correlation_id(correlation_id),
+                    );
+                    let orchestrator = xybrid_core::orchestrator::Orchestrator::new();
+                    let bridge = bridge_orchestrator_events(&orchestrator);
+                    for idx in 0..10 {
+                        orchestrator
+                            .event_bus()
+                            .publish(routing_decided_event(format!("{correlation_id}-{idx}")));
+                        thread::yield_now();
+                    }
+                    drop(orchestrator);
+                    bridge.join().expect("bridge should drain cleanly");
+                })
+            })
+            .collect();
+
+        for publisher in publishers {
+            publisher.join().expect("publisher thread should not panic");
+        }
+
+        let events: Vec<_> = rx
+            .try_iter()
+            .filter(|event| {
+                event.event_type == "RoutingDecided"
+                    && event
+                        .stage_name
+                        .as_deref()
+                        .is_some_and(|stage| stage.starts_with("A-") || stage.starts_with("B-"))
+            })
+            .collect();
+        assert_eq!(events.len(), 20);
+        for event in events {
+            let stage = event.stage_name.as_deref().expect("stage name");
+            let data: serde_json::Value =
+                serde_json::from_str(event.data.as_deref().expect("event data")).unwrap();
+            let expected = stage.split('-').next().unwrap();
+            assert_eq!(
+                data["correlation_id"].as_str(),
+                Some(expected),
+                "event {stage} carried wrong context: {data}"
+            );
+        }
+    }
+
+    #[test]
+    fn flush_blocks_until_in_flight_events_delivered() {
+        let _guard = TelemetrySenderTestGuard::acquire();
+        let (tx, rx) = mpsc::channel();
+        register_telemetry_sender(tx);
+
+        let orchestrator = xybrid_core::orchestrator::Orchestrator::new();
+        let bridge = bridge_orchestrator_events(&orchestrator);
+        for idx in 0..5 {
+            orchestrator
+                .event_bus()
+                .publish(routing_decided_event(format!("flush-{idx}")));
+        }
+
+        bridge.flush().expect("flush should complete");
+
+        let mut delivered = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while delivered.len() < 5 && std::time::Instant::now() < deadline {
+            let event = rx
+                .recv_timeout(Duration::from_millis(50))
+                .expect("flush should deliver event before returning");
+            if event.event_type == "RoutingDecided"
+                && event
+                    .stage_name
+                    .as_deref()
+                    .is_some_and(|stage| stage.starts_with("flush-"))
+            {
+                delivered.push(event);
+            }
+        }
+        assert_eq!(delivered.len(), 5);
+
+        drop(orchestrator);
+        bridge.join().expect("bridge should drain cleanly");
     }
 
     #[test]
@@ -2089,6 +3478,7 @@ mod tests {
 
     #[test]
     fn test_register_and_publish() {
+        let _guard = TelemetrySenderTestGuard::acquire();
         let (tx, rx) = mpsc::channel();
         register_telemetry_sender(tx);
 
@@ -2173,6 +3563,9 @@ mod tests {
             timestamp: None,
             pipeline_id: None,
             trace_id: None,
+            correlation_id: None,
+            outcome_category: None,
+            abort_reason: None,
             stages: None,
         }];
 
@@ -2336,6 +3729,73 @@ mod tests {
     }
 
     #[test]
+    fn extract_llm_prompt_cached_tokens_picks_last_llm_span_with_value() {
+        // Mirrors the token-count extractor's last-span-wins rule: a
+        // streaming run emits a timing-only span first, then a final
+        // span with the accounting numbers. The cached-tokens hoist
+        // must read from the final span — earlier values should be
+        // shadowed when a later span has its own.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "llm_inference_streaming",
+                    "metadata": { "ttft_ms": 120, "prompt_cached_tokens": "0" }
+                },
+                {
+                    "name": "llm_inference_with_messages",
+                    "metadata": { "tokens_in": 200, "prompt_cached_tokens": "150" }
+                }
+            ]
+        });
+        assert_eq!(extract_llm_prompt_cached_tokens(&stages), Some(150));
+    }
+
+    #[test]
+    fn extract_llm_prompt_cached_tokens_handles_numeric_value() {
+        // The runtime emits via add_metadata which always stringifies,
+        // but a future emit path or external producer might supply a
+        // raw number. Both shapes must extract correctly.
+        let stages = serde_json::json!({
+            "spans": [{
+                "name": "llm_inference_with_messages",
+                "metadata": { "prompt_cached_tokens": 96 }
+            }]
+        });
+        assert_eq!(extract_llm_prompt_cached_tokens(&stages), Some(96));
+    }
+
+    #[test]
+    fn extract_llm_prompt_cached_tokens_returns_none_when_absent() {
+        // Backends that don't track prefix reuse never emit the key —
+        // the SDK hoist must produce None so the wire payload omits the
+        // field entirely (rather than emitting a misleading 0).
+        let stages = serde_json::json!({
+            "spans": [{
+                "name": "llm_inference_with_messages",
+                "metadata": { "tokens_in": 32, "tokens_out": 96 }
+            }]
+        });
+        assert_eq!(extract_llm_prompt_cached_tokens(&stages), None);
+    }
+
+    #[test]
+    fn extract_llm_prompt_cached_tokens_ignores_non_llm_spans() {
+        // An ASR/TTS span carrying a stray `prompt_cached_tokens` would
+        // be a real bug to flag, but the extractor must not let that
+        // value leak onto the LLM hoist axis. Same LLM-span detection
+        // as the token-count extractor.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:asr.whisper-tiny",
+                    "metadata": { "prompt_cached_tokens": "999" }
+                }
+            ]
+        });
+        assert_eq!(extract_llm_prompt_cached_tokens(&stages), None);
+    }
+
+    #[test]
     fn extract_llm_token_counts_scans_across_llm_spans() {
         let stages = serde_json::json!({
             "spans": [
@@ -2400,6 +3860,290 @@ mod tests {
         let (tin, tout) = extract_llm_token_counts(&stages).expect("should find llm spans");
         assert_eq!(tin, Some(64));
         assert_eq!(tout, Some(256));
+    }
+
+    #[test]
+    fn extract_llm_inference_string_attr_reads_backend_and_provider() {
+        // The cloud adapter writes both keys onto the inner
+        // `llm_inference` span (see `runtime_adapter::cloud::mod`).
+        // The hoist must read them through the same span-detection
+        // rule used by the token-count hoist so the two stay in sync.
+        let stages = serde_json::json!({
+            "spans": [
+                { "name": "execute:gpt-4o-mini", "metadata": {} },
+                {
+                    "name": "llm_inference",
+                    "metadata": {
+                        "backend": "cloud",
+                        "provider": "openai",
+                        "tokens_in": "120",
+                        "tokens_out": "32"
+                    }
+                }
+            ]
+        });
+        assert_eq!(
+            extract_llm_inference_string_attr(&stages, "backend").as_deref(),
+            Some("cloud")
+        );
+        assert_eq!(
+            extract_llm_inference_string_attr(&stages, "provider").as_deref(),
+            Some("openai")
+        );
+    }
+
+    #[test]
+    fn extract_llm_inference_string_attr_skips_non_llm_spans() {
+        // A non-LLM span (e.g., the outer execute span or an ASR
+        // span) carrying a `backend` key MUST NOT win — the hoist's
+        // contract is "read from the LLM span, the same one the
+        // token-count hoist reads". Otherwise a TTS/ASR backend
+        // string could spuriously land on an LLM event's payload.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:asr-whisper-tiny",
+                    "metadata": { "backend": "ort" }
+                },
+                {
+                    "name": "execute:gpt-4o-mini",
+                    "metadata": { "provider": "should-not-win" }
+                }
+            ]
+        });
+        assert!(extract_llm_inference_string_attr(&stages, "backend").is_none());
+        assert!(extract_llm_inference_string_attr(&stages, "provider").is_none());
+    }
+
+    #[test]
+    fn extract_llm_inference_string_attr_prefers_last_llm_span() {
+        // Mirror of `extract_llm_token_counts_prefers_last_authoritative_span`:
+        // a retried run emits one LLM span per attempt and the final
+        // attempt is the source of truth. Fields from earlier attempts
+        // must not leak through.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "llm_inference",
+                    "metadata": { "backend": "cloud", "provider": "anthropic" }
+                },
+                {
+                    "name": "llm_inference",
+                    "metadata": { "backend": "cloud", "provider": "openai" }
+                }
+            ]
+        });
+        assert_eq!(
+            extract_llm_inference_string_attr(&stages, "provider").as_deref(),
+            Some("openai"),
+            "must take last-span provider, not first"
+        );
+    }
+
+    #[test]
+    fn extract_string_attr_from_any_span_reads_outer_execute_span() {
+        // Non-LLM events (ASR/TTS) carry `backend` on the outer
+        // `execute:<model>` span via `backend_label_from_template` —
+        // the LLM-gated hoist would skip it, dropping backend
+        // attribution from the wire payload. The any-span hoist must
+        // pick it up so ASR/TTS rows aren't blank in the billing column.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:wav2vec2-base-960h",
+                    "metadata": { "backend": "ort" }
+                }
+            ]
+        });
+        assert_eq!(
+            extract_string_attr_from_any_span(&stages, "backend").as_deref(),
+            Some("ort")
+        );
+    }
+
+    #[test]
+    fn extract_string_attr_from_any_span_prefers_last() {
+        // Same last-wins rule as the LLM-gated hoist, applied across
+        // any span. If both inner and outer spans carry `backend` (an
+        // LLM run that also annotates the outer `execute:` span), the
+        // last one in the array wins — matching the existing
+        // token-count hoist behaviour for retried runs.
+        let stages = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:gpt-4o-mini",
+                    "metadata": { "backend": "first" }
+                },
+                {
+                    "name": "llm_inference",
+                    "metadata": { "backend": "second" }
+                }
+            ]
+        });
+        assert_eq!(
+            extract_string_attr_from_any_span(&stages, "backend").as_deref(),
+            Some("second")
+        );
+    }
+
+    #[test]
+    fn build_model_download_event_has_canonical_shape() {
+        // ModelDownload is the cost-attribution event for a successful
+        // registry fetch. The wire shape is fixed by the platform's
+        // billing pipeline: top-level `event_type` literal
+        // "ModelDownload", `latency_ms` mirrors `duration_ms`, and the
+        // four cost fields land under `data` as a JSON object.
+        let event = build_model_download_event("kokoro-82m", 1_234_567, "huggingface", 5_432);
+
+        assert_eq!(event.event_type, "ModelDownload");
+        assert_eq!(
+            event.latency_ms,
+            Some(5_432),
+            "latency_ms must mirror duration_ms so the existing latency column lights up without a schema migration"
+        );
+        assert!(event.error.is_none());
+        assert!(event.stage_name.is_none());
+        assert!(event.target.is_none());
+        assert!(event.timestamp_ms > 0, "timestamp must be populated");
+
+        let data: serde_json::Value =
+            serde_json::from_str(event.data.as_deref().expect("data present"))
+                .expect("data is valid JSON");
+        assert_eq!(data["model_id"].as_str(), Some("kokoro-82m"));
+        assert_eq!(data["bytes_downloaded"].as_u64(), Some(1_234_567));
+        assert_eq!(data["source"].as_str(), Some("huggingface"));
+        assert_eq!(data["duration_ms"].as_u64(), Some(5_432));
+    }
+
+    #[test]
+    fn build_model_download_event_carries_r2_source_label() {
+        // Sanity that the closed-set source label is passed through as-is.
+        // The classifier in `registry_client::classify_download_source`
+        // is responsible for mapping URLs to labels; this test guards
+        // the builder's pass-through contract.
+        let event = build_model_download_event("test-model", 42, "r2", 1);
+        let data: serde_json::Value = serde_json::from_str(event.data.as_deref().unwrap()).unwrap();
+        assert_eq!(data["source"].as_str(), Some("r2"));
+    }
+
+    #[test]
+    fn task_field_hoists_to_payload_top_level() {
+        // INF-93: `task` is a semantic label sourced from the model
+        // bundle's `metadata.task`, written by `TemplateExecutor` onto
+        // the outer `execute:<model>` span. This test exercises the
+        // full convert path so an accidental future regression (e.g.,
+        // dropping the hoist branch) is caught without depending on
+        // the executor.
+        //
+        // `convert_to_platform_event` only runs the hoist block when
+        // global tracing is on (it would otherwise have nothing to
+        // capture from the global collector); flip it on here so the
+        // embedded-spans branch fires.
+        xybrid_core::tracing::init_tracing(true);
+        let data = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:wav2vec2-base-960h",
+                    "metadata": { "task": "asr", "backend": "ort" }
+                }
+            ]
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("transcribe".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(420),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let payload_json = serde_json::to_string(&platform.payload).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&payload_json).unwrap();
+        assert_eq!(
+            parsed["task"].as_str(),
+            Some("asr"),
+            "task must be hoisted to payload top level: {}",
+            payload_json
+        );
+    }
+
+    #[test]
+    fn quantization_field_hoists_to_payload_top_level() {
+        // INF-91: `quantization` is sourced by `TemplateExecutor` from
+        // `metadata.quantization` (or GGUF filename inference) and
+        // written onto the outer `execute:<model>` span. The hoist
+        // must surface it on the wire payload alongside `task` and
+        // `backend` so analytics rolls up
+        // `model_id × quantization` as distinct rows.
+        xybrid_core::tracing::init_tracing(true);
+        let data = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:qwen2.5-0.5b-instruct",
+                    "metadata": { "quantization": "q4_k_m", "backend": "llamacpp" }
+                }
+            ]
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("chat".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(1_200),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert_eq!(
+            parsed["quantization"].as_str(),
+            Some("q4_k_m"),
+            "quantization must be hoisted: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
+    fn task_field_omitted_when_span_does_not_carry_it() {
+        // Contract: `task` is optional / additive. A bundle without a
+        // `task` declaration must produce a payload that omits the key
+        // entirely (not an empty string). Guards against a future
+        // refactor that emits `Some("")` or `Some("unknown")`.
+        //
+        // Tracing must be enabled for the hoist branch to fire;
+        // otherwise this test would pass trivially even if the hoist
+        // were emitting a stale empty-string default.
+        xybrid_core::tracing::init_tracing(true);
+        let data = serde_json::json!({
+            "spans": [
+                {
+                    "name": "execute:custom-model",
+                    "metadata": { "backend": "ort" }
+                }
+            ]
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("custom".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(10),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert!(
+            parsed.get("task").is_none(),
+            "task must be absent (not empty string) when bundle didn't declare it: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
     }
 
     #[test]

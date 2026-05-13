@@ -411,9 +411,17 @@ internal interface _UniFFILib : Library {
     ): Pointer
     fun uniffi_xybrid_uniffi_fn_method_xybridmodelloader_load(`ptr`: Pointer,
     ): Pointer
+    fun uniffi_xybrid_uniffi_fn_func_clear_battery_level(_uniffi_out_err: RustCallStatus, 
+    ): Unit
+    fun uniffi_xybrid_uniffi_fn_func_clear_thermal_state(_uniffi_out_err: RustCallStatus, 
+    ): Unit
     fun uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(`cacheDir`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
+    fun uniffi_xybrid_uniffi_fn_func_set_battery_level(`percent`: Byte,_uniffi_out_err: RustCallStatus, 
+    ): Unit
     fun uniffi_xybrid_uniffi_fn_func_set_binding(`binding`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Unit
+    fun uniffi_xybrid_uniffi_fn_func_set_thermal_state(`state`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun ffi_xybrid_uniffi_rustbuffer_alloc(`size`: Int,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
@@ -529,9 +537,17 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun ffi_xybrid_uniffi_rust_future_complete_void(`handle`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
+    fun uniffi_xybrid_uniffi_checksum_func_clear_battery_level(
+    ): Short
+    fun uniffi_xybrid_uniffi_checksum_func_clear_thermal_state(
+    ): Short
     fun uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir(
     ): Short
+    fun uniffi_xybrid_uniffi_checksum_func_set_battery_level(
+    ): Short
     fun uniffi_xybrid_uniffi_checksum_func_set_binding(
+    ): Short
+    fun uniffi_xybrid_uniffi_checksum_func_set_thermal_state(
     ): Short
     fun uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id(
     ): Short
@@ -570,10 +586,22 @@ private fun uniffiCheckContractApiVersion(lib: _UniFFILib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
+    if (lib.uniffi_xybrid_uniffi_checksum_func_clear_battery_level() != 40326.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_xybrid_uniffi_checksum_func_clear_thermal_state() != 36495.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir() != 59754.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_xybrid_uniffi_checksum_func_set_battery_level() != 57690.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_xybrid_uniffi_checksum_func_set_binding() != 53803.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_xybrid_uniffi_checksum_func_set_thermal_state() != 59048.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id() != 623.toShort()) {
@@ -656,6 +684,26 @@ internal suspend fun<T, F, E: Exception> uniffiRustCallAsync(
 
 // Public interface members begin here.
 
+
+public object FfiConverterUByte: FfiConverter<UByte, Byte> {
+    override fun lift(value: Byte): UByte {
+        return value.toUByte()
+    }
+
+    override fun read(buf: ByteBuffer): UByte {
+        return lift(buf.get())
+    }
+
+    override fun lower(value: UByte): Byte {
+        return value.toByte()
+    }
+
+    override fun allocationSize(value: UByte) = 1
+
+    override fun write(value: UByte, buf: ByteBuffer) {
+        buf.put(value.toByte())
+    }
+}
 
 public object FfiConverterUInt: FfiConverter<UInt, Int> {
     override fun lift(value: Int): UInt {
@@ -1795,6 +1843,30 @@ public object FfiConverterTypeXybridError : FfiConverterRustBuffer<XybridExcepti
 
 
 
+enum class XybridThermalState {
+    NORMAL,WARM,HOT,CRITICAL;
+    companion object
+}
+
+public object FfiConverterTypeXybridThermalState: FfiConverterRustBuffer<XybridThermalState> {
+    override fun read(buf: ByteBuffer) = try {
+        XybridThermalState.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: XybridThermalState) = 4
+
+    override fun write(value: XybridThermalState, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
 public object FfiConverterOptionalUInt: FfiConverterRustBuffer<UInt?> {
     override fun read(buf: ByteBuffer): UInt? {
         if (buf.get().toInt() == 0) {
@@ -2161,6 +2233,22 @@ public object FfiConverterSequenceTypeXybridVoiceInfo: FfiConverterRustBuffer<Li
 
 
 
+fun `clearBatteryLevel`() =
+    
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_clear_battery_level(_status)
+}
+
+
+
+fun `clearThermalState`() =
+    
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_clear_thermal_state(_status)
+}
+
+
+
 fun `initSdkCacheDir`(`cacheDir`: String) =
     
     rustCall() { _status ->
@@ -2169,10 +2257,26 @@ fun `initSdkCacheDir`(`cacheDir`: String) =
 
 
 
+fun `setBatteryLevel`(`percent`: UByte) =
+    
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_set_battery_level(FfiConverterUByte.lower(`percent`),_status)
+}
+
+
+
 fun `setBinding`(`binding`: String) =
     
     rustCall() { _status ->
     _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_set_binding(FfiConverterString.lower(`binding`),_status)
+}
+
+
+
+fun `setThermalState`(`state`: XybridThermalState) =
+    
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_set_thermal_state(FfiConverterTypeXybridThermalState.lower(`state`),_status)
 }
 
 

@@ -106,6 +106,12 @@ llm-mistral-cuda = ["llm-mistral", "mistralrs/cuda"]        # mistral.rs + CUDA 
 # Requires: vendor/llama.cpp directory with cloned llama.cpp source.
 llm-llamacpp = []
 
+# dev-tools — exposes test seams (e.g. resource-snapshot providers) for
+# downstream demos, integration tests, and benchmarks. Off by default.
+# Crates that depend on `xybrid-core` enable this when they need to inject
+# deterministic resource state without spinning up a real `ResourceMonitor`.
+dev-tools = []
+
 [build-dependencies]
 # For compiling llama.cpp C/C++ source (used by build.rs when llm-llamacpp is enabled)
 cc = "1.0"
@@ -133,6 +139,10 @@ harness = false
 name = "resource_telemetry"
 harness = false
 
+[[bench]]
+name = "routing_feedback"
+harness = false
+
 # Platform-specific ureq dependencies
 # Non-Android: Use default ureq with TLS
 [target.'cfg(not(target_os = "android"))'.dependencies]
@@ -143,3 +153,67 @@ ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
 ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
 # Force rustls to use ring crypto backend instead of aws-lc-rs
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
+# Apple thermal poller (macOS + iOS): NSProcessInfo.thermalState — same
+# Foundation API on both, no entitlement, microsecond-class. The
+# Foundation crates work cross-platform under the same target_os check
+# clang's apple compilation matrix uses.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+# objc2 + objc2-foundation pinned at 0.6 / 0.3 so the direct deps unify with
+# the transitive 0.6/0.3 versions pulled by objc2-metal/-core-graphics/-core-ml.
+# Mixing 0.5 + 0.6 in the same dep graph splits NSObjectProtocol/AnyObject
+# types and breaks isKindOfClass-style checks across them.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString"] }
+# Real Metal probe via MTLCreateSystemDefaultDevice.
+objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice"] }
+# Sibling dep to satisfy the CoreGraphics framework link objc2-metal documents
+# as a build requirement. 0.2 does not exist on crates.io — must be 0.3.
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std"] }
+# Real Apple Neural Engine probe via Core ML compute-device enumeration.
+# Note: we deliberately do NOT enable the `MLAllComputeDevices` feature.
+# That feature's generated wrapper emits a strong extern reference to the
+# `MLAllComputeDevices` C symbol — which would re-introduce the bind-at-load
+# risk on macOS 13 / iOS 16 that our libc::dlsym lookup in apple.rs avoids.
+# We need only the type bindings here; the function itself is resolved at
+# runtime via dlsym in detect_neural_engine_with_confidence.
+objc2-core-ml = { version = "0.3", default-features = false, features = [
+    "std",
+    "MLComputeDeviceProtocol",
+    "MLNeuralEngineComputeDevice",
+] }
+# libc for dlsym(RTLD_DEFAULT, ...) to resolve MLAllComputeDevices at runtime
+# instead of through the objc2-core-ml generated wrapper.
+libc = "0.2"
+
+# macOS-only battery poller: IOKit IOPSCopyPowerSourcesInfo. The IOPS
+# APIs are gated behind a private entitlement on iOS; the public
+# UIDevice.batteryLevel path requires UIKit which doesn't belong in
+# xybrid-core, so iOS hosts push battery via the UniFFI surface.
+# A `pmset` shellout would fork+exec on every cache miss inside the
+# orchestrator hot path; IOKit's IOPS APIs are documented thread-safe
+# and avoid that.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-io-kit = "0.3"
+objc2-core-foundation = { version = "0.3", features = ["CFString", "CFNumber", "CFArray", "CFDictionary"] }
+
+# Windows native platform-state pollers.
+#
+# Battery uses `windows-sys` for `GetSystemPowerStatus` — a single Win32
+# syscall, no COM. Thermal needs WMI's `MSAcpi_ThermalZoneTemperature`,
+# which means COM interface vtables (`IWbemLocator`, `IWbemServices`,
+# `IEnumWbemClassObject`, `IWbemClassObject`) and `VARIANT` plumbing —
+# none of which `windows-sys` exposes (it ships constants and free
+# functions, not interfaces). The `windows` crate is the supported path
+# for COM/WMI, so it joins `windows-sys` here scoped to the WMI feature
+# set. Lazy-linked bindings keep the binary impact minimal.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_Power", "Win32_Foundation"] }
+windows = { version = "0.61", features = [
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+    "Win32_System_Wmi",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }

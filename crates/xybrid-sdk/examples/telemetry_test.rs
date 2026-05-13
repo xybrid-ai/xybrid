@@ -1,14 +1,17 @@
 //! Telemetry Integration Test
 //!
-//! This example demonstrates the SDK telemetry integration with the Xybrid Platform.
-//! It runs a simple TTS pipeline and sends telemetry events to the platform API.
+//! This example demonstrates the SDK telemetry integration with the Xybrid
+//! ingest endpoint. It runs a simple TTS pipeline and sends telemetry
+//! events upstream.
 //!
 //! ## Prerequisites
-//! 1. Start the local backend: `cd repos/xybrid-platform/backend && cargo shuttle run`
-//! 2. Create an API key in the console (or use a test key)
+//! 1. Have a Xybrid telemetry ingest endpoint reachable (production at
+//!    `https://ingest.xybrid.dev`, or your own local endpoint).
+//! 2. Mint an API key in your Xybrid account.
 //! 3. Set environment variables:
-//!    - XYBRID_API_KEY=your-api-key
-//!    - XYBRID_PLATFORM_URL=http://localhost:8000 (for local testing)
+//!    - `XYBRID_API_KEY=your-api-key`
+//!    - `XYBRID_INGEST_URL=http://localhost:8081` (only for local testing
+//!      against a self-hosted ingest endpoint; omit for production).
 //!
 //! ## Usage
 //! ```bash

@@ -21,9 +21,11 @@
 use log::{debug, info, warn};
 
 use super::template::{
-    span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata,
-    PipelineStage, PostprocessingStep,
+    backend_label_from_template, quantization_label_from_metadata, span_kind_from_template,
+    stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
 };
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use super::template::{normalize_llm_backend_hint, PostprocessingStep};
 use crate::conversation::ConversationContext;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::ir::EnvelopeKind;
@@ -36,9 +38,20 @@ use std::path::Path;
 
 use super::listener::ExecutionGuard;
 
+fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
+    if error.cloud_fallback_abort_reason().is_some() {
+        guard.set_controlled_abort();
+    } else {
+        guard.set_failed(error.to_string());
+    }
+}
+
 // Internal: ONNX-specific types needed for optimized execution paths
 // These are implementation details, not part of the public API
-use crate::runtime_adapter::onnx::{ONNXSession, OnnxRuntime};
+use crate::execution::session_factory::OnnxSessionFactory;
+use crate::runtime_adapter::onnx::{
+    ExecutionProviderKind, ONNXSession, OnnxRuntime, SessionOptions,
+};
 
 #[cfg(feature = "candle")]
 use crate::runtime_adapter::candle::CandleRuntime;
@@ -192,10 +205,16 @@ impl TemplateExecutor {
         input: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute");
+        // Silent guard: the SDK's `XybridModel::run` / `run_async` wrappers
+        // around this method emit `ModelComplete` with full attribution
+        // (model_id, backend, latency, etc.). Emitting an outer
+        // `Started` / `Completed` pair from here would surface as
+        // duplicate noise rows on the Traces dashboard. Failed-path
+        // emission via `mark_execution_terminal` is preserved.
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute");
         let result = self.execute_impl(metadata, input, config);
         if let Err(e) = &result {
-            guard.set_failed(e.to_string());
+            mark_execution_terminal(&guard, e);
         }
         result
     }
@@ -238,11 +257,41 @@ impl TemplateExecutor {
             if let Some(kind) = stage_kind_from_task(task) {
                 xybrid_trace::add_metadata("stage_kind", kind);
             }
+            // Semantic task label for cost-attribution telemetry
+            // (per `PlatformEvent.task`). Echoes the raw value from
+            // `model_metadata.json` so the dashboard can filter
+            // chat/vlm/asr/tts/embedding/etc. without joining against
+            // the registry at render time. Omitted when the model
+            // bundle didn't declare a task.
+            xybrid_trace::add_metadata("task", task);
         }
         xybrid_trace::add_metadata(
             "span_kind",
             span_kind_from_template(&metadata.execution_template),
         );
+
+        // Cost-accounting backend label (per `PlatformEvent.backend`).
+        // The bundle's `metadata.backend` hint disambiguates GGUF runtimes
+        // (llama.cpp vs mistral.rs); for ONNX/SafeTensors the template
+        // itself fixes the label. Omitted when the runtime isn't part of
+        // the closed set yet (CoreML / TFLite / ModelGraph) so analytics
+        // sees "absent" not "guessed".
+        let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+        if let Some(label) = backend_label_from_template(&metadata.execution_template, backend_hint)
+        {
+            xybrid_trace::add_metadata("backend", label);
+        }
+
+        // Quantization label for cost-attribution telemetry
+        // (per `PlatformEvent.quantization`). Two runs of "the same
+        // model" can differ by 4× in size / speed / quality based on
+        // quantization, so the dashboard needs this to avoid
+        // collapsing `kokoro-82m@q4_0` and `kokoro-82m@fp16` into one
+        // row. Source priority: bundle metadata > GGUF filename >
+        // omitted. See `quantization_label_from_metadata`.
+        if let Some(quant) = quantization_label_from_metadata(metadata) {
+            xybrid_trace::add_metadata("quantization", quant);
+        }
 
         // Step 1: Handling ModelGraph (multi-model DAG)
         if let ExecutionTemplate::ModelGraph { stages, config } = &metadata.execution_template {
@@ -370,8 +419,12 @@ impl TemplateExecutor {
                 .as_token_ids()
                 .ok_or_else(|| AdapterError::InvalidInput("Expected token IDs".to_string()))?;
 
-            // Create and run BERT session directly
-            let session = ONNXSession::new(model_full_path.to_str().unwrap(), false, false)?;
+            // Create and run BERT session through the shared factory entry.
+            let session = OnnxSessionFactory::create_session(
+                &model_full_path,
+                ExecutionProviderKind::Cpu,
+                SessionOptions::default(),
+            )?;
             let raw_outputs =
                 execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
 
@@ -486,10 +539,16 @@ impl TemplateExecutor {
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute_with_context");
+        // Silent guard for the same reason as `execute_streaming_with_context`:
+        // the user-facing telemetry for a chat-context turn is the SDK's
+        // `ModelComplete` event from `XybridModel::run_with_context`. The
+        // outer executor span is an implementation detail and emitting
+        // `Started` / `Completed` from here surfaces as separate noise
+        // rows in the Traces dashboard. Error reporting is preserved.
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute_with_context");
         let result = self.execute_with_context_impl(metadata, input, context, config);
         if let Err(e) = &result {
-            guard.set_failed(e.to_string());
+            mark_execution_terminal(&guard, e);
         }
         result
     }
@@ -630,10 +689,15 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute_streaming");
+        // Silent guard: the SDK's `XybridModel::run_streaming` wrapper
+        // around this method emits `ModelComplete` with full attribution.
+        // The outer `Started` / `Completed` pair would surface as
+        // duplicate noise rows on the Traces dashboard. Failed-path
+        // emission via `mark_execution_terminal` is preserved.
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute_streaming");
         let result = self.execute_streaming_impl(metadata, input, on_token, config);
         if let Err(e) = &result {
-            guard.set_failed(e.to_string());
+            mark_execution_terminal(&guard, e);
         }
         result
     }
@@ -725,11 +789,19 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute_streaming_with_context");
+        // Silent guard: the user-facing telemetry for a chat-context
+        // turn is the SDK's `ModelComplete` event from
+        // `XybridModel::run_streaming_with_context`. Emitting an outer
+        // `Started`/`Completed` pair here surfaces as separate noise
+        // rows in the Traces dashboard with the executor-internal span
+        // name. Error reporting is preserved — `mark_execution_terminal`
+        // still flips the guard to emit `Failed` on the error path.
+        let guard =
+            ExecutionGuard::new_silent(&metadata.model_id, "execute_streaming_with_context");
         let result =
             self.execute_streaming_with_context_impl(metadata, input, context, on_token, config);
         if let Err(e) = &result {
-            guard.set_failed(e.to_string());
+            mark_execution_terminal(&guard, e);
         }
         result
     }
@@ -938,16 +1010,22 @@ impl TemplateExecutor {
             cfg
         };
 
-        // Execute with streaming
-        let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            adapter
-                .backend()
-                .generate_streaming(&messages, &gen_config, on_token)?
-        } else {
-            return Err(AdapterError::RuntimeError(
-                "LLM adapter cache unexpectedly empty".to_string(),
-            ));
-        };
+        // Execute with streaming. Capture the backend name + the prefix
+        // length the backend reused from its KV cache so the metric
+        // mirror can attach the resolved execution provider and the
+        // local-cache-hit count to the wire payload.
+        let (output, backend_name, cached_prefix) =
+            if let Some((_, adapter)) = &self.llm_adapter_cache {
+                let backend = adapter.backend();
+                let out = backend.generate_streaming(&messages, &gen_config, on_token)?;
+                let name = backend.name().to_string();
+                let cached = backend.last_cached_prefix_len();
+                (out, name, cached)
+            } else {
+                return Err(AdapterError::RuntimeError(
+                    "LLM adapter cache unexpectedly empty".to_string(),
+                ));
+            };
 
         // Build response envelope
         let mut response_metadata = std::collections::HashMap::new();
@@ -965,7 +1043,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output);
+        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1024,14 +1102,20 @@ impl TemplateExecutor {
         // Use explicit config or fall back to defaults
         let gen_config = config.cloned().unwrap_or_default();
 
-        // Execute with ChatMessages directly — backend applies template once
-        let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            adapter.backend().generate(messages, &gen_config)?
-        } else {
-            return Err(AdapterError::RuntimeError(
-                "LLM adapter cache unexpectedly empty".to_string(),
-            ));
-        };
+        // Execute with ChatMessages directly — backend applies template once.
+        // Capture backend name + cached-prefix length for the metric mirror.
+        let (output, backend_name, cached_prefix) =
+            if let Some((_, adapter)) = &self.llm_adapter_cache {
+                let backend = adapter.backend();
+                let out = backend.generate(messages, &gen_config)?;
+                let name = backend.name().to_string();
+                let cached = backend.last_cached_prefix_len();
+                (out, name, cached)
+            } else {
+                return Err(AdapterError::RuntimeError(
+                    "LLM adapter cache unexpectedly empty".to_string(),
+                ));
+            };
 
         // Build response envelope
         let mut response_metadata = std::collections::HashMap::new();
@@ -1049,7 +1133,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output);
+        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1111,16 +1195,20 @@ impl TemplateExecutor {
         // Use explicit config or fall back to defaults
         let gen_config = config.cloned().unwrap_or_default();
 
-        // Execute with streaming - pass ChatMessages directly to backend
-        let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            adapter
-                .backend()
-                .generate_streaming(messages, &gen_config, on_token)?
-        } else {
-            return Err(AdapterError::RuntimeError(
-                "LLM adapter cache unexpectedly empty".to_string(),
-            ));
-        };
+        // Execute with streaming - pass ChatMessages directly to backend.
+        // Capture backend name + cached-prefix length for the metric mirror.
+        let (output, backend_name, cached_prefix) =
+            if let Some((_, adapter)) = &self.llm_adapter_cache {
+                let backend = adapter.backend();
+                let out = backend.generate_streaming(messages, &gen_config, on_token)?;
+                let name = backend.name().to_string();
+                let cached = backend.last_cached_prefix_len();
+                (out, name, cached)
+            } else {
+                return Err(AdapterError::RuntimeError(
+                    "LLM adapter cache unexpectedly empty".to_string(),
+                ));
+            };
 
         // Build response envelope
         let mut response_metadata = std::collections::HashMap::new();
@@ -1138,7 +1226,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output);
+        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1173,7 +1261,11 @@ impl TemplateExecutor {
 
         let _llm_span = xybrid_trace::SpanGuard::new("llm_inference");
         xybrid_trace::add_metadata("model", model_file);
-        if let Some(hint) = backend_hint {
+        // Normalise the legacy `mistral` alias to the canonical wire label
+        // before annotating the span: the SDK telemetry hoist reads this
+        // span for the `backend` field on `PlatformEvent`, which must be
+        // in the closed set `{llamacpp, mistralrs, ...}`.
+        if let Some(hint) = backend_hint.and_then(normalize_llm_backend_hint) {
             xybrid_trace::add_metadata("backend", hint);
         }
 
@@ -1260,14 +1352,20 @@ impl TemplateExecutor {
         }
         messages.push(ChatMessage::user(&prompt));
 
-        // Execute inference using cached adapter's backend directly
-        let output = if let Some((_, adapter)) = &self.llm_adapter_cache {
-            adapter.backend().generate(&messages, &gen_config)?
-        } else {
-            return Err(AdapterError::RuntimeError(
-                "LLM adapter cache unexpectedly empty".to_string(),
-            ));
-        };
+        // Execute inference using cached adapter's backend directly.
+        // Capture backend name + cached-prefix length for the metric mirror.
+        let (output, backend_name, cached_prefix) =
+            if let Some((_, adapter)) = &self.llm_adapter_cache {
+                let backend = adapter.backend();
+                let out = backend.generate(&messages, &gen_config)?;
+                let name = backend.name().to_string();
+                let cached = backend.last_cached_prefix_len();
+                (out, name, cached)
+            } else {
+                return Err(AdapterError::RuntimeError(
+                    "LLM adapter cache unexpectedly empty".to_string(),
+                ));
+            };
 
         info!(
             target: "xybrid_core",
@@ -1290,7 +1388,7 @@ impl TemplateExecutor {
         );
         response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
         insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output);
+        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
 
         Ok(Envelope {
             kind: EnvelopeKind::Text(output.text),
@@ -1805,7 +1903,11 @@ impl TemplateExecutor {
         const CROSSFADE_SAMPLES: usize = 480;
 
         let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
-        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        let session = OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?;
         let speed = extract_tts_speed(input);
 
         for (i, chunk) in chunks.iter().enumerate() {
@@ -1904,8 +2006,12 @@ impl TemplateExecutor {
         let voice_loader = TtsVoiceLoader::new(&self.base_path);
         let voice_embedding = voice_loader.load(metadata, input)?;
 
-        // Create and run TTS session
-        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        // Create and run TTS session through the shared factory entry.
+        let session = OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?;
         let speed = extract_tts_speed(input);
         let mut raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
 
@@ -2042,7 +2148,11 @@ fn insert_llm_streaming_metrics(
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-fn mirror_llm_metrics_to_span(output: &crate::runtime_adapter::llm::GenerationOutput) {
+fn mirror_llm_metrics_to_span(
+    output: &crate::runtime_adapter::llm::GenerationOutput,
+    backend_name: &str,
+    cached_prefix_tokens: Option<usize>,
+) {
     // Always-present scalars. These reach the platform via
     // `PlatformEvent.stages[].spans[].metadata` (populated by
     // `xybrid_core::tracing::add_metadata` on the currently active span).
@@ -2053,6 +2163,31 @@ fn mirror_llm_metrics_to_span(output: &crate::runtime_adapter::llm::GenerationOu
         format!("{:.2}", output.tokens_per_second),
     );
     xybrid_trace::add_metadata("finish_reason", &output.finish_reason);
+
+    // Resolved execution provider: which on-device engine path actually
+    // ran. Cost-attribution telemetry uses this to explain latency
+    // variance on the same chip + model. Sourced from build flags via
+    // `local_execution_provider` because backend selection is compile-
+    // time. Cloud LLMs go through a different adapter and get
+    // attribution from the `provider` field instead.
+    xybrid_trace::add_metadata(
+        "execution_provider",
+        crate::runtime_adapter::llm::local_execution_provider(backend_name),
+    );
+
+    // Local KV cache hits: how many prompt tokens this call reused from
+    // the cache the previous turn left behind. Only emit when positive
+    // — `Some(0)` means a first turn or a totally divergent prompt
+    // (telemetry should look like a non-cached call), and `None` means
+    // the backend doesn't track prefix reuse at all (cloud, mistralrs,
+    // mock test backends). The local mirror of cloud's
+    // `cache_read_input_tokens` so analytics can stack them on the
+    // same axis.
+    if let Some(n) = cached_prefix_tokens {
+        if n > 0 {
+            xybrid_trace::add_metadata("prompt_cached_tokens", n.to_string());
+        }
+    }
 
     // Streaming-derived scalars. Only mirror when the backend reported them;
     // the `Option<_>` + `nonzero` filter in mistral keeps misleading zeros
@@ -2081,6 +2216,7 @@ fn mirror_llm_metrics_to_span(output: &crate::runtime_adapter::llm::GenerationOu
 mod tests {
     use super::super::template::PreprocessingStep;
     use super::*;
+    use crate::ir::EnvelopeKind;
 
     // ============================================================================
     // Constructor Tests

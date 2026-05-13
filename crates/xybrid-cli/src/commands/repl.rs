@@ -5,9 +5,8 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;
-use xybrid_core::context::StageDescriptor;
+use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::conversation::ConversationContext;
-use xybrid_core::device_adapter::{DeviceAdapter, LocalDeviceAdapter};
 use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 use xybrid_core::orchestrator::Orchestrator;
@@ -163,8 +162,7 @@ pub(crate) fn handle_repl_command(
         }
     }
 
-    let device_adapter = LocalDeviceAdapter::new();
-    let metrics = device_adapter.collect_metrics();
+    let metrics = DeviceMetrics::default();
 
     let stage_bundle_paths: std::collections::HashMap<String, bool> = stages
         .iter()
@@ -175,7 +173,7 @@ pub(crate) fn handle_repl_command(
     };
 
     let mut orchestrator = Orchestrator::new();
-    xybrid_sdk::bridge_orchestrator_events(&orchestrator);
+    let bridge = xybrid_sdk::bridge_orchestrator_events(&orchestrator);
 
     warmup_models(&mut orchestrator, &stages, &metrics, &availability_fn);
 
@@ -280,6 +278,11 @@ pub(crate) fn handle_repl_command(
             verbose,
         );
     }
+
+    drop(orchestrator);
+    bridge
+        .join()
+        .map_err(|e| anyhow::anyhow!("Orchestrator event bridge failed: {}", e))?;
 
     Ok(())
 }

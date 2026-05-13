@@ -2,7 +2,9 @@
 //!
 //! This module provides unified hardware capability detection across platforms,
 //! including GPU acceleration (Metal, Vulkan), neural processing units (CoreML, NNAPI),
-//! battery level, thermal state, and memory profiling.
+//! and memory/CPU profiling. Battery and thermal state default to safe values
+//! (`100%`, `Normal`); a future platform-bridge slice will populate them on
+//! mobile and Windows.
 //!
 //! ## Module Organization
 //!
@@ -19,15 +21,8 @@
 //!
 //! ```rust,ignore
 //! use xybrid_core::device::capabilities::{HardwareCapabilities, detect_capabilities};
-//! use xybrid_core::context::DeviceMetrics;
 //!
-//! let metrics = DeviceMetrics {
-//!     network_rtt: 100,
-//!     battery: 75,
-//!     temperature: 25.0,
-//! };
-//!
-//! let capabilities = detect_capabilities(&metrics);
+//! let capabilities = detect_capabilities();
 //! if capabilities.has_gpu() {
 //!     println!("GPU acceleration available");
 //! }
@@ -36,8 +31,6 @@
 //! }
 //! println!("Memory confidence: {:?}", capabilities.memory_confidence);
 //! ```
-
-use crate::context::DeviceMetrics;
 
 // Re-export types from submodules
 pub use super::types::{
@@ -49,44 +42,59 @@ pub use super::types::{
 use super::common::{detect_cpu, detect_memory};
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-use super::apple::{detect_coreml_availability, detect_metal_availability};
+use super::apple::{detect_metal_with_confidence, detect_neural_engine_with_confidence};
 
 #[cfg(target_os = "android")]
 use super::android::detect_nnapi_availability;
 
 /// Detects hardware capabilities for the current platform.
 ///
-/// This function performs platform-specific detection and returns a
-/// `HardwareCapabilities` struct with the detected capabilities.
+/// Returns a `HardwareCapabilities` struct populated from cross-platform
+/// detection (memory, CPU cores) and platform-specific accelerator probes
+/// (Metal/CoreML on Apple, NNAPI on Android, Vulkan/DirectX stubs elsewhere).
 ///
-/// - Uses `sysinfo` crate for accurate memory/CPU detection
-/// - Includes detection confidence indicators
-/// - Cross-platform CPU core count and usage
+/// **Cache scope:** only static fields are cached after the first call —
+/// accelerator presence (`has_gpu`, `has_metal`, `has_npu`, `has_nnapi`),
+/// accelerator types, confidence levels, CPU core count, and total memory.
+/// Dynamic fields (`memory_available_mb`, `cpu_usage_percent`) are refreshed
+/// on every call because they vary over the process lifetime. The cache
+/// exists to skip the ~1-second cold-init cost of `MLAllComputeDevices`
+/// on first Core ML access — not to freeze live system state.
 ///
-/// # Arguments
+/// `battery_level` and `thermal_state` are NOT populated here — they live on
+/// the live `ResourceSnapshot` and are overlaid onto a `HardwareCapabilities`
+/// view at routing time via [`crate::context::DeviceMetrics::with_live_snapshot`].
+pub fn detect_capabilities() -> HardwareCapabilities {
+    use std::sync::OnceLock;
+    static STATIC_CACHE: OnceLock<HardwareCapabilities> = OnceLock::new();
+    let mut caps = STATIC_CACHE
+        .get_or_init(detect_capabilities_uncached)
+        .clone();
+    // Refresh dynamic fields on each call — sysinfo handles these cheaply
+    // (< 1ms) so there's no reason to cache stale values.
+    let memory_info = detect_memory();
+    caps.memory_available_mb = memory_info.available_mb;
+    let cpu_info = detect_cpu();
+    caps.cpu_usage_percent = cpu_info.usage_percent;
+    caps
+}
+
+/// Prewarm the capability cache.
 ///
-/// * `metrics` - Device metrics containing battery and temperature information
-///
-/// # Returns
-///
-/// A `HardwareCapabilities` struct with detected capabilities
-pub fn detect_capabilities(metrics: &DeviceMetrics) -> HardwareCapabilities {
+/// Triggers `detect_capabilities` (synchronously populating the OnceLock
+/// static-fields cache) if it hasn't been called yet. Cheap no-op after
+/// the first call. Call this from long-lived construction paths — e.g.
+/// `LocalAuthority::new` — to keep the cold-init cost (~1s on first
+/// `MLAllComputeDevices` invocation when Core ML lazy-loads on macOS/iOS)
+/// out of latency-sensitive hot paths like routing decisions. The refresh
+/// of dynamic memory/CPU fields on each `detect_capabilities` call is
+/// unaffected by this prewarm.
+pub fn prewarm() {
+    let _ = detect_capabilities();
+}
+
+fn detect_capabilities_uncached() -> HardwareCapabilities {
     let mut capabilities = HardwareCapabilities::new();
-
-    // Set battery level from metrics
-    capabilities.battery_level = metrics.battery;
-
-    // Determine thermal state from temperature
-    // These thresholds are approximate and may need tuning per device
-    capabilities.thermal_state = if metrics.temperature > 80.0 {
-        ThermalState::Critical
-    } else if metrics.temperature > 70.0 {
-        ThermalState::Hot
-    } else if metrics.temperature > 60.0 {
-        ThermalState::Warm
-    } else {
-        ThermalState::Normal
-    };
 
     // Detect memory using sysinfo
     let memory_info = detect_memory();
@@ -102,58 +110,58 @@ pub fn detect_capabilities(metrics: &DeviceMetrics) -> HardwareCapabilities {
     // Platform-specific detection
     #[cfg(target_os = "macos")]
     {
-        capabilities.has_metal = detect_metal_availability();
-        capabilities.has_gpu = capabilities.has_metal;
-        capabilities.gpu_type = if capabilities.has_metal {
+        let (metal_present, metal_conf) = detect_metal_with_confidence();
+        capabilities.has_metal = metal_present;
+        capabilities.has_gpu = metal_present;
+        capabilities.gpu_type = if metal_present {
             GpuType::Metal
         } else {
             GpuType::None
         };
-        // GPU confidence: Medium (compile-time check, not runtime validation)
-        capabilities.gpu_confidence = DetectionConfidence::Medium;
+        capabilities.gpu_confidence = metal_conf;
 
-        // CoreML Neural Engine detection (stub based on arch)
-        capabilities.has_npu = detect_coreml_availability();
-        capabilities.npu_type = if capabilities.has_npu {
+        let (ne_present, ne_conf) = detect_neural_engine_with_confidence();
+        capabilities.has_npu = ne_present;
+        capabilities.npu_type = if ne_present {
             NpuType::CoreML
         } else {
             NpuType::None
         };
-        // NPU confidence: Medium (arch-based, not actual detection)
-        capabilities.npu_confidence = DetectionConfidence::Medium;
+        capabilities.npu_confidence = ne_conf;
     }
 
     #[cfg(target_os = "ios")]
     {
-        capabilities.has_metal = detect_metal_availability();
-        capabilities.has_gpu = capabilities.has_metal;
-        capabilities.gpu_type = if capabilities.has_metal {
+        let (metal_present, metal_conf) = detect_metal_with_confidence();
+        capabilities.has_metal = metal_present;
+        capabilities.has_gpu = metal_present;
+        capabilities.gpu_type = if metal_present {
             GpuType::Metal
         } else {
             GpuType::None
         };
-        capabilities.gpu_confidence = DetectionConfidence::Medium;
+        capabilities.gpu_confidence = metal_conf;
 
-        capabilities.has_npu = detect_coreml_availability();
-        capabilities.npu_type = if capabilities.has_npu {
+        let (ne_present, ne_conf) = detect_neural_engine_with_confidence();
+        capabilities.has_npu = ne_present;
+        capabilities.npu_type = if ne_present {
             NpuType::CoreML
         } else {
             NpuType::None
         };
-        capabilities.npu_confidence = DetectionConfidence::Medium;
+        capabilities.npu_confidence = ne_conf;
     }
 
     #[cfg(target_os = "android")]
     {
         capabilities.has_nnapi = detect_nnapi_availability();
-        capabilities.has_gpu = detect_gpu_availability_stub();
-        capabilities.gpu_type = if capabilities.has_gpu {
-            GpuType::Vulkan
-        } else {
-            GpuType::None
-        };
-        // GPU confidence: Low (stubbed, always true)
-        capabilities.gpu_confidence = DetectionConfidence::Low;
+
+        // Android GPU probe via the NDK Vulkan loader requires a JNI
+        // bridge; deferred. Returning Unknown is more honest than the
+        // silent `true` v1 had.
+        capabilities.has_gpu = false;
+        capabilities.gpu_type = GpuType::None;
+        capabilities.gpu_confidence = DetectionConfidence::Unknown;
 
         // NNAPI can use NPU accelerators
         capabilities.has_npu = capabilities.has_nnapi;
@@ -169,33 +177,52 @@ pub fn detect_capabilities(metrics: &DeviceMetrics) -> HardwareCapabilities {
 
     #[cfg(target_os = "windows")]
     {
-        capabilities.has_gpu = detect_gpu_availability_stub();
-        capabilities.gpu_type = if capabilities.has_gpu {
+        let (gpu_present, gpu_conf) = super::windows::detect_gpu_with_confidence();
+        capabilities.has_gpu = gpu_present;
+        capabilities.gpu_type = if gpu_present {
             GpuType::DirectX
         } else {
             GpuType::None
         };
-        capabilities.gpu_confidence = DetectionConfidence::Low;
+        capabilities.gpu_confidence = gpu_conf;
 
-        // DirectML NPU (stub)
+        // DirectML NPU detection not implemented; mark Unknown rather than
+        // the v1 hardcoded false which read as a confident negative.
         capabilities.has_npu = false;
         capabilities.npu_type = NpuType::None;
-        capabilities.npu_confidence = DetectionConfidence::Low;
+        capabilities.npu_confidence = DetectionConfidence::Unknown;
     }
 
     #[cfg(target_os = "linux")]
     {
-        capabilities.has_gpu = detect_gpu_availability_stub();
-        capabilities.gpu_type = if capabilities.has_gpu {
+        // Cheap probe: /dev/dri/renderD* files exist when the kernel has
+        // exposed a DRM render node. Catches NVIDIA/AMD/Intel/Mesa — any
+        // userspace-visible GPU surface. Does NOT catch WSL2 (/dev/dxg)
+        // or sandboxed containers where /dev/dri is denied; those return
+        // (false, Unknown).
+        let has_render_node = std::fs::read_dir("/dev/dri/")
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .any(|e| e.file_name().to_string_lossy().starts_with("renderD"))
+            })
+            .unwrap_or(false);
+
+        capabilities.has_gpu = has_render_node;
+        capabilities.gpu_type = if has_render_node {
             GpuType::Vulkan
         } else {
             GpuType::None
         };
-        capabilities.gpu_confidence = DetectionConfidence::Low;
+        capabilities.gpu_confidence = if has_render_node {
+            DetectionConfidence::Medium
+        } else {
+            DetectionConfidence::Unknown
+        };
 
         capabilities.has_npu = false;
         capabilities.npu_type = NpuType::None;
-        capabilities.npu_confidence = DetectionConfidence::Low;
+        capabilities.npu_confidence = DetectionConfidence::Unknown;
     }
 
     #[cfg(not(any(
@@ -206,25 +233,16 @@ pub fn detect_capabilities(metrics: &DeviceMetrics) -> HardwareCapabilities {
         target_os = "linux"
     )))]
     {
-        capabilities.has_gpu = detect_gpu_availability_stub();
+        // Unknown platform — nothing to probe.
+        capabilities.has_gpu = false;
         capabilities.gpu_type = GpuType::None;
-        capabilities.gpu_confidence = DetectionConfidence::Low;
+        capabilities.gpu_confidence = DetectionConfidence::Unknown;
         capabilities.has_npu = false;
         capabilities.npu_type = NpuType::None;
-        capabilities.npu_confidence = DetectionConfidence::Low;
+        capabilities.npu_confidence = DetectionConfidence::Unknown;
     }
 
     capabilities
-}
-
-/// Stub GPU detection for platforms without specific detection.
-#[allow(dead_code)]
-fn detect_gpu_availability_stub() -> bool {
-    // Stub: Always return true for now
-    // TODO: Real implementation would check:
-    // - Vulkan device availability
-    // - GPU compute shader support
-    true
 }
 
 #[cfg(test)]
@@ -352,94 +370,12 @@ mod tests {
 
     #[test]
     fn test_detect_capabilities() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 75,
-            temperature: 25.0,
-        };
-
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.battery_level(), 75);
+        let caps = detect_capabilities();
+        // battery_level and thermal_state default to safe values; the live
+        // overlay (via DeviceMetrics::with_live_snapshot) populates them.
+        assert_eq!(caps.battery_level(), 100);
         assert_eq!(caps.thermal_state(), ThermalState::Normal);
         assert!(caps.memory_total_mb() > 0);
-    }
-
-    #[test]
-    fn test_detect_capabilities_hot_device() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 75,
-            temperature: 75.0,
-        };
-
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Hot);
-        assert!(caps.should_throttle());
-    }
-
-    #[test]
-    fn test_detect_capabilities_critical_device() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 75,
-            temperature: 85.0,
-        };
-
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Critical);
-        assert!(caps.should_throttle());
-    }
-
-    #[test]
-    fn test_detect_capabilities_low_battery() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 15,
-            temperature: 25.0,
-        };
-
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.battery_level(), 15);
-        assert!(caps.should_throttle());
-    }
-
-    #[test]
-    fn test_thermal_state_thresholds() {
-        // Normal
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-        };
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Normal);
-
-        // Warm
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 65.0,
-        };
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Warm);
-
-        // Hot
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 75.0,
-        };
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Hot);
-
-        // Critical
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 85.0,
-        };
-        let caps = detect_capabilities(&metrics);
-        assert_eq!(caps.thermal_state(), ThermalState::Critical);
     }
 
     #[test]
@@ -519,13 +455,7 @@ mod tests {
 
     #[test]
     fn test_detect_capabilities_has_confidence() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 75,
-            temperature: 25.0,
-        };
-
-        let caps = detect_capabilities(&metrics);
+        let caps = detect_capabilities();
         // Memory confidence should be High when using sysinfo
         assert_eq!(
             caps.memory_confidence,
@@ -537,21 +467,83 @@ mod tests {
             caps.gpu_confidence == DetectionConfidence::High
                 || caps.gpu_confidence == DetectionConfidence::Medium
                 || caps.gpu_confidence == DetectionConfidence::Low
+                || caps.gpu_confidence == DetectionConfidence::Unknown,
+            "gpu_confidence must be one of the four documented variants",
         );
     }
 
     #[test]
     fn test_detect_capabilities_has_cpu_info() {
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 75,
-            temperature: 25.0,
-        };
-
-        let caps = detect_capabilities(&metrics);
+        let caps = detect_capabilities();
         // Should have CPU info
         assert!(caps.cpu_cores >= 1, "Should detect at least 1 CPU core");
         // Memory should be detected
         assert!(caps.memory_total_mb > 0, "Should detect total memory");
+    }
+
+    #[test]
+    fn test_detection_confidence_unknown_added() {
+        assert_eq!(DetectionConfidence::Unknown.as_str(), "unknown");
+        let default: DetectionConfidence = Default::default();
+        assert_eq!(default, DetectionConfidence::Low);
+    }
+
+    #[test]
+    fn test_detection_confidence_wire_format_stays_capitalized() {
+        let json = serde_json::to_string(&DetectionConfidence::Unknown).unwrap();
+        assert_eq!(
+            json, "\"Unknown\"",
+            "wire format must stay capitalized — no rename_all"
+        );
+        let parsed: DetectionConfidence = serde_json::from_str("\"High\"").unwrap();
+        assert_eq!(parsed, DetectionConfidence::High);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[test]
+    fn test_capabilities_apple_uses_real_probes() {
+        let caps = detect_capabilities();
+        assert_eq!(caps.gpu_confidence, DetectionConfidence::High);
+        assert!(matches!(
+            caps.npu_confidence,
+            DetectionConfidence::High | DetectionConfidence::Medium,
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_linux_gpu_no_silent_true() {
+        let caps = detect_capabilities();
+        if caps.has_gpu {
+            assert!(
+                matches!(
+                    caps.gpu_confidence,
+                    DetectionConfidence::Medium | DetectionConfidence::High
+                ),
+                "has_gpu=true must come with Medium+ confidence",
+            );
+            assert_eq!(caps.gpu_type, GpuType::Vulkan);
+        } else {
+            assert_eq!(caps.gpu_confidence, DetectionConfidence::Unknown);
+            assert_eq!(caps.gpu_type, GpuType::None);
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    #[test]
+    fn test_android_gpu_unknown() {
+        let caps = detect_capabilities();
+        assert!(!caps.has_gpu);
+        assert_eq!(caps.gpu_confidence, DetectionConfidence::Unknown);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_windows_real_dxgi_probe() {
+        let caps = detect_capabilities();
+        assert!(matches!(
+            caps.gpu_confidence,
+            DetectionConfidence::High | DetectionConfidence::Unknown,
+        ));
     }
 }

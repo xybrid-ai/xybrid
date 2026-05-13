@@ -173,52 +173,89 @@ fn compile_llama_cpp() {
     let llama_cpp_dir = manifest_dir.join("vendor/llama.cpp");
     let wrapper_path = manifest_dir.join("vendor/llama_wrapper.cpp");
 
+    // Pinned llama.cpp upstream — keep in sync with the git submodule SHA in
+    // .gitmodules / `git submodule status`. The fallback clone below uses this
+    // exact commit so consumers without submodule support (e.g. Flutter pub
+    // cache git deps) get a reproducible build instead of upstream HEAD.
+    const LLAMA_CPP_REPO: &str = "https://github.com/ggml-org/llama.cpp";
+    const LLAMA_CPP_COMMIT: &str = "b46812de78f8fbcb6cf0154947e8633ebc78d9ac";
+
     // Check if llama.cpp is vendored
     // When consumed as a git dependency (e.g., Flutter pub cache), git submodules
     // are not initialized — the directory exists but is empty (no CMakeLists.txt).
     let cmake_lists = llama_cpp_dir.join("CMakeLists.txt");
     if !cmake_lists.exists() {
-        println!("cargo:warning=llama.cpp submodule not initialized, cloning...");
+        println!(
+            "cargo:warning=llama.cpp submodule not initialized, cloning {}@{}...",
+            LLAMA_CPP_REPO, LLAMA_CPP_COMMIT
+        );
 
         // Remove the empty stub directory if it exists (git submodule placeholder)
         if llama_cpp_dir.exists() {
             let _ = std::fs::remove_dir_all(&llama_cpp_dir);
         }
 
-        let status = process::Command::new("git")
-            .args([
-                "clone",
+        // Pinned-commit clone: init empty repo, fetch the exact SHA at depth 1,
+        // then check it out. `git clone --depth 1` cannot target an arbitrary
+        // commit, so we do it in three steps.
+        let dir_str = llama_cpp_dir.to_string_lossy().to_string();
+        let run = |args: &[&str]| -> bool {
+            process::Command::new("git")
+                .args(args)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        };
+        let ok = std::fs::create_dir_all(&llama_cpp_dir).is_ok()
+            && run(&["-C", &dir_str, "init", "-q"])
+            && run(&["-C", &dir_str, "remote", "add", "origin", LLAMA_CPP_REPO])
+            && run(&[
+                "-C",
+                &dir_str,
+                "fetch",
                 "--depth",
                 "1",
-                "https://github.com/ggerganov/llama.cpp",
-                &llama_cpp_dir.to_string_lossy(),
+                "origin",
+                LLAMA_CPP_COMMIT,
             ])
-            .status();
+            && run(&["-C", &dir_str, "checkout", "--detach", "FETCH_HEAD"]);
 
-        match status {
-            Ok(s) if s.success() => {
-                println!("cargo:warning=llama.cpp cloned successfully");
-            }
-            _ => {
-                println!("cargo:warning=================================================================");
-                println!("cargo:warning=ERROR: Failed to clone llama.cpp!");
-                println!("cargo:warning=================================================================");
-                println!(
-                    "cargo:warning=Expected location: {}",
-                    llama_cpp_dir.display()
-                );
-                println!("cargo:warning=");
-                println!("cargo:warning=To fix this manually, run:");
-                println!(
-                    "cargo:warning=  git clone --depth 1 https://github.com/ggerganov/llama.cpp {}",
-                    llama_cpp_dir.display()
-                );
-                println!("cargo:warning=");
-                println!("cargo:warning=Or disable the llm-llamacpp feature:");
-                println!("cargo:warning=  cargo build --no-default-features");
-                println!("cargo:warning=================================================================");
-                process::exit(1);
-            }
+        if ok {
+            println!(
+                "cargo:warning=llama.cpp cloned successfully at {}",
+                LLAMA_CPP_COMMIT
+            );
+        } else {
+            println!(
+                "cargo:warning================================================================="
+            );
+            println!("cargo:warning=ERROR: Failed to clone llama.cpp!");
+            println!(
+                "cargo:warning================================================================="
+            );
+            println!(
+                "cargo:warning=Expected location: {}",
+                llama_cpp_dir.display()
+            );
+            println!("cargo:warning=");
+            println!("cargo:warning=To fix this manually, run:");
+            println!(
+                "cargo:warning=  git clone {} {} && \\",
+                LLAMA_CPP_REPO,
+                llama_cpp_dir.display()
+            );
+            println!(
+                "cargo:warning=    git -C {} checkout {}",
+                llama_cpp_dir.display(),
+                LLAMA_CPP_COMMIT
+            );
+            println!("cargo:warning=");
+            println!("cargo:warning=Or disable the llm-llamacpp feature:");
+            println!("cargo:warning=  cargo build --no-default-features");
+            println!(
+                "cargo:warning================================================================="
+            );
+            process::exit(1);
         }
     }
 

@@ -7,6 +7,9 @@
 //
 
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - SDK Initialization
 
@@ -23,17 +26,34 @@ import Foundation
 public enum Xybrid {
     private static let initLock = NSLock()
     nonisolated(unsafe) private static var initialized = false
+    #if os(iOS)
+    // Retained so the NotificationCenter block-based observer keeps
+    // firing for the process lifetime. NotificationCenter holds the
+    // observer weakly through this token; losing the reference would
+    // silently drop battery updates.
+    nonisolated(unsafe) private static var batteryObserver: NSObjectProtocol?
+    #endif
 
     /// Initialize the Xybrid runtime.
     ///
     /// Registers the Swift binding identifier with the SDK so that the
     /// `X-Xybrid-Client` header on registry HTTP calls reports
     /// `binding=swift`. Idempotent and thread-safe.
+    ///
+    /// On iOS, also enables `UIDevice` battery monitoring and subscribes
+    /// to `UIDevice.batteryLevelDidChangeNotification`, forwarding each
+    /// reading through the SDK's push-state surface so the routing
+    /// engine has live battery telemetry. Thermal state on Apple
+    /// platforms is sourced from `NSProcessInfo.thermalState` directly
+    /// in `xybrid-core` (no host wiring needed). On macOS, both
+    /// battery (IOKit) and thermal (NSProcessInfo) are in-Rust, so
+    /// nothing extra is registered here.
     public static func initialize() {
         initLock.lock()
         defer { initLock.unlock() }
         if initialized { return }
         setBinding(binding: "swift")
+        registerPlatformObservers()
         initialized = true
     }
 
@@ -43,6 +63,45 @@ public enum Xybrid {
         defer { initLock.unlock() }
         return initialized
     }
+
+    private static func registerPlatformObservers() {
+        #if os(iOS)
+        let device = UIDevice.current
+        // Battery monitoring is opt-in on iOS — without this flag,
+        // `batteryLevel` returns -1.0 and the notification never fires.
+        device.isBatteryMonitoringEnabled = true
+
+        // Push the current value immediately so the first cache miss
+        // isn't blind, then keep updating on every notification.
+        pushBatteryLevel(device.batteryLevel)
+
+        batteryObserver = NotificationCenter.default.addObserver(
+            forName: UIDevice.batteryLevelDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            pushBatteryLevel(UIDevice.current.batteryLevel)
+        }
+        #endif
+    }
+
+    #if os(iOS)
+    /// Convert `UIDevice.batteryLevel` (Float in 0.0...1.0, or -1.0 for
+    /// unknown) into the SDK's `UInt8` 0..=100 representation. Negative
+    /// or non-finite values surface as "unknown" via [`clearBatteryLevel`]
+    /// so the routing engine doesn't see a fake 0% reading.
+    private static func pushBatteryLevel(_ level: Float) {
+        guard level.isFinite, level >= 0 else {
+            clearBatteryLevel()
+            return
+        }
+        let pct = (level * 100).rounded()
+        // Clamp defensively; iOS has been observed to report 1.01 briefly
+        // near a full charge during recalibration.
+        let bounded = max(0, min(100, Int(pct)))
+        setBatteryLevel(percent: UInt8(bounded))
+    }
+    #endif
 }
 
 // MARK: - Public Type Re-exports

@@ -30,6 +30,9 @@ mod local;
 mod remote;
 pub mod types;
 
+#[cfg(any(test, feature = "dev-tools"))]
+pub mod test_seams;
+
 pub use local::LocalAuthority;
 pub use remote::RemoteAuthority;
 pub use types::*;
@@ -88,6 +91,14 @@ pub trait OrchestrationAuthority: Send + Sync {
     /// An `AuthorityDecision` containing the resolved target with explanation.
     fn resolve_target(&self, context: &StageContext) -> AuthorityDecision<ResolvedTarget>;
 
+    /// Resolve target and return feedback context for outcome learning.
+    ///
+    /// Existing authorities can keep implementing only `resolve_target`; richer
+    /// authorities override this to attach signal buckets or effective model ids.
+    fn resolve_target_with_feedback(&self, context: &StageContext) -> TargetResolution {
+        TargetResolution::new(self.resolve_target(context), context.model_id.clone(), None)
+    }
+
     /// Select which model variant to use.
     ///
     /// Called: **Per-pipeline-load** (stable for session).
@@ -124,14 +135,11 @@ pub trait OrchestrationAuthority: Send + Sync {
 mod tests {
     use super::*;
     use crate::context::DeviceMetrics;
+    use crate::device::ResourceMonitor;
     use crate::ir::{Envelope, EnvelopeKind};
 
     fn default_metrics() -> DeviceMetrics {
-        DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-        }
+        DeviceMetrics::default()
     }
 
     fn text_envelope(text: &str) -> Envelope {
@@ -172,6 +180,7 @@ mod tests {
             model_id: "whisper-tiny".to_string(),
             input_kind: EnvelopeKind::Audio(vec![]),
             metrics: default_metrics(),
+            resource_monitor: ResourceMonitor::global(),
             explicit_target: Some(crate::pipeline::ExecutionTarget::Device),
         };
 

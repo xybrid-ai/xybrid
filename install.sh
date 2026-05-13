@@ -151,7 +151,7 @@ verify_install() {
     printf "  Get started:\n"
     printf "    xybrid --help\n"
     printf "    xybrid models list\n"
-    printf "    xybrid run kokoro-82m --input \"Hello world\" -o output.wav\n"
+    printf "    xybrid run --model kokoro-82m --input-text \"Hello world\" -o output.wav\n"
     printf "\n"
   fi
 }

@@ -5,16 +5,64 @@
 //! graduated into the IR layer (`crate::ir::Envelope`); we re-export them here
 //! to maintain backwards compatibility while downstream code migrates.
 
+use crate::device::{detect_capabilities, HardwareCapabilities, ResourceSnapshot};
 pub use crate::ir::{Envelope, EnvelopeKind};
 use crate::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
 
-/// Live device metrics (network, battery, temperature, etc.).
+/// Live device signals consumed by the orchestrator.
+///
+/// Two members:
+/// - `capabilities` — static hardware view (memory total, GPU/Metal/NNAPI
+///   flags, CPU cores) captured at construction time.
+/// - `resource` — live resource snapshot (CPU, memory, thermal, battery)
+///   sampled by `ResourceMonitor`.
+///
+/// Battery and thermal state on `capabilities` are populated by overlaying a
+/// fresh `ResourceSnapshot` via [`Self::with_live_snapshot`]; the snapshot is
+/// the only authoritative source.
 #[derive(Debug, Clone)]
 pub struct DeviceMetrics {
-    pub network_rtt: u32,
-    pub battery: u8,
-    pub temperature: f32,
-    // TODO: Add more fields
+    /// Hardware capability snapshot used by the routing engine.
+    pub capabilities: HardwareCapabilities,
+    /// Live resource snapshot sampled by `ResourceMonitor`.
+    pub resource: ResourceSnapshot,
+}
+
+impl DeviceMetrics {
+    /// Return a copy with the snapshot's live values overlaid onto the
+    /// capability view.
+    ///
+    /// `available_mem_mb`, `total_mem_mb`, `cpu_pct`, `battery_pct`, and
+    /// `thermal_state` flow from the snapshot into `capabilities` so callers
+    /// of `should_throttle()` and the routing ladder see live readings. When
+    /// a snapshot field is `None` the existing capability value is preserved.
+    pub fn with_live_snapshot(&self, snapshot: ResourceSnapshot) -> Self {
+        let mut metrics = self.clone();
+        metrics.resource = snapshot;
+        if let Some(available_mb) = snapshot.available_mem_mb {
+            metrics.capabilities.memory_available_mb = available_mb as u64;
+        }
+        if let Some(total_mb) = snapshot.total_mem_mb {
+            metrics.capabilities.memory_total_mb = total_mb as u64;
+        }
+        if let Some(cpu_pct) = snapshot.cpu_pct {
+            metrics.capabilities.cpu_usage_percent = cpu_pct;
+        }
+        if let Some(battery_pct) = snapshot.battery_pct {
+            metrics.capabilities.battery_level = battery_pct;
+        }
+        metrics.capabilities.thermal_state = snapshot.thermal_state;
+        metrics
+    }
+}
+
+impl Default for DeviceMetrics {
+    fn default() -> Self {
+        Self {
+            capabilities: detect_capabilities(),
+            resource: ResourceSnapshot::default(),
+        }
+    }
 }
 
 /// Metadata descriptor for a pipeline stage.
@@ -88,5 +136,60 @@ impl StageDescriptor {
     /// Check if this stage is a device/local stage.
     pub fn is_device(&self) -> bool {
         matches!(self.target, Some(ExecutionTarget::Device) | None) && self.provider.is_none()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::{MemoryPressure, ThermalState};
+
+    #[test]
+    fn default_device_metrics_carries_unknown_memory_pressure() {
+        let metrics = DeviceMetrics::default();
+
+        assert_eq!(metrics.resource.memory_pressure, MemoryPressure::Unknown);
+    }
+
+    #[test]
+    fn with_live_snapshot_preserves_capability_memory_when_snapshot_missing() {
+        let metrics = DeviceMetrics::default();
+        let snapshot = ResourceSnapshot::unknown();
+
+        let merged = metrics.with_live_snapshot(snapshot);
+
+        assert!(
+            merged.capabilities.memory_total_mb > 0,
+            "memory_total_mb must not be zeroed by an unknown snapshot"
+        );
+    }
+
+    #[test]
+    fn with_live_snapshot_uses_snapshot_memory_when_present() {
+        let metrics = DeviceMetrics::default();
+        let mut snapshot = ResourceSnapshot::unknown();
+        snapshot.memory_pressure = MemoryPressure::Normal;
+        snapshot.available_mem_mb = Some(2048);
+        snapshot.total_mem_mb = Some(8192);
+        snapshot.cpu_pct = Some(42.5);
+
+        let merged = metrics.with_live_snapshot(snapshot);
+
+        assert_eq!(merged.capabilities.memory_available_mb, 2048);
+        assert_eq!(merged.capabilities.memory_total_mb, 8192);
+        assert_eq!(merged.capabilities.cpu_usage_percent, 42.5);
+    }
+
+    #[test]
+    fn with_live_snapshot_overlays_battery_and_thermal_when_snapshot_carries_them() {
+        let metrics = DeviceMetrics::default();
+        let mut snapshot = ResourceSnapshot::unknown();
+        snapshot.battery_pct = Some(42);
+        snapshot.thermal_state = ThermalState::Hot;
+
+        let merged = metrics.with_live_snapshot(snapshot);
+
+        assert_eq!(merged.capabilities.battery_level, 42);
+        assert_eq!(merged.capabilities.thermal_state, ThermalState::Hot);
     }
 }

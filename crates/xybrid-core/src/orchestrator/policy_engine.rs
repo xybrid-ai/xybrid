@@ -65,10 +65,11 @@ pub trait PolicyEngine {
 
 /// Default implementation of PolicyEngine for MVP.
 ///
-/// This implementation provides a simple rule-based evaluation system.
-/// For MVP, it supports basic conditions like:
-/// - `input.kind == "AudioRaw"`
-/// - `metrics.network_rtt > 300`
+/// Currently supports a single expression form: `input.kind == "<value>"`.
+/// The legacy `metrics.network_rtt`/`metrics.battery` comparisons were
+/// dropped together with the speculative routing scalars; if device-state
+/// rules are needed in the future they should target real signals on
+/// `metrics.capabilities` / `metrics.resource`.
 pub struct DefaultPolicyEngine {
     bundle: Option<PolicyBundle>,
 }
@@ -79,21 +80,15 @@ impl DefaultPolicyEngine {
         Self { bundle: None }
     }
 
-    /// Create a new instance with default MVP policy.
+    /// Create a new instance with the default policy bundle.
+    ///
+    /// The default bundle is currently empty (allow-all). Callers wanting
+    /// stricter behaviour should `load_policies` an explicit bundle.
     pub fn with_default_policy() -> Self {
         let mut engine = Self::new();
-        // Load default MVP policy: deny if network_rtt > 300
-        // Note: audio_rule removed to allow AudioRaw input for demo purposes
         let default_bundle = PolicyBundle {
             version: "0.1.0".to_string(),
-            rules: vec![
-                PolicyRule {
-                    id: "rtt_rule".to_string(),
-                    expression: "metrics.network_rtt > 300".to_string(),
-                    action: "deny".to_string(),
-                },
-                // audio_rule removed - AudioRaw is now allowed for demo
-            ],
+            rules: vec![],
             signature: "default_mvp".to_string(),
         };
         engine.bundle = Some(default_bundle);
@@ -105,15 +100,11 @@ impl DefaultPolicyEngine {
         &self,
         expression: &str,
         envelope: &Envelope,
-        metrics: &DeviceMetrics,
+        _metrics: &DeviceMetrics,
     ) -> bool {
         // MVP: Simple expression evaluation
         // Supports:
         // - input.kind == "value"
-        // - metrics.network_rtt > number
-        // - metrics.network_rtt < number
-        // - metrics.battery < number
-        // - metrics.battery > number
 
         let expr = expression.trim();
 
@@ -165,45 +156,7 @@ impl DefaultPolicyEngine {
             }
         }
 
-        // Check for network_rtt comparisons
-        if expr.contains("metrics.network_rtt") {
-            if expr.contains(">") {
-                let parts: Vec<&str> = expr.split(">").collect();
-                if parts.len() == 2 {
-                    if let Ok(threshold) = parts[1].trim().parse::<u32>() {
-                        return metrics.network_rtt > threshold;
-                    }
-                }
-            } else if expr.contains("<") {
-                let parts: Vec<&str> = expr.split("<").collect();
-                if parts.len() == 2 {
-                    if let Ok(threshold) = parts[1].trim().parse::<u32>() {
-                        return metrics.network_rtt < threshold;
-                    }
-                }
-            }
-        }
-
-        // Check for battery comparisons
-        if expr.contains("metrics.battery") {
-            if expr.contains(">") {
-                let parts: Vec<&str> = expr.split(">").collect();
-                if parts.len() == 2 {
-                    if let Ok(threshold) = parts[1].trim().parse::<u8>() {
-                        return metrics.battery > threshold;
-                    }
-                }
-            } else if expr.contains("<") {
-                let parts: Vec<&str> = expr.split("<").collect();
-                if parts.len() == 2 {
-                    if let Ok(threshold) = parts[1].trim().parse::<u8>() {
-                        return metrics.battery < threshold;
-                    }
-                }
-            }
-        }
-
-        // If we can't parse it, default to false (deny)
+        // If we can't parse it, default to false (no match → no deny).
         false
     }
 }
@@ -429,29 +382,10 @@ mod tests {
     }
 
     #[test]
-    fn test_default_policy_denies_high_rtt() {
+    fn test_default_policy_allows_text() {
         let engine = DefaultPolicyEngine::with_default_policy();
         let envelope = text_envelope("Text");
-        let metrics = DeviceMetrics {
-            network_rtt: 350,
-            battery: 50,
-            temperature: 25.0,
-        };
-
-        let result = engine.evaluate("test_stage", &envelope, &metrics);
-        assert!(!result.allowed);
-        assert!(result.reason.is_some());
-    }
-
-    #[test]
-    fn test_default_policy_allows_low_rtt() {
-        let engine = DefaultPolicyEngine::with_default_policy();
-        let envelope = text_envelope("Text");
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-        };
+        let metrics = DeviceMetrics::default();
 
         let result = engine.evaluate("test_stage", &envelope, &metrics);
         assert!(result.allowed);
@@ -459,27 +393,21 @@ mod tests {
 
     #[test]
     fn test_default_policy_allows_audio_raw() {
-        // AudioRaw is now allowed (audio_rule was removed for demo)
         let engine = DefaultPolicyEngine::with_default_policy();
         let envelope = audio_envelope(&[0, 1, 2]);
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-        };
+        let metrics = DeviceMetrics::default();
 
         let result = engine.evaluate("test_stage", &envelope, &metrics);
-        assert!(result.allowed); // AudioRaw should now be allowed
+        assert!(result.allowed);
         assert!(result.reason.is_some());
         assert!(result.reason.unwrap().contains("all policy checks passed"));
     }
 
     #[test]
-    fn test_load_yaml_policy() {
+    fn test_load_yaml_policy_input_kind_rule() {
         let yaml_content = r#"
 version: "0.1.0"
 deny_cloud_if:
-  - metrics.network_rtt > 250
   - input.kind == "SensitiveData"
 signature: "test"
 "#;
@@ -489,22 +417,18 @@ signature: "test"
         assert!(result.is_ok());
 
         let envelope = text_envelope("SensitiveData");
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-        };
+        let metrics = DeviceMetrics::default();
 
         let policy_result = engine.evaluate("test", &envelope, &metrics);
         assert!(!policy_result.allowed);
     }
 
     #[test]
-    fn test_load_json_policy() {
+    fn test_load_json_policy_input_kind_rule() {
         let json_content = r#"{
             "version": "0.1.0",
             "deny_cloud_if": [
-                "metrics.battery < 20"
+                "input.kind == \"AudioRaw\""
             ],
             "signature": "test"
         }"#;
@@ -513,12 +437,8 @@ signature: "test"
         let result = engine.load_policies(json_content.as_bytes().to_vec());
         assert!(result.is_ok());
 
-        let envelope = text_envelope("Text");
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 15,
-            temperature: 25.0,
-        };
+        let envelope = audio_envelope(&[1, 2, 3]);
+        let metrics = DeviceMetrics::default();
 
         let policy_result = engine.evaluate("test", &envelope, &metrics);
         assert!(!policy_result.allowed);
@@ -528,11 +448,7 @@ signature: "test"
     fn test_no_policy_allows() {
         let engine = DefaultPolicyEngine::new();
         let envelope = text_envelope("Text");
-        let metrics = DeviceMetrics {
-            network_rtt: 100,
-            battery: 50,
-            temperature: 25.0,
-        };
+        let metrics = DeviceMetrics::default();
 
         let result = engine.evaluate("test_stage", &envelope, &metrics);
         assert!(result.allowed);

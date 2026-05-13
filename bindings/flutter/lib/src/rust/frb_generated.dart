@@ -8,6 +8,7 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api/context.dart';
+import 'api/device.dart';
 import 'api/envelope.dart';
 import 'api/model.dart';
 import 'api/pipeline.dart';
@@ -78,7 +79,7 @@ class XybridRustLib extends BaseEntrypoint<XybridRustLibApi,
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -101373461;
+  int get rustContentHash => 2045382748;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -199,10 +200,26 @@ abstract class XybridRustLibApi extends BaseApi {
   List<String> crateApiPipelineFfiPipelineStageNames(
       {required FfiPipeline that});
 
+  void crateApiDeviceXybridDeviceClearBatteryLevel();
+
+  void crateApiDeviceXybridDeviceClearThermalState();
+
+  FfiResourceSnapshot crateApiDeviceXybridDeviceCurrentSnapshot();
+
+  void crateApiDeviceXybridDeviceSetBatteryLevel({required int percent});
+
+  void crateApiDeviceXybridDeviceSetThermalState(
+      {required FfiThermalState state});
+
   void crateApiSdkClientXybridSdkClientInitSdkCacheDir(
       {required String cacheDir});
 
+  void crateApiSdkClientXybridSdkClientInitTelemetry(
+      {required String endpoint, required String apiKey});
+
   bool crateApiSdkClientXybridSdkClientIsModelCached({required String modelId});
+
+  bool crateApiSdkClientXybridSdkClientIsTelemetryInitialized();
 
   void crateApiSdkClientXybridSdkClientSetApiKey({required String apiKey});
 
@@ -251,6 +268,14 @@ abstract class XybridRustLibApi extends BaseApi {
       get rust_arc_decrement_strong_count_FfiPipeline;
 
   CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_FfiPipelinePtr;
+
+  RustArcIncrementStrongCountFnType
+      get rust_arc_increment_strong_count_XybridDevice;
+
+  RustArcDecrementStrongCountFnType
+      get rust_arc_decrement_strong_count_XybridDevice;
+
+  CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_XybridDevicePtr;
 
   RustArcIncrementStrongCountFnType
       get rust_arc_increment_strong_count_XybridSdkClient;
@@ -1236,13 +1261,131 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       );
 
   @override
+  void crateApiDeviceXybridDeviceClearBatteryLevel() {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 36)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiDeviceXybridDeviceClearBatteryLevelConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDeviceXybridDeviceClearBatteryLevelConstMeta =>
+      const TaskConstMeta(
+        debugName: "XybridDevice_clear_battery_level",
+        argNames: [],
+      );
+
+  @override
+  void crateApiDeviceXybridDeviceClearThermalState() {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 37)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiDeviceXybridDeviceClearThermalStateConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDeviceXybridDeviceClearThermalStateConstMeta =>
+      const TaskConstMeta(
+        debugName: "XybridDevice_clear_thermal_state",
+        argNames: [],
+      );
+
+  @override
+  FfiResourceSnapshot crateApiDeviceXybridDeviceCurrentSnapshot() {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 38)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_ffi_resource_snapshot,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiDeviceXybridDeviceCurrentSnapshotConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDeviceXybridDeviceCurrentSnapshotConstMeta =>
+      const TaskConstMeta(
+        debugName: "XybridDevice_current_snapshot",
+        argNames: [],
+      );
+
+  @override
+  void crateApiDeviceXybridDeviceSetBatteryLevel({required int percent}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_u_8(percent, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 39)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiDeviceXybridDeviceSetBatteryLevelConstMeta,
+      argValues: [percent],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDeviceXybridDeviceSetBatteryLevelConstMeta =>
+      const TaskConstMeta(
+        debugName: "XybridDevice_set_battery_level",
+        argNames: ["percent"],
+      );
+
+  @override
+  void crateApiDeviceXybridDeviceSetThermalState(
+      {required FfiThermalState state}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_ffi_thermal_state(state, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 40)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiDeviceXybridDeviceSetThermalStateConstMeta,
+      argValues: [state],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDeviceXybridDeviceSetThermalStateConstMeta =>
+      const TaskConstMeta(
+        debugName: "XybridDevice_set_thermal_state",
+        argNames: ["state"],
+      );
+
+  @override
   void crateApiSdkClientXybridSdkClientInitSdkCacheDir(
       {required String cacheDir}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(cacheDir, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 36)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 41)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1261,13 +1404,39 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       );
 
   @override
+  void crateApiSdkClientXybridSdkClientInitTelemetry(
+      {required String endpoint, required String apiKey}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(endpoint, serializer);
+        sse_encode_String(apiKey, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 42)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiSdkClientXybridSdkClientInitTelemetryConstMeta,
+      argValues: [endpoint, apiKey],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiSdkClientXybridSdkClientInitTelemetryConstMeta =>
+      const TaskConstMeta(
+        debugName: "XybridSdkClient_init_telemetry",
+        argNames: ["endpoint", "apiKey"],
+      );
+
+  @override
   bool crateApiSdkClientXybridSdkClientIsModelCached(
       {required String modelId}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(modelId, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 37)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 43)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -1286,12 +1455,37 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       );
 
   @override
+  bool crateApiSdkClientXybridSdkClientIsTelemetryInitialized() {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 44)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_bool,
+        decodeErrorData: null,
+      ),
+      constMeta:
+          kCrateApiSdkClientXybridSdkClientIsTelemetryInitializedConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta
+      get kCrateApiSdkClientXybridSdkClientIsTelemetryInitializedConstMeta =>
+          const TaskConstMeta(
+            debugName: "XybridSdkClient_is_telemetry_initialized",
+            argNames: [],
+          );
+
+  @override
   void crateApiSdkClientXybridSdkClientSetApiKey({required String apiKey}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(apiKey, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 38)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 45)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1314,7 +1508,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 39)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 46)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_generation_config,
@@ -1337,7 +1531,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 40)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 47)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_generation_config,
@@ -1396,6 +1590,14 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
           .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline;
 
   RustArcIncrementStrongCountFnType
+      get rust_arc_increment_strong_count_XybridDevice => wire
+          .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice;
+
+  RustArcDecrementStrongCountFnType
+      get rust_arc_decrement_strong_count_XybridDevice => wire
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice;
+
+  RustArcIncrementStrongCountFnType
       get rust_arc_increment_strong_count_XybridSdkClient => wire
           .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient;
 
@@ -1448,6 +1650,14 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
           dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return FfiPipelineImpl.frbInternalDcoDecode(raw as List<dynamic>);
+  }
+
+  @protected
+  XybridDevice
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return XybridDeviceImpl.frbInternalDcoDecode(raw as List<dynamic>);
   }
 
   @protected
@@ -1541,6 +1751,14 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  XybridDevice
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return XybridDeviceImpl.frbInternalDcoDecode(raw as List<dynamic>);
+  }
+
+  @protected
   XybridSdkClient
       dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
           dynamic raw) {
@@ -1624,6 +1842,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  int dco_decode_box_autoadd_u_8(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
   double dco_decode_f_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as double;
@@ -1672,9 +1896,33 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  FfiMemoryPressure dco_decode_ffi_memory_pressure(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return FfiMemoryPressure.values[raw as int];
+  }
+
+  @protected
   FfiMessageRole dco_decode_ffi_message_role(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return FfiMessageRole.values[raw as int];
+  }
+
+  @protected
+  FfiResourceSnapshot dco_decode_ffi_resource_snapshot(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return FfiResourceSnapshot(
+      cpuPct: dco_decode_opt_box_autoadd_f_32(arr[0]),
+      processRssMb: dco_decode_opt_box_autoadd_u_32(arr[1]),
+      availableMemMb: dco_decode_opt_box_autoadd_u_32(arr[2]),
+      totalMemMb: dco_decode_opt_box_autoadd_u_32(arr[3]),
+      memoryPressure: dco_decode_ffi_memory_pressure(arr[4]),
+      thermalState: dco_decode_ffi_thermal_state(arr[5]),
+      batteryPct: dco_decode_opt_box_autoadd_u_8(arr[6]),
+      capturedAtMs: dco_decode_u_64(arr[7]),
+    );
   }
 
   @protected
@@ -1726,6 +1974,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       cumulativeText: dco_decode_String(arr[3]),
       finishReason: dco_decode_opt_String(arr[4]),
     );
+  }
+
+  @protected
+  FfiThermalState dco_decode_ffi_thermal_state(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return FfiThermalState.values[raw as int];
   }
 
   @protected
@@ -1816,6 +2070,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  int? dco_decode_opt_box_autoadd_u_8(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_u_8(raw);
+  }
+
+  @protected
   List<String>? dco_decode_opt_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_list_String(raw);
@@ -1837,6 +2097,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   int dco_decode_u_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
+  }
+
+  @protected
+  BigInt dco_decode_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeU64(raw);
   }
 
   @protected
@@ -1906,6 +2172,15 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
           SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return FfiPipelineImpl.frbInternalSseDecode(
+        sse_decode_usize(deserializer), sse_decode_i_32(deserializer));
+  }
+
+  @protected
+  XybridDevice
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return XybridDeviceImpl.frbInternalSseDecode(
         sse_decode_usize(deserializer), sse_decode_i_32(deserializer));
   }
 
@@ -2009,6 +2284,15 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  XybridDevice
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return XybridDeviceImpl.frbInternalSseDecode(
+        sse_decode_usize(deserializer), sse_decode_i_32(deserializer));
+  }
+
+  @protected
   XybridSdkClient
       sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
           SseDeserializer deserializer) {
@@ -2096,6 +2380,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  int sse_decode_box_autoadd_u_8(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_u_8(deserializer));
+  }
+
+  @protected
   double sse_decode_f_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getFloat32();
@@ -2148,10 +2438,41 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  FfiMemoryPressure sse_decode_ffi_memory_pressure(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return FfiMemoryPressure.values[inner];
+  }
+
+  @protected
   FfiMessageRole sse_decode_ffi_message_role(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
     return FfiMessageRole.values[inner];
+  }
+
+  @protected
+  FfiResourceSnapshot sse_decode_ffi_resource_snapshot(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_cpuPct = sse_decode_opt_box_autoadd_f_32(deserializer);
+    var var_processRssMb = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_availableMemMb = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_totalMemMb = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_memoryPressure = sse_decode_ffi_memory_pressure(deserializer);
+    var var_thermalState = sse_decode_ffi_thermal_state(deserializer);
+    var var_batteryPct = sse_decode_opt_box_autoadd_u_8(deserializer);
+    var var_capturedAtMs = sse_decode_u_64(deserializer);
+    return FfiResourceSnapshot(
+        cpuPct: var_cpuPct,
+        processRssMb: var_processRssMb,
+        availableMemMb: var_availableMemMb,
+        totalMemMb: var_totalMemMb,
+        memoryPressure: var_memoryPressure,
+        thermalState: var_thermalState,
+        batteryPct: var_batteryPct,
+        capturedAtMs: var_capturedAtMs);
   }
 
   @protected
@@ -2204,6 +2525,13 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         index: var_index,
         cumulativeText: var_cumulativeText,
         finishReason: var_finishReason);
+  }
+
+  @protected
+  FfiThermalState sse_decode_ffi_thermal_state(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return FfiThermalState.values[inner];
   }
 
   @protected
@@ -2338,6 +2666,17 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  int? sse_decode_opt_box_autoadd_u_8(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_u_8(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   List<String>? sse_decode_opt_list_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -2375,6 +2714,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   int sse_decode_u_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint32();
+  }
+
+  @protected
+  BigInt sse_decode_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getBigUint64();
   }
 
   @protected
@@ -2446,6 +2791,16 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(
         (self as FfiPipelineImpl).frbInternalSseEncode(move: true), serializer);
+  }
+
+  @protected
+  void
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          XybridDevice self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(
+        (self as XybridDeviceImpl).frbInternalSseEncode(move: true),
+        serializer);
   }
 
   @protected
@@ -2556,6 +2911,16 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
 
   @protected
   void
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
+          XybridDevice self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(
+        (self as XybridDeviceImpl).frbInternalSseEncode(move: null),
+        serializer);
+  }
+
+  @protected
+  void
       sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridSdkClient(
           XybridSdkClient self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -2656,6 +3021,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  void sse_encode_box_autoadd_u_8(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_8(self, serializer);
+  }
+
+  @protected
   void sse_encode_f_32(double self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putFloat32(self);
@@ -2696,10 +3067,31 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  void sse_encode_ffi_memory_pressure(
+      FfiMemoryPressure self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_ffi_message_role(
       FfiMessageRole self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_resource_snapshot(
+      FfiResourceSnapshot self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_f_32(self.cpuPct, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.processRssMb, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.availableMemMb, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.totalMemMb, serializer);
+    sse_encode_ffi_memory_pressure(self.memoryPressure, serializer);
+    sse_encode_ffi_thermal_state(self.thermalState, serializer);
+    sse_encode_opt_box_autoadd_u_8(self.batteryPct, serializer);
+    sse_encode_u_64(self.capturedAtMs, serializer);
   }
 
   @protected
@@ -2738,6 +3130,13 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_u_32(self.index, serializer);
     sse_encode_String(self.cumulativeText, serializer);
     sse_encode_opt_String(self.finishReason, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_thermal_state(
+      FfiThermalState self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -2869,6 +3268,16 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_u_8(int? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_u_8(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_list_String(
       List<String>? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -2905,6 +3314,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   void sse_encode_u_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint32(self);
+  }
+
+  @protected
+  void sse_encode_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putBigUint64(self);
   }
 
   @protected
@@ -3209,6 +3624,26 @@ class FfiPipelineImpl extends RustOpaque implements FfiPipeline {
       XybridRustLib.instance.api.crateApiPipelineFfiPipelineStageNames(
         that: this,
       );
+}
+
+@sealed
+class XybridDeviceImpl extends RustOpaque implements XybridDevice {
+  // Not to be used by end users
+  XybridDeviceImpl.frbInternalDcoDecode(List<dynamic> wire)
+      : super.frbInternalDcoDecode(wire, _kStaticData);
+
+  // Not to be used by end users
+  XybridDeviceImpl.frbInternalSseDecode(BigInt ptr, int externalSizeOnNative)
+      : super.frbInternalSseDecode(ptr, externalSizeOnNative, _kStaticData);
+
+  static final _kStaticData = RustArcStaticData(
+    rustArcIncrementStrongCount:
+        XybridRustLib.instance.api.rust_arc_increment_strong_count_XybridDevice,
+    rustArcDecrementStrongCount:
+        XybridRustLib.instance.api.rust_arc_decrement_strong_count_XybridDevice,
+    rustArcDecrementStrongCountPtr: XybridRustLib
+        .instance.api.rust_arc_decrement_strong_count_XybridDevicePtr,
+  );
 }
 
 @sealed

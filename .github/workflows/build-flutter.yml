@@ -1,11 +1,18 @@
 name: Build Flutter
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+    branches: [master]
+    paths:
+      - 'bindings/flutter/**'
+      - 'crates/xybrid-uniffi/**'
+      - 'xtask/**'
+      - '.github/workflows/build-flutter.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions: read-all
 
@@ -16,6 +23,9 @@ env:
   FRB_VERSION: "2.11.1"
 
 jobs:
+  # Linux-only on push/PR. macOS + Windows Flutter binaries are built and
+  # validated in release.yml (precompile-flutter-* jobs) at release time.
+  # Use workflow_dispatch + test-ci.yml for ad-hoc per-platform validation.
   build-flutter:
     name: Build Flutter (${{ matrix.platform }})
     strategy:
@@ -25,12 +35,6 @@ jobs:
           - platform: linux
             os: ubuntu-latest
             rust_targets: x86_64-unknown-linux-gnu
-          - platform: macos
-            os: macos-14
-            rust_targets: aarch64-apple-darwin
-          - platform: windows
-            os: windows-latest
-            rust_targets: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.os }}
     steps:

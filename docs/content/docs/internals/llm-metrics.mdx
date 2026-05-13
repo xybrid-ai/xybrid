@@ -15,8 +15,10 @@ guarantees the SDK provides.
 
 | Field | Unit | Type | Source |
 | --- | --- | --- | --- |
-| `ttft_ms` | ms | `u64` | `Instant` of the first emitted `Response::Chunk` minus the `generate()` start time. |
-| `tokens_generated` | count | `usize` | mistralrs `Usage.completion_tokens` (terminal chunk). |
+| `ttft_ms` | ms | `u64` | Local LLM: `Instant` of the first emitted `Response::Chunk` minus the `generate()` start time. Cloud LLM: gateway round-trip time (`client.complete()` start → return). |
+| `tokens_in` | count | `usize` | Local LLM (llama.cpp): `tokens.len()` captured before the streaming loop so it survives mid-stream aborts. Local LLM (mistral): `Usage.prompt_tokens` from the terminal chunk. Cloud LLM: upstream `Usage.prompt_tokens` when populated. |
+| `tokens_generated` | count | `usize` | Local LLM: emitted token count from the streaming telemetry recorder. Cloud LLM: surfaced as `tokens_out` instead — see below. |
+| `tokens_out` | count | `usize` | Cloud LLM only: upstream `Usage.completion_tokens`. The SDK's `extract_llm_token_counts` accepts both `tokens_out` and `tokens_generated` as aliases when hoisting to the platform-event payload top-level. |
 | `tokens_per_second` | tok/s | `f32` | Wallclock: `tokens_generated / elapsed`. Includes prefill time. |
 | `decode_tps` | tok/s | `f32` | mistralrs `Usage.avg_compl_tok_per_sec` — steady-state decode only. `None` when 0.0 (timing below resolution). |
 | `prefill_tps` | tok/s | `f32` | mistralrs `Usage.avg_prompt_tok_per_sec`. Same zero-filter semantics. |
@@ -90,8 +92,13 @@ for tests, caching, and any stage that depends on stable local inference.
 ## Guarantees and non-guarantees
 
 - **Guaranteed on every successful LLM generation**: `ttft_ms`,
-  `tokens_generated`, `tokens_per_second`, `emitted_chunks`,
-  `finish_reason`.
+  `tokens_in`, `tokens_generated` (local) / `tokens_out` (cloud),
+  `tokens_per_second`, `emitted_chunks`, `finish_reason`.
+- **Guaranteed even when generation aborts mid-stream** (e.g.
+  `MemoryPressure::Critical` triggers cloud fallback): `tokens_in` is
+  attached to the `llm_inference_streaming` span before the streaming
+  loop starts, so the dashboard's `LocalAborted` row still carries the
+  prompt token count. Other fields require successful completion.
 - **Best-effort**: `decode_tps`, `prefill_tps`, `mean_itl_ms`,
   `p95_itl_ms`. Short prompts on fast hardware occasionally produce
   `avg_*_tok_per_sec = 0.0` in mistralrs; these are filtered to `None`.

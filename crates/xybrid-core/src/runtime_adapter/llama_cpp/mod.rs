@@ -37,6 +37,7 @@ use crate::runtime_adapter::streaming_postprocess::{
     StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
 };
 use crate::runtime_adapter::AdapterError;
+use crate::tracing as xybrid_trace;
 use std::sync::Mutex;
 #[cfg(feature = "llm-llamacpp")]
 use std::sync::Once;
@@ -86,6 +87,35 @@ pub struct LlamaCppBackend {
     context: Mutex<Option<sys::LlamaContext>>,
     /// Current configuration
     config: Option<LlmConfig>,
+    /// Multi-turn KV cache reuse state. Records the tokenized prompt of
+    /// the last `generate*` call so the next call can find the longest
+    /// common prefix and skip re-prefilling that portion. Wrapped in
+    /// `Mutex` because `generate*` are `&self` and we need cross-call
+    /// mutation; lock order is always `context → kv_state` to match the
+    /// natural critical section (we already hold the context lock when
+    /// we mutate the cache via seq_rm).
+    kv_state: Mutex<KvCacheState>,
+}
+
+/// Cross-call state for the multi-turn KV cache reuse path. `Default::default()`
+/// gives an empty cache (`n_past = 0`, `cached_tokens.is_empty()`), which
+/// matches the post-load state of a fresh context.
+///
+/// `last_prefix_hit` records the prefix length the most recent call was able
+/// to reuse — the source of truth for the future `prompt_cached_tokens`
+/// telemetry field. Read it post-`generate*` to learn how many tokens were
+/// served from cache.
+#[cfg(feature = "llm-llamacpp")]
+#[derive(Default)]
+struct KvCacheState {
+    /// The exact token sequence currently sitting in the KV cache. Empty
+    /// when the cache is unpopulated (post-load, or post full-clear).
+    cached_tokens: Vec<i32>,
+    /// Prefix length the most recent prepare call was able to keep from
+    /// the prior cached_tokens. `None` when no `generate*` has run since
+    /// load; `Some(0)` when the most recent call had no shared prefix
+    /// (fully re-prefilled).
+    last_prefix_hit: Option<usize>,
 }
 
 #[cfg(feature = "llm-llamacpp")]
@@ -108,6 +138,7 @@ impl LlamaCppBackend {
             model: None,
             context: Mutex::new(None),
             config: None,
+            kv_state: Mutex::new(KvCacheState::default()),
         })
     }
 }
@@ -157,6 +188,90 @@ impl LlamaCppBackend {
         })?;
         f(model, context)
     }
+
+    /// Multi-turn KV cache reuse: compute the longest common prefix between
+    /// the new prompt's tokens and what's already in the cache from the
+    /// previous call, truncate the cache to that prefix, and return the
+    /// diverged tail along with the prefix length the caller should pass
+    /// as `n_past_in` to [`sys::llama_generate_streaming`].
+    ///
+    /// On a fresh context (no prior call) or when the prompts share no
+    /// prefix, returns `(full_tokens, 0)` and full-clears the cache so the
+    /// generate call below starts from scratch — same behaviour as before
+    /// this helper existed.
+    ///
+    /// Safety net: when the prefilled prefix plus new tail plus
+    /// `max_tokens` would overflow the context window, fall back to a
+    /// full clear so the generation call doesn't trip the
+    /// `n_past + n_input >= n_ctx` bail-out in the C wrapper. The simple
+    /// LCP path doesn't implement context-window eviction yet — that's
+    /// deliberately out of scope, the fallback keeps correctness.
+    ///
+    /// Updates `kv_state.cached_tokens` to reflect the post-call cache
+    /// (which will be `[prefix; new_tail; generated_tokens]` after the
+    /// generation runs). Records `last_prefix_hit` for the telemetry
+    /// accessor [`Self::last_cached_prefix_len`].
+    fn prepare_kv_cache_and_get_tail(
+        &self,
+        context: &sys::LlamaContext,
+        new_tokens: &[i32],
+        max_new_tokens: usize,
+    ) -> LlmResult<(Vec<i32>, usize)> {
+        let mut state = self
+            .kv_state
+            .lock()
+            .map_err(|_| AdapterError::RuntimeError("KV state mutex poisoned".to_string()))?;
+
+        let n_ctx = sys::llama_n_ctx(context);
+        let prefix_len = compute_reusable_prefix_len(&state.cached_tokens, new_tokens);
+
+        // Safety net: if the prefilled prefix + new tail + max_new_tokens
+        // would push us past the context window, the simple LCP path
+        // can't help — drop the cache and let the standard "input too
+        // long" check in the C wrapper produce a clear error. This also
+        // covers the eviction case the issue explicitly punts on.
+        let would_overflow = prefix_len
+            .saturating_add(new_tokens.len() - prefix_len)
+            .saturating_add(max_new_tokens)
+            >= n_ctx;
+        if prefix_len == 0 || would_overflow {
+            sys::llama_kv_cache_clear(context);
+            state.cached_tokens = new_tokens.to_vec();
+            state.last_prefix_hit = Some(0);
+            return Ok((new_tokens.to_vec(), 0));
+        }
+
+        // Truncate the cache to the prefix. seq_id = 0 because the
+        // wrapper's batch.seq_id[..][0] = 0 path uses a single sequence;
+        // when we add multi-sequence support the seq_id needs to flow
+        // through prepare too.
+        sys::llama_kv_cache_seq_rm(context, 0, prefix_len);
+        let tail = new_tokens[prefix_len..].to_vec();
+        state.cached_tokens = new_tokens.to_vec();
+        state.last_prefix_hit = Some(prefix_len);
+        Ok((tail, prefix_len))
+    }
+}
+
+/// Longest-common-prefix length between the cached tokens and the new
+/// prompt tokens, capped at `new_tokens.len() - 1` so the post-prefill
+/// batch always has at least one token to feed the C decoder.
+///
+/// Pulled out so the LCP arithmetic is unit-testable without needing a
+/// real `LlamaContext`. Behaviour:
+/// - empty `new_tokens` ⇒ 0 (caller should bail before reaching the helper)
+/// - empty `cached` ⇒ 0 (first call)
+/// - identical sequences ⇒ `new_tokens.len() - 1` (keep last token for the C decoder)
+/// - common prefix shorter than either ⇒ that prefix length
+#[cfg(feature = "llm-llamacpp")]
+fn compute_reusable_prefix_len(cached: &[i32], new_tokens: &[i32]) -> usize {
+    let max_reuse = new_tokens.len().saturating_sub(1);
+    cached
+        .iter()
+        .zip(new_tokens.iter())
+        .take(max_reuse)
+        .take_while(|(a, b)| a == b)
+        .count()
 }
 
 #[cfg(feature = "llm-llamacpp")]
@@ -244,6 +359,10 @@ impl LlmBackend for LlamaCppBackend {
         let _ = self.context.get_mut().unwrap().take();
         let _ = self.model.take();
         self.config = None;
+        // Reset KV cache reuse state — the next load gets a fresh cache,
+        // so any cached prefix from a prior model would be a use-after-free
+        // waiting to happen.
+        *self.kv_state.get_mut().unwrap() = KvCacheState::default();
         Ok(())
     }
 
@@ -253,10 +372,6 @@ impl LlmBackend for LlamaCppBackend {
         config: &GenerationConfig,
     ) -> LlmResult<GenerationOutput> {
         self.with_model_and_context(|model, context| {
-            // Clear KV cache to reset context state for new conversation
-            // This is essential when reusing the context across multiple queries
-            sys::llama_kv_cache_clear(context);
-
             // Format messages into prompt using chat template
             let prompt = sys::llama_format_chat(model, messages)?;
 
@@ -276,16 +391,38 @@ impl LlmBackend for LlamaCppBackend {
                 )));
             }
 
+            // Multi-turn KV cache reuse: keep the prefix the previous call
+            // already prefilled, only re-prefill the diverged tail. On a
+            // first turn (or no shared prefix) `tail == tokens` and
+            // `n_past == 0` — same observable behaviour as the legacy
+            // unconditional clear, just without the duplicate work in
+            // multi-turn chats.
+            let (tail, n_past) =
+                self.prepare_kv_cache_and_get_tail(context, &tokens, config.max_tokens)?;
+
             // Per-chunk timestamps capture the streaming cadence for TTFT +
             // inter-token-latency telemetry. The closure is observation-only
             // (no external emission) — generation still returns the full
             // token vector like `llama_generate_with_stops` did. Keeps the
             // non-streaming contract of this function intact.
-            let mut tel = StreamingTelemetry::new(tokens.len());
+            // Capture prompt size up-front so we can attach `tokens_in` to
+            // the active span after the loop. The executor opens
+            // `llm_inference_streaming` around this call, so this metadata
+            // lands on the same span as the rest of the LLM telemetry that
+            // `mirror_llm_metrics_to_span` writes post-return.
+            let prompt_token_count = tokens.len();
+            // Surface prompt size on the active span BEFORE the streaming
+            // loop, so cloud-fallback aborts (which short-circuit before
+            // tel.finalize runs) still attach tokens_in to LocalAborted.
+            // Without this the dashboard's TOKENS column shows `—` for the
+            // local leg of every aborted run. Successful runs harmlessly
+            // overwrite this with the same value after finalize.
+            xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
+            let mut tel = StreamingTelemetry::new(prompt_token_count);
             let (output_tokens, stopped_by_callback) = sys::llama_generate_streaming(
                 context,
                 model,
-                &tokens,
+                &tail,
                 config.max_tokens,
                 config.temperature,
                 config.top_p,
@@ -297,6 +434,7 @@ impl LlmBackend for LlamaCppBackend {
                     tel.record_chunk();
                     Ok(())
                 },
+                n_past,
             )?;
 
             // Finalize telemetry before the post-processing work below so
@@ -368,8 +506,6 @@ impl LlmBackend for LlamaCppBackend {
 
     fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput> {
         self.with_model_and_context(|model, context| {
-            sys::llama_kv_cache_clear(context);
-
             // Tokenize with parse_special=true so boundary tokens like
             // <|SPEECH_GENERATION_START|>, <|TEXT_PROMPT_START|>, <|im_start|>, etc.
             // collapse to single vocab IDs instead of 8-10 subword pieces each.
@@ -386,15 +522,31 @@ impl LlmBackend for LlamaCppBackend {
                 )));
             }
 
+            // Multi-turn KV cache reuse: see prepare_kv_cache_and_get_tail
+            // for the LCP + truncate-or-clear contract. raw-prompt callers
+            // (TTS codec preludes etc.) typically don't share prefixes
+            // across calls so the LCP path will mostly clear-and-refill,
+            // but the unified helper keeps behaviour consistent.
+            let (tail, n_past) =
+                self.prepare_kv_cache_and_get_tail(context, &tokens, config.max_tokens)?;
+
             // Use the streaming-capable API with an observation-only
             // callback so raw generation gets the same TTFT / ITL /
             // decode-tps telemetry as `generate()`. Stop handling stays
             // raw — only user-supplied sequences, no chat markers.
-            let mut tel = StreamingTelemetry::new(tokens.len());
+            let prompt_token_count = tokens.len();
+            // Surface prompt size on the active span BEFORE the streaming
+            // loop, so cloud-fallback aborts (which short-circuit before
+            // tel.finalize runs) still attach tokens_in to LocalAborted.
+            // Without this the dashboard's TOKENS column shows `—` for the
+            // local leg of every aborted run. Successful runs harmlessly
+            // overwrite this with the same value after finalize.
+            xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
+            let mut tel = StreamingTelemetry::new(prompt_token_count);
             let (output_tokens, stopped_by_callback) = sys::llama_generate_streaming(
                 context,
                 model,
-                &tokens,
+                &tail,
                 config.max_tokens,
                 config.temperature,
                 config.top_p,
@@ -406,6 +558,7 @@ impl LlmBackend for LlamaCppBackend {
                     tel.record_chunk();
                     Ok(())
                 },
+                n_past,
             )?;
             let fields = tel.finalize(output_tokens.len());
 
@@ -445,9 +598,6 @@ impl LlmBackend for LlamaCppBackend {
         let mut on_token = on_token;
 
         self.with_model_and_context(|model, context| {
-            // Clear KV cache to reset context state for new conversation
-            sys::llama_kv_cache_clear(context);
-
             // Format messages into prompt using chat template
             let prompt = sys::llama_format_chat(model, messages)?;
 
@@ -465,6 +615,12 @@ impl LlmBackend for LlamaCppBackend {
                 )));
             }
 
+            // Multi-turn KV cache reuse: keep the prefix the previous call
+            // already prefilled, only re-prefill the diverged tail. See
+            // prepare_kv_cache_and_get_tail for the full contract.
+            let (tail, n_past) =
+                self.prepare_kv_cache_and_get_tail(context, &tokens, config.max_tokens)?;
+
             // Shared streaming state: telemetry recorder + text filter.
             // The filter owns cumulative text, think-block state, stop-pattern
             // detection, and safe-prefix buffering — this backend just feeds
@@ -476,7 +632,15 @@ impl LlmBackend for LlamaCppBackend {
             // `_BROKEN` variants are intentionally excluded from streaming
             // (they false-positive on legitimate text) — they only run in
             // the final cleanup pass below.
-            let mut tel = StreamingTelemetry::new(tokens.len());
+            let prompt_token_count = tokens.len();
+            // Surface prompt size on the active span BEFORE the streaming
+            // loop, so cloud-fallback aborts (which short-circuit before
+            // tel.finalize runs) still attach tokens_in to LocalAborted.
+            // Without this the dashboard's TOKENS column shows `—` for the
+            // local leg of every aborted run. Successful runs harmlessly
+            // overwrite this with the same value after finalize.
+            xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
+            let mut tel = StreamingTelemetry::new(prompt_token_count);
             let stop_patterns = merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let mut filter = StreamingTextFilter::new(stop_patterns.clone());
             let mut token_index = 0usize;
@@ -484,7 +648,7 @@ impl LlmBackend for LlamaCppBackend {
             let (output_tokens, stopped_by_callback) = sys::llama_generate_streaming(
                 context,
                 model,
-                &tokens,
+                &tail,
                 config.max_tokens,
                 config.temperature,
                 config.top_p,
@@ -511,6 +675,7 @@ impl LlmBackend for LlamaCppBackend {
 
                     Ok(())
                 },
+                n_past,
             )?;
 
             // Finalize telemetry before post-processing so `generation_time_ms`
@@ -584,6 +749,15 @@ impl LlmBackend for LlamaCppBackend {
     fn context_length(&self) -> Option<usize> {
         self.config.as_ref().map(|c| c.context_length)
     }
+
+    /// Surface the prefix length the most recent `generate*` reused from
+    /// the persisted KV cache. `Some(0)` on a first turn or a totally
+    /// divergent prompt, `None` only before any `generate*` has run.
+    /// Telemetry hoists this as `prompt_cached_tokens` on inference
+    /// events when the value is positive.
+    fn last_cached_prefix_len(&self) -> Option<usize> {
+        self.kv_state.lock().ok().and_then(|s| s.last_prefix_hit)
+    }
 }
 
 // =============================================================================
@@ -644,5 +818,66 @@ impl LlmBackend for LlamaCppBackend {
         Err(AdapterError::RuntimeError(
             "llm-llamacpp feature not enabled".to_string(),
         ))
+    }
+}
+
+#[cfg(all(test, feature = "llm-llamacpp"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lcp_empty_inputs_return_zero() {
+        // First-call shape: nothing cached yet. The KV cache is empty so
+        // there's nothing to reuse; caller falls back to a full prefill.
+        assert_eq!(compute_reusable_prefix_len(&[], &[1, 2, 3]), 0);
+        // Defensive: an empty new prompt would be rejected by the caller
+        // before reaching here, but the helper must not panic on it.
+        assert_eq!(compute_reusable_prefix_len(&[1, 2, 3], &[]), 0);
+        assert_eq!(compute_reusable_prefix_len(&[], &[]), 0);
+    }
+
+    #[test]
+    fn lcp_identical_prompts_keep_one_token_for_decoder() {
+        // Multi-turn replay of the exact same prompt. We could in
+        // principle reuse the entire cache, but the C wrapper rejects
+        // an empty input slice, so the helper caps reuse at len-1 to
+        // guarantee one fresh token feeds the decode loop.
+        let same = vec![10, 20, 30, 40];
+        assert_eq!(compute_reusable_prefix_len(&same, &same), 3);
+    }
+
+    #[test]
+    fn lcp_partial_match_returns_shared_length() {
+        // Typical multi-turn shape: shared system prompt + earlier turns,
+        // diverging at the new user turn. The shared prefix is the part
+        // worth keeping in the cache.
+        let cached = vec![1, 2, 3, 4, 99, 99];
+        let new = vec![1, 2, 3, 4, 50, 60, 70];
+        assert_eq!(compute_reusable_prefix_len(&cached, &new), 4);
+    }
+
+    #[test]
+    fn lcp_no_overlap_returns_zero() {
+        // Totally divergent prompts (e.g. user starts a new conversation
+        // without clearing context). The caller will full-clear the cache
+        // when this returns 0.
+        assert_eq!(compute_reusable_prefix_len(&[1, 2, 3], &[9, 8, 7]), 0);
+    }
+
+    #[test]
+    fn lcp_caps_at_new_tokens_minus_one() {
+        // Cached is longer than the new prompt and shares it entirely.
+        // We still cap at len-1 so the decoder gets a fresh token to
+        // process — otherwise the C wrapper bails on empty input.
+        let cached = vec![1, 2, 3, 4, 5, 6];
+        let new = vec![1, 2, 3];
+        assert_eq!(compute_reusable_prefix_len(&cached, &new), 2);
+    }
+
+    #[test]
+    fn lcp_single_token_new_prompt_returns_zero() {
+        // Edge case: new prompt is one token long (rare but possible —
+        // think test fixtures). max_reuse = 0 ⇒ we always re-prefill.
+        assert_eq!(compute_reusable_prefix_len(&[1, 2, 3], &[1]), 0);
     }
 }

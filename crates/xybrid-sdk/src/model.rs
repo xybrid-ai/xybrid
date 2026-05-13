@@ -8,12 +8,13 @@
 
 use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
+use crate::run_options::{check_abort_for_streaming, AbortState, CancellationToken, RunOptions};
 use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, RwLock};
-use std::time::Instant;
+use std::sync::{Arc, OnceLock, RwLock};
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use tokio_stream::wrappers::ReceiverStream;
 use xybrid_core::conversation::ConversationContext;
@@ -21,6 +22,10 @@ use xybrid_core::execution::{
     ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
 };
 use xybrid_core::ir::Envelope;
+use xybrid_core::orchestrator::authority::{
+    ExecutionOutcome, LocalAuthority, OrchestrationAuthority, OutcomeCategory, PolicyOutcome,
+    PolicyRequest, ResolvedTarget, SignalContext,
+};
 use xybrid_core::runtime_adapter::types::GenerationConfig;
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
 
@@ -69,6 +74,15 @@ pub enum SdkError {
     LoadError(String),
     #[error("Inference failed: {0}")]
     InferenceError(String),
+    /// Local streaming aborted under resource pressure with the caller's
+    /// permission to retry on cloud (`AbortPolicy::fallback_to_cloud`).
+    /// `run_streaming_with_fallback` catches this variant; lower-level
+    /// streaming entry points (e.g. `run_streaming_with_options`) propagate
+    /// it so callers can choose their own retry strategy.
+    #[error("Aborted for cloud fallback: {reason}")]
+    AbortedForCloudFallback {
+        reason: xybrid_core::abort::AbortReason,
+    },
     #[error("Streaming not supported by this model")]
     StreamingNotSupported,
     #[error("Model not loaded")]
@@ -120,6 +134,9 @@ impl xybrid_core::http::RetryableError for SdkError {
             SdkError::MetadataInvalid(_) => false,
             SdkError::LoadError(_) => false,
             SdkError::InferenceError(_) => false,
+            // Resource-driven abort is not retryable on the same path; the
+            // wrapper redirects to cloud instead.
+            SdkError::AbortedForCloudFallback { .. } => false,
             SdkError::StreamingNotSupported => false,
             SdkError::NotLoaded => false,
             SdkError::ConfigError(_) => false,
@@ -137,6 +154,377 @@ impl xybrid_core::http::RetryableError for SdkError {
             }
             _ => None,
         }
+    }
+}
+
+fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
+    match error {
+        xybrid_core::runtime_adapter::AdapterError::AbortedForCloudFallback { reason } => {
+            SdkError::AbortedForCloudFallback { reason }
+        }
+        other => SdkError::InferenceError(format!("Streaming execution failed: {}", other)),
+    }
+}
+
+fn streaming_callback_error(error: Box<dyn std::error::Error + Send + Sync>) -> SdkError {
+    if let Some(reason) = xybrid_core::abort::cloud_fallback_reason_from_error(error.as_ref()) {
+        return SdkError::AbortedForCloudFallback { reason };
+    }
+    SdkError::InferenceError(format!("Streaming callback failed: {}", error))
+}
+
+fn streaming_pre_run_abort_error(
+    reason: crate::run_options::AbortReason,
+    fallback_to_cloud: bool,
+) -> SdkError {
+    if fallback_to_cloud && !matches!(reason, crate::run_options::AbortReason::UserCancelled) {
+        return SdkError::AbortedForCloudFallback {
+            reason: reason.to_core_abort_reason(),
+        };
+    }
+    SdkError::InferenceError(format!("Execution aborted: {reason}"))
+}
+
+/// Information about a local→cloud handoff "seam" surfaced by
+/// [`XybridModel::run_streaming_with_fallback`].
+///
+/// The wrapper invokes the caller's `on_seam` once when a local stream
+/// aborts under resource pressure and the run is about to continue on
+/// cloud. Callers use this to render UX cues ("switching to cloud…") or
+/// reconcile telemetry against the same `correlation_id`.
+#[derive(Debug, Clone)]
+pub struct SeamInfo {
+    /// Why the local run aborted.
+    pub reason: xybrid_core::abort::AbortReason,
+    /// Correlation id linking the local-aborted and cloud-retry telemetry events.
+    pub correlation_id: String,
+    /// Number of `PartialToken`s the local leg emitted before aborting.
+    pub local_tokens: u32,
+    /// Wall-clock latency of the local leg, in milliseconds.
+    pub local_latency_ms: u32,
+}
+
+const FALLBACK_POLICY_RESOURCE_MAX_AGE: Duration = Duration::from_millis(500);
+
+static FALLBACK_AUTHORITY: OnceLock<LocalAuthority> = OnceLock::new();
+
+fn fallback_authority() -> &'static dyn OrchestrationAuthority {
+    FALLBACK_AUTHORITY.get_or_init(LocalAuthority::new)
+}
+
+fn fallback_policy_metrics(options: &RunOptions) -> xybrid_core::context::DeviceMetrics {
+    let snapshot = options
+        .resource_provider
+        .as_ref()
+        .map(|provider| provider.current_snapshot(FALLBACK_POLICY_RESOURCE_MAX_AGE))
+        .unwrap_or_else(|| {
+            xybrid_core::device::ResourceMonitor::global()
+                .current_snapshot(FALLBACK_POLICY_RESOURCE_MAX_AGE)
+        });
+    // Prefer caller-supplied DeviceMetrics so RTT- and battery-based deny
+    // rules in the policy engine see real values. `with_live_snapshot` then
+    // overlays the freshly sampled resource snapshot on top — best of both
+    // worlds. Falls back to `DeviceMetrics::default()` when the caller has
+    // no device adapter wired (the historical behaviour).
+    let base = options.device_metrics.clone().unwrap_or_default();
+    base.with_live_snapshot(snapshot)
+}
+
+fn cloud_target(provider: Option<&str>) -> ResolvedTarget {
+    ResolvedTarget::Cloud {
+        provider: provider.unwrap_or("xybrid").to_string(),
+    }
+}
+
+fn record_local_abort_outcome(
+    authority: &dyn OrchestrationAuthority,
+    model_id: &str,
+    reason: xybrid_core::abort::AbortReason,
+    latency_ms: u32,
+    signal_context: Option<SignalContext>,
+) {
+    authority.record_outcome(&ExecutionOutcome {
+        stage_id: model_id.to_string(),
+        target: ResolvedTarget::Device,
+        latency_ms: latency_ms as u64,
+        success: false,
+        error: Some(reason.as_str().to_string()),
+        category: Some(OutcomeCategory::AbortedForCloudFallback { reason }),
+        model_id: Some(model_id.to_string()),
+        signal_context,
+    });
+}
+
+fn record_cloud_outcome(
+    authority: &dyn OrchestrationAuthority,
+    model_id: &str,
+    provider: Option<&str>,
+    latency_ms: u32,
+    success: bool,
+    error: Option<String>,
+    category: OutcomeCategory,
+    signal_context: Option<SignalContext>,
+) {
+    authority.record_outcome(&ExecutionOutcome {
+        stage_id: model_id.to_string(),
+        target: cloud_target(provider),
+        latency_ms: latency_ms as u64,
+        success,
+        error,
+        category: Some(category),
+        model_id: Some(model_id.to_string()),
+        signal_context,
+    });
+}
+
+/// Inspect the local-leg result and, on a typed cloud-fallback abort, fire
+/// `on_seam`, retry on the cloud adapter, and return the cloud
+/// [`InferenceResult`]. On any other shape the original result is returned
+/// unchanged.
+///
+/// `cancellation_token`, when set, makes the cloud retry leg honour
+/// caller-driven cancellation. The cloud leg cannot meaningfully react to
+/// resource pressure on the device, so only `UserCancelled` is consulted —
+/// matching the local leg's contract.
+///
+/// Lives as a free function so unit tests can drive it directly without
+/// constructing a real [`XybridModel`].
+#[allow(clippy::too_many_arguments)]
+fn dispatch_after_local<F, S>(
+    local_result: SdkResult<InferenceResult>,
+    envelope: &Envelope,
+    cloud_adapter: &dyn xybrid_core::runtime_adapter::CloudStreaming,
+    correlation_id: String,
+    model_id: &str,
+    local_tokens: u32,
+    local_latency_ms: u32,
+    authority: &dyn OrchestrationAuthority,
+    policy_metrics: xybrid_core::context::DeviceMetrics,
+    signal_context: Option<SignalContext>,
+    cancellation_token: Option<CancellationToken>,
+    on_token: &mut F,
+    on_seam: &mut S,
+) -> SdkResult<InferenceResult>
+where
+    F: FnMut(
+            xybrid_core::runtime_adapter::types::PartialToken,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+        + Send,
+    S: FnMut(SeamInfo) + Send,
+{
+    match local_result {
+        Ok(result) => Ok(result),
+        Err(SdkError::AbortedForCloudFallback { reason }) => {
+            // Emit `LocalAborted` before the user's `on_seam` callback fires so
+            // the audit trail exists even if the caller's seam handler panics.
+            crate::telemetry::publish_local_aborted(
+                &correlation_id,
+                model_id,
+                reason,
+                local_latency_ms,
+                local_tokens,
+            );
+            record_local_abort_outcome(
+                authority,
+                model_id,
+                reason,
+                local_latency_ms,
+                signal_context,
+            );
+
+            let seam = SeamInfo {
+                reason,
+                correlation_id: correlation_id.clone(),
+                local_tokens,
+                local_latency_ms,
+            };
+            on_seam(seam);
+
+            if cancellation_token
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Err(SdkError::InferenceError(format!(
+                    "Execution aborted: {}",
+                    crate::run_options::AbortReason::UserCancelled
+                )));
+            }
+
+            // FR-6: reuse the original prompt; no partial-token reuse.
+            let cloud_envelope = envelope.clone();
+            let cloud_provider = cloud_envelope.metadata.get("provider").cloned();
+            // The cloud leg almost always runs a different model than the
+            // local leg (e.g. local `qwen2.5-0.5b-instruct` falling back to
+            // cloud `deepseek-chat`). The dashboard reads `model_id` off
+            // the published event, so passing the local `model_id` through
+            // to the cloud event makes the trace lie about which model
+            // actually produced the cloud tokens. Pull the cloud model from
+            // the envelope's `model` metadata (the same field the gateway
+            // dispatches on) and fall back to the local id only when the
+            // caller didn't set one — in that case the dispatch would have
+            // failed at the gateway anyway, so the local id is a fine
+            // last-resort label.
+            let cloud_model_id = cloud_envelope
+                .metadata
+                .get("model")
+                .map(|s| s.as_str())
+                .unwrap_or(model_id);
+            let policy_decision = authority.apply_policy(&PolicyRequest {
+                stage_id: cloud_model_id.to_string(),
+                envelope: cloud_envelope.clone(),
+                metrics: policy_metrics,
+            });
+            match policy_decision.result {
+                PolicyOutcome::Allow => {}
+                PolicyOutcome::Deny {
+                    reason: policy_reason,
+                } => {
+                    crate::telemetry::publish_cloud_denied_by_policy(
+                        &correlation_id,
+                        cloud_model_id,
+                        reason,
+                        &policy_reason,
+                        local_latency_ms,
+                    );
+                    record_cloud_outcome(
+                        authority,
+                        cloud_model_id,
+                        cloud_provider.as_deref(),
+                        0,
+                        false,
+                        Some(format!("cloud_denied_by_policy: {}", policy_reason)),
+                        OutcomeCategory::HardFail {
+                            reason: "cloud_denied_by_policy".to_string(),
+                        },
+                        signal_context,
+                    );
+                    return Err(SdkError::InferenceError(format!(
+                        "cloud_denied_by_policy: {}",
+                        policy_reason
+                    )));
+                }
+                PolicyOutcome::Transform { transforms } => {
+                    // Defensive hard-fail: the orchestrator path applies
+                    // PolicyEngine::redact when this variant fires, but the
+                    // SDK fallback path does not yet plumb a redact seam.
+                    // Treating Transform as Allow would silently dispatch
+                    // the un-redacted envelope to cloud — a privacy
+                    // regression the orchestrator path explicitly avoids.
+                    // Fail closed until the redact seam is wired in.
+                    let policy_reason =
+                        format!("transforms_unsupported_in_fallback: {:?}", transforms);
+                    crate::telemetry::publish_cloud_denied_by_policy(
+                        &correlation_id,
+                        cloud_model_id,
+                        reason,
+                        &policy_reason,
+                        local_latency_ms,
+                    );
+                    record_cloud_outcome(
+                        authority,
+                        cloud_model_id,
+                        cloud_provider.as_deref(),
+                        0,
+                        false,
+                        Some(format!("cloud_denied_by_policy: {}", policy_reason)),
+                        OutcomeCategory::HardFail {
+                            reason: "cloud_denied_by_policy".to_string(),
+                        },
+                        signal_context,
+                    );
+                    return Err(SdkError::InferenceError(format!(
+                        "cloud_denied_by_policy: {}",
+                        policy_reason
+                    )));
+                }
+            }
+
+            let cloud_start = Instant::now();
+            let cloud_tokens = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+            let cloud_tokens_for_cb = cloud_tokens.clone();
+            let cancellation_for_cb = cancellation_token.clone();
+            let cloud_callback: xybrid_core::runtime_adapter::types::StreamingCallback<'_> =
+                Box::new(move |token| {
+                    // Honour user cancellation across the local→cloud seam.
+                    // Resource-pressure signals are not consulted: the device's
+                    // CPU/memory state says nothing about a cloud round-trip's
+                    // viability, and treating it as a cloud-leg abort would
+                    // surface CloudFallbackAbort errors at the wrong layer.
+                    if let Some(token_handle) = cancellation_for_cb.as_ref() {
+                        if token_handle.is_cancelled() {
+                            return Err(Box::new(crate::run_options::AbortReason::UserCancelled)
+                                as Box<dyn std::error::Error + Send + Sync>);
+                        }
+                    }
+                    cloud_tokens_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    on_token(token)
+                });
+            // Match instead of `?` so we publish a `CloudRetry` event on
+            // BOTH branches. Without this the audit trail loses any record
+            // that cloud was even attempted when the cloud leg fails (auth
+            // misconfiguration, gateway 5xx, network partition, etc.) —
+            // the trace would just stop after `LocalAborted` and the
+            // dashboard would show no cloud activity at all.
+            let cloud_result = cloud_adapter.execute_streaming(&cloud_envelope, cloud_callback);
+            let cloud_latency_ms = cloud_start.elapsed().as_millis() as u32;
+            let cloud_token_count = cloud_tokens.load(std::sync::atomic::Ordering::SeqCst);
+
+            match cloud_result {
+                Ok(cloud_output) => {
+                    crate::telemetry::publish_cloud_retry(
+                        &correlation_id,
+                        cloud_model_id,
+                        cloud_provider.as_deref(),
+                        cloud_latency_ms,
+                        cloud_token_count,
+                        None,
+                    );
+                    record_cloud_outcome(
+                        authority,
+                        cloud_model_id,
+                        cloud_provider.as_deref(),
+                        cloud_latency_ms,
+                        true,
+                        None,
+                        OutcomeCategory::Success,
+                        signal_context,
+                    );
+                    let total_latency_ms = local_latency_ms.saturating_add(cloud_latency_ms);
+                    Ok(InferenceResult::new(
+                        cloud_output,
+                        cloud_model_id,
+                        total_latency_ms,
+                    ))
+                }
+                Err(adapter_err) => {
+                    let error_message = adapter_err.to_string();
+                    let telemetry_error =
+                        crate::telemetry::redact_error_for_telemetry(&error_message);
+                    crate::telemetry::publish_cloud_retry(
+                        &correlation_id,
+                        cloud_model_id,
+                        cloud_provider.as_deref(),
+                        cloud_latency_ms,
+                        cloud_token_count,
+                        Some(&error_message),
+                    );
+                    record_cloud_outcome(
+                        authority,
+                        cloud_model_id,
+                        cloud_provider.as_deref(),
+                        cloud_latency_ms,
+                        false,
+                        Some(telemetry_error.clone()),
+                        OutcomeCategory::HardFail {
+                            reason: telemetry_error,
+                        },
+                        signal_context,
+                    );
+                    Err(streaming_execution_error(adapter_err))
+                }
+            }
+        }
+        Err(other) => Err(other),
     }
 }
 
@@ -1315,6 +1703,15 @@ impl XybridModel {
         // `publish_with_resource_summary` at the end of this function.
         let resource_guard = crate::telemetry::begin_resource_run();
 
+        // Install a per-call trace_id for the lifetime of this run. Any
+        // telemetry events emitted between install and `Drop` (including
+        // any deferred adapter events) share the same `trace_id`, so the
+        // dashboard collapses them to a single Traces row. Same
+        // discipline `run_with_context` uses; see `docs/sdk/trace-model.md`.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
         // Recover from poisoned RwLock to prevent permanent lock errors
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -1353,7 +1750,23 @@ impl XybridModel {
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
+        // `_telemetry_ctx` drops here, clearing the pipeline context after
+        // the publish — same ordering as `run_with_context`.
+
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+    }
+
+    /// Run batch inference with per-run controls.
+    pub fn run_with_options(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+    ) -> SdkResult<InferenceResult> {
+        let mut abort_state = AbortState::new(options);
+        abort_state
+            .check_before_run()
+            .map_err(|reason| SdkError::InferenceError(format!("Execution aborted: {reason}")))?;
+        self.run(envelope, options.generation_config.as_ref())
     }
 
     /// Run inference with conversation context.
@@ -1404,6 +1817,16 @@ impl XybridModel {
         let start = Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
 
+        // Install a turn-scoped trace_id for the lifetime of this call.
+        // The guard's `Drop` clears the pipeline context on every exit —
+        // including the `?` error paths and panics below — so every
+        // telemetry event emitted between install and drop shares the
+        // same `trace_id` and the dashboard collapses the turn to one
+        // Traces row. Same discipline `Pipeline::run` uses for stages.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
         // Recover from poisoned RwLock to prevent permanent lock errors
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -1443,7 +1866,24 @@ impl XybridModel {
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
+        // `_telemetry_ctx` drops here (and on every early return / unwind
+        // above), clearing the pipeline context after the publish.
+
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+    }
+
+    /// Run inference with conversation context and per-run controls.
+    pub fn run_with_context_options(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+        options: &RunOptions,
+    ) -> SdkResult<InferenceResult> {
+        let mut abort_state = AbortState::new(options);
+        abort_state
+            .check_before_run()
+            .map_err(|reason| SdkError::InferenceError(format!("Execution aborted: {reason}")))?;
+        self.run_with_context(envelope, context, options.generation_config.as_ref())
     }
 
     /// Run streaming inference with conversation context.
@@ -1498,6 +1938,13 @@ impl XybridModel {
 
         let start = Instant::now();
 
+        // RAII pipeline context — see `run_with_context` for rationale.
+        // Cleared on drop at end of scope (after publish) or on any
+        // early return / unwind below.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
         // Get write lock on handle
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -1522,9 +1969,7 @@ impl XybridModel {
                     Box::new(&mut on_token),
                     config,
                 )
-                .map_err(|e| {
-                    SdkError::InferenceError(format!("Streaming execution failed: {}", e))
-                })?
+                .map_err(streaming_execution_error)?
         } else {
             // For non-LLM models: run with context and emit single "token" with full result
             let result = handle
@@ -1541,7 +1986,7 @@ impl XybridModel {
                     cumulative_text: text.clone(),
                     finish_reason: Some("stop".to_string()),
                 };
-                let _ = on_token(token);
+                on_token(token).map_err(streaming_callback_error)?;
             }
 
             result
@@ -1573,7 +2018,46 @@ impl XybridModel {
         };
         crate::telemetry::publish_telemetry_event(event);
 
+        // `_telemetry_ctx` drops here, clearing pipeline context after
+        // the publish — same ordering as before.
+
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+    }
+
+    /// Run streaming inference with conversation context and per-token abort checks.
+    pub fn run_streaming_with_context_options<F>(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+        options: &RunOptions,
+        mut on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        let mut abort_state = AbortState::new(options);
+        // Honour pre-run cancellation so a `token.cancel()` issued before
+        // invocation aborts immediately rather than running the full batch
+        // (or model load + prompt fill on streaming models) before the first
+        // token boundary checks the abort state.
+        let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
+        abort_state
+            .check_before_run()
+            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
+        self.run_streaming_with_context(
+            envelope,
+            context,
+            options.generation_config.as_ref(),
+            move |token| {
+                if let Err(reason) = abort_state.check_before_token() {
+                    return Err(reason.into_streaming_error(fallback_to_cloud));
+                }
+                on_token(token)
+            },
+        )
     }
 
     /// Run inference with streaming output.
@@ -1622,6 +2106,12 @@ impl XybridModel {
 
         let start = Instant::now();
 
+        // Per-call trace_id scope — see `run` for rationale. Cleared on
+        // drop at end of scope (after publish) or on any early return.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
         // Get write lock on handle
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -1640,9 +2130,7 @@ impl XybridModel {
             handle
                 .executor
                 .execute_streaming(&metadata, envelope, Box::new(&mut on_token), config)
-                .map_err(|e| {
-                    SdkError::InferenceError(format!("Streaming execution failed: {}", e))
-                })?
+                .map_err(streaming_execution_error)?
         } else {
             // For non-LLM models: run batch and emit single "token" with full result
             let result = handle
@@ -1659,7 +2147,7 @@ impl XybridModel {
                     cumulative_text: text.clone(),
                     finish_reason: Some("stop".to_string()),
                 };
-                let _ = on_token(token); // Ignore callback errors for non-streaming
+                on_token(token).map_err(streaming_callback_error)?;
             }
 
             result
@@ -1691,6 +2179,148 @@ impl XybridModel {
         crate::telemetry::publish_telemetry_event(event);
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+    }
+
+    /// Run streaming inference with per-token abort checks.
+    pub fn run_streaming_with_options<F>(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+        mut on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        // Capture supports_streaming before the closure takes ownership.
+        // The check_abort_for_streaming helper short-circuits when this is
+        // false so non-streaming models (batch executor + single synthetic
+        // token at the end) don't trigger cloud fallback after local
+        // inference already succeeded — see helper docs for the full
+        // privacy/cost rationale.
+        let supports_streaming = self.supports_streaming;
+        let mut abort_state = AbortState::new(options);
+        // Honour pre-run cancellation: without this, a non-streaming model
+        // whose `supports_streaming = false` would silently execute the full
+        // batch even when the cancellation token was set before invocation,
+        // because `check_abort_for_streaming` short-circuits in that case.
+        let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
+        abort_state
+            .check_before_run()
+            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
+        self.run_streaming(envelope, options.generation_config.as_ref(), move |token| {
+            check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)?;
+            on_token(token)
+        })
+    }
+
+    /// Run streaming inference with automatic cloud fallback on resource-driven
+    /// abort.
+    ///
+    /// On a healthy run this behaves identically to
+    /// [`Self::run_streaming_with_options`] — `on_token` fires once per local
+    /// token, `on_seam` is never invoked, and the returned [`InferenceResult`]
+    /// reflects the local execution.
+    ///
+    /// When the configured [`AbortPolicy`](crate::run_options::AbortPolicy)
+    /// trips mid-stream **and** the policy permits cloud fallback, the wrapper:
+    /// 1. Captures the local token count and elapsed latency.
+    /// 2. Fires `on_seam(SeamInfo { … })` with the abort reason and a
+    ///    shared `correlation_id`. Callers use this to render a UX cue.
+    /// 3. Records the local abort outcome and re-checks policy before cloud.
+    ///    If policy denies cloud, the wrapper emits `cloud_denied_by_policy`
+    ///    telemetry and returns an explicit error without retrying.
+    /// 4. Builds a fresh cloud envelope from the **original prompt** (no
+    ///    partial-token reuse) and calls
+    ///    [`CloudStreaming::execute_streaming`](xybrid_core::runtime_adapter::CloudStreaming::execute_streaming)
+    ///    on `cloud_adapter`.
+    /// 5. Routes cloud chunks through the same `on_token` so the user sees
+    ///    one continuous token stream.
+    /// 6. Records the cloud outcome and returns the cloud-leg
+    ///    [`InferenceResult`].
+    ///
+    /// On any other error (no abort policy fired, or `fallback_to_cloud` is
+    /// false), the original [`SdkError`] is returned unchanged.
+    ///
+    /// # Notes
+    ///
+    /// - The same `on_token` is invoked for both legs; the seam is observable
+    ///   via `on_seam`, not via the token stream itself.
+    /// - `correlation_id` is taken from `options.correlation_id` if set,
+    ///   otherwise generated via `uuid::Uuid::new_v4()`.
+    /// - The `envelope` must carry cloud-side routing metadata (`provider`,
+    ///   `model`, `system_prompt`, `temperature`, …) for the retry leg. See
+    ///   [`CloudRuntimeAdapter`](xybrid_core::runtime_adapter::CloudRuntimeAdapter)
+    ///   for supported keys.
+    /// - The wrapper is fully synchronous; cloud chunking is synthetic
+    ///   (see `CloudStreaming`).
+    /// - **Cancellation timing across the seam.** A cancel set on the
+    ///   `cancellation_token` *before* `execute_streaming` is invoked
+    ///   (including from inside `on_seam`) short-circuits before the cloud
+    ///   adapter is called — the prompt is never sent. A cancel that arrives
+    ///   *during* the blocking cloud round-trip is observed at the next
+    ///   synthetic-chunk boundary: the user-visible token stream is suppressed,
+    ///   but the prompt has already been transmitted and the provider may
+    ///   bill for it. Stopping the in-flight HTTP request itself requires
+    ///   adapter-level cancellation, which is not yet plumbed through
+    ///   [`CloudStreaming`](xybrid_core::runtime_adapter::CloudStreaming) (the
+    ///   current implementation uses a blocking `ureq` client). Treat the
+    ///   token as "responsive on the seam, best-effort during cloud."
+    pub fn run_streaming_with_fallback<F, S>(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+        cloud_adapter: &dyn xybrid_core::runtime_adapter::CloudStreaming,
+        on_token: &mut F,
+        on_seam: &mut S,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+        S: FnMut(SeamInfo) + Send,
+    {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+
+        let correlation_id = options
+            .correlation_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        let local_tokens = Arc::new(AtomicU32::new(0));
+        let local_start = Instant::now();
+
+        let local_result = {
+            let local_tokens = local_tokens.clone();
+            self.run_streaming_with_options(envelope, options, |token| {
+                local_tokens.fetch_add(1, Ordering::SeqCst);
+                on_token(token)
+            })
+        };
+
+        let local_latency_ms = local_start.elapsed().as_millis() as u32;
+        let policy_metrics = fallback_policy_metrics(options);
+        let signal_context = Some(SignalContext::from_metrics(&policy_metrics));
+
+        dispatch_after_local(
+            local_result,
+            envelope,
+            cloud_adapter,
+            correlation_id,
+            &self.model_id,
+            local_tokens.load(Ordering::SeqCst),
+            local_latency_ms,
+            fallback_authority(),
+            policy_metrics,
+            signal_context,
+            options.cancellation_token.clone(),
+            on_token,
+            on_seam,
+        )
     }
 
     /// Run inference returning a stream of events.
@@ -1740,6 +2370,13 @@ impl XybridModel {
             let result = tokio::task::spawn_blocking(move || {
                 let start = Instant::now();
 
+                // Per-call trace_id scope — see `run` for rationale. Lives
+                // inside the spawn_blocking closure so the install + drop
+                // happen on the same thread the publish runs on.
+                let trace_id = uuid::Uuid::new_v4();
+                let _telemetry_ctx =
+                    crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
                 // Get write lock on handle
                 let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -1778,9 +2415,7 @@ impl XybridModel {
                             }),
                             config.as_ref(),
                         )
-                        .map_err(|e| {
-                            SdkError::InferenceError(format!("Streaming execution failed: {}", e))
-                        })?
+                        .map_err(streaming_execution_error)?
                 } else {
                     // Non-LLM: batch execution, emit single token
                     let result = guard
@@ -1898,6 +2533,13 @@ impl XybridModel {
         tokio::task::spawn_blocking(move || {
             let start = Instant::now();
             let resource_guard = crate::telemetry::begin_resource_run();
+
+            // Per-call trace_id scope — see `run` for rationale. Cleared
+            // on drop at end of the spawn_blocking closure (after publish)
+            // or on any early return.
+            let trace_id = uuid::Uuid::new_v4();
+            let _telemetry_ctx =
+                crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
             // Recover from poisoned RwLock to prevent permanent lock errors
             let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
@@ -2027,6 +2669,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn streaming_execution_error_preserves_typed_cloud_fallback_abort() {
+        let error = streaming_execution_error(
+            xybrid_core::runtime_adapter::AdapterError::AbortedForCloudFallback {
+                reason: xybrid_core::abort::AbortReason::StressMemory,
+            },
+        );
+
+        match error {
+            SdkError::AbortedForCloudFallback { reason } => {
+                assert_eq!(reason, xybrid_core::abort::AbortReason::StressMemory);
+            }
+            other => panic!("expected AbortedForCloudFallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn streaming_callback_error_preserves_typed_cloud_fallback_abort() {
+        let error =
+            streaming_callback_error(Box::new(xybrid_core::abort::CloudFallbackAbort::new(
+                xybrid_core::abort::AbortReason::StressThermal,
+            )));
+
+        match error {
+            SdkError::AbortedForCloudFallback { reason } => {
+                assert_eq!(reason, xybrid_core::abort::AbortReason::StressThermal);
+            }
+            other => panic!("expected AbortedForCloudFallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn streaming_callback_error_keeps_non_fallback_abort_generic() {
+        let error =
+            streaming_callback_error(Box::new(crate::run_options::AbortReason::UserCancelled));
+
+        match error {
+            SdkError::InferenceError(message) => {
+                assert!(message.contains("Streaming callback failed"));
+                assert!(message.contains("user_cancelled"));
+            }
+            other => panic!("expected inference error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_model_loader_from_registry() {
         let loader = ModelLoader::from_registry("kokoro-82m");
         assert_eq!(loader.model_id(), Some("kokoro-82m"));
@@ -2063,5 +2750,651 @@ mod tests {
         assert!(config.enable_vad);
         assert_eq!(config.language, Some("fr".to_string()));
         assert_eq!(config.vad_threshold, 0.7);
+    }
+
+    // ========================================================================
+    // run_streaming_with_fallback / dispatch_after_local
+    //
+    // We test the testable inner helper `dispatch_after_local` directly so the
+    // fallback decision logic is covered without standing up a real model. The
+    // public wrapper is a thin shim over `run_streaming_with_options` plus this
+    // helper, so its behavior is derivable from these tests + the existing
+    // streaming-error tests above.
+    // ========================================================================
+
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+    use std::sync::Mutex;
+
+    /// Records calls and emits a fixed response as one or more synthetic tokens.
+    /// Used as a stand-in for `CloudRuntimeAdapter` in unit tests.
+    struct FakeCloudAdapter {
+        response_text: String,
+        calls: Mutex<Vec<xybrid_core::ir::Envelope>>,
+    }
+
+    impl FakeCloudAdapter {
+        fn new(response: &str) -> Self {
+            Self {
+                response_text: response.to_string(),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn call_count(&self) -> usize {
+            self.calls.lock().unwrap().len()
+        }
+    }
+
+    impl xybrid_core::runtime_adapter::CloudStreaming for FakeCloudAdapter {
+        fn execute_streaming(
+            &self,
+            input: &xybrid_core::ir::Envelope,
+            mut on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'_>,
+        ) -> xybrid_core::runtime_adapter::AdapterResult<xybrid_core::ir::Envelope> {
+            self.calls.lock().unwrap().push(input.clone());
+
+            let token = xybrid_core::runtime_adapter::types::PartialToken {
+                token: self.response_text.clone(),
+                token_id: None,
+                index: 0,
+                cumulative_text: self.response_text.clone(),
+                finish_reason: Some("stop".to_string()),
+            };
+            on_token(token).map_err(|e| {
+                xybrid_core::runtime_adapter::AdapterError::InferenceFailed(format!("{}", e))
+            })?;
+
+            Ok(xybrid_core::ir::Envelope::new(
+                xybrid_core::ir::EnvelopeKind::Text(self.response_text.clone()),
+            ))
+        }
+    }
+
+    #[derive(Debug)]
+    struct FixedUnitResourceProvider {
+        snapshot: xybrid_core::device::ResourceSnapshot,
+    }
+
+    impl FixedUnitResourceProvider {
+        fn new(snapshot: xybrid_core::device::ResourceSnapshot) -> Self {
+            Self { snapshot }
+        }
+    }
+
+    impl xybrid_core::device::ResourceSnapshotProvider for FixedUnitResourceProvider {
+        fn current_snapshot(
+            &self,
+            _max_age: std::time::Duration,
+        ) -> xybrid_core::device::ResourceSnapshot {
+            self.snapshot
+        }
+    }
+
+    fn text_envelope(text: &str) -> xybrid_core::ir::Envelope {
+        xybrid_core::ir::Envelope::new(xybrid_core::ir::EnvelopeKind::Text(text.to_string()))
+    }
+
+    fn test_loaded_model(supports_streaming: bool) -> XybridModel {
+        let metadata =
+            xybrid_core::execution::ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
+        XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: TemplateExecutor::default(),
+                metadata,
+                model_dir: PathBuf::from("."),
+                loaded: true,
+            })),
+            model_id: "local-test-model".to_string(),
+            version: "1.0".to_string(),
+            output_type: OutputType::Text,
+            supports_streaming,
+        }
+    }
+
+    fn default_metrics() -> xybrid_core::context::DeviceMetrics {
+        xybrid_core::context::DeviceMetrics::default()
+    }
+
+    fn default_signal() -> xybrid_core::orchestrator::authority::SignalContext {
+        xybrid_core::orchestrator::authority::SignalContext::from_metrics(&default_metrics())
+    }
+
+    struct FakeAuthority {
+        allow_policy: bool,
+        deny_reason: String,
+        outcomes: Mutex<Vec<xybrid_core::orchestrator::authority::ExecutionOutcome>>,
+    }
+
+    impl FakeAuthority {
+        fn allow() -> Self {
+            Self {
+                allow_policy: true,
+                deny_reason: String::new(),
+                outcomes: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn deny(reason: &str) -> Self {
+            Self {
+                allow_policy: false,
+                deny_reason: reason.to_string(),
+                outcomes: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn outcomes(&self) -> Vec<xybrid_core::orchestrator::authority::ExecutionOutcome> {
+            self.outcomes.lock().unwrap().clone()
+        }
+    }
+
+    impl xybrid_core::orchestrator::authority::OrchestrationAuthority for FakeAuthority {
+        fn apply_policy(
+            &self,
+            _request: &xybrid_core::orchestrator::authority::PolicyRequest,
+        ) -> xybrid_core::orchestrator::authority::AuthorityDecision<
+            xybrid_core::orchestrator::authority::PolicyOutcome,
+        > {
+            if self.allow_policy {
+                xybrid_core::orchestrator::authority::AuthorityDecision::local(
+                    xybrid_core::orchestrator::authority::PolicyOutcome::Allow,
+                    "policy allowed",
+                )
+            } else {
+                xybrid_core::orchestrator::authority::AuthorityDecision::local(
+                    xybrid_core::orchestrator::authority::PolicyOutcome::Deny {
+                        reason: self.deny_reason.clone(),
+                    },
+                    self.deny_reason.clone(),
+                )
+            }
+        }
+
+        fn resolve_target(
+            &self,
+            _context: &xybrid_core::orchestrator::authority::StageContext,
+        ) -> xybrid_core::orchestrator::authority::AuthorityDecision<
+            xybrid_core::orchestrator::authority::ResolvedTarget,
+        > {
+            xybrid_core::orchestrator::authority::AuthorityDecision::local(
+                xybrid_core::orchestrator::authority::ResolvedTarget::Device,
+                "test",
+            )
+        }
+
+        fn select_model(
+            &self,
+            request: &xybrid_core::orchestrator::authority::ModelRequest,
+        ) -> xybrid_core::orchestrator::authority::AuthorityDecision<
+            xybrid_core::orchestrator::authority::ModelSelection,
+        > {
+            xybrid_core::orchestrator::authority::AuthorityDecision::local(
+                xybrid_core::orchestrator::authority::ModelSelection {
+                    model_id: request.model_id.clone(),
+                    variant: None,
+                    source: xybrid_core::orchestrator::authority::ModelSource::Local {
+                        path: "test".to_string(),
+                    },
+                },
+                "test",
+            )
+        }
+
+        fn record_outcome(&self, outcome: &xybrid_core::orchestrator::authority::ExecutionOutcome) {
+            self.outcomes.lock().unwrap().push(outcome.clone());
+        }
+
+        fn name(&self) -> &str {
+            "fake"
+        }
+    }
+
+    #[test]
+    fn dispatch_after_local_retries_on_typed_abort_and_emits_seam() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("write me a haiku");
+        let collected: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_for_cb = collected.clone();
+        let mut on_token = move |t: xybrid_core::runtime_adapter::types::PartialToken| {
+            collected_for_cb.lock().unwrap().push(t.token);
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        let seam_count = Arc::new(AtomicUsize::new(0));
+        let seam_reason: Arc<Mutex<Option<xybrid_core::abort::AbortReason>>> =
+            Arc::new(Mutex::new(None));
+        let seam_count_for_cb = seam_count.clone();
+        let seam_reason_for_cb = seam_reason.clone();
+        let mut on_seam = move |s: SeamInfo| {
+            seam_count_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            *seam_reason_for_cb.lock().unwrap() = Some(s.reason);
+            assert_eq!(s.correlation_id, "corr-1");
+            assert_eq!(s.local_tokens, 3);
+            assert_eq!(s.local_latency_ms, 100);
+        };
+
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-1".to_string(),
+            "test-model",
+            3,
+            100,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("retry should succeed");
+
+        assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            *seam_reason.lock().unwrap(),
+            Some(xybrid_core::abort::AbortReason::StressMemory)
+        );
+        assert_eq!(cloud.call_count(), 1);
+        assert_eq!(result.text(), Some("hello from cloud"));
+        assert_eq!(result.model_id(), "test-model");
+        let tokens = collected.lock().unwrap().clone();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], "hello from cloud");
+    }
+
+    #[test]
+    fn run_streaming_with_fallback_retries_cloud_on_pre_run_resource_pressure() {
+        let model = test_loaded_model(true);
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let mut critical_snapshot = xybrid_core::device::ResourceSnapshot::unknown();
+        critical_snapshot.memory_pressure = xybrid_core::device::MemoryPressure::Critical;
+        let resource_provider = Arc::new(FixedUnitResourceProvider::new(critical_snapshot));
+        let options = RunOptions::new()
+            .with_abort_policy(
+                crate::run_options::AbortPolicy::default()
+                    .stop_on(crate::run_options::AbortSignal::MemoryPressureCritical)
+                    .with_cloud_fallback(true)
+                    .with_max_grace_tokens(0),
+            )
+            .with_resource_provider(resource_provider)
+            .with_correlation_id("corr-pre-run");
+        let envelope = text_envelope("write me a haiku");
+        let collected: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_for_cb = collected.clone();
+        let mut on_token = move |t: xybrid_core::runtime_adapter::types::PartialToken| {
+            collected_for_cb.lock().unwrap().push(t.token);
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        let seam_count = Arc::new(AtomicUsize::new(0));
+        let seam_count_for_cb = seam_count.clone();
+        let mut on_seam = move |s: SeamInfo| {
+            seam_count_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(s.reason, xybrid_core::abort::AbortReason::StressMemory);
+            assert_eq!(s.correlation_id, "corr-pre-run");
+            assert_eq!(s.local_tokens, 0);
+        };
+
+        let result = model
+            .run_streaming_with_fallback(&envelope, &options, &cloud, &mut on_token, &mut on_seam)
+            .expect("pre-run resource pressure should retry on cloud");
+
+        assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(cloud.call_count(), 1);
+        assert_eq!(result.text(), Some("hello from cloud"));
+        assert_eq!(collected.lock().unwrap().as_slice(), ["hello from cloud"]);
+    }
+
+    #[test]
+    fn dispatch_after_local_records_local_abort_and_cloud_success_outcomes() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("write a haiku");
+        envelope
+            .metadata
+            .insert("model".to_string(), "deepseek-chat".to_string());
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-record".to_string(),
+            "local-model",
+            7,
+            321,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("cloud retry should succeed");
+
+        let outcomes = authority.outcomes();
+        assert_eq!(outcomes.len(), 2);
+        assert!(matches!(
+            outcomes[0].category,
+            Some(
+                xybrid_core::orchestrator::authority::OutcomeCategory::AbortedForCloudFallback {
+                    reason: xybrid_core::abort::AbortReason::StressMemory
+                }
+            )
+        ));
+        assert!(matches!(
+            outcomes[0].target,
+            xybrid_core::orchestrator::authority::ResolvedTarget::Device
+        ));
+        assert!(matches!(
+            outcomes[1].category,
+            Some(xybrid_core::orchestrator::authority::OutcomeCategory::Success)
+        ));
+        assert!(matches!(
+            outcomes[1].target,
+            xybrid_core::orchestrator::authority::ResolvedTarget::Cloud { .. }
+        ));
+        assert_eq!(outcomes[1].model_id.as_deref(), Some("deepseek-chat"));
+    }
+
+    #[test]
+    fn dispatch_after_local_stops_before_cloud_when_cancelled_after_seam() {
+        let cloud = FakeCloudAdapter::new("must not run");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("prompt");
+        let cancellation = CancellationToken::new();
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let seam_count = Arc::new(AtomicUsize::new(0));
+        let seam_count_for_cb = seam_count.clone();
+        let cancellation_for_seam = cancellation.clone();
+        let mut on_seam = move |_s: SeamInfo| {
+            seam_count_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            cancellation_for_seam.cancel();
+        };
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-cancel-after-seam".to_string(),
+            "local-model",
+            0,
+            0,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            Some(cancellation),
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::InferenceError(message)) => assert!(message.contains("user_cancelled")),
+            other => panic!("expected user_cancelled error, got {other:?}"),
+        }
+        assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(cloud.call_count(), 0);
+        assert_eq!(authority.outcomes().len(), 1);
+    }
+
+    #[test]
+    fn dispatch_after_local_stops_when_cloud_policy_is_denied() {
+        let cloud = FakeCloudAdapter::new("should not run");
+        let authority = FakeAuthority::deny("Policy rule 'rtt_rule' matched");
+        let mut envelope = text_envelope("write a haiku");
+        envelope
+            .metadata
+            .insert("model".to_string(), "deepseek-chat".to_string());
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-denied".to_string(),
+            "local-model",
+            7,
+            321,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::InferenceError(message)) => {
+                assert!(message.contains("cloud_denied_by_policy"));
+            }
+            other => panic!("expected cloud_denied_by_policy error, got {other:?}"),
+        }
+        assert_eq!(cloud.call_count(), 0);
+
+        let outcomes = authority.outcomes();
+        assert_eq!(outcomes.len(), 2);
+        assert!(matches!(
+            outcomes[1].category,
+            Some(xybrid_core::orchestrator::authority::OutcomeCategory::HardFail { ref reason })
+                if reason == "cloud_denied_by_policy"
+        ));
+    }
+
+    #[test]
+    fn dispatch_after_local_uses_cloud_model_name_from_envelope() {
+        // Regression: previously the cloud-leg `CloudRetry` event and the
+        // returned `InferenceResult` both reported the LOCAL model_id
+        // (e.g. `qwen2.5-0.5b-instruct`) for tokens that actually came from
+        // the cloud-side model (e.g. `deepseek-chat`), making the dashboard
+        // misattribute cloud output to the local model.
+        let cloud = FakeCloudAdapter::new("hello from deepseek");
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("write a haiku");
+        envelope
+            .metadata
+            .insert("provider".to_string(), "deepseek".to_string());
+        envelope
+            .metadata
+            .insert("model".to_string(), "deepseek-chat".to_string());
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-cloud-model".to_string(),
+            "qwen2.5-0.5b-instruct",
+            5,
+            220,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("cloud retry should succeed");
+
+        assert_eq!(result.model_id(), "deepseek-chat");
+    }
+
+    #[test]
+    fn dispatch_after_local_falls_back_to_local_model_when_envelope_missing_model() {
+        // When no `model` metadata is on the envelope the dispatch would
+        // typically fail at the gateway, but if it somehow succeeds we
+        // shouldn't leave the result struct's model_id empty — fall back
+        // to the local id so the trace at least labels something.
+        let cloud = FakeCloudAdapter::new("ok");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("p");
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-fallback".to_string(),
+            "local-only-model",
+            0,
+            0,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("cloud retry should succeed");
+
+        assert_eq!(result.model_id(), "local-only-model");
+    }
+
+    #[test]
+    fn dispatch_after_local_passes_through_ok_result() {
+        let cloud = FakeCloudAdapter::new("unused");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("prompt");
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let seam_fired = Arc::new(AtomicBool::new(false));
+        let seam_fired_for_cb = seam_fired.clone();
+        let mut on_seam = move |_s: SeamInfo| {
+            seam_fired_for_cb.store(true, std::sync::atomic::Ordering::SeqCst);
+        };
+
+        let local_inner = InferenceResult::new(text_envelope("local result"), "test-model", 50);
+        let local_result: SdkResult<InferenceResult> = Ok(local_inner);
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-2".to_string(),
+            "test-model",
+            10,
+            200,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("ok should pass through");
+
+        assert!(!seam_fired.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(cloud.call_count(), 0);
+        assert_eq!(result.text(), Some("local result"));
+        assert_eq!(result.latency_ms(), 50);
+    }
+
+    #[test]
+    fn dispatch_after_local_passes_through_other_errors() {
+        let cloud = FakeCloudAdapter::new("unused");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("prompt");
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let seam_fired = Arc::new(AtomicBool::new(false));
+        let seam_fired_for_cb = seam_fired.clone();
+        let mut on_seam = move |_s: SeamInfo| {
+            seam_fired_for_cb.store(true, std::sync::atomic::Ordering::SeqCst);
+        };
+
+        let local_result: SdkResult<InferenceResult> =
+            Err(SdkError::InferenceError("local failed".to_string()));
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-3".to_string(),
+            "test-model",
+            0,
+            0,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::InferenceError(msg)) => assert!(msg.contains("local failed")),
+            other => panic!("expected InferenceError, got {:?}", other),
+        }
+        assert!(!seam_fired.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(cloud.call_count(), 0);
+    }
+
+    #[test]
+    fn dispatch_after_local_never_retries_user_cancelled_with_fallback_enabled() {
+        let cloud = FakeCloudAdapter::new("must not run");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("prompt");
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let seam_fired = Arc::new(AtomicBool::new(false));
+        let seam_fired_for_cb = seam_fired.clone();
+        let mut on_seam = move |_s: SeamInfo| {
+            seam_fired_for_cb.store(true, std::sync::atomic::Ordering::SeqCst);
+        };
+
+        let cancellation_error =
+            crate::run_options::AbortReason::UserCancelled.into_streaming_error(true);
+        let local_result: SdkResult<InferenceResult> =
+            Err(streaming_callback_error(cancellation_error));
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-cancel".to_string(),
+            "test-model",
+            0,
+            0,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::InferenceError(message)) => assert!(message.contains("user_cancelled")),
+            other => panic!("expected terminal user_cancelled error, got {other:?}"),
+        }
+        assert!(!seam_fired.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(cloud.call_count(), 0);
     }
 }

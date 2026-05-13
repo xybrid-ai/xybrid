@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Ordered so that [`MemoryPressure::worse_of`] can collapse a stream of
 /// snapshots into the peak pressure observed across a run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryPressure {
     #[default]

@@ -21,6 +21,12 @@ dependencies:
   plugin_platform_interface: ^2.0.2
   freezed_annotation: ^2.0.0
   path_provider: ^2.1.5
+  # Cross-platform battery level observer used by Xybrid.init on
+  # iOS / Android to forward host battery state into the routing
+  # engine via the FRB push-state surface (XybridDevice.setBatteryLevel).
+  # Flutter on macOS / Linux / Windows uses xybrid-core's in-process
+  # pollers and does not rely on this package at runtime.
+  battery_plus: ^6.0.0
 
 dev_dependencies:
   ffi: ^2.1.3

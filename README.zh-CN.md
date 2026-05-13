@@ -12,7 +12,7 @@
 
 <p align="center">
   <strong>在应用与游戏中原生运行 LLM、ASR 与 TTS。</strong><br/>
-  Rust 核心 · iOS · Android · Flutter · Unity<br/>
+  <a href="#flutter">Flutter</a> · <a href="#swift">Swift</a> · <a href="#kotlin">Kotlin</a> · <a href="#unity">Unity</a> · <a href="#rust">Rust</a><br/>
   隐私优先，离线可用，无需云端。
 </p>
 
@@ -116,8 +116,7 @@ Xybrid 是一个 **Rust 驱动的运行时**，为所有主流平台提供原生
 
 选择你喜欢的语言，安装并运行模型。每个语言下都包含安装片段和最小示例。
 
-<details>
-<summary><b>CLI</b> — macOS、Linux、Windows</summary>
+### CLI
 
 **安装：**
 
@@ -137,10 +136,7 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -o output.wav
 ```
 
-</details>
-
-<details>
-<summary><b>Flutter</b> — iOS、Android、macOS、Linux、Windows</summary>
+### Flutter
 
 **安装** 在 `pubspec.yaml`：
 
@@ -157,10 +153,7 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 // 输出 → 24kHz WAV 音频
 ```
 
-</details>
-
-<details>
-<summary><b>Kotlin</b> — Android</summary>
+### Kotlin
 
 **安装** 在 `build.gradle.kts`：
 
@@ -178,10 +171,7 @@ val result = model.run(Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
 
-</details>
-
-<details>
-<summary><b>Swift</b> — iOS、macOS</summary>
+### Swift
 
 **安装** 在 `Package.swift`：
 
@@ -201,10 +191,7 @@ let result = try model.run(envelope: Envelope.text("国破山河在，城春草�
 // 输出 → 24kHz WAV 音频
 ```
 
-</details>
-
-<details>
-<summary><b>Unity (C#)</b> — macOS、Windows、Linux、iOS、Android</summary>
+### Unity
 
 **安装** 通过 Unity Package Manager：
 
@@ -220,10 +207,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 // 输出 → 24kHz WAV 音频
 ```
 
-</details>
-
-<details>
-<summary><b>Rust</b> — 全平台</summary>
+### Rust
 
 **安装** 在 `Cargo.toml`：
 
@@ -240,14 +224,12 @@ let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 // 输出 → 24kHz WAV 音频
 ```
 
-</details>
-
 完整安装选项、硬件加速与 CLI 参考请参阅 [Installation Guide](docs/INSTALLATION.md)。各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
 
 <details>
-<summary><h3>流水线（实验性）</h3></summary>
+<summary><h3>多模型推理流水线 — MMP（实验性）</h3></summary>
 
-将模型链接在一起——用 3 行 YAML 搭建语音助手：
+将多个模型链接成一条多模型推理流水线（MMP）——用 3 行 YAML 搭建语音助手：
 
 ```yaml
 # voice-assistant.yaml
@@ -271,17 +253,17 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// 流水线支持即将推出，当前请使用单模型加载
+// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
 ```
 
 **Swift:**
 ```swift
-// 流水线支持即将推出，当前请使用单模型加载
+// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
 ```
 
 **Unity (C#):**
 ```csharp
-// 流水线支持即将推出，当前请使用单模型加载
+// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
 ```
 
 **Rust:**
@@ -395,11 +377,11 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 语言模型 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 视觉模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
-| 流水线编排 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 硬件加速 | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
 
-**SDK 流水线支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
 ---
 
@@ -408,7 +390,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 - **隐私优先** — 所有推理在设备端运行。你的数据永远不会离开你的设备。
 - **离线可用** — 初次模型下载后无需互联网。
 - **跨平台** — iOS、Android、macOS、Linux 和 Windows 使用统一的 API。
-- **流水线编排** — 在单次调用中链接多个模型（ASR → LLM → TTS）。
+- **多模型流水线（MMP）** — 在单次调用中链接多个模型（ASR → LLM → TTS）。
 - **自动优化** — 在 Apple Neural Engine、Metal 和 CUDA 上进行硬件加速。
 
 ### 与其他方案对比
@@ -417,7 +399,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 |---|---|---|---|---|
 | 移动端（iOS/Android） | ✅ | ❌ | ❌ | ✅ |
 | 游戏引擎（Unity） | ✅ | ❌ | ❌ | ❌ |
-| 多阶段流水线 | ✅ | ❌ | ❌ | ❌ |
+| 多模型流水线（MMP） | ✅ | ❌ | ❌ | ❌ |
 | ASR + TTS + LLM 统一 SDK | ✅ | ❌ | ❌ | ❌ |
 | 进程内运行（无需服务器） | ✅ | ❌ | ✅ | ✅ |
 | 无需云端 | ✅ | ✅ | ✅ | ✅ |

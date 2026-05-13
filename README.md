@@ -12,7 +12,7 @@
 
 <p align="center">
   <strong>Run LLMs, ASR, and TTS natively in apps and games.</strong><br/>
-  Rust core · iOS · Android · Flutter · Unity<br/>
+  <a href="#flutter">Flutter</a> · <a href="#swift">Swift</a> · <a href="#kotlin">Kotlin</a> · <a href="#unity">Unity</a> · <a href="#rust">Rust</a><br/>
   Private, offline, no cloud required.
 </p>
 
@@ -118,8 +118,7 @@ Install and run a model in your language of choice. Each section includes the in
 
 See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) for all options.
 
-<details>
-<summary><b>Flutter</summary>
+### Flutter
 
 **Install** in `pubspec.yaml`:
 
@@ -136,10 +135,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 // result → 24kHz WAV audio
 ```
 
-</details>
-
-<details>
-<summary><b>Kotlin</summary>
+### Kotlin
 
 **Install** in `build.gradle.kts`:
 
@@ -157,10 +153,7 @@ val result = model.run(Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
 
-</details>
-
-<details>
-<summary><b>Swift</summary>
+### Swift
 
 **Install** in `Package.swift`:
 
@@ -180,10 +173,7 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
 
-</details>
-
-<details>
-<summary><b>Unity/C#</summary>
+### Unity
 
 **Install** via Unity Package Manager:
 
@@ -199,10 +189,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 // result → 24kHz WAV audio
 ```
 
-</details>
-
-<details>
-<summary>Rust</summary>
+### Rust
 
 **Install** in `Cargo.toml`:
 
@@ -219,10 +206,7 @@ let result = model.run(&Envelope::text("Hello world"))?;
 // result → 24kHz WAV audio
 ```
 
-</details>
-
-<details>
-<summary><b>CLI</b> — macOS, Linux, Windows</summary>
+### CLI
 
 **Install:**
 
@@ -242,14 +226,12 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 ```
 
-</details>
-
 For platform-specific setup, see each SDK's README: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/).
 
 <details>
-<summary><h3>Pipelines (Experimental)</h3></summary>
+<summary><h3>Multi-Model Inference Pipelines — MMP (Experimental)</h3></summary>
 
-Chain models together — build a voice assistant in 3 lines of YAML:
+Chain models together into a single multi-model inference pipeline (MMP) — build a voice assistant in 3 lines of YAML:
 
 ```yaml
 # voice-assistant.yaml
@@ -273,17 +255,17 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// Pipeline support coming soon — use single model loading for now
+// Multi-model pipeline (MMP) support coming soon — use single model loading for now
 ```
 
 **Swift:**
 ```swift
-// Pipeline support coming soon — use single model loading for now
+// Multi-model pipeline (MMP) support coming soon — use single model loading for now
 ```
 
 **Unity (C#):**
 ```csharp
-// Pipeline support coming soon — use single model loading for now
+// Multi-model pipeline (MMP) support coming soon — use single model loading for now
 ```
 
 **Rust:**
@@ -397,11 +379,11 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Language Models | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Vision Models | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
-| Pipeline Orchestration | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
 
-**SDK pipeline support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
 ---
 
@@ -410,7 +392,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 - **Privacy first** — All inference runs on-device. Your data never leaves the device. The SDK attaches a small fleet-attribution header on registry metadata calls — see [registry telemetry](docs/telemetry/registry.md).
 - **Offline capable** — No internet required after initial model download.
 - **Cross-platform** — One API across iOS, Android, macOS, Linux, and Windows.
-- **Pipeline orchestration** — Chain models together (ASR → LLM → TTS) in a single call.
+- **Multi-model pipelines (MMP)** — Chain models together (ASR → LLM → TTS) in a single call.
 - **Automatic optimization** — Hardware acceleration on Apple Neural Engine, Metal, and CUDA.
 
 ### How it compares
@@ -419,7 +401,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 |---|---|---|---|---|
 | Mobile (iOS/Android) | ✅ | ❌ | ❌ | ✅ |
 | Game engine (Unity) | ✅ | ❌ | ❌ | ❌ |
-| Multi-stage pipelines | ✅ | ❌ | ❌ | ❌ |
+| Multi-model pipelines (MMP) | ✅ | ❌ | ❌ | ❌ |
 | ASR + TTS + LLM in one SDK | ✅ | ❌ | ❌ | ❌ |
 | Runs in-process (no server) | ✅ | ❌ | ✅ | ✅ |
 | No cloud required | ✅ | ✅ | ✅ | ✅ |

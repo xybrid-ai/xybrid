@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// This enum represents the thermal state of a device, which affects
 /// performance and battery consumption decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThermalState {
     /// Normal operating temperature (< 60°C)
@@ -145,6 +145,8 @@ pub enum DetectionConfidence {
     /// Hardcoded default or estimate
     #[default]
     Low,
+    /// No probe was performed; the field value should not be trusted
+    Unknown,
 }
 
 impl DetectionConfidence {
@@ -153,6 +155,7 @@ impl DetectionConfidence {
             DetectionConfidence::High => "high",
             DetectionConfidence::Medium => "medium",
             DetectionConfidence::Low => "low",
+            DetectionConfidence::Unknown => "unknown",
         }
     }
 }

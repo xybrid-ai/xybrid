@@ -34,7 +34,7 @@ use ort::value::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
-use xybrid_core::runtime_adapter::onnx::{ExecutionProviderKind, ONNXSession};
+use xybrid_core::runtime_adapter::onnx::{ExecutionProviderKind, ONNXSession, SessionOptions};
 
 // ============================================================================
 // Model Configurations
@@ -272,9 +272,10 @@ fn benchmark_cpu(c: &mut Criterion) {
         };
 
         // Create session with CPU provider
-        let session = match ONNXSession::with_provider(
+        let session = match ONNXSession::build(
             model_path.to_str().unwrap(),
             ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
         ) {
             Ok(s) => s,
             Err(e) => {
@@ -327,13 +328,14 @@ fn benchmark_coreml_ane(c: &mut Criterion) {
         };
 
         // Create session with CoreML Neural Engine provider
-        let session = match ONNXSession::with_provider(
+        let session = match ONNXSession::build(
             model_path.to_str().unwrap(),
             ExecutionProviderKind::CoreML(CoreMLConfig {
                 compute_units: CoreMLComputeUnits::CpuAndNeuralEngine,
                 use_subgraphs: true,
                 require_static_shapes: false,
             }),
+            SessionOptions::default(),
         ) {
             Ok(s) => s,
             Err(e) => {
@@ -381,13 +383,14 @@ fn benchmark_coreml_gpu(c: &mut Criterion) {
         };
 
         // Create session with CoreML GPU provider
-        let session = match ONNXSession::with_provider(
+        let session = match ONNXSession::build(
             model_path.to_str().unwrap(),
             ExecutionProviderKind::CoreML(CoreMLConfig {
                 compute_units: CoreMLComputeUnits::CpuAndGpu,
                 use_subgraphs: true,
                 require_static_shapes: false,
             }),
+            SessionOptions::default(),
         ) {
             Ok(s) => s,
             Err(e) => {

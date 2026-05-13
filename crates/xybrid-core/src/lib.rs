@@ -174,6 +174,9 @@ pub mod prelude;
 pub mod error;
 pub use error::{InferenceError, PipelineError, XybridError, XybridResult};
 
+/// Typed abort reasons shared by execution, routing feedback, and SDK wrappers.
+pub mod abort;
+
 // ============================================================================
 // Core Execution Layer (Orchestrator → Executor → TemplateExecutor)
 // See EXECUTION_LAYERS.md for architecture documentation
@@ -293,10 +296,6 @@ pub mod preprocessing;
 /// Text-to-phoneme conversion for TTS
 #[doc(hidden)]
 pub mod phonemizer;
-
-/// Device adapter traits
-#[doc(hidden)]
-pub mod device_adapter;
 
 /// Telemetry collection
 #[doc(hidden)]

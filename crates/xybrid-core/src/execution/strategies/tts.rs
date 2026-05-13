@@ -13,6 +13,7 @@ use std::path::Path;
 use super::{ExecutionContext, ExecutionStrategy};
 use crate::execution::executor::extract_tts_speed;
 use crate::execution::modes::execute_tts_inference;
+use crate::execution::session_factory::OnnxSessionFactory;
 use crate::execution::template::{
     ExecutionTemplate, ModelMetadata, PostprocessingStep, PreprocessingStep,
 };
@@ -20,7 +21,7 @@ use crate::execution::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use crate::execution::voice_loader::TtsVoiceLoader;
 use crate::execution::{postprocessing, preprocessing};
 use crate::ir::{Envelope, EnvelopeKind};
-use crate::runtime_adapter::onnx::ONNXSession;
+use crate::runtime_adapter::onnx::{ExecutionProviderKind, SessionOptions};
 use crate::runtime_adapter::AdapterError;
 use crate::tracing as xybrid_trace;
 
@@ -141,8 +142,15 @@ impl TtsStrategy {
         let voice_embedding =
             voice_loader.load_for_token_count(metadata, input, Some(phoneme_ids.len()))?;
 
-        // Create and run TTS session
-        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        // Build through the shared factory entry. TTS is the path that
+        // surfaced the original "EP = —" gap; centralising construction
+        // here is what lets a future change opt this site into capture
+        // without revisiting four inline sites.
+        let session = OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?;
         let speed = extract_tts_speed(input);
         let mut raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
 
@@ -202,7 +210,11 @@ impl TtsStrategy {
 
         // Process each chunk and collect audio
         let mut all_audio: Vec<f32> = Vec::new();
-        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        let session = OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?;
         let speed = extract_tts_speed(input);
 
         // Compute inter-chunk silence (e.g. 200ms at 24kHz = 4800 zero samples)

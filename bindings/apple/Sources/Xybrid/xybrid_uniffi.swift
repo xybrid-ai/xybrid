@@ -297,6 +297,19 @@ private func uniffiCheckCallStatus(
 // Public interface members begin here.
 
 
+fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -1182,6 +1195,72 @@ extension XybridError: Equatable, Hashable {}
 
 extension XybridError: Error { }
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+public enum XybridThermalState {
+    
+    case normal
+    case warm
+    case hot
+    case critical
+}
+
+public struct FfiConverterTypeXybridThermalState: FfiConverterRustBuffer {
+    typealias SwiftType = XybridThermalState
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> XybridThermalState {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .normal
+        
+        case 2: return .warm
+        
+        case 3: return .hot
+        
+        case 4: return .critical
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: XybridThermalState, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .normal:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .warm:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .hot:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .critical:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+public func FfiConverterTypeXybridThermalState_lift(_ buf: RustBuffer) throws -> XybridThermalState {
+    return try FfiConverterTypeXybridThermalState.lift(buf)
+}
+
+public func FfiConverterTypeXybridThermalState_lower(_ value: XybridThermalState) -> RustBuffer {
+    return FfiConverterTypeXybridThermalState.lower(value)
+}
+
+
+extension XybridThermalState: Equatable, Hashable {}
+
+
+
 fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
     typealias SwiftType = UInt32?
 
@@ -1520,6 +1599,22 @@ fileprivate func uniffiInitContinuationCallback() {
     ffi_xybrid_uniffi_rust_future_continuation_callback_set(uniffiFutureContinuationCallback)
 }
 
+public func clearBatteryLevel()  {
+    try! rustCall() {
+    uniffi_xybrid_uniffi_fn_func_clear_battery_level($0)
+}
+}
+
+
+
+public func clearThermalState()  {
+    try! rustCall() {
+    uniffi_xybrid_uniffi_fn_func_clear_thermal_state($0)
+}
+}
+
+
+
 public func initSdkCacheDir(cacheDir: String)  {
     try! rustCall() {
     uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(
@@ -1529,10 +1624,28 @@ public func initSdkCacheDir(cacheDir: String)  {
 
 
 
+public func setBatteryLevel(percent: UInt8)  {
+    try! rustCall() {
+    uniffi_xybrid_uniffi_fn_func_set_battery_level(
+        FfiConverterUInt8.lower(percent),$0)
+}
+}
+
+
+
 public func setBinding(binding: String)  {
     try! rustCall() {
     uniffi_xybrid_uniffi_fn_func_set_binding(
         FfiConverterString.lower(binding),$0)
+}
+}
+
+
+
+public func setThermalState(state: XybridThermalState)  {
+    try! rustCall() {
+    uniffi_xybrid_uniffi_fn_func_set_thermal_state(
+        FfiConverterTypeXybridThermalState.lower(state),$0)
 }
 }
 
@@ -1553,10 +1666,22 @@ private var initializationResult: InitializationResult {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_xybrid_uniffi_checksum_func_clear_battery_level() != 40326) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xybrid_uniffi_checksum_func_clear_thermal_state() != 36495) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir() != 59754) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_xybrid_uniffi_checksum_func_set_battery_level() != 57690) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_xybrid_uniffi_checksum_func_set_binding() != 53803) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xybrid_uniffi_checksum_func_set_thermal_state() != 59048) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id() != 623) {
