@@ -1,0 +1,19 @@
+Package.swift
+  s_f1391ecec13529::t_af0e8306256910 44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "7c85569d4440df30a56c09324074207a371c4c56",
+  "prompts": {},
+  "sessions": {
+    "s_f1391ecec13529": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69e046f0-0aaf-406c-9a36-89c2cccdd5b5",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
