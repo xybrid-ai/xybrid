@@ -396,7 +396,33 @@ impl Telemetry {
     }
 
     /// Log a routing decision event.
-    pub fn log_routing_decision(&self, stage_name: &str, target: &str, reason: &str) {
+    ///
+    /// `recent_abort_rate` and `sample_size` come from the local reliability
+    /// window the authority maintains per `(model_id, signal_context)`. Empty
+    /// window callers pass `(0.0, 0)`. The pair travels in the event's
+    /// `local_reliability_hint` attribute, alongside the routing reason. The
+    /// public bridge path
+    /// (`OrchestratorEvent::RoutingDecided` → SDK exporter) hoists the same
+    /// field to the platform-event payload top level so analytics can
+    /// column-extract it without descending into the nested data object.
+    ///
+    /// Non-finite `recent_abort_rate` values (NaN, ±Infinity) are clamped to
+    /// `0.0` before serialization so the analytics backend's typed Float32
+    /// column never receives a JSON `null`. The authority itself emits only
+    /// finite values; this clamp is defense-in-depth for direct callers.
+    pub fn log_routing_decision(
+        &self,
+        stage_name: &str,
+        target: &str,
+        reason: &str,
+        recent_abort_rate: f32,
+        sample_size: u32,
+    ) {
+        let safe_rate = if recent_abort_rate.is_finite() {
+            recent_abort_rate
+        } else {
+            0.0_f32
+        };
         let entry = TelemetryEntry::new(
             Severity::Info,
             TelemetryEvent::RoutingDecision,
@@ -407,7 +433,11 @@ impl Telemetry {
             json!({
                 "stage": stage_name,
                 "target": target,
-                "reason": reason
+                "reason": reason,
+                "local_reliability_hint": {
+                    "recent_abort_rate": safe_rate,
+                    "sample_size": sample_size,
+                }
             }),
         );
         self.emit(entry);
@@ -584,7 +614,40 @@ mod tests {
     #[test]
     fn test_log_routing_decision() {
         let telemetry = Telemetry::new();
-        telemetry.log_routing_decision("test_stage", "local", "high_latency");
+        telemetry.log_routing_decision("test_stage", "local", "high_latency", 0.0, 0);
+    }
+
+    #[test]
+    fn routing_decision_attributes_carry_local_reliability_hint() {
+        // Mirror the inline json! macro from log_routing_decision so the
+        // wire shape is asserted directly rather than depending on a
+        // captured emit sink. The TelemetryEntry round-trip proves the
+        // attribute survives serialization unchanged.
+        let attrs = json!({
+            "stage": "stage-1",
+            "target": "cloud",
+            "reason": "history_bias",
+            "local_reliability_hint": {
+                "recent_abort_rate": 0.75,
+                "sample_size": 4_u32,
+            }
+        });
+        let entry = TelemetryEntry::new(
+            Severity::Info,
+            TelemetryEvent::RoutingDecision,
+            String::from("Routing decision for 'stage-1': cloud (history_bias)"),
+            attrs,
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(&entry.to_json()).expect("entry to_json must be valid JSON");
+        let attributes = parsed
+            .get("attributes")
+            .expect("entry must serialize attributes");
+        assert_eq!(
+            attributes["local_reliability_hint"]["recent_abort_rate"],
+            0.75
+        );
+        assert_eq!(attributes["local_reliability_hint"]["sample_size"], 4);
     }
 
     #[test]

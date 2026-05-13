@@ -905,10 +905,14 @@ impl Pipeline {
             .name
             .as_ref()
             .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-        let _telemetry_ctx =
+        let _context_guard =
             crate::telemetry::TelemetryPipelineContextGuard::install(pipeline_id, Some(trace_id));
 
         let mut orchestrator = Orchestrator::new();
+        // Subscribe after construction: bootstrap events emitted by
+        // `Orchestrator::new()` are constructor-local, while execution events
+        // below must be drained before this short-lived orchestrator returns.
+        let bridge = crate::telemetry::bridge_orchestrator_events(&orchestrator);
         // No need to set registry config - executor uses bundle_path from stage descriptors
 
         let availability_fn = move |stage: &str| -> LocalAvailability {
@@ -918,8 +922,13 @@ impl Pipeline {
 
         let start_time = std::time::Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
-        let results: Vec<StageExecutionResult> = orchestrator
-            .execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn)
+        let execution_result =
+            orchestrator.execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn);
+        drop(orchestrator);
+        bridge.join().map_err(|e| {
+            SdkError::PipelineError(format!("Orchestrator event bridge failed: {}", e))
+        })?;
+        let results: Vec<StageExecutionResult> = execution_result
             .map_err(|e| SdkError::PipelineError(format!("Pipeline execution failed: {}", e)))?;
         let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
@@ -991,15 +1000,17 @@ impl Pipeline {
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0),
             };
-            crate::telemetry::publish_with_resource_summary(event, resource_guard);
+            crate::telemetry::publish_with_resource_summary_in_context(
+                event,
+                resource_guard,
+                pipeline_id,
+                Some(trace_id),
+            );
         } else {
             // Single-stage path: drop the resource_guard explicitly so
             // its summary doesn't get attached to a phantom event later.
             drop(resource_guard);
         }
-
-        // `_telemetry_ctx` drops here, clearing the pipeline context
-        // after the publish — same ordering as before.
 
         Ok(PipelineExecutionResult {
             name: self.name.clone(),
@@ -1046,12 +1057,14 @@ impl Pipeline {
             let pipeline_id = name
                 .as_ref()
                 .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-            let _telemetry_ctx = crate::telemetry::TelemetryPipelineContextGuard::install(
+            let _context_guard = crate::telemetry::TelemetryPipelineContextGuard::install(
                 pipeline_id,
                 Some(trace_id),
             );
 
             let mut orchestrator = Orchestrator::new();
+            // Subscribe after construction; see the sync path above.
+            let bridge = crate::telemetry::bridge_orchestrator_events(&orchestrator);
             // No need to set registry config - executor uses bundle_path from stage descriptors
 
             let availability_fn = move |stage: &str| -> LocalAvailability {
@@ -1061,16 +1074,19 @@ impl Pipeline {
 
             let start_time = std::time::Instant::now();
             let resource_guard = crate::telemetry::begin_resource_run();
-            let results: Vec<StageExecutionResult> = orchestrator
-                .execute_pipeline(
-                    &stage_descriptors,
-                    &envelope_clone,
-                    &metrics,
-                    &availability_fn,
-                )
-                .map_err(|e| {
-                    SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
-                })?;
+            let execution_result = orchestrator.execute_pipeline(
+                &stage_descriptors,
+                &envelope_clone,
+                &metrics,
+                &availability_fn,
+            );
+            drop(orchestrator);
+            bridge.join().map_err(|e| {
+                SdkError::PipelineError(format!("Orchestrator event bridge failed: {}", e))
+            })?;
+            let results: Vec<StageExecutionResult> = execution_result.map_err(|e| {
+                SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
+            })?;
             let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
             let stages: Vec<StageTiming> = results
@@ -1131,13 +1147,15 @@ impl Pipeline {
                         .map(|d| d.as_millis() as u64)
                         .unwrap_or(0),
                 };
-                crate::telemetry::publish_with_resource_summary(event, resource_guard);
+                crate::telemetry::publish_with_resource_summary_in_context(
+                    event,
+                    resource_guard,
+                    pipeline_id,
+                    Some(trace_id),
+                );
             } else {
                 drop(resource_guard);
             }
-
-            // `_telemetry_ctx` drops here, clearing the pipeline context
-            // after the publish.
 
             Ok(PipelineExecutionResult {
                 name,

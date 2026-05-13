@@ -941,6 +941,157 @@ signature: "test-deny-all"
     }
 
     #[test]
+    fn reliability_window_evicts_oldest_after_32_entries() {
+        // Pin the exact retained FIFO sequence: writing failure-0..32 must
+        // leave failure-1..32 in oldest-to-newest order. Asserting length
+        // alone (or just the absence of failure-0) would silently accept
+        // reversed eviction, duplicate retention, or stable-non-FIFO bugs.
+        let authority = LocalAuthority::with_cache_provider(Arc::new(CachedProvider));
+        for idx in 0..33 {
+            authority.record_outcome(&ExecutionOutcome {
+                stage_id: "test-stage".to_string(),
+                target: ResolvedTarget::Device,
+                latency_ms: 10,
+                success: false,
+                error: Some(format!("failure-{idx}")),
+                category: Some(OutcomeCategory::HardFail {
+                    reason: format!("failure-{idx}"),
+                }),
+                model_id: Some("test-model".to_string()),
+                signal_context: Some(signal()),
+            });
+        }
+
+        let history = authority.history_snapshot("test-model", signal());
+
+        assert_eq!(history.len(), RELIABILITY_WINDOW);
+        let actual_reasons: Vec<String> = history
+            .iter()
+            .map(|c| match c {
+                OutcomeCategory::HardFail { reason } => reason.clone(),
+                other => panic!("expected HardFail, got {other:?}"),
+            })
+            .collect();
+        let expected_reasons: Vec<String> = (1..=RELIABILITY_WINDOW)
+            .map(|i| format!("failure-{i}"))
+            .collect();
+        assert_eq!(
+            actual_reasons, expected_reasons,
+            "history must contain failure-1..failure-{RELIABILITY_WINDOW} in FIFO order (oldest first)"
+        );
+    }
+
+    // Helper: record one HardFail under `(model, sig)` and return the
+    // resulting snapshot. Keeps the per-dimension isolation tests compact.
+    fn record_hard_fail_and_snapshot(
+        authority: &LocalAuthority,
+        model: &str,
+        sig: SignalContext,
+        reason: &str,
+    ) -> std::collections::VecDeque<OutcomeCategory> {
+        authority.record_outcome(&ExecutionOutcome {
+            stage_id: "test-stage".to_string(),
+            target: ResolvedTarget::Device,
+            latency_ms: 10,
+            success: false,
+            error: Some(reason.to_string()),
+            category: Some(OutcomeCategory::HardFail {
+                reason: reason.to_string(),
+            }),
+            model_id: Some(model.to_string()),
+            signal_context: Some(sig),
+        });
+        authority.history_snapshot(model, sig)
+    }
+
+    #[test]
+    fn reliability_history_is_scoped_by_memory_pressure() {
+        // Memory-pressure isolation: same (model, thermal, cpu_bucket) but
+        // different memory_pressure must keep histories separate.
+        let authority = LocalAuthority::with_cache_provider(Arc::new(CachedProvider));
+        let mut warn_signal = signal();
+        warn_signal.memory_pressure = MemoryPressure::Warn;
+        let mut critical_signal = signal();
+        critical_signal.memory_pressure = MemoryPressure::Critical;
+
+        let warn_history =
+            record_hard_fail_and_snapshot(&authority, "test-model", warn_signal, "warn-failure");
+        let critical_history = record_hard_fail_and_snapshot(
+            &authority,
+            "test-model",
+            critical_signal,
+            "critical-failure",
+        );
+
+        assert_eq!(warn_history.len(), 1);
+        assert_eq!(critical_history.len(), 1);
+        assert_ne!(warn_history, critical_history);
+    }
+
+    #[test]
+    fn reliability_history_is_scoped_by_thermal_state() {
+        // Thermal-state isolation: same (model, memory_pressure, cpu_bucket)
+        // but different thermal_state must keep histories separate. Without
+        // this, a `Normal` device's hot history would leak into a `Hot`
+        // device's bias decision.
+        let authority = LocalAuthority::with_cache_provider(Arc::new(CachedProvider));
+        let mut normal_signal = signal();
+        normal_signal.thermal_state = ThermalState::Normal;
+        let mut hot_signal = signal();
+        hot_signal.thermal_state = ThermalState::Hot;
+
+        let normal_history =
+            record_hard_fail_and_snapshot(&authority, "test-model", normal_signal, "normal-fail");
+        let hot_history =
+            record_hard_fail_and_snapshot(&authority, "test-model", hot_signal, "hot-fail");
+
+        assert_eq!(normal_history.len(), 1);
+        assert_eq!(hot_history.len(), 1);
+        assert_ne!(normal_history, hot_history);
+    }
+
+    #[test]
+    fn reliability_history_is_scoped_by_cpu_bucket() {
+        // cpu_bucket isolation: same (model, memory, thermal) but different
+        // quantized CPU bucket must keep histories separate. The bucket is
+        // the only continuous dimension in SignalContext, so a coarse
+        // quantization regression would manifest here.
+        let authority = LocalAuthority::with_cache_provider(Arc::new(CachedProvider));
+        let mut low_cpu_signal = signal();
+        low_cpu_signal.cpu_bucket = Some(2);
+        let mut high_cpu_signal = signal();
+        high_cpu_signal.cpu_bucket = Some(9);
+
+        let low_history =
+            record_hard_fail_and_snapshot(&authority, "test-model", low_cpu_signal, "low-cpu-fail");
+        let high_history = record_hard_fail_and_snapshot(
+            &authority,
+            "test-model",
+            high_cpu_signal,
+            "high-cpu-fail",
+        );
+
+        assert_eq!(low_history.len(), 1);
+        assert_eq!(high_history.len(), 1);
+        assert_ne!(low_history, high_history);
+    }
+
+    #[test]
+    fn reliability_history_is_scoped_by_model_id() {
+        // model_id isolation: identical SignalContext but different model
+        // IDs must keep histories separate. If the key ever collapsed to
+        // SignalContext alone, this would conflate per-model reliability.
+        let authority = LocalAuthority::with_cache_provider(Arc::new(CachedProvider));
+
+        let history_a = record_hard_fail_and_snapshot(&authority, "model-a", signal(), "a-fail");
+        let history_b = record_hard_fail_and_snapshot(&authority, "model-b", signal(), "b-fail");
+
+        assert_eq!(history_a.len(), 1);
+        assert_eq!(history_b.len(), 1);
+        assert_ne!(history_a, history_b);
+    }
+
+    #[test]
     fn reliability_history_bias_routes_cloud_with_hint() {
         let authority =
             LocalAuthority::with_cache_provider(Arc::new(CachedProvider)).with_history_bias_k(3);

@@ -329,7 +329,6 @@ fn execute_pipeline(
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     let mut orchestrator = Orchestrator::new();
-    xybrid_sdk::bridge_orchestrator_events(&orchestrator);
 
     if let Some(policy_file) = policy_path {
         ui::kv("Policy", &policy_file.display().to_string());
@@ -346,7 +345,14 @@ fn execute_pipeline(
 
     let sp = ui::spinner("Executing pipeline...");
 
-    match orchestrator.execute_pipeline(stages, input, metrics, availability_fn) {
+    let bridge = xybrid_sdk::bridge_orchestrator_events(&orchestrator);
+    let execution_result = orchestrator.execute_pipeline(stages, input, metrics, availability_fn);
+    drop(orchestrator);
+    bridge
+        .join()
+        .map_err(|e| anyhow::anyhow!("Orchestrator event bridge failed: {}", e))?;
+
+    match execution_result {
         Ok(results) => {
             sp.finish_and_clear();
             print_pipeline_results(&results, output_path)?;

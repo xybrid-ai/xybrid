@@ -12,7 +12,9 @@ use super::target::ExecutionTarget;
 use crate::context::DeviceMetrics;
 use crate::device::capabilities::HardwareCapabilities;
 use crate::device::MemoryPressure;
-use crate::orchestrator::routing_engine::{LocalAvailability, RouteTarget, RoutingDecision};
+use crate::orchestrator::routing_engine::{
+    LocalAvailability, LocalReliabilityHint, RouteTarget, RoutingDecision,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Resolution context containing all information needed to resolve execution targets.
@@ -140,14 +142,17 @@ impl ResolvedTarget {
     }
 
     /// Convert to a RoutingDecision for telemetry.
-    pub fn to_routing_decision(&self, stage: &str) -> RoutingDecision {
+    pub fn to_routing_decision(
+        &self,
+        stage: &str,
+        local_reliability_hint: LocalReliabilityHint,
+    ) -> RoutingDecision {
         RoutingDecision {
             stage: stage.to_string(),
             target: self.target.clone(),
             reason: self.reason.clone(),
             timestamp_ms: current_timestamp_ms(),
-            local_reliability_hint:
-                crate::orchestrator::routing_engine::LocalReliabilityHint::EMPTY,
+            local_reliability_hint,
         }
     }
 }
@@ -563,11 +568,26 @@ mod tests {
     #[test]
     fn test_resolved_target_to_routing_decision() {
         let resolved = ResolvedTarget::local("wav2vec2", Some("1.0"), "test reason");
-        let decision = resolved.to_routing_decision("asr");
+        let decision = resolved.to_routing_decision(
+            "asr",
+            crate::orchestrator::routing_engine::LocalReliabilityHint::EMPTY,
+        );
 
         assert_eq!(decision.stage, "asr");
         assert_eq!(decision.target, RouteTarget::Local);
         assert_eq!(decision.reason, "test reason");
         assert!(decision.timestamp_ms > 0);
+    }
+
+    #[test]
+    fn resolved_target_to_routing_decision_carries_local_reliability_hint() {
+        let resolved = ResolvedTarget::local("wav2vec2", Some("1.0"), "test reason");
+        let hint = crate::orchestrator::routing_engine::LocalReliabilityHint {
+            recent_abort_rate: 0.75,
+            sample_size: 4,
+        };
+        let decision = resolved.to_routing_decision("asr", hint);
+
+        assert_eq!(decision.local_reliability_hint, hint);
     }
 }
