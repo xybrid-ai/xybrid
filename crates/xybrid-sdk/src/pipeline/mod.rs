@@ -1458,11 +1458,8 @@ stages:
 
     #[test]
     fn xybrid_run_pipeline_with_options_is_public_api() {
-        let _method: fn(
-            &str,
-            &Envelope,
-            &RunOptions,
-        ) -> PipelineResult<PipelineExecutionResult> = Xybrid::run_pipeline_with_options;
+        let _method: fn(&str, &Envelope, &RunOptions) -> PipelineResult<PipelineExecutionResult> =
+            Xybrid::run_pipeline_with_options;
     }
 
     #[test]
