@@ -214,6 +214,8 @@ pub use telemetry::{
     shutdown_platform_telemetry,
     // Platform telemetry exports
     subscribe_orchestrator_events,
+    BridgeError,
+    BridgeHandle,
     HttpTelemetryExporter,
     OrchestratorEventBridge,
     TelemetryConfig,

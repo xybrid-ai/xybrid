@@ -6,28 +6,157 @@
 //! For MVP, this implements a simple event enum with a synchronous broadcast channel.
 //! Future versions will support async channels (Tokio) and more sophisticated event routing.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use uuid::Uuid;
+
+thread_local! {
+    static CURRENT_EVENT_CONTEXT: RefCell<EventContext> = RefCell::new(EventContext::default());
+}
+
+/// Producer-side context attached to orchestrator events before they cross
+/// thread/task boundaries.
+///
+/// Consumers should read this struct from the event payload. They must not
+/// assume telemetry task-local or thread-local state is still available when
+/// a bridge drains the event later.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EventContext {
+    pub pipeline_id: Option<Uuid>,
+    pub trace_id: Option<Uuid>,
+    pub correlation_id: Option<String>,
+    pub request_id: Option<String>,
+    pub model_id: Option<String>,
+    pub span_id: Option<String>,
+}
+
+impl EventContext {
+    pub fn current() -> Self {
+        CURRENT_EVENT_CONTEXT.with(|context| context.borrow().clone())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pipeline_id.is_none()
+            && self.trace_id.is_none()
+            && self.correlation_id.is_none()
+            && self.request_id.is_none()
+            && self.model_id.is_none()
+            && self.span_id.is_none()
+    }
+
+    pub fn with_pipeline_id(mut self, pipeline_id: Uuid) -> Self {
+        self.pipeline_id = Some(pipeline_id);
+        self
+    }
+
+    pub fn with_trace_id(mut self, trace_id: Uuid) -> Self {
+        self.trace_id = Some(trace_id);
+        self
+    }
+
+    pub fn with_correlation_id(mut self, correlation_id: impl Into<String>) -> Self {
+        self.correlation_id = Some(correlation_id.into());
+        self
+    }
+
+    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
+        self.request_id = Some(request_id.into());
+        self
+    }
+
+    pub fn with_model_id(mut self, model_id: impl Into<String>) -> Self {
+        self.model_id = Some(model_id.into());
+        self
+    }
+
+    pub fn with_span_id(mut self, span_id: impl Into<String>) -> Self {
+        self.span_id = Some(span_id.into());
+        self
+    }
+
+    fn merge_missing(mut self, fallback: EventContext) -> Self {
+        if self.pipeline_id.is_none() {
+            self.pipeline_id = fallback.pipeline_id;
+        }
+        if self.trace_id.is_none() {
+            self.trace_id = fallback.trace_id;
+        }
+        if self.correlation_id.is_none() {
+            self.correlation_id = fallback.correlation_id;
+        }
+        if self.request_id.is_none() {
+            self.request_id = fallback.request_id;
+        }
+        if self.model_id.is_none() {
+            self.model_id = fallback.model_id;
+        }
+        if self.span_id.is_none() {
+            self.span_id = fallback.span_id;
+        }
+        self
+    }
+}
+
+/// RAII guard for temporarily installing a producer event context.
+pub struct EventContextGuard {
+    previous: EventContext,
+}
+
+impl EventContextGuard {
+    pub fn install(context: EventContext) -> Self {
+        let previous = CURRENT_EVENT_CONTEXT.with(|slot| slot.replace(context));
+        Self { previous }
+    }
+}
+
+impl Drop for EventContextGuard {
+    fn drop(&mut self) {
+        CURRENT_EVENT_CONTEXT.with(|slot| {
+            slot.replace(self.previous.clone());
+        });
+    }
+}
+
+pub fn set_current_event_context(context: EventContext) {
+    CURRENT_EVENT_CONTEXT.with(|slot| {
+        slot.replace(context);
+    });
+}
+
+pub fn clear_current_event_context() {
+    set_current_event_context(EventContext::default());
+}
 
 /// Event types that can be published to the event bus.
 #[derive(Debug, Clone)]
 pub enum OrchestratorEvent {
     /// Stage execution started.
-    StageStart { stage_name: String },
+    StageStart {
+        stage_name: String,
+        context: EventContext,
+    },
     /// Stage execution completed.
     StageComplete {
         stage_name: String,
         target: String,
         latency_ms: u32,
+        context: EventContext,
     },
     /// Stage execution failed.
-    StageError { stage_name: String, error: String },
+    StageError {
+        stage_name: String,
+        error: String,
+        context: EventContext,
+    },
     /// Policy evaluation occurred.
     PolicyEvaluated {
         stage_name: String,
         allowed: bool,
         reason: Option<String>,
+        context: EventContext,
     },
     /// Routing decision was made.
     ///
@@ -44,20 +173,27 @@ pub enum OrchestratorEvent {
         reason: String,
         recent_abort_rate: f32,
         sample_size: u32,
+        context: EventContext,
     },
     /// Execution started.
-    ExecutionStarted { stage_name: String, target: String },
+    ExecutionStarted {
+        stage_name: String,
+        target: String,
+        context: EventContext,
+    },
     /// Execution completed.
     ExecutionCompleted {
         stage_name: String,
         target: String,
         execution_time_ms: u32,
+        context: EventContext,
     },
     /// Execution failed.
     ExecutionFailed {
         stage_name: String,
         target: String,
         error: String,
+        context: EventContext,
     },
     /// Local execution was cooperatively aborted (e.g. resource pressure
     /// triggered an `AbortPolicy`). Distinct from `ExecutionFailed` because
@@ -71,21 +207,81 @@ pub enum OrchestratorEvent {
         stage_name: String,
         target: String,
         reason: String,
+        context: EventContext,
     },
     /// Pipeline started.
-    PipelineStart { stages: Vec<String> },
+    PipelineStart {
+        stages: Vec<String>,
+        context: EventContext,
+    },
     /// Pipeline completed.
-    PipelineComplete { total_latency_ms: u32 },
+    PipelineComplete {
+        total_latency_ms: u32,
+        context: EventContext,
+    },
     /// Bootstrap process started.
-    BootstrapStart,
+    BootstrapStart { context: EventContext },
     /// Component initialized during bootstrap.
-    ComponentInitialized { component: String },
+    ComponentInitialized {
+        component: String,
+        context: EventContext,
+    },
     /// Adapter registered during bootstrap.
-    AdapterRegistered { name: String },
+    AdapterRegistered { name: String, context: EventContext },
     /// Executor is ready with registered adapters.
-    ExecutorReady,
+    ExecutorReady { context: EventContext },
     /// Orchestrator is fully initialized and ready.
-    OrchestratorReady,
+    OrchestratorReady { context: EventContext },
+}
+
+impl OrchestratorEvent {
+    pub fn context(&self) -> &EventContext {
+        match self {
+            Self::StageStart { context, .. }
+            | Self::StageComplete { context, .. }
+            | Self::StageError { context, .. }
+            | Self::PolicyEvaluated { context, .. }
+            | Self::RoutingDecided { context, .. }
+            | Self::ExecutionStarted { context, .. }
+            | Self::ExecutionCompleted { context, .. }
+            | Self::ExecutionFailed { context, .. }
+            | Self::LocalAborted { context, .. }
+            | Self::PipelineStart { context, .. }
+            | Self::PipelineComplete { context, .. }
+            | Self::BootstrapStart { context }
+            | Self::ComponentInitialized { context, .. }
+            | Self::AdapterRegistered { context, .. }
+            | Self::ExecutorReady { context }
+            | Self::OrchestratorReady { context } => context,
+        }
+    }
+
+    fn context_mut(&mut self) -> &mut EventContext {
+        match self {
+            Self::StageStart { context, .. }
+            | Self::StageComplete { context, .. }
+            | Self::StageError { context, .. }
+            | Self::PolicyEvaluated { context, .. }
+            | Self::RoutingDecided { context, .. }
+            | Self::ExecutionStarted { context, .. }
+            | Self::ExecutionCompleted { context, .. }
+            | Self::ExecutionFailed { context, .. }
+            | Self::LocalAborted { context, .. }
+            | Self::PipelineStart { context, .. }
+            | Self::PipelineComplete { context, .. }
+            | Self::BootstrapStart { context }
+            | Self::ComponentInitialized { context, .. }
+            | Self::AdapterRegistered { context, .. }
+            | Self::ExecutorReady { context }
+            | Self::OrchestratorReady { context } => context,
+        }
+    }
+
+    fn attach_context(mut self, context: EventContext) -> Self {
+        let merged = self.context().clone().merge_missing(context);
+        *self.context_mut() = merged;
+        self
+    }
 }
 
 /// Event subscription handle for managing subscriptions.
@@ -104,6 +300,14 @@ impl Subscription {
     /// Receive the next event, blocking until one is available.
     pub fn recv(&self) -> Result<OrchestratorEvent, mpsc::RecvError> {
         self.receiver.recv()
+    }
+
+    /// Receive the next event, blocking until one is available or timeout elapses.
+    pub fn recv_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<OrchestratorEvent, mpsc::RecvTimeoutError> {
+        self.receiver.recv_timeout(timeout)
     }
 
     /// Get the subscription ID.
@@ -126,6 +330,7 @@ struct Subscriber {
 pub struct EventBus {
     subscribers: Arc<Mutex<HashMap<usize, Subscriber>>>,
     next_id: Arc<Mutex<usize>>,
+    context: EventContext,
 }
 
 impl EventBus {
@@ -134,11 +339,19 @@ impl EventBus {
         Self {
             subscribers: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(Mutex::new(0)),
+            context: EventContext::current(),
         }
     }
 
     /// Publish an event to all subscribers.
     pub fn publish(&self, event: OrchestratorEvent) {
+        let current_context = EventContext::current();
+        let context = if current_context.is_empty() {
+            self.context.clone()
+        } else {
+            current_context.merge_missing(self.context.clone())
+        };
+        let event = event.attach_context(context);
         let subscribers = self.subscribers.lock().unwrap();
         let mut failed_ids = Vec::new();
 
@@ -244,6 +457,10 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
+    fn empty_context() -> EventContext {
+        EventContext::default()
+    }
+
     #[test]
     fn test_event_bus_creation() {
         let bus = EventBus::new();
@@ -257,11 +474,12 @@ mod tests {
 
         bus.publish(OrchestratorEvent::StageStart {
             stage_name: "test_stage".to_string(),
+            context: empty_context(),
         });
 
         let event = subscription.recv().unwrap();
         match event {
-            OrchestratorEvent::StageStart { stage_name } => {
+            OrchestratorEvent::StageStart { stage_name, .. } => {
                 assert_eq!(stage_name, "test_stage");
             }
             _ => panic!("Unexpected event type"),
@@ -276,6 +494,7 @@ mod tests {
 
         bus.publish(OrchestratorEvent::PipelineStart {
             stages: vec!["stage1".to_string(), "stage2".to_string()],
+            context: empty_context(),
         });
 
         let event1 = sub1.recv().unwrap();
@@ -283,8 +502,8 @@ mod tests {
 
         match (event1, event2) {
             (
-                OrchestratorEvent::PipelineStart { stages: s1 },
-                OrchestratorEvent::PipelineStart { stages: s2 },
+                OrchestratorEvent::PipelineStart { stages: s1, .. },
+                OrchestratorEvent::PipelineStart { stages: s2, .. },
             ) => {
                 assert_eq!(s1, s2);
                 assert_eq!(s1.len(), 2);
@@ -311,6 +530,7 @@ mod tests {
             stage_name: "test".to_string(),
             target: "local".to_string(),
             latency_ms: 100,
+            context: empty_context(),
         });
 
         // Give handler thread time to process
@@ -347,6 +567,7 @@ mod tests {
             stage_name: "test".to_string(),
             allowed: true,
             reason: None,
+            context: empty_context(),
         });
 
         // Should receive event now
@@ -367,6 +588,7 @@ mod tests {
             reason: "optimal".to_string(),
             recent_abort_rate: 0.0,
             sample_size: 0,
+            context: empty_context(),
         };
 
         // Verify Clone works
@@ -402,6 +624,7 @@ mod tests {
         // Test all event types
         bus.publish(OrchestratorEvent::StageStart {
             stage_name: "test".to_string(),
+            context: empty_context(),
         });
         let _ = subscription.recv().unwrap();
 
@@ -409,12 +632,14 @@ mod tests {
             stage_name: "test".to_string(),
             target: "local".to_string(),
             latency_ms: 100,
+            context: empty_context(),
         });
         let _ = subscription.recv().unwrap();
 
         bus.publish(OrchestratorEvent::StageError {
             stage_name: "test".to_string(),
             error: "test error".to_string(),
+            context: empty_context(),
         });
         let _ = subscription.recv().unwrap();
 
@@ -422,6 +647,7 @@ mod tests {
             stage_name: "test".to_string(),
             allowed: true,
             reason: Some("policy passed".to_string()),
+            context: empty_context(),
         });
         let _ = subscription.recv().unwrap();
 
@@ -431,12 +657,14 @@ mod tests {
             reason: "optimal".to_string(),
             recent_abort_rate: 0.0,
             sample_size: 0,
+            context: empty_context(),
         });
         let _ = subscription.recv().unwrap();
 
         bus.publish(OrchestratorEvent::ExecutionStarted {
             stage_name: "test".to_string(),
             target: "local".to_string(),
+            context: empty_context(),
         });
         let _ = subscription.recv().unwrap();
 
@@ -444,6 +672,7 @@ mod tests {
             stage_name: "test".to_string(),
             target: "local".to_string(),
             execution_time_ms: 50,
+            context: empty_context(),
         });
         let _ = subscription.recv().unwrap();
 
@@ -451,6 +680,7 @@ mod tests {
             stage_name: "test".to_string(),
             target: "cloud".to_string(),
             error: "execution error".to_string(),
+            context: empty_context(),
         });
         let _ = subscription.recv().unwrap();
     }

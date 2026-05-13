@@ -103,7 +103,9 @@ impl Orchestrator {
     pub fn bootstrap(config_path: Option<&Path>) -> Result<Self, OrchestratorError> {
         // Emit bootstrap start event
         let event_bus = EventBus::new();
-        event_bus.publish(OrchestratorEvent::BootstrapStart);
+        event_bus.publish(OrchestratorEvent::BootstrapStart {
+            context: Default::default(),
+        });
 
         // Load configuration if provided
         let config = if let Some(path) = config_path {
@@ -120,12 +122,14 @@ impl Orchestrator {
         let policy_engine = Box::new(DefaultPolicyEngine::with_default_policy());
         event_bus.publish(OrchestratorEvent::ComponentInitialized {
             component: "policy_engine".to_string(),
+            context: Default::default(),
         });
 
         // Initialize routing engine
         let routing_engine = Box::new(DefaultRoutingEngine::new());
         event_bus.publish(OrchestratorEvent::ComponentInitialized {
             component: "routing_engine".to_string(),
+            context: Default::default(),
         });
 
         // Initialize executor
@@ -135,6 +139,7 @@ impl Orchestrator {
 
         event_bus.publish(OrchestratorEvent::ComponentInitialized {
             component: "executor".to_string(),
+            context: Default::default(),
         });
 
         // Register adapters based on configuration
@@ -157,6 +162,7 @@ impl Orchestrator {
                 executor.register_adapter(adapter);
                 event_bus.publish(OrchestratorEvent::AdapterRegistered {
                     name: "coreml".to_string(),
+                    context: Default::default(),
                 });
             }
 
@@ -167,6 +173,7 @@ impl Orchestrator {
                 executor.register_adapter(adapter);
                 event_bus.publish(OrchestratorEvent::AdapterRegistered {
                     name: "onnx-mobile".to_string(),
+                    context: Default::default(),
                 });
             }
 
@@ -177,6 +184,7 @@ impl Orchestrator {
                 executor.register_adapter(adapter);
                 event_bus.publish(OrchestratorEvent::AdapterRegistered {
                     name: "onnx".to_string(),
+                    context: Default::default(),
                 });
             }
 
@@ -187,6 +195,7 @@ impl Orchestrator {
                 executor.register_adapter(adapter);
                 event_bus.publish(OrchestratorEvent::AdapterRegistered {
                     name: "onnx".to_string(),
+                    context: Default::default(),
                 });
             }
 
@@ -197,6 +206,7 @@ impl Orchestrator {
                 executor.register_adapter(adapter);
                 event_bus.publish(OrchestratorEvent::AdapterRegistered {
                     name: "onnx".to_string(),
+                    context: Default::default(),
                 });
             }
         }
@@ -207,6 +217,7 @@ impl Orchestrator {
             executor.register_adapter(adapter);
             event_bus.publish(OrchestratorEvent::AdapterRegistered {
                 name: "cloud".to_string(),
+                context: Default::default(),
             });
         }
 
@@ -216,6 +227,7 @@ impl Orchestrator {
             executor.register_adapter(adapter);
             event_bus.publish(OrchestratorEvent::AdapterRegistered {
                 name: "mock".to_string(),
+                context: Default::default(),
             });
         }
 
@@ -263,10 +275,15 @@ impl Orchestrator {
         let authority: Box<dyn OrchestrationAuthority> = Box::new(LocalAuthority::new());
         event_bus.publish(OrchestratorEvent::ComponentInitialized {
             component: "authority".to_string(),
+            context: Default::default(),
         });
 
-        event_bus.publish(OrchestratorEvent::ExecutorReady);
-        event_bus.publish(OrchestratorEvent::OrchestratorReady);
+        event_bus.publish(OrchestratorEvent::ExecutorReady {
+            context: Default::default(),
+        });
+        event_bus.publish(OrchestratorEvent::OrchestratorReady {
+            context: Default::default(),
+        });
 
         // Create orchestrator instance
         let orchestrator = Orchestrator::with_all(

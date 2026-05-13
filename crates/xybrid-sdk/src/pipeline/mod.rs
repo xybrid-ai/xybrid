@@ -908,11 +908,7 @@ impl Pipeline {
         // Subscribe after construction: bootstrap events emitted by
         // `Orchestrator::new()` are constructor-local, while execution events
         // below must be drained before this short-lived orchestrator returns.
-        let orchestrator_bridge = crate::telemetry::subscribe_orchestrator_events_in_context(
-            &orchestrator,
-            pipeline_id,
-            Some(trace_id),
-        );
+        let bridge = crate::telemetry::bridge_orchestrator_events(&orchestrator);
         // No need to set registry config - executor uses bundle_path from stage descriptors
 
         let availability_fn = move |stage: &str| -> LocalAvailability {
@@ -922,15 +918,18 @@ impl Pipeline {
 
         let start_time = std::time::Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
-        let results: Vec<StageExecutionResult> = orchestrator
-            .execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn)
-            .map_err(|e| {
-                orchestrator_bridge.drain();
-                SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
-            })?;
-        orchestrator_bridge.drain();
+        let execution_result =
+            orchestrator.execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn);
+        drop(orchestrator);
+        bridge.join().map_err(|e| {
+            SdkError::PipelineError(format!("Orchestrator event bridge failed: {}", e))
+        })?;
+        let results: Vec<StageExecutionResult> = execution_result
+            .map_err(|e| SdkError::PipelineError(format!("Pipeline execution failed: {}", e)))?;
         let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
+        // Defer clearing context until after the PipelineComplete publish so
+        // direct SDK telemetry still carries this run's pipeline_id/trace_id.
         let stages: Vec<StageTiming> = results
             .iter()
             .map(|result| StageTiming {
@@ -1044,11 +1043,7 @@ impl Pipeline {
 
             let mut orchestrator = Orchestrator::new();
             // Subscribe after construction; see the sync path above.
-            let orchestrator_bridge = crate::telemetry::subscribe_orchestrator_events_in_context(
-                &orchestrator,
-                pipeline_id,
-                Some(trace_id),
-            );
+            let bridge = crate::telemetry::bridge_orchestrator_events(&orchestrator);
             // No need to set registry config - executor uses bundle_path from stage descriptors
 
             let availability_fn = move |stage: &str| -> LocalAvailability {
@@ -1058,20 +1053,23 @@ impl Pipeline {
 
             let start_time = std::time::Instant::now();
             let resource_guard = crate::telemetry::begin_resource_run();
-            let results: Vec<StageExecutionResult> = orchestrator
-                .execute_pipeline(
-                    &stage_descriptors,
-                    &envelope_clone,
-                    &metrics,
-                    &availability_fn,
-                )
-                .map_err(|e| {
-                    orchestrator_bridge.drain();
-                    SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
-                })?;
-            orchestrator_bridge.drain();
+            let execution_result = orchestrator.execute_pipeline(
+                &stage_descriptors,
+                &envelope_clone,
+                &metrics,
+                &availability_fn,
+            );
+            drop(orchestrator);
+            bridge.join().map_err(|e| {
+                SdkError::PipelineError(format!("Orchestrator event bridge failed: {}", e))
+            })?;
+            let results: Vec<StageExecutionResult> = execution_result.map_err(|e| {
+                SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
+            })?;
             let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
+            // Defer clearing context until after the PipelineComplete publish
+            // so direct SDK telemetry still carries this run's IDs.
             let stages: Vec<StageTiming> = results
                 .iter()
                 .map(|result| StageTiming {

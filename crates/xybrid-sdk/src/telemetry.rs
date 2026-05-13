@@ -16,6 +16,12 @@
 //! - **Circuit breaker**: Prevents hammering failing endpoints
 //! - **Automatic retry**: Exponential backoff with jitter for transient failures
 //! - **Failed event queue**: Retries failed events in the background
+//!
+//! # Orchestrator Bridge Context
+//!
+//! Producers attach context at orchestrator event publish time; bridge threads
+//! must not assume telemetry task-local or thread-local state is available when
+//! they drain events later.
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -27,7 +33,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 pub use xybrid_core::device::DeviceProfile;
 use xybrid_core::device::{ResourceMonitor, ResourceTelemetryMode, ResourceUsageSummary};
-use xybrid_core::event_bus::OrchestratorEvent;
+use xybrid_core::event_bus::{EventContext, OrchestratorEvent};
 use xybrid_core::execution::listener::{self as execution_listener, ExecutionEvent};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 use xybrid_core::tracing as core_tracing;
@@ -1772,6 +1778,15 @@ pub fn init_platform_telemetry_from_env() -> bool {
 
 /// Set pipeline context for event enrichment
 pub fn set_telemetry_pipeline_context(pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) {
+    let mut event_context = xybrid_core::event_bus::EventContext::current();
+    event_context.pipeline_id = pipeline_id;
+    event_context.trace_id = trace_id;
+    if event_context.is_empty() {
+        xybrid_core::event_bus::clear_current_event_context();
+    } else {
+        xybrid_core::event_bus::set_current_event_context(event_context);
+    }
+
     if let Ok(exporter) = PLATFORM_EXPORTER.read() {
         if let Some(exp) = exporter.as_ref() {
             exp.set_pipeline_context(pipeline_id, trace_id);
@@ -1792,9 +1807,9 @@ pub fn set_telemetry_pipeline_context(pipeline_id: Option<Uuid>, trace_id: Optio
 /// duplication and closes the panic-leak hole.
 ///
 /// The clear happens at the guard's `Drop`, which fires after any
-/// `publish_telemetry_event` call earlier in the scope — preserving
-/// the existing "publish before clear" ordering the exporter's
-/// lazy-read flush relies on.
+/// `publish_telemetry_event` call earlier in the scope. Direct SDK
+/// telemetry keeps the scoped IDs, while bridged orchestrator events
+/// capture producer context before they cross task/thread boundaries.
 pub(crate) struct TelemetryPipelineContextGuard;
 
 impl TelemetryPipelineContextGuard {
@@ -1904,8 +1919,9 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
         .unwrap()
         .as_millis() as u64;
 
-    match event {
-        OrchestratorEvent::PipelineStart { stages } => TelemetryEvent {
+    let context = event.context().clone();
+    let telemetry_event = match event {
+        OrchestratorEvent::PipelineStart { stages, .. } => TelemetryEvent {
             event_type: "PipelineStart".to_string(),
             stage_name: None,
             target: None,
@@ -1914,7 +1930,9 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             data: Some(serde_json::json!({"stages": stages}).to_string()),
             timestamp_ms,
         },
-        OrchestratorEvent::PipelineComplete { total_latency_ms } => TelemetryEvent {
+        OrchestratorEvent::PipelineComplete {
+            total_latency_ms, ..
+        } => TelemetryEvent {
             event_type: "PipelineComplete".to_string(),
             stage_name: None,
             target: None,
@@ -1923,7 +1941,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             data: None,
             timestamp_ms,
         },
-        OrchestratorEvent::StageStart { stage_name } => TelemetryEvent {
+        OrchestratorEvent::StageStart { stage_name, .. } => TelemetryEvent {
             event_type: "StageStart".to_string(),
             stage_name: Some(stage_name.clone()),
             target: None,
@@ -1936,6 +1954,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             target,
             latency_ms,
+            ..
         } => TelemetryEvent {
             event_type: "StageComplete".to_string(),
             stage_name: Some(stage_name.clone()),
@@ -1945,7 +1964,9 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             data: None,
             timestamp_ms,
         },
-        OrchestratorEvent::StageError { stage_name, error } => TelemetryEvent {
+        OrchestratorEvent::StageError {
+            stage_name, error, ..
+        } => TelemetryEvent {
             event_type: "StageError".to_string(),
             stage_name: Some(stage_name.clone()),
             target: None,
@@ -1960,6 +1981,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             reason,
             recent_abort_rate,
             sample_size,
+            ..
         } => TelemetryEvent {
             event_type: "RoutingDecided".to_string(),
             stage_name: Some(stage_name.clone()),
@@ -1989,7 +2011,9 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             ),
             timestamp_ms,
         },
-        OrchestratorEvent::ExecutionStarted { stage_name, target } => TelemetryEvent {
+        OrchestratorEvent::ExecutionStarted {
+            stage_name, target, ..
+        } => TelemetryEvent {
             event_type: "ExecutionStarted".to_string(),
             stage_name: Some(stage_name.clone()),
             target: Some(target.clone()),
@@ -2002,6 +2026,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             target,
             execution_time_ms,
+            ..
         } => TelemetryEvent {
             event_type: "ExecutionCompleted".to_string(),
             stage_name: Some(stage_name.clone()),
@@ -2015,6 +2040,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             target,
             error,
+            ..
         } => TelemetryEvent {
             event_type: "ExecutionFailed".to_string(),
             stage_name: Some(stage_name.clone()),
@@ -2028,6 +2054,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             allowed,
             reason,
+            ..
         } => TelemetryEvent {
             event_type: "PolicyEvaluated".to_string(),
             stage_name: Some(stage_name.clone()),
@@ -2051,6 +2078,7 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             stage_name,
             target,
             reason,
+            ..
         } => TelemetryEvent {
             event_type: "LocalAborted".to_string(),
             stage_name: Some(stage_name.clone()),
@@ -2069,6 +2097,55 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             data: Some(format!("{:?}", event)),
             timestamp_ms,
         },
+    };
+
+    attach_event_context(telemetry_event, &context)
+}
+
+fn attach_event_context(event: TelemetryEvent, context: &EventContext) -> TelemetryEvent {
+    if context.is_empty() {
+        return event;
+    }
+
+    let mut data = match event.data.as_ref() {
+        Some(raw) => match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(value) if value.is_object() => value,
+            Ok(value) => serde_json::json!({ "value": value }),
+            Err(_) => serde_json::json!({ "value": raw }),
+        },
+        None => serde_json::json!({}),
+    };
+
+    if let Some(obj) = data.as_object_mut() {
+        if let Some(id) = context.pipeline_id {
+            obj.entry(CONTEXT_PIPELINE_ID_KEY.to_string())
+                .or_insert_with(|| serde_json::json!(id.to_string()));
+        }
+        if let Some(id) = context.trace_id {
+            obj.entry(CONTEXT_TRACE_ID_KEY.to_string())
+                .or_insert_with(|| serde_json::json!(id.to_string()));
+        }
+        if let Some(id) = context.correlation_id.as_ref() {
+            obj.entry("correlation_id".to_string())
+                .or_insert_with(|| serde_json::json!(id));
+        }
+        if let Some(id) = context.request_id.as_ref() {
+            obj.entry("request_id".to_string())
+                .or_insert_with(|| serde_json::json!(id));
+        }
+        if let Some(id) = context.model_id.as_ref() {
+            obj.entry("model_id".to_string())
+                .or_insert_with(|| serde_json::json!(id));
+        }
+        if let Some(id) = context.span_id.as_ref() {
+            obj.entry("span_id".to_string())
+                .or_insert_with(|| serde_json::json!(id));
+        }
+    }
+
+    TelemetryEvent {
+        data: Some(data.to_string()),
+        ..event
     }
 }
 
@@ -2308,85 +2385,148 @@ fn dispatch_telemetry_event(event: TelemetryEvent) {
     }
 }
 
-/// Scoped bridge from an orchestrator event bus to the telemetry stream.
-///
-/// The bridge captures the current pipeline context when it subscribes, then
-/// embeds that context into each converted event before enqueueing it. Callers
-/// that own a short-lived orchestrator should keep this handle and call
-/// [`Self::drain`] before returning so queued orchestrator events are not left
-/// behind a detached worker.
-pub struct OrchestratorEventBridge {
-    subscription: xybrid_core::event_bus::Subscription,
-    pipeline_id: Option<Uuid>,
-    trace_id: Option<Uuid>,
+#[derive(Debug, thiserror::Error)]
+pub enum BridgeError {
+    #[error("orchestrator event bridge is no longer running")]
+    Stopped,
+    #[error("orchestrator event bridge flush acknowledgement was dropped")]
+    FlushAckDropped,
+    #[error("orchestrator event bridge thread panicked")]
+    ThreadPanicked,
 }
 
-impl OrchestratorEventBridge {
-    /// Publish all events currently buffered for this bridge.
+enum BridgeCommand {
+    Flush(mpsc::Sender<()>),
+}
+
+/// Handle for a scoped orchestrator-to-telemetry event bridge.
+#[must_use = "BridgeHandle must be flushed or joined, otherwise queued orchestrator telemetry can be dropped"]
+pub struct BridgeHandle {
+    join_handle: thread::JoinHandle<()>,
+    command_tx: mpsc::Sender<BridgeCommand>,
+}
+
+impl BridgeHandle {
+    /// Block until all events queued before this call have been delivered to
+    /// the SDK telemetry stream.
+    pub fn flush(&self) -> Result<(), BridgeError> {
+        let (ack_tx, ack_rx) = mpsc::channel();
+        self.command_tx
+            .send(BridgeCommand::Flush(ack_tx))
+            .map_err(|_| BridgeError::Stopped)?;
+        ack_rx.recv().map_err(|_| BridgeError::FlushAckDropped)
+    }
+
+    /// Compatibility alias for callers that used the previous scoped bridge
+    /// drain API. New code should prefer [`Self::flush`] and handle errors.
     pub fn drain(&self) {
-        loop {
-            match self.subscription.try_recv() {
-                Ok(event) => self.publish_event(&event),
-                Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
-            }
-        }
+        let _ = self.flush();
     }
 
-    fn publish_event(&self, event: &OrchestratorEvent) {
-        let telemetry_event = convert_orchestrator_event(event);
-        publish_telemetry_event_in_context(telemetry_event, self.pipeline_id, self.trace_id);
-    }
-
-    fn recv_forever(self) {
-        while let Ok(event) = self.subscription.recv() {
-            self.publish_event(&event);
-        }
+    /// Wait for the bridge thread to finish draining after the orchestrator's
+    /// event bus has been dropped.
+    pub fn join(self) -> Result<(), BridgeError> {
+        let Self {
+            join_handle,
+            command_tx,
+        } = self;
+        drop(command_tx);
+        join_handle.join().map_err(|_| BridgeError::ThreadPanicked)
     }
 }
 
-impl Drop for OrchestratorEventBridge {
-    fn drop(&mut self) {
-        self.drain();
+pub type OrchestratorEventBridge = BridgeHandle;
+
+const BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(1);
+
+/// Bridge orchestrator events to telemetry stream.
+///
+/// This function subscribes to orchestrator events and converts them to
+/// telemetry events. The returned handle must be joined after the orchestrator
+/// is dropped so queued events are drained before the caller tears down
+/// telemetry subscribers or the runtime.
+pub fn bridge_orchestrator_events(
+    orchestrator: &xybrid_core::orchestrator::Orchestrator,
+) -> BridgeHandle {
+    let event_bus = orchestrator.event_bus();
+    let subscription = event_bus.subscribe();
+    let (command_tx, command_rx) = mpsc::channel();
+
+    let join_handle = thread::spawn(move || bridge_loop(subscription, command_rx));
+
+    BridgeHandle {
+        join_handle,
+        command_tx,
     }
 }
 
 /// Subscribe to orchestrator events and return a drainable bridge handle.
 pub fn subscribe_orchestrator_events(
     orchestrator: &xybrid_core::orchestrator::Orchestrator,
-) -> OrchestratorEventBridge {
-    let (pipeline_id, trace_id) = current_telemetry_pipeline_context();
-    subscribe_orchestrator_events_in_context(orchestrator, pipeline_id, trace_id)
+) -> BridgeHandle {
+    bridge_orchestrator_events(orchestrator)
 }
 
 pub(crate) fn subscribe_orchestrator_events_in_context(
     orchestrator: &xybrid_core::orchestrator::Orchestrator,
-    pipeline_id: Option<Uuid>,
-    trace_id: Option<Uuid>,
-) -> OrchestratorEventBridge {
-    let event_bus = orchestrator.event_bus();
-    let subscription = event_bus.subscribe();
+    _pipeline_id: Option<Uuid>,
+    _trace_id: Option<Uuid>,
+) -> BridgeHandle {
+    bridge_orchestrator_events(orchestrator)
+}
 
-    OrchestratorEventBridge {
-        subscription,
-        pipeline_id,
-        trace_id,
+fn bridge_loop(
+    subscription: xybrid_core::event_bus::Subscription,
+    command_rx: mpsc::Receiver<BridgeCommand>,
+) {
+    loop {
+        drain_bridge_commands(&subscription, &command_rx);
+        match subscription.recv_timeout(BRIDGE_POLL_INTERVAL) {
+            Ok(event) => publish_orchestrator_event(event),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                drain_available_orchestrator_events(&subscription);
+                drain_bridge_commands(&subscription, &command_rx);
+                break;
+            }
+        }
     }
 }
 
-/// Bridge orchestrator events to telemetry stream on a background thread.
-///
-/// Short-lived SDK entry points should prefer [`subscribe_orchestrator_events`]
-/// and drain the returned handle before returning. This detached helper is kept
-/// for long-running CLI flows that own an orchestrator for an interactive
-/// session.
-pub fn bridge_orchestrator_events(orchestrator: &xybrid_core::orchestrator::Orchestrator) {
-    let bridge = subscribe_orchestrator_events(orchestrator);
-    thread::spawn(move || bridge.recv_forever());
+fn drain_bridge_commands(
+    subscription: &xybrid_core::event_bus::Subscription,
+    command_rx: &mpsc::Receiver<BridgeCommand>,
+) {
+    while let Ok(command) = command_rx.try_recv() {
+        match command {
+            BridgeCommand::Flush(ack_tx) => {
+                drain_available_orchestrator_events(subscription);
+                let _ = ack_tx.send(());
+            }
+        }
+    }
+}
+
+fn drain_available_orchestrator_events(subscription: &xybrid_core::event_bus::Subscription) {
+    loop {
+        match subscription.try_recv() {
+            Ok(event) => publish_orchestrator_event(event),
+            Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
+        }
+    }
+}
+
+fn publish_orchestrator_event(event: OrchestratorEvent) {
+    let telemetry_event = convert_orchestrator_event(&event);
+    publish_telemetry_event(telemetry_event);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::MutexGuard;
+
+    static TELEMETRY_SENDER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn platform_event_payload_has_no_legacy_cache_keys() {
@@ -2817,6 +2957,7 @@ mod tests {
     fn test_convert_stage_start_event() {
         let event = OrchestratorEvent::StageStart {
             stage_name: "asr".to_string(),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2834,6 +2975,7 @@ mod tests {
             stage_name: "tts".to_string(),
             target: "local".to_string(),
             latency_ms: 150,
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2849,6 +2991,7 @@ mod tests {
         let event = OrchestratorEvent::StageError {
             stage_name: "asr".to_string(),
             error: "Model not found".to_string(),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2861,6 +3004,7 @@ mod tests {
     fn test_convert_pipeline_start_event() {
         let event = OrchestratorEvent::PipelineStart {
             stages: vec!["asr".to_string(), "llm".to_string(), "tts".to_string()],
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2877,6 +3021,7 @@ mod tests {
     fn test_convert_pipeline_complete_event() {
         let event = OrchestratorEvent::PipelineComplete {
             total_latency_ms: 500,
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2892,6 +3037,7 @@ mod tests {
             reason: "network_optimal".to_string(),
             recent_abort_rate: 0.0,
             sample_size: 0,
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -2915,6 +3061,7 @@ mod tests {
             reason: "history_bias".to_string(),
             recent_abort_rate: 0.75,
             sample_size: 4,
+            context: Default::default(),
         };
         let telemetry_event = convert_orchestrator_event(&event);
 
@@ -2961,6 +3108,7 @@ mod tests {
                 reason: "history_bias".to_string(),
                 recent_abort_rate: bad_rate,
                 sample_size: 1,
+                context: Default::default(),
             };
             let telemetry_event = convert_orchestrator_event(&event);
             let parsed_data: serde_json::Value =
@@ -2978,14 +3126,15 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         register_telemetry_sender(tx);
 
-        let orchestrator = xybrid_core::orchestrator::Orchestrator::new();
         let pipeline_id = Uuid::new_v4();
         let trace_id = Uuid::new_v4();
-        let bridge = subscribe_orchestrator_events_in_context(
-            &orchestrator,
-            Some(pipeline_id),
-            Some(trace_id),
+        let _event_context = xybrid_core::event_bus::EventContextGuard::install(
+            xybrid_core::event_bus::EventContext::default()
+                .with_pipeline_id(pipeline_id)
+                .with_trace_id(trace_id),
         );
+        let orchestrator = xybrid_core::orchestrator::Orchestrator::new();
+        let bridge = bridge_orchestrator_events(&orchestrator);
 
         orchestrator
             .event_bus()
@@ -2995,6 +3144,7 @@ mod tests {
                 reason: "history_bias".to_string(),
                 recent_abort_rate: 0.5,
                 sample_size: 2,
+                context: Default::default(),
             });
         bridge.drain();
 
@@ -3035,6 +3185,7 @@ mod tests {
         let event = OrchestratorEvent::ExecutionStarted {
             stage_name: "asr".to_string(),
             target: "local".to_string(),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -3049,6 +3200,7 @@ mod tests {
             stage_name: "asr".to_string(),
             target: "local".to_string(),
             execution_time_ms: 75,
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -3064,6 +3216,7 @@ mod tests {
             stage_name: "tts".to_string(),
             target: "cloud".to_string(),
             error: "Timeout".to_string(),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -3079,6 +3232,7 @@ mod tests {
             stage_name: "asr".to_string(),
             allowed: true,
             reason: Some("All conditions met".to_string()),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -3094,6 +3248,7 @@ mod tests {
             stage_name: "llm".to_string(),
             allowed: false,
             reason: Some("Privacy policy violation".to_string()),
+            context: Default::default(),
         };
         let telemetry = convert_orchestrator_event(&event);
 
@@ -3103,6 +3258,164 @@ mod tests {
             telemetry.error,
             Some("Privacy policy violation".to_string())
         );
+    }
+
+    fn routing_decided_event(stage_name: impl Into<String>) -> OrchestratorEvent {
+        OrchestratorEvent::RoutingDecided {
+            stage_name: stage_name.into(),
+            target: "local".to_string(),
+            reason: "test_route".to_string(),
+            recent_abort_rate: 0.0,
+            sample_size: 0,
+            context: xybrid_core::event_bus::EventContext::default(),
+        }
+    }
+
+    fn clear_registered_telemetry_senders() {
+        TELEMETRY_SENDERS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
+
+    fn telemetry_sender_test_lock() -> MutexGuard<'static, ()> {
+        TELEMETRY_SENDER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[test]
+    fn bridge_drains_all_events_on_orchestrator_drop() {
+        let _lock = telemetry_sender_test_lock();
+        clear_registered_telemetry_senders();
+        let (tx, rx) = mpsc::channel();
+        register_telemetry_sender(tx);
+
+        let orchestrator = xybrid_core::orchestrator::Orchestrator::new();
+        let bridge = bridge_orchestrator_events(&orchestrator);
+        for idx in 0..100 {
+            orchestrator
+                .event_bus()
+                .publish(routing_decided_event(format!("stage-{idx:03}")));
+        }
+
+        drop(orchestrator);
+        bridge.join().expect("bridge should drain cleanly");
+
+        let events: Vec<_> = rx
+            .try_iter()
+            .filter(|event| {
+                event.event_type == "RoutingDecided"
+                    && event
+                        .stage_name
+                        .as_deref()
+                        .is_some_and(|stage| stage.starts_with("stage-"))
+            })
+            .collect();
+        assert_eq!(events.len(), 100);
+        for idx in 0..100 {
+            assert!(
+                events
+                    .iter()
+                    .any(|event| event.stage_name.as_deref() == Some(&format!("stage-{idx:03}"))),
+                "missing routed event stage-{idx:03}; got {events:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bridge_preserves_correlation_id_across_task_boundary() {
+        let _lock = telemetry_sender_test_lock();
+        clear_registered_telemetry_senders();
+        let (tx, rx) = mpsc::channel();
+        register_telemetry_sender(tx);
+
+        let publishers: Vec<_> = ["A", "B"]
+            .into_iter()
+            .map(|correlation_id| {
+                thread::spawn(move || {
+                    let _context = xybrid_core::event_bus::EventContextGuard::install(
+                        xybrid_core::event_bus::EventContext::default()
+                            .with_correlation_id(correlation_id),
+                    );
+                    let orchestrator = xybrid_core::orchestrator::Orchestrator::new();
+                    let bridge = bridge_orchestrator_events(&orchestrator);
+                    for idx in 0..10 {
+                        orchestrator
+                            .event_bus()
+                            .publish(routing_decided_event(format!("{correlation_id}-{idx}")));
+                        thread::yield_now();
+                    }
+                    drop(orchestrator);
+                    bridge.join().expect("bridge should drain cleanly");
+                })
+            })
+            .collect();
+
+        for publisher in publishers {
+            publisher.join().expect("publisher thread should not panic");
+        }
+
+        let events: Vec<_> = rx
+            .try_iter()
+            .filter(|event| {
+                event.event_type == "RoutingDecided"
+                    && event
+                        .stage_name
+                        .as_deref()
+                        .is_some_and(|stage| stage.starts_with("A-") || stage.starts_with("B-"))
+            })
+            .collect();
+        assert_eq!(events.len(), 20);
+        for event in events {
+            let stage = event.stage_name.as_deref().expect("stage name");
+            let data: serde_json::Value =
+                serde_json::from_str(event.data.as_deref().expect("event data")).unwrap();
+            let expected = stage.split('-').next().unwrap();
+            assert_eq!(
+                data["correlation_id"].as_str(),
+                Some(expected),
+                "event {stage} carried wrong context: {data}"
+            );
+        }
+    }
+
+    #[test]
+    fn flush_blocks_until_in_flight_events_delivered() {
+        let _lock = telemetry_sender_test_lock();
+        clear_registered_telemetry_senders();
+        let (tx, rx) = mpsc::channel();
+        register_telemetry_sender(tx);
+
+        let orchestrator = xybrid_core::orchestrator::Orchestrator::new();
+        let bridge = bridge_orchestrator_events(&orchestrator);
+        for idx in 0..5 {
+            orchestrator
+                .event_bus()
+                .publish(routing_decided_event(format!("flush-{idx}")));
+        }
+
+        bridge.flush().expect("flush should complete");
+
+        let mut delivered = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while delivered.len() < 5 && std::time::Instant::now() < deadline {
+            let event = rx
+                .recv_timeout(Duration::from_millis(50))
+                .expect("flush should deliver event before returning");
+            if event.event_type == "RoutingDecided"
+                && event
+                    .stage_name
+                    .as_deref()
+                    .is_some_and(|stage| stage.starts_with("flush-"))
+            {
+                delivered.push(event);
+            }
+        }
+        assert_eq!(delivered.len(), 5);
+
+        drop(orchestrator);
+        bridge.join().expect("bridge should drain cleanly");
     }
 
     #[test]
@@ -3128,6 +3441,8 @@ mod tests {
 
     #[test]
     fn test_register_and_publish() {
+        let _lock = telemetry_sender_test_lock();
+        clear_registered_telemetry_senders();
         let (tx, rx) = mpsc::channel();
         register_telemetry_sender(tx);
 
