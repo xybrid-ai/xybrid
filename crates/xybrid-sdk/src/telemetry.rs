@@ -3123,6 +3123,7 @@ mod tests {
 
     #[test]
     fn scoped_orchestrator_bridge_drains_queued_events_with_captured_context() {
+        let _guard = TelemetrySenderTestGuard::acquire();
         let (tx, rx) = mpsc::channel();
         register_telemetry_sender(tx);
 
@@ -3139,7 +3140,7 @@ mod tests {
         orchestrator
             .event_bus()
             .publish(OrchestratorEvent::RoutingDecided {
-                stage_name: "stage-1".to_string(),
+                stage_name: "scoped-bridge-context".to_string(),
                 target: "cloud".to_string(),
                 reason: "history_bias".to_string(),
                 recent_abort_rate: 0.5,
@@ -3151,7 +3152,10 @@ mod tests {
         let mut received = None;
         for _ in 0..20 {
             match rx.recv_timeout(std::time::Duration::from_millis(50)) {
-                Ok(event) if event.event_type == "RoutingDecided" => {
+                Ok(event)
+                    if event.event_type == "RoutingDecided"
+                        && event.stage_name.as_deref() == Some("scoped-bridge-context") =>
+                {
                     received = Some(event);
                     break;
                 }
@@ -3278,16 +3282,29 @@ mod tests {
             .clear();
     }
 
-    fn telemetry_sender_test_lock() -> MutexGuard<'static, ()> {
-        TELEMETRY_SENDER_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    struct TelemetrySenderTestGuard {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl TelemetrySenderTestGuard {
+        fn acquire() -> Self {
+            let guard = TELEMETRY_SENDER_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            clear_registered_telemetry_senders();
+            Self { _guard: guard }
+        }
+    }
+
+    impl Drop for TelemetrySenderTestGuard {
+        fn drop(&mut self) {
+            clear_registered_telemetry_senders();
+        }
     }
 
     #[test]
     fn bridge_drains_all_events_on_orchestrator_drop() {
-        let _lock = telemetry_sender_test_lock();
-        clear_registered_telemetry_senders();
+        let _guard = TelemetrySenderTestGuard::acquire();
         let (tx, rx) = mpsc::channel();
         register_telemetry_sender(tx);
 
@@ -3296,7 +3313,7 @@ mod tests {
         for idx in 0..100 {
             orchestrator
                 .event_bus()
-                .publish(routing_decided_event(format!("stage-{idx:03}")));
+                .publish(routing_decided_event(format!("bridge-drain-{idx:03}")));
         }
 
         drop(orchestrator);
@@ -3309,7 +3326,7 @@ mod tests {
                     && event
                         .stage_name
                         .as_deref()
-                        .is_some_and(|stage| stage.starts_with("stage-"))
+                        .is_some_and(|stage| stage.starts_with("bridge-drain-"))
             })
             .collect();
         assert_eq!(events.len(), 100);
@@ -3317,16 +3334,16 @@ mod tests {
             assert!(
                 events
                     .iter()
-                    .any(|event| event.stage_name.as_deref() == Some(&format!("stage-{idx:03}"))),
-                "missing routed event stage-{idx:03}; got {events:?}"
+                    .any(|event| event.stage_name.as_deref()
+                        == Some(&format!("bridge-drain-{idx:03}"))),
+                "missing routed event bridge-drain-{idx:03}; got {events:?}"
             );
         }
     }
 
     #[test]
     fn bridge_preserves_correlation_id_across_task_boundary() {
-        let _lock = telemetry_sender_test_lock();
-        clear_registered_telemetry_senders();
+        let _guard = TelemetrySenderTestGuard::acquire();
         let (tx, rx) = mpsc::channel();
         register_telemetry_sender(tx);
 
@@ -3382,8 +3399,7 @@ mod tests {
 
     #[test]
     fn flush_blocks_until_in_flight_events_delivered() {
-        let _lock = telemetry_sender_test_lock();
-        clear_registered_telemetry_senders();
+        let _guard = TelemetrySenderTestGuard::acquire();
         let (tx, rx) = mpsc::channel();
         register_telemetry_sender(tx);
 
@@ -3441,8 +3457,7 @@ mod tests {
 
     #[test]
     fn test_register_and_publish() {
-        let _lock = telemetry_sender_test_lock();
-        clear_registered_telemetry_senders();
+        let _guard = TelemetrySenderTestGuard::acquire();
         let (tx, rx) = mpsc::channel();
         register_telemetry_sender(tx);
 
