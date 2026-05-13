@@ -213,6 +213,7 @@ impl LlamaCppBackend {
     /// accessor [`Self::last_cached_prefix_len`].
     fn prepare_kv_cache_and_get_tail(
         &self,
+        model: &sys::LlamaModel,
         context: &sys::LlamaContext,
         new_tokens: &[i32],
         max_new_tokens: usize,
@@ -232,9 +233,6 @@ impl LlamaCppBackend {
         // pre-prefix-reuse full-clear path. The cost is per-turn
         // re-prefill of the full conversation, which is the engine's
         // pre-INF-99 behaviour.
-        let model = self.model.as_ref().ok_or_else(|| {
-            AdapterError::ModelNotLoaded("No model loaded for KV cache prepare".to_string())
-        })?;
         if sys::llama_model_is_recurrent(model) {
             sys::llama_kv_cache_clear(context);
             state.cached_tokens = new_tokens.to_vec();
@@ -418,7 +416,7 @@ impl LlmBackend for LlamaCppBackend {
             // unconditional clear, just without the duplicate work in
             // multi-turn chats.
             let (tail, n_past) =
-                self.prepare_kv_cache_and_get_tail(context, &tokens, config.max_tokens)?;
+                self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
 
             // Per-chunk timestamps capture the streaming cadence for TTFT +
             // inter-token-latency telemetry. The closure is observation-only
@@ -548,7 +546,7 @@ impl LlmBackend for LlamaCppBackend {
             // across calls so the LCP path will mostly clear-and-refill,
             // but the unified helper keeps behaviour consistent.
             let (tail, n_past) =
-                self.prepare_kv_cache_and_get_tail(context, &tokens, config.max_tokens)?;
+                self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
 
             // Use the streaming-capable API with an observation-only
             // callback so raw generation gets the same TTFT / ITL /
@@ -639,7 +637,7 @@ impl LlmBackend for LlamaCppBackend {
             // already prefilled, only re-prefill the diverged tail. See
             // prepare_kv_cache_and_get_tail for the full contract.
             let (tail, n_past) =
-                self.prepare_kv_cache_and_get_tail(context, &tokens, config.max_tokens)?;
+                self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
 
             // Shared streaming state: telemetry recorder + text filter.
             // The filter owns cumulative text, think-block state, stop-pattern

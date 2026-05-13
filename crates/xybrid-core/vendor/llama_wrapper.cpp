@@ -585,7 +585,17 @@ int llama_generate_c(
             n_cur++;
         }
 
-        if (llama_decode(ctx, batch) != 0) {
+        int decode_result = llama_decode(ctx, batch);
+        if (decode_result != 0) {
+            // Mirror the streaming wrapper's diagnostic so the -3 Rust
+            // error message can point at a real stderr line. Always-on
+            // (not gated on llama.cpp verbosity) — this path has no
+            // n_past_in / prefix-reuse, so a decode failure here points
+            // at the input chunk itself, not a KV-cache state mismatch.
+            fprintf(stderr,
+                    "llama_generate_c: llama_decode returned %d on prefill "
+                    "chunk [%d, %d), n_input=%d, n_ctx=%d.\n",
+                    decode_result, chunk_start, chunk_end, n_input, n_ctx);
             delete[] candidates_data;
             llama_batch_free(batch);
             llama_sampler_free(sampler);

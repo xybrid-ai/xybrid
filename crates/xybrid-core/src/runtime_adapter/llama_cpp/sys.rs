@@ -866,7 +866,8 @@ pub fn llama_generate_with_stops(
             -2 => "sampler chain creation failed",
             -3 => {
                 "llama_decode failed on prefill \
-                 (enable XYBRID_LLAMACPP_VERBOSITY=2 for the wrapper-level diagnostic)"
+                 (the wrapper logs the actual llama_decode return code + chunk \
+                 position to stderr; see `llama_generate_c` in llama_wrapper.cpp)"
             }
             -4 => "input exceeds context window",
             _ => "unknown",
@@ -1067,20 +1068,22 @@ where
             -1 => "invalid arguments (null context/model/input or non-positive sizes)",
             -2 => "sampler chain creation failed",
             -3 => {
-                // The wrapper logs the actual llama_decode return code +
-                // n_past_in / chunk position to stderr (see
-                // `llama_generate_streaming_c` in llama_wrapper.cpp). When
-                // n_past_in > 0 the prefix-reuse path was in play; that's
-                // the path that triggers KV-cache state mismatches on
-                // recurrent / hybrid models. The adapter
+                // The wrapper unconditionally logs the actual llama_decode
+                // return code + n_past_in / chunk position to stderr (see
+                // `llama_generate_streaming_c` in llama_wrapper.cpp); the
+                // diagnostic is not gated on `XYBRID_LLAMACPP_VERBOSITY`,
+                // which only controls llama.cpp's own log callback path.
+                // When n_past_in > 0 the prefix-reuse path was in play;
+                // that's the path that triggers KV-cache state mismatches
+                // on recurrent / hybrid models. The adapter
                 // (`prepare_kv_cache_and_get_tail`) now full-clears the
                 // cache for recurrent models specifically, so this should
-                // be rare; if you hit it on a new architecture, enable
-                // `XYBRID_LLAMACPP_VERBOSITY=2` for the wrapper's stderr
-                // diagnostic and consider whether the model needs the
-                // recurrent path.
+                // be rare; if you hit it on a new architecture, consult
+                // the stderr line and consider whether the model needs
+                // the recurrent path.
                 "llama_decode failed on prefill (KV-cache state mismatch likely; \
-                 enable XYBRID_LLAMACPP_VERBOSITY=2 for the wrapper-level diagnostic)"
+                 see stderr for the wrapper-level diagnostic line emitted by \
+                 `llama_generate_streaming_c`)"
             }
             -4 => "input + prefix exceeds context window (n_past_in + n_input >= n_ctx)",
             _ => "unknown",
