@@ -159,7 +159,7 @@ val result = model.run(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", exact: "0.1.0-beta13")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", exact: "0.1.0-rc1")
 ]
 ```
 
