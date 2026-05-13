@@ -257,6 +257,28 @@ int llama_n_ctx_c(const llama_context* ctx) {
     return static_cast<int>(llama_n_ctx(ctx));
 }
 
+// Returns true if the model uses a recurrent / hybrid-state architecture
+// (Mamba, RWKV, LFM, etc.) rather than a pure attention KV cache.
+//
+// The multi-turn prefix-reuse path in the Rust adapter
+// (`prepare_kv_cache_and_get_tail`) calls `llama_kv_cache_seq_rm` to
+// truncate the cache to a shared prefix, then re-prefills the
+// diverging tail at `n_past_in`. That dance is safe for pure attention
+// caches but corrupts the recurrent state of hybrid models — the
+// recurrence accumulates across positions, so dropping a contiguous
+// suffix leaves the residual state inconsistent with the truncated
+// position. `llama_decode` then fails on the first batch of the new
+// tail.
+//
+// Callers should skip prefix-reuse and full-clear the cache between
+// turns when this returns true.
+bool llama_model_is_recurrent_c(const llama_model* model) {
+    if (!model) {
+        return false;
+    }
+    return llama_model_is_recurrent(model);
+}
+
 // =============================================================================
 // Generation (low-level)
 // =============================================================================
@@ -761,7 +783,20 @@ int llama_generate_streaming_c(
             n_cur++;
         }
 
-        if (llama_decode(ctx, batch) != 0) {
+        int decode_result = llama_decode(ctx, batch);
+        if (decode_result != 0) {
+            // Surface the actual llama_decode return code via stderr so
+            // operators running with XYBRID_LLAMACPP_VERBOSITY>=2 can
+            // distinguish KV-cache state mismatch (common on recurrent /
+            // hybrid arch models when prefix-reuse is misapplied) from
+            // hard runtime failures. The wrapper still returns -3 to
+            // preserve the Rust-side error-code contract.
+            fprintf(stderr,
+                    "llama_generate_streaming_c: llama_decode returned %d on "
+                    "prefill chunk [%d, %d) at n_past_in=%d, n_input=%d, n_ctx=%d. "
+                    "On recurrent/hybrid models this usually indicates "
+                    "prefix-reuse left the cache in an inconsistent state.\n",
+                    decode_result, chunk_start, chunk_end, n_past_in, n_input, n_ctx);
             delete[] candidates_data;
             llama_batch_free(batch);
             llama_sampler_free(sampler);

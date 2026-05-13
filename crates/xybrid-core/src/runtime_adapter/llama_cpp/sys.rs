@@ -145,6 +145,16 @@ extern "C" {
     fn llama_n_vocab_c(model: *const c_void) -> c_int;
     fn llama_n_ctx_c(ctx: *const c_void) -> c_int;
 
+    // Recurrent / hybrid architecture detection. Returns true for Mamba,
+    // RWKV, LFM, and similar models whose state can't be safely
+    // truncated by position (the recurrence accumulates state). Callers
+    // must skip the KV-cache prefix-reuse optimisation on these models —
+    // truncate-then-prefill-tail leaves the residual recurrent state
+    // inconsistent with the new prefix length and `llama_decode` fails
+    // on the diverging tail (returns non-zero, surfaces as wrapper
+    // error code -3).
+    fn llama_model_is_recurrent_c(model: *const c_void) -> bool;
+
     // Generation (low-level)
     fn llama_decode_c(ctx: *mut c_void, batch: *const c_void) -> c_int;
     fn llama_get_logits_c(ctx: *mut c_void) -> *mut c_float;
@@ -405,6 +415,19 @@ pub fn llama_n_vocab(model: &LlamaModel) -> usize {
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_n_ctx(ctx: &LlamaContext) -> usize {
     unsafe { llama_n_ctx_c(ctx.ptr) as usize }
+}
+
+/// Returns true for recurrent / hybrid-state architectures (Mamba,
+/// RWKV, LFM, etc.). Callers that manipulate the KV cache by position —
+/// in particular the multi-turn prefix-reuse path in
+/// `LlamaCppBackend::prepare_kv_cache_and_get_tail` — must skip those
+/// optimisations on these models and full-clear the cache between
+/// turns instead. Truncating a recurrent state mid-sequence leaves the
+/// residual state inconsistent with the new prefix length and
+/// `llama_decode` fails on the diverging tail.
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_model_is_recurrent(model: &LlamaModel) -> bool {
+    unsafe { llama_model_is_recurrent_c(model.ptr) }
 }
 
 /// Get the model's chat template string from GGUF metadata.
@@ -838,9 +861,19 @@ pub fn llama_generate_with_stops(
     };
 
     if result < 0 {
+        let detail = match result {
+            -1 => "invalid arguments (null context/model/input or non-positive sizes)",
+            -2 => "sampler chain creation failed",
+            -3 => {
+                "llama_decode failed on prefill \
+                 (enable XYBRID_LLAMACPP_VERBOSITY=2 for the wrapper-level diagnostic)"
+            }
+            -4 => "input exceeds context window",
+            _ => "unknown",
+        };
         return Err(AdapterError::RuntimeError(format!(
-            "Generation failed with error code {}",
-            result
+            "Generation failed with error code {} ({})",
+            result, detail
         )));
     }
 
@@ -1030,9 +1063,31 @@ where
     // Check for hard error codes FIRST — these are never callback-stop.
     // -1 = invalid args, -2 = sampler creation failed, -3 = decode failed, -4 = input too long.
     if (-4..=-1).contains(&result) {
+        let detail = match result {
+            -1 => "invalid arguments (null context/model/input or non-positive sizes)",
+            -2 => "sampler chain creation failed",
+            -3 => {
+                // The wrapper logs the actual llama_decode return code +
+                // n_past_in / chunk position to stderr (see
+                // `llama_generate_streaming_c` in llama_wrapper.cpp). When
+                // n_past_in > 0 the prefix-reuse path was in play; that's
+                // the path that triggers KV-cache state mismatches on
+                // recurrent / hybrid models. The adapter
+                // (`prepare_kv_cache_and_get_tail`) now full-clears the
+                // cache for recurrent models specifically, so this should
+                // be rare; if you hit it on a new architecture, enable
+                // `XYBRID_LLAMACPP_VERBOSITY=2` for the wrapper's stderr
+                // diagnostic and consider whether the model needs the
+                // recurrent path.
+                "llama_decode failed on prefill (KV-cache state mismatch likely; \
+                 enable XYBRID_LLAMACPP_VERBOSITY=2 for the wrapper-level diagnostic)"
+            }
+            -4 => "input + prefix exceeds context window (n_past_in + n_input >= n_ctx)",
+            _ => "unknown",
+        };
         return Err(AdapterError::RuntimeError(format!(
-            "Generation failed with error code {}",
-            result
+            "Generation failed with error code {} ({}; n_past_in={})",
+            result, detail, n_past_in
         )));
     }
 

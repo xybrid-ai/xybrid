@@ -222,6 +222,26 @@ impl LlamaCppBackend {
             .lock()
             .map_err(|_| AdapterError::RuntimeError("KV state mutex poisoned".to_string()))?;
 
+        // Recurrent / hybrid architectures (Mamba, RWKV, LFM, …) can't
+        // safely have their cache truncated by position — the recurrence
+        // accumulates state across positions, so `llama_kv_cache_seq_rm`
+        // leaves the residual state inconsistent with the new prefix
+        // length and `llama_decode` fails on the diverging tail (wrapper
+        // error code -3, surfaced on LFM 2.5 second-turn chat). Skip the
+        // optimisation entirely on these models and fall back to the
+        // pre-prefix-reuse full-clear path. The cost is per-turn
+        // re-prefill of the full conversation, which is the engine's
+        // pre-INF-99 behaviour.
+        let model = self.model.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No model loaded for KV cache prepare".to_string())
+        })?;
+        if sys::llama_model_is_recurrent(model) {
+            sys::llama_kv_cache_clear(context);
+            state.cached_tokens = new_tokens.to_vec();
+            state.last_prefix_hit = Some(0);
+            return Ok((new_tokens.to_vec(), 0));
+        }
+
         let n_ctx = sys::llama_n_ctx(context);
         let prefix_len = compute_reusable_prefix_len(&state.cached_tokens, new_tokens);
 
