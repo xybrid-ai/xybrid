@@ -199,6 +199,12 @@ classes:
         async: true
         params: [{ name: envelope, type: Envelope }]
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      runWithOptions:
+        async: true
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: options, type: RunOptions }
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
     properties:
       name:
         type: "String?"

@@ -442,6 +442,32 @@ class XybridPipeline {
 }
 ```
 
+### Rust
+
+```rust
+impl Pipeline {
+    pub fn run_with_options(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+    ) -> PipelineResult<PipelineExecutionResult>;
+
+    pub async fn run_async_with_options(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+    ) -> PipelineResult<PipelineExecutionResult>;
+}
+
+impl Xybrid {
+    pub fn run_pipeline_with_options(
+        yaml: &str,
+        envelope: &Envelope,
+        options: &RunOptions,
+    ) -> PipelineResult<PipelineExecutionResult>;
+}
+```
+
 ### Implementation Status
 
 | Method | Dart | Kotlin | Swift | C# |
@@ -455,6 +481,7 @@ class XybridPipeline {
 | `stageNames` | ✅ | — | — | — |
 | `load()` | ✅ | — | — | — |
 | `run()` | ✅ | — | — | — |
+| `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
 
 > **Note**: The Dart SDK currently uses a single `XybridPipeline` class (no separate `PipelineRef`).
 > The Kotlin spec shows the two-step `PipelineRef` → `Pipeline` pattern which is the target design.
@@ -816,9 +843,10 @@ final stream = model.runStreaming(
 ### RunOptions and AbortPolicy
 
 Per-run controls for cooperative cancellation and resource-driven local abort.
-Rust SDK methods with options are available as `run_with_options`,
+Rust SDK methods with options are available as model-level `run_with_options`,
 `run_with_context_options`, `run_streaming_with_options`, and
-`run_streaming_with_context_options`.
+`run_streaming_with_context_options`, plus pipeline-level `run_with_options`,
+`run_async_with_options`, and `Xybrid::run_pipeline_with_options`.
 
 ```rust
 let token = CancellationToken::new();
