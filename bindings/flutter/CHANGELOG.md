@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-rc2
+
+* Republishes 0.1.0-rc1 — the rc1 pub.dev publish was skipped due to an upstream compile failure in `xybrid-core` on `aarch64-linux-android` (fixed in xybrid-ai/xybrid#112). No API or behavior changes in the Flutter binding itself.
+
 ## 0.1.0-rc1
 
 * Registry calls now send the `X-Xybrid-Client` telemetry header identifying the Flutter binding, SDK / core versions, platform, and enabled backends; respects the `XYBRID_TELEMETRY_OPTOUT` env var

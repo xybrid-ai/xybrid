@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.0-rc2] - 2026-05-14
+
+### Fixed
+
+- **Apple device detection compile on non-Apple aarch64 targets** (#112): `detect_apple_device` in `xybrid-core` now compiles on `aarch64-linux-android` and `aarch64-unknown-linux-gnu`. The missing tail expression triggered E0317 on those targets, which silently blocked `Build Unity → Build Android Libraries` and the Release workflow's `Precompile Flutter (linux)` job in 0.1.0-rc1.
+
+### Release
+
+- **Flutter (pub.dev) and Unity (UPM)** ship for 0.1.0-rc2. Both were skipped in 0.1.0-rc1 because the aarch64 compile failure above blocked their upstream build jobs; no code/API changes in the Flutter or Unity bindings themselves.
+
+### Build / CI
+
+- **Release workflow self-patches the SPM manifest checksum** (#111): the XCFramework SHA computed by CI is now written into `xybridFFIChecksum` in `Package.swift`, committed, and the tag is force-moved to the patched commit. Removes the chicken-and-egg between the tag-time manifest and the CI-rebuilt zip bytes.
+
+---
+
 ## [0.1.0-rc1] - 2026-04-30
 
 ### Added
