@@ -20,12 +20,12 @@
 
 use log::{debug, info, warn};
 
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use super::template::PostprocessingStep;
 use super::template::{
     backend_label_from_template, quantization_label_from_metadata, span_kind_from_template,
     stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
 };
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-use super::template::PostprocessingStep;
 use crate::conversation::ConversationContext;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::ir::EnvelopeKind;
