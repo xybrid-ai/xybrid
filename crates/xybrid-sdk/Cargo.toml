@@ -48,16 +48,16 @@ onnx-inspect = ["dep:ort", "ort/download-binaries", "ort/tls-native"]
 # PLATFORM PRESETS (SINGLE SOURCE OF TRUTH)
 
 # Android: Dynamic ORT loading + Candle + llama.cpp (mistral.rs has SIGILL issues on ARM)
-platform-android = ["xybrid-core/ort-dynamic", "xybrid-core/llm-llamacpp", "xybrid-core/candle"]
+platform-android = ["xybrid-core/ort-dynamic", "xybrid-core/llm-llamacpp", "xybrid-core/candle", "llm-llamacpp"]
 
 # iOS: CoreML + Metal acceleration + llama.cpp
-platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "xybrid-core/llm-llamacpp"]
+platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "xybrid-core/llm-llamacpp", "llm-llamacpp"]
 
 # macOS: CoreML + Metal + llama.cpp
-platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "xybrid-core/llm-llamacpp"]
+platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "xybrid-core/llm-llamacpp", "llm-llamacpp"]
 
 # Desktop (Linux/Windows): CPU with llama.cpp
-platform-desktop = ["xybrid-core/ort-download", "xybrid-core/llm-llamacpp"]
+platform-desktop = ["xybrid-core/ort-download", "xybrid-core/llm-llamacpp", "llm-llamacpp"]
 
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 

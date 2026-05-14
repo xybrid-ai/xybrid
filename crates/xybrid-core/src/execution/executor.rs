@@ -46,6 +46,29 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     }
 }
 
+/// Stamp cost-attribution metadata (`backend`, `quantization`) onto the
+/// currently-open span.
+///
+/// The outer `execute:<model_id>` span set up by `execute_impl` already
+/// carries these — but the chat-context entry points
+/// (`execute_with_context_impl`, `execute_streaming_with_context_impl`)
+/// dispatch directly to the inner `execute_llm*` methods without ever
+/// opening that outer span, so the inner LLM spans are the only place the
+/// SDK telemetry hoist can read these fields from on a chat-context call.
+/// Call this from each inner LLM span site immediately after `SpanGuard`
+/// so both the non-context and chat-context flows produce the same wire
+/// shape.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn stamp_llm_span_cost_attribution(metadata: &ModelMetadata) {
+    let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+    if let Some(label) = backend_hint.and_then(normalize_llm_backend_hint) {
+        xybrid_trace::add_metadata("backend", label);
+    }
+    if let Some(quant) = quantization_label_from_metadata(metadata) {
+        xybrid_trace::add_metadata("quantization", quant);
+    }
+}
+
 // Internal: ONNX-specific types needed for optimized execution paths
 // These are implementation details, not part of the public API
 use crate::execution::session_factory::OnnxSessionFactory;
@@ -369,6 +392,7 @@ impl TemplateExecutor {
 
                 // LLM execution via LlmRuntimeAdapter
                 return self.execute_llm(
+                    metadata,
                     model_file,
                     chat_template.as_deref(),
                     *context_length,
@@ -630,6 +654,7 @@ impl TemplateExecutor {
             let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
             let mut result = self.execute_llm_with_messages(
+                metadata,
                 model_file,
                 *context_length,
                 &chat_messages,
@@ -723,6 +748,7 @@ impl TemplateExecutor {
                 let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
                 return self.execute_llm_streaming(
+                    metadata,
                     model_file,
                     chat_template.as_deref(),
                     *context_length,
@@ -884,6 +910,7 @@ impl TemplateExecutor {
                 let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
                 let result = self.execute_llm_streaming_with_messages(
+                    metadata,
                     model_file,
                     *context_length,
                     &chat_messages,
@@ -924,6 +951,7 @@ impl TemplateExecutor {
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_llm_streaming(
         &mut self,
+        metadata: &ModelMetadata,
         model_file: &str,
         chat_template: Option<&str>,
         context_length: usize,
@@ -944,6 +972,7 @@ impl TemplateExecutor {
         let _llm_span = xybrid_trace::SpanGuard::new("llm_inference_streaming");
         xybrid_trace::add_metadata("model", model_file);
         xybrid_trace::add_metadata("streaming", "true");
+        stamp_llm_span_cost_attribution(metadata);
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
@@ -1062,6 +1091,7 @@ impl TemplateExecutor {
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_llm_with_messages(
         &mut self,
+        metadata: &ModelMetadata,
         model_file: &str,
         context_length: usize,
         messages: &[ChatMessage],
@@ -1079,6 +1109,7 @@ impl TemplateExecutor {
         let _llm_span = xybrid_trace::SpanGuard::new("llm_inference_with_messages");
         xybrid_trace::add_metadata("model", model_file);
         xybrid_trace::add_metadata("message_count", messages.len().to_string());
+        stamp_llm_span_cost_attribution(metadata);
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
@@ -1152,6 +1183,7 @@ impl TemplateExecutor {
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_llm_streaming_with_messages(
         &mut self,
+        metadata: &ModelMetadata,
         model_file: &str,
         context_length: usize,
         messages: &[ChatMessage],
@@ -1172,6 +1204,7 @@ impl TemplateExecutor {
         let _llm_span = xybrid_trace::SpanGuard::new("llm_inference_streaming_with_messages");
         xybrid_trace::add_metadata("model", model_file);
         xybrid_trace::add_metadata("message_count", messages.len().to_string());
+        stamp_llm_span_cost_attribution(metadata);
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
@@ -1245,6 +1278,7 @@ impl TemplateExecutor {
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_llm(
         &mut self,
+        metadata: &ModelMetadata,
         model_file: &str,
         chat_template: Option<&str>,
         context_length: usize,
@@ -1261,13 +1295,14 @@ impl TemplateExecutor {
 
         let _llm_span = xybrid_trace::SpanGuard::new("llm_inference");
         xybrid_trace::add_metadata("model", model_file);
-        // Normalise the legacy `mistral` alias to the canonical wire label
-        // before annotating the span: the SDK telemetry hoist reads this
-        // span for the `backend` field on `PlatformEvent`, which must be
-        // in the closed set `{llamacpp, mistralrs, ...}`.
-        if let Some(hint) = backend_hint.and_then(normalize_llm_backend_hint) {
-            xybrid_trace::add_metadata("backend", hint);
-        }
+        // Stamp the canonical `backend` + `quantization` labels onto the
+        // inner LLM span. The SDK telemetry hoist reads from any span in
+        // the trace; the outer `execute:<model_id>` span set up by
+        // `execute_impl` also carries these, but the chat-context
+        // dispatch path bypasses that outer span entirely, so stamping
+        // here is what makes the wire shape consistent across both
+        // entry points.
+        stamp_llm_span_cost_attribution(metadata);
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
