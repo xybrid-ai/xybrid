@@ -130,6 +130,21 @@ pub fn detect_apple_device() -> AppleDeviceInfo {
             confidence: DetectionConfidence::High,
         }
     }
+    // Non-Apple aarch64 hosts (Linux aarch64, Android aarch64). The
+    // function isn't *expected* to run here — these hosts can't actually
+    // host an Apple device — but the file is compiled for every target
+    // in the workspace, so this branch is needed to keep the function
+    // a `-> AppleDeviceInfo` rather than `-> ()`. Env-var hints above
+    // are the only signal that could have produced a real value; if we
+    // reached this point, we had none.
+    #[cfg(all(target_arch = "aarch64", not(any(target_os = "macos", target_os = "ios"))))]
+    {
+        AppleDeviceInfo {
+            device_model: None,
+            has_neural_engine: false,
+            confidence: DetectionConfidence::Unknown,
+        }
+    }
 }
 
 /// Read the hardware-model identifier via `sysctlbyname`. Returns the
