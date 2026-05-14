@@ -5,11 +5,11 @@
 
 use std::sync::OnceLock;
 
-// Forward-compatible feature names: some entries (`ort-cuda`, `llm-mlx`,
-// `llm-mlx-runtime`, `espeak`) are not yet declared in Cargo.toml. The
-// `cfg!()` checks resolve to `false` for any feature that does not exist,
-// and `#[allow(unexpected_cfgs)]` suppresses the corresponding lint so the
-// list can grow without a parallel Cargo.toml edit.
+// Forward-compatible feature names: some entries (`ort-cuda`, `espeak`) are
+// not yet declared in Cargo.toml. The `cfg!()` checks resolve to `false`
+// for any feature that does not exist, and `#[allow(unexpected_cfgs)]`
+// suppresses the corresponding lint so the list can grow without a
+// parallel Cargo.toml edit.
 #[allow(unexpected_cfgs)]
 const ALL_FEATURES: &[(&str, bool)] = &[
     ("candle-cuda", cfg!(feature = "candle-cuda")),
@@ -17,8 +17,6 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("espeak", cfg!(feature = "espeak")),
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-mistral", cfg!(feature = "llm-mistral")),
-    ("llm-mlx", cfg!(feature = "llm-mlx")),
-    ("llm-mlx-runtime", cfg!(feature = "llm-mlx-runtime")),
     ("ort-coreml", cfg!(feature = "ort-coreml")),
     ("ort-cuda", cfg!(feature = "ort-cuda")),
     ("ort-download", cfg!(feature = "ort-download")),

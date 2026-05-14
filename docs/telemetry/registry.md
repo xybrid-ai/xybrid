@@ -37,7 +37,7 @@ The command exits 0 in both cases — it is a status report, not an error.
 The header is a single line, semicolon-separated:
 
 ```
-X-Xybrid-Client: binding=flutter; sdk_version=0.1.0-beta12; core_version=0.1.0-beta12; platform=ios-arm64; backends=candle-metal,llm-llamacpp,llm-mlx,ort-coreml,ort-download
+X-Xybrid-Client: binding=flutter; sdk_version=0.1.0-beta12; core_version=0.1.0-beta12; platform=ios-arm64; backends=candle-metal,llm-llamacpp,ort-coreml,ort-download
 ```
 
 | Field | Type | Description |
@@ -85,8 +85,6 @@ Source: `xybrid_sdk::current_platform()` (`crates/xybrid-sdk/src/platform.rs`). 
 | `espeak` | `espeak` | espeak-ng phonemizer (multi-language TTS) |
 | `llm-llamacpp` | `llm-llamacpp` | llama.cpp backend (universal LLM runtime) |
 | `llm-mistral` | `llm-mistral` | mistral.rs backend |
-| `llm-mlx` | `llm-mlx` | MLX skeleton (Apple Silicon, no forward pass) |
-| `llm-mlx-runtime` | `llm-mlx-runtime` | MLX with the real forward pass |
 | `ort-coreml` | `ort-coreml` | ONNX Runtime with CoreML execution provider |
 | `ort-cuda` | `ort-cuda` | ONNX Runtime with CUDA execution provider |
 | `ort-download` | `ort-download` | ONNX Runtime resolved via prebuilt downloads |
