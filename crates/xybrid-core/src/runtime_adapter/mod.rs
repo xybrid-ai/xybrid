@@ -92,9 +92,9 @@ pub mod llama_cpp;
 // Re-exports from runtime backends
 pub use cloud::{CloudRuntimeAdapter, CloudStreaming};
 pub use metadata_driven::MetadataDrivenAdapter;
-pub use onnx::ONNXSession;
 pub use onnx::OnnxBackend;
 pub use onnx::OnnxRuntimeAdapter;
+pub use onnx::{ExecutionProviderKind, ONNXSession, SessionOptions};
 
 #[cfg(any(target_os = "android", test))]
 pub use onnx::ONNXMobileRuntimeAdapter;

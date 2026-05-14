@@ -48,7 +48,10 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
 
 // Internal: ONNX-specific types needed for optimized execution paths
 // These are implementation details, not part of the public API
-use crate::runtime_adapter::onnx::{ONNXSession, OnnxRuntime};
+use crate::execution::session_factory::OnnxSessionFactory;
+use crate::runtime_adapter::onnx::{
+    ExecutionProviderKind, ONNXSession, OnnxRuntime, SessionOptions,
+};
 
 #[cfg(feature = "candle")]
 use crate::runtime_adapter::candle::CandleRuntime;
@@ -202,7 +205,13 @@ impl TemplateExecutor {
         input: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute");
+        // Silent guard: the SDK's `XybridModel::run` / `run_async` wrappers
+        // around this method emit `ModelComplete` with full attribution
+        // (model_id, backend, latency, etc.). Emitting an outer
+        // `Started` / `Completed` pair from here would surface as
+        // duplicate noise rows on the Traces dashboard. Failed-path
+        // emission via `mark_execution_terminal` is preserved.
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute");
         let result = self.execute_impl(metadata, input, config);
         if let Err(e) = &result {
             mark_execution_terminal(&guard, e);
@@ -410,8 +419,12 @@ impl TemplateExecutor {
                 .as_token_ids()
                 .ok_or_else(|| AdapterError::InvalidInput("Expected token IDs".to_string()))?;
 
-            // Create and run BERT session directly
-            let session = ONNXSession::new(model_full_path.to_str().unwrap(), false, false)?;
+            // Create and run BERT session through the shared factory entry.
+            let session = OnnxSessionFactory::create_session(
+                &model_full_path,
+                ExecutionProviderKind::Cpu,
+                SessionOptions::default(),
+            )?;
             let raw_outputs =
                 execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
 
@@ -526,7 +539,13 @@ impl TemplateExecutor {
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute_with_context");
+        // Silent guard for the same reason as `execute_streaming_with_context`:
+        // the user-facing telemetry for a chat-context turn is the SDK's
+        // `ModelComplete` event from `XybridModel::run_with_context`. The
+        // outer executor span is an implementation detail and emitting
+        // `Started` / `Completed` from here surfaces as separate noise
+        // rows in the Traces dashboard. Error reporting is preserved.
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute_with_context");
         let result = self.execute_with_context_impl(metadata, input, context, config);
         if let Err(e) = &result {
             mark_execution_terminal(&guard, e);
@@ -670,7 +689,12 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute_streaming");
+        // Silent guard: the SDK's `XybridModel::run_streaming` wrapper
+        // around this method emits `ModelComplete` with full attribution.
+        // The outer `Started` / `Completed` pair would surface as
+        // duplicate noise rows on the Traces dashboard. Failed-path
+        // emission via `mark_execution_terminal` is preserved.
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute_streaming");
         let result = self.execute_streaming_impl(metadata, input, on_token, config);
         if let Err(e) = &result {
             mark_execution_terminal(&guard, e);
@@ -765,7 +789,15 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        let guard = ExecutionGuard::new(&metadata.model_id, "execute_streaming_with_context");
+        // Silent guard: the user-facing telemetry for a chat-context
+        // turn is the SDK's `ModelComplete` event from
+        // `XybridModel::run_streaming_with_context`. Emitting an outer
+        // `Started`/`Completed` pair here surfaces as separate noise
+        // rows in the Traces dashboard with the executor-internal span
+        // name. Error reporting is preserved — `mark_execution_terminal`
+        // still flips the guard to emit `Failed` on the error path.
+        let guard =
+            ExecutionGuard::new_silent(&metadata.model_id, "execute_streaming_with_context");
         let result =
             self.execute_streaming_with_context_impl(metadata, input, context, on_token, config);
         if let Err(e) = &result {
@@ -1871,7 +1903,11 @@ impl TemplateExecutor {
         const CROSSFADE_SAMPLES: usize = 480;
 
         let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
-        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        let session = OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?;
         let speed = extract_tts_speed(input);
 
         for (i, chunk) in chunks.iter().enumerate() {
@@ -1970,8 +2006,12 @@ impl TemplateExecutor {
         let voice_loader = TtsVoiceLoader::new(&self.base_path);
         let voice_embedding = voice_loader.load(metadata, input)?;
 
-        // Create and run TTS session
-        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        // Create and run TTS session through the shared factory entry.
+        let session = OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?;
         let speed = extract_tts_speed(input);
         let mut raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
 

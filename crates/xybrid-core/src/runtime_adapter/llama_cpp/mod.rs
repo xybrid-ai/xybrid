@@ -213,6 +213,7 @@ impl LlamaCppBackend {
     /// accessor [`Self::last_cached_prefix_len`].
     fn prepare_kv_cache_and_get_tail(
         &self,
+        model: &sys::LlamaModel,
         context: &sys::LlamaContext,
         new_tokens: &[i32],
         max_new_tokens: usize,
@@ -221,6 +222,30 @@ impl LlamaCppBackend {
             .kv_state
             .lock()
             .map_err(|_| AdapterError::RuntimeError("KV state mutex poisoned".to_string()))?;
+
+        // Models with recurrent state — fully recurrent (Mamba, RWKV)
+        // OR hybrid (LFM2 / LFM2MOE, Qwen35 / Qwen35MOE, Granite-hybrid,
+        // …) — can't safely have their cache truncated by position.
+        // Their recurrent layers accumulate state across positions, so
+        // `llama_kv_cache_seq_rm` leaves the residual state inconsistent
+        // with the new prefix length and `llama_decode` fails on the
+        // diverging tail (wrapper error code -3; surfaced on LFM 2.5
+        // second-turn chat).
+        //
+        // Gating on `has_recurrent_state` (which combines the upstream
+        // `is_recurrent` and `is_hybrid` predicates) instead of
+        // `is_recurrent` alone is important: LFM2 is classified hybrid,
+        // not fully recurrent, so a narrower check missed it the first
+        // time round. Skip prefix-reuse entirely on these models and
+        // fall back to the pre-INF-99 full-clear path. The cost is
+        // per-turn re-prefill of the full conversation — correct, just
+        // not the prefix-reuse optimisation.
+        if sys::llama_model_has_recurrent_state(model) {
+            sys::llama_kv_cache_clear(context);
+            state.cached_tokens = new_tokens.to_vec();
+            state.last_prefix_hit = Some(0);
+            return Ok((new_tokens.to_vec(), 0));
+        }
 
         let n_ctx = sys::llama_n_ctx(context);
         let prefix_len = compute_reusable_prefix_len(&state.cached_tokens, new_tokens);
@@ -250,6 +275,17 @@ impl LlamaCppBackend {
         state.cached_tokens = new_tokens.to_vec();
         state.last_prefix_hit = Some(prefix_len);
         Ok((tail, prefix_len))
+    }
+
+    fn reset_kv_cache_after_failed_stream(&self, context: &sys::LlamaContext) {
+        sys::llama_kv_cache_clear(context);
+        self.clear_cached_prefix_state();
+    }
+
+    fn clear_cached_prefix_state(&self) {
+        if let Ok(mut state) = self.kv_state.lock() {
+            *state = KvCacheState::default();
+        }
     }
 }
 
@@ -398,7 +434,7 @@ impl LlmBackend for LlamaCppBackend {
             // unconditional clear, just without the duplicate work in
             // multi-turn chats.
             let (tail, n_past) =
-                self.prepare_kv_cache_and_get_tail(context, &tokens, config.max_tokens)?;
+                self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
 
             // Per-chunk timestamps capture the streaming cadence for TTFT +
             // inter-token-latency telemetry. The closure is observation-only
@@ -419,7 +455,7 @@ impl LlmBackend for LlamaCppBackend {
             // overwrite this with the same value after finalize.
             xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
             let mut tel = StreamingTelemetry::new(prompt_token_count);
-            let (output_tokens, stopped_by_callback) = sys::llama_generate_streaming(
+            let stream_result = sys::llama_generate_streaming(
                 context,
                 model,
                 &tail,
@@ -435,7 +471,14 @@ impl LlmBackend for LlamaCppBackend {
                     Ok(())
                 },
                 n_past,
-            )?;
+            );
+            let (output_tokens, stopped_by_callback) = match stream_result {
+                Ok(result) => result,
+                Err(err) => {
+                    self.reset_kv_cache_after_failed_stream(context);
+                    return Err(err);
+                }
+            };
 
             // Finalize telemetry before the post-processing work below so
             // `generation_time_ms` reflects pure generation wallclock and is
@@ -528,7 +571,7 @@ impl LlmBackend for LlamaCppBackend {
             // across calls so the LCP path will mostly clear-and-refill,
             // but the unified helper keeps behaviour consistent.
             let (tail, n_past) =
-                self.prepare_kv_cache_and_get_tail(context, &tokens, config.max_tokens)?;
+                self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
 
             // Use the streaming-capable API with an observation-only
             // callback so raw generation gets the same TTFT / ITL /
@@ -619,7 +662,7 @@ impl LlmBackend for LlamaCppBackend {
             // already prefilled, only re-prefill the diverged tail. See
             // prepare_kv_cache_and_get_tail for the full contract.
             let (tail, n_past) =
-                self.prepare_kv_cache_and_get_tail(context, &tokens, config.max_tokens)?;
+                self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
 
             // Shared streaming state: telemetry recorder + text filter.
             // The filter owns cumulative text, think-block state, stop-pattern
@@ -824,6 +867,38 @@ impl LlmBackend for LlamaCppBackend {
 #[cfg(all(test, feature = "llm-llamacpp"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backend_reports_true_streaming_for_sdk_cancellation_gate() {
+        let backend = LlamaCppBackend::new().unwrap();
+
+        assert!(
+            backend.supports_streaming(),
+            "llama.cpp must stay on the true streaming path so SDK abort checks can interrupt generation"
+        );
+    }
+
+    #[test]
+    fn failed_stream_resets_rust_kv_cache_state() {
+        let backend = LlamaCppBackend::new().unwrap();
+        {
+            let mut state = backend.kv_state.lock().unwrap();
+            state.cached_tokens = vec![1, 2, 3];
+            state.last_prefix_hit = Some(2);
+        }
+
+        backend.clear_cached_prefix_state();
+
+        let state = backend.kv_state.lock().unwrap();
+        assert!(
+            state.cached_tokens.is_empty(),
+            "failed streaming runs must not leave reusable prompt tokens behind"
+        );
+        assert_eq!(
+            state.last_prefix_hit, None,
+            "failed streaming runs must clear prefix-hit metadata"
+        );
+    }
 
     #[test]
     fn lcp_empty_inputs_return_zero() {

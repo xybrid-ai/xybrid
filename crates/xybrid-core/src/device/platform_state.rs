@@ -278,10 +278,10 @@ mod apple {
         // thread-safe and never null on every macOS we support — there
         // is no precondition the caller can violate.
         let info = NSProcessInfo::processInfo();
-        // SAFETY: see comment above — `thermalState` is thread-safe and
-        // has no caller-side preconditions; the cast to i64 is widening
-        // from NSInteger and lossless.
-        let raw = unsafe { info.thermalState() }.0 as i64;
+        // `thermalState` is exposed as safe in objc2-foundation 0.3 —
+        // the binding wraps the Objective-C call which has no caller-
+        // side preconditions and is documented thread-safe.
+        let raw = info.thermalState().0 as i64;
         thermal_from_nsprocessinfo(raw)
     }
 

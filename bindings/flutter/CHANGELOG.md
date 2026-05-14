@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-rc2
+
+* Republishes 0.1.0-rc1 — the rc1 pub.dev publish was skipped due to an upstream compile failure in `xybrid-core` on `aarch64-linux-android` (fixed in xybrid-ai/xybrid#112). No API or behavior changes in the Flutter binding itself.
+
+## 0.1.0-rc1
+
+* Registry calls now send the `X-Xybrid-Client` telemetry header identifying the Flutter binding, SDK / core versions, platform, and enabled backends; respects the `XYBRID_TELEMETRY_OPTOUT` env var
+* Per-inference resource telemetry: CPU / memory / GPU pressure metrics now flow into telemetry events from the underlying SDK
+* Cloud LLM telemetry exposes provider-agnostic prompt-cache token counts (`cache_creation` / `cache_read`)
+
 ## 0.1.0-beta12
 
 * LLM telemetry expansion: swim-lane spans, device profile metadata, and Pipeline::run hardening on top of beta11's streaming telemetry

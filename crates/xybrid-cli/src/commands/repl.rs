@@ -173,7 +173,7 @@ pub(crate) fn handle_repl_command(
     };
 
     let mut orchestrator = Orchestrator::new();
-    xybrid_sdk::bridge_orchestrator_events(&orchestrator);
+    let bridge = xybrid_sdk::bridge_orchestrator_events(&orchestrator);
 
     warmup_models(&mut orchestrator, &stages, &metrics, &availability_fn);
 
@@ -278,6 +278,11 @@ pub(crate) fn handle_repl_command(
             verbose,
         );
     }
+
+    drop(orchestrator);
+    bridge
+        .join()
+        .map_err(|e| anyhow::anyhow!("Orchestrator event bridge failed: {}", e))?;
 
     Ok(())
 }

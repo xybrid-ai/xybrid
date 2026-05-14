@@ -145,6 +145,8 @@ pub enum DetectionConfidence {
     /// Hardcoded default or estimate
     #[default]
     Low,
+    /// No probe was performed; the field value should not be trusted
+    Unknown,
 }
 
 impl DetectionConfidence {
@@ -153,6 +155,7 @@ impl DetectionConfidence {
             DetectionConfidence::High => "high",
             DetectionConfidence::Medium => "medium",
             DetectionConfidence::Low => "low",
+            DetectionConfidence::Unknown => "unknown",
         }
     }
 }

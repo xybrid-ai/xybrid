@@ -63,7 +63,7 @@ pub trait SessionFactory: Send + Sync {
 // ONNX Implementation
 // ============================================================================
 
-use crate::runtime_adapter::onnx::ONNXSession;
+use crate::runtime_adapter::onnx::{ExecutionProviderKind, ONNXSession, SessionOptions};
 
 /// Wrapper to implement InferenceSession for ONNXSession.
 pub struct OnnxInferenceSession {
@@ -88,18 +88,56 @@ impl InferenceSession for OnnxInferenceSession {
 }
 
 /// Default session factory that creates real ONNX sessions.
+///
+/// Acts as the single construction point for raw `ONNXSession` instances
+/// used inside `xybrid-core` strategies, executor, and the inference
+/// backend. Routing through here keeps the expensive resolved-EP
+/// capture opt-in — every call site picks its own [`SessionOptions`]
+/// but goes through the same builder, so we never re-introduce the
+/// bypass that hid EP attribution on the TTS/ASR paths.
+///
+/// The runtime adapters (`OnnxRuntimeAdapter::load_model`,
+/// `ONNXMobileRuntimeAdapter::load_model`) construct sessions via
+/// `ONNXSession::build` directly: they own a per-model session cache
+/// and want explicit control over the EP-capture flag (the desktop
+/// adapter opts in to capture so its `real_inference` can read the
+/// resolved EP back; the mobile adapter stays on the cheap path).
+/// Every other ONNX session in this crate goes through the factory.
 #[derive(Default)]
 pub struct OnnxSessionFactory;
+
+impl OnnxSessionFactory {
+    /// Build a raw [`ONNXSession`] with explicit execution-provider and
+    /// option control.
+    ///
+    /// This is the helper that strategies, the executor, and the
+    /// inference backend share — they need the concrete `ONNXSession`
+    /// (for `run_with_values`, `input_dtypes`, etc.), but no longer
+    /// construct it inline. Pass [`SessionOptions::default`] for the
+    /// cheap, capture-off path; opt in to `capture_resolved_ep` only
+    /// when a caller actually reads `resolved_providers()`.
+    pub fn create_session(
+        model_path: &Path,
+        execution_provider: ExecutionProviderKind,
+        options: SessionOptions,
+    ) -> ExecutorResult<ONNXSession> {
+        let path_str = model_path
+            .to_str()
+            .ok_or_else(|| AdapterError::InvalidInput("Invalid model path encoding".to_string()))?;
+        let session = ONNXSession::build(path_str, execution_provider, options)?;
+        Ok(session)
+    }
+}
 
 impl SessionFactory for OnnxSessionFactory {
     type Session = OnnxInferenceSession;
 
     fn create(&self, model_path: &Path) -> ExecutorResult<Self::Session> {
-        let path_str = model_path
-            .to_str()
-            .ok_or_else(|| AdapterError::InvalidInput("Invalid model path encoding".to_string()))?;
-
-        let session = ONNXSession::new(path_str, false, false)?;
+        let session = Self::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?;
         Ok(OnnxInferenceSession { session })
     }
 }

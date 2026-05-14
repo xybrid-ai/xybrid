@@ -13,6 +13,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.0-rc2] - 2026-05-14
+
+### Fixed
+
+- **Apple device detection compile on non-Apple aarch64 targets** (#112): `detect_apple_device` in `xybrid-core` now compiles on `aarch64-linux-android` and `aarch64-unknown-linux-gnu`. The missing tail expression triggered E0317 on those targets, which silently blocked `Build Unity → Build Android Libraries` and the Release workflow's `Precompile Flutter (linux)` job in 0.1.0-rc1.
+
+### Release
+
+- **Flutter (pub.dev) and Unity (UPM)** ship for 0.1.0-rc2. Both were skipped in 0.1.0-rc1 because the aarch64 compile failure above blocked their upstream build jobs; no code/API changes in the Flutter or Unity bindings themselves.
+
+### Build / CI
+
+- **Release workflow self-patches the SPM manifest checksum** (#111): the XCFramework SHA computed by CI is now written into `xybridFFIChecksum` in `Package.swift`, committed, and the tag is force-moved to the patched commit. Removes the chicken-and-egg between the tag-time manifest and the CI-rebuilt zip bytes.
+
+---
+
+## [0.1.0-rc1] - 2026-04-30
+
+### Added
+
+- **Per-inference resource telemetry** (#53): `xybrid-core` exposes CPU / memory / GPU pressure metrics per inference and `xybrid-sdk` folds them into telemetry events; new `device::resource` module with pressure sampling and a Criterion bench.
+- **Provider-agnostic prompt-cache token counts** (#52): Cloud LLM responses report `cache_creation` / `cache_read` token counts uniformly across providers; legacy field names continue to deserialize.
+- **Registry telemetry header** (#60): `X-Xybrid-Client` header on registry calls advertises binding, SDK version, core version, platform, and enabled backends; honors `XYBRID_TELEMETRY_OPTOUT`. Binding identifier is wired through Flutter, Kotlin, Swift, Unity, and Rust; CLI gains `xybrid telemetry status`.
+- **Unity / C# telemetry surface** (#56): `TelemetryConfig` API with Editor domain-reload guard, configuration sample scene, and Editor tests; C FFI exposes telemetry init / config / event hooks.
+- **Swift Package Manager root manifest** (#62): Top-level `Package.swift` with a `useLocalNatives` toggle for switching between published binaries and local-built XCFrameworks; `set-natives-mode.sh` and `sync-spm-checksum.sh` helpers.
+- **Localized docs**: Japanese README (#58) and Chinese localization for newly added documentation pages (#55).
+
+### Fixed
+
+- **Apple SPM MPS link** (#62): Corrected Metal Performance Shaders linker flags so the Apple SPM target builds cleanly against the unified XCFramework.
+
+---
+
 ## [0.1.0-beta12] - 2026-04-20
 
 ### Added

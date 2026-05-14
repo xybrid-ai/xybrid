@@ -14,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 import 'rust/frb_generated.dart';
 
 import '../xybrid.dart';
+import 'device_snapshot.dart';
 
 /// Main entry point for the Xybrid SDK.
 ///
@@ -132,10 +133,66 @@ class Xybrid {
     return XybridSdkClient.isModelCached(modelId: modelId);
   }
 
-  static void initTelemetry() {
-    // TODO - Implement telemetry
-    // XybridSdkClient.enableTelemetry();
-    throw UnimplementedError();
+  /// Initialize the platform telemetry exporter.
+  ///
+  /// Once initialized, the normal inference paths (`Xybrid.model().run()`,
+  /// `Xybrid.pipeline().run()`, conversation turns) automatically emit
+  /// `ExecutionStarted` / `ExecutionCompleted` / `ExecutionFailed` events
+  /// to the configured endpoint — no per-call wiring required.
+  ///
+  /// `endpoint` is the platform ingest URL (e.g. `https://ingest.xybrid.dev`
+  /// in production, or `http://192.168.1.78:8081` for a local dashboard on
+  /// the host machine). `apiKey` authenticates the sender.
+  ///
+  /// Must be called after [init] has completed. The Rust layer holds a
+  /// process-wide once-guard, so subsequent calls — including across
+  /// Flutter hot-restart or a second Dart isolate — are safe no-ops; the
+  /// HTTP exporter and execution listener are registered exactly once
+  /// per process.
+  ///
+  /// No reconfigure path: changing `endpoint` or `apiKey` requires
+  /// restarting the process.
+  ///
+  /// Example:
+  /// ```dart
+  /// void main() async {
+  ///   await Xybrid.init();
+  ///   Xybrid.initTelemetry(
+  ///     endpoint: const String.fromEnvironment('XYBRID_PLATFORM_URL'),
+  ///     apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+  ///   );
+  ///   runApp(...);
+  /// }
+  /// ```
+  static void initTelemetry({required String endpoint, required String apiKey}) {
+    if (!_initialized) {
+      throw StateError('Xybrid.init() must complete before initTelemetry()');
+    }
+    XybridSdkClient.initTelemetry(endpoint: endpoint, apiKey: apiKey);
+  }
+
+  /// Whether the process-wide telemetry exporter is running.
+  ///
+  /// Reads from the Rust once-flag, so this stays correct across Flutter
+  /// hot-restart (which would reset any Dart-side state) and second
+  /// isolates that didn't themselves call [initTelemetry].
+  static bool get isTelemetryInitialized =>
+      XybridSdkClient.isTelemetryInitialized();
+
+  /// Read the routing-engine's current view of device state.
+  ///
+  /// Returns the same [DeviceSnapshot] the engine reads internally on
+  /// each routing decision — battery + thermal from the platform
+  /// pollers / host pushes, CPU + memory from sysinfo. Force-refreshes
+  /// on every call so a diagnostics surface that polls at ~1 Hz sees
+  /// fresh data each tick. The refresh cost is bounded at `< 1 ms` on
+  /// a warm monitor.
+  ///
+  /// Intended for app-side diagnostics views ("what does the routing
+  /// engine see on this device right now?"). Production code should
+  /// not poll this — the engine reads it internally.
+  static DeviceSnapshot currentDeviceSnapshot() {
+    return DeviceSnapshot.fromFfi(XybridDevice.currentSnapshot());
   }
 
   /// Create a ModelLoader for the specified model.

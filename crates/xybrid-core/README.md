@@ -176,7 +176,7 @@ let telemetry = Telemetry::new();
 
 // Log events
 telemetry.log_stage_start("asr");
-telemetry.log_routing_decision("asr", "local", "low_latency");
+telemetry.log_routing_decision("asr", "local", "low_latency", 0.0, 0);
 telemetry.log_stage_complete("asr", "local", 50, None);
 ```
 

@@ -138,15 +138,46 @@ jobs:
           echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
           echo "XCFramework SHA256: $CHECKSUM"
 
-      - name: Verify root Package.swift checksum matches built XCFramework
-        # SPM resolves the manifest at the tagged commit, so the manifest's
-        # xybridFFIChecksum must already match the zip we just built. If it
-        # doesn't, the engineer who cut the tag forgot to run
-        # bindings/apple/scripts/sync-spm-checksum.sh and re-tag — fail fast.
+      - name: Patch Package.swift checksum and force-move tag
+        # SPM reads Package.swift at the tagged commit and refuses the package
+        # if xybridFFIChecksum doesn't match the downloaded zip's SHA. The
+        # xcframework build is non-deterministic between runs (zip mtimes,
+        # Rust codegen ordering), so we can't pre-bake a stable checksum at
+        # tag time. Instead: compute the SHA of the zip we just built, patch
+        # the manifest, commit, and force-move the tag to that commit. SPM
+        # consumers resolving v<version> see a manifest whose checksum
+        # matches the released zip.
+        #
+        # Pushes authored by GITHUB_TOKEN do not re-trigger workflow runs
+        # (https://docs.github.com/en/actions/security-guides/automatic-token-authentication),
+        # so the tag force-push does not loop the Release workflow.
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           VERSION=${GITHUB_REF#refs/tags/}
-          ./bindings/apple/scripts/sync-spm-checksum.sh --check dist/XybridFFI-${VERSION}.xcframework.zip
+
+          ./bindings/apple/scripts/sync-spm-checksum.sh "dist/XybridFFI-${VERSION}.xcframework.zip"
+
+          if git diff --quiet Package.swift; then
+            echo "Package.swift checksum already matches the built zip — nothing to do."
+            exit 0
+          fi
+
+          echo "Package.swift checksum patched:"
+          git diff Package.swift
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Package.swift
+          git commit -m "chore(release): pin XybridFFI checksum for ${VERSION}"
+
+          NEW_COMMIT=$(git rev-parse HEAD)
+          echo "::notice::Tag ${VERSION} now points at ${NEW_COMMIT} with the released zip's xybridFFIChecksum baked in"
+
+          git tag -f "${VERSION}" "${NEW_COMMIT}"
+          git push --force origin "refs/tags/${VERSION}"
 
       - name: Upload XCFramework artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -451,18 +482,41 @@ jobs:
 
   #
   # Publish Flutter SDK to pub.dev (OIDC -- zero secrets)
-  # Uses dart-lang/setup-dart reusable workflow for automatic OIDC token exchange.
-  # Requires trusted publisher configured on pub.dev for xybrid-ai/xybrid + release.yml.
-  # This job does NOT block the GitHub Release -- failure only affects pub.dev publishing.
+  #
+  # Inlines the same steps the dart-lang/setup-dart publish.yml reusable
+  # workflow runs, but pins actions/checkout to v4 instead of v6. v6 added
+  # a safety check that aborts when the workflow's ref has been updated
+  # since the run was triggered. Our build-apple-all job force-moves the
+  # tag (self-patches xybridFFIChecksum into Package.swift), which trips
+  # that check and skipped Flutter from pub.dev on 0.1.0-rc2. v4 doesn't
+  # enforce the check; everything else under release.yml already pins v4.
+  #
+  # pub.dev's trusted-publisher config matches on `workflow_ref` (the
+  # caller's workflow path), so inlining preserves the existing trust
+  # binding to xybrid-ai/xybrid/.github/workflows/release.yml.
+  #
+  # This job does NOT block the GitHub Release -- failure only affects
+  # pub.dev publishing.
   #
   publish-flutter:
     name: Publish Flutter to pub.dev
     needs: [build-apple-all, precompile-flutter-linux, precompile-flutter-windows]
+    runs-on: ubuntu-latest
     permissions:
       id-token: write   # Required for OIDC authentication with pub.dev
-    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
-    with:
-      working-directory: bindings/flutter
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260
+      - uses: flutter-actions/setup-flutter@18c66a64fb6f6d3338c63cabbc5cd6da395e7f1d
+      - name: Install dependencies
+        run: dart pub get
+        working-directory: bindings/flutter
+      - name: Publish - dry run
+        run: dart pub publish --dry-run
+        working-directory: bindings/flutter
+      - name: Publish to pub.dev
+        run: dart pub publish -f
+        working-directory: bindings/flutter
 
   #
   # CLI builds (Linux + Windows only; macOS is built in build-apple-all)

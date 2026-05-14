@@ -49,7 +49,7 @@ pub use authority::{
 use crate::context::{DeviceMetrics, StageDescriptor};
 use crate::control_sync::ControlSync;
 use crate::device::ResourceMonitor;
-use crate::event_bus::{EventBus, OrchestratorEvent};
+use crate::event_bus::{EventBus, EventContext, OrchestratorEvent};
 use crate::executor::{Executor, ExecutorError};
 use crate::ir::Envelope;
 use crate::streaming::manager::{StreamManager, StreamManagerConfig as StreamConfig};
@@ -141,6 +141,10 @@ pub struct Orchestrator {
 impl Orchestrator {
     fn effective_model_id(stage: &StageDescriptor) -> String {
         stage.model.clone().unwrap_or_else(|| stage.name.clone())
+    }
+
+    fn event_context_for_stage(stage: &StageDescriptor) -> EventContext {
+        EventContext::default().with_model_id(Self::effective_model_id(stage))
     }
 
     fn build_execution_outcome(
@@ -302,6 +306,7 @@ impl Orchestrator {
         // Emit stage start event
         self.event_bus.publish(OrchestratorEvent::StageStart {
             stage_name: stage.name.clone(),
+            context: Self::event_context_for_stage(stage),
         });
         self.telemetry.log_stage_start(&stage.name);
 
@@ -320,6 +325,7 @@ impl Orchestrator {
             stage_name: stage.name.clone(),
             allowed: policy_allowed,
             reason: Some(policy_decision.reason.clone()),
+            context: Self::event_context_for_stage(stage),
         });
         self.telemetry.log_policy_evaluation(
             &stage.name,
@@ -353,17 +359,23 @@ impl Orchestrator {
             stage_name: stage.name.clone(),
             target: routing_decision.target.to_json_string(),
             reason: routing_decision.reason.clone(),
+            recent_abort_rate: routing_decision.local_reliability_hint.recent_abort_rate,
+            sample_size: routing_decision.local_reliability_hint.sample_size,
+            context: Self::event_context_for_stage(stage),
         });
         self.telemetry.log_routing_decision(
             &stage.name,
             &routing_decision.target.to_json_string(),
             &routing_decision.reason,
+            routing_decision.local_reliability_hint.recent_abort_rate,
+            routing_decision.local_reliability_hint.sample_size,
         );
 
         // Step 4: Execute model based on routing decision
         self.event_bus.publish(OrchestratorEvent::ExecutionStarted {
             stage_name: stage.name.clone(),
             target: routing_decision.target.to_json_string(),
+            context: Self::event_context_for_stage(stage),
         });
         self.telemetry
             .log_execution_start(&stage.name, &routing_decision.target.to_json_string());
@@ -386,12 +398,14 @@ impl Orchestrator {
                         stage_name: stage.name.clone(),
                         target: routing_decision.target.to_json_string(),
                         reason: reason.as_str().to_string(),
+                        context: Self::event_context_for_stage(stage),
                     });
                 } else {
                     self.event_bus.publish(OrchestratorEvent::ExecutionFailed {
                         stage_name: stage.name.clone(),
                         target: routing_decision.target.to_json_string(),
                         error: error_msg.clone(),
+                        context: Self::event_context_for_stage(stage),
                     });
                 }
                 // Record failure outcome
@@ -416,6 +430,7 @@ impl Orchestrator {
                 stage_name: stage.name.clone(),
                 target: routing_decision.target.to_json_string(),
                 execution_time_ms: latency_ms,
+                context: Self::event_context_for_stage(stage),
             });
         self.telemetry.log_execution_complete(
             &stage.name,
@@ -443,6 +458,7 @@ impl Orchestrator {
             stage_name: stage.name.clone(),
             target: routing_decision.target.to_json_string(),
             latency_ms,
+            context: Self::event_context_for_stage(stage),
         });
         self.telemetry.log_stage_complete(
             &stage.name,
@@ -481,6 +497,7 @@ impl Orchestrator {
         // Emit pipeline start event
         self.event_bus.publish(OrchestratorEvent::PipelineStart {
             stages: stage_names.clone(),
+            context: Default::default(),
         });
 
         let mut results = Vec::new();
@@ -496,8 +513,10 @@ impl Orchestrator {
         let total_latency_ms = pipeline_start.elapsed().as_millis() as u32;
 
         // Emit pipeline complete event
-        self.event_bus
-            .publish(OrchestratorEvent::PipelineComplete { total_latency_ms });
+        self.event_bus.publish(OrchestratorEvent::PipelineComplete {
+            total_latency_ms,
+            context: Default::default(),
+        });
 
         Ok(results)
     }
@@ -530,6 +549,7 @@ impl Orchestrator {
         // Emit stage start event (consistent with sync execute_stage)
         self.event_bus.publish(OrchestratorEvent::StageStart {
             stage_name: stage.name.clone(),
+            context: Self::event_context_for_stage(stage),
         });
         self.telemetry.log_stage_start(&stage.name);
 
@@ -548,6 +568,7 @@ impl Orchestrator {
             stage_name: stage.name.clone(),
             allowed: policy_allowed,
             reason: Some(policy_decision.reason.clone()),
+            context: Self::event_context_for_stage(stage),
         });
         self.telemetry.log_policy_evaluation(
             &stage.name,
@@ -581,11 +602,16 @@ impl Orchestrator {
             stage_name: stage.name.clone(),
             target: routing_decision.target.to_json_string(),
             reason: routing_decision.reason.clone(),
+            recent_abort_rate: routing_decision.local_reliability_hint.recent_abort_rate,
+            sample_size: routing_decision.local_reliability_hint.sample_size,
+            context: Self::event_context_for_stage(stage),
         });
         self.telemetry.log_routing_decision(
             &stage.name,
             &routing_decision.target.to_json_string(),
             &routing_decision.reason,
+            routing_decision.local_reliability_hint.recent_abort_rate,
+            routing_decision.local_reliability_hint.sample_size,
         );
 
         // Execute model in blocking thread pool (adapter execution may be CPU-bound)
@@ -596,6 +622,7 @@ impl Orchestrator {
         self.event_bus.publish(OrchestratorEvent::ExecutionStarted {
             stage_name: stage.name.clone(),
             target: routing_decision.target.to_json_string(),
+            context: Self::event_context_for_stage(stage),
         });
         self.telemetry
             .log_execution_start(&stage.name, &routing_decision.target.to_json_string());
@@ -621,12 +648,14 @@ impl Orchestrator {
                         stage_name: stage.name.clone(),
                         target: routing_decision.target.to_json_string(),
                         reason: reason.as_str().to_string(),
+                        context: Self::event_context_for_stage(stage),
                     });
                 } else {
                     self.event_bus.publish(OrchestratorEvent::ExecutionFailed {
                         stage_name: stage.name.clone(),
                         target: routing_decision.target.to_json_string(),
                         error: error_msg.clone(),
+                        context: Self::event_context_for_stage(stage),
                     });
                 }
                 // Record failure outcome
@@ -651,6 +680,7 @@ impl Orchestrator {
                 stage_name: stage.name.clone(),
                 target: routing_decision.target.to_json_string(),
                 execution_time_ms: latency_ms,
+                context: Self::event_context_for_stage(stage),
             });
         self.telemetry.log_execution_complete(
             &stage.name,
@@ -678,6 +708,7 @@ impl Orchestrator {
             stage_name: stage.name.clone(),
             target: routing_decision.target.to_json_string(),
             latency_ms,
+            context: Self::event_context_for_stage(stage),
         });
         self.telemetry.log_stage_complete(
             &stage.name,
@@ -727,6 +758,7 @@ impl Orchestrator {
         // Emit pipeline start event
         self.event_bus.publish(OrchestratorEvent::PipelineStart {
             stages: stage_names.clone(),
+            context: Default::default(),
         });
 
         let mut results = Vec::new();
@@ -745,8 +777,10 @@ impl Orchestrator {
         let total_latency_ms = pipeline_start.elapsed().as_millis() as u32;
 
         // Emit pipeline complete event
-        self.event_bus
-            .publish(OrchestratorEvent::PipelineComplete { total_latency_ms });
+        self.event_bus.publish(OrchestratorEvent::PipelineComplete {
+            total_latency_ms,
+            context: Default::default(),
+        });
 
         Ok(results)
     }

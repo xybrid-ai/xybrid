@@ -1703,6 +1703,15 @@ impl XybridModel {
         // `publish_with_resource_summary` at the end of this function.
         let resource_guard = crate::telemetry::begin_resource_run();
 
+        // Install a per-call trace_id for the lifetime of this run. Any
+        // telemetry events emitted between install and `Drop` (including
+        // any deferred adapter events) share the same `trace_id`, so the
+        // dashboard collapses them to a single Traces row. Same
+        // discipline `run_with_context` uses; see `docs/sdk/trace-model.md`.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
         // Recover from poisoned RwLock to prevent permanent lock errors
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -1740,6 +1749,9 @@ impl XybridModel {
                 .unwrap_or(0),
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
+
+        // `_telemetry_ctx` drops here, clearing the pipeline context after
+        // the publish — same ordering as `run_with_context`.
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
@@ -1805,6 +1817,16 @@ impl XybridModel {
         let start = Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
 
+        // Install a turn-scoped trace_id for the lifetime of this call.
+        // The guard's `Drop` clears the pipeline context on every exit —
+        // including the `?` error paths and panics below — so every
+        // telemetry event emitted between install and drop shares the
+        // same `trace_id` and the dashboard collapses the turn to one
+        // Traces row. Same discipline `Pipeline::run` uses for stages.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
         // Recover from poisoned RwLock to prevent permanent lock errors
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -1843,6 +1865,9 @@ impl XybridModel {
                 .unwrap_or(0),
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
+
+        // `_telemetry_ctx` drops here (and on every early return / unwind
+        // above), clearing the pipeline context after the publish.
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
@@ -1912,6 +1937,13 @@ impl XybridModel {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         let start = Instant::now();
+
+        // RAII pipeline context — see `run_with_context` for rationale.
+        // Cleared on drop at end of scope (after publish) or on any
+        // early return / unwind below.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -1985,6 +2017,9 @@ impl XybridModel {
                 .unwrap_or(0),
         };
         crate::telemetry::publish_telemetry_event(event);
+
+        // `_telemetry_ctx` drops here, clearing pipeline context after
+        // the publish — same ordering as before.
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
@@ -2070,6 +2105,12 @@ impl XybridModel {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         let start = Instant::now();
+
+        // Per-call trace_id scope — see `run` for rationale. Cleared on
+        // drop at end of scope (after publish) or on any early return.
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -2213,20 +2254,16 @@ impl XybridModel {
     ///   `model`, `system_prompt`, `temperature`, …) for the retry leg. See
     ///   [`CloudRuntimeAdapter`](xybrid_core::runtime_adapter::CloudRuntimeAdapter)
     ///   for supported keys.
-    /// - The wrapper is fully synchronous; cloud chunking is synthetic
-    ///   (see `CloudStreaming`).
+    /// - The wrapper is fully synchronous; the default `CloudRuntimeAdapter`
+    ///   consumes OpenAI-compatible gateway SSE via `CloudStreaming`.
     /// - **Cancellation timing across the seam.** A cancel set on the
     ///   `cancellation_token` *before* `execute_streaming` is invoked
     ///   (including from inside `on_seam`) short-circuits before the cloud
     ///   adapter is called — the prompt is never sent. A cancel that arrives
-    ///   *during* the blocking cloud round-trip is observed at the next
-    ///   synthetic-chunk boundary: the user-visible token stream is suppressed,
-    ///   but the prompt has already been transmitted and the provider may
-    ///   bill for it. Stopping the in-flight HTTP request itself requires
-    ///   adapter-level cancellation, which is not yet plumbed through
-    ///   [`CloudStreaming`](xybrid_core::runtime_adapter::CloudStreaming) (the
-    ///   current implementation uses a blocking `ureq` client). Treat the
-    ///   token as "responsive on the seam, best-effort during cloud."
+    ///   while the cloud leg is waiting on SSE is observed at the next gateway
+    ///   chunk: the user-visible token stream is suppressed, but the prompt may
+    ///   already have been transmitted and billed. Treat the token as
+    ///   "responsive on the seam, best-effort during cloud."
     pub fn run_streaming_with_fallback<F, S>(
         &self,
         envelope: &Envelope,
@@ -2328,6 +2365,13 @@ impl XybridModel {
         tokio::task::spawn(async move {
             let result = tokio::task::spawn_blocking(move || {
                 let start = Instant::now();
+
+                // Per-call trace_id scope — see `run` for rationale. Lives
+                // inside the spawn_blocking closure so the install + drop
+                // happen on the same thread the publish runs on.
+                let trace_id = uuid::Uuid::new_v4();
+                let _telemetry_ctx =
+                    crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
                 // Get write lock on handle
                 let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
@@ -2485,6 +2529,13 @@ impl XybridModel {
         tokio::task::spawn_blocking(move || {
             let start = Instant::now();
             let resource_guard = crate::telemetry::begin_resource_run();
+
+            // Per-call trace_id scope — see `run` for rationale. Cleared
+            // on drop at end of the spawn_blocking closure (after publish)
+            // or on any early return.
+            let trace_id = uuid::Uuid::new_v4();
+            let _telemetry_ctx =
+                crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
             // Recover from poisoned RwLock to prevent permanent lock errors
             let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
@@ -2728,6 +2779,10 @@ mod tests {
         fn call_count(&self) -> usize {
             self.calls.lock().unwrap().len()
         }
+
+        fn calls(&self) -> Vec<xybrid_core::ir::Envelope> {
+            self.calls.lock().unwrap().clone()
+        }
     }
 
     impl xybrid_core::runtime_adapter::CloudStreaming for FakeCloudAdapter {
@@ -2807,6 +2862,7 @@ mod tests {
     struct FakeAuthority {
         allow_policy: bool,
         deny_reason: String,
+        policy_requests: Mutex<Vec<xybrid_core::orchestrator::authority::PolicyRequest>>,
         outcomes: Mutex<Vec<xybrid_core::orchestrator::authority::ExecutionOutcome>>,
     }
 
@@ -2815,6 +2871,7 @@ mod tests {
             Self {
                 allow_policy: true,
                 deny_reason: String::new(),
+                policy_requests: Mutex::new(Vec::new()),
                 outcomes: Mutex::new(Vec::new()),
             }
         }
@@ -2823,8 +2880,13 @@ mod tests {
             Self {
                 allow_policy: false,
                 deny_reason: reason.to_string(),
+                policy_requests: Mutex::new(Vec::new()),
                 outcomes: Mutex::new(Vec::new()),
             }
+        }
+
+        fn policy_requests(&self) -> Vec<xybrid_core::orchestrator::authority::PolicyRequest> {
+            self.policy_requests.lock().unwrap().clone()
         }
 
         fn outcomes(&self) -> Vec<xybrid_core::orchestrator::authority::ExecutionOutcome> {
@@ -2835,10 +2897,11 @@ mod tests {
     impl xybrid_core::orchestrator::authority::OrchestrationAuthority for FakeAuthority {
         fn apply_policy(
             &self,
-            _request: &xybrid_core::orchestrator::authority::PolicyRequest,
+            request: &xybrid_core::orchestrator::authority::PolicyRequest,
         ) -> xybrid_core::orchestrator::authority::AuthorityDecision<
             xybrid_core::orchestrator::authority::PolicyOutcome,
         > {
+            self.policy_requests.lock().unwrap().push(request.clone());
             if self.allow_policy {
                 xybrid_core::orchestrator::authority::AuthorityDecision::local(
                     xybrid_core::orchestrator::authority::PolicyOutcome::Allow,
@@ -3048,6 +3111,60 @@ mod tests {
             xybrid_core::orchestrator::authority::ResolvedTarget::Cloud { .. }
         ));
         assert_eq!(outcomes[1].model_id.as_deref(), Some("deepseek-chat"));
+    }
+
+    #[test]
+    fn dispatch_after_local_rechecks_policy_and_retries_with_original_envelope() {
+        let cloud = FakeCloudAdapter::new("cloud continuation");
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("original prompt, not partial local output");
+        envelope
+            .metadata
+            .insert("provider".to_string(), "openai".to_string());
+        envelope
+            .metadata
+            .insert("model".to_string(), "gpt-4o-mini".to_string());
+        envelope
+            .metadata
+            .insert("temperature".to_string(), "0.2".to_string());
+
+        let received: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let received_for_cb = received.clone();
+        let mut on_token = move |t: xybrid_core::runtime_adapter::types::PartialToken| {
+            received_for_cb.lock().unwrap().push(t.token);
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-original-envelope".to_string(),
+            "local-model",
+            4,
+            123,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("cloud retry should succeed");
+
+        let policy_requests = authority.policy_requests();
+        assert_eq!(policy_requests.len(), 1);
+        assert_eq!(policy_requests[0].stage_id, "gpt-4o-mini");
+        assert_eq!(policy_requests[0].envelope, envelope);
+
+        let cloud_calls = cloud.calls();
+        assert_eq!(cloud_calls.len(), 1);
+        assert_eq!(cloud_calls[0], envelope);
+        assert_eq!(received.lock().unwrap().as_slice(), ["cloud continuation"]);
     }
 
     #[test]

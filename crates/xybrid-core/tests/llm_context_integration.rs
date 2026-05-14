@@ -334,3 +334,86 @@ fn test_moderate_prompt_over_512_tokens_works() {
         println!("Moderate prompt response: {}", text);
     }
 }
+
+/// Regression test for INF-162: two-turn chat on a recurrent/hybrid-arch
+/// model (LFM 2.5 350M) must not fail with `Generation failed with
+/// error code -3` on the second turn.
+///
+/// Root cause: the multi-turn KV-cache prefix-reuse path
+/// (`prepare_kv_cache_and_get_tail`) calls `llama_kv_cache_seq_rm` to
+/// truncate the cache to a shared prefix, then re-prefills the
+/// diverging tail at `n_past_in`. That dance is safe for pure attention
+/// caches but leaves the recurrent state of hybrid models (LFM, Mamba,
+/// RWKV) inconsistent with the new prefix length — `llama_decode` then
+/// fails on the diverging tail (wrapper error code -3).
+///
+/// The fix gates prefix-reuse on `!llama_model_is_recurrent`, so
+/// recurrent models full-clear the cache between turns (the pre-INF-99
+/// behaviour). This test exercises the previously-failing sequence to
+/// catch the regression if the gate is ever removed.
+///
+/// Skips when the `lfm2.5-350m` fixture isn't downloaded, mirroring
+/// the other tests in this file.
+#[test]
+fn test_recurrent_model_multi_turn_no_decode_error_3() {
+    if !model_fixtures::model_available("lfm2.5-350m") {
+        eprintln!("Skipping: lfm2.5-350m model not downloaded");
+        return;
+    }
+
+    let model_dir = model_fixtures::require_model("lfm2.5-350m");
+    let metadata = load_metadata(&model_dir);
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+
+    let mut ctx = ConversationContext::new().with_max_history_len(20);
+
+    // Turn 1: warm the cache. Pre-INF-99 this is the only kind of call;
+    // post-INF-99 it primes `kv_state.cached_tokens` for the
+    // prefix-reuse path that triggers the bug on turn 2.
+    let turn1 = Envelope::new(EnvelopeKind::Text(
+        "Say the word ready in one word.".to_string(),
+    ))
+    .with_role(MessageRole::User);
+    let result1 = executor.execute_streaming_with_context(
+        &metadata,
+        &turn1,
+        &ctx,
+        Box::new(|_token| Ok(())),
+        None,
+    );
+    assert!(
+        result1.is_ok(),
+        "Turn 1 on lfm2.5-350m should succeed: {:?}",
+        result1.err()
+    );
+    ctx.push(turn1);
+    ctx.push(result1.unwrap());
+
+    // Turn 2: previously failed at ~8ms with
+    // `Generation failed with error code -3` because prefix-reuse left
+    // the recurrent state mismatched. With the recurrent gate, the
+    // cache full-clears and turn 2 succeeds.
+    let turn2 = Envelope::new(EnvelopeKind::Text(
+        "Now say the word done in one word.".to_string(),
+    ))
+    .with_role(MessageRole::User);
+    let result2 = executor.execute_streaming_with_context(
+        &metadata,
+        &turn2,
+        &ctx,
+        Box::new(|_token| Ok(())),
+        None,
+    );
+    assert!(
+        result2.is_ok(),
+        "Turn 2 on lfm2.5-350m must not fail with decode error -3: {:?}",
+        result2.err()
+    );
+
+    if let EnvelopeKind::Text(text) = &result2.unwrap().kind {
+        assert!(
+            !text.is_empty(),
+            "Turn 2 response should not be empty (model produced no tokens)"
+        );
+    }
+}

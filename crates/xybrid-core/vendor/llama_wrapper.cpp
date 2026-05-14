@@ -257,6 +257,39 @@ int llama_n_ctx_c(const llama_context* ctx) {
     return static_cast<int>(llama_n_ctx(ctx));
 }
 
+// Returns true if the model uses a fully recurrent architecture
+// (Mamba, RWKV, etc.). See `llama_model_has_recurrent_state_c` for
+// the predicate the KV-cache prefix-reuse path should actually gate
+// on — that one also covers hybrid architectures (LFM, Qwen35,
+// Granite-hybrid) which mix attention + recurrent layers and have the
+// same cache-truncation hazard.
+bool llama_model_is_recurrent_c(const llama_model* model) {
+    if (!model) {
+        return false;
+    }
+    return llama_model_is_recurrent(model);
+}
+
+// Returns true if the model has any recurrent state — either fully
+// recurrent (Mamba, RWKV) or hybrid (LFM2, LFM2MOE, Qwen35,
+// Qwen35MOE, Granite-hybrid, etc.). Hybrid models interleave
+// attention and recurrent layers; the recurrent layers accumulate
+// state across positions, so truncating the cache by position via
+// `llama_kv_cache_seq_rm` leaves the residual state inconsistent
+// with the new prefix length and `llama_decode` fails on the
+// diverging tail.
+//
+// The Rust adapter's `prepare_kv_cache_and_get_tail` must skip
+// prefix-reuse and full-clear the cache between turns when this
+// returns true. Wraps the two upstream predicates in one call so
+// callers don't need to know the recurrent / hybrid distinction.
+bool llama_model_has_recurrent_state_c(const llama_model* model) {
+    if (!model) {
+        return false;
+    }
+    return llama_model_is_recurrent(model) || llama_model_is_hybrid(model);
+}
+
 // =============================================================================
 // Generation (low-level)
 // =============================================================================
@@ -563,7 +596,17 @@ int llama_generate_c(
             n_cur++;
         }
 
-        if (llama_decode(ctx, batch) != 0) {
+        int decode_result = llama_decode(ctx, batch);
+        if (decode_result != 0) {
+            // Mirror the streaming wrapper's diagnostic so the -3 Rust
+            // error message can point at a real stderr line. Always-on
+            // (not gated on llama.cpp verbosity) — this path has no
+            // n_past_in / prefix-reuse, so a decode failure here points
+            // at the input chunk itself, not a KV-cache state mismatch.
+            fprintf(stderr,
+                    "llama_generate_c: llama_decode returned %d on prefill "
+                    "chunk [%d, %d), n_input=%d, n_ctx=%d.\n",
+                    decode_result, chunk_start, chunk_end, n_input, n_ctx);
             delete[] candidates_data;
             llama_batch_free(batch);
             llama_sampler_free(sampler);
@@ -761,7 +804,20 @@ int llama_generate_streaming_c(
             n_cur++;
         }
 
-        if (llama_decode(ctx, batch) != 0) {
+        int decode_result = llama_decode(ctx, batch);
+        if (decode_result != 0) {
+            // Surface the actual llama_decode return code via stderr so
+            // operators running with XYBRID_LLAMACPP_VERBOSITY>=2 can
+            // distinguish KV-cache state mismatch (common on recurrent /
+            // hybrid arch models when prefix-reuse is misapplied) from
+            // hard runtime failures. The wrapper still returns -3 to
+            // preserve the Rust-side error-code contract.
+            fprintf(stderr,
+                    "llama_generate_streaming_c: llama_decode returned %d on "
+                    "prefill chunk [%d, %d) at n_past_in=%d, n_input=%d, n_ctx=%d. "
+                    "On recurrent/hybrid models this usually indicates "
+                    "prefix-reuse left the cache in an inconsistent state.\n",
+                    decode_result, chunk_start, chunk_end, n_past_in, n_input, n_ctx);
             delete[] candidates_data;
             llama_batch_free(batch);
             llama_sampler_free(sampler);

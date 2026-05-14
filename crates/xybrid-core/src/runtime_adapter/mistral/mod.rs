@@ -12,6 +12,7 @@
 use crate::ir::MessageRole;
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
+    PartialToken, StreamingCallback,
 };
 #[cfg(feature = "llm-mistral")]
 use crate::runtime_adapter::llm_telemetry::compute_streaming_fields;
@@ -169,6 +170,36 @@ fn handle_response(
     }
 }
 
+#[cfg(feature = "llm-mistral")]
+fn emit_new_text_if_any(
+    state: &StreamState,
+    before_len: usize,
+    token_index: &mut usize,
+    on_token: &mut StreamingCallback<'_>,
+) -> Result<(), AdapterError> {
+    if state.text.len() > before_len {
+        let token = state.text[before_len..].to_string();
+        let partial = PartialToken::new(token, *token_index, state.text.clone());
+        on_token(partial).map_err(AdapterError::from_streaming_callback_error)?;
+        *token_index = token_index.saturating_add(1);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "llm-mistral")]
+fn emit_final_token_if_needed(
+    state: &StreamState,
+    token_index: usize,
+    on_token: &mut StreamingCallback<'_>,
+) -> Result<(), AdapterError> {
+    if token_index > 0 {
+        let final_partial = PartialToken::new(String::new(), token_index, state.text.clone())
+            .with_finish_reason(state.finish_reason.clone());
+        on_token(final_partial).map_err(AdapterError::from_streaming_callback_error)?;
+    }
+    Ok(())
+}
+
 /// MistralBackend - LLM inference using mistral.rs.
 ///
 /// This backend uses the mistral.rs library for pure-Rust LLM inference.
@@ -244,6 +275,31 @@ impl MistralBackend {
             MessageRole::System => TextMessageRole::System,
             MessageRole::Assistant => TextMessageRole::Assistant,
             MessageRole::User => TextMessageRole::User,
+        }
+    }
+
+    fn build_request(messages: &[ChatMessage], config: &GenerationConfig) -> RequestBuilder {
+        let mut request = RequestBuilder::new();
+
+        for msg in messages {
+            request = request.add_message(Self::convert_role(&msg.role), &msg.content);
+        }
+
+        // Deterministic-by-default: when the caller has not asked for
+        // sampling (`temperature <= 0.0`), use mistralrs's
+        // `set_deterministic_sampler()` so local inference is reproducible.
+        // `max_tokens` still applies in the deterministic path; sampling
+        // knobs are only set when requested.
+        if config.temperature <= 0.0 {
+            request
+                .set_deterministic_sampler()
+                .set_sampler_max_len(config.max_tokens)
+        } else {
+            request
+                .set_sampler_temperature(config.temperature as f64)
+                .set_sampler_topp(config.top_p as f64)
+                .set_sampler_topk(config.top_k)
+                .set_sampler_max_len(config.max_tokens)
         }
     }
 }
@@ -384,29 +440,7 @@ impl LlmBackend for MistralBackend {
             AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
         })?;
 
-        // Build the request with messages
-        let mut request = RequestBuilder::new();
-
-        for msg in messages {
-            request = request.add_message(Self::convert_role(&msg.role), &msg.content);
-        }
-
-        // Deterministic-by-default: when the caller has not asked for
-        // sampling (`temperature <= 0.0`), use mistralrs's
-        // `set_deterministic_sampler()` so local inference is reproducible.
-        // `max_tokens` still applies in the deterministic path; sampling
-        // knobs are only set when requested.
-        request = if config.temperature <= 0.0 {
-            request
-                .set_deterministic_sampler()
-                .set_sampler_max_len(config.max_tokens)
-        } else {
-            request
-                .set_sampler_temperature(config.temperature as f64)
-                .set_sampler_topp(config.top_p as f64)
-                .set_sampler_topk(config.top_k)
-                .set_sampler_max_len(config.max_tokens)
-        };
+        let request = Self::build_request(messages, config);
 
         let start = std::time::Instant::now();
 
@@ -498,14 +532,79 @@ impl LlmBackend for MistralBackend {
         self.generate(&messages, config)
     }
 
-    // TODO: Implement true streaming for mistral.rs once we verify the streaming API
-    // For now, uses the default implementation which falls back to non-streaming.
-    // The mistral.rs streaming API (stream_chat_request) has a different response
-    // structure that needs investigation.
+    fn generate_streaming(
+        &self,
+        messages: &[ChatMessage],
+        config: &GenerationConfig,
+        on_token: StreamingCallback<'_>,
+    ) -> LlmResult<GenerationOutput> {
+        let model = self.model.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
+        })?;
+        let request = Self::build_request(messages, config);
+        let start = std::time::Instant::now();
+        let mut on_token = on_token;
+
+        let state = self.runtime.block_on(async {
+            let mut stream = model
+                .stream_chat_request(request)
+                .await
+                .map_err(|e| AdapterError::InferenceFailed(format!("stream init: {}", e)))?;
+
+            let mut state = StreamState::new();
+            let mut token_index = 0usize;
+            while let Some(response) = stream.next().await {
+                let before_len = state.text.len();
+                let done = handle_response(response, &mut state, std::time::Instant::now())?;
+                emit_new_text_if_any(&state, before_len, &mut token_index, &mut on_token)?;
+                if done {
+                    break;
+                }
+            }
+            if !state.saw_terminal {
+                return Err(AdapterError::InferenceFailed(
+                    "stream closed before terminal chunk (no usage or finish_reason)".to_string(),
+                ));
+            }
+            emit_final_token_if_needed(&state, token_index, &mut on_token)?;
+            Ok::<_, AdapterError>(state)
+        })?;
+
+        let StreamState {
+            text,
+            finish_reason,
+            tokens_reported,
+            prompt_tokens_reported,
+            chunk_ts,
+            decode_tps_reported,
+            prefill_tps_reported,
+            ..
+        } = state;
+
+        let tokens_generated = tokens_reported.unwrap_or(chunk_ts.len());
+        let prompt_token_count = prompt_tokens_reported.unwrap_or(0);
+        let fields =
+            compute_streaming_fields(start, &chunk_ts, prompt_token_count, tokens_generated);
+        xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
+
+        Ok(GenerationOutput {
+            text,
+            tokens_generated,
+            generation_time_ms: fields.generation_time_ms,
+            tokens_per_second: fields.tokens_per_second,
+            finish_reason,
+            ttft_ms: fields.ttft_ms,
+            mean_itl_ms: fields.mean_itl_ms,
+            p95_itl_ms: fields.p95_itl_ms,
+            emitted_chunks: fields.emitted_chunks,
+            inter_chunk_ms: fields.inter_chunk_ms,
+            decode_tps: decode_tps_reported.or(fields.decode_tps),
+            prefill_tps: prefill_tps_reported.or(fields.prefill_tps),
+        })
+    }
 
     fn supports_streaming(&self) -> bool {
-        // Return false until true streaming is implemented
-        false
+        true
     }
 
     fn memory_usage(&self) -> Option<u64> {
@@ -596,7 +695,11 @@ mod tests {
 
     #[cfg(feature = "llm-mistral")]
     mod mock_stream {
-        use super::super::{handle_response, nonzero, StreamState};
+        use super::super::{
+            emit_final_token_if_needed, emit_new_text_if_any, handle_response, nonzero, StreamState,
+        };
+        use crate::abort::{AbortReason, CloudFallbackAbort};
+        use crate::runtime_adapter::llm::{PartialToken, StreamingCallback};
         use crate::runtime_adapter::AdapterError;
         use mistralrs::{ChatCompletionChunkResponse, ChunkChoice, Delta, Response, Usage};
         use std::time::{Duration, Instant};
@@ -864,6 +967,72 @@ mod tests {
             assert_eq!(nonzero(0.0), None);
             assert_eq!(nonzero(-1.0), None);
             assert_eq!(nonzero(42.5), Some(42.5));
+        }
+
+        #[test]
+        fn backend_reports_true_streaming_for_sdk_cancellation_gate() {
+            use crate::runtime_adapter::llm::LlmBackend;
+
+            let backend = super::super::MistralBackend::new().unwrap();
+
+            assert!(
+                backend.supports_streaming(),
+                "mistral must stay on the true streaming path so SDK abort checks can interrupt generation"
+            );
+        }
+
+        #[test]
+        fn callback_cloud_fallback_abort_is_preserved_as_typed_adapter_error() {
+            let mut state = StreamState::new();
+            let before_len = state.text.len();
+            handle_response(delta_chunk("stop here"), &mut state, Instant::now()).unwrap();
+
+            let mut token_index = 0usize;
+            let mut callback: StreamingCallback<'_> = Box::new(|_token: PartialToken| {
+                Err(Box::new(CloudFallbackAbort::new(AbortReason::StressMemory)))
+            });
+
+            let started = Instant::now();
+            let err = emit_new_text_if_any(&state, before_len, &mut token_index, &mut callback)
+                .expect_err("callback abort must stop the mistral stream");
+            let elapsed = started.elapsed();
+
+            assert_eq!(
+                err.cloud_fallback_abort_reason(),
+                Some(AbortReason::StressMemory),
+                "mistral callback errors must preserve the typed CloudFallbackAbort marker"
+            );
+            assert!(
+                elapsed <= Duration::from_millis(50),
+                "mistral callback abort exceeded M-series cancellation budget: {:?}",
+                elapsed
+            );
+            assert_eq!(
+                token_index, 0,
+                "token index must not advance after a failed callback"
+            );
+        }
+
+        #[test]
+        fn final_token_callback_error_is_preserved() {
+            let mut state = StreamState::new();
+            state.text = "done".to_string();
+            state.finish_reason = "stop".to_string();
+
+            let mut callback: StreamingCallback<'_> = Box::new(|_token: PartialToken| {
+                Err(Box::new(CloudFallbackAbort::new(
+                    AbortReason::StressThermal,
+                )))
+            });
+
+            let err = emit_final_token_if_needed(&state, 1, &mut callback)
+                .expect_err("final callback abort must stop the mistral stream");
+
+            assert_eq!(
+                err.cloud_fallback_abort_reason(),
+                Some(AbortReason::StressThermal),
+                "final-token callback errors must preserve the typed CloudFallbackAbort marker"
+            );
         }
     }
 }

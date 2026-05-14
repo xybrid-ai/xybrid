@@ -145,6 +145,25 @@ extern "C" {
     fn llama_n_vocab_c(model: *const c_void) -> c_int;
     fn llama_n_ctx_c(ctx: *const c_void) -> c_int;
 
+    // Fully recurrent architecture (Mamba, RWKV). Distinct from
+    // hybrid models — see `llama_model_has_recurrent_state_c`.
+    fn llama_model_is_recurrent_c(model: *const c_void) -> bool;
+
+    // Recurrent OR hybrid architecture (Mamba, RWKV, LFM2, LFM2MOE,
+    // Qwen35, Qwen35MOE, Granite-hybrid, …). This is the predicate
+    // the KV-cache prefix-reuse path gates on: any model with
+    // recurrent state cannot have its cache safely truncated by
+    // position via `llama_kv_cache_seq_rm`, because the recurrence
+    // accumulates across positions and the residual state ends up
+    // inconsistent with the new prefix length. `llama_decode` fails
+    // on the diverging tail (returns non-zero, surfaces as wrapper
+    // error code -3).
+    //
+    // Wraps two upstream predicates (`llama_model_is_recurrent` +
+    // `llama_model_is_hybrid`) so the Rust caller doesn't need to
+    // know which bucket each architecture falls into.
+    fn llama_model_has_recurrent_state_c(model: *const c_void) -> bool;
+
     // Generation (low-level)
     fn llama_decode_c(ctx: *mut c_void, batch: *const c_void) -> c_int;
     fn llama_get_logits_c(ctx: *mut c_void) -> *mut c_float;
@@ -405,6 +424,30 @@ pub fn llama_n_vocab(model: &LlamaModel) -> usize {
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_n_ctx(ctx: &LlamaContext) -> usize {
     unsafe { llama_n_ctx_c(ctx.ptr) as usize }
+}
+
+/// Returns true for fully recurrent architectures (Mamba, RWKV).
+/// Most callers want [`llama_model_has_recurrent_state`] instead,
+/// which also covers hybrid models (LFM2, Qwen35, Granite-hybrid, …)
+/// — they have the same cache-truncation hazard.
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_model_is_recurrent(model: &LlamaModel) -> bool {
+    unsafe { llama_model_is_recurrent_c(model.ptr) }
+}
+
+/// Returns true for any model with recurrent state — fully recurrent
+/// (Mamba, RWKV) or hybrid (LFM2 / LFM2MOE, Qwen35 / Qwen35MOE,
+/// Granite-hybrid, …). Callers that manipulate the KV cache by
+/// position — in particular the multi-turn prefix-reuse path in
+/// `LlamaCppBackend::prepare_kv_cache_and_get_tail` — must skip
+/// those optimisations on these models and full-clear the cache
+/// between turns instead. Truncating recurrent state mid-sequence
+/// leaves the residual state inconsistent with the new prefix length
+/// and `llama_decode` fails on the diverging tail (wrapper error
+/// code -3).
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_model_has_recurrent_state(model: &LlamaModel) -> bool {
+    unsafe { llama_model_has_recurrent_state_c(model.ptr) }
 }
 
 /// Get the model's chat template string from GGUF metadata.
@@ -838,9 +881,20 @@ pub fn llama_generate_with_stops(
     };
 
     if result < 0 {
+        let detail = match result {
+            -1 => "invalid arguments (null context/model/input or non-positive sizes)",
+            -2 => "sampler chain creation failed",
+            -3 => {
+                "llama_decode failed on prefill \
+                 (the wrapper logs the actual llama_decode return code + chunk \
+                 position to stderr; see `llama_generate_c` in llama_wrapper.cpp)"
+            }
+            -4 => "input exceeds context window",
+            _ => "unknown",
+        };
         return Err(AdapterError::RuntimeError(format!(
-            "Generation failed with error code {}",
-            result
+            "Generation failed with error code {} ({})",
+            result, detail
         )));
     }
 
@@ -1030,9 +1084,33 @@ where
     // Check for hard error codes FIRST — these are never callback-stop.
     // -1 = invalid args, -2 = sampler creation failed, -3 = decode failed, -4 = input too long.
     if (-4..=-1).contains(&result) {
+        let detail = match result {
+            -1 => "invalid arguments (null context/model/input or non-positive sizes)",
+            -2 => "sampler chain creation failed",
+            -3 => {
+                // The wrapper unconditionally logs the actual llama_decode
+                // return code + n_past_in / chunk position to stderr (see
+                // `llama_generate_streaming_c` in llama_wrapper.cpp); the
+                // diagnostic is not gated on `XYBRID_LLAMACPP_VERBOSITY`,
+                // which only controls llama.cpp's own log callback path.
+                // When n_past_in > 0 the prefix-reuse path was in play;
+                // that's the path that triggers KV-cache state mismatches
+                // on recurrent / hybrid models. The adapter
+                // (`prepare_kv_cache_and_get_tail`) now full-clears the
+                // cache for recurrent models specifically, so this should
+                // be rare; if you hit it on a new architecture, consult
+                // the stderr line and consider whether the model needs
+                // the recurrent path.
+                "llama_decode failed on prefill (KV-cache state mismatch likely; \
+                 see stderr for the wrapper-level diagnostic line emitted by \
+                 `llama_generate_streaming_c`)"
+            }
+            -4 => "input + prefix exceeds context window (n_past_in + n_input >= n_ctx)",
+            _ => "unknown",
+        };
         return Err(AdapterError::RuntimeError(format!(
-            "Generation failed with error code {}",
-            result
+            "Generation failed with error code {} ({}; n_past_in={})",
+            result, detail, n_past_in
         )));
     }
 
@@ -1214,7 +1292,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::os::raw::c_int;
+    use std::os::raw::{c_int, c_void};
 
     // =========================================================================
     // Regression: Stop Sequence Count Mismatch
@@ -1261,6 +1339,51 @@ mod tests {
         assert_eq!(stop_tokens.len(), 3); // 2 + 1 tokens total
         assert_eq!(stop_lens[0], 2); // first sequence: 2 tokens
         assert_eq!(stop_lens[1], 1); // third sequence: 1 token
+    }
+
+    #[cfg(feature = "llm-llamacpp")]
+    #[test]
+    fn streaming_trampoline_preserves_cloud_fallback_abort_marker() {
+        use super::{streaming_trampoline, StreamingContext};
+        use crate::abort::{cloud_fallback_reason_from_error, AbortReason, CloudFallbackAbort};
+        use std::ffi::CString;
+        use std::time::{Duration, Instant};
+
+        type Callback = fn(i32, &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+        fn abort_callback(
+            _token_id: i32,
+            _text: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Err(Box::new(CloudFallbackAbort::new(AbortReason::StressMemory)))
+        }
+
+        let mut callback: Callback = abort_callback;
+        let mut ctx = StreamingContext {
+            callback: &mut callback,
+            error: None,
+        };
+        let token_text = CString::new("token").unwrap();
+
+        let started = Instant::now();
+        let stop = streaming_trampoline::<Callback>(
+            42,
+            token_text.as_ptr(),
+            &mut ctx as *mut StreamingContext<Callback> as *mut c_void,
+        );
+        let elapsed = started.elapsed();
+
+        assert_eq!(stop, 1, "callback errors must stop the C stream");
+        assert!(
+            elapsed <= Duration::from_millis(50),
+            "llama.cpp trampoline abort exceeded M-series cancellation budget: {:?}",
+            elapsed
+        );
+        let err = ctx.error.take().expect("callback error must be stored");
+        assert_eq!(
+            cloud_fallback_reason_from_error(err.as_ref()),
+            Some(AbortReason::StressMemory),
+            "llama.cpp trampoline must keep the typed CloudFallbackAbort marker for the Rust layer"
+        );
     }
 
     // =========================================================================

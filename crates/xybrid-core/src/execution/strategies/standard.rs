@@ -7,11 +7,12 @@ use log::{debug, info};
 
 use super::{ExecutionContext, ExecutionStrategy};
 use crate::execution::modes::execute_bert_inference;
+use crate::execution::session_factory::OnnxSessionFactory;
 use crate::execution::template::{ExecutionTemplate, ModelMetadata, PreprocessingStep};
 use crate::execution::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use crate::execution::{postprocessing, preprocessing};
 use crate::ir::Envelope;
-use crate::runtime_adapter::onnx::ONNXSession;
+use crate::runtime_adapter::onnx::{ExecutionProviderKind, SessionOptions};
 use crate::runtime_adapter::AdapterError;
 use crate::tracing as xybrid_trace;
 
@@ -153,8 +154,14 @@ impl StandardStrategy {
             .as_token_ids()
             .ok_or_else(|| AdapterError::InvalidInput("Expected token IDs".to_string()))?;
 
-        // Create and run BERT session directly
-        let session = ONNXSession::new(model_path.to_str().unwrap(), false, false)?;
+        // Build through the shared factory entry. BERT goes through this
+        // path on the cheap (no profiling, no resolved-EP capture);
+        // attribution is the adapter's responsibility, not the strategy's.
+        let session = OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?;
         let raw_outputs = execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
 
         // Convert outputs to envelope

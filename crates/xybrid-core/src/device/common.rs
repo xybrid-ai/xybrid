@@ -83,16 +83,3 @@ pub fn detect_cpu() -> CpuInfo {
         }
     }
 }
-
-/// Detects GPU/Vulkan acceleration availability.
-///
-/// This is a stub implementation that returns true.
-/// Real implementation would check Vulkan device availability.
-#[allow(dead_code)]
-pub fn detect_gpu_availability() -> bool {
-    // Stub: Always return true for now
-    // TODO: Real implementation would check:
-    // - Vulkan device availability
-    // - GPU compute shader support
-    true
-}

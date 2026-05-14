@@ -29,6 +29,7 @@ fn test_event_stream_subscription() {
         let event_bus = orchestrator.event_bus();
         event_bus.publish(OrchestratorEvent::StageStart {
             stage_name: "test_stage".to_string(),
+            context: Default::default(),
         });
 
         // Wait for the event to be received
@@ -37,7 +38,7 @@ fn test_event_stream_subscription() {
             if let Ok(event) = timeout(Duration::from_millis(200), event_stream.recv()).await {
                 if matches!(
                     event,
-                    Some(OrchestratorEvent::StageStart { stage_name }) if stage_name == "test_stage"
+                    Some(OrchestratorEvent::StageStart { stage_name, .. }) if stage_name == "test_stage"
                 ) {
                     found_stage_start = true;
                     break;

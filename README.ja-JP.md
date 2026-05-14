@@ -12,7 +12,7 @@
 
 <p align="center">
   <strong>LLM、ASR、TTSをアプリやゲームでネイティブに実行。</strong><br/>
-  Rustコア · iOS · Android · Flutter · Unity<br/>
+  <a href="#flutter">Flutter</a> · <a href="#swift">Swift</a> · <a href="#kotlin">Kotlin</a> · <a href="#unity">Unity</a> · <a href="#rust">Rust</a><br/>
   プライベート、オフライン、クラウド不要。
 </p>
 
@@ -116,8 +116,7 @@ Xybridは**Rustベースのランタイム**であり、すべての主要プラ
 
 お好みの言語でインストールしてモデルを実行できます。各セクションにはインストール手順と最小限のサンプルが含まれています。
 
-<details>
-<summary><b>CLI</b> — macOS、Linux、Windows</summary>
+### CLI
 
 **インストール:**
 
@@ -137,10 +136,7 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 ```
 
-</details>
-
-<details>
-<summary><b>Flutter</b> — iOS、Android、macOS、Linux、Windows</summary>
+### Flutter
 
 **インストール** `pubspec.yaml`:
 
@@ -157,16 +153,13 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 // result → 24kHz WAVオーディオ
 ```
 
-</details>
-
-<details>
-<summary><b>Kotlin</b> — Android</summary>
+### Kotlin
 
 **インストール** `build.gradle.kts`:
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta12")
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-rc1")
 }
 ```
 
@@ -178,10 +171,7 @@ val result = model.run(Envelope.text("Hello world"))
 // result → 24kHz WAVオーディオ
 ```
 
-</details>
-
-<details>
-<summary><b>Swift</b> — iOS、macOS</summary>
+### Swift
 
 **インストール** `Package.swift`:
 
@@ -201,10 +191,7 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 // result → 24kHz WAVオーディオ
 ```
 
-</details>
-
-<details>
-<summary><b>Unity (C#)</b> — macOS、Windows、Linux、iOS、Android</summary>
+### Unity
 
 **インストール** Unity Package Managerを使用:
 
@@ -220,10 +207,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 // result → 24kHz WAVオーディオ
 ```
 
-</details>
-
-<details>
-<summary><b>Rust</b> — すべてのプラットフォーム</summary>
+### Rust
 
 **インストール** `Cargo.toml`:
 
@@ -240,14 +224,12 @@ let result = model.run(&Envelope::text("Hello world"))?;
 // result → 24kHz WAVオーディオ
 ```
 
-</details>
-
 すべてのオプション、ハードウェアアクセラレーション、CLIリファレンスについては、完全な[インストールガイド](docs/INSTALLATION.md)を参照してください。プラットフォーム固有のセットアップについては、各SDKのREADMEを参照してください: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
 
 <details>
-<summary><h3>パイプライン（実験的機能）</h3></summary>
+<summary><h3>マルチモデル推論パイプライン — MMP（実験的機能）</h3></summary>
 
-モデルを連鎖させて、3行のYAMLで音声アシスタントを構築:
+複数のモデルを1つのマルチモデル推論パイプライン（MMP）として連鎖させ、3行のYAMLで音声アシスタントを構築:
 
 ```yaml
 # voice-assistant.yaml
@@ -271,17 +253,17 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// パイプラインサポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
 ```
 
 **Swift:**
 ```swift
-// パイプラインサポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
 ```
 
 **Unity (C#):**
 ```csharp
-// パイプラインサポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
 ```
 
 **Rust:**
@@ -395,11 +377,11 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 | 言語モデル | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 画像認識モデル | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 埋め込み | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
-| パイプラインオーケストレーション | ✅ | ✅ | ✅ | ✅ | ✅ |
+| マルチモデルパイプライン（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
 
-**SDKパイプラインサポート:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
 ---
 
@@ -408,7 +390,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 - **プライバシー最優先** — すべての推論はオンデバイスで実行。データがデバイスから出ることはありません。
 - **オフライン対応** — 初回のモデルダウンロード後はインターネット不要。
 - **クロスプラットフォーム** — iOS、Android、macOS、Linux、Windowsで統一されたAPI。
-- **パイプラインオーケストレーション** — モデルを連鎖（ASR → LLM → TTS）して1回の呼び出しで実行。
+- **マルチモデルパイプライン（MMP）** — モデルを連鎖（ASR → LLM → TTS）して1回の呼び出しで実行。
 - **自動最適化** — Apple Neural Engine、Metal、CUDAによるハードウェアアクセラレーション。
 
 ### 比較
@@ -417,7 +399,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 |---|---|---|---|---|
 | モバイル（iOS/Android） | ✅ | ❌ | ❌ | ✅ |
 | ゲームエンジン（Unity） | ✅ | ❌ | ❌ | ❌ |
-| マルチステージパイプライン | ✅ | ❌ | ❌ | ❌ |
+| マルチモデルパイプライン（MMP） | ✅ | ❌ | ❌ | ❌ |
 | ASR + TTS + LLMを1つのSDKで | ✅ | ❌ | ❌ | ❌ |
 | インプロセス実行（サーバー不要） | ✅ | ❌ | ✅ | ✅ |
 | クラウド不要 | ✅ | ✅ | ✅ | ✅ |
