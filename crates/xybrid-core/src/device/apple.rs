@@ -137,7 +137,10 @@ pub fn detect_apple_device() -> AppleDeviceInfo {
     // a `-> AppleDeviceInfo` rather than `-> ()`. Env-var hints above
     // are the only signal that could have produced a real value; if we
     // reached this point, we had none.
-    #[cfg(all(target_arch = "aarch64", not(any(target_os = "macos", target_os = "ios"))))]
+    #[cfg(all(
+        target_arch = "aarch64",
+        not(any(target_os = "macos", target_os = "ios"))
+    ))]
     {
         AppleDeviceInfo {
             device_model: None,
