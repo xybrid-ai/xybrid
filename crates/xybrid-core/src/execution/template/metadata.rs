@@ -432,7 +432,6 @@ pub fn normalize_llm_backend_hint(hint: &str) -> Option<&'static str> {
     match hint {
         "llamacpp" => Some("llamacpp"),
         "mistral" | "mistralrs" => Some("mistralrs"),
-        "mlx" => Some("mlx"),
         _ => None,
     }
 }
@@ -441,7 +440,7 @@ pub fn normalize_llm_backend_hint(hint: &str) -> Option<&'static str> {
 /// `ModelMetadata.metadata`) to the canonical backend label used by cost
 /// telemetry and the analytics ingest path. Values are aligned with the
 /// closed set documented for the `backend` field on `PlatformEvent`:
-/// `llamacpp` | `mlx` | `mistralrs` | `ort` | `candle` | `cloud`.
+/// `llamacpp` | `mistralrs` | `ort` | `candle` | `cloud`.
 ///
 /// Returns `None` when the runtime is not yet covered by that closed set
 /// (e.g. CoreML, TFLite, ModelGraph) — the contract is "additive, omit
@@ -457,9 +456,9 @@ pub fn backend_label_from_template(
 ) -> Option<&'static str> {
     match template {
         ExecutionTemplate::Onnx { .. } => Some("ort"),
-        // SafeTensors is Candle's native format; an `mlx` hint on an
-        // Apple Silicon bundle overrides the default so the wire label
-        // reflects the actual runtime that will execute the model.
+        // SafeTensors is Candle's native format. Unknown or deferred
+        // backend hints fall back to Candle so telemetry reflects the
+        // runtime that will actually execute the model in this checkout.
         ExecutionTemplate::SafeTensors { .. } => {
             hint.and_then(normalize_llm_backend_hint).or(Some("candle"))
         }
@@ -627,9 +626,8 @@ mod tests {
         };
         assert_eq!(backend_label_from_template(&onnx, None), Some("ort"));
 
-        // SafeTensors defaults to Candle when no hint is set; an
-        // `mlx` hint overrides for Apple-Silicon-targeted bundles
-        // where the runtime selector picks MLX over Candle.
+        // SafeTensors defaults to Candle when no supported local-LLM
+        // backend hint is set.
         let safe = ExecutionTemplate::SafeTensors {
             model_file: "m.safetensors".into(),
             architecture: None,
@@ -639,8 +637,8 @@ mod tests {
         assert_eq!(backend_label_from_template(&safe, None), Some("candle"));
         assert_eq!(
             backend_label_from_template(&safe, Some("mlx")),
-            Some("mlx"),
-            "mlx hint must override the candle default for SafeTensors bundles"
+            Some("candle"),
+            "deferred mlx hints must not claim an unavailable runtime"
         );
 
         // GGUF: hint required to disambiguate llama.cpp vs mistral.rs;
@@ -666,9 +664,9 @@ mod tests {
             backend_label_from_template(&gguf, Some("mistralrs")),
             Some("mistralrs")
         );
-        // GGUF + mlx hint: the MLX runtime can also consume converted
-        // GGUFs, so the hint path must accept `"mlx"` here too.
-        assert_eq!(backend_label_from_template(&gguf, Some("mlx")), Some("mlx"));
+        // MLX is deferred in this checkout, so the hint path must not
+        // emit an unavailable runtime label.
+        assert_eq!(backend_label_from_template(&gguf, Some("mlx")), None);
     }
 
     #[test]
@@ -680,9 +678,9 @@ mod tests {
         assert_eq!(normalize_llm_backend_hint("mistral"), Some("mistralrs"));
         assert_eq!(normalize_llm_backend_hint("mistralrs"), Some("mistralrs"));
         assert_eq!(normalize_llm_backend_hint("llamacpp"), Some("llamacpp"));
-        // MLX is the Apple-Silicon-only LLM runtime; the wire label is
-        // already canonical so the mapping is identity.
-        assert_eq!(normalize_llm_backend_hint("mlx"), Some("mlx"));
+        // MLX is currently deferred, so callers must omit the runtime
+        // label rather than claim that an unavailable backend ran.
+        assert_eq!(normalize_llm_backend_hint("mlx"), None);
         // Unknown hints must return None so callers omit the field
         // rather than emit a guessed value.
         assert_eq!(normalize_llm_backend_hint("unknown"), None);
