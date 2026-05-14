@@ -1,0 +1,19 @@
+crates/xybrid-core/src/device/apple.rs
+  s_f1391ecec13529::t_14adbacd03d191 133-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "c29b613ec7dfd0cda609a431faf67f51f33ef4dc",
+  "prompts": {},
+  "sessions": {
+    "s_f1391ecec13529": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69e046f0-0aaf-406c-9a36-89c2cccdd5b5",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
