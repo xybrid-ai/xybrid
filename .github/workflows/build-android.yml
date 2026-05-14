@@ -24,8 +24,21 @@ env:
 
 jobs:
   build-android:
-    name: Build Android .so files
+    name: Build Android .so (${{ matrix.abi }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: armeabi-v7a
+            rust-target: armv7-linux-androideabi
+            has-ort: false
+          - abi: arm64-v8a
+            rust-target: aarch64-linux-android
+            has-ort: true
+          - abi: x86_64
+            rust-target: x86_64-linux-android
+            has-ort: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -33,10 +46,7 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
-          targets: >-
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android
+          targets: ${{ matrix.rust-target }}
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -49,11 +59,14 @@ jobs:
           echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
           echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
 
+      # Per-ABI rust-cache so the three matrix shards don't clobber each
+      # other's target/ directories (each shard has a distinct cross-compile
+      # target tree).
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           prefix-key: "v1-rust"
-          shared-key: "android-ndk"
+          shared-key: "android-ndk-${{ matrix.abi }}"
           cache-all-crates: "true"
           save-if: "true"
 
@@ -97,55 +110,43 @@ jobs:
         # `which || install` is idempotent in both states.
         run: which cargo-ndk || cargo install cargo-ndk
 
-      - name: Build Android .so files
-        run: cargo xtask build-android --release
+      - name: Build Android .so (${{ matrix.abi }})
+        run: cargo xtask build-android --release --abi ${{ matrix.abi }}
 
-      - name: Verify .so files
+      - name: Verify .so file
         run: |
-          SO_BASE_PATH="bindings/kotlin/libs"
-          ABIS=("armeabi-v7a" "arm64-v8a" "x86_64")
-
-          for abi in "${ABIS[@]}"; do
-            SO_PATH="$SO_BASE_PATH/$abi/libxybrid_uniffi.so"
-            if [ ! -f "$SO_PATH" ]; then
-              echo "Error: .so file not found at $SO_PATH"
-              exit 1
-            fi
-            echo "Verifying $SO_PATH..."
-            file "$SO_PATH"
-          done
-
-          echo ""
-          echo "All .so files verified:"
-          find "$SO_BASE_PATH" -name "*.so" -exec ls -la {} \;
+          SO_PATH="bindings/kotlin/libs/${{ matrix.abi }}/libxybrid_uniffi.so"
+          if [ ! -f "$SO_PATH" ]; then
+            echo "Error: .so file not found at $SO_PATH"
+            exit 1
+          fi
+          echo "Verifying $SO_PATH..."
+          file "$SO_PATH"
+          ls -la "$SO_PATH"
 
       - name: Verify ORT libraries
+        if: matrix.has-ort
         run: |
-          SO_BASE_PATH="bindings/kotlin/libs"
-          ABIS=("arm64-v8a" "x86_64")
+          SO_BASE_PATH="bindings/kotlin/libs/${{ matrix.abi }}"
           ORT_LIBS=("libonnxruntime.so" "libc++_shared.so")
 
-          echo "Checking ORT libraries in Kotlin SDK..."
-          for abi in "${ABIS[@]}"; do
-            for lib in "${ORT_LIBS[@]}"; do
-              LIB_PATH="$SO_BASE_PATH/$abi/$lib"
-              if [ ! -f "$LIB_PATH" ]; then
-                echo "Error: ORT library not found at $LIB_PATH"
-                exit 1
-              fi
-              echo "OK: $LIB_PATH"
-              file "$LIB_PATH"
-            done
+          echo "Checking ORT libraries for ${{ matrix.abi }}..."
+          for lib in "${ORT_LIBS[@]}"; do
+            LIB_PATH="$SO_BASE_PATH/$lib"
+            if [ ! -f "$LIB_PATH" ]; then
+              echo "Error: ORT library not found at $LIB_PATH"
+              exit 1
+            fi
+            echo "OK: $LIB_PATH"
+            file "$LIB_PATH"
           done
 
           echo ""
-          echo "All ORT libraries verified:"
-          ls -la "$SO_BASE_PATH"/arm64-v8a/
-          ls -la "$SO_BASE_PATH"/x86_64/
+          ls -la "$SO_BASE_PATH"
 
-      - name: Upload Android .so artifacts
+      - name: Upload Android .so artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: android-so-files
-          path: bindings/kotlin/libs/
+          name: android-so-files-${{ matrix.abi }}
+          path: bindings/kotlin/libs/${{ matrix.abi }}/
           if-no-files-found: error
