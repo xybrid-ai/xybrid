@@ -402,4 +402,27 @@ mod tests {
         }
         .is_allowed());
     }
+
+    #[test]
+    fn outcome_category_aborted_for_cloud_fallback_round_trips() {
+        let category = OutcomeCategory::AbortedForCloudFallback {
+            reason: AbortReason::StressMemory,
+        };
+
+        let json = serde_json::to_value(&category).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "kind": "aborted_for_cloud_fallback",
+                "reason": "stress_memory"
+            })
+        );
+        let parsed: OutcomeCategory = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, category);
+        assert!(
+            parsed.is_local_unreliable(),
+            "cloud-fallback aborts must stay visible to local reliability feedback"
+        );
+    }
 }

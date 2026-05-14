@@ -839,4 +839,60 @@ mod tests {
             "user cancellation must NOT carry the CloudFallbackAbort marker (terminal, no retry)"
         );
     }
+
+    #[test]
+    fn streaming_user_cancellation_check_stays_within_m_series_budget() {
+        let token = CancellationToken::new();
+        let options = RunOptions::new()
+            .with_cancellation_token(token.clone())
+            .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::UserCancelled));
+        let mut state = AbortState::new(&options);
+
+        token.cancel();
+        let started = Instant::now();
+        let err = check_abort_for_streaming(/* supports_streaming */ true, &mut state, true)
+            .expect_err("streaming cancellation must abort immediately");
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed <= Duration::from_millis(50),
+            "M-series cancellation budget exceeded: {:?}",
+            elapsed
+        );
+        assert_eq!(
+            xybrid_core::abort::cloud_fallback_reason_from_error(err.as_ref()),
+            None,
+            "UserCancelled must stay terminal and never become CloudFallbackAbort"
+        );
+    }
+
+    #[test]
+    fn streaming_resource_abort_check_stays_within_low_end_android_budget() {
+        let snapshot = ResourceSnapshot {
+            memory_pressure: MemoryPressure::Critical,
+            ..Default::default()
+        };
+        let reader = Arc::new(CountingResourceReader::new(snapshot));
+        let options = RunOptions::new().with_abort_policy(
+            AbortPolicy::default()
+                .stop_on(AbortSignal::MemoryPressureCritical)
+                .with_cloud_fallback(true),
+        );
+        let mut state = AbortState::with_resource_reader(&options, reader);
+
+        let started = Instant::now();
+        let err = check_abort_for_streaming(/* supports_streaming */ true, &mut state, true)
+            .expect_err("streaming resource pressure must become a cloud fallback abort");
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed <= Duration::from_millis(200),
+            "low-end Android cancellation budget exceeded: {:?}",
+            elapsed
+        );
+        assert_eq!(
+            xybrid_core::abort::cloud_fallback_reason_from_error(err.as_ref()),
+            Some(xybrid_core::abort::AbortReason::StressMemory)
+        );
+    }
 }
