@@ -25,7 +25,7 @@ use super::template::{
     stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
 };
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-use super::template::{normalize_llm_backend_hint, PostprocessingStep};
+use super::template::PostprocessingStep;
 use crate::conversation::ConversationContext;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::ir::EnvelopeKind;
@@ -60,8 +60,12 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
 /// shape.
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 fn stamp_llm_span_cost_attribution(metadata: &ModelMetadata) {
+    // Reuse the same resolver the outer `execute:<model_id>` span uses
+    // so both spans agree on the canonical wire label — including the
+    // GGUF-defaults-to-llamacpp behaviour that lights up unannotated
+    // bundles in the registry.
     let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
-    if let Some(label) = backend_hint.and_then(normalize_llm_backend_hint) {
+    if let Some(label) = backend_label_from_template(&metadata.execution_template, backend_hint) {
         xybrid_trace::add_metadata("backend", label);
     }
     if let Some(quant) = quantization_label_from_metadata(metadata) {
