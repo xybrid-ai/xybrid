@@ -9696,6 +9696,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokenizers 0.19.1",
  "tokio",
+ "tracing",
  "unicode-normalization",
  "ureq 2.12.1",
  "url",
