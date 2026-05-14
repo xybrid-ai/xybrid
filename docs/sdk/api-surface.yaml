@@ -318,6 +318,57 @@ classes:
       audioAsWav:
         type: "Uint8List?"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      metrics:
+        type: InferenceMetrics
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+
+  InferenceMetrics:
+    type: data
+    section: "7. Result Types"
+    dart_name: XybridInferenceMetrics
+    kotlin_name: XybridInferenceMetrics
+    swift_name: XybridInferenceMetrics
+    csharp_name: InferenceMetrics
+    properties:
+      totalMs:
+        type: int
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      ttftMs:
+        type: "int?"
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      tokensPerSecond:
+        type: "double?"
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      prefillTps:
+        type: "double?"
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      decodeTps:
+        type: "double?"
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      tokensIn:
+        type: "int?"
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      tokensOut:
+        type: "int?"
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      stageLatenciesMs:
+        type: "List<StageLatency>"
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+
+  StageLatency:
+    type: data
+    section: "7. Result Types"
+    dart_name: XybridStageLatency
+    kotlin_name: XybridStageLatency
+    swift_name: XybridStageLatency
+    csharp_name: StageLatency
+    properties:
+      stageId:
+        type: String
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      latencyMs:
+        type: int
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
 
   # -------------------------------------------------------------------
   # 8. Supporting Types

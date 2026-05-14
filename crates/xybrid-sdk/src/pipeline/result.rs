@@ -25,7 +25,9 @@
 //! assert_eq!(error_result.error, Some("Model not found".to_string()));
 //! ```
 
+use crate::result::{InferenceMetrics, StageLatency};
 use serde::{Deserialize, Serialize};
+use xybrid_core::ir::Envelope;
 
 // ============================================================================
 // Stage Execution Result (FFI-safe)
@@ -158,6 +160,12 @@ pub struct FfiPipelineExecutionResult {
     pub stages_executed: u32,
     /// Stages skipped (due to conditions)
     pub stages_skipped: u32,
+    /// Typed metrics (TTFT, tok/s, per-stage latencies).
+    ///
+    /// `stage_latencies_ms` is populated from `stages` by `with_stages`.
+    /// LLM-specific fields are populated by `populate_metrics_from_envelope`.
+    #[serde(default)]
+    pub metrics: InferenceMetrics,
 }
 
 impl FfiPipelineExecutionResult {
@@ -213,6 +221,10 @@ impl FfiPipelineExecutionResult {
             stages: Vec::new(),
             stages_executed: 1,
             stages_skipped: 0,
+            metrics: InferenceMetrics {
+                total_ms: latency_ms,
+                ..InferenceMetrics::default()
+            },
         }
     }
 
@@ -246,6 +258,10 @@ impl FfiPipelineExecutionResult {
             stages: Vec::new(),
             stages_executed: 1,
             stages_skipped: 0,
+            metrics: InferenceMetrics {
+                total_ms: latency_ms,
+                ..InferenceMetrics::default()
+            },
         }
     }
 
@@ -281,6 +297,7 @@ impl FfiPipelineExecutionResult {
             stages: Vec::new(),
             stages_executed: 0,
             stages_skipped: 0,
+            metrics: InferenceMetrics::default(),
         }
     }
 
@@ -313,7 +330,29 @@ impl FfiPipelineExecutionResult {
     pub fn with_stages(&mut self, stages: Vec<FfiStageExecutionResult>) {
         self.stages_executed = stages.iter().filter(|s| s.executed).count() as u32;
         self.stages_skipped = stages.iter().filter(|s| !s.executed).count() as u32;
+        self.metrics.stage_latencies_ms = stages
+            .iter()
+            .filter(|s| s.executed)
+            .map(|s| StageLatency {
+                stage_id: s.stage_id.clone(),
+                latency_ms: s.latency_ms,
+            })
+            .collect();
         self.stages = stages;
+    }
+
+    /// Populate LLM-specific metrics (TTFT, tok/s, token counts) from the
+    /// final envelope's metadata map. Per-stage latencies are populated
+    /// separately by `with_stages`.
+    pub fn populate_metrics_from_envelope(&mut self, envelope: &Envelope) {
+        let parsed = InferenceMetrics::from_metadata(&envelope.metadata, self.latency_ms);
+        self.metrics.ttft_ms = parsed.ttft_ms;
+        self.metrics.tokens_per_second = parsed.tokens_per_second;
+        self.metrics.prefill_tps = parsed.prefill_tps;
+        self.metrics.decode_tps = parsed.decode_tps;
+        self.metrics.tokens_in = parsed.tokens_in;
+        self.metrics.tokens_out = parsed.tokens_out;
+        self.metrics.total_ms = self.latency_ms;
     }
 
     /// Check if the result contains text output.
@@ -346,6 +385,7 @@ impl Default for FfiPipelineExecutionResult {
             stages: Vec::new(),
             stages_executed: 0,
             stages_skipped: 0,
+            metrics: InferenceMetrics::default(),
         }
     }
 }
@@ -496,6 +536,42 @@ mod tests {
         assert_eq!(result.stages.len(), 3);
         assert_eq!(result.stages_executed, 2);
         assert_eq!(result.stages_skipped, 1);
+        // Stage latencies populated from executed stages only.
+        assert_eq!(result.metrics.stage_latencies_ms.len(), 2);
+        assert_eq!(result.metrics.stage_latencies_ms[0].stage_id, "stage1");
+        assert_eq!(result.metrics.stage_latencies_ms[0].latency_ms, 50);
+        assert_eq!(result.metrics.stage_latencies_ms[1].stage_id, "stage2");
+        assert_eq!(result.metrics.stage_latencies_ms[1].latency_ms, 100);
+    }
+
+    #[test]
+    fn test_pipeline_execution_result_populate_metrics_from_envelope() {
+        use std::collections::HashMap;
+        use xybrid_core::ir::{Envelope, EnvelopeKind};
+
+        let mut result = FfiPipelineExecutionResult::success(
+            "text",
+            Some("hi".to_string()),
+            None,
+            500,
+            "llm-model",
+        );
+
+        let mut metadata = HashMap::new();
+        metadata.insert("ttft_ms".to_string(), "120".to_string());
+        metadata.insert("tokens_per_second".to_string(), "42.50".to_string());
+        metadata.insert("tokens_generated".to_string(), "256".to_string());
+
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("hi".to_string()),
+            metadata,
+        };
+        result.populate_metrics_from_envelope(&envelope);
+
+        assert_eq!(result.metrics.total_ms, 500);
+        assert_eq!(result.metrics.ttft_ms, Some(120));
+        assert_eq!(result.metrics.tokens_per_second, Some(42.5));
+        assert_eq!(result.metrics.tokens_out, Some(256));
     }
 
     #[test]

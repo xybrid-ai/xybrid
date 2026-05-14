@@ -196,7 +196,7 @@ pub use pipeline::{
     TextInputConfig,
     Xybrid,
 };
-pub use result::{InferenceResult, OutputType};
+pub use result::{InferenceMetrics, InferenceResult, OutputType, StageLatency};
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
