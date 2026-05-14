@@ -1,0 +1,21 @@
+.github/workflows/build-unity.yml
+  s_f1391ecec13529::t_667ec53b6d8fd6 342-347
+.github/workflows/build-android.yml
+  s_f1391ecec13529::t_a98793d796c1df 93-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "774c552db69d940286d014b5d515594f8ab00a22",
+  "prompts": {},
+  "sessions": {
+    "s_f1391ecec13529": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69e046f0-0aaf-406c-9a36-89c2cccdd5b5",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
