@@ -257,26 +257,37 @@ int llama_n_ctx_c(const llama_context* ctx) {
     return static_cast<int>(llama_n_ctx(ctx));
 }
 
-// Returns true if the model uses a recurrent / hybrid-state architecture
-// (Mamba, RWKV, LFM, etc.) rather than a pure attention KV cache.
-//
-// The multi-turn prefix-reuse path in the Rust adapter
-// (`prepare_kv_cache_and_get_tail`) calls `llama_kv_cache_seq_rm` to
-// truncate the cache to a shared prefix, then re-prefills the
-// diverging tail at `n_past_in`. That dance is safe for pure attention
-// caches but corrupts the recurrent state of hybrid models — the
-// recurrence accumulates across positions, so dropping a contiguous
-// suffix leaves the residual state inconsistent with the truncated
-// position. `llama_decode` then fails on the first batch of the new
-// tail.
-//
-// Callers should skip prefix-reuse and full-clear the cache between
-// turns when this returns true.
+// Returns true if the model uses a fully recurrent architecture
+// (Mamba, RWKV, etc.). See `llama_model_has_recurrent_state_c` for
+// the predicate the KV-cache prefix-reuse path should actually gate
+// on — that one also covers hybrid architectures (LFM, Qwen35,
+// Granite-hybrid) which mix attention + recurrent layers and have the
+// same cache-truncation hazard.
 bool llama_model_is_recurrent_c(const llama_model* model) {
     if (!model) {
         return false;
     }
     return llama_model_is_recurrent(model);
+}
+
+// Returns true if the model has any recurrent state — either fully
+// recurrent (Mamba, RWKV) or hybrid (LFM2, LFM2MOE, Qwen35,
+// Qwen35MOE, Granite-hybrid, etc.). Hybrid models interleave
+// attention and recurrent layers; the recurrent layers accumulate
+// state across positions, so truncating the cache by position via
+// `llama_kv_cache_seq_rm` leaves the residual state inconsistent
+// with the new prefix length and `llama_decode` fails on the
+// diverging tail.
+//
+// The Rust adapter's `prepare_kv_cache_and_get_tail` must skip
+// prefix-reuse and full-clear the cache between turns when this
+// returns true. Wraps the two upstream predicates in one call so
+// callers don't need to know the recurrent / hybrid distinction.
+bool llama_model_has_recurrent_state_c(const llama_model* model) {
+    if (!model) {
+        return false;
+    }
+    return llama_model_is_recurrent(model) || llama_model_is_hybrid(model);
 }
 
 // =============================================================================

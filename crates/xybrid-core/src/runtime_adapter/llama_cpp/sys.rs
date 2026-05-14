@@ -145,15 +145,24 @@ extern "C" {
     fn llama_n_vocab_c(model: *const c_void) -> c_int;
     fn llama_n_ctx_c(ctx: *const c_void) -> c_int;
 
-    // Recurrent / hybrid architecture detection. Returns true for Mamba,
-    // RWKV, LFM, and similar models whose state can't be safely
-    // truncated by position (the recurrence accumulates state). Callers
-    // must skip the KV-cache prefix-reuse optimisation on these models —
-    // truncate-then-prefill-tail leaves the residual recurrent state
-    // inconsistent with the new prefix length and `llama_decode` fails
+    // Fully recurrent architecture (Mamba, RWKV). Distinct from
+    // hybrid models — see `llama_model_has_recurrent_state_c`.
+    fn llama_model_is_recurrent_c(model: *const c_void) -> bool;
+
+    // Recurrent OR hybrid architecture (Mamba, RWKV, LFM2, LFM2MOE,
+    // Qwen35, Qwen35MOE, Granite-hybrid, …). This is the predicate
+    // the KV-cache prefix-reuse path gates on: any model with
+    // recurrent state cannot have its cache safely truncated by
+    // position via `llama_kv_cache_seq_rm`, because the recurrence
+    // accumulates across positions and the residual state ends up
+    // inconsistent with the new prefix length. `llama_decode` fails
     // on the diverging tail (returns non-zero, surfaces as wrapper
     // error code -3).
-    fn llama_model_is_recurrent_c(model: *const c_void) -> bool;
+    //
+    // Wraps two upstream predicates (`llama_model_is_recurrent` +
+    // `llama_model_is_hybrid`) so the Rust caller doesn't need to
+    // know which bucket each architecture falls into.
+    fn llama_model_has_recurrent_state_c(model: *const c_void) -> bool;
 
     // Generation (low-level)
     fn llama_decode_c(ctx: *mut c_void, batch: *const c_void) -> c_int;
@@ -417,17 +426,28 @@ pub fn llama_n_ctx(ctx: &LlamaContext) -> usize {
     unsafe { llama_n_ctx_c(ctx.ptr) as usize }
 }
 
-/// Returns true for recurrent / hybrid-state architectures (Mamba,
-/// RWKV, LFM, etc.). Callers that manipulate the KV cache by position —
-/// in particular the multi-turn prefix-reuse path in
-/// `LlamaCppBackend::prepare_kv_cache_and_get_tail` — must skip those
-/// optimisations on these models and full-clear the cache between
-/// turns instead. Truncating a recurrent state mid-sequence leaves the
-/// residual state inconsistent with the new prefix length and
-/// `llama_decode` fails on the diverging tail.
+/// Returns true for fully recurrent architectures (Mamba, RWKV).
+/// Most callers want [`llama_model_has_recurrent_state`] instead,
+/// which also covers hybrid models (LFM2, Qwen35, Granite-hybrid, …)
+/// — they have the same cache-truncation hazard.
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_model_is_recurrent(model: &LlamaModel) -> bool {
     unsafe { llama_model_is_recurrent_c(model.ptr) }
+}
+
+/// Returns true for any model with recurrent state — fully recurrent
+/// (Mamba, RWKV) or hybrid (LFM2 / LFM2MOE, Qwen35 / Qwen35MOE,
+/// Granite-hybrid, …). Callers that manipulate the KV cache by
+/// position — in particular the multi-turn prefix-reuse path in
+/// `LlamaCppBackend::prepare_kv_cache_and_get_tail` — must skip
+/// those optimisations on these models and full-clear the cache
+/// between turns instead. Truncating recurrent state mid-sequence
+/// leaves the residual state inconsistent with the new prefix length
+/// and `llama_decode` fails on the diverging tail (wrapper error
+/// code -3).
+#[cfg(feature = "llm-llamacpp")]
+pub fn llama_model_has_recurrent_state(model: &LlamaModel) -> bool {
+    unsafe { llama_model_has_recurrent_state_c(model.ptr) }
 }
 
 /// Get the model's chat template string from GGUF metadata.

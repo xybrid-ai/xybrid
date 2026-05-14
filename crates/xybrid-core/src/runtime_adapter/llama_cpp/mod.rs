@@ -223,17 +223,24 @@ impl LlamaCppBackend {
             .lock()
             .map_err(|_| AdapterError::RuntimeError("KV state mutex poisoned".to_string()))?;
 
-        // Recurrent / hybrid architectures (Mamba, RWKV, LFM, …) can't
-        // safely have their cache truncated by position — the recurrence
-        // accumulates state across positions, so `llama_kv_cache_seq_rm`
-        // leaves the residual state inconsistent with the new prefix
-        // length and `llama_decode` fails on the diverging tail (wrapper
-        // error code -3, surfaced on LFM 2.5 second-turn chat). Skip the
-        // optimisation entirely on these models and fall back to the
-        // pre-prefix-reuse full-clear path. The cost is per-turn
-        // re-prefill of the full conversation, which is the engine's
-        // pre-INF-99 behaviour.
-        if sys::llama_model_is_recurrent(model) {
+        // Models with recurrent state — fully recurrent (Mamba, RWKV)
+        // OR hybrid (LFM2 / LFM2MOE, Qwen35 / Qwen35MOE, Granite-hybrid,
+        // …) — can't safely have their cache truncated by position.
+        // Their recurrent layers accumulate state across positions, so
+        // `llama_kv_cache_seq_rm` leaves the residual state inconsistent
+        // with the new prefix length and `llama_decode` fails on the
+        // diverging tail (wrapper error code -3; surfaced on LFM 2.5
+        // second-turn chat).
+        //
+        // Gating on `has_recurrent_state` (which combines the upstream
+        // `is_recurrent` and `is_hybrid` predicates) instead of
+        // `is_recurrent` alone is important: LFM2 is classified hybrid,
+        // not fully recurrent, so a narrower check missed it the first
+        // time round. Skip prefix-reuse entirely on these models and
+        // fall back to the pre-INF-99 full-clear path. The cost is
+        // per-turn re-prefill of the full conversation — correct, just
+        // not the prefix-reuse optimisation.
+        if sys::llama_model_has_recurrent_state(model) {
             sys::llama_kv_cache_clear(context);
             state.cached_tokens = new_tokens.to_vec();
             state.last_prefix_hit = Some(0);
