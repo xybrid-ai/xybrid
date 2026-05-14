@@ -1214,7 +1214,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::os::raw::c_int;
+    use std::os::raw::{c_int, c_void};
 
     // =========================================================================
     // Regression: Stop Sequence Count Mismatch
@@ -1261,6 +1261,51 @@ mod tests {
         assert_eq!(stop_tokens.len(), 3); // 2 + 1 tokens total
         assert_eq!(stop_lens[0], 2); // first sequence: 2 tokens
         assert_eq!(stop_lens[1], 1); // third sequence: 1 token
+    }
+
+    #[cfg(feature = "llm-llamacpp")]
+    #[test]
+    fn streaming_trampoline_preserves_cloud_fallback_abort_marker() {
+        use super::{streaming_trampoline, StreamingContext};
+        use crate::abort::{cloud_fallback_reason_from_error, AbortReason, CloudFallbackAbort};
+        use std::ffi::CString;
+        use std::time::{Duration, Instant};
+
+        type Callback = fn(i32, &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+        fn abort_callback(
+            _token_id: i32,
+            _text: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Err(Box::new(CloudFallbackAbort::new(AbortReason::StressMemory)))
+        }
+
+        let mut callback: Callback = abort_callback;
+        let mut ctx = StreamingContext {
+            callback: &mut callback,
+            error: None,
+        };
+        let token_text = CString::new("token").unwrap();
+
+        let started = Instant::now();
+        let stop = streaming_trampoline::<Callback>(
+            42,
+            token_text.as_ptr(),
+            &mut ctx as *mut StreamingContext<Callback> as *mut c_void,
+        );
+        let elapsed = started.elapsed();
+
+        assert_eq!(stop, 1, "callback errors must stop the C stream");
+        assert!(
+            elapsed <= Duration::from_millis(50),
+            "llama.cpp trampoline abort exceeded M-series cancellation budget: {:?}",
+            elapsed
+        );
+        let err = ctx.error.take().expect("callback error must be stored");
+        assert_eq!(
+            cloud_fallback_reason_from_error(err.as_ref()),
+            Some(AbortReason::StressMemory),
+            "llama.cpp trampoline must keep the typed CloudFallbackAbort marker for the Rust layer"
+        );
     }
 
     // =========================================================================

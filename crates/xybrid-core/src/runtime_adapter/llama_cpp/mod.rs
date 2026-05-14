@@ -251,6 +251,17 @@ impl LlamaCppBackend {
         state.last_prefix_hit = Some(prefix_len);
         Ok((tail, prefix_len))
     }
+
+    fn reset_kv_cache_after_failed_stream(&self, context: &sys::LlamaContext) {
+        sys::llama_kv_cache_clear(context);
+        self.clear_cached_prefix_state();
+    }
+
+    fn clear_cached_prefix_state(&self) {
+        if let Ok(mut state) = self.kv_state.lock() {
+            *state = KvCacheState::default();
+        }
+    }
 }
 
 /// Longest-common-prefix length between the cached tokens and the new
@@ -419,7 +430,7 @@ impl LlmBackend for LlamaCppBackend {
             // overwrite this with the same value after finalize.
             xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
             let mut tel = StreamingTelemetry::new(prompt_token_count);
-            let (output_tokens, stopped_by_callback) = sys::llama_generate_streaming(
+            let stream_result = sys::llama_generate_streaming(
                 context,
                 model,
                 &tail,
@@ -435,7 +446,14 @@ impl LlmBackend for LlamaCppBackend {
                     Ok(())
                 },
                 n_past,
-            )?;
+            );
+            let (output_tokens, stopped_by_callback) = match stream_result {
+                Ok(result) => result,
+                Err(err) => {
+                    self.reset_kv_cache_after_failed_stream(context);
+                    return Err(err);
+                }
+            };
 
             // Finalize telemetry before the post-processing work below so
             // `generation_time_ms` reflects pure generation wallclock and is
@@ -824,6 +842,38 @@ impl LlmBackend for LlamaCppBackend {
 #[cfg(all(test, feature = "llm-llamacpp"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backend_reports_true_streaming_for_sdk_cancellation_gate() {
+        let backend = LlamaCppBackend::new().unwrap();
+
+        assert!(
+            backend.supports_streaming(),
+            "llama.cpp must stay on the true streaming path so SDK abort checks can interrupt generation"
+        );
+    }
+
+    #[test]
+    fn failed_stream_resets_rust_kv_cache_state() {
+        let backend = LlamaCppBackend::new().unwrap();
+        {
+            let mut state = backend.kv_state.lock().unwrap();
+            state.cached_tokens = vec![1, 2, 3];
+            state.last_prefix_hit = Some(2);
+        }
+
+        backend.clear_cached_prefix_state();
+
+        let state = backend.kv_state.lock().unwrap();
+        assert!(
+            state.cached_tokens.is_empty(),
+            "failed streaming runs must not leave reusable prompt tokens behind"
+        );
+        assert_eq!(
+            state.last_prefix_hit, None,
+            "failed streaming runs must clear prefix-hit metadata"
+        );
+    }
 
     #[test]
     fn lcp_empty_inputs_return_zero() {
