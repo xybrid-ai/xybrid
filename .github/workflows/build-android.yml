@@ -90,8 +90,12 @@ jobs:
             cargo-ndk-${{ runner.os }}-
 
       - name: Install cargo-ndk
-        if: steps.cache-cargo-ndk.outputs.cache-hit != 'true'
-        run: cargo install cargo-ndk
+        # actions/cache sets cache-hit only on EXACT key match; with
+        # restore-keys, a fallback can populate ~/.cargo/bin/cargo-ndk while
+        # leaving cache-hit empty, which made the previous `if:`-gated
+        # `cargo install` re-run and fail with "binary already exists".
+        # `which || install` is idempotent in both states.
+        run: which cargo-ndk || cargo install cargo-ndk
 
       - name: Build Android .so files
         run: cargo xtask build-android --release
