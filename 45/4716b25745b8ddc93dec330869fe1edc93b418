@@ -1,0 +1,19 @@
+.github/workflows/build-android.yml
+  s_a5ce674d1c497a::t_66180c5074c7e1 27,29-41,49,62-64,69,113-114,116,118-125,128,130,133-141,145,147,150-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "454716b25745b8ddc93dec330869fe1edc93b418",
+  "prompts": {},
+  "sessions": {
+    "s_a5ce674d1c497a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1940bfa7-1fa7-4e7d-9455-b217c3b217b9",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
