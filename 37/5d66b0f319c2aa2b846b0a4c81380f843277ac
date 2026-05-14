@@ -1,0 +1,19 @@
+.github/workflows/test-self-hosted-macos.yml
+  s_1821612281609b::t_84230a697cf05e 1-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "375d66b0f319c2aa2b846b0a4c81380f843277ac",
+  "prompts": {},
+  "sessions": {
+    "s_1821612281609b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70f4cf78-a4d2-4ad6-9dd1-e0af2084ae58",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
