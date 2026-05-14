@@ -1,0 +1,36 @@
+crates/xybrid-sdk/src/pipeline/result.rs
+  s_56b604a5c7b635::t_89d6b3f58bb922 224-227,261-264
+  s_56b604a5c7b635::t_6f1027d3260e53 333-340,344-355
+  s_56b604a5c7b635::t_1b90c831c3baf3 539-574
+  s_56b604a5c7b635::t_6c678ec723cf00 300
+  s_56b604a5c7b635::t_2afc48382d2214 388
+  s_56b604a5c7b635::t_ec0a271c0b03c1 163-168
+  s_56b604a5c7b635::t_5e785de66a79a3 28,30
+docs/sdk/api-surface.yaml
+  s_56b604a5c7b635::t_4805a789a030ad 321-371
+docs/sdk/API_REFERENCE.md
+  s_56b604a5c7b635::t_29f050a32b9925 737-818,833-836
+crates/xybrid-sdk/src/lib.rs
+  s_56b604a5c7b635::t_17c9f42f744dbf 199
+crates/xybrid-sdk/src/result.rs
+  s_56b604a5c7b635::t_ff95ee31be362d 7,10-80
+  s_56b604a5c7b635::t_29ba935bff1554 198-208
+  s_56b604a5c7b635::t_f145f569944659 379-450
+  s_56b604a5c7b635::t_0f2fb7af52cd57 139-140,151,158,169,175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "da03b3deba2de9d3eb2ec33aba441faaf58e27fe",
+  "prompts": {},
+  "sessions": {
+    "s_56b604a5c7b635": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30ad98a9-9013-4806-8f70-a57cdc5df72d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
