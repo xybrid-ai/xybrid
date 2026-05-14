@@ -1,0 +1,74 @@
+name: Test Self-Hosted macOS
+
+# Smoke test for a self-hosted Apple Silicon runner. Mirrors the
+# `m1-xen` setup we wired up for the zig project: preflight the
+# toolchain so misconfiguration fails fast with a clear message,
+# then exercise the aarch64-macos build + tests that GitHub-hosted
+# runners can't run with Metal-backed features.
+on:
+  push:
+    branches: [theGlenn/self-hosted-ci-test]
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/test-self-hosted-macos.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Self-hosted Apple Silicon — exercises the aarch64-apple-darwin
+  # build + Metal-backed features that GitHub-hosted runners can't run.
+  build-and-test-macos:
+    name: Build & test (aarch64-apple-darwin, self-hosted)
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      # Preflight: catch runner-host misconfiguration up front rather than
+      # bleeding into a 20-line linker wall or a 46-line `xcrun metal`
+      # failure deep in the build graph.
+      - name: Verify macOS toolchain on runner
+        run: |
+          set -e
+          echo "xcode-select -p: $(xcode-select -p 2>&1 || true)"
+          SDK_PATH="$(xcrun --show-sdk-path 2>&1 || true)"
+          echo "xcrun --show-sdk-path: ${SDK_PATH}"
+          if [ ! -f "${SDK_PATH}/usr/lib/libSystem.tbd" ]; then
+            echo "::error::macOS SDK not selectable on runner. Run \`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer\` (or \`xcode-select --install\` if CLT is missing) on the self-hosted host."
+            exit 1
+          fi
+          if ! xcrun --find metal >/dev/null 2>&1; then
+            echo "::error::Metal toolchain missing. Run \`xcodebuild -downloadComponent MetalToolchain\` on the self-hosted host."
+            exit 1
+          fi
+          echo "metal: $(xcrun --find metal)"
+          xcrun metal --version | head -1
+          echo "arch: $(uname -m)"
+          echo "rustup: $(rustup --version 2>&1 || echo 'not installed')"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: self-hosted-macos-arm64
+
+      - name: Build (aarch64-apple-darwin, platform-macos)
+        run: cargo build -p xybrid-sdk --target aarch64-apple-darwin --features platform-macos
+
+      - name: Test (aarch64-apple-darwin)
+        run: cargo test --workspace --target aarch64-apple-darwin --features ort-download
