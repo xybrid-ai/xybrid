@@ -56,6 +56,7 @@ mod completion;
 mod config;
 mod error;
 
+pub(crate) use client::parse_gateway_usage;
 pub use client::Cloud;
 pub use completion::{CompletionRequest, CompletionResponse, Message, Role, Usage};
 pub use config::{CloudBackend, CloudConfig};

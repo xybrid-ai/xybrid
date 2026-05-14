@@ -330,7 +330,7 @@ impl Default for Cloud {
 /// `prompt_tokens - cache_read - cache_creation`. DeepSeek has no
 /// cache-creation concept; Anthropic's creation field is plumbed via
 /// the direct-path adapter in `cloud_llm::response`, not this function.
-fn parse_gateway_usage(u: &serde_json::Value) -> super::completion::Usage {
+pub(crate) fn parse_gateway_usage(u: &serde_json::Value) -> super::completion::Usage {
     // Presence on either field surfaces as `Some(0)` for cold-cache
     // responses (where only the miss key is present). Preserves the
     // "provider didn't report" (None) vs "cold cache" (Some(0))

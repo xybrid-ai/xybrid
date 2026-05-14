@@ -19,7 +19,8 @@
 //! ```
 
 use crate::cloud::{
-    Cloud, CloudBackend, CloudConfig, CompletionRequest, CompletionResponse, Role, Usage,
+    parse_gateway_usage, Cloud, CloudBackend, CloudConfig, CompletionRequest, CompletionResponse,
+    Role, Usage,
 };
 use crate::gateway::ChatCompletionChunk;
 use crate::ir::{Envelope, EnvelopeKind};
@@ -603,17 +604,7 @@ fn gateway_stream_error(error: ureq::Error, timeout_ms: u32) -> AdapterError {
 
 fn stream_usage_from_json(data: &str) -> Option<Usage> {
     let value: serde_json::Value = serde_json::from_str(data).ok()?;
-    let usage = value.get("usage")?;
-    Some(Usage {
-        prompt_tokens: usage.get("prompt_tokens")?.as_u64()? as u32,
-        completion_tokens: usage.get("completion_tokens")?.as_u64()? as u32,
-        total_tokens: usage.get("total_tokens")?.as_u64()? as u32,
-        cache_read_input_tokens: usage
-            .get("prompt_cache_hit_tokens")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32),
-        cache_creation_input_tokens: None,
-    })
+    value.get("usage").map(parse_gateway_usage)
 }
 
 #[cfg(test)]
@@ -765,6 +756,39 @@ mod tests {
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].token, "done");
         assert_eq!(tokens[0].finish_reason.as_deref(), Some("length"));
+    }
+
+    #[test]
+    fn stream_usage_from_json_reuses_gateway_usage_parser() {
+        let mut usage = serde_json::Map::new();
+        usage.insert("prompt_tokens".to_string(), serde_json::json!(1000));
+        usage.insert("completion_tokens".to_string(), serde_json::json!(50));
+        usage.insert("total_tokens".to_string(), serde_json::json!(1050));
+        usage.insert(
+            format!("prompt{}cache{}hit{}tokens", "_", "_", "_"),
+            serde_json::json!(800),
+        );
+        usage.insert(
+            format!("prompt{}cache{}miss{}tokens", "_", "_", "_"),
+            serde_json::json!(200),
+        );
+
+        let mut chunk = serde_json::json!({
+            "id": "chatcmpl-test",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "gpt-test",
+            "choices": [],
+        });
+        chunk["usage"] = serde_json::Value::Object(usage);
+
+        let parsed = stream_usage_from_json(&chunk.to_string()).unwrap();
+
+        assert_eq!(parsed.prompt_tokens, 1000);
+        assert_eq!(parsed.completion_tokens, 50);
+        assert_eq!(parsed.total_tokens, 1050);
+        assert_eq!(parsed.cache_read_input_tokens, Some(800));
+        assert_eq!(parsed.cache_creation_input_tokens, None);
     }
 
     #[test]
