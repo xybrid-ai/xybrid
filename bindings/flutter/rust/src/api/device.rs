@@ -24,11 +24,34 @@
 //! signal coverage on a given platform without round-tripping through
 //! a telemetry event.
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use flutter_rust_bridge::frb;
+use xybrid_sdk::{MemoryPressure, ResourceSnapshot};
 
 use super::FLUTTER_BINDING;
+
+const DEBUG_MEMORY_PRESSURE_READS: u8 = 2;
+
+static DEBUG_MEMORY_PRESSURE_REMAINING: AtomicU8 = AtomicU8::new(0);
+
+pub(crate) fn current_snapshot_with_debug_memory_pressure(max_age: Duration) -> ResourceSnapshot {
+    let mut snapshot = xybrid_sdk::ResourceMonitor::global().current_snapshot(max_age);
+    let previous = DEBUG_MEMORY_PRESSURE_REMAINING
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
+            if remaining > 0 {
+                Some(remaining - 1)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    if previous > 0 {
+        snapshot.memory_pressure = MemoryPressure::Critical;
+    }
+    snapshot
+}
 
 /// Thermal pressure state forwarded by the host.
 ///
@@ -188,9 +211,25 @@ impl XybridDevice {
     #[frb(sync)]
     pub fn current_snapshot() -> FfiResourceSnapshot {
         xybrid_sdk::set_binding(FLUTTER_BINDING);
-        xybrid_sdk::ResourceMonitor::global()
-            .current_snapshot(Duration::ZERO)
-            .into()
+        current_snapshot_with_debug_memory_pressure(Duration::ZERO).into()
+    }
+
+    /// Inject a short-lived critical memory-pressure sample for dogfood tests.
+    ///
+    /// The next fallback stream resource checks observe
+    /// `MemoryPressure::Critical`, then the override expires. This keeps the
+    /// demo deterministic without leaving the process permanently poisoned.
+    #[frb(sync)]
+    pub fn apply_debug_memory_pressure() {
+        xybrid_sdk::set_binding(FLUTTER_BINDING);
+        DEBUG_MEMORY_PRESSURE_REMAINING.store(DEBUG_MEMORY_PRESSURE_READS, Ordering::Release);
+    }
+
+    /// Clear any pending debug memory-pressure override.
+    #[frb(sync)]
+    pub fn clear_debug_memory_pressure() {
+        xybrid_sdk::set_binding(FLUTTER_BINDING);
+        DEBUG_MEMORY_PRESSURE_REMAINING.store(0, Ordering::Release);
     }
 }
 

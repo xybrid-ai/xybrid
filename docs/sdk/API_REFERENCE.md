@@ -302,6 +302,11 @@ class XybridModel {
     required Envelope envelope,
     GenerationConfig? config,
   });
+  Stream<StreamToken> runStreamingWithFallback({
+    required Envelope envelope,
+    required RunOptions options,
+    GenerationConfig? config,
+  });
   Stream<StreamToken> runStreamingWithContext({
     required Envelope envelope,
     required ConversationContext context,
@@ -382,6 +387,7 @@ impl XybridModel {
 | `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
 | `runStreaming()` | ✅ | — | — | ✅ |
 | `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | planned | planned | planned |
+| `runStreamingWithFallback()` | ✅ | planned | planned | planned |
 | `runStreamingWithContext()` | ✅ | — | — | ✅ |
 | `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |
 | `benchmark()` | — | — | — | — |
@@ -871,6 +877,13 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 `fallback_to_cloud` is carried in policy and telemetry contracts so binding
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
+
+Flutter exposes the customer opt-in surface as `RunOptions.cloudFallback(...)`
+plus `AbortPolicy.cloudFallback(...)`; plain `RunOptions()` stays neutral and
+does not opt into cloud retry. The Flutter FFI adapter maps that policy to the
+Rust SDK abort policy, including the selected memory/thermal stop signals,
+`fallbackToCloud`, and grace-token budget, and uses
+`runStreamingWithFallback(...)` for the continuous token stream.
 
 Routing feedback is recorded inside the core orchestrator using low-cardinality
 resource buckets. The SDK keeps `correlation_id` as an opaque string for

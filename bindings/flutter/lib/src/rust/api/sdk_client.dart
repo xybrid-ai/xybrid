@@ -10,8 +10,23 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `initialize_telemetry_once`, `parse_resource_telemetry_mode`
+
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridSdkClient>>
 abstract class XybridSdkClient implements RustOpaqueInterface {
+  static void configurePlatformTelemetry(
+          {required String apiKey,
+          String? ingestUrl,
+          String? resourceTelemetry}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientConfigurePlatformTelemetry(
+              apiKey: apiKey,
+              ingestUrl: ingestUrl,
+              resourceTelemetry: resourceTelemetry);
+
+  static void flushPlatformTelemetry() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientFlushPlatformTelemetry();
+
   static void initSdkCacheDir({required String cacheDir}) =>
       XybridRustLib.instance.api
           .crateApiSdkClientXybridSdkClientInitSdkCacheDir(cacheDir: cacheDir);
@@ -56,4 +71,8 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
 
   static void setApiKey({required String apiKey}) => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientSetApiKey(apiKey: apiKey);
+
+  static void setGatewayUrl({required String gatewayUrl}) => XybridRustLib
+      .instance.api
+      .crateApiSdkClientXybridSdkClientSetGatewayUrl(gatewayUrl: gatewayUrl);
 }

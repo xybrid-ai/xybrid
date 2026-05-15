@@ -150,6 +150,13 @@ classes:
           - { name: options, type: RunOptions }
         return: "Stream<StreamToken>"
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      runStreamingWithFallback:
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: options, type: RunOptions }
+          - { name: config, type: "GenerationConfig?", default: "null" }
+        return: "Stream<StreamToken>"
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       runStreamingWithContext:
         params:
           - { name: envelope, type: Envelope }
@@ -608,6 +615,25 @@ classes:
   RunOptions:
     type: data
     section: "8. Supporting Types"
+    properties:
+      abortPolicy:
+        type: AbortPolicy
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      cloudProvider:
+        type: "String?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      cloudModel:
+        type: "String?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      cloudGatewayUrl:
+        type: "String?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      correlationId:
+        type: "String?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      maxGraceTokens:
+        type: "int?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
     methods:
       with_generation_config:
         params: [{ name: config, type: GenerationConfig }]
@@ -629,12 +655,21 @@ classes:
       stop_on:
         type: "List<AbortSignal>"
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      stopOn:
+        type: "Set<AbortSignal>"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       fallback_to_cloud:
         type: bool
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      fallbackToCloud:
+        type: bool
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       max_grace_tokens:
         type: int
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      maxGraceTokens:
+        type: "int?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
 
   CancellationToken:
     type: class

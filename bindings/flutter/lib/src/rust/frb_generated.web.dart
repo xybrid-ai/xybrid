@@ -186,6 +186,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiResult dco_decode_box_autoadd_ffi_result(dynamic raw);
 
   @protected
+  FfiRunOptions dco_decode_box_autoadd_ffi_run_options(dynamic raw);
+
+  @protected
   FfiStreamToken dco_decode_box_autoadd_ffi_stream_token(dynamic raw);
 
   @protected
@@ -220,6 +223,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiResult dco_decode_ffi_result(dynamic raw);
+
+  @protected
+  FfiRunOptions dco_decode_ffi_run_options(dynamic raw);
 
   @protected
   FfiStreamEvent dco_decode_ffi_stream_event(dynamic raw);
@@ -430,6 +436,10 @@ abstract class XybridRustLibApiImplPlatform
   FfiResult sse_decode_box_autoadd_ffi_result(SseDeserializer deserializer);
 
   @protected
+  FfiRunOptions sse_decode_box_autoadd_ffi_run_options(
+      SseDeserializer deserializer);
+
+  @protected
   FfiStreamToken sse_decode_box_autoadd_ffi_stream_token(
       SseDeserializer deserializer);
 
@@ -468,6 +478,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiResult sse_decode_ffi_result(SseDeserializer deserializer);
+
+  @protected
+  FfiRunOptions sse_decode_ffi_run_options(SseDeserializer deserializer);
 
   @protected
   FfiStreamEvent sse_decode_ffi_stream_event(SseDeserializer deserializer);
@@ -682,6 +695,10 @@ abstract class XybridRustLibApiImplPlatform
       FfiResult self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_run_options(
+      FfiRunOptions self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_ffi_stream_token(
       FfiStreamToken self, SseSerializer serializer);
 
@@ -722,6 +739,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_ffi_result(FfiResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_run_options(FfiRunOptions self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_stream_event(

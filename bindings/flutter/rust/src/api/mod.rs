@@ -21,6 +21,8 @@ pub mod sdk_client;
 pub use context::{FfiConversationContext, FfiMessageRole};
 pub use device::{FfiThermalState, XybridDevice};
 pub use envelope::FfiEnvelope;
-pub use model::{FfiGenerationConfig, FfiModel, FfiModelLoader, FfiStreamEvent, FfiStreamToken};
+pub use model::{
+    FfiGenerationConfig, FfiModel, FfiModelLoader, FfiRunOptions, FfiStreamEvent, FfiStreamToken,
+};
 pub use pipeline::FfiPipeline;
 pub use result::FfiResult;

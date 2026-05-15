@@ -72,13 +72,22 @@
 library;
 
 export 'src/context.dart' show ConversationContext, MessageRole;
-export 'src/device_snapshot.dart' show DeviceSnapshot, MemoryPressure, ThermalState;
+export 'src/device_snapshot.dart'
+    show DeviceSnapshot, MemoryPressure, ThermalState;
 export 'src/envelope.dart' show XybridEnvelope;
 export 'src/generation_config.dart' show GenerationConfig;
 export 'src/llm.dart' show StreamToken;
 export 'src/model_loader.dart'
-    show XybridModelLoader, XybridModel, XybridException, LoadEvent, LoadProgress, LoadComplete, LoadError;
+    show
+        XybridModelLoader,
+        XybridModel,
+        XybridException,
+        LoadEvent,
+        LoadProgress,
+        LoadComplete,
+        LoadError;
 export 'src/pipeline.dart' show XybridPipeline;
 export 'src/result.dart' show XybridResult;
+export 'src/run_options.dart' show AbortPolicy, AbortSignal, RunOptions;
 export 'src/utils/utils.dart';
 export 'src/xybrid.dart' show Xybrid;

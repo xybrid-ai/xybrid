@@ -1,11 +1,17 @@
 //! Model loading FFI wrappers for Flutter.
 use flutter_rust_bridge::frb;
 use std::sync::Arc;
-use xybrid_sdk::{GenerationConfig, ModelLoader, XybridModel};
+use std::time::Duration;
+use xybrid_core::device::{ResourceSnapshot, ResourceSnapshotProvider};
+use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
+use xybrid_sdk::{
+    AbortPolicy, AbortSignal, GenerationConfig, ModelLoader, RunOptions, XybridModel,
+};
 
 use crate::frb_generated::StreamSink;
 
 use super::context::FfiConversationContext;
+use super::device;
 use super::result::FfiResult;
 
 /// Generation parameters for LLM inference.
@@ -82,6 +88,102 @@ impl FfiGenerationConfig {
             config.stop_sequences = v.clone();
         }
         config
+    }
+}
+
+/// Cloud fallback controls exposed to Flutter callers.
+///
+/// This mirrors the customer-facing Dart `RunOptions` wrapper and maps into
+/// `xybrid_sdk::RunOptions` at the FFI boundary.
+pub struct FfiRunOptions {
+    pub cloud_provider: Option<String>,
+    pub cloud_model: Option<String>,
+    pub cloud_gateway_url: Option<String>,
+    pub correlation_id: Option<String>,
+    pub abort_on_memory_pressure_critical: bool,
+    pub abort_on_thermal_critical: bool,
+    pub fallback_to_cloud: bool,
+    pub max_grace_tokens: Option<u32>,
+}
+
+impl FfiRunOptions {
+    fn to_sdk(&self, generation_config: Option<GenerationConfig>) -> RunOptions {
+        let mut policy = AbortPolicy::default()
+            .with_cloud_fallback(self.fallback_to_cloud)
+            .with_max_grace_tokens(self.max_grace_tokens.unwrap_or(0));
+        if self.abort_on_memory_pressure_critical {
+            policy = policy.stop_on(AbortSignal::MemoryPressureCritical);
+        }
+        if self.abort_on_thermal_critical {
+            policy = policy.stop_on(AbortSignal::ThermalCritical);
+        }
+
+        let mut options = RunOptions::new()
+            .with_abort_policy(policy)
+            .with_resource_provider(Arc::new(FlutterFallbackResourceProvider));
+
+        if let Some(config) = generation_config {
+            options = options.with_generation_config(config);
+        }
+
+        if let Some(correlation_id) = non_empty(self.correlation_id.as_deref()) {
+            options = options.with_correlation_id(correlation_id.to_string());
+        }
+
+        options
+    }
+}
+
+#[derive(Debug)]
+struct FlutterFallbackResourceProvider;
+
+impl ResourceSnapshotProvider for FlutterFallbackResourceProvider {
+    fn current_snapshot(&self, max_age: Duration) -> ResourceSnapshot {
+        device::current_snapshot_with_debug_memory_pressure(max_age)
+    }
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.and_then(|v| {
+        let trimmed = v.trim();
+        (!trimmed.is_empty()).then_some(trimmed)
+    })
+}
+
+fn apply_cloud_fallback_metadata(
+    envelope: &mut xybrid_sdk::ir::Envelope,
+    options: &FfiRunOptions,
+    config: Option<&FfiGenerationConfig>,
+) {
+    let provider = non_empty(options.cloud_provider.as_deref()).unwrap_or("openai");
+    let model = non_empty(options.cloud_model.as_deref()).unwrap_or("gpt-4o-mini");
+    envelope
+        .metadata
+        .insert("provider".to_string(), provider.to_string());
+    envelope
+        .metadata
+        .insert("model".to_string(), model.to_string());
+    envelope
+        .metadata
+        .insert("backend".to_string(), "gateway".to_string());
+
+    if let Some(gateway_url) = non_empty(options.cloud_gateway_url.as_deref()) {
+        envelope
+            .metadata
+            .insert("gateway_url".to_string(), gateway_url.to_string());
+    }
+
+    if let Some(config) = config {
+        if let Some(max_tokens) = config.max_tokens {
+            envelope
+                .metadata
+                .insert("max_tokens".to_string(), max_tokens.to_string());
+        }
+        if let Some(temperature) = config.temperature {
+            envelope
+                .metadata
+                .insert("temperature".to_string(), temperature.to_string());
+        }
     }
 }
 
@@ -396,5 +498,95 @@ impl FfiModel {
                 }
             }
         });
+    }
+
+    /// Run streaming inference with local abort and Xybrid cloud fallback.
+    ///
+    /// The Rust SDK owns the fallback semantics: abort on configured resource
+    /// pressure, re-check cloud policy, retry the original prompt through the
+    /// authenticated gateway, and emit local/cloud telemetry under one
+    /// correlation id.
+    pub fn run_stream_with_fallback(
+        &self,
+        envelope: super::envelope::FfiEnvelope,
+        options: FfiRunOptions,
+        config: Option<FfiGenerationConfig>,
+        sink: StreamSink<FfiStreamEvent>,
+    ) {
+        let model = self.0.clone();
+        let mut env = envelope.into_envelope();
+        apply_cloud_fallback_metadata(&mut env, &options, config.as_ref());
+        let sdk_config = config.map(|c| c.to_sdk());
+        let run_options = options.to_sdk(sdk_config);
+        let cloud_adapter = match non_empty(options.cloud_gateway_url.as_deref()) {
+            Some(gateway_url) => CloudRuntimeAdapter::with_gateway(gateway_url),
+            None => CloudRuntimeAdapter::new(),
+        };
+
+        std::thread::spawn(move || {
+            let mut token_index = 0u32;
+            let result = {
+                let mut on_token = |token: xybrid_core::runtime_adapter::types::PartialToken| {
+                    let ffi_token = FfiStreamToken {
+                        token: token.token.clone(),
+                        token_id: token.token_id,
+                        index: token_index,
+                        cumulative_text: token.cumulative_text.clone(),
+                        finish_reason: token.finish_reason.clone(),
+                    };
+                    token_index = token_index.saturating_add(1);
+                    let _ = sink.add(FfiStreamEvent::Token(ffi_token));
+                    Ok(())
+                };
+                let mut on_seam = |_seam: xybrid_sdk::model::SeamInfo| {};
+
+                model.run_streaming_with_fallback(
+                    &env,
+                    &run_options,
+                    &cloud_adapter,
+                    &mut on_token,
+                    &mut on_seam,
+                )
+            };
+
+            match result {
+                Ok(inference_result) => {
+                    let ffi_result = FfiResult::from_inference_result(&inference_result);
+                    let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
+                }
+                Err(e) => {
+                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                }
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ffi_run_options_maps_abort_policy_to_sdk() {
+        let ffi = FfiRunOptions {
+            cloud_provider: Some("openai".to_string()),
+            cloud_model: Some("gpt-4o-mini".to_string()),
+            cloud_gateway_url: Some("http://127.0.0.1:3001/v1".to_string()),
+            correlation_id: Some("corr-flutter".to_string()),
+            abort_on_memory_pressure_critical: true,
+            abort_on_thermal_critical: false,
+            fallback_to_cloud: false,
+            max_grace_tokens: Some(2),
+        };
+
+        let sdk = ffi.to_sdk(None);
+
+        assert!(sdk
+            .abort_policy
+            .observes(AbortSignal::MemoryPressureCritical));
+        assert!(!sdk.abort_policy.observes(AbortSignal::ThermalCritical));
+        assert!(!sdk.abort_policy.fallback_to_cloud);
+        assert_eq!(sdk.abort_policy.max_grace_tokens, 2);
+        assert_eq!(sdk.correlation_id.as_deref(), Some("corr-flutter"));
     }
 }
