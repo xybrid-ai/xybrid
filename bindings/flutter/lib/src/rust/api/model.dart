@@ -15,7 +15,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `non_empty`, `to_sdk`, `to_sdk`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `to_sdk`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `current_snapshot`, `fmt`, `from`
 
