@@ -906,6 +906,13 @@ Rust SDK abort policy, including the selected memory/thermal stop signals,
 `fallbackToCloud`, and grace-token budget, and uses
 `runStreamingWithFallback(...)` for the continuous token stream.
 
+`cloudGatewayUrl` is an optional override for the Xybrid cloud gateway base URL.
+Customer builds accept HTTPS Xybrid gateway hosts with a `/v1` base path. Debug
+builds also accept localhost, private IP, and link-local gateways so apps can
+exercise fallback against the local platform stack. URLs with embedded
+credentials, query strings, fragments, unsupported schemes, or missing `/v1`
+are rejected before the cloud retry starts.
+
 Routing feedback is recorded inside the core orchestrator using low-cardinality
 resource buckets. The SDK keeps `correlation_id` as an opaque string for
 cross-binding compatibility; telemetry may include flat `routing_source`,

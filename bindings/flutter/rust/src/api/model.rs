@@ -2,6 +2,7 @@
 use flutter_rust_bridge::frb;
 use std::sync::Arc;
 use std::time::Duration;
+use url::Url;
 use xybrid_core::device::{ResourceSnapshot, ResourceSnapshotProvider};
 use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
 use xybrid_sdk::{
@@ -154,7 +155,7 @@ fn apply_cloud_fallback_metadata(
     envelope: &mut xybrid_sdk::ir::Envelope,
     options: &FfiRunOptions,
     config: Option<&FfiGenerationConfig>,
-) {
+) -> Result<Option<String>, String> {
     let provider = non_empty(options.cloud_provider.as_deref()).unwrap_or("openai");
     let model = non_empty(options.cloud_model.as_deref()).unwrap_or("gpt-4o-mini");
     envelope
@@ -167,7 +168,8 @@ fn apply_cloud_fallback_metadata(
         .metadata
         .insert("backend".to_string(), "gateway".to_string());
 
-    if let Some(gateway_url) = non_empty(options.cloud_gateway_url.as_deref()) {
+    let gateway_url = options.validated_cloud_gateway_url()?;
+    if let Some(gateway_url) = gateway_url.as_deref() {
         envelope
             .metadata
             .insert("gateway_url".to_string(), gateway_url.to_string());
@@ -185,6 +187,101 @@ fn apply_cloud_fallback_metadata(
                 .insert("temperature".to_string(), temperature.to_string());
         }
     }
+
+    Ok(gateway_url)
+}
+
+impl FfiRunOptions {
+    fn validated_cloud_gateway_url(&self) -> Result<Option<String>, String> {
+        non_empty(self.cloud_gateway_url.as_deref())
+            .map(validate_cloud_gateway_url)
+            .transpose()
+    }
+}
+
+fn validate_cloud_gateway_url(gateway_url: &str) -> Result<String, String> {
+    let parsed = Url::parse(gateway_url)
+        .map_err(|e| format!("Invalid cloud gateway URL '{}': {}", gateway_url, e))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        scheme => {
+            return Err(format!(
+                "Invalid cloud gateway URL '{}': unsupported scheme '{}'",
+                gateway_url, scheme
+            ));
+        }
+    }
+
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("Invalid cloud gateway URL: credentials are not allowed".to_string());
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(
+            "Invalid cloud gateway URL: query strings and fragments are not allowed".to_string(),
+        );
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Invalid cloud gateway URL: host is required".to_string())?;
+    if !is_v1_gateway_base(&parsed) {
+        return Err("Invalid cloud gateway URL: base URL must include /v1".to_string());
+    }
+
+    if parsed.scheme() == "https" && is_xybrid_gateway_host(host) {
+        return Ok(normalize_gateway_url(parsed));
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        if is_debug_gateway_host(host) {
+            return Ok(normalize_gateway_url(parsed));
+        }
+    }
+
+    Err(
+        "Invalid cloud gateway URL: release builds only allow HTTPS Xybrid gateway hosts"
+            .to_string(),
+    )
+}
+
+fn normalize_gateway_url(parsed: Url) -> String {
+    parsed.as_str().trim_end_matches('/').to_string()
+}
+
+fn is_v1_gateway_base(parsed: &Url) -> bool {
+    let path = parsed.path().trim_end_matches('/');
+    path == "/v1" || path.starts_with("/v1/")
+}
+
+fn is_xybrid_gateway_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == "xybrid.dev" || host.ends_with(".xybrid.dev")
+}
+
+#[cfg(debug_assertions)]
+fn is_debug_gateway_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") {
+        return true;
+    }
+
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
+        Ok(std::net::IpAddr::V6(ip)) => {
+            ip.is_loopback() || is_ipv6_link_local(ip) || is_ipv6_unique_local(ip)
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(debug_assertions)]
+fn is_ipv6_link_local(ip: std::net::Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xffc0) == 0xfe80
+}
+
+#[cfg(debug_assertions)]
+fn is_ipv6_unique_local(ip: std::net::Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xfe00) == 0xfc00
 }
 
 /// Event emitted during model loading with progress.
@@ -515,10 +612,16 @@ impl FfiModel {
     ) {
         let model = self.0.clone();
         let mut env = envelope.into_envelope();
-        apply_cloud_fallback_metadata(&mut env, &options, config.as_ref());
+        let gateway_url = match apply_cloud_fallback_metadata(&mut env, &options, config.as_ref()) {
+            Ok(gateway_url) => gateway_url,
+            Err(e) => {
+                let _ = sink.add(FfiStreamEvent::Error(e));
+                return;
+            }
+        };
         let sdk_config = config.map(|c| c.to_sdk());
         let run_options = options.to_sdk(sdk_config);
-        let cloud_adapter = match non_empty(options.cloud_gateway_url.as_deref()) {
+        let cloud_adapter = match gateway_url.as_deref() {
             Some(gateway_url) => CloudRuntimeAdapter::with_gateway(gateway_url),
             None => CloudRuntimeAdapter::new(),
         };
@@ -588,5 +691,36 @@ mod tests {
         assert!(!sdk.abort_policy.fallback_to_cloud);
         assert_eq!(sdk.abort_policy.max_grace_tokens, 2);
         assert_eq!(sdk.correlation_id.as_deref(), Some("corr-flutter"));
+    }
+
+    #[test]
+    fn cloud_gateway_url_accepts_xybrid_https_v1_base() {
+        let url = validate_cloud_gateway_url("https://api.xybrid.dev/v1/").unwrap();
+        assert_eq!(url, "https://api.xybrid.dev/v1");
+    }
+
+    #[test]
+    fn cloud_gateway_url_rejects_public_http_hosts() {
+        let err = validate_cloud_gateway_url("http://example.com/v1").unwrap_err();
+        assert!(err.contains("HTTPS Xybrid gateway hosts"));
+    }
+
+    #[test]
+    fn cloud_gateway_url_rejects_embedded_credentials() {
+        let err = validate_cloud_gateway_url("https://token@api.xybrid.dev/v1").unwrap_err();
+        assert!(err.contains("credentials"));
+    }
+
+    #[test]
+    fn cloud_gateway_url_rejects_missing_v1_base() {
+        let err = validate_cloud_gateway_url("https://api.xybrid.dev/").unwrap_err();
+        assert!(err.contains("/v1"));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn cloud_gateway_url_accepts_debug_localhost_gateway() {
+        let url = validate_cloud_gateway_url("http://127.0.0.1:3001/v1").unwrap();
+        assert_eq!(url, "http://127.0.0.1:3001/v1");
     }
 }

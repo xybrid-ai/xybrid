@@ -643,6 +643,7 @@ classes:
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       cloudGatewayUrl:
         type: "String?"
+        notes: "Optional Xybrid cloud gateway base URL. Customer builds accept HTTPS Xybrid hosts with a /v1 base path; debug builds also accept local/private gateways for local platform stacks."
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       correlationId:
         type: "String?"
