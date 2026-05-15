@@ -19,9 +19,17 @@ classes:
     methods:
       init:
         async: true
+        params:
+          - { name: apiKey, type: "String?" }
+          - { name: gatewayUrl, type: "String?" }
+          - { name: ingestUrl, type: "String?" }
+          - { name: resourceTelemetry, type: "String?" }
         status: { dart: implemented, kotlin: implemented, swift: planned, csharp: implemented }
       setApiKey:
         params: [{ name: apiKey, type: String }]
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      setGatewayUrl:
+        params: [{ name: gatewayUrl, type: String }]
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       model:
         params:
@@ -212,6 +220,14 @@ classes:
           - { name: envelope, type: Envelope }
           - { name: options, type: RunOptions }
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      runPipelineStreamingWithOptions:
+        params:
+          - { name: yaml, type: String }
+          - { name: envelope, type: Envelope }
+          - { name: options, type: RunOptions }
+          - { name: on_token, type: StreamingCallback }
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Single-stage LLM streaming fast path that preserves caller RunOptions for routing metrics and fallback to non-streaming pipeline execution."
     properties:
       name:
         type: "String?"
@@ -670,6 +686,21 @@ classes:
       maxGraceTokens:
         type: "int?"
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+
+  AbortSignal:
+    type: enum
+    section: "8. Supporting Types"
+    variants:
+      UserCancelled:
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      MemoryPressureWarn:
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      MemoryPressureCritical:
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      ThermalHot:
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      ThermalCritical:
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
 
   CancellationToken:
     type: class

@@ -162,8 +162,8 @@ pub use benchmark::{compare_benchmarks, BenchmarkResult, ExecutionProviderInfo};
 pub use cache::{CacheManager, CacheStatus, SdkCacheProvider};
 pub use device::{device_id, Device};
 pub use llm::{
-    default_gateway_url, ChatMessage, CompletionRequest, CompletionResponse, LlmBackend,
-    LlmClientConfig, MessageRole, TokenUsage,
+    default_gateway_url, set_gateway_url, ChatMessage, CompletionRequest, CompletionResponse,
+    LlmBackend, LlmClientConfig, MessageRole, TokenUsage,
 };
 pub use model::SdkError;
 pub use model::{

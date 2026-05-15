@@ -27,10 +27,12 @@ use super::types::*;
 use super::OrchestrationAuthority;
 use crate::context::DeviceMetrics;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 use url::Url;
+
+const TARGET_ADVICE_CACHE_CAPACITY: usize = 256;
 
 /// Remote orchestration authority - delegates to xybrid backend.
 ///
@@ -60,13 +62,78 @@ pub struct RemoteAuthority {
     fallback: LocalAuthority,
     /// Successful target advice cache. Keeps remote routing resilient when the
     /// same hot path resolves repeatedly during a short session.
-    target_cache: Mutex<HashMap<String, CachedTargetAdvice>>,
+    target_cache: Mutex<TargetAdviceCache>,
 }
 
 #[derive(Debug, Clone)]
 struct CachedTargetAdvice {
     decision: AuthorityDecision<ResolvedTarget>,
     expires_at_ms: u64,
+}
+
+#[derive(Debug, Default)]
+struct TargetAdviceCache {
+    entries: HashMap<String, CachedTargetAdvice>,
+    lru: VecDeque<String>,
+}
+
+impl TargetAdviceCache {
+    fn insert(&mut self, key: String, advice: CachedTargetAdvice, now_ms: u64) {
+        self.entries.insert(key.clone(), advice);
+        self.promote(&key);
+        self.evict_expired(now_ms);
+        self.evict_over_capacity();
+    }
+
+    fn get_fresh(&mut self, key: &str, now_ms: u64) -> Option<AuthorityDecision<ResolvedTarget>> {
+        let cached = self.entries.get(key).cloned()?;
+        if cached.expires_at_ms <= now_ms {
+            self.remove(key);
+            return None;
+        }
+
+        self.promote(key);
+        let mut decision = cached.decision;
+        decision.source = DecisionSource::Cached;
+        decision.timestamp_ms = now_ms;
+        Some(decision)
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.lru.clear();
+    }
+
+    fn promote(&mut self, key: &str) {
+        self.lru.retain(|candidate| candidate != key);
+        self.lru.push_back(key.to_string());
+    }
+
+    fn remove(&mut self, key: &str) {
+        self.entries.remove(key);
+        self.lru.retain(|candidate| candidate != key);
+    }
+
+    fn evict_expired(&mut self, now_ms: u64) {
+        let expired: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|(_, advice)| advice.expires_at_ms <= now_ms)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in expired {
+            self.remove(&key);
+        }
+    }
+
+    fn evict_over_capacity(&mut self) {
+        while self.entries.len() > TARGET_ADVICE_CACHE_CAPACITY {
+            let Some(key) = self.lru.pop_front() else {
+                break;
+            };
+            self.entries.remove(&key);
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,7 +162,7 @@ impl RemoteAuthority {
             endpoint: endpoint.to_string(),
             api_key: None,
             fallback: LocalAuthority::new(),
-            target_cache: Mutex::new(HashMap::new()),
+            target_cache: Mutex::new(TargetAdviceCache::default()),
         }
     }
 
@@ -105,7 +172,7 @@ impl RemoteAuthority {
             endpoint: endpoint.to_string(),
             api_key: None,
             fallback,
-            target_cache: Mutex::new(HashMap::new()),
+            target_cache: Mutex::new(TargetAdviceCache::default()),
         }
     }
 
@@ -120,6 +187,28 @@ impl RemoteAuthority {
         &self.endpoint
     }
 
+    fn target_cache_guard(&self) -> MutexGuard<'_, TargetAdviceCache> {
+        self.target_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn battery_cache_bucket(battery_pct: u8) -> String {
+        let bucket = (battery_pct.min(100) / 10) * 10;
+        bucket.to_string()
+    }
+
+    fn cpu_cache_bucket(cpu_pct: Option<f32>) -> String {
+        let Some(cpu_pct) = cpu_pct else {
+            return "unknown".to_string();
+        };
+        if !cpu_pct.is_finite() {
+            return "unknown".to_string();
+        }
+        let bucket = ((cpu_pct.clamp(0.0, 100.0) / 10.0).floor() * 10.0) as u8;
+        bucket.to_string()
+    }
+
     fn target_cache_key(context: &StageContext, metrics: &DeviceMetrics) -> String {
         format!(
             "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
@@ -132,14 +221,10 @@ impl RemoteAuthority {
             } else {
                 "unknown-schema".to_string()
             },
-            metrics.capabilities.battery_level,
+            Self::battery_cache_bucket(metrics.capabilities.battery_level),
             metrics.capabilities.thermal_state.as_str(),
             metrics.resource.memory_pressure.as_str(),
-            metrics
-                .resource
-                .cpu_pct
-                .map(|cpu| format!("{cpu:.0}"))
-                .unwrap_or_else(|| "unknown".to_string()),
+            Self::cpu_cache_bucket(metrics.resource.cpu_pct),
             context
                 .explicit_target
                 .as_ref()
@@ -221,15 +306,14 @@ impl RemoteAuthority {
         let expires_at_ms = decision.timestamp_ms.saturating_add(ttl_ms);
 
         if ttl_ms > 0 {
-            if let Ok(mut cache) = self.target_cache.lock() {
-                cache.insert(
-                    key,
-                    CachedTargetAdvice {
-                        decision: decision.clone(),
-                        expires_at_ms,
-                    },
-                );
-            }
+            self.target_cache_guard().insert(
+                key,
+                CachedTargetAdvice {
+                    decision: decision.clone(),
+                    expires_at_ms,
+                },
+                decision.timestamp_ms,
+            );
         }
 
         Some(decision)
@@ -242,17 +326,7 @@ impl RemoteAuthority {
     ) -> Option<AuthorityDecision<ResolvedTarget>> {
         let key = Self::target_cache_key(context, metrics);
         let now = now_ms();
-        let mut cache = self.target_cache.lock().ok()?;
-        let cached = cache.get(&key)?;
-        if cached.expires_at_ms <= now {
-            cache.remove(&key);
-            return None;
-        }
-
-        let mut decision = cached.decision.clone();
-        decision.source = DecisionSource::Cached;
-        decision.timestamp_ms = now;
-        Some(decision)
+        self.target_cache_guard().get_fresh(&key, now)
     }
 }
 
@@ -337,9 +411,7 @@ impl OrchestrationAuthority for RemoteAuthority {
     }
 
     fn invalidate_cache(&self) {
-        if let Ok(mut cache) = self.target_cache.lock() {
-            cache.clear();
-        }
+        self.target_cache_guard().clear();
     }
 
     fn name(&self) -> &str {
@@ -620,6 +692,70 @@ mod tests {
             RemoteAuthority::target_cache_key(&context, &critical_memory)
         );
         assert_ne!(key, RemoteAuthority::target_cache_key(&context, &high_cpu));
+    }
+
+    #[test]
+    fn target_cache_key_buckets_high_cardinality_percentages() {
+        let context = context_with_device_class("bucketed-resource", "iphone-15-pro");
+        let mut baseline = context.metrics.clone();
+        baseline.capabilities.battery_level = 83;
+        baseline.resource.cpu_pct = Some(24.2);
+
+        let mut same_bucket = baseline.clone();
+        same_bucket.capabilities.battery_level = 89;
+        same_bucket.resource.cpu_pct = Some(29.9);
+
+        let mut different_bucket = baseline.clone();
+        different_bucket.capabilities.battery_level = 72;
+        different_bucket.resource.cpu_pct = Some(31.0);
+
+        assert_eq!(
+            RemoteAuthority::target_cache_key(&context, &baseline),
+            RemoteAuthority::target_cache_key(&context, &same_bucket)
+        );
+        assert_ne!(
+            RemoteAuthority::target_cache_key(&context, &baseline),
+            RemoteAuthority::target_cache_key(&context, &different_bucket)
+        );
+    }
+
+    #[test]
+    fn target_advice_cache_evicts_least_recent_entries() {
+        let mut cache = TargetAdviceCache::default();
+        for index in 0..(TARGET_ADVICE_CACHE_CAPACITY + 8) {
+            cache.insert(
+                format!("key-{index}"),
+                CachedTargetAdvice {
+                    decision: AuthorityDecision::new(
+                        ResolvedTarget::Device,
+                        "cached".to_string(),
+                        DecisionSource::Remote,
+                        0.8,
+                    ),
+                    expires_at_ms: u64::MAX,
+                },
+                1,
+            );
+        }
+
+        assert_eq!(cache.entries.len(), TARGET_ADVICE_CACHE_CAPACITY);
+        assert!(!cache.entries.contains_key("key-0"));
+        assert!(cache
+            .entries
+            .contains_key(&format!("key-{}", TARGET_ADVICE_CACHE_CAPACITY + 7)));
+    }
+
+    #[test]
+    fn remote_authority_recovers_poisoned_target_cache_lock() {
+        let authority = RemoteAuthority::new("https://api.xybrid.dev");
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = authority.target_cache.lock().expect("cache lock");
+            panic!("poison target cache");
+        }));
+        assert!(result.is_err());
+
+        authority.invalidate_cache();
+        assert!(authority.target_cache_guard().entries.is_empty());
     }
 
     #[test]

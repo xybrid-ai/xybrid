@@ -2871,6 +2871,35 @@ mod tests {
         }
     }
 
+    struct FailingCloudAdapter {
+        calls: AtomicUsize,
+    }
+
+    impl FailingCloudAdapter {
+        fn new() -> Self {
+            Self {
+                calls: AtomicUsize::new(0),
+            }
+        }
+
+        fn call_count(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl xybrid_core::runtime_adapter::CloudStreaming for FailingCloudAdapter {
+        fn execute_streaming(
+            &self,
+            _input: &xybrid_core::ir::Envelope,
+            _on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'_>,
+        ) -> xybrid_core::runtime_adapter::AdapterResult<xybrid_core::ir::Envelope> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(xybrid_core::runtime_adapter::AdapterError::RuntimeError(
+                "gateway unavailable".to_string(),
+            ))
+        }
+    }
+
     #[derive(Debug)]
     struct FixedUnitResourceProvider {
         snapshot: xybrid_core::device::ResourceSnapshot,
@@ -3216,6 +3245,64 @@ mod tests {
             xybrid_core::orchestrator::authority::ResolvedTarget::Cloud { .. }
         ));
         assert_eq!(outcomes[1].model_id.as_deref(), Some("deepseek-chat"));
+    }
+
+    #[test]
+    fn dispatch_after_local_records_cloud_retry_failure() {
+        let cloud = FailingCloudAdapter::new();
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("write a haiku");
+        envelope
+            .metadata
+            .insert("provider".to_string(), "openai".to_string());
+        envelope
+            .metadata
+            .insert("model".to_string(), "gpt-4o-mini".to_string());
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-cloud-fail".to_string(),
+            "local-model",
+            2,
+            120,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::InferenceError(message)) => {
+                assert!(message.contains("gateway unavailable"), "{message}");
+            }
+            other => panic!("expected cloud retry failure, got {other:?}"),
+        }
+        assert_eq!(cloud.call_count(), 1);
+
+        let outcomes = authority.outcomes();
+        assert_eq!(outcomes.len(), 2);
+        assert!(matches!(
+            outcomes[0].category,
+            Some(
+                xybrid_core::orchestrator::authority::OutcomeCategory::AbortedForCloudFallback { .. }
+            )
+        ));
+        assert!(matches!(
+            outcomes[1].category,
+            Some(xybrid_core::orchestrator::authority::OutcomeCategory::HardFail { .. })
+        ));
+        assert_eq!(outcomes[1].model_id.as_deref(), Some("gpt-4o-mini"));
     }
 
     #[test]

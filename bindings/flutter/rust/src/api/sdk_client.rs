@@ -73,7 +73,7 @@ impl XybridSdkClient {
     #[frb(sync)]
     pub fn set_gateway_url(gateway_url: String) {
         xybrid_sdk::set_binding(FLUTTER_BINDING);
-        std::env::set_var("XYBRID_GATEWAY_URL", gateway_url);
+        xybrid_sdk::set_gateway_url(gateway_url);
     }
 
     /// Initialize the platform telemetry exporter for this process.

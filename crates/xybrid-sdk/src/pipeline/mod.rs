@@ -1461,6 +1461,21 @@ impl Xybrid {
         envelope: &Envelope,
         on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'a>,
     ) -> PipelineResult<PipelineExecutionResult> {
+        Self::run_pipeline_streaming_with_options(yaml, envelope, &RunOptions::default(), on_token)
+    }
+
+    /// Run a pipeline from YAML with streaming and per-run controls.
+    ///
+    /// Uses `RunOptions::device_metrics` for the single-stage streaming LLM
+    /// routing fast path, so the streaming path observes the same caller-supplied
+    /// routing context as non-streaming `run_pipeline_with_options`.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    pub fn run_pipeline_streaming_with_options<'a>(
+        yaml: &str,
+        envelope: &Envelope,
+        options: &RunOptions,
+        on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'a>,
+    ) -> PipelineResult<PipelineExecutionResult> {
         use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
 
         let pipeline_ref = PipelineRef::from_yaml(yaml)?;
@@ -1499,7 +1514,7 @@ impl Xybrid {
                         xybrid_core::execution::ExecutionTemplate::Gguf { .. }
                     ) {
                         let model_id = metadata.model_id.clone();
-                        let metrics = pipeline_metrics(&RunOptions::default());
+                        let metrics = pipeline_metrics(options);
                         let authority = LocalAuthority::with_cache_provider(Arc::new(
                             StreamingFastPathCacheProvider::new(
                                 model_id.clone(),
@@ -1516,7 +1531,7 @@ impl Xybrid {
 
                         if !route.can_stream_locally {
                             drop(handle);
-                            return pipeline.run(envelope);
+                            return pipeline.run_with_options(envelope, options);
                         }
 
                         drop(handle); // Release lock before executor call
@@ -1573,7 +1588,7 @@ impl Xybrid {
 
         // Fall back to non-streaming execution for multi-stage or non-LLM pipelines
         drop(handle);
-        pipeline.run(envelope)
+        pipeline.run_with_options(envelope, options)
     }
 
     /// Stub for when LLM features are disabled.
@@ -1589,6 +1604,18 @@ impl Xybrid {
     ) -> PipelineResult<PipelineExecutionResult> {
         // Without LLM features, just run normally
         Self::run_pipeline(yaml, envelope)
+    }
+
+    /// Stub for when LLM features are disabled.
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    #[allow(unused_variables)]
+    pub fn run_pipeline_streaming_with_options<'a>(
+        yaml: &str,
+        envelope: &Envelope,
+        options: &RunOptions,
+        on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'a>,
+    ) -> PipelineResult<PipelineExecutionResult> {
+        Self::run_pipeline_with_options(yaml, envelope, options)
     }
 }
 
@@ -1652,6 +1679,16 @@ stages:
     fn xybrid_run_pipeline_with_options_is_public_api() {
         let _method: fn(&str, &Envelope, &RunOptions) -> PipelineResult<PipelineExecutionResult> =
             Xybrid::run_pipeline_with_options;
+    }
+
+    #[test]
+    fn xybrid_run_pipeline_streaming_with_options_is_public_api() {
+        let _method: for<'a> fn(
+            &str,
+            &Envelope,
+            &RunOptions,
+            xybrid_core::runtime_adapter::types::StreamingCallback<'a>,
+        ) -> PipelineResult<PipelineExecutionResult> = Xybrid::run_pipeline_streaming_with_options;
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]

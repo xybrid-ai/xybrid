@@ -34,6 +34,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::sync::{OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 // ============================================================================
 // LLM Backend Configuration
@@ -137,12 +138,49 @@ impl Default for LlmClientConfig {
 // Helper Functions
 // ============================================================================
 
+static GATEWAY_URL_OVERRIDE: OnceLock<RwLock<Option<String>>> = OnceLock::new();
+
+fn gateway_url_override() -> &'static RwLock<Option<String>> {
+    GATEWAY_URL_OVERRIDE.get_or_init(|| RwLock::new(None))
+}
+
+fn read_gateway_url_override() -> RwLockReadGuard<'static, Option<String>> {
+    gateway_url_override()
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn write_gateway_url_override() -> RwLockWriteGuard<'static, Option<String>> {
+    gateway_url_override()
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Set the process-local Xybrid gateway URL used by SDK-created LLM clients.
+///
+/// This is intentionally not backed by `std::env::set_var`: platform bindings
+/// may call it from multi-threaded runtimes where mutating process environment
+/// is not synchronized.
+pub fn set_gateway_url(gateway_url: impl Into<String>) {
+    let gateway_url = gateway_url.into().trim().to_string();
+    if gateway_url.is_empty() {
+        return;
+    }
+    *write_gateway_url_override() = Some(gateway_url);
+}
+
+#[cfg(test)]
+fn clear_gateway_url_override() {
+    *write_gateway_url_override() = None;
+}
+
 /// Get default gateway URL from environment or fallback to production URL.
 ///
 /// Priority:
-/// 1. `XYBRID_GATEWAY_URL` env var (explicit override, should include `/v1`)
-/// 2. `XYBRID_PLATFORM_URL` env var + `/v1` suffix (shared with telemetry)
-/// 3. Default production URL (`https://api.xybrid.dev/v1`)
+/// 1. Process-local override set with [`set_gateway_url`]
+/// 2. `XYBRID_GATEWAY_URL` env var (explicit override, should include `/v1`)
+/// 3. `XYBRID_PLATFORM_URL` env var + `/v1` suffix (shared with telemetry)
+/// 4. Default production URL (`https://api.xybrid.dev/v1`)
 ///
 /// # Note
 ///
@@ -159,6 +197,9 @@ impl Default for LlmClientConfig {
 /// assert!(url.ends_with("/v1"));
 /// ```
 pub fn default_gateway_url() -> String {
+    if let Some(url) = read_gateway_url_override().clone() {
+        return url;
+    }
     if let Ok(url) = std::env::var("XYBRID_GATEWAY_URL") {
         return url;
     }
@@ -525,6 +566,14 @@ mod tests {
             "gateway_url should end with '/v1', got: {}",
             url
         );
+    }
+
+    #[test]
+    fn test_process_local_gateway_url_override() {
+        clear_gateway_url_override();
+        set_gateway_url("https://local.gateway.test/v1");
+        assert_eq!(default_gateway_url(), "https://local.gateway.test/v1");
+        clear_gateway_url_override();
     }
 
     #[test]

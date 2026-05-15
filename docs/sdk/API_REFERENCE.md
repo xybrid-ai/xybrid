@@ -60,10 +60,16 @@ The main SDK entry point with static methods.
 ```dart
 class Xybrid {
   // Initialization
-  static Future<void> init();
+  static Future<void> init({
+    String? apiKey,
+    String? gatewayUrl,
+    String? ingestUrl,
+    String? resourceTelemetry,
+  });
 
-  // API Key Management
+  // Runtime configuration
   static void setApiKey(String apiKey);
+  static void setGatewayUrl(String gatewayUrl);
 
   // Model Loading (returns XybridModelLoader)
   static XybridModelLoader model({
@@ -110,6 +116,7 @@ object Xybrid {
 |--------|------|--------|-------|----|
 | `init()` | ✅ | ✅ | — | ✅ |
 | `setApiKey()` | ✅ | — | — | — |
+| `setGatewayUrl()` | ✅ | — | — | — |
 | `model()` | ✅ | — | — | ✅ |
 | `pipeline()` | ✅ | — | — | — |
 | `isModelCached()` | ✅ | — | — | — |
@@ -471,6 +478,13 @@ impl Xybrid {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> PipelineResult<PipelineExecutionResult>;
+
+    pub fn run_pipeline_streaming_with_options<F>(
+        yaml: &str,
+        envelope: &Envelope,
+        options: &RunOptions,
+        on_token: F,
+    ) -> PipelineResult<PipelineExecutionResult>;
 }
 ```
 
@@ -488,6 +502,7 @@ impl Xybrid {
 | `load()` | ✅ | — | — | — |
 | `run()` | ✅ | — | — | — |
 | `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
+| `runPipelineStreamingWithOptions()` / `run_pipeline_streaming_with_options()` | Rust ✅ | planned | planned | planned |
 
 > **Note**: The Dart SDK currently uses a single `XybridPipeline` class (no separate `PipelineRef`).
 > The Kotlin spec shows the two-step `PipelineRef` → `Pipeline` pattern which is the target design.
@@ -852,7 +867,8 @@ Per-run controls for cooperative cancellation and resource-driven local abort.
 Rust SDK methods with options are available as model-level `run_with_options`,
 `run_with_context_options`, `run_streaming_with_options`, and
 `run_streaming_with_context_options`, plus pipeline-level `run_with_options`,
-`run_async_with_options`, and `Xybrid::run_pipeline_with_options`.
+`run_async_with_options`, `Xybrid::run_pipeline_with_options`, and
+`Xybrid::run_pipeline_streaming_with_options`.
 
 ```rust
 let token = CancellationToken::new();
@@ -878,6 +894,11 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
 
+`AbortSignal` is the shared policy enum. Rust currently supports
+`UserCancelled`, `MemoryPressureWarn`, `MemoryPressureCritical`, `ThermalHot`,
+and `ThermalCritical`; Flutter currently exposes the customer-facing fallback
+signals `memoryPressureCritical` and `thermalCritical`.
+
 Flutter exposes the customer opt-in surface as `RunOptions.cloudFallback(...)`
 plus `AbortPolicy.cloudFallback(...)`; plain `RunOptions()` stays neutral and
 does not opt into cloud retry. The Flutter FFI adapter maps that policy to the
@@ -900,6 +921,7 @@ cross-binding compatibility; telemetry may include flat `routing_source`,
 | `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
 | `RunOptions` | ✅ | planned | planned | planned |
 | `AbortPolicy` | ✅ | planned | planned | planned |
+| `AbortSignal` | ✅ | planned | planned | planned |
 | `CancellationToken` | ✅ | planned | planned | planned |
 | `StreamToken` | ✅ | — | — | ✅ |
 
