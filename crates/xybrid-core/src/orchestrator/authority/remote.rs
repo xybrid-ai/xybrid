@@ -25,6 +25,7 @@
 use super::local::LocalAuthority;
 use super::types::*;
 use super::OrchestrationAuthority;
+use crate::context::DeviceMetrics;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -119,25 +120,35 @@ impl RemoteAuthority {
         &self.endpoint
     }
 
-    fn target_cache_key(context: &StageContext) -> String {
+    fn target_cache_key(context: &StageContext, metrics: &DeviceMetrics) -> String {
         format!(
-            "{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             context.stage_id,
             context.model_id,
             context.input_kind.as_str(),
-            context.metrics.capabilities.battery_level,
-            context.metrics.capabilities.thermal_state.as_str(),
-            context.metrics.resource.memory_pressure.as_str(),
-            context
-                .metrics
+            context.device_class.as_deref().unwrap_or("unknown-device"),
+            if context.device_class.is_some() {
+                context.device_class_schema_version.unwrap_or(1).to_string()
+            } else {
+                "unknown-schema".to_string()
+            },
+            metrics.capabilities.battery_level,
+            metrics.capabilities.thermal_state.as_str(),
+            metrics.resource.memory_pressure.as_str(),
+            metrics
                 .resource
                 .cpu_pct
                 .map(|cpu| format!("{cpu:.0}"))
-                .unwrap_or_else(|| "unknown".to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            context
+                .explicit_target
+                .as_ref()
+                .map(|target| target.to_string())
+                .unwrap_or_else(|| "auto".to_string())
         )
     }
 
-    fn target_advice_url(&self, context: &StageContext) -> Option<String> {
+    fn target_advice_url(&self, context: &StageContext, metrics: &DeviceMetrics) -> Option<String> {
         let mut url = Url::parse(&self.endpoint)
             .ok()?
             .join("/v1/routing/advice")
@@ -147,19 +158,18 @@ impl RemoteAuthority {
             qp.append_pair("stage_id", &context.stage_id);
             qp.append_pair("model_id", &context.model_id);
             qp.append_pair("input_kind", context.input_kind.as_str());
+            if let Some(device_class) = context.device_class.as_deref() {
+                qp.append_pair("device_class", device_class);
+                let schema_version = context.device_class_schema_version.unwrap_or(1);
+                qp.append_pair("device_class_schema_version", &schema_version.to_string());
+            }
             qp.append_pair(
                 "battery_pct",
-                &context.metrics.capabilities.battery_level.to_string(),
+                &metrics.capabilities.battery_level.to_string(),
             );
-            qp.append_pair(
-                "thermal_state",
-                context.metrics.capabilities.thermal_state.as_str(),
-            );
-            qp.append_pair(
-                "memory_pressure",
-                context.metrics.resource.memory_pressure.as_str(),
-            );
-            if let Some(cpu_pct) = context.metrics.resource.cpu_pct {
+            qp.append_pair("thermal_state", metrics.capabilities.thermal_state.as_str());
+            qp.append_pair("memory_pressure", metrics.resource.memory_pressure.as_str());
+            if let Some(cpu_pct) = metrics.resource.cpu_pct {
                 qp.append_pair("cpu_pct", &format!("{cpu_pct:.2}"));
             }
             if let Some(explicit_target) = &context.explicit_target {
@@ -172,8 +182,9 @@ impl RemoteAuthority {
     fn fetch_target_advice(
         &self,
         context: &StageContext,
+        metrics: &DeviceMetrics,
     ) -> Option<AuthorityDecision<ResolvedTarget>> {
-        let url = self.target_advice_url(context)?;
+        let url = self.target_advice_url(context, metrics)?;
         let mut request = ureq::get(&url).timeout(Duration::from_millis(750));
         let auth_header = self
             .api_key
@@ -206,7 +217,7 @@ impl RemoteAuthority {
             .unwrap_or_else(|| "Remote routing advice".to_string());
         let decision = AuthorityDecision::new(result, reason, DecisionSource::Remote, confidence);
         let ttl_ms = advice.ttl_ms.unwrap_or(30_000);
-        let key = Self::target_cache_key(context);
+        let key = Self::target_cache_key(context, metrics);
         let expires_at_ms = decision.timestamp_ms.saturating_add(ttl_ms);
 
         if ttl_ms > 0 {
@@ -227,8 +238,9 @@ impl RemoteAuthority {
     fn cached_target_advice(
         &self,
         context: &StageContext,
+        metrics: &DeviceMetrics,
     ) -> Option<AuthorityDecision<ResolvedTarget>> {
-        let key = Self::target_cache_key(context);
+        let key = Self::target_cache_key(context, metrics);
         let now = now_ms();
         let mut cache = self.target_cache.lock().ok()?;
         let cached = cache.get(&key)?;
@@ -278,16 +290,20 @@ impl OrchestrationAuthority for RemoteAuthority {
             .current_snapshot(Duration::from_millis(500));
         let live_metrics = context.metrics.with_live_snapshot(snapshot);
         let signal = Some(SignalContext::from_metrics(&live_metrics));
+        let live_context = StageContext {
+            metrics: live_metrics.clone(),
+            ..context.clone()
+        };
 
-        if let Some(decision) = self.cached_target_advice(context) {
+        if let Some(decision) = self.cached_target_advice(&live_context, &live_metrics) {
             return TargetResolution::new(decision, context.model_id.clone(), signal);
         }
 
-        if let Some(decision) = self.fetch_target_advice(context) {
+        if let Some(decision) = self.fetch_target_advice(&live_context, &live_metrics) {
             return TargetResolution::new(decision, context.model_id.clone(), signal);
         }
 
-        let mut resolution = self.fallback.resolve_target_with_feedback(context);
+        let mut resolution = self.fallback.resolve_target_with_feedback(&live_context);
         resolution.decision.source = DecisionSource::Default;
         resolution.decision.reason = format!(
             "Fallback to local (remote unavailable): {}",
@@ -358,6 +374,16 @@ mod tests {
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
+            device_class: None,
+            device_class_schema_version: None,
+        }
+    }
+
+    fn context_with_device_class(endpoint_stage: &str, device_class: &str) -> StageContext {
+        StageContext {
+            device_class: Some(device_class.to_string()),
+            device_class_schema_version: Some(1),
+            ..default_context(endpoint_stage)
         }
     }
 
@@ -497,6 +523,115 @@ mod tests {
             request_lower.contains("authorization: bearer sk_test_routing"),
             "request should carry bearer auth header, got: {request}"
         );
+    }
+
+    #[test]
+    fn target_advice_url_includes_device_class_and_schema_when_available() {
+        let authority = RemoteAuthority::new("https://api.xybrid.dev");
+        let context = context_with_device_class("classed", "iphone-15-pro");
+        let url = authority
+            .target_advice_url(&context, &context.metrics)
+            .expect("routing advice url");
+
+        assert!(url.contains("device_class=iphone-15-pro"), "{url}");
+        assert!(url.contains("device_class_schema_version=1"), "{url}");
+    }
+
+    #[test]
+    fn target_advice_url_omits_device_class_when_unavailable() {
+        let authority = RemoteAuthority::new("https://api.xybrid.dev");
+        let context = default_context("unclassed");
+        let url = authority
+            .target_advice_url(&context, &context.metrics)
+            .expect("routing advice url");
+
+        assert!(!url.contains("device_class="), "{url}");
+        assert!(!url.contains("device_class_schema_version="), "{url}");
+    }
+
+    #[test]
+    fn target_advice_url_uses_live_metrics_argument() {
+        let authority = RemoteAuthority::new("https://api.xybrid.dev");
+        let context = default_context("live");
+        let mut live_metrics = context.metrics.clone();
+        live_metrics.capabilities.battery_level = 7;
+        live_metrics.capabilities.thermal_state = crate::device::ThermalState::Hot;
+        live_metrics.resource.memory_pressure = crate::device::MemoryPressure::Critical;
+        live_metrics.resource.cpu_pct = Some(98.4);
+
+        let url = authority
+            .target_advice_url(&context, &live_metrics)
+            .expect("routing advice url");
+
+        assert!(url.contains("battery_pct=7"), "{url}");
+        assert!(url.contains("thermal_state=hot"), "{url}");
+        assert!(url.contains("memory_pressure=critical"), "{url}");
+        assert!(url.contains("cpu_pct=98.40"), "{url}");
+    }
+
+    #[test]
+    fn target_cache_key_differs_by_device_class_and_schema() {
+        let a = context_with_device_class("cached-class", "iphone-15-pro");
+        let b = context_with_device_class("cached-class", "iphone-15");
+        let mut c = context_with_device_class("cached-class", "iphone-15-pro");
+        c.device_class_schema_version = Some(2);
+
+        let key_a = RemoteAuthority::target_cache_key(&a, &a.metrics);
+        let key_b = RemoteAuthority::target_cache_key(&b, &b.metrics);
+        let key_c = RemoteAuthority::target_cache_key(&c, &c.metrics);
+
+        assert_ne!(key_a, key_b);
+        assert_ne!(key_a, key_c);
+    }
+
+    #[test]
+    fn target_cache_key_differs_by_live_resource_fields() {
+        let context = context_with_device_class("cached-resource", "iphone-15-pro");
+        let mut baseline = context.metrics.clone();
+        baseline.capabilities.battery_level = 80;
+        baseline.capabilities.thermal_state = crate::device::ThermalState::Normal;
+        baseline.resource.memory_pressure = crate::device::MemoryPressure::Normal;
+        baseline.resource.cpu_pct = Some(20.0);
+
+        let mut low_battery = baseline.clone();
+        low_battery.capabilities.battery_level = 7;
+
+        let mut hot_thermal = baseline.clone();
+        hot_thermal.capabilities.thermal_state = crate::device::ThermalState::Hot;
+
+        let mut critical_memory = baseline.clone();
+        critical_memory.resource.memory_pressure = crate::device::MemoryPressure::Critical;
+
+        let mut high_cpu = baseline.clone();
+        high_cpu.resource.cpu_pct = Some(98.4);
+
+        let key = RemoteAuthority::target_cache_key(&context, &baseline);
+
+        assert_ne!(
+            key,
+            RemoteAuthority::target_cache_key(&context, &low_battery)
+        );
+        assert_ne!(
+            key,
+            RemoteAuthority::target_cache_key(&context, &hot_thermal)
+        );
+        assert_ne!(
+            key,
+            RemoteAuthority::target_cache_key(&context, &critical_memory)
+        );
+        assert_ne!(key, RemoteAuthority::target_cache_key(&context, &high_cpu));
+    }
+
+    #[test]
+    fn target_cache_key_differs_by_explicit_target() {
+        let auto_context = context_with_device_class("cached-explicit", "iphone-15-pro");
+        let mut cloud_context = auto_context.clone();
+        cloud_context.explicit_target = Some(crate::pipeline::ExecutionTarget::Cloud);
+
+        let auto_key = RemoteAuthority::target_cache_key(&auto_context, &auto_context.metrics);
+        let cloud_key = RemoteAuthority::target_cache_key(&cloud_context, &cloud_context.metrics);
+
+        assert_ne!(auto_key, cloud_key);
     }
 
     #[test]

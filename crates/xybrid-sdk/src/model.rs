@@ -24,8 +24,9 @@ use xybrid_core::execution::{
 use xybrid_core::ir::Envelope;
 use xybrid_core::orchestrator::authority::{
     ExecutionOutcome, LocalAuthority, OrchestrationAuthority, OutcomeCategory, PolicyOutcome,
-    PolicyRequest, ResolvedTarget, SignalContext,
+    PolicyRequest, ResolvedTarget, SignalContext, StageContext,
 };
+use xybrid_core::orchestrator::routing_engine::LocalReliabilityHint;
 use xybrid_core::runtime_adapter::types::GenerationConfig;
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
 
@@ -277,6 +278,27 @@ fn record_cloud_outcome(
     });
 }
 
+fn local_reliability_hint_after_abort(
+    authority: &dyn OrchestrationAuthority,
+    model_id: &str,
+    envelope: &Envelope,
+    metrics: &xybrid_core::context::DeviceMetrics,
+) -> Option<LocalReliabilityHint> {
+    let context = StageContext {
+        stage_id: model_id.to_string(),
+        model_id: model_id.to_string(),
+        input_kind: envelope.kind.clone(),
+        metrics: metrics.clone(),
+        resource_monitor: xybrid_core::device::ResourceMonitor::global(),
+        explicit_target: None,
+        device_class: Some(metrics.canonical_device_class()),
+        device_class_schema_version: Some(xybrid_core::context::DEVICE_CLASS_SCHEMA_VERSION),
+    };
+    authority
+        .resolve_target_with_feedback(&context)
+        .local_reliability_hint
+}
+
 /// Inspect the local-leg result and, on a typed cloud-fallback abort, fire
 /// `on_seam`, retry on the cloud adapter, and return the cloud
 /// [`InferenceResult`]. On any other shape the original result is returned
@@ -298,6 +320,7 @@ fn dispatch_after_local<F, S>(
     model_id: &str,
     local_tokens: u32,
     local_latency_ms: u32,
+    local_resource_summary: Option<xybrid_core::device::ResourceUsageSummary>,
     authority: &dyn OrchestrationAuthority,
     policy_metrics: xybrid_core::context::DeviceMetrics,
     signal_context: Option<SignalContext>,
@@ -315,21 +338,25 @@ where
     match local_result {
         Ok(result) => Ok(result),
         Err(SdkError::AbortedForCloudFallback { reason }) => {
-            // Emit `LocalAborted` before the user's `on_seam` callback fires so
-            // the audit trail exists even if the caller's seam handler panics.
-            crate::telemetry::publish_local_aborted(
-                &correlation_id,
-                model_id,
-                reason,
-                local_latency_ms,
-                local_tokens,
-            );
             record_local_abort_outcome(
                 authority,
                 model_id,
                 reason,
                 local_latency_ms,
                 signal_context,
+            );
+            let local_reliability_hint =
+                local_reliability_hint_after_abort(authority, model_id, envelope, &policy_metrics);
+            // Emit `LocalAborted` before the user's `on_seam` callback fires so
+            // the audit trail exists even if the caller's seam handler panics.
+            crate::telemetry::publish_local_aborted_with_details(
+                &correlation_id,
+                model_id,
+                reason,
+                local_latency_ms,
+                local_tokens,
+                local_resource_summary,
+                local_reliability_hint,
             );
 
             let seam = SeamInfo {
@@ -1306,7 +1333,15 @@ impl ModelLoader {
         })
     }
 
+    fn is_llm_template(metadata: &ModelMetadata) -> bool {
+        matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
+    }
+
     fn check_streaming_support(metadata: &ModelMetadata) -> bool {
+        if Self::is_llm_template(metadata) {
+            return true;
+        }
+
         // Check if this is an ASR model (supports streaming)
         // Look at metadata task or model type (metadata is HashMap<String, serde_json::Value>)
         if let Some(task) = metadata.metadata.get("task").and_then(|v| v.as_str()) {
@@ -1334,6 +1369,10 @@ impl ModelLoader {
     }
 
     fn infer_output_type(metadata: &ModelMetadata) -> OutputType {
+        if Self::is_llm_template(metadata) {
+            return OutputType::Text;
+        }
+
         // Check metadata hints (metadata is HashMap<String, serde_json::Value>)
         if let Some(task) = metadata.metadata.get("task").and_then(|v| v.as_str()) {
             match task {
@@ -1531,6 +1570,7 @@ impl XybridModel {
         use xybrid_core::ir::EnvelopeKind;
 
         log::info!(target: "xybrid_sdk", "Warming up model: {}", self.model_id);
+        let is_llm = self.is_llm();
 
         // Create a minimal input based on expected input type
         let warmup_input = match self.output_type {
@@ -1540,7 +1580,7 @@ impl XybridModel {
                 metadata: std::collections::HashMap::new(),
             },
             // For ASR models, use minimal audio (1 second of silence at 16kHz)
-            OutputType::Text if self.supports_streaming => {
+            OutputType::Text if self.supports_streaming && !is_llm => {
                 // Create a minimal WAV file with silence
                 let silence_samples = vec![0i16; 16000]; // 1 second at 16kHz
                 let audio_bytes = Self::create_wav_bytes(&silence_samples, 16000);
@@ -1595,6 +1635,7 @@ impl XybridModel {
         let model_id = self.model_id.clone();
         let output_type = self.output_type;
         let supports_streaming = self.supports_streaming;
+        let is_llm = self.is_llm();
 
         tokio::task::spawn_blocking(move || {
             use xybrid_core::ir::EnvelopeKind;
@@ -1607,7 +1648,7 @@ impl XybridModel {
                     kind: EnvelopeKind::Text("Hi".to_string()),
                     metadata: std::collections::HashMap::new(),
                 },
-                OutputType::Text if supports_streaming => {
+                OutputType::Text if supports_streaming && !is_llm => {
                     let silence_samples = vec![0i16; 16000];
                     let audio_bytes = Self::create_wav_bytes(&silence_samples, 16000);
                     Envelope {
@@ -2289,6 +2330,7 @@ impl XybridModel {
 
         let local_tokens = Arc::new(AtomicU32::new(0));
         let local_start = Instant::now();
+        let local_resource_guard = crate::telemetry::begin_resource_run();
 
         let local_result = {
             let local_tokens = local_tokens.clone();
@@ -2299,6 +2341,7 @@ impl XybridModel {
         };
 
         let local_latency_ms = local_start.elapsed().as_millis() as u32;
+        let local_resource_summary = local_resource_guard.finish();
         let policy_metrics = fallback_policy_metrics(options);
         let signal_context = Some(SignalContext::from_metrics(&policy_metrics));
 
@@ -2310,6 +2353,7 @@ impl XybridModel {
             &self.model_id,
             local_tokens.load(Ordering::SeqCst),
             local_latency_ms,
+            local_resource_summary,
             fallback_authority(),
             policy_metrics,
             signal_context,
@@ -2725,6 +2769,23 @@ mod tests {
     }
 
     #[test]
+    fn gguf_models_are_streaming_text_models() {
+        let mut metadata = ModelMetadata::onnx("qwen2.5-0.5b-instruct", "1.0", "model.gguf");
+        metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 2048,
+            generation_params: None,
+        };
+
+        assert!(
+            ModelLoader::check_streaming_support(&metadata),
+            "GGUF LLMs stream tokens and must run abort checks between chunks"
+        );
+        assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Text);
+    }
+
+    #[test]
     #[allow(deprecated)]
     fn test_model_loader_from_legacy_registry() {
         let loader = ModelLoader::from_legacy_registry("http://localhost:8080", "whisper", "1.0");
@@ -2992,6 +3053,7 @@ mod tests {
             "test-model",
             3,
             100,
+            None,
             &authority,
             default_metrics(),
             Some(default_signal()),
@@ -3057,6 +3119,48 @@ mod tests {
     }
 
     #[test]
+    fn run_streaming_with_fallback_retries_cloud_on_pre_run_thermal_pressure() {
+        let model = test_loaded_model(true);
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let mut critical_snapshot = xybrid_core::device::ResourceSnapshot::unknown();
+        critical_snapshot.thermal_state = xybrid_core::device::ThermalState::Critical;
+        let resource_provider = Arc::new(FixedUnitResourceProvider::new(critical_snapshot));
+        let options = RunOptions::new()
+            .with_abort_policy(
+                crate::run_options::AbortPolicy::default()
+                    .stop_on(crate::run_options::AbortSignal::ThermalCritical)
+                    .with_cloud_fallback(true)
+                    .with_max_grace_tokens(0),
+            )
+            .with_resource_provider(resource_provider)
+            .with_correlation_id("corr-thermal-pre-run");
+        let envelope = text_envelope("write me a haiku");
+        let collected: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_for_cb = collected.clone();
+        let mut on_token = move |t: xybrid_core::runtime_adapter::types::PartialToken| {
+            collected_for_cb.lock().unwrap().push(t.token);
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        let seam_count = Arc::new(AtomicUsize::new(0));
+        let seam_count_for_cb = seam_count.clone();
+        let mut on_seam = move |s: SeamInfo| {
+            seam_count_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(s.reason, xybrid_core::abort::AbortReason::StressThermal);
+            assert_eq!(s.correlation_id, "corr-thermal-pre-run");
+            assert_eq!(s.local_tokens, 0);
+        };
+
+        let result = model
+            .run_streaming_with_fallback(&envelope, &options, &cloud, &mut on_token, &mut on_seam)
+            .expect("pre-run thermal pressure should retry on cloud");
+
+        assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(cloud.call_count(), 1);
+        assert_eq!(result.text(), Some("hello from cloud"));
+        assert_eq!(collected.lock().unwrap().as_slice(), ["hello from cloud"]);
+    }
+
+    #[test]
     fn dispatch_after_local_records_local_abort_and_cloud_success_outcomes() {
         let cloud = FakeCloudAdapter::new("hello from cloud");
         let authority = FakeAuthority::allow();
@@ -3079,6 +3183,7 @@ mod tests {
             "local-model",
             7,
             321,
+            None,
             &authority,
             default_metrics(),
             Some(default_signal()),
@@ -3147,6 +3252,7 @@ mod tests {
             "local-model",
             4,
             123,
+            None,
             &authority,
             default_metrics(),
             Some(default_signal()),
@@ -3194,6 +3300,7 @@ mod tests {
             "local-model",
             0,
             0,
+            None,
             &authority,
             default_metrics(),
             Some(default_signal()),
@@ -3234,6 +3341,7 @@ mod tests {
             "local-model",
             7,
             321,
+            None,
             &authority,
             default_metrics(),
             Some(default_signal()),
@@ -3291,6 +3399,7 @@ mod tests {
             "qwen2.5-0.5b-instruct",
             5,
             220,
+            None,
             &authority,
             default_metrics(),
             Some(default_signal()),
@@ -3327,6 +3436,7 @@ mod tests {
             "local-only-model",
             0,
             0,
+            None,
             &authority,
             default_metrics(),
             Some(default_signal()),
@@ -3363,6 +3473,7 @@ mod tests {
             "test-model",
             10,
             200,
+            None,
             &authority,
             default_metrics(),
             Some(default_signal()),
@@ -3402,6 +3513,7 @@ mod tests {
             "test-model",
             0,
             0,
+            None,
             &authority,
             default_metrics(),
             Some(default_signal()),
@@ -3444,6 +3556,7 @@ mod tests {
             "test-model",
             0,
             0,
+            None,
             &authority,
             default_metrics(),
             Some(default_signal()),

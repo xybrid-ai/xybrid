@@ -10,12 +10,13 @@
 //!
 //! 2. **End-to-end (manual)** (`cloud_fallback_demo_runs_end_to_end` —
 //!    `#[ignore]`'d): drives `run_streaming_with_fallback` through a real
-//!    cached `qwen2.5-0.5b` and a mock cloud target. Run with
+//!    cached `qwen2.5-0.5b-instruct` and a mock cloud target. Run with
 //!    `cargo test --features platform-macos,dev-tools,llm-llamacpp \
 //!     --test cloud_fallback_e2e -- --ignored`.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use xybrid_core::abort::AbortReason as CoreAbortReason;
 use xybrid_core::device::{MemoryPressure, ResourceSnapshot, ResourceSnapshotProvider};
@@ -23,7 +24,7 @@ use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::authority::test_seams::{
     FixedResourceProvider, StagedResourceProvider,
 };
-use xybrid_core::runtime_adapter::types::{PartialToken, StreamingCallback};
+use xybrid_core::runtime_adapter::types::{GenerationConfig, PartialToken, StreamingCallback};
 use xybrid_core::runtime_adapter::{
     AdapterError, AdapterResult, CloudRuntimeAdapter, CloudStreaming,
 };
@@ -47,7 +48,7 @@ fn cloud_fallback_api_surface_compiles() {
                 .with_cloud_fallback(true)
                 .with_max_grace_tokens(0),
         )
-        .with_resource_provider(provider);
+        .with_resource_provider(provider.clone());
 
     let _adapter: Box<dyn CloudStreaming> =
         Box::new(CloudRuntimeAdapter::with_gateway("http://example.test"));
@@ -101,6 +102,46 @@ impl CloudStreaming for RecordingCloud {
     }
 }
 
+#[derive(Debug)]
+struct TimedStagedResourceProvider {
+    normal: ResourceSnapshot,
+    stressed: ResourceSnapshot,
+    normal_reads: usize,
+    reads_so_far: AtomicUsize,
+    first_stressed_read_at: Mutex<Option<Instant>>,
+}
+
+impl TimedStagedResourceProvider {
+    fn new(normal_reads: usize, stressed: ResourceSnapshot) -> Self {
+        Self {
+            normal: ResourceSnapshot::unknown(),
+            stressed,
+            normal_reads,
+            reads_so_far: AtomicUsize::new(0),
+            first_stressed_read_at: Mutex::new(None),
+        }
+    }
+
+    fn first_stressed_read_at(&self) -> Option<Instant> {
+        *self.first_stressed_read_at.lock().unwrap()
+    }
+}
+
+impl ResourceSnapshotProvider for TimedStagedResourceProvider {
+    fn current_snapshot(&self, _max_age: Duration) -> ResourceSnapshot {
+        let n = self.reads_so_far.fetch_add(1, Ordering::SeqCst);
+        if n < self.normal_reads {
+            self.normal
+        } else {
+            let mut first_stressed_read_at = self.first_stressed_read_at.lock().unwrap();
+            if first_stressed_read_at.is_none() {
+                *first_stressed_read_at = Some(Instant::now());
+            }
+            self.stressed
+        }
+    }
+}
+
 #[test]
 fn cloud_fallback_dispatch_with_fake_adapter() {
     // Sanity check that a `CloudStreaming` implementation talks to its
@@ -132,12 +173,12 @@ fn cloud_fallback_dispatch_with_fake_adapter() {
 
 /// End-to-end exercise of `run_streaming_with_fallback` against a real local
 /// LLM and a mock cloud. Excluded from default `cargo test` because it
-/// requires `qwen2.5-0.5b` to be present in the registry cache.
+/// requires `qwen2.5-0.5b-instruct` to be present in the registry cache.
 ///
 /// Run manually:
 ///
 /// ```bash
-/// xybrid run --model qwen2.5-0.5b --input-text "warmup"
+/// xybrid run --model qwen2.5-0.5b-instruct --input-text "warmup"
 /// cargo test --features platform-macos,dev-tools,llm-llamacpp \
 ///   --test cloud_fallback_e2e -- --ignored
 /// ```
@@ -146,13 +187,17 @@ fn cloud_fallback_dispatch_with_fake_adapter() {
 fn cloud_fallback_demo_runs_end_to_end() {
     use xybrid_sdk::ModelLoader;
 
-    let model = ModelLoader::from_registry("qwen2.5-0.5b")
+    const FALLBACK_ABORT_LATENCY_BUDGET: Duration = Duration::from_millis(200);
+
+    let model_id = std::env::var("XYBRID_FALLBACK_E2E_MODEL_ID")
+        .unwrap_or_else(|_| "qwen2.5-0.5b-instruct".to_string());
+    let model = ModelLoader::from_registry(&model_id)
         .load()
-        .expect("model must be cached for this test");
+        .unwrap_or_else(|err| panic!("{model_id} must be cached for this test: {err}"));
 
     let mut crit = ResourceSnapshot::unknown();
     crit.memory_pressure = MemoryPressure::Critical;
-    let provider = Arc::new(StagedResourceProvider::new(3, crit));
+    let provider = Arc::new(TimedStagedResourceProvider::new(2, crit));
 
     let cloud = RecordingCloud::new("hello from cloud");
 
@@ -163,10 +208,11 @@ fn cloud_fallback_demo_runs_end_to_end() {
                 .with_cloud_fallback(true)
                 .with_max_grace_tokens(0),
         )
-        .with_resource_provider(provider);
+        .with_resource_provider(provider.clone())
+        .with_generation_config(GenerationConfig::greedy().with_max_tokens(256));
 
     let mut envelope = Envelope::new(EnvelopeKind::Text(
-        "Write a haiku about the sea.".to_string(),
+        "Write a long numbered list of short reasons adaptive compute keeps mobile LLM apps responsive. Do not stop early.".to_string(),
     ));
     envelope
         .metadata
@@ -179,6 +225,7 @@ fn cloud_fallback_demo_runs_end_to_end() {
     let cloud_count = Arc::new(AtomicU32::new(0));
     let on_cloud = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let captured_seam: Arc<Mutex<Option<SeamInfo>>> = Arc::new(Mutex::new(None));
+    let seam_observed_at: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
     let local_count_cb = local_count.clone();
     let cloud_count_cb = cloud_count.clone();
@@ -195,8 +242,10 @@ fn cloud_fallback_demo_runs_end_to_end() {
 
     let on_cloud_seam = on_cloud.clone();
     let captured_seam_for_cb = captured_seam.clone();
+    let seam_observed_at_for_cb = seam_observed_at.clone();
     let mut on_seam = move |info: SeamInfo| {
         on_cloud_seam.store(true, Ordering::SeqCst);
+        *seam_observed_at_for_cb.lock().unwrap() = Some(Instant::now());
         *captured_seam_for_cb.lock().unwrap() = Some(info);
     };
 
@@ -206,6 +255,18 @@ fn cloud_fallback_demo_runs_end_to_end() {
 
     let seam = captured_seam.lock().unwrap().clone();
     assert!(seam.is_some(), "seam should fire when pressure trips");
+    let first_stressed_read_at = provider
+        .first_stressed_read_at()
+        .expect("provider should have returned a stressed snapshot");
+    let seam_observed_at = (*seam_observed_at.lock().unwrap())
+        .expect("seam callback should record when abort surfaced");
+    let abort_latency = seam_observed_at.duration_since(first_stressed_read_at);
+    assert!(
+        abort_latency <= FALLBACK_ABORT_LATENCY_BUDGET,
+        "local abort exceeded one-token low-end budget: {:?} > {:?}",
+        abort_latency,
+        FALLBACK_ABORT_LATENCY_BUDGET
+    );
     assert!(
         local_count.load(Ordering::SeqCst) >= 1,
         "local should emit at least one token"

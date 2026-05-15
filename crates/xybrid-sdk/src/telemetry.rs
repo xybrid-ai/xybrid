@@ -36,6 +36,7 @@ use xybrid_core::device::{ResourceMonitor, ResourceTelemetryMode, ResourceUsageS
 use xybrid_core::event_bus::{EventContext, OrchestratorEvent};
 use xybrid_core::execution::listener::{self as execution_listener, ExecutionEvent};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
+use xybrid_core::orchestrator::routing_engine::LocalReliabilityHint;
 use xybrid_core::tracing as core_tracing;
 
 /// Telemetry event type (simplified for FFI)
@@ -1517,25 +1518,67 @@ pub fn local_aborted_event(
     latency_ms: u32,
     tokens_emitted: u32,
 ) -> TelemetryEvent {
+    local_aborted_event_with_details(
+        correlation_id,
+        model_id,
+        abort_reason,
+        latency_ms,
+        tokens_emitted,
+        None,
+        None,
+    )
+}
+
+/// Build a `LocalAborted` event with resource and reliability context.
+///
+/// This is the cloud-fallback telemetry shape used by customer-ready routing:
+/// analytics can join the local/cloud legs by `correlation_id`, inspect the
+/// live resource summary that caused the abort, and feed the local reliability
+/// hint back into fleet-aware routing decisions.
+pub fn local_aborted_event_with_details(
+    correlation_id: &str,
+    model_id: &str,
+    abort_reason: xybrid_core::abort::AbortReason,
+    latency_ms: u32,
+    tokens_emitted: u32,
+    resource_summary: Option<ResourceUsageSummary>,
+    local_reliability_hint: Option<LocalReliabilityHint>,
+) -> TelemetryEvent {
+    let mut data = serde_json::json!({
+        "model_id": model_id,
+        "correlation_id": correlation_id,
+        "outcome_category": {
+            "kind": "aborted_for_cloud_fallback",
+            "reason": abort_reason.as_str(),
+        },
+        "abort_reason": abort_reason.as_str(),
+        "tokens_emitted": tokens_emitted,
+    });
+
+    if let Some(obj) = data.as_object_mut() {
+        if let Some(summary) =
+            resource_summary.and_then(|summary| serde_json::to_value(summary).ok())
+        {
+            obj.insert("resource_summary".to_string(), summary);
+        }
+        if let Some(hint) = local_reliability_hint {
+            obj.insert(
+                "local_reliability_hint".to_string(),
+                serde_json::json!({
+                    "recent_abort_rate": hint.recent_abort_rate,
+                    "sample_size": hint.sample_size,
+                }),
+            );
+        }
+    }
+
     TelemetryEvent {
         event_type: "LocalAborted".to_string(),
         stage_name: Some(model_id.to_string()),
         target: Some("local".to_string()),
         latency_ms: Some(latency_ms),
         error: None,
-        data: Some(
-            serde_json::json!({
-                "model_id": model_id,
-                "correlation_id": correlation_id,
-                "outcome_category": {
-                    "kind": "aborted_for_cloud_fallback",
-                    "reason": abort_reason.as_str(),
-                },
-                "abort_reason": abort_reason.as_str(),
-                "tokens_emitted": tokens_emitted,
-            })
-            .to_string(),
-        ),
+        data: Some(data.to_string()),
         timestamp_ms: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -1557,6 +1600,26 @@ pub fn publish_local_aborted(
         abort_reason,
         latency_ms,
         tokens_emitted,
+    ));
+}
+
+pub(crate) fn publish_local_aborted_with_details(
+    correlation_id: &str,
+    model_id: &str,
+    abort_reason: xybrid_core::abort::AbortReason,
+    latency_ms: u32,
+    tokens_emitted: u32,
+    resource_summary: Option<ResourceUsageSummary>,
+    local_reliability_hint: Option<LocalReliabilityHint>,
+) {
+    publish_telemetry_event(local_aborted_event_with_details(
+        correlation_id,
+        model_id,
+        abort_reason,
+        latency_ms,
+        tokens_emitted,
+        resource_summary,
+        local_reliability_hint,
     ));
 }
 
@@ -1700,18 +1763,30 @@ pub fn cloud_retry_event(
     error: Option<&str>,
 ) -> TelemetryEvent {
     let provider_value = provider.unwrap_or("xybrid");
-    let status = if error.is_some() { "error" } else { "ok" };
+    let redacted_error = error.map(redact_error_for_telemetry);
+    let (status, outcome_category) = if let Some(reason) = redacted_error.as_deref() {
+        (
+            "error",
+            serde_json::json!({
+                "kind": "hard_fail",
+                "reason": reason,
+            }),
+        )
+    } else {
+        ("ok", serde_json::json!("cloud_success"))
+    };
     TelemetryEvent {
         event_type: "CloudRetry".to_string(),
         stage_name: Some(model_id.to_string()),
         target: Some("cloud".to_string()),
         latency_ms: Some(latency_ms),
-        error: error.map(redact_error_for_telemetry),
+        error: redacted_error,
         data: Some(
             serde_json::json!({
                 "model_id": model_id,
                 "correlation_id": correlation_id,
                 "provider": provider_value,
+                "outcome_category": outcome_category,
                 "tokens_emitted": tokens_emitted,
                 "status": status,
             })
@@ -2861,6 +2936,7 @@ mod tests {
         assert_eq!(local_data["outcome_category"]["reason"], "stress_memory");
         assert_eq!(local_data["tokens_emitted"], 4);
         assert_eq!(cloud_data["provider"], "openai");
+        assert_eq!(cloud_data["outcome_category"], "cloud_success");
         assert_eq!(cloud_data["tokens_emitted"], 38);
 
         // The platform-event hoist promotes `correlation_id` and `abort_reason`
@@ -2878,8 +2954,74 @@ mod tests {
             Some("run-abc-123")
         );
         assert_eq!(
+            platform_cloud.outcome_category.as_ref(),
+            Some(&serde_json::json!("cloud_success"))
+        );
+        assert_eq!(
+            platform_cloud.payload["outcome_category"],
+            serde_json::json!("cloud_success")
+        );
+        assert_eq!(
             platform_local.abort_reason.as_deref(),
             Some("stress_memory")
+        );
+    }
+
+    #[test]
+    fn local_aborted_event_carries_resource_summary_and_reliability_hint() {
+        let summary = ResourceUsageSummary {
+            cpu_avg_pct: Some(61.0),
+            cpu_peak_pct: Some(88.5),
+            process_rss_peak_mb: Some(2048),
+            available_mem_min_mb: Some(512),
+            memory_pressure_peak: xybrid_core::device::MemoryPressure::Critical,
+            thermal_state_peak: xybrid_core::device::ThermalState::Hot,
+            battery_pct_end: Some(51),
+            sample_count: 3,
+            sampling_mode: "debug_local".to_string(),
+            sampling_interval_ms: Some(100),
+        };
+        let local = local_aborted_event_with_details(
+            "run-rich-123",
+            "qwen2.5-0.5b",
+            xybrid_core::abort::AbortReason::StressMemory,
+            180,
+            4,
+            Some(summary),
+            Some(LocalReliabilityHint {
+                recent_abort_rate: 0.5,
+                sample_size: 2,
+            }),
+        );
+
+        let data: serde_json::Value =
+            serde_json::from_str(local.data.as_ref().expect("data present")).unwrap();
+        assert_eq!(
+            data["resource_summary"]["memory_pressure_peak"].as_str(),
+            Some("critical")
+        );
+        assert_eq!(
+            data["resource_summary"]["sampling_interval_ms"].as_i64(),
+            Some(100)
+        );
+        assert_eq!(
+            data["local_reliability_hint"]["recent_abort_rate"].as_f64(),
+            Some(0.5)
+        );
+        assert_eq!(
+            data["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(2)
+        );
+
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&local, &config, None, None, None);
+        assert_eq!(
+            platform.payload["resource_summary"]["sample_count"].as_i64(),
+            Some(3)
+        );
+        assert_eq!(
+            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(2)
         );
     }
 
@@ -2889,6 +3031,7 @@ mod tests {
         let cloud_data: serde_json::Value =
             serde_json::from_str(cloud.data.as_ref().unwrap()).unwrap();
         assert_eq!(cloud_data["provider"], "xybrid");
+        assert_eq!(cloud_data["outcome_category"], "cloud_success");
         assert_eq!(cloud_data["status"], "ok");
         assert!(cloud.error.is_none());
     }
@@ -2913,7 +3056,22 @@ mod tests {
             Some("Gateway returned 502: Provider error")
         );
         assert_eq!(cloud_data["status"], "error");
+        assert_eq!(cloud_data["outcome_category"]["kind"], "hard_fail");
+        assert_eq!(
+            cloud_data["outcome_category"]["reason"],
+            "Gateway returned 502: Provider error"
+        );
         assert_eq!(cloud_data["tokens_emitted"], 0);
+
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&cloud, &config, None, None, None);
+        assert_eq!(
+            platform.outcome_category.as_ref(),
+            Some(&serde_json::json!({
+                "kind": "hard_fail",
+                "reason": "Gateway returned 502: Provider error"
+            }))
+        );
     }
 
     #[test]

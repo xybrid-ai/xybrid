@@ -182,6 +182,8 @@ mod tests {
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: Some(crate::pipeline::ExecutionTarget::Device),
+            device_class: None,
+            device_class_schema_version: None,
         };
 
         let decision = authority.resolve_target(&context);

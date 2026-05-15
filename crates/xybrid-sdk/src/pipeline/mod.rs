@@ -62,14 +62,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use xybrid_core::context::{DeviceMetrics, StageDescriptor};
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use xybrid_core::cache_provider::CacheProvider;
+use xybrid_core::context::{DeviceMetrics, StageDescriptor, DEVICE_CLASS_SCHEMA_VERSION};
 use xybrid_core::device::ResourceMonitor;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use xybrid_core::event_bus::{EventContext, OrchestratorEvent};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 use xybrid_core::orchestrator::{
     LocalAuthority, OrchestrationAuthority, Orchestrator, ResolvedTarget, StageContext,
     StageExecutionResult,
 };
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use xybrid_core::orchestrator::{PolicyOutcome, PolicyRequest};
 use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
 use xybrid_core::pipeline_config::PipelineConfig;
 
@@ -310,6 +316,150 @@ impl PipelineExecutionResult {
 
 fn pipeline_metrics(options: &RunOptions) -> DeviceMetrics {
     options.device_metrics.as_ref().cloned().unwrap_or_default()
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+struct StreamingFastPathCacheProvider {
+    model_id: String,
+    model_path: PathBuf,
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+impl StreamingFastPathCacheProvider {
+    fn new(model_id: impl Into<String>, model_path: PathBuf) -> Self {
+        Self {
+            model_id: model_id.into(),
+            model_path,
+        }
+    }
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+impl CacheProvider for StreamingFastPathCacheProvider {
+    fn is_model_cached(&self, model_id: &str) -> bool {
+        model_id == self.model_id && self.model_path.exists()
+    }
+
+    fn get_model_path(&self, model_id: &str) -> Option<PathBuf> {
+        self.is_model_cached(model_id)
+            .then(|| self.model_path.clone())
+    }
+
+    fn cache_dir(&self) -> PathBuf {
+        self.model_path
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.model_path.clone())
+    }
+
+    fn name(&self) -> &'static str {
+        "streaming-fast-path"
+    }
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[derive(Debug, Clone)]
+struct StreamingFastPathRoute {
+    policy_allowed: bool,
+    policy_reason: Option<String>,
+    target: String,
+    reason: String,
+    recent_abort_rate: f32,
+    sample_size: u32,
+    can_stream_locally: bool,
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn resolve_streaming_fast_path_route(
+    authority: &dyn OrchestrationAuthority,
+    stage: &StageDescriptor,
+    model_id: &str,
+    envelope: &Envelope,
+    metrics: &DeviceMetrics,
+) -> StreamingFastPathRoute {
+    let policy_decision = authority.apply_policy(&PolicyRequest {
+        stage_id: stage.name.clone(),
+        envelope: envelope.clone(),
+        metrics: metrics.clone(),
+    });
+    let policy_allowed = policy_decision.result.is_allowed();
+    let policy_transform = matches!(policy_decision.result, PolicyOutcome::Transform { .. });
+    let policy_reason = Some(policy_decision.reason.clone());
+
+    let context = StageContext {
+        stage_id: stage.name.clone(),
+        model_id: model_id.to_string(),
+        input_kind: envelope.kind.clone(),
+        metrics: metrics.clone(),
+        resource_monitor: ResourceMonitor::global(),
+        explicit_target: stage.target.clone(),
+        device_class: Some(metrics.canonical_device_class()),
+        device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
+    };
+    let resolution = authority.resolve_target_with_feedback(&context);
+    let target = match &resolution.decision.result {
+        ResolvedTarget::Device => "local".to_string(),
+        ResolvedTarget::Cloud { .. } => "cloud".to_string(),
+        ResolvedTarget::Server { endpoint } => format!("fallback:{endpoint}"),
+    };
+    let hint = resolution.local_reliability_hint.unwrap_or_default();
+    let can_stream_locally = policy_allowed
+        && matches!(resolution.decision.result, ResolvedTarget::Device)
+        && !policy_transform;
+
+    StreamingFastPathRoute {
+        policy_allowed,
+        policy_reason,
+        target,
+        reason: format!(
+            "[{}] {} (confidence: {:.0}%)",
+            resolution.decision.source,
+            resolution.decision.reason,
+            resolution.decision.confidence * 100.0
+        ),
+        recent_abort_rate: hint.recent_abort_rate,
+        sample_size: hint.sample_size,
+        can_stream_locally,
+    }
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn streaming_fast_path_events(
+    stage_name: &str,
+    model_id: &str,
+    route: &StreamingFastPathRoute,
+) -> Vec<OrchestratorEvent> {
+    let context = EventContext::default().with_model_id(model_id.to_string());
+    vec![
+        OrchestratorEvent::PolicyEvaluated {
+            stage_name: stage_name.to_string(),
+            allowed: route.policy_allowed,
+            reason: route.policy_reason.clone(),
+            context: context.clone(),
+        },
+        OrchestratorEvent::RoutingDecided {
+            stage_name: stage_name.to_string(),
+            target: route.target.clone(),
+            reason: route.reason.clone(),
+            recent_abort_rate: route.recent_abort_rate,
+            sample_size: route.sample_size,
+            context,
+        },
+    ]
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn publish_streaming_fast_path_events(
+    stage_name: &str,
+    model_id: &str,
+    route: &StreamingFastPathRoute,
+    pipeline_id: Option<uuid::Uuid>,
+    trace_id: Option<uuid::Uuid>,
+) {
+    for event in streaming_fast_path_events(stage_name, model_id, route) {
+        let telemetry = crate::telemetry::convert_orchestrator_event(&event);
+        crate::telemetry::publish_telemetry_event_in_context(telemetry, pipeline_id, trace_id);
+    }
 }
 
 fn pipeline_complete_data(
@@ -742,6 +892,8 @@ impl Pipeline {
                 metrics: metrics.clone(),
                 resource_monitor: ResourceMonitor::global(),
                 explicit_target,
+                device_class: Some(metrics.canonical_device_class()),
+                device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
             };
 
             let decision = authority.resolve_target(&stage_context);
@@ -1327,7 +1479,8 @@ impl Xybrid {
         // For streaming, we need to identify if there's an LLM stage and execute it with streaming
         // For now, support single-stage LLM pipelines
         if handle.stage_descriptors.len() == 1 {
-            let stage_name = handle.stage_descriptors[0].name.clone();
+            let stage_descriptor = handle.stage_descriptors[0].clone();
+            let stage_name = stage_descriptor.name.clone();
             if let Some(bundle_path) = handle.bundle_paths.get(&stage_name) {
                 let bundle_path = bundle_path.clone(); // Clone to avoid borrow issues
                 let metadata_path = bundle_path.join("model_metadata.json");
@@ -1345,7 +1498,46 @@ impl Xybrid {
                         metadata.execution_template,
                         xybrid_core::execution::ExecutionTemplate::Gguf { .. }
                     ) {
+                        let model_id = metadata.model_id.clone();
+                        let metrics = pipeline_metrics(&RunOptions::default());
+                        let authority = LocalAuthority::with_cache_provider(Arc::new(
+                            StreamingFastPathCacheProvider::new(
+                                model_id.clone(),
+                                bundle_path.clone(),
+                            ),
+                        ));
+                        let route = resolve_streaming_fast_path_route(
+                            &authority,
+                            &stage_descriptor,
+                            &model_id,
+                            envelope,
+                            &metrics,
+                        );
+
+                        if !route.can_stream_locally {
+                            drop(handle);
+                            return pipeline.run(envelope);
+                        }
+
                         drop(handle); // Release lock before executor call
+
+                        let trace_id = uuid::Uuid::new_v4();
+                        let pipeline_id = pipeline
+                            .name
+                            .as_ref()
+                            .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
+                        let _context_guard =
+                            crate::telemetry::TelemetryPipelineContextGuard::install(
+                                pipeline_id,
+                                Some(trace_id),
+                            );
+                        publish_streaming_fast_path_events(
+                            &stage_name,
+                            &model_id,
+                            &route,
+                            pipeline_id,
+                            Some(trace_id),
+                        );
 
                         let mut executor =
                             TemplateExecutor::with_base_path(bundle_path.to_str().unwrap_or(""));
@@ -1367,8 +1559,8 @@ impl Xybrid {
                             stages: vec![StageTiming {
                                 name: pipeline_ref.config.stages[0].model_id(),
                                 latency_ms: total_latency_ms,
-                                target: "local".to_string(),
-                                reason: "streaming".to_string(),
+                                target: route.target,
+                                reason: route.reason,
                             }],
                             total_latency_ms,
                             output_type,
@@ -1460,6 +1652,115 @@ stages:
     fn xybrid_run_pipeline_with_options_is_public_api() {
         let _method: fn(&str, &Envelope, &RunOptions) -> PipelineResult<PipelineExecutionResult> =
             Xybrid::run_pipeline_with_options;
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_route_uses_policy_and_local_routing() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let model_id = "streaming-local-model";
+        let authority = LocalAuthority::with_cache_provider(Arc::new(
+            StreamingFastPathCacheProvider::new(model_id, tempdir.path().to_path_buf()),
+        ));
+        let stage = StageDescriptor::new("llm")
+            .with_model(model_id)
+            .with_target(ExecutionTarget::Device);
+        let envelope = Envelope::new(EnvelopeKind::Text("prompt".to_string()));
+        let metrics = DeviceMetrics::default();
+
+        let route =
+            resolve_streaming_fast_path_route(&authority, &stage, model_id, &envelope, &metrics);
+
+        assert!(route.policy_allowed);
+        assert!(route.can_stream_locally);
+        assert_eq!(route.target, "local");
+        assert_eq!(route.sample_size, 0);
+        assert!(route.reason.contains("Explicit target"));
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_policy_deny_disables_local_streaming() {
+        use xybrid_core::orchestrator::policy_engine::{DefaultPolicyEngine, PolicyEngine};
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let model_id = "streaming-denied-model";
+        let mut policy_engine = DefaultPolicyEngine::new();
+        policy_engine
+            .load_policies(
+                br#"
+version: "0.1.0"
+deny_cloud_if:
+  - input.kind == "text"
+signature: "test-deny-text"
+"#
+                .to_vec(),
+            )
+            .expect("policy loads");
+        let authority = LocalAuthority::with_policy_and_cache(
+            policy_engine,
+            Arc::new(StreamingFastPathCacheProvider::new(
+                model_id,
+                tempdir.path().to_path_buf(),
+            )),
+        );
+        let stage = StageDescriptor::new("llm")
+            .with_model(model_id)
+            .with_target(ExecutionTarget::Device);
+        let envelope = Envelope::new(EnvelopeKind::Text("prompt".to_string()));
+        let metrics = DeviceMetrics::default();
+
+        let route =
+            resolve_streaming_fast_path_route(&authority, &stage, model_id, &envelope, &metrics);
+
+        assert!(!route.policy_allowed);
+        assert!(
+            !route.can_stream_locally,
+            "streaming fast path must not execute when policy denies the prompt"
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_events_emit_policy_before_routing_with_hint() {
+        let route = StreamingFastPathRoute {
+            policy_allowed: true,
+            policy_reason: Some("Local policy evaluation".to_string()),
+            target: "local".to_string(),
+            reason: "[local] default_local (confidence: 80%)".to_string(),
+            recent_abort_rate: 0.25,
+            sample_size: 4,
+            can_stream_locally: true,
+        };
+
+        let events = streaming_fast_path_events("llm", "qwen2.5-0.5b", &route);
+
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[0],
+            OrchestratorEvent::PolicyEvaluated { .. }
+        ));
+        assert!(matches!(
+            events[1],
+            OrchestratorEvent::RoutingDecided { .. }
+        ));
+
+        let telemetry = crate::telemetry::convert_orchestrator_event(&events[1]);
+        assert_eq!(telemetry.event_type, "RoutingDecided");
+        assert_eq!(telemetry.stage_name.as_deref(), Some("llm"));
+        assert_eq!(telemetry.target.as_deref(), Some("local"));
+
+        let data: serde_json::Value =
+            serde_json::from_str(telemetry.data.as_ref().expect("routing data")).unwrap();
+        assert_eq!(
+            data["local_reliability_hint"]["recent_abort_rate"].as_f64(),
+            Some(0.25)
+        );
+        assert_eq!(
+            data["local_reliability_hint"]["sample_size"].as_i64(),
+            Some(4)
+        );
+        assert_eq!(data["model_id"].as_str(), Some("qwen2.5-0.5b"));
     }
 
     #[test]

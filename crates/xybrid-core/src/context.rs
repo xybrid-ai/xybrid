@@ -9,6 +9,13 @@ use crate::device::{detect_capabilities, HardwareCapabilities, ResourceSnapshot}
 pub use crate::ir::{Envelope, EnvelopeKind};
 use crate::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
 
+/// Current canonical schema version for device-class buckets.
+///
+/// The contract is documented in the meta workspace at
+/// `docs/device-class.md`; SDK emitters include this value when routing advice
+/// is keyed by `device_class`.
+pub const DEVICE_CLASS_SCHEMA_VERSION: u16 = 1;
+
 /// Live device signals consumed by the orchestrator.
 ///
 /// Two members:
@@ -53,6 +60,40 @@ impl DeviceMetrics {
         }
         metrics.capabilities.thermal_state = snapshot.thermal_state;
         metrics
+    }
+
+    /// Best-effort canonical device-class bucket derived from the static
+    /// capability view.
+    ///
+    /// Native bindings can pass a more precise hardware family through
+    /// `StageContext::device_class` (for example `iphone-15-pro`). This fallback
+    /// intentionally avoids transient resource values so the bucket is stable
+    /// across app launches.
+    pub fn canonical_device_class(&self) -> String {
+        let platform = self.capabilities.platform.as_str();
+        let arch = normalized_arch(std::env::consts::ARCH);
+        match platform {
+            "android" => format!("android-{arch}-unknown"),
+            "ios" => format!("unknown-ios-{arch}"),
+            "macos" | "linux" | "windows" => {
+                let accelerator = if self.capabilities.has_npu {
+                    self.capabilities.npu_type.as_str()
+                } else if self.capabilities.has_gpu {
+                    self.capabilities.gpu_type.as_str()
+                } else {
+                    "cpu"
+                };
+                format!("desktop-{platform}-{arch}-{accelerator}")
+            }
+            _ => format!("unknown-{platform}-{arch}"),
+        }
+    }
+}
+
+fn normalized_arch(arch: &str) -> String {
+    match arch {
+        "aarch64" => "arm64".to_string(),
+        other => other.to_ascii_lowercase().replace('_', "-"),
     }
 }
 
@@ -142,7 +183,7 @@ impl StageDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device::{MemoryPressure, ThermalState};
+    use crate::device::{GpuType, MemoryPressure, Platform, ThermalState};
 
     #[test]
     fn default_device_metrics_carries_unknown_memory_pressure() {
@@ -191,5 +232,30 @@ mod tests {
 
         assert_eq!(merged.capabilities.battery_level, 42);
         assert_eq!(merged.capabilities.thermal_state, ThermalState::Hot);
+    }
+
+    #[test]
+    fn canonical_device_class_uses_stable_desktop_capability_bucket() {
+        let mut metrics = DeviceMetrics::default();
+        metrics.capabilities.platform = Platform::MacOS;
+        metrics.capabilities.has_npu = false;
+        metrics.capabilities.has_gpu = true;
+        metrics.capabilities.gpu_type = GpuType::Metal;
+
+        let class = metrics.canonical_device_class();
+
+        assert!(class.starts_with("desktop-macos-"));
+        assert!(class.ends_with("-metal"));
+    }
+
+    #[test]
+    fn canonical_device_class_uses_android_unknown_fallback() {
+        let mut metrics = DeviceMetrics::default();
+        metrics.capabilities.platform = Platform::Android;
+
+        let class = metrics.canonical_device_class();
+
+        assert!(class.starts_with("android-"));
+        assert!(class.ends_with("-unknown"));
     }
 }
