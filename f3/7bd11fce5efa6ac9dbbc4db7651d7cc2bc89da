@@ -1,0 +1,19 @@
+Package.swift
+  ai_agent 39
+Cargo.toml
+  ai_agent 16
+Cargo.lock
+  ai_agent 946,1667,1669,3845,4464,4491,4502,4543,4601,4612,4618,4633,4650,4680,8014,8023,9473,9475,9608,9623,9650,9715,9726,9735,9761
+bindings/kotlin/build.gradle.kts
+  ai_agent 8
+bindings/unity/package.json
+  ai_agent 3
+bindings/flutter/pubspec.yaml
+  ai_agent 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "f37bd11fce5efa6ac9dbbc4db7651d7cc2bc89da",
+  "prompts": {}
+}
