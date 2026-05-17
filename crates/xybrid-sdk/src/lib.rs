@@ -194,6 +194,7 @@ pub use xybrid_core::execution::{VoiceConfig, VoiceInfo};
 pub use xybrid_core::runtime_adapter::types::{
     GenerationConfig, PartialToken, StreamingCallback, StreamingError,
 };
+pub use xybrid_core::runtime_adapter::BackendChoice;
 
 // Backwards compatibility re-exports
 #[doc(hidden)]

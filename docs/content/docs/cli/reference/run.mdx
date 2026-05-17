@@ -23,6 +23,7 @@ xybrid run --pipeline <name> --dry-run
 | `--input-text` | | Text input for text-based models (LLM, TTS) |
 | `--input-audio` | | Path to an audio file for audio-based models (ASR) — WAV, MP3, OGG, or FLAC |
 | `--target` | | Force model format (`onnx`, `coreml`, `tflite`); auto-detected if omitted |
+| `--backend` | | Force a local generation or embedding backend (`auto`, `mlx`, `llamacpp`, `mistral`) |
 | `--dry-run` | | Simulate routing without execution |
 | `--policy` | | Load an additional policy bundle |
 | `--trace` | | Enable execution tracing with flame graph + LLM metrics output |
@@ -35,6 +36,13 @@ xybrid run --pipeline <name> --dry-run
 3. Prints stage latency and routing summaries
 
 In dry-run mode, the CLI prints routing decisions and simulated outputs without invoking adapters.
+
+For registry-backed local LLM stages, `--backend mlx` requests the
+SafeTensors artifact variant and requires an Apple Silicon build with the
+`llm-mlx-runtime` feature available. `--backend llamacpp` requests the GGUF
+variant for LLM stages. Registry embedding stages currently reject explicit
+non-MLX local backends because no non-MLX embedding runtime is exposed through
+the local selector.
 
 ## Examples
 
@@ -73,6 +81,16 @@ Output shows routing decisions without actual execution:
 ```bash
 xybrid run --pipeline hiiipe --policy ./policies/strict-privacy.yaml
 ```
+
+### Force MLX SafeTensors
+
+```bash
+xybrid run --model qwen3-4b --backend mlx --input-text "Summarize this."
+```
+
+Use this when a registry model publishes both GGUF and MLX SafeTensors
+variants and you want the MLX runtime path instead of automatic local backend
+selection.
 
 ## Sample Output
 

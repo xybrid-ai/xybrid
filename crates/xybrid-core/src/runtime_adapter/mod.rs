@@ -101,7 +101,9 @@ pub mod mistral;
 #[cfg(feature = "llm-llamacpp")]
 pub mod llama_cpp;
 
-// MLX backend (feature-gated, Apple Silicon runtime via `llm-mlx-runtime`).
+// MLX backend (feature-gated, Apple Silicon only via vendor/mlx-apple/mlx.xcframework).
+// The `llm-mlx` tier compiles config parsing and selector/error surfaces without
+// linking MLX; `llm-mlx-runtime` enables the Apple runtime forward pass.
 #[cfg(feature = "llm-mlx")]
 pub mod mlx;
 

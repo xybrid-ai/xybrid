@@ -155,7 +155,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("🖼️  Vision output (unexpected for MNIST)");
         }
         EnvelopeKind::TokenIds(ids) => {
-            println!("🔢 Token ID output (unexpected for MNIST): {} ids", ids.len());
+            println!(
+                "🔢 Token ID output (unexpected for MNIST): {} ids",
+                ids.len()
+            );
         }
     }
 

@@ -228,6 +228,13 @@ class XybridModel {
 
   XybridModel._(this.inner);
 
+  /// Whether this model supports native token-by-token streaming.
+  ///
+  /// Returns `true` for token-streaming LLM models such as GGUF and
+  /// runtime-ready MLX SafeTensors models, and `false` for batch-only model
+  /// types or non-linking MLX skeleton builds.
+  bool supportsTokenStreaming() => inner.supportsTokenStreaming();
+
   /// Run inference with the given envelope.
   ///
   /// Returns [XybridResult] containing output text, audio, or embeddings

@@ -772,9 +772,10 @@ impl FfiModel {
 
     /// Check if this model supports true token-by-token streaming.
     ///
-    /// Returns `true` for LLM models (GGUF), `false` for other model types.
+    /// Returns `true` for token-streaming LLM models (GGUF or runtime-ready
+    /// MLX SafeTensors), `false` for other model types or non-linking MLX
+    /// skeleton builds.
     #[frb(sync)]
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     pub fn supports_token_streaming(&self) -> bool {
         self.0.supports_token_streaming()
     }

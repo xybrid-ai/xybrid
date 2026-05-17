@@ -7,7 +7,7 @@ set -euo pipefail
 #   - url: Downloads directly from URLs (GitHub, HuggingFace, etc.)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODELS_DIR="$SCRIPT_DIR/fixtures/models"
+MODELS_DIR="${XYBRID_MODELS_DIR:-$SCRIPT_DIR/fixtures/models}"
 MANIFEST="$MODELS_DIR/models.json"
 REGISTRY_API="https://registry.xybrid.dev"
 
@@ -41,7 +41,86 @@ list_models() {
     echo -e "${BLUE}Direct URL models:${NC}"
     jq -r '.models | to_entries[] | select(.value.source == "url") | "  \(.key) (\(.value.size_mb)MB) - \(.value.description)"' "$MANIFEST"
     echo ""
+    echo -e "${BLUE}Staged models (not downloaded by --all):${NC}"
+    jq -r '
+      .models
+      | to_entries[]
+      | select(.value.source == "staged")
+      | "  \(.key) (\(.value.status // "staged"))"
+        + (if .value.test_env_var then " env: \(.value.test_env_var)" else "" end)
+        + " - \(.value.description)"
+    ' "$MANIFEST"
+    echo ""
     echo "Usage: $0 [model-name|--all|--list|--check]"
+}
+
+staged_required_files() {
+    local model="$1"
+    jq -r ".models[\"$model\"].required_files[]?" "$MANIFEST"
+}
+
+staged_missing_files() {
+    local model="$1"
+    local model_dir="$2"
+    local missing=""
+    local file
+
+    append_missing() {
+        local name="$1"
+        if [ -n "$missing" ]; then
+            missing="$missing, $name"
+        else
+            missing="$name"
+        fi
+    }
+
+    while IFS= read -r file; do
+        if [ -n "$file" ] && [ ! -f "$model_dir/$file" ]; then
+            append_missing "$file"
+        fi
+    done < <(staged_required_files "$model")
+
+    local index="$model_dir/model.safetensors.index.json"
+    if [ -f "$index" ]; then
+        local shards
+        if ! shards=$(jq -r '.weight_map // empty | values[]?' "$index" 2>/dev/null); then
+            append_missing "model.safetensors.index.json (invalid)"
+            echo "$missing"
+            return
+        fi
+        if [ -z "$shards" ]; then
+            append_missing "model.safetensors.index.json weight_map"
+        fi
+        while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+                /*|..|../*|*/..|*/../*)
+                    append_missing "unsafe shard path: $file"
+                    continue
+                    ;;
+            esac
+            if [ ! -f "$model_dir/$file" ]; then
+                append_missing "$file"
+            fi
+        done <<< "$shards"
+    fi
+
+    echo "$missing"
+}
+
+print_staged_fixture_hint() {
+    local model="$1"
+    local env_var
+    local required
+    env_var=$(jq -r ".models[\"$model\"].test_env_var // empty" "$MANIFEST")
+    required=$(jq -r ".models[\"$model\"].required_files // [] | join(\", \")" "$MANIFEST")
+
+    if [ -n "$env_var" ]; then
+        echo "  Test env: $env_var=/path/to/$model"
+    fi
+    if [ -n "$required" ]; then
+        echo "  Required files: $required"
+    fi
 }
 
 # Check which models are present
@@ -53,11 +132,50 @@ check_models() {
     models=$(jq -r '.models | keys[]' "$MANIFEST")
     local missing=0
     local present=0
+    local staged_present=0
+    local staged_unset=0
+    local staged_incomplete=0
 
     for model in $models; do
         local model_dir="$MODELS_DIR/$model"
         local source
         source=$(jq -r ".models[\"$model\"].source" "$MANIFEST")
+
+        if [ "$source" = "staged" ]; then
+            local env_var
+            env_var=$(jq -r ".models[\"$model\"].test_env_var // empty" "$MANIFEST")
+            if [ -n "$env_var" ]; then
+                local staged_dir="${!env_var:-}"
+                if [ -n "$staged_dir" ]; then
+                    local missing_files
+                    missing_files=$(staged_missing_files "$model" "$staged_dir")
+                    if [ -z "$missing_files" ]; then
+                        echo -e "  ${GREEN}✓${NC} $model [staged] via $env_var=$staged_dir"
+                        staged_present=$((staged_present + 1))
+                    else
+                        echo -e "  ${YELLOW}•${NC} $model [staged] via $env_var=$staged_dir (missing: $missing_files)"
+                        staged_incomplete=$((staged_incomplete + 1))
+                    fi
+                elif [ -d "$model_dir" ]; then
+                    local missing_files
+                    missing_files=$(staged_missing_files "$model" "$model_dir")
+                    if [ -z "$missing_files" ]; then
+                        echo -e "  ${GREEN}✓${NC} $model [staged] via local fixture $model_dir"
+                        staged_present=$((staged_present + 1))
+                    else
+                        echo -e "  ${YELLOW}•${NC} $model [staged] via local fixture $model_dir (missing: $missing_files)"
+                        staged_incomplete=$((staged_incomplete + 1))
+                    fi
+                else
+                    echo -e "  ${YELLOW}•${NC} $model [staged] set $env_var=/path/to/$model"
+                    staged_unset=$((staged_unset + 1))
+                fi
+            else
+                echo -e "  ${YELLOW}•${NC} $model [staged] (not downloaded by --all)"
+                staged_unset=$((staged_unset + 1))
+            fi
+            continue
+        fi
 
         # Check for model.onnx or model_metadata.json
         if [ -d "$model_dir" ] && { [ -f "$model_dir/model_metadata.json" ] || [ -f "$model_dir/model.onnx" ]; }; then
@@ -71,9 +189,12 @@ check_models() {
 
     echo ""
     if [ $missing -eq 0 ]; then
-        echo -e "${GREEN}All $present models present!${NC}"
+        echo -e "${GREEN}All $present downloadable models present!${NC}"
     else
         echo -e "${YELLOW}$missing model(s) missing, $present present. Run '$0 --all' to download.${NC}"
+    fi
+    if [ $staged_present -gt 0 ] || [ $staged_unset -gt 0 ] || [ $staged_incomplete -gt 0 ]; then
+        echo -e "${BLUE}Staged fixtures:${NC} $staged_present ready, $staged_unset unset, $staged_incomplete incomplete"
     fi
 }
 
@@ -409,6 +530,14 @@ download_model() {
         url)
             download_from_url "$model_name"
             ;;
+        staged)
+            local notes
+            notes=$(jq -r ".models[\"$model_name\"].notes // \"This fixture is staged and not downloadable yet.\"" "$MANIFEST")
+            echo -e "${YELLOW}$model_name is staged and is not downloaded by this script.${NC}"
+            print_staged_fixture_hint "$model_name"
+            echo "  $notes"
+            return 1
+            ;;
         *)
             echo -e "${RED}Unknown source type: $source${NC}"
             return 1
@@ -422,7 +551,7 @@ download_all() {
     echo ""
 
     local models
-    models=$(jq -r '.models | keys[]' "$MANIFEST")
+    models=$(jq -r '.models | to_entries[] | select(.value.source != "staged") | .key' "$MANIFEST")
     local failed=0
     local succeeded=0
 
@@ -471,6 +600,7 @@ case "${1:-}" in
         echo "Download sources:"
         echo "  registry  - Downloads from xybrid registry (registry.xybrid.dev)"
         echo "  url       - Downloads directly from URLs"
+        echo "  staged    - Local/manual fixture; skipped by --all and surfaced through its test env var"
         echo ""
         echo "Examples:"
         echo "  $0 --list           # List available models"

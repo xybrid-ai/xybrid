@@ -80,6 +80,140 @@ mod tests {
     }
 
     #[test]
+    fn test_mlx_manifest_entries_are_staged_until_real_fixtures_ship() {
+        let manifest_path = models_dir().join("models.json");
+        let raw = std::fs::read_to_string(&manifest_path).unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let models = manifest
+            .get("models")
+            .and_then(|m| m.as_object())
+            .expect("models.json must contain a models object");
+
+        for id in [
+            "qwen3-4b-mlx",
+            "gemma4-2b",
+            "lfm2-350m-bf16",
+            "lfm2.5-1.2b-instruct-mlx",
+            "nomic-embed-text-v1.5",
+        ] {
+            let entry = models.get(id).unwrap_or_else(|| panic!("{id} missing"));
+            assert_eq!(
+                entry.get("source").and_then(|v| v.as_str()),
+                Some("staged"),
+                "{id} must not be listed as a downloadable registry fixture before real MLX fixture staging ships"
+            );
+            assert_eq!(
+                entry.get("feature_gate").and_then(|v| v.as_str()),
+                Some("llm-mlx-runtime"),
+                "{id} requires the runtime feature, not the skeleton-only llm-mlx gate"
+            );
+            let expected_status = match id {
+                "qwen3-4b-mlx" => "runtime",
+                "gemma4-2b"
+                | "lfm2-350m-bf16"
+                | "lfm2.5-1.2b-instruct-mlx"
+                | "nomic-embed-text-v1.5" => "partial-runtime",
+                _ => unreachable!("unexpected MLX fixture id"),
+            };
+            let expected_env_var = match id {
+                "qwen3-4b-mlx" => "XYBRID_MLX_QWEN_4B_DIR",
+                "gemma4-2b" => "XYBRID_MLX_GEMMA_DIR",
+                "lfm2-350m-bf16" => "XYBRID_MLX_LFM_DIR",
+                "lfm2.5-1.2b-instruct-mlx" => "XYBRID_MLX_LFM25_DIR",
+                "nomic-embed-text-v1.5" => "XYBRID_MLX_NOMIC_DIR",
+                _ => unreachable!("unexpected MLX fixture id"),
+            };
+            assert_eq!(
+                entry.get("status").and_then(|v| v.as_str()),
+                Some(expected_status),
+                "{id} status must reflect the current MLX runtime coverage"
+            );
+            assert_eq!(
+                entry.get("test_env_var").and_then(|v| v.as_str()),
+                Some(expected_env_var),
+                "{id} must declare the env var used by the real MLX runtime tests"
+            );
+            let required_files = entry
+                .get("required_files")
+                .and_then(|v| v.as_array())
+                .unwrap_or_else(|| panic!("{id} must list required staged fixture files"));
+            for file in ["config.json", "tokenizer.json"] {
+                assert!(
+                    required_files
+                        .iter()
+                        .any(|required| required.as_str() == Some(file)),
+                    "{id} must require {file}"
+                );
+            }
+            let has_single_weights = required_files
+                .iter()
+                .any(|required| required.as_str() == Some("model.safetensors"));
+            let has_indexed_weights = required_files
+                .iter()
+                .any(|required| required.as_str() == Some("model.safetensors.index.json"));
+            assert!(
+                has_single_weights || has_indexed_weights,
+                "{id} must require either model.safetensors or model.safetensors.index.json"
+            );
+            let platforms = entry
+                .get("platforms")
+                .and_then(|v| v.as_array())
+                .unwrap_or_else(|| panic!("{id} must list supported runtime platforms"));
+            assert!(
+                platforms
+                    .iter()
+                    .any(|platform| platform.as_str() == Some("macos")),
+                "{id} must remain listed for the macOS MLX runtime"
+            );
+            assert!(
+                !platforms
+                    .iter()
+                    .any(|platform| platform.as_str() == Some("ios")),
+                "{id} must not advertise iOS MLX runtime readiness while iOS slices are skeleton-only"
+            );
+            assert!(
+                entry
+                    .get("notes")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|notes| notes.contains("Not downloaded by --all")
+                        && notes.contains("iOS remains skeleton-only")),
+                "{id} notes must make staged download and iOS skeleton-only behavior explicit"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mlx_staged_fixture_env_vars_are_unambiguous() {
+        let manifest_path = models_dir().join("models.json");
+        let raw = std::fs::read_to_string(&manifest_path).unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let models = manifest
+            .get("models")
+            .and_then(|m| m.as_object())
+            .expect("models.json must contain a models object");
+
+        let mut seen = std::collections::HashMap::new();
+        for id in [
+            "qwen3-4b-mlx",
+            "gemma4-2b",
+            "lfm2-350m-bf16",
+            "lfm2.5-1.2b-instruct-mlx",
+            "nomic-embed-text-v1.5",
+        ] {
+            let env_var = models
+                .get(id)
+                .and_then(|entry| entry.get("test_env_var"))
+                .and_then(|value| value.as_str())
+                .unwrap_or_else(|| panic!("{id} must declare test_env_var"));
+            if let Some(previous_id) = seen.insert(env_var, id) {
+                panic!(
+                    "{id} and {previous_id} share {env_var}; staged MLX benchmark fixtures must not resolve through ambiguous env vars"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_input_dir_exists() {
         assert!(input_dir().exists());
     }

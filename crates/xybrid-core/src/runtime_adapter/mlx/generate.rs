@@ -14,18 +14,21 @@
 //!   build, token append/emit, sampler dispatch, stop-condition checks,
 //!   telemetry.  Unit-testable without MLX.
 //! - **Arch builders (`arch/qwen35::runtime` etc.)** — transformer forward
-//!   pass.  Gated on `llm-mlx-runtime` + Apple because they touch
+//!   pass. Gated on `llm-mlx-runtime` + Apple Silicon macOS because they touch
 //!   `xybrid_mlx::MlxArray`.
 //!
-//! When `llm-mlx-runtime` is off (or on a non-Apple target), the forward-
-//! pass entry returns [`MlxLlmError::NotImplemented`] — the orchestration
-//! remains fully covered by unit tests (sampler, chat-template, stop-
-//! sequence logic) and the error points the caller at the missing feature
-//! gate.
+//! When `llm-mlx-runtime` is off (or on a non-runtime target), the forward-pass
+//! entry returns [`MlxLlmError::NotImplemented`] as a build-gate error: the
+//! orchestration remains fully covered by unit tests (sampler, chat-template,
+//! stop-sequence logic), and the error points the caller at the missing runtime
+//! feature.
 
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, StreamingCallback,
 };
+use crate::runtime_adapter::llm_telemetry::{compute_streaming_fields, StreamingTelemetryFields};
+
+use std::time::Instant;
 
 use super::chat_template::RenderOptions;
 use super::model::{MlxLlmAdapter, MlxLlmError, MlxLlmResult};
@@ -126,24 +129,29 @@ pub fn generate_tokens<'cb>(
     // unit tests that construct a mock adapter.
     #[cfg(not(all(
         feature = "llm-mlx-runtime",
-        any(target_os = "macos", target_os = "ios")
+        target_os = "macos",
+        target_arch = "aarch64"
     )))]
     {
         let _ = (params, callback, eos_tokens, max_decode, arch);
         Err(MlxLlmError::NotImplemented {
-            feature: "MLX forward pass (build with `--features llm-mlx-runtime` on an Apple host, \
-                 and fetch mlx.xcframework via tools/scripts/fetch-mlx-xcframework.sh)",
-            story: "US-014",
+            feature:
+                "MLX forward pass (build with `--features llm-mlx-runtime` on Apple Silicon macOS, \
+                 then materialize mlx.xcframework via tools/scripts/fetch-mlx-xcframework.sh \
+                 or tools/scripts/build-local-mlx-xcframework.sh)",
+            story: "llm-mlx-runtime",
         })
     }
 
     #[cfg(all(
         feature = "llm-mlx-runtime",
-        any(target_os = "macos", target_os = "ios")
+        target_os = "macos",
+        target_arch = "aarch64"
     ))]
     {
         runtime::generate_runtime(
             adapter,
+            tokenizer,
             arch,
             &prompt_ids,
             max_decode,
@@ -170,22 +178,143 @@ fn resolve_eos_tokens(tokenizer: &tokenizers::Tokenizer) -> Vec<i64> {
     out
 }
 
-/// The MLX-linked decode loop. Only compiled when the xcframework is
-/// linkable (`llm-mlx-runtime` on an Apple target) — everything below
-/// touches `xybrid_mlx::MlxArray` either directly or via the arch builder.
+fn token_id_to_u32(label: &str, token_id: i64) -> MlxLlmResult<u32> {
+    u32::try_from(token_id).map_err(|_| {
+        MlxLlmError::ConfigInvalid(format!(
+            "{label} token id {token_id} is outside the tokenizer u32 id range"
+        ))
+    })
+}
+
+fn mlx_streaming_fields(
+    start: Instant,
+    chunk_timestamps: &[Instant],
+    prompt_token_count: usize,
+    tokens_generated: usize,
+) -> StreamingTelemetryFields {
+    compute_streaming_fields(
+        start,
+        chunk_timestamps,
+        prompt_token_count,
+        tokens_generated,
+    )
+}
+
+#[cfg(any(
+    test,
+    all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    )
+))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeStreamPreference {
+    Gpu,
+    CpuFallback,
+}
+
+#[cfg(any(
+    test,
+    all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    )
+))]
+fn runtime_stream_preference(gpu_available: bool) -> RuntimeStreamPreference {
+    if gpu_available {
+        RuntimeStreamPreference::Gpu
+    } else {
+        RuntimeStreamPreference::CpuFallback
+    }
+}
+
+#[cfg(any(
+    test,
+    all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    )
+))]
+fn token_count_to_i32(label: &str, len: usize) -> MlxLlmResult<i32> {
+    i32::try_from(len).map_err(|_| {
+        MlxLlmError::ConfigInvalid(format!(
+            "{label} length ({len}) exceeds MLX i32 shape limit"
+        ))
+    })
+}
+
+#[cfg(any(
+    test,
+    all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    )
+))]
+fn token_batch_shape(label: &str, len: usize) -> MlxLlmResult<[i32; 2]> {
+    Ok([1, token_count_to_i32(label, len)?])
+}
+
+#[cfg(any(
+    test,
+    all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    )
+))]
+fn position_offset_for_history_len(len: usize) -> MlxLlmResult<i32> {
+    token_count_to_i32("kv-cache position offset", len.saturating_sub(1))
+}
+
+#[cfg(any(
+    test,
+    all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    )
+))]
+fn decode_forward_input_without_kv_cache(token_history: &[i64]) -> MlxLlmResult<(&[i64], i32)> {
+    Ok((token_history, 0))
+}
+
+#[cfg(any(
+    test,
+    all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    )
+))]
+fn decode_forward_input_with_kv_cache(token_history: &[i64]) -> MlxLlmResult<(&[i64], i32)> {
+    let last = token_history.len().saturating_sub(1);
+    Ok((
+        &token_history[last..],
+        position_offset_for_history_len(token_history.len())?,
+    ))
+}
+
+/// The MLX-linked decode loop. Only compiled when the xcframework is linkable
+/// (`llm-mlx-runtime` on Apple Silicon macOS) — everything below touches
+/// `xybrid_mlx::MlxArray` either directly or via the arch builder.
 #[cfg(all(
     feature = "llm-mlx-runtime",
-    any(target_os = "macos", target_os = "ios")
+    target_os = "macos",
+    target_arch = "aarch64"
 ))]
 mod runtime {
     use super::super::model::ModelArchitecture;
     use super::*;
     use crate::runtime_adapter::types::PartialToken;
-    use std::time::Instant;
-    use tracing::{debug, info};
+    use tracing::{debug, info, warn};
 
     pub(super) fn generate_runtime<'cb>(
         adapter: &MlxLlmAdapter,
+        tokenizer: &tokenizers::Tokenizer,
         arch: ModelArchitecture,
         prompt_ids: &[i64],
         max_decode: usize,
@@ -193,44 +322,27 @@ mod runtime {
         mut params: GenerateParams<'_>,
         mut callback: Option<StreamingCallback<'cb>>,
     ) -> MlxLlmResult<GenerationOutput> {
-        let model_dir = adapter.model_dir().ok_or(MlxLlmError::NotLoaded)?;
-        let weights_path = model_dir.join("model.safetensors");
-
         let start = Instant::now();
-        let mut first_token_time: Option<Instant> = None;
-        let mut inter_chunk_ms: Vec<u32> = Vec::new();
-        let mut last_tick = Instant::now();
+        let mut chunk_timestamps: Vec<Instant> = Vec::new();
 
-        // Currently only Qwen 3.5 has a completed forward pass. Gemma 4 /
-        // LFM 3.5 builders return NotImplemented at their attention/FFN
-        // boundary; those land in follow-up stories.
-        match arch {
-            ModelArchitecture::Qwen35 => {}
+        let mut forward = match arch {
+            ModelArchitecture::Qwen35 => {
+                let (cfg, weights) = adapter.qwen3_runtime_state()?;
+                ForwardRuntime::Qwen35 { cfg, weights }
+            }
             ModelArchitecture::Gemma4 => {
-                return Err(MlxLlmError::NotImplemented {
-                    feature: "Gemma 4 generation (attention boundary still open in arch/gemma4)",
-                    story: "US-012 follow-up",
-                });
+                let (cfg, weights) = adapter.gemma4_runtime_state()?;
+                ForwardRuntime::Gemma4 { cfg, weights }
             }
             ModelArchitecture::Lfm35 => {
-                return Err(MlxLlmError::NotImplemented {
-                    feature:
-                        "LFM 3.5 generation (conv/attention boundary still open in arch/lfm35)",
-                    story: "US-013 follow-up",
-                });
+                let (cfg, weights) = adapter.lfm35_runtime_state()?;
+                ForwardRuntime::Lfm35 { cfg, weights }
             }
-        }
+        };
 
-        // Build weights + config from the bundle. Each generate() call
-        // rebuilds the weight handles — this is cheap on MLX because the
-        // underlying MTLBuffer / safetensors data hits the FS cache and the
-        // MlxArray constructors are reference-bumps. A future optimisation
-        // keeps the built weights on the adapter; we defer that to avoid
-        // caching concerns on the first pass.
-        let qwen_cfg = super::super::arch::qwen35::Qwen3Config::from_model_dir(model_dir)?;
-        let weights = super::super::arch::qwen35::runtime::build(&qwen_cfg, &weights_path)?;
-
-        let stream = None; // default CPU stream — GPU dispatch is a separate knob
+        let runtime_stream = default_runtime_stream()?;
+        let stream = Some(&runtime_stream);
+        forward.reset_kv_cache();
 
         // Generated token history: starts with the prompt, appended as we
         // decode so the sampler's repetition_penalty sees the whole history.
@@ -248,18 +360,10 @@ mod runtime {
 
         // Prefill: run the forward pass on the full prompt, then slice the
         // last token's logits.
-        let prefill_ids = xybrid_mlx::MlxArray::from_slice_i32(
-            &prompt_ids.iter().map(|&t| t as i32).collect::<Vec<i32>>(),
-            &[1, prompt_ids.len() as i32],
-        )?;
-        let logits = super::super::arch::qwen35::runtime::forward(
-            &qwen_cfg,
-            &weights,
-            &prefill_ids,
-            0,
-            stream,
-        )?;
-        let mut next_logits_row = last_token_logits(&logits, qwen_cfg.vocab_size)?;
+        let prefill_shape = token_batch_shape("prefill prompt", prompt_ids.len())?;
+        let prefill_ids = xybrid_mlx::MlxArray::from_slice_i64(prompt_ids, &prefill_shape)?;
+        let logits = forward.forward(&prefill_ids, 0, stream)?;
+        let mut next_logits_row = last_token_logits(&logits, forward.vocab_size(), stream)?;
 
         for step in 0..max_decode {
             let next_token = params
@@ -272,25 +376,15 @@ mod runtime {
             // Decode the new token to text. HuggingFace tokenizers return
             // bytes for partial-UTF-8 sequences; we tolerate that by falling
             // back to the replacement character.
-            let token_text = adapter
-                .tokenizer()
-                .unwrap()
-                .decode(&[next_token as u32], true)
+            let token_id = token_id_to_u32("generated", next_token)?;
+            let token_text = tokenizer
+                .decode(&[token_id], true)
                 .unwrap_or_else(|_| "\u{FFFD}".to_string());
             cumulative_text.push_str(&token_text);
 
             // Timing: first-token latency + inter-chunk gaps.
             let now = Instant::now();
-            if first_token_time.is_none() {
-                first_token_time = Some(now);
-            } else {
-                let dt = now
-                    .duration_since(last_tick)
-                    .as_millis()
-                    .min(u32::MAX as u128) as u32;
-                inter_chunk_ms.push(dt);
-            }
-            last_tick = now;
+            chunk_timestamps.push(now);
 
             // EOS check.
             if eos_tokens.contains(&next_token) {
@@ -332,34 +426,30 @@ mod runtime {
                     .with_token_id(next_token),
             )?;
 
-            // Decode step: forward the single new token.
-            let one_tok = xybrid_mlx::MlxArray::from_slice_i32(&[next_token as i32], &[1, 1])?;
-            let position_offset = (prompt_ids.len() + step) as i32;
-            let step_logits = super::super::arch::qwen35::runtime::forward(
-                &qwen_cfg,
-                &weights,
-                &one_tok,
-                position_offset,
-                stream,
-            )?;
-            next_logits_row = last_token_logits(&step_logits, qwen_cfg.vocab_size)?;
+            // Decode step: runtime architectures reset their resident
+            // attention/conv caches before prefill, then only forward the
+            // newest token at the absolute position.
+            let (decode_ids, position_offset) = if forward.uses_kv_cache() {
+                decode_forward_input_with_kv_cache(&all_tokens)?
+            } else {
+                decode_forward_input_without_kv_cache(&all_tokens)?
+            };
+            let decode_shape = token_batch_shape("decode input", decode_ids.len())?;
+            let decode_tok = xybrid_mlx::MlxArray::from_slice_i64(decode_ids, &decode_shape)?;
+            let step_logits = forward.forward(&decode_tok, position_offset, stream)?;
+            next_logits_row = last_token_logits(&step_logits, forward.vocab_size(), stream)?;
         }
 
-        let elapsed = start.elapsed();
-        let generation_time_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
         let tokens_generated = generated.len();
-        let tokens_per_second = if elapsed.as_secs_f32() > 0.0 {
-            tokens_generated as f32 / elapsed.as_secs_f32()
-        } else {
-            0.0
-        };
-        let ttft_ms = first_token_time
-            .map(|t| t.duration_since(start).as_millis().min(u64::MAX as u128) as u64);
-        let (mean_itl_ms, p95_itl_ms) = summarise_inter_chunk(&inter_chunk_ms);
+        let fields =
+            mlx_streaming_fields(start, &chunk_timestamps, prompt_ids.len(), tokens_generated);
 
         info!(
             model_id = adapter.model_id_or_default(),
-            tokens_generated, tokens_per_second, finish_reason, "mlx.generate.done"
+            tokens_generated,
+            tokens_per_second = fields.tokens_per_second,
+            finish_reason,
+            "mlx.generate.done"
         );
         debug!(
             prefill_tokens = prompt_ids.len(),
@@ -373,27 +463,107 @@ mod runtime {
         Ok(GenerationOutput {
             text: cumulative_text,
             tokens_generated,
-            generation_time_ms,
-            tokens_per_second,
+            generation_time_ms: fields.generation_time_ms,
+            tokens_per_second: fields.tokens_per_second,
             finish_reason: finish_reason.to_string(),
-            ttft_ms,
-            mean_itl_ms,
-            p95_itl_ms,
-            emitted_chunks: Some(tokens_generated as u32),
-            inter_chunk_ms,
-            decode_tps: None,
-            prefill_tps: None,
+            ttft_ms: fields.ttft_ms,
+            mean_itl_ms: fields.mean_itl_ms,
+            p95_itl_ms: fields.p95_itl_ms,
+            emitted_chunks: fields.emitted_chunks,
+            inter_chunk_ms: fields.inter_chunk_ms,
+            decode_tps: fields.decode_tps,
+            prefill_tps: fields.prefill_tps,
         })
+    }
+
+    enum ForwardRuntime<'a> {
+        Qwen35 {
+            cfg: &'a super::super::arch::qwen35::Qwen3Config,
+            weights: std::sync::MutexGuard<'a, super::super::arch::qwen35::runtime::Qwen35Weights>,
+        },
+        Gemma4 {
+            cfg: &'a super::super::arch::gemma4::Gemma4Config,
+            weights: std::sync::MutexGuard<'a, super::super::arch::gemma4::runtime::Gemma4Weights>,
+        },
+        Lfm35 {
+            cfg: &'a super::super::arch::lfm35::Lfm35Config,
+            weights: std::sync::MutexGuard<'a, super::super::arch::lfm35::runtime::Lfm35Weights>,
+        },
+    }
+
+    impl ForwardRuntime<'_> {
+        fn vocab_size(&self) -> usize {
+            match self {
+                Self::Qwen35 { cfg, .. } => cfg.vocab_size,
+                Self::Gemma4 { cfg, .. } => cfg.vocab_size,
+                Self::Lfm35 { cfg, .. } => cfg.vocab_size,
+            }
+        }
+
+        fn reset_kv_cache(&mut self) {
+            match self {
+                Self::Qwen35 { weights, .. } => weights.reset_kv_cache(),
+                Self::Gemma4 { weights, .. } => weights.reset_kv_cache(),
+                Self::Lfm35 { weights, .. } => weights.reset_kv_cache(),
+            }
+        }
+
+        fn uses_kv_cache(&self) -> bool {
+            matches!(
+                self,
+                Self::Qwen35 { .. } | Self::Gemma4 { .. } | Self::Lfm35 { .. }
+            )
+        }
+
+        fn forward(
+            &mut self,
+            input_ids: &xybrid_mlx::MlxArray,
+            position_offset: i32,
+            stream: Option<&xybrid_mlx::MlxStream>,
+        ) -> MlxLlmResult<xybrid_mlx::MlxArray> {
+            match self {
+                Self::Qwen35 { cfg, weights } => super::super::arch::qwen35::runtime::forward(
+                    cfg,
+                    weights,
+                    input_ids,
+                    position_offset,
+                    stream,
+                ),
+                Self::Gemma4 { cfg, weights } => super::super::arch::gemma4::runtime::forward(
+                    cfg,
+                    weights,
+                    input_ids,
+                    position_offset,
+                    stream,
+                ),
+                Self::Lfm35 { cfg, weights } => super::super::arch::lfm35::runtime::forward(
+                    cfg,
+                    weights,
+                    input_ids,
+                    position_offset,
+                    stream,
+                ),
+            }
+        }
     }
 
     /// Extract the last-position logits from a `[batch=1, seq_len, vocab]`
     /// tensor as a plain `Vec<f32>`. The sampler works on CPU-side probs, so
     /// this is the handoff point between MLX and the generate loop.
-    fn last_token_logits(logits: &xybrid_mlx::MlxArray, vocab: usize) -> MlxLlmResult<Vec<f32>> {
+    fn last_token_logits(
+        logits: &xybrid_mlx::MlxArray,
+        vocab: usize,
+        stream: Option<&xybrid_mlx::MlxStream>,
+    ) -> MlxLlmResult<Vec<f32>> {
+        let logits = if logits.dtype()? == xybrid_mlx::MlxDtype::F32 {
+            logits.clone()
+        } else {
+            xybrid_mlx::ops::cast(logits, xybrid_mlx::MlxDtype::F32, stream)?
+        };
         // Flattened readback. The logits tensor is `[1, T, V]`, and we want
         // the last `V` slice. For T=1 (decode step) this is just to_vec_f32;
         // for T>1 (prefill) we take the tail.
-        let data = logits.to_vec_f32()?;
+        let data = logits.to_vec_f32_on_stream(stream)?;
         if data.len() < vocab {
             return Err(MlxLlmError::ConfigInvalid(format!(
                 "logits read back {} elements, expected at least {}",
@@ -417,16 +587,24 @@ mod runtime {
         Ok(())
     }
 
-    fn summarise_inter_chunk(gaps: &[u32]) -> (Option<f32>, Option<u32>) {
-        if gaps.is_empty() {
-            return (None, None);
+    fn default_runtime_stream() -> MlxLlmResult<xybrid_mlx::MlxStream> {
+        match xybrid_mlx::MlxStream::default_gpu() {
+            Ok(stream) => {
+                debug!(
+                    preference = ?super::runtime_stream_preference(true),
+                    "mlx.generate.stream"
+                );
+                Ok(stream)
+            }
+            Err(gpu_err) => {
+                warn!(
+                    error = %gpu_err,
+                    preference = ?super::runtime_stream_preference(false),
+                    "mlx.generate.gpu_stream_unavailable_falling_back_to_cpu"
+                );
+                xybrid_mlx::MlxStream::default_cpu().map_err(Into::into)
+            }
         }
-        let mean = gaps.iter().map(|&g| g as f64).sum::<f64>() / gaps.len() as f64;
-        let mut sorted: Vec<u32> = gaps.to_vec();
-        sorted.sort_unstable();
-        let p95_idx = ((sorted.len() as f32) * 0.95).ceil() as usize;
-        let p95 = sorted.get(p95_idx.min(sorted.len() - 1)).copied();
-        (Some(mean as f32), p95)
     }
 }
 
@@ -475,6 +653,110 @@ mod tests {
         }
     }
 
+    #[test]
+    fn mlx_streaming_fields_derives_prefill_and_decode_tps() {
+        use std::time::{Duration, Instant};
+
+        let start = Instant::now();
+        let chunks = [
+            start + Duration::from_millis(50),
+            start + Duration::from_millis(75),
+            start + Duration::from_millis(100),
+        ];
+
+        let fields = super::mlx_streaming_fields(start, &chunks, 20, 3);
+
+        assert_eq!(fields.ttft_ms, Some(50));
+        assert_eq!(fields.mean_itl_ms, Some(25.0));
+        assert_eq!(fields.p95_itl_ms, Some(25));
+        assert_eq!(fields.decode_tps, Some(40.0));
+        assert_eq!(fields.prefill_tps, Some(400.0));
+        assert_eq!(fields.emitted_chunks, Some(3));
+        assert_eq!(fields.inter_chunk_ms, vec![25, 25]);
+    }
+
+    #[test]
+    fn runtime_stream_policy_prefers_gpu_when_available() {
+        assert_eq!(
+            super::runtime_stream_preference(true),
+            super::RuntimeStreamPreference::Gpu
+        );
+        assert_eq!(
+            super::runtime_stream_preference(false),
+            super::RuntimeStreamPreference::CpuFallback
+        );
+    }
+
+    #[test]
+    fn decode_without_kv_cache_forwards_full_context_from_zero_position() {
+        let token_history = [10, 20, 30, 40];
+        let (forward_tokens, position_offset) =
+            super::decode_forward_input_without_kv_cache(&token_history).unwrap();
+
+        assert_eq!(forward_tokens, &token_history);
+        assert_eq!(position_offset, 0);
+    }
+
+    #[test]
+    fn decode_with_kv_cache_forwards_only_new_token_at_absolute_position() {
+        let token_history = [10, 20, 30, 40];
+        let (forward_tokens, position_offset) =
+            super::decode_forward_input_with_kv_cache(&token_history).unwrap();
+
+        assert_eq!(forward_tokens, &[40]);
+        assert_eq!(position_offset, 3);
+    }
+
+    #[test]
+    fn token_batch_shape_rejects_lengths_over_mlx_i32_limit() {
+        match super::token_batch_shape("prefill prompt", i32::MAX as usize + 1).unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("prefill prompt"), "got: {msg}");
+                assert!(msg.contains("exceeds MLX i32 shape limit"), "got: {msg}");
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn kv_cache_position_offset_rejects_lengths_over_mlx_i32_limit() {
+        match super::position_offset_for_history_len(i32::MAX as usize + 2).unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("kv-cache position offset"), "got: {msg}");
+                assert!(msg.contains("exceeds MLX i32 shape limit"), "got: {msg}");
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn token_id_to_u32_rejects_negative_ids() {
+        match super::token_id_to_u32("generated", -1).unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("generated"), "got: {msg}");
+                assert!(
+                    msg.contains("outside the tokenizer u32 id range"),
+                    "got: {msg}"
+                );
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn token_id_to_u32_rejects_ids_over_u32_limit() {
+        match super::token_id_to_u32("generated", i64::from(u32::MAX) + 1).unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("generated"), "got: {msg}");
+                assert!(
+                    msg.contains("outside the tokenizer u32 id range"),
+                    "got: {msg}"
+                );
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
     /// Integration-style test of the generate path on a non-runtime build
     /// (i.e. when `llm-mlx-runtime` is OFF). Loads a dummy Qwen 3 bundle,
     /// calls `LlmBackend::generate`, and asserts the returned error carries
@@ -484,7 +766,8 @@ mod tests {
     /// is cfg-gated to macOS + `llm-mlx-runtime`.
     #[cfg(not(all(
         feature = "llm-mlx-runtime",
-        any(target_os = "macos", target_os = "ios")
+        target_os = "macos",
+        target_arch = "aarch64"
     )))]
     #[test]
     fn generate_on_non_runtime_build_returns_actionable_error() {
@@ -533,7 +816,11 @@ mod tests {
                     feature.contains("fetch-mlx-xcframework"),
                     "fetch hint: {feature}"
                 );
-                assert_eq!(story, "US-014");
+                assert!(
+                    feature.contains("build-local-mlx-xcframework"),
+                    "source-build hint: {feature}"
+                );
+                assert_eq!(story, "llm-mlx-runtime");
             }
             other => panic!("expected NotImplemented, got {other:?}"),
         }

@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 # bench-llm-backends.sh — Run the MLX vs llama.cpp decode-throughput
-# comparison benchmark with a warm-up pass + measurement pass + threshold
+# comparison benchmark with a warm-up pass + measurement pass + parity
 # check.
 #
-# Requires: macOS + both `llm-mlx-runtime` and `llm-llamacpp` features
-# available (i.e. vendor/mlx-apple/mlx.xcframework fetched and the
-# llama.cpp build toolchain usable). Missing fixtures are treated as
-# "skip" and the corresponding model's threshold assertion is bypassed
-# unless XYBRID_BENCH_STRICT=1 is set.
+# Requires: Apple Silicon macOS + both `llm-mlx-runtime` and `llm-llamacpp`
+# features available (i.e. vendor/mlx-apple/mlx.xcframework fetched and
+# the llama.cpp build toolchain usable). Unsupported hosts and missing fixtures
+# are treated as "skip"; informational pairs bypass parity assertions, while
+# strict mode still turns skipped/failed cells into a non-zero exit.
 #
 # Usage:
 #   tools/scripts/bench-llm-backends.sh [--warmup-only|--measure-only] [--strict]
 #
 # Options:
-#   --warmup-only   Run only the throwaway warm-up pass (useful for
-#                   populating Metal's kernel cache ahead of a manual run).
+#   --warmup-only   Run only the throwaway, non-reporting warm-up pass
+#                   (useful for populating Metal's kernel cache ahead of
+#                   a manual run).
 #   --measure-only  Skip the warm-up pass; go straight to the measurement.
 #   --strict        Pass XYBRID_BENCH_STRICT=1 to the bench — any skipped
 #                   or failed cell becomes a non-zero exit.
@@ -31,7 +32,7 @@ Usage:
   tools/scripts/bench-llm-backends.sh [--warmup-only|--measure-only] [--strict]
 
 Options:
-  --warmup-only   Run only the throwaway warm-up pass.
+  --warmup-only   Run only the throwaway, non-reporting warm-up pass.
   --measure-only  Skip the warm-up pass.
   --strict        Exit non-zero on any skipped or failed cell.
   -h, --help      Show this help.
@@ -62,20 +63,33 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 
 cd "$REPO_ROOT"
 
-if [ "$(uname -s)" != "Darwin" ]; then
-    echo "bench-llm-backends: host is $(uname -s), not Darwin — skipping." >&2
+skip() {
+    echo "$1" >&2
+    if [ "$STRICT" = true ]; then
+        exit 1
+    fi
     exit 0
+}
+
+if [ "$(uname -s)" != "Darwin" ]; then
+    skip "bench-llm-backends: host is $(uname -s), not Darwin — skipping."
+fi
+
+if [ "$(uname -m)" != "arm64" ]; then
+    skip "bench-llm-backends: host is $(uname -m), not arm64 Apple Silicon — skipping."
 fi
 
 FEATURES="llm-mlx-runtime llm-llamacpp"
 BENCH_BIN="llm_backend_compare"
+CARGO_BENCH=(cargo bench -p xybrid-core --no-default-features --features "$FEATURES" --bench "$BENCH_BIN")
 
 if [ "$WARMUP" = true ]; then
     echo "==> warm-up pass (output discarded)"
     # stderr carries the per-round progress lines; stdout is cargo output
     # that we also want to keep visible. We do NOT capture either because
     # the user should see what's happening.
-    cargo bench -p xybrid-core --features "$FEATURES" --bench "$BENCH_BIN" \
+    env XYBRID_BENCH_WARMUP_ONLY=1 \
+        "${CARGO_BENCH[@]}" \
         || echo "warm-up exited non-zero (ignored)" >&2
     echo ""
 fi
@@ -85,7 +99,7 @@ if [ "$MEASURE" = true ]; then
     if [ "$STRICT" = true ]; then
         export XYBRID_BENCH_STRICT=1
     fi
-    cargo bench -p xybrid-core --features "$FEATURES" --bench "$BENCH_BIN"
+    "${CARGO_BENCH[@]}"
 
     REPORT="$REPO_ROOT/target/benchmark-results/llm_backend_compare.md"
     if [ -f "$REPORT" ]; then

@@ -9,10 +9,11 @@
 //! on Linux CI runners green, because MLX links against Metal and Accelerate
 //! and cannot be built or linked on non-Apple hosts.
 //!
-//! To get the actual FFI surface, build with `--features bindings` on an Apple
-//! target. The [`tools/scripts/fetch-mlx-xcframework.sh`] script must have
-//! populated `vendor/mlx-apple/mlx.xcframework/` first (or `$MLX_XCFRAMEWORK_PATH`
-//! must point at a prebuilt one).
+//! To get the actual FFI surface, build with `--features bindings` on
+//! Apple Silicon macOS. Populate `vendor/mlx-apple/mlx.xcframework/` first
+//! with [`tools/scripts/build-local-mlx-xcframework.sh`] from source pins, or
+//! [`tools/scripts/fetch-mlx-xcframework.sh`] when a download pin is available.
+//! Alternatively, `$MLX_XCFRAMEWORK_PATH` can point at a prebuilt one.
 //!
 //! # Safety and stability
 //!
@@ -27,23 +28,26 @@
 
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 
-// Apple-only compile-time guard. Fires only when a downstream crate has
-// enabled the `bindings` feature on a non-Apple target — for instance by
-// activating `llm-mlx` on a `linux-x86_64` build. On default workspace
-// builds (no `bindings` feature), this guard is inert, so Ubuntu CI stays
-// clean.
-#[cfg(all(feature = "bindings", not(any(target_os = "macos", target_os = "ios"))))]
+// Apple Silicon macOS-only compile-time guard. Fires only when a downstream
+// crate has enabled the `bindings` feature on an unsupported target — for
+// instance by activating `llm-mlx-runtime` on Linux or current iOS builds. On
+// default workspace builds (no `bindings` feature), this guard is inert, so
+// Ubuntu CI stays clean.
+#[cfg(all(
+    feature = "bindings",
+    not(all(target_os = "macos", target_arch = "aarch64"))
+))]
 compile_error!(
-    "mlx-c-sys `bindings` feature requires an Apple target (macOS or iOS). \
-     MLX links against Metal and Accelerate, which are Apple-only. Disable \
-     the `llm-mlx` feature (or its equivalent) when building for this target."
+    "mlx-c-sys `bindings` feature is currently supported only on Apple Silicon \
+     macOS (`aarch64-apple-darwin`). iOS remains non-linking only until upstream MLX \
+     ships a Metal-enabled iOS slice. Disable `llm-mlx-runtime` for this target."
 );
 
 /// Generated bindgen output. Lives in a submodule so it can carry the
 /// non-standard lint allowances without polluting the crate root, and so
 /// downstream code imports via `mlx_c_sys::bindings::mlx_stream` rather than
 /// relying on flattened re-exports.
-#[cfg(all(feature = "bindings", any(target_os = "macos", target_os = "ios")))]
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub mod bindings {
     #![allow(
         non_camel_case_types,

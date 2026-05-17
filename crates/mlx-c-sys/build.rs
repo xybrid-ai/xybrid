@@ -8,14 +8,17 @@
 //! Gated end-to-end behaviour:
 //!   - If the `bindings` cargo feature is off, the script is a no-op.
 //!     `cargo check --workspace` on Linux CI runs this branch.
-//!   - If the feature is on but the host target is not Apple, the lib.rs
-//!     `compile_error!` fires. This script still runs but short-circuits
-//!     so the error message comes from rustc and not from a missing file.
-//!   - If the feature is on and the target is Apple, we locate the
-//!     xcframework slice, run bindgen, and emit link flags.
+//!   - If the feature is on but the host target is not Apple Silicon macOS,
+//!     the lib.rs `compile_error!` fires. This script still runs but
+//!     short-circuits so the error message comes from rustc and not from a
+//!     missing file.
+//!   - If the feature is on and the target is `aarch64-apple-darwin`, we
+//!     locate the xcframework slice, run bindgen, and emit link flags.
 //!
-//! The xcframework itself is CI-built (see `.github/workflows/build-mlx-xcframework.yml`)
-//! and materialised locally by `tools/scripts/fetch-mlx-xcframework.sh`.
+//! The xcframework itself is materialised locally either by
+//! `tools/scripts/build-local-mlx-xcframework.sh` from pinned upstream source
+//! SHAs, or by `tools/scripts/fetch-mlx-xcframework.sh` when a download pin is
+//! available.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -37,8 +40,10 @@ fn main() {
     let target_arch =
         env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH set by cargo");
 
-    // Non-Apple targets: leave linking to lib.rs's compile_error!.
-    if target_os != "macos" && target_os != "ios" {
+    // Unsupported targets: leave linking to lib.rs's compile_error!. This
+    // includes current iOS builds, where upstream MLX does not yet provide a
+    // Metal-enabled runtime slice.
+    if target_os != "macos" || target_arch != "aarch64" {
         return;
     }
 
@@ -51,7 +56,8 @@ fn main() {
     if !slice_dir.is_dir() {
         panic!(
             "mlx-c-sys: xcframework slice `{slice}` not found at {}. \
-             Run `./tools/scripts/fetch-mlx-xcframework.sh` or point \
+             Run `./tools/scripts/fetch-mlx-xcframework.sh`, run \
+             `./tools/scripts/build-local-mlx-xcframework.sh`, or point \
              $MLX_XCFRAMEWORK_PATH at a prebuilt mlx.xcframework.",
             slice_dir.display()
         );
@@ -68,26 +74,30 @@ fn main() {
         );
     }
 
+    let metallib = slice_dir.join("Resources").join("mlx.metallib");
+    if !metallib.is_file() {
+        panic!(
+            "mlx-c-sys: expected Metal library at {}. Run \
+             `./tools/scripts/fetch-mlx-xcframework.sh`, run \
+             `./tools/scripts/build-local-mlx-xcframework.sh`, or point \
+             $MLX_XCFRAMEWORK_PATH at a complete mlx.xcframework.",
+            metallib.display()
+        );
+    }
+
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR set by cargo"));
     generate_bindings(&headers, &slice, &out_dir);
+    println!("cargo:rerun-if-changed={}", metallib.display());
+    println!(
+        "cargo:rustc-env=XYBRID_MLX_METALLIB_PATH={}",
+        metallib.display()
+    );
     emit_link_directives(&slice_dir, lib_name);
 }
 
 fn resolve_slice(target_os: &str, target_arch: &str) -> Result<String, String> {
     match (target_os, target_arch) {
         ("macos", "aarch64") => Ok("macos-arm64".into()),
-        ("ios", "aarch64") => {
-            // The `aarch64-apple-ios-sim` target triple sets target_os=ios,
-            // target_arch=aarch64, and target_abi=sim. Distinguish via
-            // target_abi (propagated as CARGO_CFG_TARGET_ABI) so the device
-            // vs simulator slice is picked correctly.
-            let abi = env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default();
-            if abi == "sim" {
-                Ok("ios-arm64-simulator".into())
-            } else {
-                Ok("ios-arm64".into())
-            }
-        }
         (os, arch) => Err(format!(
             "no mlx.xcframework slice available for target_os={os} target_arch={arch}"
         )),
@@ -119,17 +129,15 @@ fn resolve_xcframework_dir() -> Result<PathBuf, String> {
         return Ok(default);
     }
     Err(format!(
-        "mlx.xcframework not found at {}. Run `tools/scripts/fetch-mlx-xcframework.sh` \
-         or set $MLX_XCFRAMEWORK_PATH.",
+        "mlx.xcframework not found at {}. Run `tools/scripts/fetch-mlx-xcframework.sh`, \
+         run `tools/scripts/build-local-mlx-xcframework.sh`, or set $MLX_XCFRAMEWORK_PATH.",
         default.display()
     ))
 }
 
 fn generate_bindings(headers: &Path, slice: &str, out_dir: &Path) {
     let (sdk, target_triple) = match slice {
-        "macos-arm64" => ("macosx", "arm64-apple-macos13.3"),
-        "ios-arm64" => ("iphoneos", "arm64-apple-ios15.0"),
-        "ios-arm64-simulator" => ("iphonesimulator", "arm64-apple-ios15.0-simulator"),
+        "macos-arm64" => ("macosx", "arm64-apple-macos14.0"),
         other => panic!("mlx-c-sys: unsupported slice `{other}`"),
     };
 

@@ -11,9 +11,9 @@
 //! The adapter is the embedding counterpart to
 //! [`super::model::MlxLlmAdapter`] for generative LLMs. It shares the
 //! same bundle layout, the same tokenizer loader, and the same
-//! cross-platform skeleton vs. Apple-runtime split so non-Apple builds
-//! still type-check and the runtime selector (US-016) can fall back to
-//! the ONNX embedding path when MLX is unavailable.
+//! cross-platform non-linking vs. Apple-runtime split so non-Apple builds
+//! still type-check and registry resolution can keep the default
+//! embedding artifact, typically ONNX, when MLX is unavailable.
 //!
 //! # Pooling
 //!
@@ -89,7 +89,7 @@ impl Pooling {
 /// embedding-specific knobs: pooling strategy, L2-normalisation flag,
 /// and a soft cap on input sequence length so a runaway tokenisation
 /// can't blow up the encoder.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MlxEmbeddingConfig {
     /// Maximum input sequence length (in tokens) the encoder will
     /// process. Inputs longer than this are truncated; bounded by the
@@ -149,8 +149,24 @@ impl MlxEmbeddingConfig {
                 .parse::<usize>()
                 .map_err(|e| MlxLlmError::ConfigInvalid(format!("bad max_seq_len `{m}`: {e}")))?;
         }
+        validate_embedding_config(&cfg)?;
         Ok(cfg)
     }
+}
+
+fn validate_embedding_config(config: &MlxEmbeddingConfig) -> MlxLlmResult<()> {
+    if config.max_seq_len == 0 {
+        return Err(MlxLlmError::ConfigInvalid(
+            "MLX embedding max_seq_len must be >= 1".into(),
+        ));
+    }
+    if config.max_seq_len > i32::MAX as usize {
+        return Err(MlxLlmError::ConfigInvalid(format!(
+            "MLX embedding max_seq_len={} exceeds MLX i32 shape limit",
+            config.max_seq_len
+        )));
+    }
+    Ok(())
 }
 
 // =============================================================================
@@ -163,14 +179,20 @@ struct LoadedState {
     model_dir: PathBuf,
     bert_config: BertConfig,
     tokenizer: Tokenizer,
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    runtime_weights: std::sync::Mutex<super::arch::bert::runtime::BertWeights>,
 }
 
-/// MLX-backed embedding adapter. Skeleton + load path land in US-015;
-/// the encoder forward pass is staged but bails at the first encoder
-/// block until the GeLU activation primitive is wrapped in
-/// `xybrid_mlx::ops` (follow-up). The cross-platform pooling and
-/// normalisation helpers are unit-tested here so the integration test
-/// in US-015 only has to plug in the runtime forward pass output.
+/// MLX-backed embedding adapter. The Apple runtime path keeps canonical BERT
+/// and current nomic-bert SafeTensors weights resident in loaded adapter state
+/// behind a mutex, so `&self` embedding calls can reuse MLX handles without
+/// breaking the adapter's thread-safety contract. The cross-platform pooling
+/// and normalisation helpers are unit-tested here so adapter coverage can stay
+/// independent from MLX linkage on non-Apple builds.
 #[derive(Debug)]
 pub struct MlxEmbeddingAdapter {
     config: MlxEmbeddingConfig,
@@ -187,9 +209,10 @@ impl MlxEmbeddingAdapter {
     }
 
     /// One-shot load from a model directory. Reads `config.json`,
-    /// `tokenizer.json`, and `model.safetensors` from `model_dir` and
+    /// `tokenizer.json`, and SafeTensors weights from `model_dir` and
     /// validates the BERT-family weight schedule.
     pub fn load(model_dir: &Path, config: &MlxEmbeddingConfig) -> MlxLlmResult<Self> {
+        validate_embedding_config(config)?;
         let mut adapter = Self::new(config.clone());
         adapter.load_in_place(model_dir)?;
         Ok(adapter)
@@ -200,22 +223,34 @@ impl MlxEmbeddingAdapter {
         // so users get pointed errors instead of generic IO failures.
         let config_path = require_file(model_dir, "config.json")?;
         let tokenizer_path = require_file(model_dir, "tokenizer.json")?;
-        let weights_path = bert::resolve_weights_path(model_dir)?;
+        let weights = bert::resolve_weights_bundle(model_dir)?;
 
         // We re-read config.json through BertConfig::from_model_dir
         // (which also runs validate()), but verify the file exists
         // first so the missing-file error surface stays consistent.
         let _ = fs::metadata(&config_path)?;
         let bert_cfg = bert::BertConfig::from_model_dir(model_dir)?;
-        bert::validate_safetensors(&weights_path, &bert_cfg)?;
+        bert::validate_safetensors_bundle(&weights, &bert_cfg)?;
 
         let tokenizer = tokenizer_loader::load_from_file(&tokenizer_path)
             .map_err(|e| MlxLlmError::TokenizerLoad(e.to_string()))?;
+        #[cfg(all(
+            feature = "llm-mlx-runtime",
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let runtime_weights = super::arch::bert::runtime::build(&bert_cfg, &weights)?;
 
         self.loaded = Some(LoadedState {
             model_dir: model_dir.to_path_buf(),
             bert_config: bert_cfg,
             tokenizer,
+            #[cfg(all(
+                feature = "llm-mlx-runtime",
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            runtime_weights: std::sync::Mutex::new(runtime_weights),
         });
         Ok(())
     }
@@ -244,11 +279,10 @@ impl MlxEmbeddingAdapter {
         self.loaded.as_ref().map(|s| s.model_dir.as_path())
     }
 
-    /// Embed a single text input and return an
-    /// [`EnvelopeKind::Embedding`] envelope. The runtime path lands in
-    /// the Apple-runtime submodule below; non-Apple / non-runtime
-    /// builds surface [`MlxLlmError::NotImplemented`] so callers get a
-    /// pointed error pointing at the feature gate to enable.
+    /// Embed a single text input and return an [`EnvelopeKind::Embedding`]
+    /// envelope. The Apple-runtime submodule owns the real MLX dispatch;
+    /// non-Apple / non-runtime builds surface [`MlxLlmError::NotImplemented`]
+    /// as a pointed build-gate error.
     pub fn embed(&self, text: &str) -> MlxLlmResult<Envelope> {
         let state = self.loaded.as_ref().ok_or(MlxLlmError::NotLoaded)?;
 
@@ -257,15 +291,29 @@ impl MlxEmbeddingAdapter {
             .encode(text, true)
             .map_err(|e| MlxLlmError::TokenizerLoad(e.to_string()))?;
 
-        let token_ids: Vec<i32> = encoding.get_ids().iter().map(|&id| id as i32).collect();
-        let attention_mask: Vec<u32> = encoding.get_attention_mask().to_vec();
+        validate_embedding_config(&self.config)?;
 
-        let truncated_len = token_ids.len().min(self.config.max_seq_len);
-        let token_ids = &token_ids[..truncated_len];
+        let raw_token_ids = encoding.get_ids();
+        let attention_mask = encoding.get_attention_mask();
+        let truncated_len = raw_token_ids.len().min(self.config.max_seq_len);
+        if truncated_len == 0 {
+            return Err(MlxLlmError::ConfigInvalid(
+                "MLX embedding input produced no tokens".into(),
+            ));
+        }
+        if attention_mask.len() < truncated_len {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "tokenizer attention mask length {} is shorter than token length {}",
+                attention_mask.len(),
+                truncated_len
+            )));
+        }
+        let token_ids =
+            token_ids_to_mlx_i32(raw_token_ids, truncated_len, state.bert_config.vocab_size)?;
         let attention_mask = &attention_mask[..truncated_len];
 
         let hidden_dim = state.bert_config.hidden_size;
-        let hidden = run_encoder(state, token_ids, attention_mask, hidden_dim)?;
+        let hidden = run_encoder(state, &token_ids, attention_mask, hidden_dim)?;
 
         let mut pooled = apply_pooling(
             &hidden,
@@ -280,6 +328,40 @@ impl MlxEmbeddingAdapter {
 
         Ok(Envelope::new(EnvelopeKind::Embedding(pooled)))
     }
+}
+
+fn token_ids_to_mlx_i32(
+    raw_token_ids: &[u32],
+    len: usize,
+    vocab_size: usize,
+) -> MlxLlmResult<Vec<i32>> {
+    if len > raw_token_ids.len() {
+        return Err(MlxLlmError::ConfigInvalid(format!(
+            "requested {len} token ids from tokenizer output of length {}",
+            raw_token_ids.len()
+        )));
+    }
+
+    let mut token_ids = Vec::with_capacity(len);
+    for (idx, &id) in raw_token_ids[..len].iter().enumerate() {
+        let id_i32 = i32::try_from(id).map_err(|_| {
+            MlxLlmError::ConfigInvalid(format!(
+                "MLX embedding token id {id} at position {idx} exceeds MLX i32 token-id limit"
+            ))
+        })?;
+        let id_usize = usize::try_from(id).map_err(|_| {
+            MlxLlmError::ConfigInvalid(format!(
+                "MLX embedding token id {id} at position {idx} exceeds this platform's usize limit"
+            ))
+        })?;
+        if id_usize >= vocab_size {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "MLX embedding token id {id} at position {idx} exceeds vocab_size={vocab_size}"
+            )));
+        }
+        token_ids.push(id_i32);
+    }
+    Ok(token_ids)
 }
 
 fn require_file(dir: &Path, file: &'static str) -> MlxLlmResult<PathBuf> {
@@ -424,14 +506,13 @@ pub fn l2_norm(v: &[f32]) -> f32 {
 /// Run the BERT encoder forward pass and return a flat
 /// `[seq_len * hidden_dim]` hidden-state buffer.
 ///
-/// Cross-platform / non-runtime builds surface
-/// [`MlxLlmError::NotImplemented`] pointing at the
-/// `llm-mlx-runtime` feature gate. The Apple-runtime submodule below
-/// owns the real MLX dispatch and will land alongside the
-/// `xybrid_mlx::ops::gelu` primitive that the encoder needs.
+/// Cross-platform / non-runtime builds surface [`MlxLlmError::NotImplemented`]
+/// pointing at the `llm-mlx-runtime` feature gate. The Apple-runtime submodule
+/// below owns the real MLX dispatch.
 #[cfg(not(all(
     feature = "llm-mlx-runtime",
-    any(target_os = "macos", target_os = "ios")
+    target_os = "macos",
+    target_arch = "aarch64"
 )))]
 fn run_encoder(
     _state: &LoadedState,
@@ -441,31 +522,40 @@ fn run_encoder(
 ) -> MlxLlmResult<Vec<f32>> {
     Err(MlxLlmError::NotImplemented {
         feature:
-            "MLX BERT encoder forward pass (build with --features llm-mlx-runtime on Apple Silicon)",
-        story: "US-015",
+            "MLX BERT encoder forward pass (build with --features llm-mlx-runtime on Apple Silicon macOS, \
+             then materialize mlx.xcframework via tools/scripts/fetch-mlx-xcframework.sh \
+             or tools/scripts/build-local-mlx-xcframework.sh)",
+        story: "llm-mlx-runtime",
     })
 }
 
 #[cfg(all(
     feature = "llm-mlx-runtime",
-    any(target_os = "macos", target_os = "ios")
+    target_os = "macos",
+    target_arch = "aarch64"
 ))]
 fn run_encoder(
     state: &LoadedState,
-    _token_ids: &[i32],
+    token_ids: &[i32],
     _attention_mask: &[u32],
     hidden_dim: usize,
 ) -> MlxLlmResult<Vec<f32>> {
-    // Materialise the embedding-half weights so the loader path is
-    // exercised end-to-end on macOS CI. The encoder forward pass
-    // itself defers at the GeLU primitive — see `arch::bert::runtime`.
-    let weights_path = super::arch::bert::resolve_weights_path(&state.model_dir)?;
-    let _weights = super::arch::bert::runtime::build(&state.bert_config, &weights_path)?;
-    let _ = hidden_dim;
-    Err(MlxLlmError::NotImplemented {
-        feature: "MLX BERT encoder forward pass (needs xybrid_mlx::ops::gelu)",
-        story: "US-015 follow-up",
-    })
+    let weights = state.runtime_weights.lock().map_err(|_| {
+        MlxLlmError::ConfigInvalid("BERT runtime weight cache lock is poisoned".into())
+    })?;
+    let hidden =
+        super::arch::bert::runtime::forward(&state.bert_config, &weights, token_ids, None)?;
+    let data = hidden.to_vec_f32()?;
+    if data.len() != token_ids.len() * hidden_dim {
+        return Err(MlxLlmError::ConfigInvalid(format!(
+            "BERT encoder returned {} values, expected {} (seq_len={} * hidden_dim={})",
+            data.len(),
+            token_ids.len() * hidden_dim,
+            token_ids.len(),
+            hidden_dim
+        )));
+    }
+    Ok(data)
 }
 
 // =============================================================================
@@ -626,6 +716,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn config_from_metadata_rejects_zero_max_seq_len() {
+        let mut md = HashMap::new();
+        md.insert("max_seq_len".into(), "0".into());
+        let err = MlxEmbeddingConfig::from_metadata(&md).unwrap_err();
+        match err {
+            MlxLlmError::ConfigInvalid(msg) => assert!(msg.contains("max_seq_len"), "got: {msg}"),
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn token_ids_to_mlx_i32_rejects_ids_over_i32_limit() {
+        let too_large = u32::try_from(i32::MAX).unwrap() + 1;
+        let err = token_ids_to_mlx_i32(&[too_large], 1, usize::MAX).unwrap_err();
+        match err {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("token id"), "got: {msg}");
+                assert!(msg.contains("i32 token-id limit"), "got: {msg}");
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn token_ids_to_mlx_i32_rejects_ids_outside_vocab() {
+        let err = token_ids_to_mlx_i32(&[5], 1, 5).unwrap_err();
+        match err {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("token id 5"), "got: {msg}");
+                assert!(msg.contains("vocab_size=5"), "got: {msg}");
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn token_ids_to_mlx_i32_validates_only_truncated_prefix() {
+        let too_large = u32::try_from(i32::MAX).unwrap() + 1;
+        let ids = token_ids_to_mlx_i32(&[1, too_large], 1, 2).unwrap();
+
+        assert_eq!(ids, vec![1]);
+    }
+
     // -----------------------------------------------------------------
     // Adapter load
     // -----------------------------------------------------------------
@@ -636,13 +770,20 @@ mod tests {
     /// the qwen fixture from US-009 — any valid tokenizer.json works
     /// because the load path only verifies presence + parseability.
     fn write_dummy_bert_bundle(dir: &Path, model_type: &str) {
+        let tok_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("qwen_tokenizer.json");
+        fs::copy(&tok_src, dir.join("tokenizer.json")).unwrap();
+        let tokenizer = Tokenizer::from_file(&tok_src).unwrap();
+
         let cfg = serde_json::json!({
             "model_type": model_type,
             "hidden_size": 16,
             "num_hidden_layers": 1,
             "num_attention_heads": 4,
             "intermediate_size": 32,
-            "vocab_size": 100,
+            "vocab_size": tokenizer.get_vocab_size(true),
             "max_position_embeddings": 128,
             "type_vocab_size": 2,
             "layer_norm_eps": 1.0e-12,
@@ -651,12 +792,6 @@ mod tests {
         });
         let mut f = fs::File::create(dir.join("config.json")).unwrap();
         f.write_all(cfg.to_string().as_bytes()).unwrap();
-
-        let tok_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("fixtures")
-            .join("qwen_tokenizer.json");
-        fs::copy(&tok_src, dir.join("tokenizer.json")).unwrap();
 
         // Build a full safetensors manifest matching the BERT key
         // schedule for the chosen variant.
@@ -671,6 +806,292 @@ mod tests {
             .map(|k| (k, TensorView::new(Dtype::F32, vec![1], &data).unwrap()))
             .collect();
         safetensors::serialize_to_file(tensors, &None, &dir.join("model.safetensors")).unwrap();
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn write_runtime_canonical_bert_bundle(dir: &Path, prompt: &str) {
+        let tok_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("qwen_tokenizer.json");
+        fs::copy(&tok_src, dir.join("tokenizer.json")).unwrap();
+        let tokenizer = Tokenizer::from_file(&tok_src).unwrap();
+        let encoding = tokenizer.encode(prompt, true).unwrap();
+        let token_ids = encoding.get_ids();
+        let seq_len = token_ids.len().max(1);
+        let vocab_size = token_ids
+            .iter()
+            .copied()
+            .max()
+            .map(|id| id as usize + 1)
+            .unwrap_or(1);
+
+        let cfg = serde_json::json!({
+            "model_type": "bert",
+            "hidden_size": 2,
+            "num_hidden_layers": 1,
+            "num_attention_heads": 1,
+            "intermediate_size": 4,
+            "vocab_size": vocab_size,
+            "max_position_embeddings": seq_len,
+            "type_vocab_size": 2,
+            "layer_norm_eps": 0.0,
+            "use_rotary_embeddings": false,
+            "use_swiglu": false
+        });
+        let mut f = fs::File::create(dir.join("config.json")).unwrap();
+        f.write_all(cfg.to_string().as_bytes()).unwrap();
+
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
+        let mut tensors: Vec<(String, Vec<usize>, Vec<u8>)> = Vec::new();
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.word_embeddings.weight",
+            vec![vocab_size, 2],
+            vec![0.0; vocab_size * 2],
+        );
+        let mut position_values = Vec::with_capacity(seq_len * 2);
+        for pos in 0..seq_len {
+            let base = pos as f32 + 1.0;
+            position_values.push(base);
+            position_values.push(base * 10.0);
+        }
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.position_embeddings.weight",
+            vec![seq_len, 2],
+            position_values,
+        );
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.token_type_embeddings.weight",
+            vec![2, 2],
+            vec![0.0; 4],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.LayerNorm.weight",
+            vec![2],
+            vec![1.0; 2],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.LayerNorm.bias",
+            vec![2],
+            vec![0.0; 2],
+        );
+
+        let base = "encoder.layer.0";
+        for name in [
+            "attention.self.query",
+            "attention.self.key",
+            "attention.self.value",
+            "attention.output.dense",
+        ] {
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.{name}.weight"),
+                vec![2, 2],
+                vec![0.0; 4],
+            );
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.{name}.bias"),
+                vec![2],
+                vec![0.0; 2],
+            );
+        }
+        for name in ["attention.output.LayerNorm", "output.LayerNorm"] {
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.{name}.weight"),
+                vec![2],
+                vec![1.0; 2],
+            );
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.{name}.bias"),
+                vec![2],
+                vec![0.0; 2],
+            );
+        }
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.intermediate.dense.weight"),
+            vec![4, 2],
+            vec![0.0; 8],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.intermediate.dense.bias"),
+            vec![4],
+            vec![0.0; 4],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.output.dense.weight"),
+            vec![2, 4],
+            vec![0.0; 8],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.output.dense.bias"),
+            vec![2],
+            vec![0.0; 2],
+        );
+
+        let views: Vec<(String, TensorView<'_>)> = tensors
+            .iter()
+            .map(|(name, shape, bytes)| {
+                (
+                    name.clone(),
+                    TensorView::new(Dtype::F32, shape.clone(), bytes).unwrap(),
+                )
+            })
+            .collect();
+        safetensors::serialize_to_file(views, &None, &dir.join("model.safetensors")).unwrap();
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn write_runtime_nomic_bert_bundle(dir: &Path, prompt: &str) {
+        let tok_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("qwen_tokenizer.json");
+        fs::copy(&tok_src, dir.join("tokenizer.json")).unwrap();
+        let tokenizer = Tokenizer::from_file(&tok_src).unwrap();
+        let encoding = tokenizer.encode(prompt, true).unwrap();
+        let token_ids = encoding.get_ids();
+        let seq_len = token_ids.len().max(1);
+        let vocab_size = token_ids
+            .iter()
+            .copied()
+            .max()
+            .map(|id| id as usize + 1)
+            .unwrap_or(1);
+
+        let cfg = serde_json::json!({
+            "model_type": "nomic_bert",
+            "hidden_size": 2,
+            "num_hidden_layers": 1,
+            "num_attention_heads": 1,
+            "intermediate_size": 4,
+            "vocab_size": vocab_size,
+            "max_position_embeddings": seq_len,
+            "type_vocab_size": 2,
+            "layer_norm_eps": 0.0,
+            "hidden_act": "silu",
+            "use_rotary_embeddings": true,
+            "use_swiglu": true,
+            "rope_theta": 1000.0
+        });
+        let mut f = fs::File::create(dir.join("config.json")).unwrap();
+        f.write_all(cfg.to_string().as_bytes()).unwrap();
+
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
+        let mut tensors: Vec<(String, Vec<usize>, Vec<u8>)> = Vec::new();
+        let mut word_values = Vec::with_capacity(vocab_size * 2);
+        for _ in 0..vocab_size {
+            word_values.push(1.0);
+            word_values.push(10.0);
+        }
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.word_embeddings.weight",
+            vec![vocab_size, 2],
+            word_values,
+        );
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.token_type_embeddings.weight",
+            vec![2, 2],
+            vec![0.0; 4],
+        );
+        push_f32_tensor(&mut tensors, "emb_ln.weight", vec![2], vec![1.0; 2]);
+        push_f32_tensor(&mut tensors, "emb_ln.bias", vec![2], vec![0.0; 2]);
+
+        let base = "encoder.layers.0";
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.attn.Wqkv.weight"),
+            vec![6, 2],
+            vec![0.0; 12],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.attn.out_proj.weight"),
+            vec![2, 2],
+            vec![0.0; 4],
+        );
+        for name in ["norm1", "norm2"] {
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.{name}.weight"),
+                vec![2],
+                vec![1.0; 2],
+            );
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.{name}.bias"),
+                vec![2],
+                vec![0.0; 2],
+            );
+        }
+        for name in ["fc11", "fc12"] {
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.mlp.{name}.weight"),
+                vec![4, 2],
+                vec![0.0; 8],
+            );
+        }
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.mlp.fc2.weight"),
+            vec![2, 4],
+            vec![0.0; 8],
+        );
+
+        let views: Vec<(String, TensorView<'_>)> = tensors
+            .iter()
+            .map(|(name, shape, bytes)| {
+                (
+                    name.clone(),
+                    TensorView::new(Dtype::F32, shape.clone(), bytes).unwrap(),
+                )
+            })
+            .collect();
+        safetensors::serialize_to_file(views, &None, &dir.join("model.safetensors")).unwrap();
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn push_f32_tensor(
+        tensors: &mut Vec<(String, Vec<usize>, Vec<u8>)>,
+        name: &str,
+        shape: Vec<usize>,
+        values: Vec<f32>,
+    ) {
+        let mut bytes = Vec::with_capacity(values.len() * 4);
+        for value in values {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        tensors.push((name.to_string(), shape, bytes));
     }
 
     #[test]
@@ -698,6 +1119,169 @@ mod tests {
         assert!(adapter.is_loaded());
         assert_eq!(adapter.bert_config().unwrap().model_type, "bert");
         assert_eq!(adapter.bert_config().unwrap().hidden_size, 16);
+    }
+
+    #[cfg(not(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    )))]
+    #[test]
+    fn embed_on_non_runtime_build_returns_actionable_error() {
+        let tmp = TempDir::new().unwrap();
+        write_dummy_bert_bundle(tmp.path(), "bert");
+        let adapter =
+            MlxEmbeddingAdapter::load(tmp.path(), &MlxEmbeddingConfig::default()).unwrap();
+        let err = adapter.embed("hello").unwrap_err();
+        let display = err.to_string();
+        match err {
+            MlxLlmError::NotImplemented { feature, story } => {
+                assert!(
+                    feature.contains("llm-mlx-runtime"),
+                    "feature hint: {feature}"
+                );
+                assert!(
+                    feature.contains("fetch-mlx-xcframework"),
+                    "fetch hint: {feature}"
+                );
+                assert!(
+                    feature.contains("build-local-mlx-xcframework"),
+                    "source-build hint: {feature}"
+                );
+                assert_eq!(story, "llm-mlx-runtime");
+                assert!(
+                    display.contains("unavailable in this build"),
+                    "display: {display}"
+                );
+            }
+            other => panic!("expected NotImplemented, got {other:?}"),
+        }
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn embed_canonical_bert_runtime_bundle_returns_embedding() {
+        let _guard = crate::runtime_adapter::mlx::MLX_RUNTIME_TEST_LOCK
+            .lock()
+            .unwrap();
+        let tmp = TempDir::new().unwrap();
+        let prompt = "Hello";
+        write_runtime_canonical_bert_bundle(tmp.path(), prompt);
+        let adapter = MlxEmbeddingAdapter::load(
+            tmp.path(),
+            &MlxEmbeddingConfig {
+                pooling: Pooling::Mean,
+                normalize: false,
+                max_seq_len: 16,
+            },
+        )
+        .expect("canonical runtime bert load");
+        fs::remove_file(tmp.path().join("model.safetensors"))
+            .expect("resident weights should not need the source file after load");
+
+        let out = adapter.embed(prompt).expect("canonical runtime embed");
+        match out.kind {
+            EnvelopeKind::Embedding(values) => {
+                assert_eq!(values.len(), 2);
+                assert!((values[0] + 1.0).abs() < 1.0e-5, "got {values:?}");
+                assert!((values[1] - 1.0).abs() < 1.0e-5, "got {values:?}");
+            }
+            other => panic!("expected embedding, got {other:?}"),
+        }
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn template_executor_routes_canonical_bert_runtime_bundle_to_mlx_embedding() {
+        let _guard = crate::runtime_adapter::mlx::MLX_RUNTIME_TEST_LOCK
+            .lock()
+            .unwrap();
+        let tmp = TempDir::new().unwrap();
+        let prompt = "Hello";
+        write_runtime_canonical_bert_bundle(tmp.path(), prompt);
+
+        let mut metadata = crate::execution::ModelMetadata::safetensors(
+            "synthetic-bert-embed",
+            "1.0",
+            "model.safetensors",
+            "bert",
+        );
+        metadata.backend = Some("auto".to_string());
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("text-embedding"));
+        metadata
+            .metadata
+            .insert("pooling".to_string(), serde_json::json!("mean"));
+        metadata
+            .metadata
+            .insert("normalize".to_string(), serde_json::json!(false));
+        metadata
+            .metadata
+            .insert("max_seq_len".to_string(), serde_json::json!(16));
+
+        let mut executor =
+            crate::execution::TemplateExecutor::with_base_path(&tmp.path().to_string_lossy());
+        let out = executor
+            .execute(
+                &metadata,
+                &crate::ir::Envelope::new(crate::ir::EnvelopeKind::Text(prompt.to_string())),
+                None,
+            )
+            .expect("TemplateExecutor should route BERT metadata through MLX embedding");
+
+        match out.kind {
+            crate::ir::EnvelopeKind::Embedding(values) => {
+                assert_eq!(values.len(), 2);
+                assert!((values[0] + 1.0).abs() < 1.0e-5, "got {values:?}");
+                assert!((values[1] - 1.0).abs() < 1.0e-5, "got {values:?}");
+            }
+            other => panic!("expected embedding, got {other:?}"),
+        }
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn embed_nomic_bert_runtime_bundle_returns_embedding() {
+        let _guard = crate::runtime_adapter::mlx::MLX_RUNTIME_TEST_LOCK
+            .lock()
+            .unwrap();
+        let tmp = TempDir::new().unwrap();
+        let prompt = "Hello";
+        write_runtime_nomic_bert_bundle(tmp.path(), prompt);
+        let adapter = MlxEmbeddingAdapter::load(
+            tmp.path(),
+            &MlxEmbeddingConfig {
+                pooling: Pooling::Mean,
+                normalize: false,
+                max_seq_len: 16,
+            },
+        )
+        .expect("nomic runtime bert load");
+        fs::remove_file(tmp.path().join("model.safetensors"))
+            .expect("resident weights should not need the source file after load");
+
+        let out = adapter.embed(prompt).expect("nomic runtime embed");
+        match out.kind {
+            EnvelopeKind::Embedding(values) => {
+                assert_eq!(values.len(), 2);
+                assert!((values[0] + 1.0).abs() < 1.0e-5, "got {values:?}");
+                assert!((values[1] - 1.0).abs() < 1.0e-5, "got {values:?}");
+            }
+            other => panic!("expected embedding, got {other:?}"),
+        }
     }
 
     #[test]

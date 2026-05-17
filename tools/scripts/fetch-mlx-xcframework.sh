@@ -8,13 +8,18 @@
 # vendor/mlx-apple/mlx.xcframework/.
 #
 # Usage:
-#   ./tools/scripts/fetch-mlx-xcframework.sh [--force]
+#   ./tools/scripts/fetch-mlx-xcframework.sh [--force] [--check-published]
 #
 # Options:
 #   --force        Re-download and reinstall even if the local SHA matches.
+#   --check-published
+#                  Check whether the pinned xcframework artifact is published.
+#                  Writes GitHub Actions outputs when $GITHUB_OUTPUT is set.
 #
 # Environment:
 #   XYBRID_RELEASE_REPO  Override the GitHub repo path (default: xybrid-ai/xybrid).
+#   XYBRID_MLX_VENDOR_DIR
+#                        Override vendor/mlx-apple (used by tests).
 
 set -euo pipefail
 
@@ -24,23 +29,30 @@ fetch-mlx-xcframework.sh — install the prebuilt mlx.xcframework pinned in
 vendor/mlx-apple/UPSTREAM_VERSIONS.txt.
 
 Usage:
-  ./tools/scripts/fetch-mlx-xcframework.sh [--force]
+  ./tools/scripts/fetch-mlx-xcframework.sh [--force] [--check-published]
 
 Options:
   --force        Re-download and reinstall even if the local SHA matches.
+  --check-published
+                 Check whether the pinned xcframework artifact is published.
+                 Writes GitHub Actions outputs when $GITHUB_OUTPUT is set.
 
 Environment:
   XYBRID_RELEASE_REPO  Override the GitHub repo path (default: xybrid-ai/xybrid).
+  XYBRID_MLX_VENDOR_DIR
+                       Override vendor/mlx-apple (used by tests).
 EOF
 }
 
 RELEASE_REPO="${XYBRID_RELEASE_REPO:-xybrid-ai/xybrid}"
 FORCE=false
+CHECK_PUBLISHED=false
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --force)    FORCE=true; shift ;;
-        -h|--help)  usage; exit 0 ;;
+        --force)             FORCE=true; shift ;;
+        --check-published)   CHECK_PUBLISHED=true; shift ;;
+        -h|--help)           usage; exit 0 ;;
         *)
             echo "unknown arg: $1" >&2
             usage >&2
@@ -52,7 +64,7 @@ done
 # Resolve the repo root (this script lives at tools/scripts/).
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
-VENDOR_DIR="$REPO_ROOT/vendor/mlx-apple"
+VENDOR_DIR="${XYBRID_MLX_VENDOR_DIR:-$REPO_ROOT/vendor/mlx-apple}"
 PINS_FILE="$VENDOR_DIR/UPSTREAM_VERSIONS.txt"
 XCFRAMEWORK_DIR="$VENDOR_DIR/mlx.xcframework"
 INSTALLED_MARKER="$VENDOR_DIR/.installed-sha256"
@@ -64,22 +76,49 @@ fi
 
 read_pin() {
     # Reads `key=value` from UPSTREAM_VERSIONS.txt, ignoring comments/blank lines.
-    grep "^$1=" "$PINS_FILE" | head -n1 | cut -d= -f2- | tr -d '[:space:]'
+    awk -v key="$1" '
+        index($0, key "=") == 1 {
+            value = substr($0, length(key) + 2)
+            gsub(/[[:space:]]/, "", value)
+            print value
+            exit
+        }
+    ' "$PINS_FILE"
 }
 
 RELEASE_TAG=$(read_pin release)
 EXPECTED_SHA=$(read_pin sha256)
 
+write_output() {
+    if [ -n "${GITHUB_OUTPUT:-}" ]; then
+        printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
+    fi
+}
+
 if [ -z "$RELEASE_TAG" ] || [ -z "$EXPECTED_SHA" ]; then
     echo "error: UPSTREAM_VERSIONS.txt must define both 'release=' and 'sha256=' keys" >&2
+    write_output published false
     exit 1
 fi
 
 if [ "$RELEASE_TAG" = "unpublished" ] || [ "$EXPECTED_SHA" = "unpublished" ]; then
+    write_output published false
+    write_output release "$RELEASE_TAG"
+    write_output sha256 "$EXPECTED_SHA"
+    if [ "$CHECK_PUBLISHED" = true ]; then
+        echo "MLX xcframework release is unpublished in $PINS_FILE"
+        exit 0
+    fi
+
     cat >&2 <<EOF
 error: MLX xcframework release is still 'unpublished' in $PINS_FILE.
 
-Build the artifact first by triggering the GitHub Actions workflow:
+For release-free Apple Silicon runtime validation, build the macOS arm64 slice
+directly from the pinned upstream SHAs instead:
+    ./tools/scripts/build-local-mlx-xcframework.sh
+
+For download-based installs, publish the artifact by triggering the GitHub
+Actions workflow:
     .github/workflows/build-mlx-xcframework.yml
 
 Either bump and push 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt' on master, or
@@ -89,11 +128,29 @@ EOF
     exit 1
 fi
 
+if ! [[ "$EXPECTED_SHA" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    echo "error: sha256= in $PINS_FILE must be a 64-character hex SHA256" >&2
+    write_output published false
+    write_output release "$RELEASE_TAG"
+    write_output sha256 "$EXPECTED_SHA"
+    exit 1
+fi
+
 # Strip an optional leading 'mlx-v' from the release tag to derive the version
 # portion of the asset filename. The workflow names assets 'mlx-<version>.xcframework.zip'.
 VERSION="${RELEASE_TAG#mlx-v}"
 ASSET_NAME="mlx-${VERSION}.xcframework.zip"
 ASSET_URL="https://github.com/${RELEASE_REPO}/releases/download/${RELEASE_TAG}/${ASSET_NAME}"
+
+if [ "$CHECK_PUBLISHED" = true ]; then
+    write_output published true
+    write_output release "$RELEASE_TAG"
+    write_output sha256 "$EXPECTED_SHA"
+    write_output asset_name "$ASSET_NAME"
+    write_output asset_url "$ASSET_URL"
+    echo "MLX xcframework release pin is published: ${RELEASE_TAG}"
+    exit 0
+fi
 
 # Idempotency short-circuit.
 if [ "$FORCE" != true ] && [ -d "$XCFRAMEWORK_DIR" ] && [ -f "$INSTALLED_MARKER" ]; then

@@ -4,7 +4,7 @@
 //! memory space. US-005 delivers the *shell*: RAII lifetime management,
 //! shared-ownership clone, dtype/shape introspection. The actual tensor
 //! constructors (from slices, from MTLBuffer, from Envelope) land in
-//! US-006 / US-008 — leaving them out of this skeleton keeps the review
+//! US-006 / US-008 — leaving them out of this base layer keeps the review
 //! surface small and means we can change the constructor API without a
 //! breaking cascade.
 //!
@@ -19,6 +19,8 @@ use crate::dtype::MlxDtype;
 use crate::envelope::{EnvelopePayload, EnvelopeSource, OwnedEnvelopePayload};
 use crate::error::{MlxError, MlxResult};
 use crate::ffi;
+use crate::resources::ensure_metallib_resource;
+use crate::stream::MlxStream;
 use mlx_c_sys::bindings::{mlx_array, mlx_dtype};
 
 /// Owning handle to an `mlx_array`.
@@ -38,6 +40,44 @@ use mlx_c_sys::bindings::{mlx_array, mlx_dtype};
 ///   `Send` / `Sync` discussion below.
 pub struct MlxArray {
     raw: mlx_array,
+}
+
+fn len_as_i32_saturating(len: usize) -> i32 {
+    i32::try_from(len).unwrap_or(i32::MAX)
+}
+
+fn len_as_shape_dim(len: usize) -> MlxResult<i32> {
+    i32::try_from(len).map_err(|_| MlxError::InvalidShape {
+        expected: vec![i32::MAX],
+        got: vec![i32::MAX],
+    })
+}
+
+fn rank_len_as_i32(len: usize) -> MlxResult<i32> {
+    i32::try_from(len).map_err(|_| MlxError::InvalidShape {
+        expected: vec![i32::MAX],
+        got: vec![i32::MAX],
+    })
+}
+
+fn shape_element_count(shape: &[i32]) -> MlxResult<usize> {
+    let _rank = rank_len_as_i32(shape.len())?;
+    let mut elems = 1usize;
+    for &dim in shape {
+        if dim < 0 {
+            return Err(MlxError::InvalidShape {
+                expected: shape.to_vec(),
+                got: vec![dim],
+            });
+        }
+        elems = elems
+            .checked_mul(dim as usize)
+            .ok_or_else(|| MlxError::InvalidShape {
+                expected: shape.to_vec(),
+                got: vec![i32::MAX],
+            })?;
+    }
+    Ok(elems)
 }
 
 impl MlxArray {
@@ -89,17 +129,18 @@ impl MlxArray {
     /// Returns [`MlxError::InvalidShape`] if the product of `shape` does
     /// not match `data.len()`.
     pub fn from_slice_f32(data: &[f32], shape: &[i32]) -> MlxResult<Self> {
-        let expected: i64 = shape.iter().map(|&d| i64::from(d)).product();
-        if expected < 0 || expected as usize != data.len() {
+        let expected = shape_element_count(shape)?;
+        if expected != data.len() {
             return Err(MlxError::InvalidShape {
                 expected: shape.to_vec(),
-                got: vec![data.len() as i32],
+                got: vec![len_as_i32_saturating(data.len())],
             });
         }
         // SAFETY: we just validated `data.len() == product(shape)`, so mlx-c
         // reads exactly `product(shape)` f32 values from `data.as_ptr()`.
         // `mlx_array_new_data` copies the buffer, so `data`'s lifetime can
         // end at the end of this call.
+        ensure_metallib_resource()?;
         let raw = unsafe { ffi::array_new_data_f32(data.as_ptr(), shape) };
         if raw.ctx.is_null() {
             return Err(MlxError::Internal(
@@ -115,17 +156,111 @@ impl MlxArray {
     /// for index / position tensors (e.g. the `indices` argument to
     /// [`crate::ops::gather`] or token-id inputs).
     pub fn from_slice_i32(data: &[i32], shape: &[i32]) -> MlxResult<Self> {
-        let expected: i64 = shape.iter().map(|&d| i64::from(d)).product();
-        if expected < 0 || expected as usize != data.len() {
+        let expected = shape_element_count(shape)?;
+        if expected != data.len() {
             return Err(MlxError::InvalidShape {
                 expected: shape.to_vec(),
-                got: vec![data.len() as i32],
+                got: vec![len_as_i32_saturating(data.len())],
             });
         }
         // SAFETY: we just validated `data.len() == product(shape)`. MLX copies
         // the buffer out of `data`, so the slice's lifetime ends at the end
         // of this call.
+        ensure_metallib_resource()?;
         let raw = unsafe { ffi::array_new_data_i32(data.as_ptr(), shape) };
+        if raw.ctx.is_null() {
+            return Err(MlxError::Internal(
+                "mlx_array_new_data returned a null handle".into(),
+            ));
+        }
+        Ok(Self { raw })
+    }
+
+    /// Construct an `MlxArray` from a host-side i64 slice.
+    ///
+    /// This is the lossless token-id constructor for HuggingFace tokenizers
+    /// and SafeTensors metadata paths that represent token IDs as 64-bit
+    /// integers. Use [`Self::from_slice_i32`] only when the caller has already
+    /// range-checked the IDs.
+    pub fn from_slice_i64(data: &[i64], shape: &[i32]) -> MlxResult<Self> {
+        let expected = shape_element_count(shape)?;
+        if expected != data.len() {
+            return Err(MlxError::InvalidShape {
+                expected: shape.to_vec(),
+                got: vec![len_as_i32_saturating(data.len())],
+            });
+        }
+        // SAFETY: we just validated `data.len() == product(shape)`. MLX copies
+        // the buffer out of `data`, so the slice's lifetime ends at the end
+        // of this call.
+        ensure_metallib_resource()?;
+        let raw = unsafe { ffi::array_new_data_i64(data.as_ptr(), shape) };
+        if raw.ctx.is_null() {
+            return Err(MlxError::Internal(
+                "mlx_array_new_data returned a null handle".into(),
+            ));
+        }
+        Ok(Self { raw })
+    }
+
+    /// Construct an `MlxArray` from a host-side u64 slice.
+    ///
+    /// MLX supports uint64 arrays natively. Xybrid keeps this constructor
+    /// alongside i64 so registry/tokenizer code can preserve upstream token-id
+    /// widths instead of narrowing through `i32`.
+    pub fn from_slice_u64(data: &[u64], shape: &[i32]) -> MlxResult<Self> {
+        let expected = shape_element_count(shape)?;
+        if expected != data.len() {
+            return Err(MlxError::InvalidShape {
+                expected: shape.to_vec(),
+                got: vec![len_as_i32_saturating(data.len())],
+            });
+        }
+        // SAFETY: we just validated `data.len() == product(shape)`. MLX copies
+        // the buffer out of `data`, so the slice's lifetime ends at the end
+        // of this call.
+        ensure_metallib_resource()?;
+        let raw = unsafe { ffi::array_new_data_u64(data.as_ptr(), shape) };
+        if raw.ctx.is_null() {
+            return Err(MlxError::Internal(
+                "mlx_array_new_data returned a null handle".into(),
+            ));
+        }
+        Ok(Self { raw })
+    }
+
+    /// Construct an `MlxArray` from raw bytes interpreted as `dtype`.
+    ///
+    /// The bytes are copied into MLX-managed storage via
+    /// `mlx_array_new_data`, so the input slice does not need to outlive the
+    /// call. This is primarily for file formats such as SafeTensors, where
+    /// F16/BF16 payloads already exist as little-endian raw element bytes.
+    pub fn from_dtype_bytes(data: &[u8], shape: &[i32], dtype: MlxDtype) -> MlxResult<Self> {
+        let elems = shape_element_count(shape)?;
+        if elems == 0 {
+            return Err(MlxError::InvalidShape {
+                expected: shape.to_vec(),
+                got: vec![len_as_i32_saturating(data.len())],
+            });
+        }
+        let expected_bytes =
+            elems
+                .checked_mul(dtype.size_bytes())
+                .ok_or_else(|| MlxError::InvalidShape {
+                    expected: shape.to_vec(),
+                    got: vec![len_as_i32_saturating(data.len())],
+                })?;
+        if data.len() != expected_bytes {
+            return Err(MlxError::InvalidShape {
+                expected: shape.to_vec(),
+                got: vec![len_as_i32_saturating(data.len())],
+            });
+        }
+        // SAFETY: we just validated `data.len() == product(shape) *
+        // dtype.size_bytes()`. MLX copies the buffer, so `data`'s lifetime
+        // can end at the end of this call.
+        ensure_metallib_resource()?;
+        let raw = unsafe { ffi::array_new_data_raw(data.as_ptr(), shape, dtype.into()) };
         if raw.ctx.is_null() {
             return Err(MlxError::Internal(
                 "mlx_array_new_data returned a null handle".into(),
@@ -145,12 +280,50 @@ impl MlxArray {
         unsafe { ffi::array_eval(self.raw) }
     }
 
+    /// Materialize this array into row-contiguous storage.
+    ///
+    /// MLX arrays can be lazy expressions or views with non-row-major
+    /// strides. This returns a fresh contiguous array while keeping the data
+    /// in MLX-managed storage.
+    fn contiguous(&self, stream: Option<&MlxStream>) -> MlxResult<Self> {
+        let default_stream;
+        let stream = match stream {
+            Some(stream) => stream,
+            None => {
+                default_stream = MlxStream::default_cpu()?;
+                &default_stream
+            }
+        };
+        let raw = unsafe { ffi::op_contiguous(self.raw, false, stream.as_raw())? };
+        Ok(Self::from_raw(raw))
+    }
+
+    /// Materialize this array into row-contiguous storage on the provided
+    /// stream.
+    ///
+    /// This is useful for runtime weight preprocessing, where a transposed
+    /// view should become a resident matmul-ready tensor once at load time
+    /// instead of being normalised on every decode step.
+    pub fn contiguous_on_stream(&self, stream: Option<&MlxStream>) -> MlxResult<Self> {
+        self.contiguous(stream)
+    }
+
     /// Read the array's contents as an owned `Vec<f32>`.
     ///
     /// Evaluates the array first (so callers do not need to remember to
     /// call [`Self::eval`]). Returns [`MlxError::InvalidDtype`] if the
     /// underlying dtype is not `F32`.
     pub fn to_vec_f32(&self) -> MlxResult<Vec<f32>> {
+        self.to_vec_f32_on_stream(None)
+    }
+
+    /// Read the array's contents as an owned `Vec<f32>` after making it
+    /// contiguous on the caller-provided stream.
+    ///
+    /// Runtime model code should pass the same stream that produced the
+    /// array, otherwise the final readback may force a device handoff before
+    /// evaluation.
+    pub fn to_vec_f32_on_stream(&self, stream: Option<&MlxStream>) -> MlxResult<Vec<f32>> {
         let dt = self.dtype()?;
         if dt != MlxDtype::F32 {
             return Err(MlxError::InvalidDtype {
@@ -158,11 +331,12 @@ impl MlxArray {
                 got: dt,
             });
         }
-        self.eval()?;
-        // SAFETY: self.raw is live per struct invariant; we just checked
-        // dtype and evaluated so `mlx_array_data_float32` is guaranteed to
-        // return a valid pointer.
-        unsafe { ffi::array_data_f32(self.raw) }
+        let materialized = self.contiguous(stream)?;
+        materialized.eval()?;
+        // SAFETY: materialized.raw is live per struct invariant; we just
+        // checked dtype and evaluated so `mlx_array_data_float32` is
+        // guaranteed to return a valid pointer.
+        unsafe { ffi::array_data_f32(materialized.raw) }
     }
 
     /// Read the array's contents as an owned `Vec<u32>`.
@@ -178,11 +352,52 @@ impl MlxArray {
                 got: dt,
             });
         }
-        self.eval()?;
-        // SAFETY: self.raw is live per struct invariant; we just checked
-        // dtype and evaluated so `mlx_array_data_uint32` is guaranteed to
-        // return a valid pointer.
-        unsafe { ffi::array_data_u32(self.raw) }
+        let materialized = self.contiguous_for_readback()?;
+        materialized.eval()?;
+        // SAFETY: materialized.raw is live per struct invariant; we just
+        // checked dtype and evaluated so `mlx_array_data_uint32` is
+        // guaranteed to return a valid pointer.
+        unsafe { ffi::array_data_u32(materialized.raw) }
+    }
+
+    /// Read the array's contents as an owned `Vec<i64>`.
+    ///
+    /// Companion to [`Self::from_slice_i64`]. Returns
+    /// [`MlxError::InvalidDtype`] if the underlying dtype is not `I64`.
+    pub fn to_vec_i64(&self) -> MlxResult<Vec<i64>> {
+        let dt = self.dtype()?;
+        if dt != MlxDtype::I64 {
+            return Err(MlxError::InvalidDtype {
+                expected: MlxDtype::I64,
+                got: dt,
+            });
+        }
+        let materialized = self.contiguous_for_readback()?;
+        materialized.eval()?;
+        // SAFETY: materialized.raw is live per struct invariant; we just
+        // checked dtype and evaluated so `mlx_array_data_int64` is
+        // guaranteed to return a valid pointer.
+        unsafe { ffi::array_data_i64(materialized.raw) }
+    }
+
+    /// Read the array's contents as an owned `Vec<u64>`.
+    ///
+    /// Companion to [`Self::from_slice_u64`]. Returns
+    /// [`MlxError::InvalidDtype`] if the underlying dtype is not `U64`.
+    pub fn to_vec_u64(&self) -> MlxResult<Vec<u64>> {
+        let dt = self.dtype()?;
+        if dt != MlxDtype::U64 {
+            return Err(MlxError::InvalidDtype {
+                expected: MlxDtype::U64,
+                got: dt,
+            });
+        }
+        let materialized = self.contiguous_for_readback()?;
+        materialized.eval()?;
+        // SAFETY: materialized.raw is live per struct invariant; we just
+        // checked dtype and evaluated so `mlx_array_data_uint64` is
+        // guaranteed to return a valid pointer.
+        unsafe { ffi::array_data_u64(materialized.raw) }
     }
 
     /// Fallible clone. See the note on [`Clone`] for the panic contract of
@@ -213,22 +428,29 @@ impl MlxArray {
     ) -> MlxResult<Self> {
         // Validate geometry up front. Any nonsense here would typically
         // crash MLX with a cryptic shape mismatch inside the first op.
-        let elems: i64 = shape.iter().map(|&d| i64::from(d)).product();
-        if elems <= 0 {
+        let elems = shape_element_count(shape)?;
+        if elems == 0 {
             return Err(MlxError::InvalidShape {
                 expected: shape.to_vec(),
-                got: vec![buf.len_bytes() as i32],
+                got: vec![len_as_i32_saturating(buf.len_bytes())],
             });
         }
-        let expected_bytes = (elems as usize).saturating_mul(dtype.size_bytes());
+        let expected_bytes =
+            elems
+                .checked_mul(dtype.size_bytes())
+                .ok_or_else(|| MlxError::InvalidShape {
+                    expected: shape.to_vec(),
+                    got: vec![len_as_i32_saturating(buf.len_bytes())],
+                })?;
         if buf.len_bytes() != expected_bytes {
             // shape's observed byte count — reported as a single-element
             // "shape" for consistency with the rest of the error surface.
             return Err(MlxError::InvalidShape {
                 expected: shape.to_vec(),
-                got: vec![buf.len_bytes() as i32],
+                got: vec![len_as_i32_saturating(buf.len_bytes())],
             });
         }
+        ensure_metallib_resource()?;
 
         // Park the SharedBuffer behind a Box so MLX can hold a stable
         // pointer to it. `data_ptr` aliases `SharedBuffer::as_ptr()`,
@@ -279,27 +501,26 @@ impl MlxArray {
     ///   `payload.len()`.
     /// - [`EnvelopePayload::Embedding`] → 1-D `f32` tensor of length
     ///   `payload.len()`.
-    /// - [`EnvelopePayload::TokenIds`] → [`MlxError::Internal`] — `i64`
-    ///   support lands in US-009.
+    /// - [`EnvelopePayload::TokenIds`] → 1-D `i64` tensor of length
+    ///   `payload.len()`.
     pub fn from_envelope<E: EnvelopeSource>(envelope: &E) -> MlxResult<Self> {
         match envelope.payload() {
             EnvelopePayload::Embedding(data) => {
                 let boxed: Box<[f32]> = data.to_vec().into_boxed_slice();
-                let len = boxed.len() as i32;
+                let len = len_as_shape_dim(boxed.len())?;
                 let buf = SharedBuffer::from_box(boxed)?;
                 Self::from_shared_buffer(buf, &[len], MlxDtype::F32)
             }
             EnvelopePayload::Audio(data) => {
                 let boxed: Box<[u8]> = data.to_vec().into_boxed_slice();
-                let len = boxed.len() as i32;
+                let len = len_as_shape_dim(boxed.len())?;
                 let buf = SharedBuffer::from_box(boxed)?;
                 Self::from_shared_buffer(buf, &[len], MlxDtype::U8)
             }
-            EnvelopePayload::TokenIds(_) => Err(MlxError::Internal(
-                "EnvelopePayload::TokenIds → MlxArray conversion lands in US-009 (i64 dtype \
-                 not yet exposed by MlxDtype)"
-                    .into(),
-            )),
+            EnvelopePayload::TokenIds(data) => {
+                let len = len_as_shape_dim(data.len())?;
+                Self::from_slice_i64(data, &[len])
+            }
         }
     }
 
@@ -315,15 +536,16 @@ impl MlxArray {
     /// accessor (`mlx_array_data_*`) — we log at `tracing::debug!` so
     /// consumers can tell when the fast path was unreachable.
     ///
-    /// Supported dtypes today: `F32` → `Embedding`, `U8` → `Audio`. Other
-    /// dtypes return [`MlxError::InvalidDtype`].
+    /// Supported dtypes today: `F32` → `Embedding`, `U8` → `Audio`,
+    /// `I64` → `TokenIds`. Other dtypes return [`MlxError::InvalidDtype`].
     pub fn to_envelope_payload(self) -> MlxResult<OwnedEnvelopePayload> {
-        self.eval()?;
         let dtype = self.dtype()?;
+        let materialized = self.contiguous_for_readback()?;
+        materialized.eval()?;
         match dtype {
             MlxDtype::F32 => {
                 // SAFETY: dtype checked F32 and eval() completed.
-                let data = unsafe { ffi::array_data_f32(self.raw)? };
+                let data = unsafe { ffi::array_data_f32(materialized.raw)? };
                 tracing::debug!(
                     bytes = data.len() * std::mem::size_of::<f32>(),
                     "MlxArray::to_envelope_payload: copying f32 back — SharedBuffer reuse \
@@ -333,13 +555,23 @@ impl MlxArray {
             }
             MlxDtype::U8 => {
                 // SAFETY: dtype checked U8 and eval() completed.
-                let data = unsafe { ffi::array_data_u8(self.raw)? };
+                let data = unsafe { ffi::array_data_u8(materialized.raw)? };
                 tracing::debug!(
                     bytes = data.len(),
                     "MlxArray::to_envelope_payload: copying u8 back — SharedBuffer reuse \
                      unavailable (MLX does not expose managed payloads)"
                 );
                 Ok(OwnedEnvelopePayload::Audio(data))
+            }
+            MlxDtype::I64 => {
+                // SAFETY: dtype checked I64 and eval() completed.
+                let data = unsafe { ffi::array_data_i64(materialized.raw)? };
+                tracing::debug!(
+                    bytes = data.len() * std::mem::size_of::<i64>(),
+                    "MlxArray::to_envelope_payload: copying i64 token IDs back — SharedBuffer \
+                     reuse unavailable (MLX does not expose managed payloads)"
+                );
+                Ok(OwnedEnvelopePayload::TokenIds(data))
             }
             other => Err(MlxError::InvalidDtype {
                 expected: MlxDtype::F32,
@@ -362,6 +594,14 @@ impl MlxArray {
     /// the same reason as [`Self::from_raw`].
     pub(crate) fn as_raw(&self) -> mlx_array {
         self.raw
+    }
+
+    /// Materialize this array into row-contiguous storage before typed host
+    /// readback. MLX view ops such as transpose can be evaluated but still
+    /// point at non-contiguous backing storage; copying their raw data pointer
+    /// would return storage order instead of logical row-major order.
+    fn contiguous_for_readback(&self) -> MlxResult<Self> {
+        self.contiguous(None)
     }
 }
 
@@ -489,6 +729,42 @@ mod tests {
     }
 
     #[test]
+    fn shape_element_count_rejects_negative_dim() {
+        let err = shape_element_count(&[2, -1, 4]).unwrap_err();
+
+        assert!(matches!(err, MlxError::InvalidShape { .. }));
+    }
+
+    #[test]
+    fn shape_element_count_rejects_overflow() {
+        let err = shape_element_count(&[i32::MAX, i32::MAX, i32::MAX]).unwrap_err();
+
+        assert!(matches!(err, MlxError::InvalidShape { .. }));
+    }
+
+    #[test]
+    fn len_as_shape_dim_rejects_lengths_over_mlx_i32_limit() {
+        let err = len_as_shape_dim(i32::MAX as usize + 1).unwrap_err();
+
+        assert!(matches!(err, MlxError::InvalidShape { .. }));
+    }
+
+    #[test]
+    fn rank_len_as_i32_rejects_ranks_over_mlx_i32_limit() {
+        let err = rank_len_as_i32(i32::MAX as usize + 1).unwrap_err();
+
+        assert!(matches!(err, MlxError::InvalidShape { .. }));
+    }
+
+    #[test]
+    fn from_dtype_bytes_rejects_overflow_shape_before_ffi() {
+        let err = MlxArray::from_dtype_bytes(&[], &[i32::MAX, i32::MAX, i32::MAX], MlxDtype::F32)
+            .unwrap_err();
+
+        assert!(matches!(err, MlxError::InvalidShape { .. }));
+    }
+
+    #[test]
     fn clone_and_drop_track_refcount() {
         // Fresh counter — the atomic is process-global but each test run
         // gets its own instance (cargo-test runs tests in separate procs
@@ -510,7 +786,7 @@ mod tests {
             sys::mlx_array_new_data_managed_payload(
                 data_ptr.cast::<std::ffi::c_void>(),
                 shape.as_ptr(),
-                shape.len() as i32,
+                rank_len_as_i32(shape.len()).unwrap(),
                 sys::mlx_dtype__MLX_FLOAT32,
                 std::ptr::addr_of!(DROP_COUNTER) as *mut std::ffi::c_void,
                 Some(drop_payload),
@@ -569,8 +845,8 @@ mod tests {
     //      `.storageModeShared` semantics).
     //   3. `MlxArray::from_envelope` round-trips through
     //      `to_envelope_payload` with byte-exact values.
-    //   4. `MlxArray::from_envelope` rejects `EnvelopePayload::TokenIds`
-    //      with a structurally-meaningful error (US-009 placeholder).
+    //   4. `MlxArray::from_envelope` maps `EnvelopePayload::TokenIds` to
+    //      an i64 MLX array without narrowing through i32.
 
     /// A minimal `EnvelopeSource` impl for tests — avoids pulling xybrid-core
     /// in as a dev-dep just to get the real `Envelope` type.
@@ -628,6 +904,39 @@ mod tests {
             }
             other => panic!("expected InvalidShape, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn i64_token_id_constructor_round_trips() {
+        let ids = [0_i64, 42, i64::from(i32::MAX) + 1];
+        let array = MlxArray::from_slice_i64(&ids, &[1, 3]).expect("from i64 ids");
+
+        assert_eq!(array.shape(), vec![1, 3]);
+        assert_eq!(array.dtype().expect("dtype"), MlxDtype::I64);
+        assert_eq!(array.to_vec_i64().expect("readback"), ids);
+    }
+
+    #[test]
+    fn u64_token_id_constructor_round_trips() {
+        let ids = [0_u64, 42, u64::from(u32::MAX) + 1];
+        let array = MlxArray::from_slice_u64(&ids, &[1, 3]).expect("from u64 ids");
+
+        assert_eq!(array.shape(), vec![1, 3]);
+        assert_eq!(array.dtype().expect("dtype"), MlxDtype::U64);
+        assert_eq!(array.to_vec_u64().expect("readback"), ids);
+    }
+
+    #[test]
+    fn from_dtype_bytes_loads_bf16_payload() {
+        let bytes = [0x80, 0x3f, 0x00, 0x40]; // 1.0, 2.0 in BF16 LE.
+        let array =
+            MlxArray::from_dtype_bytes(&bytes, &[2], MlxDtype::Bf16).expect("from bf16 bytes");
+
+        assert_eq!(array.shape(), vec![2]);
+        assert_eq!(array.dtype().expect("dtype"), MlxDtype::Bf16);
+
+        let as_f32 = crate::ops::cast(&array, MlxDtype::F32, None).expect("cast bf16 to f32");
+        assert_eq!(as_f32.to_vec_f32().expect("readback"), vec![1.0, 2.0]);
     }
 
     /// Shared-storage semantics: mutate the SharedBuffer via its pointer
@@ -703,23 +1012,34 @@ mod tests {
         }
     }
 
-    /// TokenIds placeholder: MlxDtype doesn't expose i64 yet (US-009), so
-    /// `from_envelope` returns a descriptive Internal error rather than
-    /// silently lying.
     #[test]
-    fn envelope_rejects_token_ids_until_us_009() {
+    fn envelope_round_trip_token_ids() {
+        let original: Vec<i64> = vec![10, 20, i64::from(i32::MAX) + 1];
+        let env = TestEnvelope {
+            payload: EnvelopePayload::TokenIds(&original),
+        };
+        let array = MlxArray::from_envelope(&env).expect("from_envelope");
+        assert_eq!(array.shape(), vec![original.len() as i32]);
+        assert_eq!(array.dtype().expect("dtype"), MlxDtype::I64);
+        let back = array.to_envelope_payload().expect("to_envelope_payload");
+        match back {
+            OwnedEnvelopePayload::TokenIds(v) => assert_eq!(v, original),
+            other => panic!("expected TokenIds, got {other:?}"),
+        }
+    }
+
+    /// TokenIds mapping: decoder models keep their i64 token IDs intact.
+    #[test]
+    fn envelope_maps_token_ids_to_i64_array() {
         let ids: Vec<i64> = vec![10, 20, 30];
         let env = TestEnvelope {
             payload: EnvelopePayload::TokenIds(&ids),
         };
-        let err = MlxArray::from_envelope(&env).unwrap_err();
-        match err {
-            MlxError::Internal(msg) => assert!(
-                msg.contains("US-009"),
-                "error should cite US-009, got: {msg}"
-            ),
-            other => panic!("expected Internal, got {other:?}"),
-        }
+        let array = MlxArray::from_envelope(&env).expect("from token ids");
+
+        assert_eq!(array.shape(), vec![ids.len() as i32]);
+        assert_eq!(array.dtype().expect("dtype"), MlxDtype::I64);
+        assert_eq!(array.to_vec_i64().expect("readback"), ids);
     }
 
     /// Dropping the MlxArray built via `from_shared_buffer` must run our

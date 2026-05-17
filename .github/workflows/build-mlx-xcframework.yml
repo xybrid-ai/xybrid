@@ -3,7 +3,9 @@ name: Build MLX XCFramework
 # Builds a fat mlx.xcframework from upstream ml-explore/mlx and ml-explore/mlx-c
 # sources. Three slices are produced (iphoneos-arm64, iphonesimulator-arm64,
 # macos-arm64) so downstream consumers (mlx-c-sys, vendor/mlx-apple) do not need
-# a Metal toolchain or CMake locally.
+# CMake locally. Upstream MLX only enables its Metal backend when
+# CMAKE_SYSTEM_NAME=Darwin; iOS slices are packaged for link compatibility but
+# are expected to be CPU/no-Metal until upstream supports iOS Metal builds.
 #
 # Triggers:
 #   - workflow_dispatch:        manual rebuild (e.g. after bumping UPSTREAM_VERSIONS.txt)
@@ -33,8 +35,8 @@ permissions:
   contents: write
 
 env:
-  MLX_DEPLOYMENT_TARGET_IOS: '15.0'
-  MLX_DEPLOYMENT_TARGET_MACOS: '13.3'
+  MLX_DEPLOYMENT_TARGET_IOS: '16.4'
+  MLX_DEPLOYMENT_TARGET_MACOS: '14.0'
 
 jobs:
   build:
@@ -48,6 +50,13 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_16.app
           xcodebuild -version
           clang --version
+
+      - name: Install build tools
+        run: |
+          if ! command -v ninja >/dev/null 2>&1; then
+            brew install ninja
+          fi
+          ninja --version
 
       - name: Read upstream pins
         id: pins
@@ -172,7 +181,11 @@ jobs:
             if compgen -G "${SRC}/lib/*.metallib" > /dev/null; then
               cp "${SRC}"/lib/*.metallib "$DST"/
             else
-              echo "::warning::no .metallib produced for ${SLICE} — Metal kernels will not be available at runtime"
+              if [ "$SLICE" = "macos-arm64" ]; then
+                echo "::error::no .metallib produced for ${SLICE}; macOS MLX runtime would not have Metal kernels"
+                exit 1
+              fi
+              echo "::notice::no .metallib produced for ${SLICE}; upstream MLX disables Metal for CMAKE_SYSTEM_NAME=iOS"
             fi
           done
 

@@ -3,9 +3,10 @@
 //! Each submodule groups related ops by rough topic, mirroring the PRD's
 //! breakdown:
 //!
-//! - [`basic`] — matmul, add, mul, softmax, rms_norm, cast (US-006)
+//! - [`basic`] — matmul, add, mul, softmax, norms, cast, activations (US-006)
 //! - [`attention`] — rope, scaled_dot_product_attention, gather, concat,
 //!   reshape, transpose (US-007)
+//! - [`convolution`] — channel-last conv1d for hybrid architectures
 //!
 //! All ops follow a common shape:
 //!
@@ -21,8 +22,11 @@
 
 pub mod attention;
 pub mod basic;
+pub mod convolution;
 
 pub use attention::{concat, gather, reshape, rope, scaled_dot_product_attention, transpose};
 pub use basic::{
-    add, argmax, cast, exp, matmul, mul, reciprocal, rms_norm, sigmoid, silu, softmax,
+    add, argmax, cast, div, erf, exp, gelu, gelu_tanh, layer_norm, matmul, mul, neg, reciprocal,
+    rms_norm, sigmoid, silu, softmax, sqrt, square, sub, tanh,
 };
+pub use convolution::conv1d;

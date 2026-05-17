@@ -2,9 +2,10 @@
 //!
 //! The cache pre-allocates page descriptors for `max_seq_len` tokens, divided
 //! into fixed [`KV_CACHE_PAGE_TOKENS`]-token chunks. Each [`KvCachePage`]
-//! carries the slot metadata for one chunk; the actual K/V tensor backing —
-//! one `xybrid_mlx::MlxArray` per layer per page — is materialised lazily
-//! when an architecture builder writes to it (US-011..US-014).
+//! carries the slot metadata for one chunk. Qwen, Gemma, and LFM currently
+//! own resident architecture-local generation tensors in their runtime weight
+//! state; this module remains the page-accounting surface for the future
+//! shared paged cache.
 //!
 //! Paging — instead of one monolithic `[batch, n_kv_heads, max_seq_len, head_dim]`
 //! tensor per layer — keeps the device-side allocation footprint flat under
@@ -19,9 +20,9 @@
 /// describing cache layout stay in sync.
 pub const KV_CACHE_PAGE_TOKENS: usize = 256;
 
-/// Per-page metadata. The actual `K` and `V` tensors live on the GPU and are
-/// owned by [`KvCache`] in subsequent stories — this struct is the
-/// CPU-side bookkeeping for one chunk.
+/// Per-page metadata. The actual `K` and `V` tensors are owned by
+/// architecture-specific runtime state today; this struct is the CPU-side
+/// bookkeeping for one future shared-cache chunk.
 #[derive(Debug, Clone)]
 pub struct KvCachePage {
     /// Token offset of the first slot in this page (multiple of
@@ -55,13 +56,11 @@ impl KvCachePage {
 
 /// Paged KV cache for one model instance.
 ///
-/// The cache stores `n_layers × n_pages` page descriptors. Each layer-page
-/// will own a pair of `MlxArray`s (K and V) once the architecture builders
-/// (US-011..US-013) and the generate loop (US-014) wire them in. For now,
-/// only the page descriptors and the per-layer count are tracked, so the
+/// The cache stores `n_layers × n_pages` page descriptors. For now, only
+/// the page descriptors and the per-layer count are tracked, so the
 /// pagination math (which page does token `t` belong to? how many pages
 /// are needed for `max_seq_len`? what's the next free slot?) can be tested
-/// in isolation.
+/// in isolation while architecture-local caches mature.
 #[derive(Debug, Clone)]
 pub struct KvCache {
     /// Number of transformer layers. One K/V page descriptor per layer per

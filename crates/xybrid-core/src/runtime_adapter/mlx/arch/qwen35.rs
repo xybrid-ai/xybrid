@@ -1,21 +1,20 @@
-//! Qwen 3 / Qwen 3.5 architecture builder.
+//! Qwen 3 architecture builder.
 //!
 //! Ports the MLX-LM Python reference's `qwen3` architecture to Rust + the
 //! safe tensor ops from `xybrid_mlx::ops`. The builder lands in two
 //! layers:
 //!
-//! 1. **Skeleton** (always compiled under `llm-mlx`) — parses
+//! 1. **Non-linking validation** (always compiled under `llm-mlx`) — parses
 //!    `config.json`, enumerates the expected safetensors weight-key
 //!    schedule, and validates the safetensors header before we commit to
 //!    linking Metal. Lets the runtime selector fall back to llama.cpp
 //!    cleanly when a bundle is malformed or quantized in a way we don't
 //!    yet support.
-//! 2. **Runtime** (gated on `llm-mlx-runtime` + Apple target) — the
+//! 2. **Runtime** (gated on `llm-mlx-runtime` + Apple Silicon macOS) — the
 //!    actual per-layer `runtime::Qwen35Weights` + forward pass, built on
-//!    `xybrid_mlx::MlxArray` + the ops from US-006/US-007. The missing
-//!    activation primitive (`silu`) and the full generate loop land in
-//!    US-014; this story stages the weight loading + layer schedule so
-//!    US-014 has a typed surface to drive.
+//!    `xybrid_mlx::MlxArray` + the core tensor ops. Prefill writes K/V
+//!    tensors into resident per-layer cache slots, and decode forwards only
+//!    the newest token with an absolute RoPE offset.
 //!
 //! Reference (upstream): <https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3.py>.
 //! Qwen 3 is a LLaMA-style decoder with Grouped-Query Attention, SwiGLU
@@ -26,16 +25,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use safetensors::SafeTensors;
 use serde::Deserialize;
 
 use super::super::model::{MlxLlmError, MlxLlmResult};
+use super::super::weights::SafeTensorBundle;
 
 // =============================================================================
 // Config
 // =============================================================================
 
-/// Full Qwen 3 / Qwen 3.5 `config.json` subset the builder needs.
+/// Full Qwen 3 `config.json` subset the builder needs.
 ///
 /// Fields mirror the HuggingFace config layout (`model_type = "qwen3"`).
 /// Missing fields fall back to upstream defaults — Qwen 3 pins
@@ -125,6 +124,44 @@ impl Qwen3Config {
                 self.vocab_size,
             )));
         }
+        if self.head_dim.is_none() && !self.hidden_size.is_multiple_of(self.num_attention_heads) {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "qwen3 config hidden_size={} is not a multiple of num_attention_heads={}",
+                self.hidden_size, self.num_attention_heads,
+            )));
+        }
+        let head_dim = self.head_dim();
+        let kv_heads = self.kv_heads();
+        if head_dim == 0 || kv_heads == 0 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "qwen3 config has invalid derived dimensions (head_dim={head_dim}, kv_heads={kv_heads})"
+            )));
+        }
+        if !self.num_attention_heads.is_multiple_of(kv_heads) {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "qwen3 config num_attention_heads={} is not a multiple of num_key_value_heads={kv_heads}",
+                self.num_attention_heads,
+            )));
+        }
+        super::validate_i32_dimensions(
+            "qwen3",
+            &[
+                ("hidden_size", self.hidden_size),
+                ("num_hidden_layers", self.num_hidden_layers),
+                ("num_attention_heads", self.num_attention_heads),
+                ("num_key_value_heads", kv_heads),
+                ("intermediate_size", self.intermediate_size),
+                ("vocab_size", self.vocab_size),
+                ("max_position_embeddings", self.max_position_embeddings),
+                ("head_dim", head_dim),
+            ],
+        )?;
+        super::validate_i32_product(
+            "qwen3",
+            "attention_projection_width",
+            &[self.num_attention_heads, head_dim],
+        )?;
+        super::validate_i32_product("qwen3", "kv_projection_width", &[kv_heads, head_dim])?;
         Ok(())
     }
 
@@ -203,29 +240,28 @@ pub fn expected_weight_keys(cfg: &Qwen3Config) -> Vec<String> {
 /// Quantized bundles are rejected here with a pointed error — MLX-LM
 /// 4-bit bundles store additional `*.scales` / `*.biases` tensors
 /// alongside packed int8 weights, and our matmul wrappers don't handle
-/// that layout yet (lands with US-014's generate loop and
-/// `mlx_fast_quantized_matmul`).
+/// that layout yet.
 pub fn validate_safetensors(path: &Path, cfg: &Qwen3Config) -> MlxLlmResult<()> {
+    let weights = SafeTensorBundle::from_single_file(path.to_path_buf());
+    validate_safetensors_bundle(&weights, cfg)
+}
+
+pub fn validate_safetensors_bundle(
+    weights: &SafeTensorBundle,
+    cfg: &Qwen3Config,
+) -> MlxLlmResult<()> {
     if cfg.is_quantized() {
         let bits = cfg.quantization.as_ref().map(|q| q.bits).unwrap_or(0);
         let gs = cfg.quantization.as_ref().map(|q| q.group_size).unwrap_or(0);
-        return Err(MlxLlmError::UnsupportedArchitecture {
-            model_type: format!(
-                "{} (quantized {bits}-bit/group={gs} — mlx_fast_quantized_matmul lands in US-014)",
-                cfg.model_type
-            ),
+        return Err(MlxLlmError::UnsupportedQuantization {
+            model_type: cfg.model_type.clone(),
+            bits,
+            group_size: gs,
+            reason: "mlx_fast_quantized_matmul is not wired for Qwen yet",
         });
     }
 
-    let bytes = fs::read(path).map_err(|e| MlxLlmError::WeightLoad {
-        path: path.to_path_buf(),
-        reason: format!("read safetensors: {e}"),
-    })?;
-    let (_, meta) = SafeTensors::read_metadata(&bytes).map_err(|e| MlxLlmError::WeightLoad {
-        path: path.to_path_buf(),
-        reason: format!("invalid safetensors header: {e}"),
-    })?;
-    let names: std::collections::HashSet<String> = meta.tensors().into_keys().collect();
+    let names = weights.tensor_names()?;
 
     let expected = expected_weight_keys(cfg);
     let missing: Vec<String> = expected
@@ -235,7 +271,7 @@ pub fn validate_safetensors(path: &Path, cfg: &Qwen3Config) -> MlxLlmResult<()> 
         .collect();
     if !missing.is_empty() {
         return Err(MlxLlmError::WeightLoad {
-            path: path.to_path_buf(),
+            path: weights.path_for_error(),
             reason: format!(
                 "missing {} required tensor(s); first few = {:?}",
                 missing.len(),
@@ -247,24 +283,21 @@ pub fn validate_safetensors(path: &Path, cfg: &Qwen3Config) -> MlxLlmResult<()> 
 }
 
 /// Top-level entry: load and validate a Qwen 3 bundle's config + weight
-/// manifest. Returns the parsed config so the skeleton load path in
+/// manifest. Returns the parsed config so the non-linking load path in
 /// [`super::super::model::MlxLlmAdapter::load`] can cache it.
 ///
 /// Does NOT touch MLX / Metal — that happens in `runtime::build` under
 /// the `llm-mlx-runtime` feature.
-pub fn load(model_dir: &Path, weights_path: &Path) -> MlxLlmResult<Qwen3Config> {
+pub fn load(model_dir: &Path, weights: &SafeTensorBundle) -> MlxLlmResult<Qwen3Config> {
     let cfg = Qwen3Config::from_model_dir(model_dir)?;
-    validate_safetensors(weights_path, &cfg)?;
+    validate_safetensors_bundle(weights, &cfg)?;
     Ok(cfg)
 }
 
-/// Resolve the safetensors weight file for a bundle.
-///
-/// MLX-LM bundles sometimes shard weights across multiple
-/// `model-{i}-of-{n}.safetensors` files addressed by a
-/// `model.safetensors.index.json` manifest. The skeleton currently
-/// supports the single-file layout only; sharded support lands with
-/// US-015 and will re-use this helper.
+/// Resolve the legacy single-file safetensors path for callers that need
+/// that exact file. Normal Qwen validation/runtime loading goes through
+/// [`SafeTensorBundle`] and accepts either `model.safetensors` or a
+/// `model.safetensors.index.json` shard manifest.
 pub fn resolve_weights_path(model_dir: &Path) -> MlxLlmResult<PathBuf> {
     let single = model_dir.join("model.safetensors");
     if single.exists() {
@@ -277,30 +310,30 @@ pub fn resolve_weights_path(model_dir: &Path) -> MlxLlmResult<PathBuf> {
 }
 
 // =============================================================================
-// Runtime (llm-mlx-runtime + Apple only)
+// Runtime (llm-mlx-runtime + Apple Silicon macOS only)
 // =============================================================================
 
 /// MLX-backed forward pass — only compiled when the xcframework can be
-/// linked (`llm-mlx-runtime` feature on an Apple target).
+/// linked (`llm-mlx-runtime` feature on Apple Silicon macOS).
 ///
-/// The skeleton above runs on every platform that enables `llm-mlx`
+/// The metadata/validation path above runs on every platform that enables `llm-mlx`
 /// (including the Linux CI runner that cross-compiles the feature for
 /// `cargo check`). The runtime submodule is the only place that touches
 /// Metal-backed allocations.
 #[cfg(all(
     feature = "llm-mlx-runtime",
-    any(target_os = "macos", target_os = "ios")
+    target_os = "macos",
+    target_arch = "aarch64"
 ))]
 pub mod runtime {
-    use super::super::super::model::{MlxLlmError, MlxLlmResult};
+    use super::super::super::model::MlxLlmResult;
+    use super::super::super::weights::SafeTensorBundle;
+    use super::super::{shape_dim_i32, shape_product_i32};
     use super::Qwen3Config;
 
-    use std::path::Path;
-
-    use safetensors::{Dtype as StDtype, SafeTensors};
     use xybrid_mlx::ops::{
-        add, gather, matmul, mul, reshape, rms_norm, rope, scaled_dot_product_attention, silu,
-        transpose,
+        add, concat, gather, matmul, mul, reshape, rms_norm, rope, scaled_dot_product_attention,
+        silu, transpose,
     };
     use xybrid_mlx::{MlxArray, MlxStream};
 
@@ -321,6 +354,22 @@ pub mod runtime {
         pub mlp_down_proj: MlxArray,
     }
 
+    /// Resident K/V tensors for one decoder layer during a single generation
+    /// call. The generate loop resets these before prefill, then each
+    /// incremental decode step appends one `[B, kv_heads, 1, head_dim]` slice.
+    #[derive(Debug, Default)]
+    pub struct Qwen35LayerCache {
+        keys: Option<MlxArray>,
+        values: Option<MlxArray>,
+    }
+
+    impl Qwen35LayerCache {
+        fn reset(&mut self) {
+            self.keys = None;
+            self.values = None;
+        }
+    }
+
     /// Full Qwen 3 weight set resident in MLX memory.
     #[derive(Debug)]
     pub struct Qwen35Weights {
@@ -330,6 +379,16 @@ pub mod runtime {
         /// `None` when [`Qwen3Config::tie_word_embeddings`] is set — the
         /// forward pass re-uses `embed_tokens` for the LM head.
         pub lm_head: Option<MlxArray>,
+        layer_cache: Vec<Qwen35LayerCache>,
+    }
+
+    impl Qwen35Weights {
+        /// Clear per-generation K/V state while keeping resident weights.
+        pub fn reset_kv_cache(&mut self) {
+            for cache in &mut self.layer_cache {
+                cache.reset();
+            }
+        }
     }
 
     /// Build [`Qwen35Weights`] by reading `model.safetensors` and
@@ -339,42 +398,33 @@ pub mod runtime {
     /// rejected up-front in [`super::validate_safetensors`], so by the
     /// time we land here the dtypes are guaranteed to be dequantized
     /// floats.
-    pub fn build(cfg: &Qwen3Config, weights_path: &Path) -> MlxLlmResult<Qwen35Weights> {
-        let bytes = std::fs::read(weights_path).map_err(|e| MlxLlmError::WeightLoad {
-            path: weights_path.to_path_buf(),
-            reason: format!("read safetensors: {e}"),
-        })?;
-        let st = SafeTensors::deserialize(&bytes).map_err(|e| MlxLlmError::WeightLoad {
-            path: weights_path.to_path_buf(),
-            reason: format!("parse safetensors: {e}"),
-        })?;
-
-        let embed_tokens = load_tensor(&st, "model.embed_tokens.weight")?;
+    pub fn build(cfg: &Qwen3Config, weights: &SafeTensorBundle) -> MlxLlmResult<Qwen35Weights> {
+        let embed_tokens = load_tensor(weights, "model.embed_tokens.weight")?;
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for l in 0..cfg.num_hidden_layers {
             let base = format!("model.layers.{l}");
             layers.push(Qwen35Layer {
-                input_layernorm: load_tensor(&st, &format!("{base}.input_layernorm.weight"))?,
-                q_proj: load_tensor(&st, &format!("{base}.self_attn.q_proj.weight"))?,
-                k_proj: load_tensor(&st, &format!("{base}.self_attn.k_proj.weight"))?,
-                v_proj: load_tensor(&st, &format!("{base}.self_attn.v_proj.weight"))?,
-                o_proj: load_tensor(&st, &format!("{base}.self_attn.o_proj.weight"))?,
-                q_norm: load_tensor(&st, &format!("{base}.self_attn.q_norm.weight"))?,
-                k_norm: load_tensor(&st, &format!("{base}.self_attn.k_norm.weight"))?,
+                input_layernorm: load_tensor(weights, &format!("{base}.input_layernorm.weight"))?,
+                q_proj: load_tensor(weights, &format!("{base}.self_attn.q_proj.weight"))?,
+                k_proj: load_tensor(weights, &format!("{base}.self_attn.k_proj.weight"))?,
+                v_proj: load_tensor(weights, &format!("{base}.self_attn.v_proj.weight"))?,
+                o_proj: load_tensor(weights, &format!("{base}.self_attn.o_proj.weight"))?,
+                q_norm: load_tensor(weights, &format!("{base}.self_attn.q_norm.weight"))?,
+                k_norm: load_tensor(weights, &format!("{base}.self_attn.k_norm.weight"))?,
                 post_attention_layernorm: load_tensor(
-                    &st,
+                    weights,
                     &format!("{base}.post_attention_layernorm.weight"),
                 )?,
-                mlp_gate_proj: load_tensor(&st, &format!("{base}.mlp.gate_proj.weight"))?,
-                mlp_up_proj: load_tensor(&st, &format!("{base}.mlp.up_proj.weight"))?,
-                mlp_down_proj: load_tensor(&st, &format!("{base}.mlp.down_proj.weight"))?,
+                mlp_gate_proj: load_tensor(weights, &format!("{base}.mlp.gate_proj.weight"))?,
+                mlp_up_proj: load_tensor(weights, &format!("{base}.mlp.up_proj.weight"))?,
+                mlp_down_proj: load_tensor(weights, &format!("{base}.mlp.down_proj.weight"))?,
             });
         }
-        let norm = load_tensor(&st, "model.norm.weight")?;
+        let norm = load_tensor(weights, "model.norm.weight")?;
         let lm_head = if cfg.tie_word_embeddings {
             None
         } else {
-            Some(load_tensor(&st, "lm_head.weight")?)
+            Some(load_tensor(weights, "lm_head.weight")?)
         };
 
         Ok(Qwen35Weights {
@@ -382,103 +432,16 @@ pub mod runtime {
             layers,
             norm,
             lm_head,
+            layer_cache: std::iter::repeat_with(Qwen35LayerCache::default)
+                .take(cfg.num_hidden_layers)
+                .collect(),
         })
     }
 
     /// Read one tensor from a SafeTensors view into an [`MlxArray`].
     ///
-    /// F16 / BF16 tensors are promoted to F32 because
-    /// [`MlxArray::from_slice_f32`] is the only lossless constructor
-    /// mlx-c-sys exposes today. The promotion doubles host memory
-    /// transiently; once `MlxArray::from_bytes(dtype, ...)` lands the
-    /// promotion can drop in favour of a direct blit.
-    fn load_tensor(st: &SafeTensors<'_>, name: &str) -> MlxLlmResult<MlxArray> {
-        let view = st.tensor(name).map_err(|e| MlxLlmError::WeightLoad {
-            path: std::path::PathBuf::from(name),
-            reason: format!("tensor missing: {e}"),
-        })?;
-        let shape_i32: Vec<i32> = view
-            .shape()
-            .iter()
-            .map(|&d| i32::try_from(d).unwrap_or(i32::MAX))
-            .collect();
-        let data = view.data();
-
-        match view.dtype() {
-            StDtype::F32 => {
-                let floats: &[f32] = cast_to_f32(data);
-                MlxArray::from_slice_f32(floats, &shape_i32).map_err(Into::into)
-            }
-            StDtype::F16 => {
-                let floats: Vec<f32> = f16_slice_to_f32(data);
-                MlxArray::from_slice_f32(&floats, &shape_i32).map_err(Into::into)
-            }
-            StDtype::BF16 => {
-                let floats: Vec<f32> = bf16_slice_to_f32(data);
-                MlxArray::from_slice_f32(&floats, &shape_i32).map_err(Into::into)
-            }
-            other => Err(MlxLlmError::WeightLoad {
-                path: std::path::PathBuf::from(name),
-                reason: format!("unsupported tensor dtype {other:?}"),
-            }),
-        }
-    }
-
-    /// Reinterpret a little-endian byte slice as `&[f32]`.
-    ///
-    /// `bytemuck::cast_slice` would be the idiomatic call but we avoid
-    /// the dep — the safetensors byte region is guaranteed well-aligned
-    /// (the crate's validator rejects misaligned layouts) and we
-    /// length-check before reinterpreting.
-    fn cast_to_f32(bytes: &[u8]) -> &[f32] {
-        debug_assert!(bytes.len().is_multiple_of(4));
-        debug_assert_eq!(bytes.as_ptr().align_offset(align_of::<f32>()), 0);
-        // SAFETY: alignment and length divisibility asserted above.
-        unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), bytes.len() / 4) }
-    }
-
-    fn f16_slice_to_f32(bytes: &[u8]) -> Vec<f32> {
-        bytes
-            .chunks_exact(2)
-            .map(|c| half_to_f32(u16::from_le_bytes([c[0], c[1]])))
-            .collect()
-    }
-
-    fn bf16_slice_to_f32(bytes: &[u8]) -> Vec<f32> {
-        bytes
-            .chunks_exact(2)
-            .map(|c| {
-                let bits = u32::from(u16::from_le_bytes([c[0], c[1]])) << 16;
-                f32::from_bits(bits)
-            })
-            .collect()
-    }
-
-    /// IEEE754 half-precision → f32. Handles subnormals + Inf/NaN.
-    fn half_to_f32(bits: u16) -> f32 {
-        let sign = u32::from(bits >> 15) << 31;
-        let exp = u32::from((bits >> 10) & 0x1f);
-        let mant = u32::from(bits & 0x3ff);
-        let out = if exp == 0 {
-            if mant == 0 {
-                sign
-            } else {
-                // Subnormal — renormalise.
-                let mut m = mant;
-                let mut e: i32 = -14;
-                while (m & 0x400) == 0 {
-                    m <<= 1;
-                    e -= 1;
-                }
-                m &= 0x3ff;
-                sign | (((e + 127) as u32) << 23) | (m << 13)
-            }
-        } else if exp == 31 {
-            sign | 0x7f80_0000 | (mant << 13)
-        } else {
-            sign | ((exp + 112) << 23) | (mant << 13)
-        };
-        f32::from_bits(out)
+    fn load_tensor(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<MlxArray> {
+        weights.read_array(name)
     }
 
     /// Forward pass through the whole stack.
@@ -486,18 +449,14 @@ pub mod runtime {
     /// `input_ids` shape: `[batch, seq_len]` (i32). Returns logits of
     /// shape `[batch, seq_len, vocab_size]` (f32).
     ///
-    /// **Deferred**: the SwiGLU FFN needs a `silu` primitive and the LM
-    /// head sampling needs elementwise `exp` / `reciprocal` for softmax-
-    /// stable sampling. Those wrappers are added alongside the generate
-    /// loop in US-014. For US-011 the forward pass assembles the
-    /// attention half of the block and returns
-    /// [`MlxLlmError::NotImplemented`] at the FFN boundary so a caller
-    /// that accidentally picks up this path before US-014 sees a pointed
-    /// error instead of a cryptic compile-time hole.
+    /// The generate loop calls this once for full-prompt prefill, then with
+    /// only the newest token for incremental decode. K/V tensors are appended
+    /// into `weights.layer_cache` per layer and read back by later decode
+    /// calls, so Qwen no longer recomputes the whole token history.
     #[allow(clippy::too_many_arguments)]
     pub fn forward(
         cfg: &Qwen3Config,
-        weights: &Qwen35Weights,
+        weights: &mut Qwen35Weights,
         input_ids: &MlxArray,
         position_offset: i32,
         stream: Option<&MlxStream>,
@@ -510,10 +469,13 @@ pub mod runtime {
         // Embedding lookup: [B, T] -> [B, T, H].
         let mut hidden = gather(&weights.embed_tokens, input_ids, 0, stream)?;
 
-        for layer in &weights.layers {
+        let layers = &weights.layers;
+        let layer_cache = &mut weights.layer_cache;
+        for (layer, cache) in layers.iter().zip(layer_cache.iter_mut()) {
             hidden = attention_block(
                 cfg,
                 layer,
+                cache,
                 &hidden,
                 n_heads,
                 n_kv_heads,
@@ -573,13 +535,13 @@ pub mod runtime {
     /// projections → per-head RMSNorm (Qwen 3 specific) → RoPE → fused
     /// SDPA → output projection → residual.
     ///
-    /// Exported at `pub` module scope so US-014's generate loop can
-    /// reuse it directly (avoiding a re-implementation when the FFN
-    /// half lands).
+    /// The fused attention call receives GQA-shaped Q/K/V tensors; MLX
+    /// handles the query-head to key/value-head grouping internally.
     #[allow(clippy::too_many_arguments)]
     fn attention_block(
         cfg: &Qwen3Config,
         layer: &Qwen35Layer,
+        cache: &mut Qwen35LayerCache,
         hidden: &MlxArray,
         n_heads: usize,
         n_kv_heads: usize,
@@ -608,10 +570,11 @@ pub mod runtime {
         // Qwen 3-specific per-head RMSNorm on Q and K (applied before RoPE).
         let q = rms_norm(&q, Some(&layer.q_norm), cfg.rms_norm_eps, stream)?;
         let k = rms_norm(&k, Some(&layer.k_norm), cfg.rms_norm_eps, stream)?;
+        let head_dim_i32 = shape_dim_i32("qwen3", "head_dim", head_dim)?;
 
         let q = rope(
             &q,
-            head_dim as i32,
+            head_dim_i32,
             false,
             Some(cfg.rope_theta),
             1.0,
@@ -621,7 +584,7 @@ pub mod runtime {
         )?;
         let k = rope(
             &k,
-            head_dim as i32,
+            head_dim_i32,
             false,
             Some(cfg.rope_theta),
             1.0,
@@ -630,11 +593,38 @@ pub mod runtime {
             stream,
         )?;
 
-        let attn = scaled_dot_product_attention(&q, &k, &v, scale, true, None, stream)?;
+        let had_cached_prefix = cache.keys.is_some();
+        let k = append_cached_axis2(&mut cache.keys, &k, stream)?;
+        let v = append_cached_axis2(&mut cache.values, &v, stream)?;
+
+        // Prefill has T>1 and needs the causal mask. Incremental decode has
+        // q_len=1 and cached K/V only contains the prefix plus this token, so
+        // no future positions exist to mask.
+        let causal = !had_cached_prefix && q.shape().get(2).copied().unwrap_or(1) > 1;
+        let attn = scaled_dot_product_attention(&q, &k, &v, scale, causal, None, stream)?;
         let attn = merge_heads(&attn, n_heads, head_dim, stream)?;
         let attn = matmul(&attn, &transpose(&layer.o_proj, &[1, 0], stream)?, stream)?;
 
         add(hidden, &attn, stream).map_err(Into::into)
+    }
+
+    fn append_cached_axis2(
+        slot: &mut Option<MlxArray>,
+        new_slice: &MlxArray,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        match slot.take() {
+            Some(existing) => {
+                let combined = concat(&[&existing, new_slice], 2, stream)?;
+                *slot = Some(combined.clone());
+                Ok(combined)
+            }
+            None => {
+                let cached = new_slice.clone();
+                *slot = Some(cached.clone());
+                Ok(cached)
+            }
+        }
     }
 
     /// Reshape `[B, T, heads * head_dim]` → `[B, heads, T, head_dim]`.
@@ -647,7 +637,9 @@ pub mod runtime {
         let shape = x.shape();
         let b = shape[0];
         let t = shape[1];
-        let reshaped = reshape(x, &[b, t, heads as i32, head_dim as i32], stream)?;
+        let heads_i32 = shape_dim_i32("qwen3", "num_attention_heads", heads)?;
+        let head_dim_i32 = shape_dim_i32("qwen3", "head_dim", head_dim)?;
+        let reshaped = reshape(x, &[b, t, heads_i32, head_dim_i32], stream)?;
         transpose(&reshaped, &[0, 2, 1, 3], stream).map_err(Into::into)
     }
 
@@ -662,39 +654,13 @@ pub mod runtime {
         let b = shape[0];
         let t = shape[2];
         let transposed = transpose(x, &[0, 2, 1, 3], stream)?;
-        reshape(&transposed, &[b, t, (heads * head_dim) as i32], stream).map_err(Into::into)
-    }
-
-    // =========================================================================
-    // Runtime tests (apple + runtime feature)
-    // =========================================================================
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn half_to_f32_zero_and_one() {
-            assert_eq!(super::half_to_f32(0x0000), 0.0_f32);
-            // 1.0 in f16 is 0x3C00.
-            assert_eq!(super::half_to_f32(0x3c00), 1.0_f32);
-            // -1.0 in f16 is 0xBC00.
-            assert_eq!(super::half_to_f32(0xbc00), -1.0_f32);
-        }
-
-        #[test]
-        fn bf16_slice_round_trip_through_f32() {
-            // bf16 is just the top 16 bits of f32 — 1.0 → 0x3f80.
-            let bytes = [0x80_u8, 0x3f];
-            let v = super::bf16_slice_to_f32(&bytes);
-            assert_eq!(v.len(), 1);
-            assert!((v[0] - 1.0_f32).abs() < f32::EPSILON);
-        }
+        let width = shape_product_i32("qwen3", "merged_attention_width", &[heads, head_dim])?;
+        reshape(&transposed, &[b, t, width], stream).map_err(Into::into)
     }
 }
 
 // =============================================================================
-// Tests (skeleton — no bindings required)
+// Tests (non-linking — no bindings required)
 // =============================================================================
 
 #[cfg(test)]
@@ -783,13 +749,24 @@ mod tests {
         });
         assert!(cfg.is_quantized());
         let err = validate_safetensors(Path::new("/nonexistent"), &cfg).unwrap_err();
-        match err {
-            MlxLlmError::UnsupportedArchitecture { model_type } => {
-                assert!(model_type.contains("quantized"), "got: {model_type}");
-                assert!(model_type.contains("4-bit"), "got: {model_type}");
+        match &err {
+            MlxLlmError::UnsupportedQuantization {
+                model_type,
+                bits,
+                group_size,
+                ..
+            } => {
+                assert_eq!(model_type, "qwen3");
+                assert_eq!(*bits, 4);
+                assert_eq!(*group_size, 64);
             }
-            other => panic!("expected UnsupportedArchitecture, got {other:?}"),
+            other => panic!("expected UnsupportedQuantization, got {other:?}"),
         }
+        let msg = err.to_string();
+        assert!(msg.contains("unsupported MLX quantization"), "got: {msg}");
+        assert!(msg.contains("qwen3"), "got: {msg}");
+        assert!(msg.contains("4-bit/group=64"), "got: {msg}");
+        assert!(msg.contains("GGUF fallback"), "got: {msg}");
     }
 
     #[test]
@@ -808,6 +785,45 @@ mod tests {
         cfg.hidden_size = 0;
         match cfg.validate().unwrap_err() {
             MlxLlmError::ConfigInvalid(msg) => assert!(msg.contains("zero-valued")),
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hidden_not_divisible_by_heads_rejected() {
+        let mut cfg = dummy_config(1, false);
+        cfg.head_dim = None;
+        cfg.hidden_size = 17;
+        match cfg.validate().unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => assert!(msg.contains("multiple of")),
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn oversized_dimensions_rejected() {
+        let mut cfg = dummy_config(1, false);
+        cfg.max_position_embeddings = i32::MAX as usize + 1;
+        match cfg.validate().unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("exceeds MLX i32 shape limit"), "got: {msg}");
+                assert!(msg.contains("max_position_embeddings"), "got: {msg}");
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn oversized_projection_width_rejected() {
+        let mut cfg = dummy_config(1, false);
+        cfg.num_attention_heads = 2;
+        cfg.num_key_value_heads = Some(1);
+        cfg.head_dim = Some(i32::MAX as usize / 2 + 1);
+        match cfg.validate().unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("exceeds MLX i32 shape limit"), "got: {msg}");
+                assert!(msg.contains("attention_projection_width"), "got: {msg}");
+            }
             other => panic!("expected ConfigInvalid, got {other:?}"),
         }
     }

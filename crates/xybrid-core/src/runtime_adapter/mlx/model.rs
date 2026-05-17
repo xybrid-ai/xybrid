@@ -1,17 +1,20 @@
-//! `MlxLlmAdapter` — the structural skeleton for MLX LLM inference.
+//! `MlxLlmAdapter` — MLX LLM inference adapter.
 //!
-//! Reads `config.json` + `tokenizer.json` + `model.safetensors` from a model
-//! directory, dispatches on the upstream `model_type` field, and (in later
-//! stories) hands off to an architecture builder. US-010 wires the file
-//! parsing and dispatch only; every known `model_type` returns
-//! [`MlxLlmError::UnsupportedArchitecture`] until the matching builder lands
-//! (Qwen 3.5 → US-011, Gemma 4 → US-012, LFM 3.5 → US-013).
+//! Reads `config.json`, `tokenizer.json`, and SafeTensors weights from a model
+//! directory, dispatches on the upstream `model_type` field, validates the
+//! architecture-specific weight manifest, and hands generation calls to the
+//! MLX generate loop when `llm-mlx-runtime` is available. Qwen has the
+//! most complete Apple-linked runtime path. Qwen, Gemma, and LFM include
+//! resident generation state for incremental decode; LFM carries both
+//! attention K/V state and short-conv recurrent state. Gemma and LFM have
+//! synthetic runtime coverage plus env-gated real bundle smokes; their exact
+//! BF16 benchmark rows remain informational until the MLX measurements justify
+//! parity gating.
 //!
 //! Trait coverage:
 //! - [`LlmBackend`](crate::runtime_adapter::llm::LlmBackend): `load` /
 //!   `is_loaded` / `unload` / `name` / `supported_formats` are wired; the
-//!   generation methods return `RuntimeError("not yet implemented")` and
-//!   gain real bodies in US-014.
+//!   generation methods route through `generate.rs`.
 //! - [`InferenceBackend`](crate::runtime_adapter::InferenceBackend):
 //!   `runtime_type` returns [`RuntimeType::Mlx`], `load_model` mirrors the
 //!   `LlmBackend::load` path, and the tensor-level methods report that this
@@ -41,6 +44,7 @@ use super::generate::{self, GenerateParams};
 use super::kv_cache::KvCache;
 use super::sampler::SamplerError;
 use super::tokenizer as tokenizer_loader;
+use super::weights::SafeTensorBundle;
 
 /// Result alias for the MLX adapter's local error type.
 pub type MlxLlmResult<T> = Result<T, MlxLlmError>;
@@ -61,14 +65,35 @@ pub enum MlxLlmError {
     /// family appears upstream.
     #[error(
         "unsupported MLX model architecture `{model_type}`. \
-         Supported: Qwen 3.5 (`qwen3`), Gemma 4 (`gemma4`), LFM 3.5 (`lfm`, `lfm3`). \
+         Supported: Qwen 3 (`qwen3`), Gemma 4 (`gemma4`), LFM 2/2.5/3.5 (`lfm2`, `lfm`, `lfm3`). \
          Fall back to llama.cpp until the matching builder lands."
     )]
     UnsupportedArchitecture { model_type: String },
 
+    /// The model architecture is known, but its SafeTensors bundle uses a
+    /// quantized layout that the MLX adapter cannot execute yet.
+    #[error(
+        "unsupported MLX quantization for `{model_type}`: {bits}-bit/group={group_size}. \
+         {reason}. Register a GGUF fallback variant or republish this MLX variant as dequantized SafeTensors."
+    )]
+    UnsupportedQuantization {
+        model_type: String,
+        bits: u32,
+        group_size: u32,
+        reason: &'static str,
+    },
+
     /// A required file is missing from the model directory.
     #[error("missing file `{file}` in MLX model directory `{dir}`")]
     MissingFile { file: &'static str, dir: PathBuf },
+
+    /// A sharded SafeTensors shard was found without the HuggingFace index
+    /// file required to map tensor names to shard files.
+    #[error(
+        "MLX sharded SafeTensors bundles require `model.safetensors.index.json`: \
+         found orphan shard `{marker}` in `{dir}`."
+    )]
+    OrphanShardedWeights { marker: PathBuf, dir: PathBuf },
 
     /// Generic IO failure while reading model files.
     #[error("IO error reading MLX model file: {0}")]
@@ -87,10 +112,10 @@ pub enum MlxLlmError {
     #[error("MLX adapter has no model loaded")]
     NotLoaded,
 
-    /// A code path is wired structurally but its real implementation lands
-    /// in a later story. Carries a human-readable feature label and the
-    /// owning user-story ID so tracebacks point at the right backlog item.
-    #[error("MLX adapter `{feature}` is not yet implemented (lands in {story})")]
+    /// A code path is implemented only in a stricter build/runtime tier.
+    /// Carries a human-readable feature label and the gate the caller must
+    /// satisfy so non-runtime builds surface an actionable error.
+    #[error("MLX adapter `{feature}` is unavailable in this build (gate: {story})")]
     NotImplemented {
         feature: &'static str,
         story: &'static str,
@@ -157,8 +182,7 @@ pub struct MlxLlmConfig {
     /// to keep cache memory predictable.
     pub max_seq_len: usize,
     /// Default generation parameters used when `LlmBackend::generate` is
-    /// called with no per-call override. Filled in fully when generate
-    /// lands in US-014; today the field is plumbed but unused.
+    /// called with no per-call override.
     pub default_generation: GenerationConfig,
 }
 
@@ -189,9 +213,9 @@ impl MlxLlmConfig {
 }
 
 /// Subset of an MLX-LM `config.json` we need at the trait surface. Captured
-/// as a public type because the architecture builders (US-011..US-013) read
-/// the same fields. Unknown fields are tolerated via serde's default
-/// behaviour — only `model_type` is strictly required for the dispatch path.
+/// as a public type because the architecture builders read the same fields.
+/// Unknown fields are tolerated via serde's default behaviour — only
+/// `model_type` is strictly required for the generic dispatch path.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelConfig {
     /// Upstream architecture identifier. Examples: `"qwen2"`, `"gemma2"`,
@@ -199,9 +223,9 @@ pub struct ModelConfig {
     /// builder.
     pub model_type: String,
 
-    /// Hidden size (model dimension). Optional in this skeleton because the
-    /// arch dispatch happens before any builder reads it; required once
-    /// US-011 lands.
+    /// Hidden size (model dimension). Optional at the generic trait surface;
+    /// architecture-specific builders validate it when their forward path
+    /// requires it.
     #[serde(default)]
     pub hidden_size: Option<usize>,
 
@@ -217,22 +241,22 @@ pub struct ModelConfig {
     pub max_position_embeddings: Option<usize>,
 }
 
-/// Architecture variant resolved from `config.json`. Grows as each arch
-/// builder lands (US-011 Qwen 3.5, US-012 Gemma 4, US-013 LFM 3.5).
+/// Architecture variant resolved from `config.json`.
 ///
 /// Marked `#[non_exhaustive]` so downstream matchers need a catch-all arm;
 /// adding a new variant in a later story is a non-breaking change.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum ModelArchitecture {
-    /// Qwen 3 / Qwen 3.5 family — upstream `model_type = "qwen3"`. See
+    /// Qwen 3 family — upstream `model_type = "qwen3"`. See
     /// [`super::arch::qwen35`].
     Qwen35,
     /// Gemma 4 family — upstream `model_type = "gemma4"`. See
     /// [`super::arch::gemma4`].
     Gemma4,
-    /// Liquid Foundation Model 3.5 family — upstream
-    /// `model_type = "lfm"` or `"lfm3"`. See [`super::arch::lfm35`].
+    /// Liquid Foundation Model 2 / 2.5 / 3.5 family — upstream
+    /// `model_type = "lfm2"`, `"lfm"` or `"lfm3"`.
+    /// See [`super::arch::lfm35`].
     Lfm35,
 }
 
@@ -246,6 +270,30 @@ struct LoadedState {
     tokenizer: Tokenizer,
     kv_cache: KvCache,
     arch: ModelArchitecture,
+    #[allow(dead_code)]
+    qwen3_config: Option<super::arch::qwen35::Qwen3Config>,
+    #[allow(dead_code)]
+    gemma4_config: Option<super::arch::gemma4::Gemma4Config>,
+    #[allow(dead_code)]
+    lfm35_config: Option<super::arch::lfm35::Lfm35Config>,
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    qwen3_runtime_weights: Option<std::sync::Mutex<super::arch::qwen35::runtime::Qwen35Weights>>,
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    gemma4_runtime_weights: Option<std::sync::Mutex<super::arch::gemma4::runtime::Gemma4Weights>>,
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    lfm35_runtime_weights: Option<std::sync::Mutex<super::arch::lfm35::runtime::Lfm35Weights>>,
     /// Loaded chat template (from `tokenizer_config.json`). Optional
     /// because base models without a `chat_template` field still load —
     /// they just can't be called via [`LlmBackend::generate`] (which
@@ -253,11 +301,11 @@ struct LoadedState {
     chat_template: Option<ChatTemplate>,
 }
 
-/// MLX LLM adapter. Skeleton in US-010; full bodies for the generation /
-/// embedding paths land in US-014 / US-015. The adapter is `Send + Sync` —
-/// the underlying tokenizer is `Send + Sync`, and the KV cache is plain Rust
-/// pre-allocated state; future MLX state is added through types that are
-/// already `Send`.
+/// MLX LLM adapter. The adapter is `Send + Sync` —
+/// the underlying tokenizer is `Send + Sync`, the generic KV descriptor cache
+/// is plain Rust pre-allocated state, and runtime MLX arrays live behind
+/// mutexes so `&self` generation calls can reuse loaded handles without
+/// breaking the trait's thread-safety contract.
 #[derive(Debug)]
 pub struct MlxLlmAdapter {
     config: MlxLlmConfig,
@@ -278,7 +326,7 @@ impl MlxLlmAdapter {
     /// `{model_dir}/tokenizer.json`, verify `{model_dir}/model.safetensors`
     /// exists, dispatch on the parsed `model_type`, and return a fully
     /// loaded adapter. Returns [`MlxLlmError::UnsupportedArchitecture`] for
-    /// any architecture without a builder yet (which today is all of them).
+    /// any architecture without a builder.
     pub fn load(model_dir: &Path, config: &MlxLlmConfig) -> MlxLlmResult<Self> {
         let mut adapter = Self::new(config.clone());
         adapter.load_in_place(model_dir)?;
@@ -291,7 +339,7 @@ impl MlxLlmAdapter {
         // IO error against the directory is not actionable.
         let config_path = require_file(model_dir, "config.json")?;
         let tokenizer_path = require_file(model_dir, "tokenizer.json")?;
-        let safetensors_path = require_file(model_dir, "model.safetensors")?;
+        let weights = SafeTensorBundle::from_model_dir(model_dir)?;
 
         let config_json = fs::read_to_string(&config_path)?;
         let model_cfg: ModelConfig = serde_json::from_str(&config_json)?;
@@ -306,22 +354,52 @@ impl MlxLlmAdapter {
         // Metal boundary — that way the runtime selector (US-016) gets a
         // clean UnsupportedArchitecture / WeightLoad error for quantized
         // or malformed bundles instead of a confusing post-link failure.
+        let mut qwen3_config = None;
+        let mut gemma4_config = None;
+        let mut lfm35_config = None;
         let n_layers = match arch {
             ModelArchitecture::Qwen35 => {
-                let qwen_cfg = super::arch::qwen35::load(model_dir, &safetensors_path)?;
-                qwen_cfg.num_hidden_layers
+                let qwen_cfg = super::arch::qwen35::load(model_dir, &weights)?;
+                let n_layers = qwen_cfg.num_hidden_layers;
+                qwen3_config = Some(qwen_cfg);
+                n_layers
             }
             ModelArchitecture::Gemma4 => {
-                let gemma_cfg = super::arch::gemma4::load(model_dir, &safetensors_path)?;
-                gemma_cfg.num_hidden_layers
+                let gemma_cfg = super::arch::gemma4::load(model_dir, &weights)?;
+                let n_layers = gemma_cfg.num_hidden_layers;
+                gemma4_config = Some(gemma_cfg);
+                n_layers
             }
             ModelArchitecture::Lfm35 => {
-                let lfm_cfg = super::arch::lfm35::load(model_dir, &safetensors_path)?;
-                lfm_cfg.num_hidden_layers
+                let lfm_cfg = super::arch::lfm35::load(model_dir, &weights)?;
+                let n_layers = lfm_cfg.num_hidden_layers;
+                lfm35_config = Some(lfm_cfg);
+                n_layers
             }
         };
 
         let kv_cache = KvCache::new(n_layers, self.config.max_seq_len);
+        #[cfg(all(
+            feature = "llm-mlx-runtime",
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let qwen3_runtime_weights =
+            build_qwen3_runtime_weights(arch, qwen3_config.as_ref(), &weights)?;
+        #[cfg(all(
+            feature = "llm-mlx-runtime",
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let gemma4_runtime_weights =
+            build_gemma4_runtime_weights(arch, gemma4_config.as_ref(), &weights)?;
+        #[cfg(all(
+            feature = "llm-mlx-runtime",
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let lfm35_runtime_weights =
+            build_lfm35_runtime_weights(arch, lfm35_config.as_ref(), &weights)?;
 
         // Chat template is optional: base (non-chat) models still load. The
         // `generate` path requires it; `generate_raw` does not. Missing-template
@@ -343,6 +421,27 @@ impl MlxLlmAdapter {
             tokenizer,
             kv_cache,
             arch,
+            qwen3_config,
+            gemma4_config,
+            lfm35_config,
+            #[cfg(all(
+                feature = "llm-mlx-runtime",
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            qwen3_runtime_weights,
+            #[cfg(all(
+                feature = "llm-mlx-runtime",
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            gemma4_runtime_weights,
+            #[cfg(all(
+                feature = "llm-mlx-runtime",
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            lfm35_runtime_weights,
             chat_template,
         });
         Ok(())
@@ -369,11 +468,111 @@ impl MlxLlmAdapter {
         self.loaded.as_ref().map(|s| &s.tokenizer)
     }
 
-    /// Architecture variant resolved at load time. Used by the generate /
-    /// embedding entry points (US-014/US-015) to pick an arch-specific
-    /// forward function. Currently empty until US-011 lands a builder.
+    /// Architecture variant resolved at load time. Used by the generation and
+    /// embedding entry points to pick an architecture-specific forward
+    /// function.
     pub fn architecture(&self) -> Option<ModelArchitecture> {
         self.loaded.as_ref().map(|s| s.arch)
+    }
+
+    /// Parsed Qwen 3 config retained on the adapter after load. The MLX
+    /// runtime generation path uses this cached config alongside cached
+    /// weight handles instead of reparsing `config.json` per request.
+    #[cfg(test)]
+    pub(crate) fn qwen3_config(&self) -> Option<&super::arch::qwen35::Qwen3Config> {
+        self.loaded.as_ref().and_then(|s| s.qwen3_config.as_ref())
+    }
+
+    /// Borrow the loaded Qwen runtime state for generation. The weight
+    /// set is mutex-protected because [`LlmBackend`] exposes generation
+    /// through `&self`; concurrent calls serialize on the shared MLX
+    /// handles instead of rebuilding them.
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    pub(crate) fn qwen3_runtime_state(
+        &self,
+    ) -> MlxLlmResult<(
+        &super::arch::qwen35::Qwen3Config,
+        std::sync::MutexGuard<'_, super::arch::qwen35::runtime::Qwen35Weights>,
+    )> {
+        let loaded = self.loaded.as_ref().ok_or(MlxLlmError::NotLoaded)?;
+        let cfg = loaded.qwen3_config.as_ref().ok_or_else(|| {
+            MlxLlmError::ConfigInvalid(
+                "Qwen generation requested but no Qwen config is loaded".into(),
+            )
+        })?;
+        let weights = loaded.qwen3_runtime_weights.as_ref().ok_or_else(|| {
+            MlxLlmError::ConfigInvalid(
+                "Qwen generation requested but runtime weights are not loaded".into(),
+            )
+        })?;
+        let guard = weights.lock().map_err(|_| {
+            MlxLlmError::ConfigInvalid("Qwen runtime weight cache lock is poisoned".into())
+        })?;
+        Ok((cfg, guard))
+    }
+
+    /// Borrow the loaded Gemma runtime state for generation. The weight
+    /// set is mutex-protected for the same reason as Qwen: generation is
+    /// exposed through `&self` and MLX handles are Send but not Sync.
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    pub(crate) fn gemma4_runtime_state(
+        &self,
+    ) -> MlxLlmResult<(
+        &super::arch::gemma4::Gemma4Config,
+        std::sync::MutexGuard<'_, super::arch::gemma4::runtime::Gemma4Weights>,
+    )> {
+        let loaded = self.loaded.as_ref().ok_or(MlxLlmError::NotLoaded)?;
+        let cfg = loaded.gemma4_config.as_ref().ok_or_else(|| {
+            MlxLlmError::ConfigInvalid(
+                "Gemma generation requested but no Gemma config is loaded".into(),
+            )
+        })?;
+        let weights = loaded.gemma4_runtime_weights.as_ref().ok_or_else(|| {
+            MlxLlmError::ConfigInvalid(
+                "Gemma generation requested but runtime weights are not loaded".into(),
+            )
+        })?;
+        let guard = weights.lock().map_err(|_| {
+            MlxLlmError::ConfigInvalid("Gemma runtime weight cache lock is poisoned".into())
+        })?;
+        Ok((cfg, guard))
+    }
+
+    /// Borrow the loaded LFM runtime state for generation.
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    pub(crate) fn lfm35_runtime_state(
+        &self,
+    ) -> MlxLlmResult<(
+        &super::arch::lfm35::Lfm35Config,
+        std::sync::MutexGuard<'_, super::arch::lfm35::runtime::Lfm35Weights>,
+    )> {
+        let loaded = self.loaded.as_ref().ok_or(MlxLlmError::NotLoaded)?;
+        let cfg = loaded.lfm35_config.as_ref().ok_or_else(|| {
+            MlxLlmError::ConfigInvalid(
+                "LFM generation requested but no LFM config is loaded".into(),
+            )
+        })?;
+        let weights = loaded.lfm35_runtime_weights.as_ref().ok_or_else(|| {
+            MlxLlmError::ConfigInvalid(
+                "LFM generation requested but runtime weights are not loaded".into(),
+            )
+        })?;
+        let guard = weights.lock().map_err(|_| {
+            MlxLlmError::ConfigInvalid("LFM runtime weight cache lock is poisoned".into())
+        })?;
+        Ok((cfg, guard))
     }
 
     /// Path the model was loaded from. Useful for error messages.
@@ -430,18 +629,89 @@ fn require_file(dir: &Path, file: &'static str) -> MlxLlmResult<PathBuf> {
 /// (US-016) converts into a "fall back to llama.cpp" decision.
 fn dispatch_architecture(model_type: &str) -> MlxLlmResult<ModelArchitecture> {
     match model_type {
-        // US-011: Qwen 3 / Qwen 3.5 family.
+        // US-011: Qwen 3 family.
         "qwen3" => Ok(ModelArchitecture::Qwen35),
         // US-012: Gemma 4 family.
         "gemma4" => Ok(ModelArchitecture::Gemma4),
-        // US-013: LFM 3.5 family. Upstream uses `"lfm"` for LFM 2 /
-        // LFM 3 bundles and `"lfm3"` for LFM 3.5 specifically — the
-        // PRD pins both strings because the config string drifts
-        // between the mlx-community and liquid-ai releases.
-        "lfm" | "lfm3" => Ok(ModelArchitecture::Lfm35),
+        // US-013: LFM 2 / 2.5 / 3.5 family. Upstream MLX bundles use
+        // `"lfm2"` for current public LFM2 releases, `"lfm"` for some
+        // LFM 2 / 3 bundles, and `"lfm3"` for LFM 3.5 specifically.
+        "lfm2" | "lfm" | "lfm3" => Ok(ModelArchitecture::Lfm35),
         other => Err(MlxLlmError::UnsupportedArchitecture {
             model_type: other.to_string(),
         }),
+    }
+}
+
+#[cfg(all(
+    feature = "llm-mlx-runtime",
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+fn build_qwen3_runtime_weights(
+    arch: ModelArchitecture,
+    qwen3_config: Option<&super::arch::qwen35::Qwen3Config>,
+    weights: &SafeTensorBundle,
+) -> MlxLlmResult<Option<std::sync::Mutex<super::arch::qwen35::runtime::Qwen35Weights>>> {
+    match arch {
+        ModelArchitecture::Qwen35 => {
+            let cfg = qwen3_config.ok_or_else(|| {
+                MlxLlmError::ConfigInvalid(
+                    "Qwen runtime weights requested without a parsed Qwen config".into(),
+                )
+            })?;
+            let weights = super::arch::qwen35::runtime::build(cfg, weights)?;
+            Ok(Some(std::sync::Mutex::new(weights)))
+        }
+        ModelArchitecture::Gemma4 | ModelArchitecture::Lfm35 => Ok(None),
+    }
+}
+
+#[cfg(all(
+    feature = "llm-mlx-runtime",
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+fn build_gemma4_runtime_weights(
+    arch: ModelArchitecture,
+    gemma4_config: Option<&super::arch::gemma4::Gemma4Config>,
+    weights: &SafeTensorBundle,
+) -> MlxLlmResult<Option<std::sync::Mutex<super::arch::gemma4::runtime::Gemma4Weights>>> {
+    match arch {
+        ModelArchitecture::Gemma4 => {
+            let cfg = gemma4_config.ok_or_else(|| {
+                MlxLlmError::ConfigInvalid(
+                    "Gemma runtime weights requested without a parsed Gemma config".into(),
+                )
+            })?;
+            let weights = super::arch::gemma4::runtime::build(cfg, weights)?;
+            Ok(Some(std::sync::Mutex::new(weights)))
+        }
+        ModelArchitecture::Qwen35 | ModelArchitecture::Lfm35 => Ok(None),
+    }
+}
+
+#[cfg(all(
+    feature = "llm-mlx-runtime",
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+fn build_lfm35_runtime_weights(
+    arch: ModelArchitecture,
+    lfm35_config: Option<&super::arch::lfm35::Lfm35Config>,
+    weights: &SafeTensorBundle,
+) -> MlxLlmResult<Option<std::sync::Mutex<super::arch::lfm35::runtime::Lfm35Weights>>> {
+    match arch {
+        ModelArchitecture::Lfm35 => {
+            let cfg = lfm35_config.ok_or_else(|| {
+                MlxLlmError::ConfigInvalid(
+                    "LFM runtime weights requested without a parsed LFM config".into(),
+                )
+            })?;
+            let weights = super::arch::lfm35::runtime::build(cfg, weights)?;
+            Ok(Some(std::sync::Mutex::new(weights)))
+        }
+        ModelArchitecture::Qwen35 | ModelArchitecture::Gemma4 => Ok(None),
     }
 }
 
@@ -701,7 +971,7 @@ mod tests {
                 };
                 expected_weight_keys(&g_cfg)
             }
-            "lfm" | "lfm3" => {
+            "lfm2" | "lfm" | "lfm3" => {
                 use super::super::arch::lfm35::{expected_weight_keys, Lfm35Config};
                 let l_cfg = Lfm35Config {
                     model_type: model_type.into(),
@@ -743,6 +1013,26 @@ mod tests {
         }
     }
 
+    fn convert_single_weights_to_indexed_shard(dir: &Path) {
+        let single = dir.join("model.safetensors");
+        let shard_name = "model-00001-of-00002.safetensors";
+        let shard = dir.join(shard_name);
+        fs::rename(&single, &shard).unwrap();
+
+        let bytes = fs::read(&shard).unwrap();
+        let (_, meta) = safetensors::SafeTensors::read_metadata(&bytes).unwrap();
+        let weight_map: serde_json::Map<String, serde_json::Value> = meta
+            .tensors()
+            .into_keys()
+            .map(|name| (name, serde_json::Value::String(shard_name.to_string())))
+            .collect();
+        let index = serde_json::json!({
+            "metadata": {},
+            "weight_map": weight_map,
+        });
+        fs::write(dir.join("model.safetensors.index.json"), index.to_string()).unwrap();
+    }
+
     #[test]
     fn load_unknown_model_type_returns_unsupported_architecture() {
         let tmp = TempDir::new().unwrap();
@@ -774,10 +1064,11 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_accepts_lfm_and_lfm3() {
-        // US-013: both `model_type = "lfm"` and `"lfm3"` route to the
-        // LFM 3.5 builder (the config string drifts between upstream
-        // releases).
+    fn dispatch_accepts_lfm2_lfm_and_lfm3() {
+        // US-013: LFM model_type strings drift across public MLX bundles,
+        // but all three currently share the same hybrid builder topology.
+        let z = dispatch_architecture("lfm2").expect("lfm2 dispatch");
+        assert!(matches!(z, ModelArchitecture::Lfm35));
         let a = dispatch_architecture("lfm").expect("lfm dispatch");
         assert!(matches!(a, ModelArchitecture::Lfm35));
         let b = dispatch_architecture("lfm3").expect("lfm3 dispatch");
@@ -816,10 +1107,24 @@ mod tests {
     }
 
     #[test]
+    fn load_lfm2_returns_loaded_adapter() {
+        // Public mlx-community LFM2 BF16 bundles use `model_type = "lfm2"`;
+        // they still share the same hybrid conv+attention key schedule.
+        let tmp = TempDir::new().unwrap();
+        write_dummy_bundle(tmp.path(), "lfm2");
+        let adapter = MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load ok");
+        assert!(LlmBackend::is_loaded(&adapter));
+        assert!(matches!(
+            adapter.architecture(),
+            Some(ModelArchitecture::Lfm35)
+        ));
+    }
+
+    #[test]
     fn load_qwen3_returns_loaded_adapter() {
         // End-to-end: bundle with `model_type = "qwen3"` loads without the
         // UnsupportedArchitecture error. The dummy bundle has no real
-        // safetensors payload, but the skeleton load path only verifies
+        // safetensors payload, but the non-linking load path only verifies
         // file presence — weight validation is deferred to the arch
         // builder which is exercised in its own tests.
         let tmp = TempDir::new().unwrap();
@@ -833,6 +1138,21 @@ mod tests {
     }
 
     #[test]
+    fn load_qwen3_caches_arch_config_for_generation_state() {
+        let tmp = TempDir::new().unwrap();
+        write_dummy_bundle(tmp.path(), "qwen3");
+
+        let adapter = MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load ok");
+        let qwen_cfg = adapter
+            .qwen3_config()
+            .expect("Qwen config should be cached on the loaded adapter");
+
+        assert_eq!(qwen_cfg.model_type, "qwen3");
+        assert_eq!(qwen_cfg.num_hidden_layers, 2);
+        assert_eq!(qwen_cfg.hidden_size, 16);
+    }
+
+    #[test]
     fn load_missing_config_returns_missing_file() {
         let tmp = TempDir::new().unwrap();
         // Intentionally do NOT write any files.
@@ -843,6 +1163,42 @@ mod tests {
                 assert_eq!(file, "config.json");
             }
             other => panic!("expected MissingFile, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_sharded_safetensors_index_returns_loaded_adapter() {
+        let tmp = TempDir::new().unwrap();
+        write_dummy_bundle(tmp.path(), "qwen3");
+        convert_single_weights_to_indexed_shard(tmp.path());
+
+        let adapter =
+            MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load sharded ok");
+        assert!(LlmBackend::is_loaded(&adapter));
+        assert!(matches!(
+            adapter.architecture(),
+            Some(ModelArchitecture::Qwen35)
+        ));
+    }
+
+    #[test]
+    fn load_sharded_safetensors_file_without_index_returns_targeted_error() {
+        let tmp = TempDir::new().unwrap();
+        write_dummy_bundle(tmp.path(), "qwen3");
+        fs::remove_file(tmp.path().join("model.safetensors")).unwrap();
+        fs::write(tmp.path().join("model-00001-of-00002.safetensors"), b"").unwrap();
+
+        let err = MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default())
+            .expect_err("orphan sharded safetensors should be rejected explicitly");
+        match err {
+            MlxLlmError::OrphanShardedWeights { marker, dir } => {
+                assert_eq!(dir, tmp.path());
+                assert_eq!(
+                    marker.file_name().and_then(|n| n.to_str()),
+                    Some("model-00001-of-00002.safetensors")
+                );
+            }
+            other => panic!("expected OrphanShardedWeights, got {other:?}"),
         }
     }
 

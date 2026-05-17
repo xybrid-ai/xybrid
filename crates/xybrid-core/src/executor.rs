@@ -37,7 +37,7 @@
 use crate::context::StageDescriptor;
 use crate::execution::{ModelMetadata, TemplateExecutor};
 use crate::ir::Envelope;
-use crate::runtime_adapter::{AdapterError, CloudRuntimeAdapter, RuntimeAdapter};
+use crate::runtime_adapter::{AdapterError, BackendChoice, CloudRuntimeAdapter, RuntimeAdapter};
 use crate::tracing as trace;
 use log::debug;
 use std::collections::HashMap;
@@ -93,6 +93,28 @@ pub struct StageMetadata {
     pub target: String,
     /// Execution latency in milliseconds
     pub latency_ms: u128,
+}
+
+fn apply_stage_backend_override(
+    metadata: &mut ModelMetadata,
+    stage: &StageDescriptor,
+) -> ExecutorResult<()> {
+    let Some(raw_backend) = stage.backend.as_deref() else {
+        return Ok(());
+    };
+
+    let canonical = match BackendChoice::parse(raw_backend).map_err(|err| {
+        ExecutorError::Other(format!(
+            "Invalid backend override for stage '{}': {}",
+            stage.name, err
+        ))
+    })? {
+        Some(choice) => choice.as_str(),
+        None => "auto",
+    };
+
+    metadata.backend = Some(canonical.to_string());
+    Ok(())
 }
 
 /// Executor for managing runtime adapters and executing inference stages.
@@ -282,13 +304,14 @@ impl Executor {
                                 e
                             ))
                         })?;
-                        let model_metadata: ModelMetadata = serde_json::from_str(&metadata_content)
-                            .map_err(|e| {
+                        let mut model_metadata: ModelMetadata =
+                            serde_json::from_str(&metadata_content).map_err(|e| {
                                 ExecutorError::Other(format!(
                                     "Failed to parse model_metadata.json: {}",
                                     e
                                 ))
                             })?;
+                        apply_stage_backend_override(&mut model_metadata, stage)?;
 
                         debug!(
                             target: "xybrid_core",
@@ -1077,6 +1100,31 @@ mod tests {
             "Directory paths should be accepted, not rejected as bundles: {:?}",
             result
         );
+    }
+
+    #[test]
+    fn stage_backend_override_stamps_loaded_metadata_in_memory() {
+        let mut metadata: ModelMetadata = serde_json::from_str(
+            r#"{
+                "model_id": "test-llm",
+                "version": "1.0",
+                "execution_template": {
+                    "type": "Gguf",
+                    "model_file": "model.gguf",
+                    "context_length": 4096
+                },
+                "preprocessing": [],
+                "postprocessing": [],
+                "files": ["model.gguf"],
+                "metadata": { "task": "text-generation" }
+            }"#,
+        )
+        .unwrap();
+        let stage = StageDescriptor::new("test-llm").with_backend("mlx");
+
+        apply_stage_backend_override(&mut metadata, &stage).unwrap();
+
+        assert_eq!(metadata.backend.as_deref(), Some("mlx"));
     }
 
     #[test]

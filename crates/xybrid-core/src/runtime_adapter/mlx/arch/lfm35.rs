@@ -1,4 +1,4 @@
-//! LFM 3.5 (Liquid Foundation Model) architecture builder.
+//! LFM 2 / 2.5 / 3.5 (Liquid Foundation Model) architecture builder.
 //!
 //! Ports the MLX-LM Python reference's LFM 2 / 3 / 3.5 family to Rust +
 //! the safe tensor ops from `xybrid_mlx::ops`. LFM is a **hybrid**
@@ -24,34 +24,29 @@
 //! difference is the token-mixing operator that sits between
 //! `operator_norm` and `ffn_norm`.
 //!
-//! The builder lands in two layers, mirroring Qwen 3.5 / Gemma 4:
+//! The builder lands in two layers, mirroring Qwen 3 / Gemma 4:
 //!
-//! 1. **Skeleton** (always compiled under `llm-mlx`) — parses
+//! 1. **Non-linking validation** (always compiled under `llm-mlx`) — parses
 //!    `config.json`, enumerates the expected safetensors weight-key
 //!    schedule per block type, and validates the safetensors header
 //!    before we commit to linking Metal.
-//! 2. **Runtime** (gated on `llm-mlx-runtime` + Apple target) — weight
-//!    materialisation and the staged forward pass. The 1D causal conv
-//!    primitive (`mlx_conv1d`) and the SwiGLU FFN activation (`silu`)
-//!    are not yet wrapped in `xybrid_mlx::ops`, so the forward pass
-//!    exercises the embedding + first-layer `operator_norm` and then
-//!    bails with [`MlxLlmError::NotImplemented`] at the operator
-//!    boundary — matching the deferral pattern Qwen 3.5 / Gemma 4 use
-//!    for their activation gaps.
+//! 2. **Runtime** (gated on `llm-mlx-runtime` + Apple Silicon macOS) — weight
+//!    materialisation, attention K/V append/read, and short-conv recurrent
+//!    state for incremental decode.
 //!
 //! Reference (upstream): <https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/lfm2.py>
 //! (LFM 3 / 3.5 inherit LFM 2's hybrid conv+attention topology on the
-//! MLX-LM side; the family ID is `"lfm"` or `"lfm3"` in the config
+//! MLX-LM side; the family ID is `"lfm2"`, `"lfm"` or `"lfm3"` in the config
 //! header per this PRD).
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use safetensors::SafeTensors;
 use serde::Deserialize;
 
 use super::super::model::{MlxLlmError, MlxLlmResult};
+use super::super::weights::SafeTensorBundle;
 
 // =============================================================================
 // Config
@@ -67,14 +62,14 @@ pub enum LayerKind {
     FullAttention,
 }
 
-/// Full LFM 3.5 `config.json` subset the builder needs.
+/// Full LFM 2 / 2.5 / 3.5 `config.json` subset the builder needs.
 ///
-/// Fields mirror the HuggingFace config layout (`model_type = "lfm"` or
-/// `"lfm3"`). Missing fields fall back to upstream defaults where they
-/// exist.
+/// Fields mirror the HuggingFace config layout (`model_type = "lfm2"`,
+/// `"lfm"`, or `"lfm3"`). Missing fields fall back to upstream defaults
+/// where they exist.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Lfm35Config {
-    /// `"lfm"` or `"lfm3"` — both route to this builder per the
+    /// `"lfm2"`, `"lfm"` or `"lfm3"` — all route to this builder per the
     /// US-013 dispatcher.
     pub model_type: String,
     /// Model hidden / embedding dimension.
@@ -112,7 +107,7 @@ pub struct Lfm35Config {
     pub head_dim: Option<usize>,
     /// Length of the causal conv cache (= kernel size) used by the
     /// conv blocks. Default `3` matches upstream.
-    #[serde(default = "default_conv_l_cache")]
+    #[serde(default = "default_conv_l_cache", alias = "conv_L_cache")]
     pub conv_l_cache: usize,
     /// Whether the conv kernel has a bias term. Default `false`.
     #[serde(default)]
@@ -160,17 +155,19 @@ pub struct QuantConfig {
 }
 
 impl Lfm35Config {
-    /// Parse `{model_dir}/config.json` as an LFM 3.5 config.
+    /// Parse `{model_dir}/config.json` as an LFM family config.
     pub fn from_model_dir(model_dir: &Path) -> MlxLlmResult<Self> {
         let path = model_dir.join("config.json");
         let raw = fs::read_to_string(&path)?;
-        let cfg: Lfm35Config = serde_json::from_str(&raw)?;
+        let mut value: serde_json::Value = serde_json::from_str(&raw)?;
+        normalize_config_aliases(&mut value);
+        let cfg: Lfm35Config = serde_json::from_value(value)?;
         cfg.validate()?;
         Ok(cfg)
     }
 
     fn validate(&self) -> MlxLlmResult<()> {
-        if !matches!(self.model_type.as_str(), "lfm" | "lfm3") {
+        if !matches!(self.model_type.as_str(), "lfm2" | "lfm" | "lfm3") {
             return Err(MlxLlmError::UnsupportedArchitecture {
                 model_type: self.model_type.clone(),
             });
@@ -190,9 +187,54 @@ impl Lfm35Config {
                 self.vocab_size,
             )));
         }
+        if self.head_dim.is_none() && !self.hidden_size.is_multiple_of(self.num_attention_heads) {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "lfm config hidden_size={} is not a multiple of num_attention_heads={}",
+                self.hidden_size, self.num_attention_heads,
+            )));
+        }
+        let head_dim = self.head_dim();
+        let kv_heads = self.kv_heads();
+        if head_dim == 0 || kv_heads == 0 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "lfm config has invalid derived dimensions (head_dim={head_dim}, kv_heads={kv_heads})"
+            )));
+        }
+        if !self.num_attention_heads.is_multiple_of(kv_heads) {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "lfm config num_attention_heads={} is not a multiple of num_key_value_heads={kv_heads}",
+                self.num_attention_heads,
+            )));
+        }
+        super::validate_i32_dimensions(
+            "lfm",
+            &[
+                ("hidden_size", self.hidden_size),
+                ("num_hidden_layers", self.num_hidden_layers),
+                ("num_attention_heads", self.num_attention_heads),
+                ("num_key_value_heads", kv_heads),
+                ("intermediate_size", self.intermediate_size),
+                ("vocab_size", self.vocab_size),
+                ("max_position_embeddings", self.max_position_embeddings),
+                ("head_dim", head_dim),
+                ("conv_l_cache", self.conv_l_cache),
+            ],
+        )?;
+        super::validate_i32_product(
+            "lfm",
+            "attention_projection_width",
+            &[self.num_attention_heads, head_dim],
+        )?;
+        super::validate_i32_product("lfm", "kv_projection_width", &[kv_heads, head_dim])?;
+        super::validate_i32_product("lfm", "conv_projection_width", &[3, self.hidden_size])?;
         if self.conv_l_cache == 0 {
             return Err(MlxLlmError::ConfigInvalid(
                 "lfm config has conv_l_cache = 0 (must be >= 1)".into(),
+            ));
+        }
+        if self.conv_bias {
+            return Err(MlxLlmError::ConfigInvalid(
+                "lfm conv_bias=true is not supported by the MLX runtime path yet".into(),
             ));
         }
         if let Some(types) = &self.layer_types {
@@ -277,11 +319,23 @@ impl Lfm35Config {
     }
 }
 
+fn normalize_config_aliases(value: &mut serde_json::Value) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+
+    if !obj.contains_key("intermediate_size") {
+        if let Some(block_ff_dim) = obj.get("block_ff_dim").cloned() {
+            obj.insert("intermediate_size".into(), block_ff_dim);
+        }
+    }
+}
+
 // =============================================================================
 // Expected safetensors schedule
 // =============================================================================
 
-/// Safetensors key names the LFM 3.5 forward pass reads, in the order
+/// Safetensors key names the LFM family forward pass reads, in the order
 /// the upstream MLX-LM reference emits them.
 ///
 /// Per-layer block (variable, depending on [`LayerKind`]):
@@ -344,33 +398,33 @@ pub fn expected_weight_keys(cfg: &Lfm35Config) -> Vec<String> {
 // Safetensors validation
 // =============================================================================
 
-/// Validate that `model.safetensors` contains every key LFM 3.5's
-/// forward pass reads.
+/// Validate that `model.safetensors` contains every key the LFM family
+/// runtime reads.
 ///
 /// Mirrors [`super::qwen35::validate_safetensors`] — quantized bundles
 /// bail here with a pointed error so the runtime selector (US-016) can
 /// fall back to llama.cpp.
 pub fn validate_safetensors(path: &Path, cfg: &Lfm35Config) -> MlxLlmResult<()> {
+    let weights = SafeTensorBundle::from_single_file(path.to_path_buf());
+    validate_safetensors_bundle(&weights, cfg)
+}
+
+pub fn validate_safetensors_bundle(
+    weights: &SafeTensorBundle,
+    cfg: &Lfm35Config,
+) -> MlxLlmResult<()> {
     if cfg.is_quantized() {
         let bits = cfg.quantization.as_ref().map(|q| q.bits).unwrap_or(0);
         let gs = cfg.quantization.as_ref().map(|q| q.group_size).unwrap_or(0);
-        return Err(MlxLlmError::UnsupportedArchitecture {
-            model_type: format!(
-                "{} (quantized {bits}-bit/group={gs} — mlx_fast_quantized_matmul lands in US-014)",
-                cfg.model_type
-            ),
+        return Err(MlxLlmError::UnsupportedQuantization {
+            model_type: cfg.model_type.clone(),
+            bits,
+            group_size: gs,
+            reason: "mlx_fast_quantized_matmul is not wired for LFM yet",
         });
     }
 
-    let bytes = fs::read(path).map_err(|e| MlxLlmError::WeightLoad {
-        path: path.to_path_buf(),
-        reason: format!("read safetensors: {e}"),
-    })?;
-    let (_, meta) = SafeTensors::read_metadata(&bytes).map_err(|e| MlxLlmError::WeightLoad {
-        path: path.to_path_buf(),
-        reason: format!("invalid safetensors header: {e}"),
-    })?;
-    let names: HashSet<String> = meta.tensors().into_keys().collect();
+    let names = weights.tensor_names()?;
 
     let expected = expected_weight_keys(cfg);
     let missing: Vec<String> = expected
@@ -380,7 +434,7 @@ pub fn validate_safetensors(path: &Path, cfg: &Lfm35Config) -> MlxLlmResult<()> 
         .collect();
     if !missing.is_empty() {
         return Err(MlxLlmError::WeightLoad {
-            path: path.to_path_buf(),
+            path: weights.path_for_error(),
             reason: format!(
                 "missing {} required tensor(s); first few = {:?}",
                 missing.len(),
@@ -391,20 +445,22 @@ pub fn validate_safetensors(path: &Path, cfg: &Lfm35Config) -> MlxLlmResult<()> 
     Ok(())
 }
 
-/// Top-level entry: load and validate an LFM 3.5 bundle's config +
-/// weight manifest. Returns the parsed config so the skeleton load path
+/// Top-level entry: load and validate an LFM family bundle's config +
+/// weight manifest. Returns the parsed config so the non-linking load path
 /// in [`super::super::model::MlxLlmAdapter::load`] can cache it.
 ///
 /// Does NOT touch MLX / Metal — that happens in `runtime::build` under
 /// the `llm-mlx-runtime` feature.
-pub fn load(model_dir: &Path, weights_path: &Path) -> MlxLlmResult<Lfm35Config> {
+pub fn load(model_dir: &Path, weights: &SafeTensorBundle) -> MlxLlmResult<Lfm35Config> {
     let cfg = Lfm35Config::from_model_dir(model_dir)?;
-    validate_safetensors(weights_path, &cfg)?;
+    validate_safetensors_bundle(weights, &cfg)?;
     Ok(cfg)
 }
 
-/// Resolve the safetensors weight file for a bundle. Sharded bundles
-/// land with US-015 — this helper accepts the single-file layout only.
+/// Resolve the legacy single-file safetensors path for callers that need
+/// that exact file. Normal LFM validation/runtime loading goes through
+/// [`SafeTensorBundle`] and accepts either `model.safetensors` or a
+/// `model.safetensors.index.json` shard manifest.
 pub fn resolve_weights_path(model_dir: &Path) -> MlxLlmResult<PathBuf> {
     let single = model_dir.join("model.safetensors");
     if single.exists() {
@@ -417,23 +473,26 @@ pub fn resolve_weights_path(model_dir: &Path) -> MlxLlmResult<PathBuf> {
 }
 
 // =============================================================================
-// Runtime (llm-mlx-runtime + Apple only)
+// Runtime (llm-mlx-runtime + Apple Silicon macOS only)
 // =============================================================================
 
 /// MLX-backed forward pass — only compiled when the xcframework can be
-/// linked (`llm-mlx-runtime` feature on an Apple target).
+/// linked (`llm-mlx-runtime` feature on Apple Silicon macOS).
 #[cfg(all(
     feature = "llm-mlx-runtime",
-    any(target_os = "macos", target_os = "ios")
+    target_os = "macos",
+    target_arch = "aarch64"
 ))]
 pub mod runtime {
     use super::super::super::model::{MlxLlmError, MlxLlmResult};
+    use super::super::super::weights::SafeTensorBundle;
+    use super::super::{shape_dim_i32, shape_dim_usize, shape_product_i32, shape_product_usize};
     use super::{LayerKind, Lfm35Config};
 
-    use std::path::Path;
-
-    use safetensors::{Dtype as StDtype, SafeTensors};
-    use xybrid_mlx::ops::rms_norm;
+    use xybrid_mlx::ops::{
+        add, concat, conv1d, gather, matmul, mul, reshape, rms_norm, rope,
+        scaled_dot_product_attention, silu, transpose,
+    };
     use xybrid_mlx::{MlxArray, MlxStream};
 
     /// One full-attention block's weights. Layout mirrors Qwen 3 with
@@ -475,7 +534,50 @@ pub mod runtime {
         Conv(ConvLayer),
     }
 
-    /// Full LFM 3.5 weight set resident in MLX memory.
+    /// Resident per-layer decode state for a single generation call.
+    #[derive(Debug)]
+    pub enum Lfm35LayerCache {
+        Attention(AttentionCache),
+        Conv(ConvCache),
+    }
+
+    impl Lfm35LayerCache {
+        fn reset(&mut self) {
+            match self {
+                Self::Attention(cache) => cache.reset(),
+                Self::Conv(cache) => cache.reset(),
+            }
+        }
+    }
+
+    /// K/V cache for a full-attention LFM layer.
+    #[derive(Debug, Default)]
+    pub struct AttentionCache {
+        keys: Option<MlxArray>,
+        values: Option<MlxArray>,
+    }
+
+    impl AttentionCache {
+        fn reset(&mut self) {
+            self.keys = None;
+            self.values = None;
+        }
+    }
+
+    /// Recurrent short-conv state. Stores the previous
+    /// `conv_L_cache - 1` `B * x` activations in channel-last layout.
+    #[derive(Debug, Default)]
+    pub struct ConvCache {
+        state: Option<MlxArray>,
+    }
+
+    impl ConvCache {
+        fn reset(&mut self) {
+            self.state = None;
+        }
+    }
+
+    /// Full LFM family weight set resident in MLX memory.
     #[derive(Debug)]
     pub struct Lfm35Weights {
         pub embed_tokens: MlxArray,
@@ -483,59 +585,67 @@ pub mod runtime {
         pub embedding_norm: MlxArray,
         /// `None` when [`Lfm35Config::tie_word_embeddings`] is set.
         pub lm_head: Option<MlxArray>,
+        layer_cache: Vec<Lfm35LayerCache>,
+    }
+
+    impl Lfm35Weights {
+        /// Clear per-generation attention and conv state while keeping
+        /// resident weights.
+        pub fn reset_kv_cache(&mut self) {
+            for cache in &mut self.layer_cache {
+                cache.reset();
+            }
+        }
     }
 
     /// Build [`Lfm35Weights`] from `model.safetensors`.
     ///
     /// Supports F32, F16, and BF16 weights. Quantized bundles are
     /// rejected up-front in [`super::validate_safetensors`].
-    pub fn build(cfg: &Lfm35Config, weights_path: &Path) -> MlxLlmResult<Lfm35Weights> {
-        let bytes = std::fs::read(weights_path).map_err(|e| MlxLlmError::WeightLoad {
-            path: weights_path.to_path_buf(),
-            reason: format!("read safetensors: {e}"),
-        })?;
-        let st = SafeTensors::deserialize(&bytes).map_err(|e| MlxLlmError::WeightLoad {
-            path: weights_path.to_path_buf(),
-            reason: format!("parse safetensors: {e}"),
-        })?;
-
-        let embed_tokens = load_tensor(&st, "model.embed_tokens.weight")?;
+    pub fn build(cfg: &Lfm35Config, weights: &SafeTensorBundle) -> MlxLlmResult<Lfm35Weights> {
+        let embed_tokens = load_tensor(weights, "model.embed_tokens.weight")?;
         let kinds = cfg.layer_kinds();
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for (l, kind) in kinds.iter().enumerate() {
             let base = format!("model.layers.{l}");
             let layer = match kind {
                 LayerKind::FullAttention => Lfm35Layer::Attention(AttentionLayer {
-                    operator_norm: load_tensor(&st, &format!("{base}.operator_norm.weight"))?,
-                    q_proj: load_tensor(&st, &format!("{base}.self_attn.q_proj.weight"))?,
-                    k_proj: load_tensor(&st, &format!("{base}.self_attn.k_proj.weight"))?,
-                    v_proj: load_tensor(&st, &format!("{base}.self_attn.v_proj.weight"))?,
-                    out_proj: load_tensor(&st, &format!("{base}.self_attn.out_proj.weight"))?,
-                    q_layernorm: load_tensor(&st, &format!("{base}.self_attn.q_layernorm.weight"))?,
-                    k_layernorm: load_tensor(&st, &format!("{base}.self_attn.k_layernorm.weight"))?,
-                    ffn_norm: load_tensor(&st, &format!("{base}.ffn_norm.weight"))?,
-                    w1: load_tensor(&st, &format!("{base}.feed_forward.w1.weight"))?,
-                    w2: load_tensor(&st, &format!("{base}.feed_forward.w2.weight"))?,
-                    w3: load_tensor(&st, &format!("{base}.feed_forward.w3.weight"))?,
+                    operator_norm: load_tensor(weights, &format!("{base}.operator_norm.weight"))?,
+                    q_proj: load_tensor(weights, &format!("{base}.self_attn.q_proj.weight"))?,
+                    k_proj: load_tensor(weights, &format!("{base}.self_attn.k_proj.weight"))?,
+                    v_proj: load_tensor(weights, &format!("{base}.self_attn.v_proj.weight"))?,
+                    out_proj: load_tensor(weights, &format!("{base}.self_attn.out_proj.weight"))?,
+                    q_layernorm: load_tensor(
+                        weights,
+                        &format!("{base}.self_attn.q_layernorm.weight"),
+                    )?,
+                    k_layernorm: load_tensor(
+                        weights,
+                        &format!("{base}.self_attn.k_layernorm.weight"),
+                    )?,
+                    ffn_norm: load_tensor(weights, &format!("{base}.ffn_norm.weight"))?,
+                    w1: load_tensor(weights, &format!("{base}.feed_forward.w1.weight"))?,
+                    w2: load_tensor(weights, &format!("{base}.feed_forward.w2.weight"))?,
+                    w3: load_tensor(weights, &format!("{base}.feed_forward.w3.weight"))?,
                 }),
                 LayerKind::Conv => Lfm35Layer::Conv(ConvLayer {
-                    operator_norm: load_tensor(&st, &format!("{base}.operator_norm.weight"))?,
-                    conv_in_proj: load_tensor(&st, &format!("{base}.conv.in_proj.weight"))?,
-                    conv_kernel: load_tensor(&st, &format!("{base}.conv.conv.weight"))?,
-                    conv_out_proj: load_tensor(&st, &format!("{base}.conv.out_proj.weight"))?,
-                    ffn_norm: load_tensor(&st, &format!("{base}.ffn_norm.weight"))?,
-                    w1: load_tensor(&st, &format!("{base}.feed_forward.w1.weight"))?,
-                    w2: load_tensor(&st, &format!("{base}.feed_forward.w2.weight"))?,
-                    w3: load_tensor(&st, &format!("{base}.feed_forward.w3.weight"))?,
+                    operator_norm: load_tensor(weights, &format!("{base}.operator_norm.weight"))?,
+                    conv_in_proj: load_tensor(weights, &format!("{base}.conv.in_proj.weight"))?,
+                    conv_kernel: load_tensor(weights, &format!("{base}.conv.conv.weight"))?,
+                    conv_out_proj: load_tensor(weights, &format!("{base}.conv.out_proj.weight"))?,
+                    ffn_norm: load_tensor(weights, &format!("{base}.ffn_norm.weight"))?,
+                    w1: load_tensor(weights, &format!("{base}.feed_forward.w1.weight"))?,
+                    w2: load_tensor(weights, &format!("{base}.feed_forward.w2.weight"))?,
+                    w3: load_tensor(weights, &format!("{base}.feed_forward.w3.weight"))?,
                 }),
             };
             layers.push(layer);
         }
-        let embedding_norm = load_tensor(&st, "model.embedding_norm.weight")?;
+        let embedding_norm = load_tensor(weights, "model.embedding_norm.weight")?;
         let lm_head = if cfg.tie_word_embeddings {
             None
         } else {
-            Some(load_tensor(&st, "lm_head.weight")?)
+            Some(load_tensor(weights, "lm_head.weight")?)
         };
 
         Ok(Lfm35Weights {
@@ -543,154 +653,351 @@ pub mod runtime {
             layers,
             embedding_norm,
             lm_head,
+            layer_cache: kinds
+                .iter()
+                .map(|kind| match kind {
+                    LayerKind::FullAttention => {
+                        Lfm35LayerCache::Attention(AttentionCache::default())
+                    }
+                    LayerKind::Conv => Lfm35LayerCache::Conv(ConvCache::default()),
+                })
+                .collect(),
         })
     }
 
     /// Read one tensor from a SafeTensors view into an [`MlxArray`].
-    fn load_tensor(st: &SafeTensors<'_>, name: &str) -> MlxLlmResult<MlxArray> {
-        let (floats, shape_i32) = read_as_f32(st, name)?;
-        MlxArray::from_slice_f32(&floats, &shape_i32).map_err(Into::into)
-    }
-
-    /// Read one tensor and promote to `Vec<f32>`. F16 / BF16 tensors
-    /// are promoted via the same half_to_f32 / bf16 helpers as the
-    /// Qwen 3.5 / Gemma 4 loaders — duplication here is intentional to
-    /// keep each arch builder self-contained.
-    fn read_as_f32(st: &SafeTensors<'_>, name: &str) -> MlxLlmResult<(Vec<f32>, Vec<i32>)> {
-        let view = st.tensor(name).map_err(|e| MlxLlmError::WeightLoad {
-            path: std::path::PathBuf::from(name),
-            reason: format!("tensor missing: {e}"),
-        })?;
-        let shape_i32: Vec<i32> = view
-            .shape()
-            .iter()
-            .map(|&d| i32::try_from(d).unwrap_or(i32::MAX))
-            .collect();
-        let data = view.data();
-
-        let floats: Vec<f32> = match view.dtype() {
-            StDtype::F32 => {
-                debug_assert!(data.len().is_multiple_of(4));
-                debug_assert_eq!(data.as_ptr().align_offset(align_of::<f32>()), 0);
-                // SAFETY: alignment and length divisibility asserted above.
-                let slice: &[f32] = unsafe {
-                    std::slice::from_raw_parts(data.as_ptr().cast::<f32>(), data.len() / 4)
-                };
-                slice.to_vec()
-            }
-            StDtype::F16 => data
-                .chunks_exact(2)
-                .map(|c| half_to_f32(u16::from_le_bytes([c[0], c[1]])))
-                .collect(),
-            StDtype::BF16 => data
-                .chunks_exact(2)
-                .map(|c| {
-                    let bits = u32::from(u16::from_le_bytes([c[0], c[1]])) << 16;
-                    f32::from_bits(bits)
-                })
-                .collect(),
-            other => {
-                return Err(MlxLlmError::WeightLoad {
-                    path: std::path::PathBuf::from(name),
-                    reason: format!("unsupported tensor dtype {other:?}"),
-                });
-            }
-        };
-        Ok((floats, shape_i32))
-    }
-
-    /// IEEE754 half-precision → f32. Handles subnormals + Inf/NaN.
-    fn half_to_f32(bits: u16) -> f32 {
-        let sign = u32::from(bits >> 15) << 31;
-        let exp = u32::from((bits >> 10) & 0x1f);
-        let mant = u32::from(bits & 0x3ff);
-        let out = if exp == 0 {
-            if mant == 0 {
-                sign
-            } else {
-                let mut m = mant;
-                let mut e: i32 = -14;
-                while (m & 0x400) == 0 {
-                    m <<= 1;
-                    e -= 1;
-                }
-                m &= 0x3ff;
-                sign | (((e + 127) as u32) << 23) | (m << 13)
-            }
-        } else if exp == 31 {
-            sign | 0x7f80_0000 | (mant << 13)
-        } else {
-            sign | ((exp + 112) << 23) | (mant << 13)
-        };
-        f32::from_bits(out)
+    fn load_tensor(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<MlxArray> {
+        weights.read_array(name)
     }
 
     /// Forward pass through the whole stack.
     ///
-    /// **Deferred**: the short 1D causal conv primitive (`mlx_conv1d`)
-    /// and the SwiGLU FFN activation (`silu`) are not yet wrapped in
-    /// `xybrid_mlx::ops`. Both land alongside US-014's generate loop.
-    /// For US-013 the forward pass wires the embedding lookup + the
-    /// first layer's `operator_norm` (to exercise the weight-loader
-    /// path) and bails with [`MlxLlmError::NotImplemented`] at the
-    /// operator (conv / attention) boundary.
+    /// `input_ids` shape: `[batch, seq_len]` (i64/i32). Returns logits of
+    /// shape `[batch, seq_len, vocab_size]` (f32). Prefill seeds attention
+    /// K/V and short-conv state; decode forwards one token with a non-zero
+    /// `position_offset` and reads the cached prefix/state.
     pub fn forward(
         cfg: &Lfm35Config,
-        weights: &Lfm35Weights,
+        weights: &mut Lfm35Weights,
         input_ids: &MlxArray,
-        _position_offset: i32,
+        position_offset: i32,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
         // Embedding lookup: [B, T] -> [B, T, H].
-        let hidden = xybrid_mlx::ops::gather(&weights.embed_tokens, input_ids, 0, stream)?;
+        let mut hidden = gather(&weights.embed_tokens, input_ids, 0, stream)?;
 
-        // Exercise the first layer's operator_norm so any corruption
-        // in the weight loader surfaces here rather than sitting
-        // dormant until US-014 runs. The norm is shape-preserving.
-        if let Some(layer0) = weights.layers.first() {
-            let norm = match layer0 {
-                super::runtime::Lfm35Layer::Attention(l) => &l.operator_norm,
-                super::runtime::Lfm35Layer::Conv(l) => &l.operator_norm,
-            };
-            let _ = rms_norm(&hidden, Some(norm), cfg.norm_eps, stream)?;
+        let head_dim = cfg.head_dim();
+        let n_heads = cfg.num_attention_heads;
+        let n_kv_heads = cfg.kv_heads();
+        let scale = 1.0 / (head_dim as f32).sqrt();
+
+        let layers = &weights.layers;
+        let layer_cache = &mut weights.layer_cache;
+        for (layer, cache) in layers.iter().zip(layer_cache.iter_mut()) {
+            hidden = decoder_block(
+                cfg,
+                layer,
+                cache,
+                &hidden,
+                n_heads,
+                n_kv_heads,
+                head_dim,
+                scale,
+                position_offset,
+                stream,
+            )?;
         }
 
-        // Full conv / attention stack + SwiGLU FFN land in US-014.
-        Err(MlxLlmError::NotImplemented {
-            feature: "LFM 3.5 hybrid conv+attention stack + SwiGLU FFN (needs mlx_conv1d + silu)",
-            story: "US-014",
-        })
+        let final_norm = rms_norm(&hidden, Some(&weights.embedding_norm), cfg.norm_eps, stream)?;
+        let lm_w = weights.lm_head.as_ref().unwrap_or(&weights.embed_tokens);
+        matmul(&final_norm, &transpose(lm_w, &[1, 0], stream)?, stream).map_err(Into::into)
     }
 
-    // =========================================================================
-    // Runtime tests (apple + runtime feature)
-    // =========================================================================
+    #[allow(clippy::too_many_arguments)]
+    fn decoder_block(
+        cfg: &Lfm35Config,
+        layer: &Lfm35Layer,
+        cache: &mut Lfm35LayerCache,
+        hidden: &MlxArray,
+        n_heads: usize,
+        n_kv_heads: usize,
+        head_dim: usize,
+        scale: f32,
+        position_offset: i32,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let mixed = match (layer, cache) {
+            (Lfm35Layer::Attention(layer), Lfm35LayerCache::Attention(cache)) => {
+                let normed = rms_norm(hidden, Some(&layer.operator_norm), cfg.norm_eps, stream)?;
+                attention_block(
+                    cfg,
+                    layer,
+                    cache,
+                    &normed,
+                    n_heads,
+                    n_kv_heads,
+                    head_dim,
+                    scale,
+                    position_offset,
+                    stream,
+                )?
+            }
+            (Lfm35Layer::Conv(layer), Lfm35LayerCache::Conv(cache)) => {
+                let normed = rms_norm(hidden, Some(&layer.operator_norm), cfg.norm_eps, stream)?;
+                conv_block(cfg, layer, cache, &normed, stream)?
+            }
+            _ => {
+                return Err(MlxLlmError::ConfigInvalid(
+                    "LFM layer/cache kind mismatch".into(),
+                ));
+            }
+        };
+        let hidden = add(hidden, &mixed, stream)?;
 
-    #[cfg(test)]
-    mod tests {
-        #[test]
-        fn half_to_f32_one() {
-            assert_eq!(super::half_to_f32(0x3c00), 1.0_f32);
-        }
+        let ffn_norm = match layer {
+            Lfm35Layer::Attention(layer) => &layer.ffn_norm,
+            Lfm35Layer::Conv(layer) => &layer.ffn_norm,
+        };
+        let normed = rms_norm(&hidden, Some(ffn_norm), cfg.norm_eps, stream)?;
+        let ffn = feed_forward(layer, &normed, stream)?;
+        add(&hidden, &ffn, stream).map_err(Into::into)
+    }
 
-        #[test]
-        fn bf16_round_trip_one() {
-            let bytes = [0x80_u8, 0x3f];
-            let v: Vec<f32> = bytes
-                .chunks_exact(2)
-                .map(|c| {
-                    let bits = u32::from(u16::from_le_bytes([c[0], c[1]])) << 16;
-                    f32::from_bits(bits)
-                })
-                .collect();
-            assert_eq!(v.len(), 1);
-            assert!((v[0] - 1.0_f32).abs() < f32::EPSILON);
+    fn feed_forward(
+        layer: &Lfm35Layer,
+        hidden: &MlxArray,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let (w1, w2, w3) = match layer {
+            Lfm35Layer::Attention(layer) => (&layer.w1, &layer.w2, &layer.w3),
+            Lfm35Layer::Conv(layer) => (&layer.w1, &layer.w2, &layer.w3),
+        };
+        let gate = matmul(hidden, &transpose(w1, &[1, 0], stream)?, stream)?;
+        let up = matmul(hidden, &transpose(w3, &[1, 0], stream)?, stream)?;
+        let gated = mul(&silu(&gate, stream)?, &up, stream)?;
+        matmul(&gated, &transpose(w2, &[1, 0], stream)?, stream).map_err(Into::into)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn attention_block(
+        cfg: &Lfm35Config,
+        layer: &AttentionLayer,
+        cache: &mut AttentionCache,
+        hidden: &MlxArray,
+        n_heads: usize,
+        n_kv_heads: usize,
+        head_dim: usize,
+        scale: f32,
+        position_offset: i32,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let q = matmul(hidden, &transpose(&layer.q_proj, &[1, 0], stream)?, stream)?;
+        let k = matmul(hidden, &transpose(&layer.k_proj, &[1, 0], stream)?, stream)?;
+        let v = matmul(hidden, &transpose(&layer.v_proj, &[1, 0], stream)?, stream)?;
+
+        let q = split_heads(&q, n_heads, head_dim, stream)?;
+        let k = split_heads(&k, n_kv_heads, head_dim, stream)?;
+        let v = split_heads(&v, n_kv_heads, head_dim, stream)?;
+
+        let q = rms_norm(&q, Some(&layer.q_layernorm), cfg.norm_eps, stream)?;
+        let k = rms_norm(&k, Some(&layer.k_layernorm), cfg.norm_eps, stream)?;
+        let head_dim_i32 = shape_dim_i32("lfm", "head_dim", head_dim)?;
+
+        let q = rope(
+            &q,
+            head_dim_i32,
+            false,
+            Some(cfg.rope_theta),
+            1.0,
+            position_offset,
+            None,
+            stream,
+        )?;
+        let k = rope(
+            &k,
+            head_dim_i32,
+            false,
+            Some(cfg.rope_theta),
+            1.0,
+            position_offset,
+            None,
+            stream,
+        )?;
+
+        let had_cached_prefix = cache.keys.is_some();
+        let k = append_cached_axis2(&mut cache.keys, &k, stream)?;
+        let v = append_cached_axis2(&mut cache.values, &v, stream)?;
+        let q_len = q.shape().get(2).copied().unwrap_or(1);
+        let causal = !had_cached_prefix && q_len > 1;
+
+        let attn = scaled_dot_product_attention(&q, &k, &v, scale, causal, None, stream)?;
+        let attn = merge_heads(&attn, n_heads, head_dim, stream)?;
+        matmul(&attn, &transpose(&layer.out_proj, &[1, 0], stream)?, stream).map_err(Into::into)
+    }
+
+    fn append_cached_axis2(
+        slot: &mut Option<MlxArray>,
+        new_slice: &MlxArray,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        match slot.take() {
+            Some(existing) => {
+                let combined = concat(&[&existing, new_slice], 2, stream)?;
+                *slot = Some(combined.clone());
+                Ok(combined)
+            }
+            None => {
+                let cached = new_slice.clone();
+                *slot = Some(cached.clone());
+                Ok(cached)
+            }
         }
+    }
+
+    fn conv_block(
+        cfg: &Lfm35Config,
+        layer: &ConvLayer,
+        cache: &mut ConvCache,
+        hidden: &MlxArray,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let projected = matmul(
+            hidden,
+            &transpose(&layer.conv_in_proj, &[1, 0], stream)?,
+            stream,
+        )?;
+        let b = take_hidden_range(&projected, 0, cfg.hidden_size, stream)?;
+        let c = take_hidden_range(&projected, cfg.hidden_size, cfg.hidden_size, stream)?;
+        let x = take_hidden_range(&projected, cfg.hidden_size * 2, cfg.hidden_size, stream)?;
+        let bx = mul(&b, &x, stream)?;
+
+        let padded = conv_input_with_cache(cache, &bx, cfg.conv_l_cache, stream)?;
+        let conv = conv1d(
+            &padded,
+            &layer.conv_kernel,
+            1,
+            0,
+            1,
+            shape_dim_i32("lfm", "hidden_size", cfg.hidden_size)?,
+            stream,
+        )?;
+        let y = mul(&c, &conv, stream)?;
+        matmul(
+            &y,
+            &transpose(&layer.conv_out_proj, &[1, 0], stream)?,
+            stream,
+        )
+        .map_err(Into::into)
+    }
+
+    fn conv_input_with_cache(
+        cache: &mut ConvCache,
+        bx: &MlxArray,
+        conv_l_cache: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let n_keep = conv_l_cache.saturating_sub(1);
+        let with_state = match cache.state.take() {
+            Some(state) => concat(&[&state, bx], 1, stream)?,
+            None => left_pad_sequence(bx, n_keep, stream)?,
+        };
+
+        cache.state = if n_keep == 0 {
+            None
+        } else {
+            Some(take_last_sequence_tokens(&with_state, n_keep, stream)?)
+        };
+
+        Ok(with_state)
+    }
+
+    fn take_hidden_range(
+        x: &MlxArray,
+        start: usize,
+        len: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let end = start.checked_add(len).ok_or_else(|| {
+            MlxLlmError::ConfigInvalid("lfm hidden range end overflows usize".into())
+        })?;
+        let indices: Vec<i32> = (start..end)
+            .map(|i| shape_dim_i32("lfm", "hidden_range_index", i))
+            .collect::<MlxLlmResult<_>>()?;
+        let len_i32 = shape_dim_i32("lfm", "hidden_range_len", len)?;
+        let index_array = MlxArray::from_slice_i32(&indices, &[len_i32])?;
+        gather(x, &index_array, 2, stream).map_err(Into::into)
+    }
+
+    fn left_pad_sequence(
+        x: &MlxArray,
+        pad: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        if pad == 0 {
+            return Ok(x.clone());
+        }
+        let shape = x.shape();
+        let b = shape[0];
+        let h = shape[2];
+        let b_usize = shape_dim_usize("lfm", "batch", b)?;
+        let h_usize = shape_dim_usize("lfm", "hidden_size", h)?;
+        let zeros_len =
+            shape_product_usize("lfm", "left_pad_element_count", &[b_usize, pad, h_usize])?;
+        let zeros = vec![0.0f32; zeros_len];
+        let pad_i32 = shape_dim_i32("lfm", "left_pad_len", pad)?;
+        let pad_arr = MlxArray::from_slice_f32(&zeros, &[b, pad_i32, h])?;
+        concat(&[&pad_arr, x], 1, stream).map_err(Into::into)
+    }
+
+    fn take_last_sequence_tokens(
+        x: &MlxArray,
+        len: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let seq_len = shape_dim_usize("lfm", "sequence_len", x.shape()[1])?;
+        let start = seq_len.saturating_sub(len);
+        let indices: Vec<i32> = (start..seq_len)
+            .map(|i| shape_dim_i32("lfm", "sequence_index", i))
+            .collect::<MlxLlmResult<_>>()?;
+        let indices_len = shape_dim_i32("lfm", "sequence_index_len", indices.len())?;
+        let index_array = MlxArray::from_slice_i32(&indices, &[indices_len])?;
+        gather(x, &index_array, 1, stream).map_err(Into::into)
+    }
+
+    /// Reshape `[B, T, heads * head_dim]` → `[B, heads, T, head_dim]`.
+    fn split_heads(
+        x: &MlxArray,
+        heads: usize,
+        head_dim: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let shape = x.shape();
+        let b = shape[0];
+        let t = shape[1];
+        let heads_i32 = shape_dim_i32("lfm", "num_attention_heads", heads)?;
+        let head_dim_i32 = shape_dim_i32("lfm", "head_dim", head_dim)?;
+        let reshaped = reshape(x, &[b, t, heads_i32, head_dim_i32], stream)?;
+        transpose(&reshaped, &[0, 2, 1, 3], stream).map_err(Into::into)
+    }
+
+    /// Reshape `[B, heads, T, head_dim]` → `[B, T, heads * head_dim]`.
+    fn merge_heads(
+        x: &MlxArray,
+        heads: usize,
+        head_dim: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let shape = x.shape();
+        let b = shape[0];
+        let t = shape[2];
+        let transposed = transpose(x, &[0, 2, 1, 3], stream)?;
+        let width = shape_product_i32("lfm", "merged_attention_width", &[heads, head_dim])?;
+        reshape(&transposed, &[b, t, width], stream).map_err(Into::into)
     }
 }
 
 // =============================================================================
-// Tests (skeleton — no bindings required)
+// Tests (non-linking — no bindings required)
 // =============================================================================
 
 #[cfg(test)]
@@ -827,6 +1134,13 @@ mod tests {
     }
 
     #[test]
+    fn model_type_lfm2_is_accepted() {
+        let mut cfg = dummy_config(1, true);
+        cfg.model_type = "lfm2".into();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
     fn model_type_lfm3_is_accepted() {
         let cfg = dummy_config(1, true);
         assert_eq!(cfg.model_type, "lfm3");
@@ -854,11 +1168,61 @@ mod tests {
     }
 
     #[test]
+    fn hidden_not_divisible_by_heads_rejected_when_head_dim_absent() {
+        let mut cfg = dummy_config(1, true);
+        cfg.head_dim = None;
+        cfg.hidden_size = 17;
+        match cfg.validate().unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => assert!(msg.contains("multiple of")),
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn oversized_dimensions_rejected() {
+        let mut cfg = dummy_config(1, true);
+        cfg.conv_l_cache = i32::MAX as usize + 1;
+        match cfg.validate().unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("exceeds MLX i32 shape limit"), "got: {msg}");
+                assert!(msg.contains("conv_l_cache"), "got: {msg}");
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn oversized_conv_projection_width_rejected() {
+        let mut cfg = dummy_config(1, true);
+        cfg.hidden_size = i32::MAX as usize / 3 + 1;
+        cfg.num_attention_heads = 1;
+        cfg.num_key_value_heads = Some(1);
+        cfg.head_dim = Some(cfg.hidden_size);
+        match cfg.validate().unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("exceeds MLX i32 shape limit"), "got: {msg}");
+                assert!(msg.contains("conv_projection_width"), "got: {msg}");
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn zero_conv_l_cache_rejected() {
         let mut cfg = dummy_config(1, true);
         cfg.conv_l_cache = 0;
         match cfg.validate().unwrap_err() {
             MlxLlmError::ConfigInvalid(msg) => assert!(msg.contains("conv_l_cache"), "got: {msg}"),
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn conv_bias_rejected_until_bias_wiring_lands() {
+        let mut cfg = dummy_config(1, true);
+        cfg.conv_bias = true;
+        match cfg.validate().unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => assert!(msg.contains("conv_bias"), "got: {msg}"),
             other => panic!("expected ConfigInvalid, got {other:?}"),
         }
     }
@@ -921,13 +1285,24 @@ mod tests {
         });
         assert!(cfg.is_quantized());
         let err = validate_safetensors(Path::new("/nonexistent"), &cfg).unwrap_err();
-        match err {
-            MlxLlmError::UnsupportedArchitecture { model_type } => {
-                assert!(model_type.contains("quantized"), "got: {model_type}");
-                assert!(model_type.contains("4-bit"), "got: {model_type}");
+        match &err {
+            MlxLlmError::UnsupportedQuantization {
+                model_type,
+                bits,
+                group_size,
+                ..
+            } => {
+                assert_eq!(model_type, "lfm3");
+                assert_eq!(*bits, 4);
+                assert_eq!(*group_size, 64);
             }
-            other => panic!("expected UnsupportedArchitecture, got {other:?}"),
+            other => panic!("expected UnsupportedQuantization, got {other:?}"),
         }
+        let msg = err.to_string();
+        assert!(msg.contains("unsupported MLX quantization"), "got: {msg}");
+        assert!(msg.contains("lfm"), "got: {msg}");
+        assert!(msg.contains("4-bit/group=64"), "got: {msg}");
+        assert!(msg.contains("GGUF fallback"), "got: {msg}");
     }
 
     #[test]
@@ -1005,5 +1380,50 @@ mod tests {
         });
         let cfg: Lfm35Config = serde_json::from_str(&raw.to_string()).unwrap();
         assert!((cfg.norm_eps - 2.5e-6).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn model_dir_config_accepts_block_ff_dim_fallback() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.json"),
+            serde_json::json!({
+                "model_type": "lfm2",
+                "hidden_size": 16,
+                "num_hidden_layers": 1,
+                "num_attention_heads": 4,
+                "block_ff_dim": 48,
+                "vocab_size": 100,
+                "layer_types": ["conv"]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let cfg = Lfm35Config::from_model_dir(tmp.path()).unwrap();
+        assert_eq!(cfg.intermediate_size, 48);
+    }
+
+    #[test]
+    fn model_dir_config_accepts_public_lfm25_duplicate_ffn_fields() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.json"),
+            serde_json::json!({
+                "model_type": "lfm2",
+                "hidden_size": 16,
+                "num_hidden_layers": 1,
+                "num_attention_heads": 4,
+                "block_ff_dim": 48,
+                "intermediate_size": 64,
+                "vocab_size": 100,
+                "layer_types": ["conv"]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let cfg = Lfm35Config::from_model_dir(tmp.path()).unwrap();
+        assert_eq!(cfg.intermediate_size, 64);
     }
 }

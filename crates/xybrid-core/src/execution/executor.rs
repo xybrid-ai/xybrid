@@ -33,6 +33,8 @@ use super::template::{
     backend_label_from_template, quantization_label_from_metadata, span_kind_from_template,
     stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
 };
+#[cfg(feature = "llm-mlx")]
+use super::template::{is_mlx_embedding_safetensors_metadata, is_mlx_llm_safetensors_metadata};
 use crate::conversation::ConversationContext;
 use crate::ir::EnvelopeKind;
 use crate::ir::{Envelope, MessageRole};
@@ -44,11 +46,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::listener::ExecutionGuard;
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 use super::llm_telemetry::{
     insert_llm_streaming_metrics, mirror_llm_metrics_to_span, stamp_llm_runtime_backend,
     stamp_llm_span_cost_attribution,
 };
+#[cfg(feature = "llm-mlx")]
+use super::strategies::MlxEmbeddingStrategy;
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     if error.cloud_fallback_abort_reason().is_some() {
@@ -58,7 +62,7 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LlmAdapterCacheKey {
     model_path: String,
@@ -68,7 +72,7 @@ struct LlmAdapterCacheKey {
     vision_encoder_path: Option<String>,
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 impl LlmAdapterCacheKey {
     fn new(
         model_path: String,
@@ -87,12 +91,12 @@ impl LlmAdapterCacheKey {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn resolve_optional_model_path(base_path: &str, path: Option<&str>) -> Option<String> {
     path.map(|p| Path::new(base_path).join(p).to_string_lossy().to_string())
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn reject_text_only_model_image_input(
     metadata: &ModelMetadata,
     input: &Envelope,
@@ -139,6 +143,20 @@ fn elapsed_millis_floor_one(start: std::time::Instant) -> u32 {
     start.elapsed().as_millis().max(1).min(u32::MAX as u128) as u32
 }
 
+#[cfg(feature = "llm-mlx")]
+fn mlx_context_length(metadata: &ModelMetadata) -> usize {
+    metadata
+        .metadata
+        .get("context_length")
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+        })
+        .and_then(|n| usize::try_from(n).ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(4096)
+}
+
 // Internal: ONNX-specific types needed for optimized execution paths
 // These are implementation details, not part of the public API
 use crate::execution::session_factory::OnnxSessionFactory;
@@ -150,13 +168,13 @@ use crate::runtime_adapter::onnx::{
 use crate::runtime_adapter::candle::CandleRuntime;
 
 // Always-available LLM types (defined in runtime_adapter/types.rs)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 use crate::runtime_adapter::types::{ChatMessage, LlmConfig};
 use crate::runtime_adapter::types::{GenerationConfig, StreamingCallback};
 use crate::runtime_adapter::{MultimodalChatMessage, MultimodalMessagePart, VisionEncoder};
 
 // LLM adapter implementation (only available with LLM features)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 use crate::runtime_adapter::llm::LlmRuntimeAdapter;
 
 use super::modes::{
@@ -226,12 +244,15 @@ pub struct TemplateExecutor {
     /// config matches. The key includes the model path, context window, chat
     /// template, backend hint, and optional vision encoder/mmproj artifact.
     /// This field always exists but is only populated when LLM features are enabled.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     llm_adapter_cache: Option<(LlmAdapterCacheKey, LlmRuntimeAdapter)>,
     /// Placeholder for llm_adapter_cache when LLM features are disabled.
     /// This ensures the struct has consistent fields regardless of features.
-    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
     llm_adapter_cache: Option<()>,
+    /// Cached MLX embedding strategy to keep resident weights alive between calls.
+    #[cfg(feature = "llm-mlx")]
+    mlx_embedding_strategy: MlxEmbeddingStrategy,
     /// Cached ONNX session for the TTS path (see [`TtsSessionCache`]). Lives for
     /// the executor's lifetime — i.e. the TTS model's load — and drops on unload,
     /// exactly like `llm_adapter_cache`; no separate eviction needed.
@@ -295,6 +316,8 @@ impl TemplateExecutor {
             runtimes,
             base_path: base_path.into(),
             llm_adapter_cache: None,
+            #[cfg(feature = "llm-mlx")]
+            mlx_embedding_strategy: MlxEmbeddingStrategy::new(),
             tts_session_cache: None,
             vision_encoders: HashMap::new(),
         }
@@ -605,6 +628,39 @@ impl TemplateExecutor {
             ));
         }
 
+        #[cfg(feature = "llm-mlx")]
+        if is_mlx_llm_safetensors_metadata(metadata) {
+            debug!(
+                target: "xybrid_core",
+                "Detected MLX SafeTensors LLM metadata, routing to execute_llm()"
+            );
+            return self.execute_llm(
+                metadata,
+                "",
+                None,
+                mlx_context_length(metadata),
+                input,
+                Some("mlx"),
+                config,
+            );
+        }
+
+        #[cfg(feature = "llm-mlx")]
+        if is_mlx_embedding_safetensors_metadata(metadata) {
+            use super::strategies::{ExecutionContext, ExecutionStrategy};
+            debug!(
+                target: "xybrid_core",
+                "Detected MLX SafeTensors embedding metadata, dispatching to MlxEmbeddingStrategy"
+            );
+            let mut ctx = ExecutionContext {
+                base_path: &self.base_path,
+                runtimes: &mut self.runtimes,
+            };
+            return self
+                .mlx_embedding_strategy
+                .execute(&mut ctx, metadata, input);
+        }
+
         // Step 2: Single Model Execution
         let (runtime_type, model_file) = match &metadata.execution_template {
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file.clone()),
@@ -905,6 +961,46 @@ impl TemplateExecutor {
             return Ok(result);
         }
 
+        #[cfg(feature = "llm-mlx")]
+        if is_mlx_llm_safetensors_metadata(metadata) {
+            debug!(
+                target: "xybrid_core",
+                "MLX SafeTensors LLM detected, converting context to ChatMessages"
+            );
+
+            reject_text_only_model_image_input(metadata, input)?;
+
+            let mut chat_messages: Vec<ChatMessage> = Vec::new();
+            for envelope in context.context_for_llm() {
+                if let EnvelopeKind::Text(text) = &envelope.kind {
+                    let role = envelope.role().unwrap_or(MessageRole::User);
+                    chat_messages.push(ChatMessage {
+                        role,
+                        content: text.clone(),
+                    });
+                }
+            }
+            if let EnvelopeKind::Text(text) = &input.kind {
+                let role = input.role().unwrap_or(MessageRole::User);
+                chat_messages.push(ChatMessage {
+                    role,
+                    content: text.clone(),
+                });
+            }
+
+            let mut result = self.execute_llm_with_messages(
+                metadata,
+                "",
+                mlx_context_length(metadata),
+                &chat_messages,
+                Some("mlx"),
+                config,
+            )?;
+
+            result = result.with_role(MessageRole::Assistant);
+            return Ok(result);
+        }
+
         // Check if this is a GGUF (LLM) model
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         if let ExecutionTemplate::Gguf {
@@ -1045,8 +1141,9 @@ impl TemplateExecutor {
         #[allow(unused_variables)] on_token: StreamingCallback<'_>,
         #[allow(unused_variables)] config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
         {
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             if let super::template::ExecutionTemplate::VisionLanguage {
                 model_file,
                 chat_template,
@@ -1068,7 +1165,22 @@ impl TemplateExecutor {
                 );
             }
 
+            #[cfg(feature = "llm-mlx")]
+            if is_mlx_llm_safetensors_metadata(metadata) {
+                return self.execute_llm_streaming(
+                    metadata,
+                    "",
+                    None,
+                    mlx_context_length(metadata),
+                    input,
+                    Some("mlx"),
+                    on_token,
+                    config,
+                );
+            }
+
             // Only GGUF (LLM) templates support streaming
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             if let super::template::ExecutionTemplate::Gguf {
                 model_file,
                 chat_template,
@@ -1097,7 +1209,7 @@ impl TemplateExecutor {
             );
         }
 
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
         {
             debug!(
                 target: "xybrid_core",
@@ -1203,8 +1315,9 @@ impl TemplateExecutor {
             }
         }
 
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
         {
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             if let ExecutionTemplate::VisionLanguage {
                 model_file,
                 chat_template,
@@ -1234,7 +1347,48 @@ impl TemplateExecutor {
                 return Ok(result.with_role(MessageRole::Assistant));
             }
 
+            #[cfg(feature = "llm-mlx")]
+            if is_mlx_llm_safetensors_metadata(metadata) {
+                debug!(
+                    target: "xybrid_core",
+                    "MLX SafeTensors LLM detected, converting context to ChatMessages for streaming"
+                );
+
+                reject_text_only_model_image_input(metadata, input)?;
+
+                let mut chat_messages: Vec<ChatMessage> = Vec::new();
+                for envelope in context.context_for_llm() {
+                    if let EnvelopeKind::Text(text) = &envelope.kind {
+                        let role = envelope.role().unwrap_or(MessageRole::User);
+                        chat_messages.push(ChatMessage {
+                            role,
+                            content: text.clone(),
+                        });
+                    }
+                }
+                if let EnvelopeKind::Text(text) = &input.kind {
+                    let role = input.role().unwrap_or(MessageRole::User);
+                    chat_messages.push(ChatMessage {
+                        role,
+                        content: text.clone(),
+                    });
+                }
+
+                let result = self.execute_llm_streaming_with_messages(
+                    metadata,
+                    "",
+                    mlx_context_length(metadata),
+                    &chat_messages,
+                    Some("mlx"),
+                    on_token,
+                    config,
+                )?;
+
+                return Ok(result.with_role(MessageRole::Assistant));
+            }
+
             // Check if this is a GGUF (LLM) model
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             if let ExecutionTemplate::Gguf {
                 model_file,
                 context_length,
@@ -1308,7 +1462,7 @@ impl TemplateExecutor {
             Ok(result)
         }
 
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
         {
             debug!(
                 target: "xybrid_core",
@@ -1320,7 +1474,7 @@ impl TemplateExecutor {
     }
 
     /// Execute LLM inference with streaming.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     fn execute_llm_streaming(
         &mut self,
         metadata: &ModelMetadata,
@@ -1438,7 +1592,7 @@ impl TemplateExecutor {
     ///
     /// Used by `execute_with_context` to pass conversation history
     /// to the LLM without our custom template formatting.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     fn execute_llm_with_messages(
         &mut self,
         metadata: &ModelMetadata,
@@ -1792,7 +1946,7 @@ impl TemplateExecutor {
     ///
     /// Used by `execute_streaming_with_context` to pass conversation history
     /// to the LLM without our custom template formatting.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     fn execute_llm_streaming_with_messages(
         &mut self,
         metadata: &ModelMetadata,
@@ -1883,7 +2037,7 @@ impl TemplateExecutor {
     /// The adapter is cached to avoid reloading the model on subsequent calls
     /// with the same model path. This provides significant speedup for REPL
     /// and interactive use cases.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     fn execute_llm(
         &mut self,
         metadata: &ModelMetadata,
@@ -2641,7 +2795,7 @@ impl Default for TemplateExecutor {
 // `execution::llm_telemetry`; this one stays at the executor layer because the
 // vision execute paths source the timing from a local measurement rather than
 // from `GenerationOutput`.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn insert_image_preprocess_metric(
     response_metadata: &mut HashMap<String, String>,
     image_preprocess_ms: Option<u32>,
@@ -2657,7 +2811,7 @@ fn insert_image_preprocess_metric(
 /// optional image-preprocess timing) and mirrors the generation metrics onto the
 /// current span. `image_preprocess_ms` is `None` for text-only paths and carries
 /// the vision timing for multimodal paths (the insert is a no-op when `None`).
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn build_llm_response_envelope(
     output: crate::runtime_adapter::llm::GenerationOutput,
     backend_name: &str,
@@ -2694,7 +2848,7 @@ fn build_llm_response_envelope(
 /// Build the generation config for the prompt-based LLM paths: an explicit
 /// config wins, otherwise fall back to envelope metadata (`max_tokens`,
 /// `temperature`), then defaults.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn build_gen_config_from_input(
     input: &Envelope,
     config: Option<&GenerationConfig>,

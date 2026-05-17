@@ -26,7 +26,7 @@ const TOKENIZER_FILE: &str = "tokenizer.json";
 ///
 /// ```no_run
 /// use std::path::Path;
-/// # #[cfg(all(feature = "llm-mlx", any(target_os = "macos", target_os = "ios")))]
+/// # #[cfg(feature = "llm-mlx")]
 /// # fn example() -> anyhow::Result<()> {
 /// let tok = xybrid_core::runtime_adapter::mlx::tokenizer::load(
 ///     Path::new("/tmp/mlx-community-qwen")

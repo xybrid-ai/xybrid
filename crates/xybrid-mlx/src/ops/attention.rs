@@ -133,7 +133,7 @@ pub fn concat(arrays: &[&MlxArray], axis: i32, stream: Option<&MlxStream>) -> Ml
     // scope guard below.
     let vec = unsafe { ffi::vector_array_from(&raws) };
 
-    let result = (|| unsafe { ffi::op_concat_axis(vec, axis, s.as_stream().as_raw()) })();
+    let result = unsafe { ffi::op_concat_axis(vec, axis, s.as_stream().as_raw()) };
 
     // SAFETY: `vec` was produced by `vector_array_from` above and has not
     // been freed elsewhere.

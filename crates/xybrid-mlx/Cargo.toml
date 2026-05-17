@@ -16,7 +16,7 @@ path = "src/lib.rs"
 # `mlx-c-sys/bindings` (link the xcframework) and pulls in `metal` for the
 # zero-copy SharedBuffer path (US-008). Off by default so
 # `cargo clippy --workspace` on Ubuntu CI runners stays clean — the MTLBuffer
-# bindings are Apple-only.
+# bindings are currently Apple Silicon macOS-only.
 default = []
 bindings = ["mlx-c-sys/bindings", "dep:metal"]
 
@@ -25,10 +25,10 @@ mlx-c-sys = { path = "../mlx-c-sys" }
 thiserror = { workspace = true }
 tracing = "0.1"
 
-# MTLBuffer bindings for the SharedBuffer zero-copy path (US-008). Apple-only;
-# elsewhere the `bindings` feature is rejected by the top-level compile_error!
-# in lib.rs, so the dep is never linked on non-Apple targets.
-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+# MTLBuffer bindings for the SharedBuffer zero-copy path (US-008). The current
+# runtime gate is Apple Silicon macOS; elsewhere the `bindings` feature is
+# rejected by the top-level compile_error! in lib.rs.
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 metal = { version = "0.29", optional = true }
 
 [[bench]]

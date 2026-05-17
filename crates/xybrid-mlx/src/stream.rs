@@ -9,6 +9,7 @@ use std::fmt;
 
 use crate::error::{MlxError, MlxResult};
 use crate::ffi;
+use crate::resources::ensure_metallib_resource;
 use mlx_c_sys::bindings::{self as sys, mlx_stream};
 
 /// MLX device placement.
@@ -51,6 +52,7 @@ impl MlxStream {
     /// at the same underlying stream — which is the behaviour we want
     /// for xybrid (one scheduler per device per process).
     pub fn new(device: Device) -> MlxResult<Self> {
+        ensure_metallib_resource()?;
         // SAFETY: the mlx-c default-stream constructors take no arguments
         // and are safe to call from any thread. We immediately check the
         // returned handle's ctx pointer below.

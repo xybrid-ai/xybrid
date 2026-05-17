@@ -421,6 +421,7 @@ impl PipelineRunner {
             provider: stage_config.provider,
             model: Some(stage_config.model.clone()),
             options: Some(stage_config.options.clone()),
+            backend: None,
         }
     }
 

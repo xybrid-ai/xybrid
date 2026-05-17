@@ -11,7 +11,7 @@
 //! default build — `cargo build -p xybrid-mlx` — compiles this crate to an
 //! empty shell on every target, which keeps `cargo clippy --workspace` on
 //! Linux CI runners green. Downstream consumers enable `bindings` only on
-//! Apple targets (the only place MLX can link).
+//! Apple Silicon macOS targets (the only validated MLX runtime path).
 //!
 //! ```bash
 //! # Real linkage — requires vendor/mlx-apple/mlx.xcframework to be present.
@@ -48,8 +48,8 @@
 //! # Why only Apple
 //!
 //! MLX links against Metal, MetalPerformanceShaders, and Accelerate — all
-//! Apple-only frameworks. The `bindings` feature therefore requires a macOS
-//! or iOS target; enabling it elsewhere fires a [`compile_error!`] below.
+//! Apple-only frameworks. The `bindings` feature therefore currently requires
+//! Apple Silicon macOS; enabling it elsewhere fires a [`compile_error!`] below.
 //!
 //! # Public surface (bindings feature enabled)
 //!
@@ -64,14 +64,17 @@
 //! - [`MlxDtype`] — the supported subset of dtypes.
 //! - [`MlxError`] / [`MlxResult`] — error surface.
 
-// Apple-only compile-time guard for the `bindings` feature. Only fires when
-// a downstream crate has opted into the feature on a non-Apple target. The
-// default (no-feature) path is inert.
-#[cfg(all(feature = "bindings", not(any(target_os = "macos", target_os = "ios"))))]
+// Apple Silicon macOS-only compile-time guard for the `bindings` feature. Only
+// fires when a downstream crate has opted into the feature on an unsupported
+// target. The default (no-feature) path is inert.
+#[cfg(all(
+    feature = "bindings",
+    not(all(target_os = "macos", target_arch = "aarch64"))
+))]
 compile_error!(
-    "xybrid-mlx `bindings` feature requires an Apple target (macOS or iOS). \
-     MLX links against Metal and Accelerate, which are Apple-only. Disable \
-     the `llm-mlx` feature (or its equivalent) when building for this target."
+    "xybrid-mlx `bindings` feature is currently supported only on Apple Silicon \
+     macOS (`aarch64-apple-darwin`). iOS remains non-linking only until upstream MLX \
+     ships a Metal-enabled iOS slice. Disable `llm-mlx-runtime` for this target."
 );
 
 // Types that do not touch the FFI are unconditionally compiled — they are
@@ -87,24 +90,26 @@ mod dtype;
 mod envelope;
 mod error;
 
-pub use dtype::MlxDtype;
+pub use dtype::{bf16_le_bytes_to_f32_vec, f16_le_bytes_to_f32_vec, MlxDtype};
 pub use envelope::{EnvelopePayload, EnvelopeSource, OwnedEnvelopePayload};
 pub use error::{MlxError, MlxResult};
 
-#[cfg(all(feature = "bindings", any(target_os = "macos", target_os = "ios")))]
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 mod array;
-#[cfg(all(feature = "bindings", any(target_os = "macos", target_os = "ios")))]
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 mod buffer;
-#[cfg(all(feature = "bindings", any(target_os = "macos", target_os = "ios")))]
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 mod ffi;
-#[cfg(all(feature = "bindings", any(target_os = "macos", target_os = "ios")))]
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub mod ops;
-#[cfg(all(feature = "bindings", any(target_os = "macos", target_os = "ios")))]
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
+mod resources;
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 mod stream;
 
-#[cfg(all(feature = "bindings", any(target_os = "macos", target_os = "ios")))]
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub use array::MlxArray;
-#[cfg(all(feature = "bindings", any(target_os = "macos", target_os = "ios")))]
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub use buffer::SharedBuffer;
-#[cfg(all(feature = "bindings", any(target_os = "macos", target_os = "ios")))]
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub use stream::{Device, MlxStream};

@@ -185,7 +185,7 @@ impl StageConfig {
         }
     }
 
-    /// Get the LLM backend override (auto, mlx, llamacpp, mistral).
+    /// Get the local generation or embedding backend override (auto, mlx, llamacpp, mistral).
     ///
     /// `None` means no override was specified — the runtime selector applies
     /// its default priority. See
@@ -256,7 +256,7 @@ pub struct StageObjectConfig {
     #[serde(default)]
     pub execution_provider: Option<String>,
 
-    /// LLM backend override for this stage.
+    /// Local generation or embedding backend override for this stage.
     ///
     /// Accepted values (case-insensitive): `auto`, `mlx`, `llamacpp`, `mistral`.
     /// `None` or `"auto"` means "let the runtime selector decide"

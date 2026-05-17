@@ -110,16 +110,27 @@ object Xybrid {
 }
 ```
 
+### Rust
+
+```rust
+pub struct Xybrid;
+
+impl Xybrid {
+    pub fn model(id: &str) -> ModelLoader;
+    pub fn pipeline(yaml: &str) -> PipelineResult<PipelineRef>;
+}
+```
+
 ### Implementation Status
 
-| Method | Dart | Kotlin | Swift | C# |
-|--------|------|--------|-------|----|
-| `init()` | ✅ | ✅ | — | ✅ |
-| `setApiKey()` | ✅ | — | — | — |
-| `setGatewayUrl()` | ✅ | — | — | — |
-| `model()` | ✅ | — | — | ✅ |
-| `pipeline()` | ✅ | — | — | — |
-| `isModelCached()` | ✅ | — | — | — |
+| Method | Rust | Dart | Kotlin | Swift | C# |
+|--------|------|------|--------|-------|----|
+| `init()` | — | ✅ | ✅ | — | ✅ |
+| `setApiKey()` | — | ✅ | — | — | — |
+| `setGatewayUrl()` | — | ✅ | — | — | — |
+| `model()` | ✅ | ✅ | — | — | ✅ |
+| `pipeline()` | ✅ | ✅ | — | — | — |
+| `isModelCached()` | — | ✅ | — | — | — |
 
 ---
 
@@ -167,6 +178,21 @@ public class ModelLoader
     public static ModelLoader FromBundle(string bundlePath);
     public static ModelLoader FromDirectory(string directoryPath);
     public InferenceResult Load();
+}
+```
+
+### Rust
+
+```rust
+pub struct ModelLoader;
+
+impl ModelLoader {
+    pub fn from_registry(model_id: &str) -> Self;
+    pub fn from_bundle(path: impl Into<PathBuf>) -> SdkResult<Self>;
+    pub fn from_directory(path: impl Into<PathBuf>) -> SdkResult<Self>;
+    pub fn from_huggingface(repo: &str) -> Self;
+    pub fn with_backend(self, backend: BackendChoice) -> Self;
+    pub fn load(&self) -> SdkResult<XybridModel>;
 }
 ```
 
@@ -263,16 +289,34 @@ using var model = loader.Load();
 var result = model.Run(Envelope.Text("Hello!"));
 ```
 
+### `withBackend()` / `with_backend()`
+
+Pins local generation or embedding execution to a specific backend by setting
+`ModelMetadata.backend` when the loader materializes a model. Omit this call for
+automatic selection.
+This is a hard requirement: asking for `mlx` on a bundle that does not contain
+MLX-compatible SafeTensors metadata will fail during load or execution rather
+than silently falling back.
+
+```rust
+use xybrid_sdk::{BackendChoice, Xybrid};
+
+let model = Xybrid::model("qwen3.5-0.8b")
+    .with_backend(BackendChoice::Mlx)
+    .load()?;
+```
+
 ### Implementation Status
 
-| Method | Dart | Kotlin | Swift | C# |
-|--------|------|--------|-------|----|
-| `fromRegistry()` | ✅ | ✅ | ✅ | ✅ |
-| `fromBundle()` | ✅ | ✅ | ✅ | ✅ |
-| `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
-| `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
-| `load()` | ✅ | ✅ | ✅ | ✅ |
-| `loadWithProgress()` | ✅ | — | — | — |
+| Method | Rust | Dart | Kotlin | Swift | C# |
+|--------|------|------|--------|-------|----|
+| `fromRegistry()` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fromBundle()` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fromDirectory()` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `withBackend()` | ✅ | — | — | — | — |
+| `load()` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `loadWithProgress()` | ✅ | ✅ | — | — | — |
 
 ---
 
@@ -319,6 +363,10 @@ class XybridModel {
     required ConversationContext context,
     GenerationConfig? config,
   });
+  /// True for token-streaming LLMs: GGUF when a GGUF backend is compiled,
+  /// and MLX SafeTensors only when the Apple Silicon macOS MLX runtime is
+  /// available. Non-linking MLX builds return false.
+  bool supportsTokenStreaming();
 
   // Streaming TTS (audio chunk-by-chunk)
   // Emits each sentence-chunk's raw PCM (+ sample rate) as it is synthesized,
@@ -397,32 +445,37 @@ impl XybridModel {
         options: &RunOptions,
         on_token: F,
     ) -> SdkResult<InferenceResult>;
+
+    // Same capability gate as Dart: GGUF requires a compiled GGUF backend;
+    // MLX SafeTensors requires the Apple Silicon macOS MLX runtime.
+    pub fn supports_token_streaming(&self) -> bool;
 }
 ```
 
 ### Implementation Status
 
-| Method | Dart | Kotlin | Swift | C# |
-|--------|------|--------|-------|----|
-| `modelId` | — | — | — | ✅ |
-| `voices` | — | ✅ | ✅ | ✅ |
-| `defaultVoice` | — | 🚧 | 🚧 | ✅ |
-| `hasVoices` | — | ✅ | ✅ | ✅ |
-| `voice()` | — | ✅ | ✅ | ✅ |
-| `run()` | ✅ | ✅ | ✅ | ✅ |
-| `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
-| `runWithContext()` | ✅ | — | — | ✅ |
-| `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
-| `runStreaming()` | ✅ | — | — | ✅ |
-| `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | planned | planned | planned |
-| `runTtsStreaming()` / `run_tts_streaming()` | ✅ | — | — | — |
-| `runStreamingWithFallback()` | ✅ | planned | planned | planned |
-| `runStreamingWithContext()` | ✅ | — | — | ✅ |
-| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |
-| `benchmark()` | — | — | — | — |
-| `warmup()` | ✅ | ✅ | ✅ | — |
-| `unload()` | ✅ | ✅ | ✅ | — |
-| `executionProviderInfo()` | — | — | — | — |
+| Method | Rust | Dart | Kotlin | Swift | C# |
+|--------|------|------|--------|-------|----|
+| `modelId` | ✅ | — | — | — | ✅ |
+| `voices` | ✅ | — | ✅ | ✅ | ✅ |
+| `defaultVoice` | ✅ | — | 🚧 | 🚧 | ✅ |
+| `hasVoices` | ✅ | — | ✅ | ✅ | ✅ |
+| `voice()` | ✅ | — | ✅ | ✅ | ✅ |
+| `run()` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `runWithOptions()` / `run_with_options()` | ✅ | planned | planned | planned | planned |
+| `runWithContext()` / `run_with_context()` | ✅ | ✅ | — | — | ✅ |
+| `runWithContextOptions()` / `run_with_context_options()` | ✅ | planned | planned | planned | planned |
+| `runStreaming()` / `run_streaming()` | ✅ | ✅ | — | — | ✅ |
+| `runStreamingWithOptions()` / `run_streaming_with_options()` | ✅ | planned | planned | planned | planned |
+| `runTtsStreaming()` / `run_tts_streaming()` | ✅ | ✅ | — | — | — |
+| `runStreamingWithFallback()` / `run_streaming_with_fallback()` | ✅ | ✅ | planned | planned | planned |
+| `runStreamingWithContext()` / `run_streaming_with_context()` | ✅ | ✅ | — | — | ✅ |
+| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | ✅ | planned | planned | planned | planned |
+| `supportsTokenStreaming()` / `supports_token_streaming()` | ✅ | ✅ | — | — | ✅ |
+| `benchmark()` | — | — | — | — | — |
+| `warmup()` | ✅ | ✅ | ✅ | ✅ | — |
+| `unload()` | ✅ | ✅ | ✅ | ✅ | — |
+| `executionProviderInfo()` | — | — | — | — | — |
 
 ---
 
@@ -1074,6 +1127,18 @@ data class YuvColorInfo(
 )
 ```
 
+### BackendChoice
+
+Explicit local generation or embedding backend override. Omit the override for automatic selection.
+
+```rust
+pub enum BackendChoice {
+    Mlx,
+    LlamaCpp,
+    Mistral,
+}
+```
+
 ### GenerationConfig (LLM Generation Parameters)
 
 Optional configuration for controlling LLM text generation. All fields are nullable —
@@ -1290,21 +1355,22 @@ stream stays low-cardinality.
 
 ### Implementation Status
 
-| Type | Dart | Kotlin | Swift | C# |
-|------|------|--------|-------|----|
-| `ConversationContext` | ✅ | — | — | ✅ |
-| `MessageRole` | ✅ | — | — | ✅ |
-| `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
-| `PixelFormat` | ✅ | 📋 | 📋 | 📋 |
-| `ImagePlane` | ✅ | 📋 | 📋 | 📋 |
-| `YuvColorInfo` | ✅ | 📋 | 📋 | 📋 |
-| `RunOptions` | ✅ | planned | planned | planned |
-| `RunOptions.frameSessionId` / `liveMode` | ✅ | 📋 | 📋 | 📋 |
-| `AbortPolicy` | ✅ | planned | planned | planned |
-| `AbortSignal` | ✅ | planned | planned | planned |
-| `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | 📋 | 📋 | 📋 |
-| `CancellationToken` | ✅ | planned | planned | planned |
-| `StreamToken` | ✅ | — | — | ✅ |
+| Type | Rust | Dart | Kotlin | Swift | C# |
+|------|------|------|--------|-------|----|
+| `ConversationContext` | ✅ | ✅ | — | — | ✅ |
+| `MessageRole` | ✅ | ✅ | — | — | ✅ |
+| `BackendChoice` | ✅ | — | — | — | — |
+| `GenerationConfig` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `PixelFormat` | ✅ | ✅ | 📋 | 📋 | 📋 |
+| `ImagePlane` | ✅ | ✅ | 📋 | 📋 | 📋 |
+| `YuvColorInfo` | ✅ | ✅ | 📋 | 📋 | 📋 |
+| `RunOptions` | ✅ | ✅ | planned | planned | planned |
+| `RunOptions.frameSessionId` / `liveMode` | ✅ | ✅ | 📋 | 📋 | 📋 |
+| `AbortPolicy` | ✅ | ✅ | planned | planned | planned |
+| `AbortSignal` | ✅ | ✅ | planned | planned | planned |
+| `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | ✅ | 📋 | 📋 | 📋 |
+| `CancellationToken` | ✅ | ✅ | planned | planned | planned |
+| `StreamToken` | ✅ | ✅ | — | — | ✅ |
 
 ---
 

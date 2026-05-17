@@ -1,4 +1,4 @@
-//! Basic tensor ops: matmul, add, mul, softmax, rms_norm, cast.
+//! Basic tensor ops: matmul, add, mul, softmax, norms, cast, activations.
 //!
 //! Safe, non-panicking wrappers over the corresponding mlx-c entry points.
 //! All ops take an optional `&MlxStream`; `None` dispatches to the
@@ -65,6 +65,22 @@ pub fn mul(a: &MlxArray, b: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<
     Ok(MlxArray::from_raw(raw))
 }
 
+/// Element-wise subtract with NumPy broadcasting.
+pub fn sub(a: &MlxArray, b: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
+    let s = resolve_stream(stream)?;
+    // SAFETY: all three handles are live for the duration of the call.
+    let raw = unsafe { ffi::op_sub(a.as_raw(), b.as_raw(), s.as_stream().as_raw())? };
+    Ok(MlxArray::from_raw(raw))
+}
+
+/// Element-wise divide with NumPy broadcasting.
+pub fn div(a: &MlxArray, b: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
+    let s = resolve_stream(stream)?;
+    // SAFETY: all three handles are live for the duration of the call.
+    let raw = unsafe { ffi::op_div(a.as_raw(), b.as_raw(), s.as_stream().as_raw())? };
+    Ok(MlxArray::from_raw(raw))
+}
+
 /// Softmax along a single axis. Uses MLX's `precise` path so f16 / bf16
 /// inputs are computed in f32 intermediates (matches PyTorch default).
 ///
@@ -105,6 +121,32 @@ pub fn rms_norm(
     Ok(MlxArray::from_raw(raw))
 }
 
+/// Layer normalisation along the last axis with affine weight and bias.
+///
+/// Computes `(x - mean(x)) / sqrt(var(x) + eps) * weight + bias`, where
+/// `mean` and `var` are reduced over the last axis. BERT-family encoders
+/// use this form rather than RMSNorm.
+pub fn layer_norm(
+    x: &MlxArray,
+    weight: &MlxArray,
+    bias: &MlxArray,
+    eps: f32,
+    stream: Option<&MlxStream>,
+) -> MlxResult<MlxArray> {
+    let s = resolve_stream(stream)?;
+    // SAFETY: all handles are live for the duration of the call.
+    let raw = unsafe {
+        ffi::op_fast_layer_norm(
+            x.as_raw(),
+            weight.as_raw(),
+            bias.as_raw(),
+            eps,
+            s.as_stream().as_raw(),
+        )?
+    };
+    Ok(MlxArray::from_raw(raw))
+}
+
 /// Cast an array to a different dtype.
 ///
 /// Thin wrapper over `mlx_astype`. Casts to the same dtype are a no-op
@@ -132,6 +174,46 @@ pub fn exp(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
     Ok(MlxArray::from_raw(raw))
 }
 
+/// Element-wise negation `-x`.
+pub fn neg(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
+    let s = resolve_stream(stream)?;
+    // SAFETY: both handles are live for the duration of the call.
+    let raw = unsafe { ffi::op_neg(a.as_raw(), s.as_stream().as_raw())? };
+    Ok(MlxArray::from_raw(raw))
+}
+
+/// Element-wise square `x * x`.
+pub fn square(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
+    let s = resolve_stream(stream)?;
+    // SAFETY: both handles are live for the duration of the call.
+    let raw = unsafe { ffi::op_square(a.as_raw(), s.as_stream().as_raw())? };
+    Ok(MlxArray::from_raw(raw))
+}
+
+/// Element-wise error function `erf(x)`.
+pub fn erf(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
+    let s = resolve_stream(stream)?;
+    // SAFETY: both handles are live for the duration of the call.
+    let raw = unsafe { ffi::op_erf(a.as_raw(), s.as_stream().as_raw())? };
+    Ok(MlxArray::from_raw(raw))
+}
+
+/// Element-wise square root `sqrt(x)`.
+pub fn sqrt(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
+    let s = resolve_stream(stream)?;
+    // SAFETY: both handles are live for the duration of the call.
+    let raw = unsafe { ffi::op_sqrt(a.as_raw(), s.as_stream().as_raw())? };
+    Ok(MlxArray::from_raw(raw))
+}
+
+/// Element-wise hyperbolic tangent `tanh(x)`.
+pub fn tanh(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
+    let s = resolve_stream(stream)?;
+    // SAFETY: both handles are live for the duration of the call.
+    let raw = unsafe { ffi::op_tanh(a.as_raw(), s.as_stream().as_raw())? };
+    Ok(MlxArray::from_raw(raw))
+}
+
 /// Element-wise reciprocal `1 / x`.
 pub fn reciprocal(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
     let s = resolve_stream(stream)?;
@@ -148,6 +230,43 @@ pub fn reciprocal(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArra
 pub fn silu(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
     let sig = sigmoid(a, stream)?;
     mul(a, &sig, stream)
+}
+
+/// Exact Gaussian Error Linear Unit: `0.5 * x * (1 + erf(x / sqrt(2)))`.
+///
+/// This is the canonical BERT activation. Gemma's gated-GeLU block uses
+/// the tanh approximation upstream; use [`gelu_tanh`] for that path.
+pub fn gelu(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
+    let inv_sqrt2 = MlxArray::from_slice_f32(&[std::f32::consts::FRAC_1_SQRT_2], &[1])?;
+    let half = MlxArray::from_slice_f32(&[0.5], &[1])?;
+    let one = MlxArray::from_slice_f32(&[1.0], &[1])?;
+
+    let scaled = mul(a, &inv_sqrt2, stream)?;
+    let erf_scaled = erf(&scaled, stream)?;
+    let cdf = add(&one, &erf_scaled, stream)?;
+    let half_x = mul(a, &half, stream)?;
+    mul(&half_x, &cdf, stream)
+}
+
+/// Tanh-approximate Gaussian Error Linear Unit.
+///
+/// Formula: `0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))`.
+/// Gemma-family gated-GeLU FFNs use this approximation in upstream MLX-LM.
+pub fn gelu_tanh(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
+    let half = MlxArray::from_slice_f32(&[0.5], &[1])?;
+    let one = MlxArray::from_slice_f32(&[1.0], &[1])?;
+    let cubic_coeff = MlxArray::from_slice_f32(&[0.044_715], &[1])?;
+    let sqrt_2_over_pi = MlxArray::from_slice_f32(&[0.797_884_6], &[1])?;
+
+    let x2 = mul(a, a, stream)?;
+    let x3 = mul(&x2, a, stream)?;
+    let cubic = mul(&x3, &cubic_coeff, stream)?;
+    let inner = add(a, &cubic, stream)?;
+    let scaled = mul(&inner, &sqrt_2_over_pi, stream)?;
+    let activated = tanh(&scaled, stream)?;
+    let cdf = add(&one, &activated, stream)?;
+    let half_x = mul(a, &half, stream)?;
+    mul(&half_x, &cdf, stream)
 }
 
 /// Argmax along `axis`, returning a `u32` index array with `keepdims=false`
@@ -172,8 +291,8 @@ mod tests {
     //! output (for rms_norm) — we keep the reference in-tree to avoid a
     //! dev-dep on ndarray or a captured-fixture step that would drift.
     //!
-    //! All tests use the default CPU stream so they work on any Apple host
-    //! (no GPU required in CI).
+    //! All tests use the default CPU stream so they work on Apple Silicon macOS
+    //! without a dedicated GPU in CI.
     use super::*;
     use crate::MlxDtype;
 
@@ -241,6 +360,28 @@ mod tests {
     }
 
     #[test]
+    fn sub_div_elementwise() {
+        let a = MlxArray::from_slice_f32(&[8.0, 9.0, 10.0], &[3]).unwrap();
+        let b = MlxArray::from_slice_f32(&[2.0, 3.0, 5.0], &[3]).unwrap();
+
+        let diff = sub(&a, &b, None).unwrap();
+        assert_close(
+            &diff.to_vec_f32().unwrap(),
+            &[6.0, 6.0, 5.0],
+            MATMUL_TOL,
+            "sub",
+        );
+
+        let quotient = div(&a, &b, None).unwrap();
+        assert_close(
+            &quotient.to_vec_f32().unwrap(),
+            &[4.0, 3.0, 2.0],
+            MATMUL_TOL,
+            "div",
+        );
+    }
+
+    #[test]
     fn softmax_sums_to_one_on_axis() {
         // 2x3 — softmax along axis=1 means each row sums to 1.0.
         let data = [1.0f32, 2.0, 3.0, -1.0, 0.0, 4.0];
@@ -285,6 +426,20 @@ mod tests {
     }
 
     #[test]
+    fn layer_norm_matches_reference() {
+        // Reference:
+        // x = [1,2,3,4], mean = 2.5, var = 1.25, eps = 1e-5.
+        // affine weight/bias then applied elementwise.
+        let x = MlxArray::from_slice_f32(&[1.0, 2.0, 3.0, 4.0], &[1, 4]).unwrap();
+        let w = MlxArray::from_slice_f32(&[1.0, 2.0, 3.0, 4.0], &[4]).unwrap();
+        let b = MlxArray::from_slice_f32(&[0.5, 0.25, -0.25, -0.5], &[4]).unwrap();
+        let y = layer_norm(&x, &w, &b, 1.0e-5, None).unwrap();
+        let got = y.to_vec_f32().unwrap();
+        let expected = [-0.841_635_4f32, -0.644_423_6, 1.091_635_5, 4.866_542];
+        assert_close(&got, &expected, 1.0e-5, "layer_norm reference");
+    }
+
+    #[test]
     fn silu_matches_reference() {
         // silu(x) = x * sigmoid(x)
         //   x=-1 -> -0.2689414...
@@ -297,6 +452,82 @@ mod tests {
         // sigmoid(x) = 1 / (1 + exp(-x)); tolerance matches softmax row-sum tests.
         let expected = [-0.268_941_43f32, 0.0, 0.731_058_6, 1.761_594_2];
         assert_close(&got, &expected, 1.0e-5, "silu reference");
+    }
+
+    #[test]
+    fn erf_matches_reference() {
+        let x = MlxArray::from_slice_f32(&[-1.0, 0.0, 1.0], &[3]).unwrap();
+        let y = erf(&x, None).unwrap();
+        let got = y.to_vec_f32().unwrap();
+        let expected = [-0.842_700_8f32, 0.0, 0.842_700_8];
+        assert_close(&got, &expected, 1.0e-5, "erf reference");
+    }
+
+    #[test]
+    fn neg_square_sqrt_elementwise() {
+        let x = MlxArray::from_slice_f32(&[-2.0, 3.0, 4.0], &[3]).unwrap();
+        let n = neg(&x, None).unwrap();
+        assert_close(
+            &n.to_vec_f32().unwrap(),
+            &[2.0, -3.0, -4.0],
+            MATMUL_TOL,
+            "neg",
+        );
+
+        let sq = square(&x, None).unwrap();
+        assert_close(
+            &sq.to_vec_f32().unwrap(),
+            &[4.0, 9.0, 16.0],
+            MATMUL_TOL,
+            "square",
+        );
+
+        let root = sqrt(&sq, None).unwrap();
+        assert_close(
+            &root.to_vec_f32().unwrap(),
+            &[2.0, 3.0, 4.0],
+            MATMUL_TOL,
+            "sqrt",
+        );
+    }
+
+    #[test]
+    fn tanh_matches_reference() {
+        let x = MlxArray::from_slice_f32(&[-1.0, 0.0, 1.0], &[3]).unwrap();
+        let y = tanh(&x, None).unwrap();
+        let got = y.to_vec_f32().unwrap();
+        let expected = [-0.761_594_2f32, 0.0, 0.761_594_2];
+        assert_close(&got, &expected, 1.0e-5, "tanh reference");
+    }
+
+    #[test]
+    fn gelu_matches_exact_reference() {
+        let x = MlxArray::from_slice_f32(&[-2.0, -1.0, 0.0, 1.0, 2.0], &[5]).unwrap();
+        let y = gelu(&x, None).unwrap();
+        let got = y.to_vec_f32().unwrap();
+        let expected = [
+            -0.045_500_264f32,
+            -0.158_655_26,
+            0.0,
+            0.841_344_7,
+            1.954_499_7,
+        ];
+        assert_close(&got, &expected, 2.0e-5, "gelu exact reference");
+    }
+
+    #[test]
+    fn gelu_tanh_matches_reference() {
+        let x = MlxArray::from_slice_f32(&[-2.0, -1.0, 0.0, 1.0, 2.0], &[5]).unwrap();
+        let y = gelu_tanh(&x, None).unwrap();
+        let got = y.to_vec_f32().unwrap();
+        let expected = [
+            -0.045_402_307f32,
+            -0.158_808_01,
+            0.0,
+            0.841_192,
+            1.954_597_7,
+        ];
+        assert_close(&got, &expected, 2.0e-5, "gelu tanh reference");
     }
 
     #[test]

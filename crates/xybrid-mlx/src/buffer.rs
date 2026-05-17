@@ -186,7 +186,7 @@ impl SharedBuffer {
                 // been freed yet (we only failed in Metal-level construction).
                 unsafe {
                     let reclaim: Box<[u8]> =
-                        Box::from_raw(std::slice::from_raw_parts_mut(ptr, layout.size()));
+                        Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, layout.size()));
                     drop(reclaim);
                 }
                 Err(err)
@@ -327,7 +327,10 @@ mod tests {
     #[test]
     fn from_box_rejects_zero_length() {
         let empty: Box<[f32]> = Vec::<f32>::new().into_boxed_slice();
-        let err = SharedBuffer::from_box(empty).unwrap_err();
+        let err = match SharedBuffer::from_box(empty) {
+            Ok(_) => panic!("zero-length box should be rejected"),
+            Err(err) => err,
+        };
         match err {
             MlxError::Internal(msg) => assert!(
                 msg.contains("zero-length"),

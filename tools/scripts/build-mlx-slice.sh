@@ -52,14 +52,30 @@ done
 
 for var in SLICE SYSROOT ARCH SYSTEM_NAME DEPLOYMENT_TARGET MLX_SRC MLX_C_SRC OUT; do
     if [ -z "${!var}" ]; then
-        echo "missing required --${var,,}" >&2
+        opt=$(printf '%s' "$var" | tr '[:upper:]_' '[:lower:]-')
+        echo "missing required --${opt}" >&2
         usage >&2
         exit 2
     fi
 done
 
+CMAKE_GENERATOR="${CMAKE_GENERATOR:-}"
+if [ -z "$CMAKE_GENERATOR" ]; then
+    if command -v ninja >/dev/null 2>&1; then
+        CMAKE_GENERATOR=Ninja
+    else
+        CMAKE_GENERATOR="Unix Makefiles"
+    fi
+fi
+
+if [ "$CMAKE_GENERATOR" = "Ninja" ] && ! command -v ninja >/dev/null 2>&1; then
+    echo "error: CMAKE_GENERATOR=Ninja but 'ninja' is not on PATH" >&2
+    echo "       install ninja or set CMAKE_GENERATOR='Unix Makefiles'" >&2
+    exit 1
+fi
+
 SDK_PATH=$(xcrun --sdk "$SYSROOT" --show-sdk-path)
-echo "==> [${SLICE}] sysroot=${SYSROOT} arch=${ARCH} sdk=${SDK_PATH}"
+echo "==> [${SLICE}] sysroot=${SYSROOT} arch=${ARCH} sdk=${SDK_PATH} generator=${CMAKE_GENERATOR}"
 
 mkdir -p "$OUT/lib" "$OUT/include"
 
@@ -81,20 +97,25 @@ COMMON_FLAGS=(
 
 # 1. Build MLX.
 MLX_BUILD="$MLX_SRC/build-${SLICE}"
-cmake -S "$MLX_SRC" -B "$MLX_BUILD" -G Ninja "${COMMON_FLAGS[@]}"
+cmake -S "$MLX_SRC" -B "$MLX_BUILD" -G "$CMAKE_GENERATOR" "${COMMON_FLAGS[@]}"
 cmake --build "$MLX_BUILD" --config Release --target mlx
 cp "$MLX_BUILD"/libmlx.a "$OUT/lib/libmlx.a"
 
-# Metal shaders are optional — only present when the Metal pipeline ran.
-shopt -s nullglob
-for METALLIB in "$MLX_BUILD"/*.metallib "$MLX_BUILD"/mlx/*.metallib; do
+# Metal shaders are optional, but when present MLX writes them below the
+# generated backend tree (for example mlx/backend/metal/kernels/mlx.metallib).
+METALLIB_COUNT=0
+while IFS= read -r METALLIB; do
+    [ -n "$METALLIB" ] || continue
     cp "$METALLIB" "$OUT/lib/"
-done
-shopt -u nullglob
+    METALLIB_COUNT=$((METALLIB_COUNT + 1))
+done < <(find "$MLX_BUILD" -type f -name '*.metallib')
+if [ "$METALLIB_COUNT" -eq 0 ]; then
+    echo "warning: no .metallib produced for ${SLICE}; Metal kernels may be unavailable" >&2
+fi
 
 # 2. Build mlx-c, pointing it at the freshly built MLX.
 MLX_C_BUILD="$MLX_C_SRC/build-${SLICE}"
-cmake -S "$MLX_C_SRC" -B "$MLX_C_BUILD" -G Ninja "${COMMON_FLAGS[@]}" \
+cmake -S "$MLX_C_SRC" -B "$MLX_C_BUILD" -G "$CMAKE_GENERATOR" "${COMMON_FLAGS[@]}" \
     -DMLX_DIR="$MLX_BUILD"
 cmake --build "$MLX_C_BUILD" --config Release --target mlxc
 cp "$MLX_C_BUILD"/libmlxc.a "$OUT/lib/libmlxc.a"

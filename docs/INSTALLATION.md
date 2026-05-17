@@ -47,14 +47,22 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli
 By default, `cargo install` builds without hardware acceleration. For optimal performance, add platform features:
 
 ```bash
-# macOS — Metal GPU + Apple Neural Engine + llama.cpp
+# macOS — CoreML/ANE + Candle Metal + llama.cpp + MLX metadata/selector support
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos
+
+# macOS Apple Silicon with the real MLX SafeTensors runtime
+# Requires an mlx.xcframework from the local source-build or download path below.
+cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos,llm-mlx-runtime
 
 # Linux / Windows — ONNX + llama.cpp
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
 ```
 
-The prebuilt binaries from the install script already include the correct features for each platform.
+The prebuilt binaries from the install script include the stable platform
+presets. MLX SafeTensors execution is a separate macOS Apple Silicon runtime
+opt-in: without `llm-mlx-runtime`, MLX registry variants and local SafeTensors
+metadata are visible for selector checks, but generation falls back to
+llama.cpp or fails for explicit `--backend mlx`.
 
 <details>
 <summary>All available feature flags</summary>
@@ -77,6 +85,8 @@ The prebuilt binaries from the install script already include the correct featur
 | `vision` | Image envelope and preprocessing support |
 | `llm-llamacpp-vision` | llama.cpp vision-language support (`mmproj` / `mtmd`) |
 | `llm-mistral` | mistral.rs LLM backend (alternative) |
+| `llm-mlx` | MLX metadata, selector, tokenizer, and SafeTensors validation without linking MLX |
+| `llm-mlx-runtime` | Real MLX SafeTensors execution on Apple Silicon macOS; requires `vendor/mlx-apple/mlx.xcframework/` |
 
 </details>
 
@@ -87,6 +97,21 @@ git clone https://github.com/xybrid-ai/xybrid.git
 cd xybrid
 cargo build --release -p xybrid-cli --features platform-macos
 # Binary at target/release/xybrid
+```
+
+For a local MLX-runtime build, first materialize the xcframework, then enable
+the runtime feature. Use the local source-build path from pinned upstream SHAs
+on Apple Silicon, or use the fetch path once `vendor/mlx-apple/UPSTREAM_VERSIONS.txt`
+contains a downloadable artifact pin:
+
+```bash
+# Apple Silicon setup from source pins
+./tools/scripts/build-local-mlx-xcframework.sh
+
+# Download-based setup when an artifact pin exists
+./tools/scripts/fetch-mlx-xcframework.sh
+
+cargo build --release -p xybrid-cli --features platform-macos,llm-mlx-runtime
 ```
 
 ## Verify Installation
@@ -214,6 +239,7 @@ xybrid run --config voice-assistant.yaml --input-audio question.wav --output res
 | `xybrid models info <id>` | Show details about a specific model |
 | `xybrid models voices <id>` | List available voices for a TTS model |
 | `xybrid fetch --model <id>` | Pre-download a model from the registry |
+| `xybrid fetch --model <id> --backend mlx` | Pre-download the MLX SafeTensors registry variant; requires an MLX-runtime build on Apple Silicon macOS |
 | `xybrid fetch --huggingface <repo>` | Pre-download a model from HuggingFace |
 | `xybrid cache list` | List cached models |
 | `xybrid cache status` | Show cache size and statistics |
@@ -256,9 +282,20 @@ The `run` command accepts multiple input sources (mutually exclusive):
 | `--voice <id>` | TTS voice ID (e.g., `af_bella`) |
 | `--output <file>` | Output file (.wav for audio, .txt for text) |
 | `--target <format>` | Target format (onnx, coreml, tflite) |
+| `--backend <backend>` | Local generation or embedding backend override (`auto`, `mlx`, `llamacpp`, `mistral`) |
 | `--dry-run` | Validate without executing |
 | `--trace` | Enable execution tracing |
 | `--trace-export <file>` | Export trace to JSON (Chrome trace format) |
+
+### `fetch` Options
+
+| Flag | Description |
+|------|-------------|
+| `--model <id>` | Registry model to fetch |
+| `<file>` | Pipeline YAML; fetches non-cloud stages |
+| `--huggingface <repo>` | HuggingFace repo to fetch |
+| `--platform <platform>` | Target registry platform (auto-detected if omitted) |
+| `--backend <backend>` | Local generation or embedding backend override; `mlx` requests SafeTensors and hard-requires an MLX-runtime build, while `llamacpp` requests GGUF for LLM loads. Known registry embedding models reject explicit non-MLX local backends. |
 
 ### `repl` Options
 
@@ -267,6 +304,7 @@ The `run` command accepts multiple input sources (mutually exclusive):
 | `--model <id>` | Registry model to load |
 | `--huggingface <repo>` | HuggingFace model to load |
 | `--model-file <path>` | Local GGUF file to load |
+| `--backend <backend>` | Local generation or embedding backend override; `mlx` requests SafeTensors for registry loads and pins local MLX-compatible metadata |
 | `--stream` | Stream tokens as generated (LLM) |
 | `--system <prompt>` | System prompt for the conversation |
 | `--voice <id>` | TTS voice ID |

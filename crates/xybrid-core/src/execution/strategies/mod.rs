@@ -8,7 +8,8 @@
 //! | [`TtsStrategy`] | Text-to-speech with chunking |
 //! | [`BertStrategy`] | BERT-style token-based inference |
 //! | [`ModelGraphStrategy`] | Multi-stage DAG execution |
-//! | [`LlmStrategy`] | GGUF LLM execution (feature-gated) |
+//! | [`LlmStrategy`] | GGUF / MLX SafeTensors LLM execution (feature-gated) |
+//! | [`MlxEmbeddingStrategy`] | MLX SafeTensors embedding execution (feature-gated) |
 //! | [`CodecTtsStrategy`] | Codec TTS: GGUF backbone + ONNX decoder (feature-gated) |
 //!
 //! ## Design
@@ -23,8 +24,11 @@
 mod standard;
 mod tts;
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 mod llm;
+
+#[cfg(feature = "llm-mlx")]
+mod mlx_embedding;
 
 // Codec TTS depends on LLM infrastructure (same feature gate)
 mod codec_tts;
@@ -32,19 +36,22 @@ mod codec_tts;
 pub use standard::StandardStrategy;
 pub use tts::TtsStrategy;
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 pub use llm::LlmStrategy;
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 #[allow(unused_imports)]
 pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
+
+#[cfg(feature = "llm-mlx")]
+pub use mlx_embedding::MlxEmbeddingStrategy;
 
 #[allow(unused_imports)]
 pub use codec_tts::CodecTtsStrategy;
 
 // Always compile the llm module (stubs when features disabled)
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
 mod llm;
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
 #[allow(unused_imports)]
 pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig, LlmStrategy};
 
@@ -127,10 +134,16 @@ impl StrategyResolver {
             strategies.push(Box::new(CodecTtsStrategy::new()));
         }
 
-        // LLM strategy for plain GGUF models (no CodecDecode)
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        // LLM strategy for plain GGUF and MLX SafeTensors models.
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
         {
             strategies.push(Box::new(LlmStrategy::new()));
+        }
+
+        // MLX BERT/nomic SafeTensors embedding models.
+        #[cfg(feature = "llm-mlx")]
+        {
+            strategies.push(Box::new(MlxEmbeddingStrategy::new()));
         }
 
         // TTS must be checked before Standard (both handle ONNX)
@@ -160,7 +173,7 @@ impl Default for StrategyResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     use crate::execution::template::ExecutionTemplate;
     use crate::execution::template::PreprocessingStep;
 
@@ -194,7 +207,7 @@ mod tests {
         assert_eq!(strategy.unwrap().name(), "standard");
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     #[test]
     fn test_resolver_selects_llm_for_gguf() {
         let resolver = StrategyResolver::new();
@@ -222,6 +235,75 @@ mod tests {
         let strategy = resolver.resolve(&metadata);
         assert!(strategy.is_some());
         assert_eq!(strategy.unwrap().name(), "llm");
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_resolver_selects_llm_for_mlx_safetensors() {
+        let resolver = StrategyResolver::new();
+        let metadata = ModelMetadata {
+            model_id: "qwen3.5-0.6b-mlx".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::SafeTensors {
+                model_file: "model.safetensors".to_string(),
+                architecture: Some("qwen3".to_string()),
+                config_file: Some("config.json".to_string()),
+                tokenizer_file: Some("tokenizer.json".to_string()),
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec![
+                "config.json".to_string(),
+                "tokenizer.json".to_string(),
+                "model.safetensors".to_string(),
+            ],
+            description: None,
+            backend: Some("mlx".to_string()),
+            metadata: std::collections::HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        let strategy = resolver.resolve(&metadata);
+        assert!(strategy.is_some());
+        assert_eq!(strategy.unwrap().name(), "llm");
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_resolver_selects_mlx_embedding_for_auto_bert_safetensors() {
+        let resolver = StrategyResolver::new();
+        let mut metadata = ModelMetadata {
+            model_id: "nomic-embed-text-v1.5-mlx".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::SafeTensors {
+                model_file: "model.safetensors".to_string(),
+                architecture: Some("nomic_bert".to_string()),
+                config_file: Some("config.json".to_string()),
+                tokenizer_file: Some("tokenizer.json".to_string()),
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec![
+                "config.json".to_string(),
+                "tokenizer.json".to_string(),
+                "model.safetensors".to_string(),
+            ],
+            description: None,
+            backend: Some("auto".to_string()),
+            metadata: std::collections::HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("text-embedding"));
+
+        let strategy = resolver.resolve(&metadata);
+        assert!(strategy.is_some());
+        assert_eq!(strategy.unwrap().name(), "mlx_embedding");
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -252,6 +334,7 @@ mod tests {
             files: vec!["model.gguf".to_string()],
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: std::collections::HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -281,6 +364,7 @@ mod tests {
             files: vec!["model.gguf".to_string()],
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: std::collections::HashMap::new(),
             voices: None,
             max_chunk_chars: None,

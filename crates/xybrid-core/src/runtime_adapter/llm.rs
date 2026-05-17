@@ -1,7 +1,7 @@
 //! LLM types and adapter - shared abstractions for local LLM inference.
 //!
 //! This module provides:
-//! - `LlmBackend` trait - interface for LLM backends (mistral, llama_cpp)
+//! - `LlmBackend` trait - interface for LLM backends (mistral, llama_cpp, MLX)
 //! - `LlmConfig` / `GenerationConfig` - configuration types
 //! - `LlmRuntimeAdapter` - RuntimeAdapter implementation that uses backends
 //!
@@ -13,12 +13,13 @@
 //!     └── LlmBackend (trait - swappable)
 //!             │
 //!             ├── MistralBackend (mistral.rs - desktop)
-//!             └── LlamaCppBackend (llama.cpp - Android + fallback)
+//!             ├── LlamaCppBackend (llama.cpp - Android + fallback)
+//!             └── MlxLlmAdapter (MLX SafeTensors - Apple runtime)
 //! ```
 
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::{
-    AdapterError, AdapterResult, ModelMetadata, RuntimeAdapter, RuntimeAdapterExt,
+    AdapterError, AdapterResult, BackendChoice, ModelMetadata, RuntimeAdapter, RuntimeAdapterExt,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -51,8 +52,13 @@ pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
     match backend_name {
         "llama-cpp" => llamacpp_execution_provider(),
         "mistral" => mistral_execution_provider(),
+        "mlx" => mlx_execution_provider(),
         _ => "cpu",
     }
+}
+
+fn mlx_execution_provider() -> &'static str {
+    "mlx-metal"
 }
 
 #[cfg(all(feature = "llm-llamacpp", any(target_os = "macos", target_os = "ios")))]
@@ -337,6 +343,7 @@ impl LlmRuntimeAdapter {
     /// The default backend depends on feature flags:
     /// - `llm-mistral`: Uses MistralBackend (desktop, not Android)
     /// - `llm-llamacpp`: Uses LlamaCppBackend (Android compatible)
+    /// - `llm-mlx`: Uses MlxLlmAdapter when no other LLM backend is enabled
     ///
     /// If both are enabled, prefers MistralBackend on non-Android platforms
     /// and LlamaCppBackend on Android.
@@ -353,6 +360,15 @@ impl LlmRuntimeAdapter {
         use crate::runtime_adapter::llama_cpp::LlamaCppBackend;
         let backend = LlamaCppBackend::new()?;
         Ok(Self::with_backend(Box::new(backend)))
+    }
+
+    /// Create a new LLM Runtime Adapter with MlxLlmAdapter.
+    #[cfg(all(
+        feature = "llm-mlx",
+        not(any(feature = "llm-mistral", feature = "llm-llamacpp"))
+    ))]
+    pub fn new() -> AdapterResult<Self> {
+        Self::with_mlx()
     }
 
     /// Create a new LLM Runtime Adapter with MistralBackend explicitly.
@@ -376,18 +392,66 @@ impl LlmRuntimeAdapter {
         Ok(Self::with_backend(Box::new(backend)))
     }
 
+    /// Create a new LLM Runtime Adapter with MlxLlmAdapter explicitly.
+    ///
+    /// `llm-mlx` exposes the adapter and selection surface without linking
+    /// MLX. `llm-mlx-runtime` is required before generation can call the
+    /// Apple MLX runtime.
+    #[cfg(feature = "llm-mlx")]
+    pub fn with_mlx() -> AdapterResult<Self> {
+        use crate::runtime_adapter::mlx::{MlxLlmAdapter, MlxLlmConfig};
+        let backend = MlxLlmAdapter::new(MlxLlmConfig::default());
+        Ok(Self::with_backend(Box::new(backend)))
+    }
+
     /// Create a new LLM Runtime Adapter based on a backend hint.
     ///
-    /// If the hint is "llamacpp" and the feature is available, uses LlamaCppBackend.
-    /// Otherwise falls back to the default backend for the platform.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    /// If the hint is a known backend and the feature is available, uses the
+    /// requested backend. `None`, `""`, and `"auto"` fall back to the default
+    /// backend for the platform. Unknown explicit hints return an error so a
+    /// misspelled `backend:` field cannot silently route to a different engine.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     pub fn with_backend_hint(hint: Option<&str>) -> AdapterResult<Self> {
-        match hint {
-            #[cfg(feature = "llm-llamacpp")]
-            Some("llamacpp") => Self::with_llamacpp(),
-            #[cfg(feature = "llm-mistral")]
-            Some("mistral") => Self::with_mistral(),
-            _ => Self::new(),
+        let Some(choice) = hint
+            .map(BackendChoice::parse)
+            .transpose()
+            .map_err(|err| AdapterError::InvalidInput(err.to_string()))?
+            .flatten()
+        else {
+            return Self::new();
+        };
+
+        match choice {
+            BackendChoice::LlamaCpp => {
+                #[cfg(feature = "llm-llamacpp")]
+                {
+                    Self::with_llamacpp()
+                }
+                #[cfg(not(feature = "llm-llamacpp"))]
+                {
+                    Err(unavailable_backend_hint(choice))
+                }
+            }
+            BackendChoice::Mistral => {
+                #[cfg(feature = "llm-mistral")]
+                {
+                    Self::with_mistral()
+                }
+                #[cfg(not(feature = "llm-mistral"))]
+                {
+                    Err(unavailable_backend_hint(choice))
+                }
+            }
+            BackendChoice::Mlx => {
+                #[cfg(feature = "llm-mlx")]
+                {
+                    Self::with_mlx()
+                }
+                #[cfg(not(feature = "llm-mlx"))]
+                {
+                    Err(unavailable_backend_hint(choice))
+                }
+            }
         }
     }
 
@@ -484,6 +548,30 @@ impl LlmRuntimeAdapter {
 
         config
     }
+}
+
+#[cfg(all(
+    any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"),
+    any(
+        not(feature = "llm-mistral"),
+        not(feature = "llm-llamacpp"),
+        not(feature = "llm-mlx")
+    )
+))]
+fn unavailable_backend_hint(requested: BackendChoice) -> AdapterError {
+    let mut available = Vec::new();
+    #[cfg(feature = "llm-mlx")]
+    available.push(BackendChoice::Mlx.as_str());
+    #[cfg(feature = "llm-llamacpp")]
+    available.push(BackendChoice::LlamaCpp.as_str());
+    #[cfg(feature = "llm-mistral")]
+    available.push(BackendChoice::Mistral.as_str());
+
+    AdapterError::RuntimeError(format!(
+        "{} backend requested but not compiled into this build. Available backends: [{}]",
+        requested,
+        available.join(", ")
+    ))
 }
 
 impl LlmRuntimeAdapter {
@@ -743,7 +831,7 @@ mod tests {
     #[test]
     fn local_execution_provider_maps_known_backends() {
         // We only assert the names we ship: backend names "llama-cpp"
-        // and "mistral" must round-trip through the helper into a
+        // "mistral", and "mlx" must round-trip through the helper into a
         // non-empty string. Exact label depends on build flags + target,
         // so the assertions here stay shape-only — full per-cfg coverage
         // is enforced at compile time by the `#[cfg]` arms themselves.
@@ -751,6 +839,8 @@ mod tests {
         assert!(!llama.is_empty(), "llama-cpp must map to a label");
         let mistral = local_execution_provider("mistral");
         assert!(!mistral.is_empty(), "mistral must map to a label");
+        let mlx = local_execution_provider("mlx");
+        assert_eq!(mlx, "mlx-metal");
     }
 
     #[test]
@@ -760,6 +850,32 @@ mod tests {
         // a diagnostic field.
         assert_eq!(local_execution_provider("mock"), "cpu");
         assert_eq!(local_execution_provider(""), "cpu");
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn backend_hint_mlx_creates_mlx_adapter() {
+        let adapter = LlmRuntimeAdapter::with_backend_hint(Some("mlx"))
+            .expect("llm-mlx should expose an MLX backend adapter");
+        assert_eq!(adapter.backend().name(), "mlx");
+        assert!(adapter
+            .backend()
+            .supported_formats()
+            .contains(&"safetensors"));
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+    #[test]
+    fn backend_hint_unknown_errors_instead_of_defaulting() {
+        let err = match LlmRuntimeAdapter::with_backend_hint(Some("mxx")) {
+            Ok(_) => panic!("unknown backend hints must not silently use the default backend"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains("unknown backend identifier `mxx`"),
+            "got: {err}"
+        );
     }
 
     #[test]

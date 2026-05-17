@@ -6,3 +6,7 @@ mlx.xcframework/
 # Sidecar marker recording the SHA256 of the currently-installed xcframework
 # zip. Used by fetch-mlx-xcframework.sh for idempotency.
 .installed-sha256
+
+# Sidecar marker recording the upstream source pins used by the local
+# release-free source-build fallback.
+.installed-source-pin

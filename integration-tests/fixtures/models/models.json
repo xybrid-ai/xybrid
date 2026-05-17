@@ -542,6 +542,162 @@
         }
       }
     },
+    "qwen3-4b-gguf": {
+      "description": "Qwen 3 4B - quantized llama.cpp reference for the MLX SafeTensors fixture (GGUF Q4_K_M, 2.50GB)",
+      "source": "url",
+      "size_mb": 2498,
+      "task": "text-generation",
+      "feature_gate": "llm-llamacpp",
+      "files": [
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
+          "output": "Qwen3-4B-Q4_K_M.gguf"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "qwen3-4b",
+        "version": "1.0",
+        "description": "Qwen 3 4B - quantized llama.cpp reference for the MLX SafeTensors fixture",
+        "execution_template": {
+          "type": "Gguf",
+          "model_file": "Qwen3-4B-Q4_K_M.gguf",
+          "context_length": 4096
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": ["Qwen3-4B-Q4_K_M.gguf"],
+        "metadata": {
+          "architecture": "qwen3",
+          "backend": "llamacpp",
+          "context_length": 40960,
+          "family": "qwen",
+          "instruction_tuned": true,
+          "languages": ["en", "zh", "fr", "de", "es", "it", "pt", "ja", "ko", "ru", "ar", "vi", "th"],
+          "license": "Apache-2.0",
+          "parameters": 4000000000,
+          "ram_minimum_mb": 4096,
+          "ram_recommended_mb": 8192,
+          "task": "text-generation"
+        }
+      }
+    },
+    "qwen3-4b-bf16-gguf": {
+      "description": "Qwen 3 4B - BF16 llama.cpp benchmark counterpart for the MLX SafeTensors fixture (GGUF BF16, 8.05GB)",
+      "source": "url",
+      "size_mb": 7678,
+      "task": "text-generation",
+      "feature_gate": "llm-llamacpp",
+      "files": [
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-BF16.gguf",
+          "output": "Qwen3-4B-BF16.gguf"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "qwen3-4b",
+        "version": "1.0",
+        "description": "Qwen 3 4B - BF16 llama.cpp benchmark counterpart for the MLX SafeTensors fixture",
+        "execution_template": {
+          "type": "Gguf",
+          "model_file": "Qwen3-4B-BF16.gguf",
+          "context_length": 4096
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": ["Qwen3-4B-BF16.gguf"],
+        "metadata": {
+          "architecture": "qwen3",
+          "backend": "llamacpp",
+          "context_length": 40960,
+          "family": "qwen",
+          "instruction_tuned": true,
+          "languages": ["en", "zh", "fr", "de", "es", "it", "pt", "ja", "ko", "ru", "ar", "vi", "th"],
+          "license": "Apache-2.0",
+          "parameters": 4000000000,
+          "precision": "bf16",
+          "ram_minimum_mb": 8192,
+          "ram_recommended_mb": 16384,
+          "task": "text-generation"
+        }
+      }
+    },
+    "lfm2.5-1.2b-instruct-bf16-gguf": {
+      "description": "Liquid LFM2.5 1.2B Instruct - BF16 llama.cpp benchmark counterpart for the MLX SafeTensors fixture (GGUF BF16, 2.24GB)",
+      "source": "url",
+      "size_mb": 2235,
+      "task": "text-generation",
+      "feature_gate": "llm-llamacpp",
+      "files": [
+        {
+          "url": "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/main/LFM2.5-1.2B-Instruct-BF16.gguf",
+          "output": "LFM2.5-1.2B-Instruct-BF16.gguf"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "lfm2.5-1.2b-instruct",
+        "version": "1.0",
+        "description": "Liquid LFM2.5 1.2B Instruct - BF16 llama.cpp benchmark counterpart for the MLX SafeTensors fixture",
+        "execution_template": {
+          "type": "Gguf",
+          "model_file": "LFM2.5-1.2B-Instruct-BF16.gguf",
+          "context_length": 4096
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": ["LFM2.5-1.2B-Instruct-BF16.gguf"],
+        "metadata": {
+          "architecture": "lfm2",
+          "backend": "llamacpp",
+          "context_length": 128000,
+          "family": "lfm",
+          "instruction_tuned": true,
+          "license": "Other",
+          "parameters": 1200000000,
+          "precision": "bf16",
+          "ram_minimum_mb": 4096,
+          "ram_recommended_mb": 8192,
+          "task": "text-generation"
+        }
+      }
+    },
+    "gemma4-2b-bf16-gguf": {
+      "description": "Gemma 4 E2B Instruct - BF16 llama.cpp benchmark counterpart for the MLX SafeTensors fixture (GGUF BF16, 8.67GB)",
+      "source": "url",
+      "size_mb": 8880,
+      "task": "text-generation",
+      "feature_gate": "llm-llamacpp",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-bf16.gguf",
+          "output": "gemma-4-E2B-it-bf16.gguf"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "gemma4-2b",
+        "version": "1.0",
+        "description": "Gemma 4 E2B Instruct - BF16 llama.cpp benchmark counterpart for the MLX SafeTensors fixture",
+        "execution_template": {
+          "type": "Gguf",
+          "model_file": "gemma-4-E2B-it-bf16.gguf",
+          "context_length": 4096
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": ["gemma-4-E2B-it-bf16.gguf"],
+        "metadata": {
+          "architecture": "gemma4",
+          "backend": "llamacpp",
+          "family": "gemma",
+          "instruction_tuned": true,
+          "license": "Gemma",
+          "parameters": 2000000000,
+          "precision": "bf16",
+          "ram_minimum_mb": 8192,
+          "ram_recommended_mb": 16384,
+          "task": "text-generation"
+        }
+      }
+    },
     "kitten-tts": {
       "description": "Ultra-lightweight TTS (15M params, 8 voices, 24kHz audio, requires espeak-ng)",
       "source": "url",
@@ -599,32 +755,65 @@
         }
       }
     },
-    "qwen3.5-3b": {
-      "description": "Qwen 3.5 3B Instruct — MLX 4-bit variant for Apple Silicon (requires llm-mlx-runtime)",
-      "source": "registry",
-      "size_mb": 1800,
+    "qwen3-4b-mlx": {
+      "description": "Qwen 3 4B — MLX SafeTensors staged fixture paired with qwen3-4b-bf16-gguf for exact backend benchmarks",
+      "source": "staged",
+      "size_mb": 8200,
       "task": "text-generation",
-      "feature_gate": "llm-mlx",
-      "platforms": ["ios", "macos"],
-      "notes": "Downloaded from xybrid-ai/Qwen3.5-3B-Instruct-MLX-4bit once published. Used by the runtime backend selector when MLX is available; non-Apple fixtures should use qwen3.5-2b instead."
+      "feature_gate": "llm-mlx-runtime",
+      "platforms": ["macos"],
+      "status": "runtime",
+      "test_env_var": "XYBRID_MLX_QWEN_4B_DIR",
+      "required_files": ["config.json", "tokenizer.json", "tokenizer_config.json", "model.safetensors.index.json"],
+      "notes": "Not downloaded by --all. This staged benchmark fixture uses the public Qwen/Qwen3-4B dequantized SafeTensors bundle with model.safetensors.index.json plus referenced model-*.safetensors shards. tokenizer_config.json is required for chat-template runtime smokes. 4-bit MLX-LM bundles are rejected until mlx_fast_quantized_matmul support lands. Use qwen3-4b-bf16-gguf for the same-precision llama.cpp benchmark counterpart; qwen3-4b-gguf remains a quantized informational reference. iOS remains skeleton-only until upstream MLX ships a Metal-enabled iOS slice."
     },
     "gemma4-2b": {
-      "description": "Gemma 4 2B Instruct — MLX 4-bit variant for Apple Silicon (requires llm-mlx-runtime)",
-      "source": "registry",
-      "size_mb": 1200,
+      "description": "Gemma 4 2B Instruct — MLX staged fixture for Apple Silicon",
+      "source": "staged",
+      "size_mb": 9825,
       "task": "text-generation",
-      "feature_gate": "llm-mlx",
-      "platforms": ["ios", "macos"],
-      "notes": "Downloaded from xybrid-ai/Gemma-4-2B-Instruct-MLX-4bit once published. Used by the runtime backend selector when MLX is available; non-Apple fixtures should use gemma-4-e2b instead."
+      "feature_gate": "llm-mlx-runtime",
+      "platforms": ["macos"],
+      "status": "partial-runtime",
+      "test_env_var": "XYBRID_MLX_GEMMA_DIR",
+      "required_files": ["config.json", "tokenizer.json", "tokenizer_config.json", "chat_template.jinja", "model.safetensors.index.json"],
+      "notes": "Not downloaded by --all. Gemma MLX incremental K/V-cache generation is synthetic-covered, and nested text_config, language_model-prefixed tensor layouts, chat_template.jinja fallback, and indexed SafeTensors shards are supported. Public gemma-4-e2b-it-bf16 passes the env-gated real generation smoke locally when XYBRID_MLX_GEMMA_DIR points at the staged index plus referenced model-*.safetensors shard files. Use gemma4-2b-bf16-gguf for the same-precision llama.cpp benchmark counterpart; measured rows remain informational until parity evidence is recorded. iOS remains skeleton-only until upstream MLX ships a Metal-enabled iOS slice."
     },
-    "lfm3.5-1.5b": {
-      "description": "Liquid LFM 3.5 1.5B — MLX 4-bit variant for Apple Silicon, hybrid conv+attention (requires llm-mlx-runtime)",
-      "source": "registry",
-      "size_mb": 900,
+    "lfm2-350m-bf16": {
+      "description": "Liquid LFM2 350M BF16 — MLX staged fixture for Apple Silicon",
+      "source": "staged",
+      "size_mb": 680,
       "task": "text-generation",
-      "feature_gate": "llm-mlx",
-      "platforms": ["ios", "macos"],
-      "notes": "Downloaded from xybrid-ai/LFM-3.5-1.5B-MLX-4bit once published. Used by the runtime backend selector when MLX is available; non-Apple fixtures should use lfm2.5-350m instead."
+      "feature_gate": "llm-mlx-runtime",
+      "platforms": ["macos"],
+      "status": "partial-runtime",
+      "test_env_var": "XYBRID_MLX_LFM_DIR",
+      "required_files": ["config.json", "tokenizer.json", "model.safetensors"],
+      "notes": "Not downloaded by --all. Public mlx-community/LFM2-350M-bf16 uses model_type=lfm2 and the same LFM hybrid builder; env-gated real generation smoke passes locally when XYBRID_MLX_LFM_DIR points at the staged SafeTensors bundle, but CI fixture staging and benchmark evidence are still pending. iOS remains skeleton-only until upstream MLX ships a Metal-enabled iOS slice."
+    },
+    "lfm2.5-1.2b-instruct-mlx": {
+      "description": "Liquid LFM2.5 1.2B Instruct — MLX BF16 staged fixture paired with lfm2.5-1.2b-instruct-bf16-gguf for exact backend benchmarks",
+      "source": "staged",
+      "size_mb": 2245,
+      "task": "text-generation",
+      "feature_gate": "llm-mlx-runtime",
+      "platforms": ["macos"],
+      "status": "partial-runtime",
+      "test_env_var": "XYBRID_MLX_LFM25_DIR",
+      "required_files": ["config.json", "tokenizer.json", "tokenizer_config.json", "chat_template.jinja", "model.safetensors.index.json"],
+      "notes": "Not downloaded by --all. Public mlx-community/LFM2.5-1.2B-Instruct-bf16 uses model_type=lfm2, duplicate block_ff_dim/intermediate_size config fields, and chat_template.jinja; env-gated real generation smoke passes locally when XYBRID_MLX_LFM25_DIR points at the staged SafeTensors bundle. Use lfm2.5-1.2b-instruct-bf16-gguf for the same-precision llama.cpp benchmark counterpart; measured rows are informational because current MLX decode throughput is below the parity floor. No public LFM3.5 text-generation SafeTensors fixture was found during the current staging pass. iOS remains skeleton-only until upstream MLX ships a Metal-enabled iOS slice."
+    },
+    "nomic-embed-text-v1.5": {
+      "description": "Nomic Embed Text v1.5 — MLX SafeTensors embedding staged fixture for Apple Silicon",
+      "source": "staged",
+      "size_mb": 540,
+      "task": "text-embedding",
+      "feature_gate": "llm-mlx-runtime",
+      "platforms": ["macos"],
+      "status": "partial-runtime",
+      "test_env_var": "XYBRID_MLX_NOMIC_DIR",
+      "required_files": ["config.json", "tokenizer.json", "model.safetensors"],
+      "notes": "Not downloaded by --all. Nomic embedding metadata routes through the cached MLX embedding strategy, and real fixture assertions pass locally when XYBRID_MLX_NOMIC_DIR points at a staged nomic-ai/nomic-embed-text-v1.5 SafeTensors bundle. CI checks the staged fixture contract and compiles the mlx_embedding benchmark; measured rows remain env-gated because the fixture is too large for the repo. iOS remains skeleton-only until upstream MLX ships a Metal-enabled iOS slice."
     }
   }
 }

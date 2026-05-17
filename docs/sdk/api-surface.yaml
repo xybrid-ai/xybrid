@@ -43,13 +43,13 @@ classes:
           - { name: bundlePath, type: "String?" }
           - { name: modelDir, type: "String?" }
         return: XybridModelLoader
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       pipeline:
         params:
           - { name: yaml, type: "String?" }
           - { name: filePath, type: "String?" }
         return: XybridPipelineRef
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       isModelCached:
         params: [{ name: modelId, type: String }]
         return: bool
@@ -66,17 +66,17 @@ classes:
         static: true
         params: [{ name: modelId, type: String }]
         return: XybridModelLoader
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromBundle:
         static: true
         params: [{ name: path, type: String }]
         return: XybridModelLoader
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromDirectory:
         static: true
         params: [{ name: path, type: String }]
         return: XybridModelLoader
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromModelFile:
         static: true
         params: [{ name: filePath, type: String }]
@@ -88,14 +88,19 @@ classes:
         params: [{ name: repo, type: String }]
         return: XybridModelLoader
         notes: "Requires huggingface feature flag. Downloads and caches model files from HuggingFace Hub."
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      withBackend:
+        params: [{ name: backend, type: BackendChoice }]
+        return: XybridModelLoader
+        notes: "Pins local generation or embedding execution by stamping ModelMetadata.backend at load time. Omit the call for automatic selection."
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       load:
         async: true
         return: XybridModel
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       loadWithProgress:
         return: "Stream<LoadEvent>"
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
 
   # -------------------------------------------------------------------
   # 3. XybridModel
@@ -106,28 +111,28 @@ classes:
     properties:
       modelId:
         type: String
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: implemented }
       voices:
         type: "List<VoiceInfo>?"
-        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       defaultVoice:
         type: "VoiceInfo?"
-        status: { dart: planned, kotlin: partial, swift: partial, csharp: implemented }
+        status: { rust: implemented, dart: planned, kotlin: partial, swift: partial, csharp: implemented }
       hasVoices:
         type: bool
-        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
     methods:
       voice:
         params: [{ name: voiceId, type: String }]
         return: "VoiceInfo?"
-        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       run:
         async: true
         params:
           - { name: envelope, type: Envelope }
           - { name: config, type: "GenerationConfig?", default: "null" }
         return: XybridResult
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       runWithOptions:
         async: true
         params:
@@ -142,7 +147,7 @@ classes:
           - { name: context, type: ConversationContext }
           - { name: config, type: "GenerationConfig?", default: "null" }
         return: XybridResult
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       runWithContextOptions:
         async: true
         params:
@@ -157,7 +162,7 @@ classes:
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
         notes: "Dart accepts two extra optional named params beyond the contract shape: cancellationToken (issue 10) and preempt (issue 11). preempt defaults to false (drop-if-busy / serialized — the existing behavior). When preempt=true AND a cancellationToken is supplied, the run cancels the model's previously in-flight streaming run before acquiring the model write lock (latest-frame-wins), so a continuous live-capture loop can flip from drop-if-busy to cancel-and-replace without head-of-line blocking. preempt with no token is a no-op. Threaded Dart→FFI→SDK (run_streaming_with_options_preempt); the cancel-and-replace slot is a separate mutex on the model, never held across the handle write lock."
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       runStreamingWithOptions:
         params:
           - { name: envelope, type: Envelope }
@@ -185,7 +190,7 @@ classes:
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
         notes: "Dart accepts the same two extra optional named params as runStreaming: cancellationToken (issue 10) and preempt (issue 11, default false). preempt=true + a cancellationToken makes this run cancel the model's previously in-flight streaming run before taking the write lock (latest-frame-wins). See runStreaming notes for the full cancel-and-replace contract."
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       runStreamingWithContextOptions:
         params:
           - { name: envelope, type: Envelope }
@@ -193,6 +198,10 @@ classes:
           - { name: options, type: RunOptions }
         return: "Stream<StreamToken>"
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      supportsTokenStreaming:
+        return: bool
+        notes: "Returns true for token-streaming LLM backends such as GGUF and runtime-available MLX SafeTensors; returns false for batch-only models and non-linking MLX builds."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       benchmark:
         async: true
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -201,7 +210,7 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
       unload:
         notes: "Genuinely frees model memory: resets the SDK executor and drops the backend session (ONNX session removed from cache; llama.cpp model/context dropped). Dart binds it as Future<void> (NOT a sync void). Not yet on the Unity C-ABI (pending migration off the pre-bolt C ABI)."
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
       executionProviderInfo:
         return: ExecutionProviderInfo
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
@@ -506,6 +515,13 @@ classes:
       range:
         type: YuvColorRange
         status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+
+  BackendChoice:
+    type: enum
+    section: "8. Supporting Types"
+    values: [mlx, llamacpp, mistral]
+    notes: "Use by omission for auto. Explicit values hard-require that backend for local generation or embedding models."
+    status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
 
   GenerationConfig:
     type: data

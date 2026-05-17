@@ -192,16 +192,31 @@ impl ChatTemplate {
     /// base models without chat templates are legitimately not chat-capable).
     pub fn load_from_dir(model_dir: &Path) -> ChatTemplateResult<Self> {
         let path = model_dir.join("tokenizer_config.json");
-        let raw = fs::read_to_string(&path)?;
-        let cfg: TokenizerConfigRaw = serde_json::from_str(&raw)?;
+        let file_template_path = model_dir.join("chat_template.jinja");
+        let cfg = match fs::read_to_string(&path) {
+            Ok(raw) => Some(serde_json::from_str::<TokenizerConfigRaw>(&raw)?),
+            Err(err)
+                if err.kind() == std::io::ErrorKind::NotFound && file_template_path.is_file() =>
+            {
+                None
+            }
+            Err(err) => return Err(ChatTemplateError::Io(err)),
+        };
 
-        let template_str = cfg
-            .chat_template
-            .ok_or(ChatTemplateError::MissingTemplate)?
-            .into_template_string()?;
+        let template_str = match cfg.as_ref().and_then(|cfg| cfg.chat_template.clone()) {
+            Some(template) => template.into_template_string()?,
+            None if file_template_path.is_file() => fs::read_to_string(&file_template_path)?,
+            None => return Err(ChatTemplateError::MissingTemplate),
+        };
 
-        let bos_token = cfg.bos_token.map(TokenField::into_string);
-        let eos_token = cfg.eos_token.map(TokenField::into_string);
+        let bos_token = cfg
+            .as_ref()
+            .and_then(|cfg| cfg.bos_token.clone())
+            .map(TokenField::into_string);
+        let eos_token = cfg
+            .as_ref()
+            .and_then(|cfg| cfg.eos_token.clone())
+            .map(TokenField::into_string);
 
         Ok(Self {
             template: template_str,
@@ -341,6 +356,24 @@ mod tests {
     }
 
     #[test]
+    fn render_supports_macro_templates() {
+        let tmpl = ChatTemplate::from_str(concat!(
+            "{%- macro turn(message) -%}",
+            "<start_of_turn>{{ message.role }}\n{{ message.content }}<end_of_turn>\n",
+            "{%- endmacro -%}",
+            "{%- for message in messages -%}",
+            "{{ turn(message) }}",
+            "{%- endfor -%}",
+            "{%- if add_generation_prompt -%}<start_of_turn>assistant\n{%- endif -%}"
+        ));
+        let out = tmpl
+            .render(&[ChatMessage::user("hello")], &RenderOptions::default())
+            .unwrap();
+        assert!(out.contains("<start_of_turn>user\nhello<end_of_turn>"));
+        assert!(out.ends_with("<start_of_turn>assistant"));
+    }
+
+    #[test]
     fn bos_eos_flow_through_to_context() {
         // Template that references bos_token/eos_token so we can observe
         // the flow-through.
@@ -403,6 +436,40 @@ mod tests {
 
         let err = ChatTemplate::load_from_dir(tmp.path()).unwrap_err();
         assert!(matches!(err, ChatTemplateError::MissingTemplate));
+    }
+
+    #[test]
+    fn load_from_dir_uses_chat_template_file_fallback() {
+        let tmp = TempDir::new().unwrap();
+        let cfg_json = serde_json::json!({
+            "bos_token": "<|startoftext|>",
+            "eos_token": "<|im_end|>"
+        });
+        let mut cfg = fs::File::create(tmp.path().join("tokenizer_config.json")).unwrap();
+        cfg.write_all(cfg_json.to_string().as_bytes()).unwrap();
+        let mut template = fs::File::create(tmp.path().join("chat_template.jinja")).unwrap();
+        template
+            .write_all(b"{{ bos_token }}{{ messages[0].content }}{{ eos_token }}")
+            .unwrap();
+
+        let tmpl = ChatTemplate::load_from_dir(tmp.path()).expect("load");
+        let out = tmpl
+            .render(&[ChatMessage::user("hello")], &RenderOptions::default())
+            .unwrap();
+        assert_eq!(out, "<|startoftext|>hello<|im_end|>");
+    }
+
+    #[test]
+    fn load_from_dir_uses_chat_template_file_without_tokenizer_config() {
+        let tmp = TempDir::new().unwrap();
+        let mut template = fs::File::create(tmp.path().join("chat_template.jinja")).unwrap();
+        template.write_all(b"{{ messages[0].content }}").unwrap();
+
+        let tmpl = ChatTemplate::load_from_dir(tmp.path()).expect("load");
+        let out = tmpl
+            .render(&[ChatMessage::user("hello")], &RenderOptions::default())
+            .unwrap();
+        assert_eq!(out, "hello");
     }
 
     #[test]

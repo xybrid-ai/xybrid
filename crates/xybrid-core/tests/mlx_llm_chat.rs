@@ -1,21 +1,28 @@
 //! MLX LLM integration tests (US-014).
 //!
 //! These tests require:
-//! - An Apple host (macOS or iOS simulator).
+//! - Apple Silicon macOS.
 //! - The `llm-mlx-runtime` feature enabled (which forwards
 //!   `xybrid-mlx/bindings` → `mlx-c-sys/bindings` and links
 //!   `vendor/mlx-apple/mlx.xcframework`).
-//! - A real Qwen 3.5 MLX bundle staged at `$XYBRID_MLX_QWEN_DIR` (the test
-//!   harness skips with a clear message when the env var is unset; CI sets
-//!   it after fetching the bundle from HuggingFace).
+//! - Optional real MLX bundles staged at `$XYBRID_MLX_QWEN_DIR` or
+//!   `$XYBRID_MLX_QWEN_4B_DIR`, `$XYBRID_MLX_GEMMA_DIR`,
+//!   `$XYBRID_MLX_LFM_DIR`, and `$XYBRID_MLX_LFM25_DIR`. Real-fixture tests
+//!   skip with a clear message when their env var is unset; synthetic
+//!   Qwen/Gemma/LFM fixtures always run when the linked runtime is available.
 //!
 //! Run with:
 //! ```bash
-//! # Fetch the xcframework first (US-001/US-002 pipeline):
+//! # Materialize the xcframework first from pinned source on Apple Silicon, or
+//! # use fetch when vendor/mlx-apple/UPSTREAM_VERSIONS.txt has a download pin:
+//! ./tools/scripts/build-local-mlx-xcframework.sh
 //! ./tools/scripts/fetch-mlx-xcframework.sh
-//! # Fetch a Qwen 3.5 MLX bundle (any MLX-LM community bundle works):
-//! export XYBRID_MLX_QWEN_DIR=/path/to/Qwen3.5-0.5B-Instruct-mlx
-//! cargo test -p xybrid-core --features llm-mlx-runtime --test mlx_llm_chat
+//! # Optionally fetch real MLX bundles:
+//! export XYBRID_MLX_QWEN_4B_DIR=/path/to/qwen3-4b-mlx
+//! export XYBRID_MLX_GEMMA_DIR=/path/to/gemma4-mlx
+//! export XYBRID_MLX_LFM_DIR=/path/to/lfm2-mlx
+//! export XYBRID_MLX_LFM25_DIR=/path/to/lfm2.5-mlx
+//! cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime --test mlx_llm_chat
 //! ```
 //!
 //! When the harness runs without the env var set the tests SKIP (`return`)
@@ -24,11 +31,12 @@
 
 #![cfg(all(
     feature = "llm-mlx-runtime",
-    any(target_os = "macos", target_os = "ios")
+    target_os = "macos",
+    target_arch = "aarch64"
 ))]
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use xybrid_core::runtime_adapter::llm::{ChatMessage, GenerationConfig, LlmBackend};
 use xybrid_core::runtime_adapter::mlx::{
@@ -38,8 +46,19 @@ use xybrid_core::runtime_adapter::mlx::{
 };
 use xybrid_core::runtime_adapter::types::{PartialToken, StreamingCallback};
 
-fn bundle_dir() -> Option<PathBuf> {
-    std::env::var_os("XYBRID_MLX_QWEN_DIR").map(PathBuf::from)
+fn bundle_dir(env_var: &str) -> Option<PathBuf> {
+    std::env::var_os(env_var).map(PathBuf::from)
+}
+
+fn qwen_bundle_dir() -> Option<PathBuf> {
+    bundle_dir("XYBRID_MLX_QWEN_DIR").or_else(|| bundle_dir("XYBRID_MLX_QWEN_4B_DIR"))
+}
+
+fn mlx_test_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("MLX integration test lock poisoned")
 }
 
 fn short_greedy_config() -> GenerationConfig {
@@ -59,9 +78,190 @@ fn short_greedy_config() -> GenerationConfig {
 }
 
 #[test]
+fn synthetic_qwen_bundle_runs_runtime_forward_without_external_fixture() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_synthetic_qwen_bundle(tmp.path());
+
+    let adapter =
+        MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load synthetic qwen3");
+    let out = LlmBackend::generate_raw(
+        &adapter,
+        "Hello",
+        &GenerationConfig {
+            max_tokens: 1,
+            ..short_greedy_config()
+        },
+    )
+    .expect("synthetic qwen generation");
+
+    assert_eq!(out.tokens_generated, 1);
+    assert!(out.tokens_per_second.is_finite());
+    assert!(out.tokens_per_second > 0.0);
+    assert!(matches!(out.finish_reason.as_str(), "stop" | "length"));
+}
+
+#[test]
+fn synthetic_qwen_sharded_bundle_runs_runtime_forward_without_external_fixture() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_synthetic_qwen_bundle(tmp.path());
+    convert_single_weights_to_indexed_shard(tmp.path());
+
+    let adapter =
+        MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load sharded qwen3");
+    let out = LlmBackend::generate_raw(
+        &adapter,
+        "Hello",
+        &GenerationConfig {
+            max_tokens: 1,
+            ..short_greedy_config()
+        },
+    )
+    .expect("synthetic sharded qwen generation");
+
+    assert_eq!(out.tokens_generated, 1);
+    assert!(out.tokens_per_second.is_finite());
+    assert!(out.tokens_per_second > 0.0);
+    assert!(matches!(out.finish_reason.as_str(), "stop" | "length"));
+}
+
+#[test]
+fn synthetic_gemma_bundle_runs_runtime_forward_without_external_fixture() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_synthetic_gemma_bundle(tmp.path());
+
+    let adapter =
+        MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load synthetic gemma4");
+    let out = LlmBackend::generate_raw(
+        &adapter,
+        "Hello",
+        &GenerationConfig {
+            max_tokens: 1,
+            ..short_greedy_config()
+        },
+    )
+    .expect("synthetic gemma generation");
+
+    assert_eq!(out.tokens_generated, 1);
+    assert!(out.tokens_per_second.is_finite());
+    assert!(out.tokens_per_second > 0.0);
+    assert!(matches!(out.finish_reason.as_str(), "stop" | "length"));
+}
+
+#[test]
+fn synthetic_lfm_bundle_runs_runtime_forward_without_external_fixture() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_synthetic_lfm_bundle(tmp.path());
+
+    let adapter =
+        MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load synthetic lfm3");
+    let out = LlmBackend::generate_raw(
+        &adapter,
+        "Hello",
+        &GenerationConfig {
+            max_tokens: 1,
+            ..short_greedy_config()
+        },
+    )
+    .expect("synthetic lfm generation");
+
+    assert_eq!(out.tokens_generated, 1);
+    assert!(out.tokens_per_second.is_finite());
+    assert!(out.tokens_per_second > 0.0);
+    assert!(matches!(out.finish_reason.as_str(), "stop" | "length"));
+}
+
+#[test]
+fn real_gemma_bundle_generates_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = bundle_dir("XYBRID_MLX_GEMMA_DIR") else {
+        eprintln!("SKIP: XYBRID_MLX_GEMMA_DIR not set");
+        return;
+    };
+
+    let adapter = MlxLlmAdapter::load(&dir, &MlxLlmConfig::default()).expect("load gemma bundle");
+    let config = GenerationConfig {
+        max_tokens: 8,
+        ..short_greedy_config()
+    };
+    let out = if adapter.chat_template().is_some() {
+        LlmBackend::generate(
+            &adapter,
+            &[ChatMessage::user("Write one short sentence about apples.")],
+            &config,
+        )
+    } else {
+        LlmBackend::generate_raw(&adapter, "Write one short sentence about apples.", &config)
+    }
+    .expect("gemma generate ok");
+
+    assert!(!out.text.trim().is_empty(), "empty Gemma output");
+    assert!(out.tokens_generated > 0);
+    assert!(out.tokens_per_second > 0.0);
+    assert!(
+        matches!(out.finish_reason.as_str(), "stop" | "length"),
+        "unexpected finish_reason: {}",
+        out.finish_reason
+    );
+}
+
+#[test]
+fn real_lfm_bundle_generates_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = bundle_dir("XYBRID_MLX_LFM_DIR") else {
+        eprintln!("SKIP: XYBRID_MLX_LFM_DIR not set");
+        return;
+    };
+
+    assert_lfm_bundle_generates(&dir, "lfm");
+}
+
+#[test]
+fn real_lfm25_bundle_generates_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = bundle_dir("XYBRID_MLX_LFM25_DIR") else {
+        eprintln!("SKIP: XYBRID_MLX_LFM25_DIR not set");
+        return;
+    };
+
+    assert_lfm_bundle_generates(&dir, "lfm2.5");
+}
+
+fn assert_lfm_bundle_generates(dir: &Path, label: &str) {
+    let adapter = MlxLlmAdapter::load(dir, &MlxLlmConfig::default()).expect("load lfm bundle");
+    let config = GenerationConfig {
+        max_tokens: 8,
+        ..short_greedy_config()
+    };
+    let out = if adapter.chat_template().is_some() {
+        LlmBackend::generate(
+            &adapter,
+            &[ChatMessage::user("Write one short sentence about oceans.")],
+            &config,
+        )
+    } else {
+        LlmBackend::generate_raw(&adapter, "Write one short sentence about oceans.", &config)
+    }
+    .expect("lfm generate ok");
+
+    assert!(!out.text.trim().is_empty(), "empty {label} output");
+    assert!(out.tokens_generated > 0);
+    assert!(out.tokens_per_second > 0.0);
+    assert!(
+        matches!(out.finish_reason.as_str(), "stop" | "length"),
+        "unexpected finish_reason: {}",
+        out.finish_reason
+    );
+}
+
+#[test]
 fn four_turn_chat_produces_coherent_output() {
-    let Some(dir) = bundle_dir() else {
-        eprintln!("SKIP: XYBRID_MLX_QWEN_DIR not set");
+    let _guard = mlx_test_lock();
+    let Some(dir) = qwen_bundle_dir() else {
+        eprintln!("SKIP: neither XYBRID_MLX_QWEN_DIR nor XYBRID_MLX_QWEN_4B_DIR is set");
         return;
     };
 
@@ -104,8 +304,9 @@ fn four_turn_chat_produces_coherent_output() {
 
 #[test]
 fn streaming_matches_non_streaming_for_same_seed() {
-    let Some(dir) = bundle_dir() else {
-        eprintln!("SKIP: XYBRID_MLX_QWEN_DIR not set");
+    let _guard = mlx_test_lock();
+    let Some(dir) = qwen_bundle_dir() else {
+        eprintln!("SKIP: neither XYBRID_MLX_QWEN_DIR nor XYBRID_MLX_QWEN_4B_DIR is set");
         return;
     };
 
@@ -167,4 +368,499 @@ fn streaming_matches_non_streaming_for_same_seed() {
         streamed.tokens_generated
     );
     assert!(!recorded_ids.is_empty(), "callback never fired");
+}
+
+struct OwnedTensor {
+    name: String,
+    shape: Vec<usize>,
+    bytes: Vec<u8>,
+}
+
+fn write_synthetic_qwen_bundle(dir: &Path) {
+    std::fs::create_dir_all(dir).expect("create bundle dir");
+
+    let tok_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("qwen_tokenizer.json");
+    std::fs::copy(&tok_src, dir.join("tokenizer.json")).expect("copy tokenizer");
+
+    let tokenizer = tokenizers::Tokenizer::from_file(&tok_src).expect("load tokenizer");
+    let vocab_size = tokenizer.get_vocab_size(true);
+
+    const HIDDEN: usize = 16;
+    const HEADS: usize = 4;
+    const KV_HEADS: usize = 2;
+    const HEAD_DIM: usize = 4;
+    const INTERMEDIATE: usize = 32;
+
+    let cfg = serde_json::json!({
+        "model_type": "qwen3",
+        "hidden_size": HIDDEN,
+        "num_hidden_layers": 1,
+        "num_attention_heads": HEADS,
+        "num_key_value_heads": KV_HEADS,
+        "intermediate_size": INTERMEDIATE,
+        "vocab_size": vocab_size,
+        "max_position_embeddings": 128,
+        "rope_theta": 1_000_000.0,
+        "rms_norm_eps": 1.0e-6,
+        "tie_word_embeddings": true,
+        "head_dim": HEAD_DIM
+    });
+    std::fs::write(dir.join("config.json"), cfg.to_string()).expect("write config");
+
+    let mut tensors = Vec::new();
+    push_tensor(
+        &mut tensors,
+        "model.embed_tokens.weight",
+        &[vocab_size, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.input_layernorm.weight",
+        &[HIDDEN],
+        1.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.self_attn.q_proj.weight",
+        &[HEADS * HEAD_DIM, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.self_attn.k_proj.weight",
+        &[KV_HEADS * HEAD_DIM, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.self_attn.v_proj.weight",
+        &[KV_HEADS * HEAD_DIM, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.self_attn.o_proj.weight",
+        &[HIDDEN, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.self_attn.q_norm.weight",
+        &[HEAD_DIM],
+        1.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.self_attn.k_norm.weight",
+        &[HEAD_DIM],
+        1.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.post_attention_layernorm.weight",
+        &[HIDDEN],
+        1.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.mlp.gate_proj.weight",
+        &[INTERMEDIATE, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.mlp.up_proj.weight",
+        &[INTERMEDIATE, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.mlp.down_proj.weight",
+        &[HIDDEN, INTERMEDIATE],
+        0.0,
+    );
+    push_tensor(&mut tensors, "model.norm.weight", &[HIDDEN], 1.0);
+
+    let views: Vec<(String, safetensors::tensor::TensorView<'_>)> = tensors
+        .iter()
+        .map(|tensor| {
+            (
+                tensor.name.clone(),
+                safetensors::tensor::TensorView::new(
+                    safetensors::Dtype::F32,
+                    tensor.shape.clone(),
+                    &tensor.bytes,
+                )
+                .expect("tensor view"),
+            )
+        })
+        .collect();
+    safetensors::serialize_to_file(views, &None, &dir.join("model.safetensors"))
+        .expect("write safetensors");
+}
+
+fn convert_single_weights_to_indexed_shard(dir: &Path) {
+    let single = dir.join("model.safetensors");
+    let shard_name = "model-00001-of-00002.safetensors";
+    let shard = dir.join(shard_name);
+    std::fs::rename(&single, &shard).expect("rename single weights to shard");
+
+    let bytes = std::fs::read(&shard).expect("read shard");
+    let (_, meta) = safetensors::SafeTensors::read_metadata(&bytes).expect("read shard metadata");
+    let weight_map: serde_json::Map<String, serde_json::Value> = meta
+        .tensors()
+        .into_keys()
+        .map(|name| (name, serde_json::Value::String(shard_name.to_string())))
+        .collect();
+    let index = serde_json::json!({
+        "metadata": {},
+        "weight_map": weight_map,
+    });
+    std::fs::write(dir.join("model.safetensors.index.json"), index.to_string())
+        .expect("write safetensors index");
+}
+
+fn write_synthetic_gemma_bundle(dir: &Path) {
+    std::fs::create_dir_all(dir).expect("create bundle dir");
+
+    let tok_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("qwen_tokenizer.json");
+    std::fs::copy(&tok_src, dir.join("tokenizer.json")).expect("copy tokenizer");
+
+    let tokenizer = tokenizers::Tokenizer::from_file(&tok_src).expect("load tokenizer");
+    let vocab_size = tokenizer.get_vocab_size(true);
+
+    const HIDDEN: usize = 16;
+    const HEADS: usize = 4;
+    const KV_HEADS: usize = 2;
+    const HEAD_DIM: usize = 4;
+    const INTERMEDIATE: usize = 32;
+    const LAYERS: usize = 2;
+
+    let cfg = serde_json::json!({
+        "model_type": "gemma4",
+        "hidden_size": HIDDEN,
+        "num_hidden_layers": LAYERS,
+        "num_attention_heads": HEADS,
+        "num_key_value_heads": KV_HEADS,
+        "intermediate_size": INTERMEDIATE,
+        "vocab_size": vocab_size,
+        "max_position_embeddings": 128,
+        "rope_theta": 1_000_000.0,
+        "rope_local_base_freq": 10_000.0,
+        "rms_norm_eps": 1.0e-6,
+        "tie_word_embeddings": true,
+        "head_dim": HEAD_DIM,
+        "sliding_window": 2,
+        "sliding_window_pattern": 2,
+        "query_pre_attn_scalar": HEAD_DIM
+    });
+    std::fs::write(dir.join("config.json"), cfg.to_string()).expect("write config");
+
+    let mut tensors = Vec::new();
+    push_tensor(
+        &mut tensors,
+        "model.embed_tokens.weight",
+        &[vocab_size, HIDDEN],
+        0.0,
+    );
+    for layer in 0..LAYERS {
+        let base = format!("model.layers.{layer}");
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.input_layernorm.weight"),
+            &[HIDDEN],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.self_attn.q_proj.weight"),
+            &[HEADS * HEAD_DIM, HIDDEN],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.self_attn.k_proj.weight"),
+            &[KV_HEADS * HEAD_DIM, HIDDEN],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.self_attn.v_proj.weight"),
+            &[KV_HEADS * HEAD_DIM, HIDDEN],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.self_attn.o_proj.weight"),
+            &[HIDDEN, HEADS * HEAD_DIM],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.self_attn.q_norm.weight"),
+            &[HEAD_DIM],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.self_attn.k_norm.weight"),
+            &[HEAD_DIM],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.post_attention_layernorm.weight"),
+            &[HIDDEN],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.pre_feedforward_layernorm.weight"),
+            &[HIDDEN],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.post_feedforward_layernorm.weight"),
+            &[HIDDEN],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.mlp.gate_proj.weight"),
+            &[INTERMEDIATE, HIDDEN],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.mlp.up_proj.weight"),
+            &[INTERMEDIATE, HIDDEN],
+            0.0,
+        );
+        push_tensor(
+            &mut tensors,
+            &format!("{base}.mlp.down_proj.weight"),
+            &[HIDDEN, INTERMEDIATE],
+            0.0,
+        );
+    }
+    push_tensor(&mut tensors, "model.norm.weight", &[HIDDEN], 0.0);
+
+    let views: Vec<(String, safetensors::tensor::TensorView<'_>)> = tensors
+        .iter()
+        .map(|tensor| {
+            (
+                tensor.name.clone(),
+                safetensors::tensor::TensorView::new(
+                    safetensors::Dtype::F32,
+                    tensor.shape.clone(),
+                    &tensor.bytes,
+                )
+                .expect("tensor view"),
+            )
+        })
+        .collect();
+    safetensors::serialize_to_file(views, &None, &dir.join("model.safetensors"))
+        .expect("write safetensors");
+}
+
+fn write_synthetic_lfm_bundle(dir: &Path) {
+    std::fs::create_dir_all(dir).expect("create bundle dir");
+
+    let tok_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("qwen_tokenizer.json");
+    std::fs::copy(&tok_src, dir.join("tokenizer.json")).expect("copy tokenizer");
+
+    let tokenizer = tokenizers::Tokenizer::from_file(&tok_src).expect("load tokenizer");
+    let vocab_size = tokenizer.get_vocab_size(true);
+
+    const HIDDEN: usize = 16;
+    const HEADS: usize = 4;
+    const KV_HEADS: usize = 2;
+    const HEAD_DIM: usize = 4;
+    const INTERMEDIATE: usize = 32;
+    const KERNEL: usize = 3;
+
+    let cfg = serde_json::json!({
+        "model_type": "lfm3",
+        "hidden_size": HIDDEN,
+        "num_hidden_layers": 2,
+        "num_attention_heads": HEADS,
+        "num_key_value_heads": KV_HEADS,
+        "intermediate_size": INTERMEDIATE,
+        "vocab_size": vocab_size,
+        "max_position_embeddings": 128,
+        "rope_theta": 1_000_000.0,
+        "norm_eps": 1.0e-5,
+        "tie_word_embeddings": true,
+        "head_dim": HEAD_DIM,
+        "conv_L_cache": KERNEL,
+        "conv_bias": false,
+        "layer_types": ["conv", "full_attention"]
+    });
+    std::fs::write(dir.join("config.json"), cfg.to_string()).expect("write config");
+
+    let mut tensors = Vec::new();
+    push_tensor(
+        &mut tensors,
+        "model.embed_tokens.weight",
+        &[vocab_size, HIDDEN],
+        0.0,
+    );
+
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.operator_norm.weight",
+        &[HIDDEN],
+        1.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.conv.in_proj.weight",
+        &[HIDDEN * 3, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.conv.conv.weight",
+        &[HIDDEN, KERNEL, 1],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.conv.out_proj.weight",
+        &[HIDDEN, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.ffn_norm.weight",
+        &[HIDDEN],
+        1.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.feed_forward.w1.weight",
+        &[INTERMEDIATE, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.feed_forward.w2.weight",
+        &[HIDDEN, INTERMEDIATE],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.0.feed_forward.w3.weight",
+        &[INTERMEDIATE, HIDDEN],
+        0.0,
+    );
+
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.operator_norm.weight",
+        &[HIDDEN],
+        1.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.self_attn.q_proj.weight",
+        &[HEADS * HEAD_DIM, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.self_attn.k_proj.weight",
+        &[KV_HEADS * HEAD_DIM, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.self_attn.v_proj.weight",
+        &[KV_HEADS * HEAD_DIM, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.self_attn.out_proj.weight",
+        &[HIDDEN, HEADS * HEAD_DIM],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.self_attn.q_layernorm.weight",
+        &[HEAD_DIM],
+        1.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.self_attn.k_layernorm.weight",
+        &[HEAD_DIM],
+        1.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.ffn_norm.weight",
+        &[HIDDEN],
+        1.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.feed_forward.w1.weight",
+        &[INTERMEDIATE, HIDDEN],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.feed_forward.w2.weight",
+        &[HIDDEN, INTERMEDIATE],
+        0.0,
+    );
+    push_tensor(
+        &mut tensors,
+        "model.layers.1.feed_forward.w3.weight",
+        &[INTERMEDIATE, HIDDEN],
+        0.0,
+    );
+    push_tensor(&mut tensors, "model.embedding_norm.weight", &[HIDDEN], 1.0);
+
+    let views: Vec<(String, safetensors::tensor::TensorView<'_>)> = tensors
+        .iter()
+        .map(|tensor| {
+            (
+                tensor.name.clone(),
+                safetensors::tensor::TensorView::new(
+                    safetensors::Dtype::F32,
+                    tensor.shape.clone(),
+                    &tensor.bytes,
+                )
+                .expect("tensor view"),
+            )
+        })
+        .collect();
+    safetensors::serialize_to_file(views, &None, &dir.join("model.safetensors"))
+        .expect("write safetensors");
+}
+
+fn push_tensor(tensors: &mut Vec<OwnedTensor>, name: &str, shape: &[usize], fill: f32) {
+    let elems: usize = shape.iter().product();
+    let mut bytes = Vec::with_capacity(elems * std::mem::size_of::<f32>());
+    for _ in 0..elems {
+        bytes.extend_from_slice(&fill.to_le_bytes());
+    }
+    tensors.push(OwnedTensor {
+        name: name.to_string(),
+        shape: shape.to_vec(),
+        bytes,
+    });
 }

@@ -1,17 +1,20 @@
-//! LLM execution strategy for GGUF models.
+//! LLM execution strategy for local LLM models.
 //!
-//! Handles local LLM inference via GGUF models with:
+//! Handles local LLM inference via GGUF and MLX SafeTensors models with:
 //! - Pluggable backend abstraction (mockable for tests)
 //! - Chat template support
 //! - Generation config parsing from envelope metadata
 //!
-//! This module is feature-gated and requires either `llm-mistral` or `llm-llamacpp`.
+//! This module is feature-gated and requires `llm-mistral`, `llm-llamacpp`,
+//! or `llm-mlx`.
 
 use log::{debug, info};
 use std::path::Path;
 
 use super::{ExecutionContext, ExecutionStrategy};
-use crate::execution::template::{ExecutionTemplate, ModelMetadata};
+use crate::execution::template::{
+    explicit_llm_backend_hint, is_mlx_llm_safetensors_metadata, ExecutionTemplate, ModelMetadata,
+};
 use crate::execution::types::ExecutorResult;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::AdapterError;
@@ -25,7 +28,7 @@ use crate::tracing as xybrid_trace;
 /// Configuration for LLM model loading.
 #[derive(Debug, Clone)]
 pub struct LlmModelConfig {
-    /// Path to the GGUF model file
+    /// Path to the GGUF model file or MLX model directory
     pub model_path: String,
     /// Optional chat template path
     pub chat_template: Option<String>,
@@ -33,7 +36,7 @@ pub struct LlmModelConfig {
     pub vision_encoder_path: Option<String>,
     /// Maximum context length
     pub context_length: usize,
-    /// Backend hint ("mistral", "llamacpp", or None for default)
+    /// Backend hint ("mistral", "llamacpp", "mlx", or None for default)
     pub backend_hint: Option<String>,
 }
 
@@ -291,13 +294,13 @@ pub trait LlmInference: Send + Sync {
 // ============================================================================
 
 /// Default LLM inference implementation using LlmRuntimeAdapter.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 pub struct DefaultLlmInference {
     adapter: Option<crate::runtime_adapter::llm::LlmRuntimeAdapter>,
     backend_hint: Option<String>,
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 impl DefaultLlmInference {
     /// Create a new default inference backend.
     pub fn new() -> Self {
@@ -316,14 +319,14 @@ impl DefaultLlmInference {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 impl Default for DefaultLlmInference {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 impl LlmInference for DefaultLlmInference {
     fn load_model(&mut self, config: &LlmModelConfig) -> ExecutorResult<()> {
         use crate::runtime_adapter::llm::{LlmConfig, LlmRuntimeAdapter};
@@ -464,10 +467,11 @@ impl LlmInference for DefaultLlmInference {
 // LLM Strategy
 // ============================================================================
 
-/// LLM execution strategy for GGUF models.
+/// LLM execution strategy for local LLM models.
 ///
-/// This strategy handles models with `ExecutionTemplate::Gguf` and provides:
-/// - Configurable backend selection (mistral, llamacpp)
+/// This strategy handles `ExecutionTemplate::Gguf` and MLX-backed
+/// `ExecutionTemplate::SafeTensors` metadata and provides:
+/// - Configurable backend selection (mistral, llamacpp, mlx)
 /// - Chat template support
 /// - Generation parameter parsing from envelope metadata
 pub struct LlmStrategy<I: LlmInference = DefaultLlmInferenceType> {
@@ -475,10 +479,10 @@ pub struct LlmStrategy<I: LlmInference = DefaultLlmInferenceType> {
 }
 
 // Type alias for the default inference type based on features
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 type DefaultLlmInferenceType = DefaultLlmInference;
 
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
 type DefaultLlmInferenceType = NoOpLlmInference;
 
 /// No-op inference for when LLM features are disabled.
@@ -489,7 +493,8 @@ pub struct NoOpLlmInference;
 impl LlmInference for NoOpLlmInference {
     fn load_model(&mut self, _config: &LlmModelConfig) -> ExecutorResult<()> {
         Err(AdapterError::RuntimeError(
-            "LLM features not enabled. Enable 'llm-mistral' or 'llm-llamacpp' feature.".to_string(),
+            "LLM features not enabled. Enable 'llm-mistral', 'llm-llamacpp', or 'llm-mlx' feature."
+                .to_string(),
         ))
     }
 
@@ -508,7 +513,7 @@ impl LlmInference for NoOpLlmInference {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 impl LlmStrategy<DefaultLlmInference> {
     /// Create a new LLM strategy with default inference backend.
     pub fn new() -> Self {
@@ -525,7 +530,7 @@ impl LlmStrategy<DefaultLlmInference> {
     }
 }
 
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
 impl LlmStrategy<NoOpLlmInference> {
     /// Create a new LLM strategy (no-op when features disabled).
     pub fn new() -> Self {
@@ -543,17 +548,18 @@ impl<I: LlmInference> LlmStrategy<I> {
         }
     }
 
-    /// Check if this is an LLM model (GGUF template).
+    /// Check if this is an LLM model.
     fn is_llm_model(metadata: &ModelMetadata) -> bool {
         matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
             || matches!(
                 metadata.execution_template,
                 ExecutionTemplate::VisionLanguage { .. }
             )
+            || (cfg!(feature = "llm-mlx") && is_mlx_llm_safetensors_metadata(metadata))
     }
 
-    /// Extract GGUF config from metadata.
-    fn extract_gguf_config(
+    /// Extract local LLM config from metadata.
+    fn extract_llm_config(
         metadata: &ModelMetadata,
         base_path: &str,
     ) -> ExecutorResult<LlmModelConfig> {
@@ -574,8 +580,9 @@ impl<I: LlmInference> LlmStrategy<I> {
                     config = config.with_chat_template(template_path.to_string_lossy().to_string());
                 }
 
-                // Extract backend hint from metadata
-                if let Some(hint) = metadata.metadata.get("backend").and_then(|v| v.as_str()) {
+                // Extract backend hint from top-level metadata before the
+                // legacy metadata map fallback.
+                if let Some(hint) = Self::metadata_backend_hint(metadata) {
                     config = config.with_backend_hint(hint);
                 }
 
@@ -609,10 +616,55 @@ impl<I: LlmInference> LlmStrategy<I> {
 
                 Ok(config)
             }
+            ExecutionTemplate::SafeTensors { .. }
+                if cfg!(feature = "llm-mlx") && is_mlx_llm_safetensors_metadata(metadata) =>
+            {
+                // MLX bundles are directories containing config.json,
+                // tokenizer.json, and model.safetensors. Pass the bundle root
+                // to MlxLlmAdapter instead of a single safetensors file.
+                let mut config =
+                    LlmModelConfig::new(base_path.to_string(), Self::context_length(metadata));
+                config = config.with_backend_hint("mlx");
+                Ok(config)
+            }
+            _ => Err(AdapterError::InvalidInput(
+                "Expected GGUF, VisionLanguage, or MLX SafeTensors execution template".to_string(),
+            )),
+        }
+    }
+
+    /// Extract GGUF config from metadata.
+    fn extract_gguf_config(
+        metadata: &ModelMetadata,
+        base_path: &str,
+    ) -> ExecutorResult<LlmModelConfig> {
+        match metadata.execution_template {
+            ExecutionTemplate::Gguf { .. } | ExecutionTemplate::VisionLanguage { .. } => {
+                Self::extract_llm_config(metadata, base_path)
+            }
             _ => Err(AdapterError::InvalidInput(
                 "Expected GGUF or VisionLanguage execution template".to_string(),
             )),
         }
+    }
+
+    /// Explicit local-LLM backend hint, preferring top-level
+    /// `ModelMetadata.backend` over the legacy `metadata.backend` map.
+    fn metadata_backend_hint(metadata: &ModelMetadata) -> Option<&str> {
+        explicit_llm_backend_hint(metadata)
+    }
+
+    fn context_length(metadata: &ModelMetadata) -> usize {
+        metadata
+            .metadata
+            .get("context_length")
+            .and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+            })
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(4096)
     }
 
     /// Extract prompt from input envelope.
@@ -640,7 +692,7 @@ impl<I: LlmInference + 'static> ExecutionStrategy for LlmStrategy<I> {
         let _span = xybrid_trace::SpanGuard::new("llm_execution");
 
         // Extract configuration
-        let config = Self::extract_gguf_config(metadata, ctx.base_path)?;
+        let config = Self::extract_llm_config(metadata, ctx.base_path)?;
 
         info!(
             target: "xybrid_core",
@@ -724,7 +776,7 @@ impl<I: LlmInference + 'static> ExecutionStrategy for LlmStrategy<I> {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 impl Default for LlmStrategy<DefaultLlmInference> {
     fn default() -> Self {
         Self::new()
@@ -1146,6 +1198,34 @@ mod tests {
                 patch_size: Some(14),
             }),
             description: None,
+            backend: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        }
+    }
+
+    fn create_mlx_safetensors_metadata() -> ModelMetadata {
+        ModelMetadata {
+            model_id: "qwen3.5-0.6b-mlx".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::SafeTensors {
+                model_file: "model.safetensors".to_string(),
+                architecture: Some("qwen3".to_string()),
+                config_file: Some("config.json".to_string()),
+                tokenizer_file: Some("tokenizer.json".to_string()),
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec![
+                "config.json".to_string(),
+                "tokenizer.json".to_string(),
+                "model.safetensors".to_string(),
+            ],
+            vision_encoder: None,
+            description: None,
+            backend: Some("mlx".to_string()),
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -1157,6 +1237,57 @@ mod tests {
     fn test_is_llm_model_true() {
         let metadata = create_gguf_metadata();
         assert!(LlmStrategy::<MockLlmInference>::is_llm_model(&metadata));
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_is_llm_model_true_for_mlx_safetensors() {
+        let metadata = create_mlx_safetensors_metadata();
+        assert!(LlmStrategy::<MockLlmInference>::is_llm_model(&metadata));
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_is_llm_model_true_for_auto_qwen_mlx_safetensors() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = Some("auto".to_string());
+
+        assert!(LlmStrategy::<MockLlmInference>::is_llm_model(&metadata));
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_is_llm_model_false_for_auto_bert_mlx_safetensors() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = Some("auto".to_string());
+        metadata.execution_template = ExecutionTemplate::SafeTensors {
+            model_file: "model.safetensors".to_string(),
+            architecture: Some("bert".to_string()),
+            config_file: Some("config.json".to_string()),
+            tokenizer_file: Some("tokenizer.json".to_string()),
+        };
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("embedding"));
+
+        assert!(!LlmStrategy::<MockLlmInference>::is_llm_model(&metadata));
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_is_llm_model_false_for_explicit_bert_mlx_safetensors() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.execution_template = ExecutionTemplate::SafeTensors {
+            model_file: "model.safetensors".to_string(),
+            architecture: Some("bert".to_string()),
+            config_file: Some("config.json".to_string()),
+            tokenizer_file: Some("tokenizer.json".to_string()),
+        };
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("embedding"));
+
+        assert!(!LlmStrategy::<MockLlmInference>::is_llm_model(&metadata));
     }
 
     #[test]
@@ -1210,6 +1341,46 @@ mod tests {
             LlmStrategy::<MockLlmInference>::extract_gguf_config(&metadata, "/base").unwrap();
 
         assert_eq!(config.backend_hint, Some("llamacpp".to_string()));
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_extract_llm_config_for_mlx_safetensors_uses_bundle_root() {
+        let metadata = create_mlx_safetensors_metadata();
+        let config =
+            LlmStrategy::<MockLlmInference>::extract_llm_config(&metadata, "/base/qwen").unwrap();
+
+        assert_eq!(config.model_path, "/base/qwen");
+        assert_eq!(config.context_length, 4096);
+        assert_eq!(config.backend_hint, Some("mlx".to_string()));
+        assert!(config.chat_template.is_none());
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_extract_llm_config_for_auto_qwen_mlx_safetensors_uses_bundle_root() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = None;
+
+        let config =
+            LlmStrategy::<MockLlmInference>::extract_llm_config(&metadata, "/base/qwen").unwrap();
+
+        assert_eq!(config.model_path, "/base/qwen");
+        assert_eq!(config.backend_hint, Some("mlx".to_string()));
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_extract_llm_config_prefers_top_level_backend() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata
+            .metadata
+            .insert("backend".into(), serde_json::json!("llamacpp"));
+
+        let config =
+            LlmStrategy::<MockLlmInference>::extract_llm_config(&metadata, "/base/qwen").unwrap();
+
+        assert_eq!(config.backend_hint, Some("mlx".to_string()));
     }
 
     #[test]

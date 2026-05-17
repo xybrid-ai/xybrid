@@ -99,12 +99,15 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 # `dep:mistralrs` wiring in the `llm-mistral*` features below.
 # mistralrs = { version = "0.8", optional = true }
 
-# MLX adapter dep. `llm-mlx` uses the non-linking portion of `xybrid-mlx`
-# on every platform, while `llm-mlx-runtime` forwards `xybrid-mlx/bindings`
-# for Apple Silicon runtime execution.
+# MLX adapter dep (US-010+). `llm-mlx` uses the non-linking portion of
+# `xybrid-mlx` on every platform, while `llm-mlx-runtime` forwards
+# `xybrid-mlx/bindings` for Apple Silicon runtime execution.
 xybrid-mlx = { path = "../xybrid-mlx", optional = true }
 
-# HuggingFace-style chat templates for MLX-LM bundles.
+# MinimalJinja — used by the MLX adapter's chat template renderer (US-014).
+# Gated behind `llm-mlx` since that's the only consumer today; the GGUF /
+# mistral.rs paths have their own template stacks (minijinja is just the
+# HuggingFace-style template flavor that MLX-LM bundles ship).
 minijinja = { version = "2.5", default-features = false, features = ["builtins", "loader", "macros", "serde"], optional = true }
 minijinja-contrib = { version = "2.5", features = ["pycompat"], optional = true }
 rand = { version = "0.8", default-features = false, features = ["std", "std_rng"], optional = true }
@@ -170,9 +173,22 @@ llm-llamacpp-vision = [
 ]
 
 # MLX backend metadata/dispatch path (cross-platform, no MLX linkage).
+# Gates runtime_adapter/mlx metadata, selector, tokenizer, and weight-validation paths.
+# Mutually compatible with llm-llamacpp; the runtime selector chooses between
+# them at load time (see runtime_adapter/selector.rs, US-016). `dep:safetensors`
+# (US-011+) is pulled in unconditionally alongside the adapter so arch builders
+# can read weight bundles without a second feature flip; `xybrid-mlx/bindings`
+# remains deliberately NOT forwarded here so the non-linking path (dispatch +
+# weight-key validation, no MLX linkage) can be tested without the xcframework.
+# Enable `llm-mlx-runtime` for the Apple Silicon macOS linked runtime.
 llm-mlx = ["dep:xybrid-mlx", "dep:safetensors", "dep:minijinja", "dep:minijinja-contrib", "dep:rand"]
 
-# Full MLX runtime for Apple Silicon macOS.
+# Full MLX runtime for Apple Silicon macOS — forwards `xybrid-mlx/bindings` so
+# the Qwen/Gemma/LFM architecture builders (US-011+) can actually allocate
+# `MlxArray`s and run the transformer forward pass. Requires
+# `vendor/mlx-apple/mlx.xcframework` to be present (downloaded when a pin is
+# available or source-built via `tools/scripts/build-local-mlx-xcframework.sh`)
+# and compile_error! guards unsupported targets.
 llm-mlx-runtime = ["llm-mlx", "xybrid-mlx/bindings"]
 
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
@@ -220,6 +236,11 @@ required-features = ["dev-tools"]
 
 [[bench]]
 name = "llm_backend_compare"
+harness = false
+
+# MLX SafeTensors embedding throughput benchmark.
+[[bench]]
+name = "mlx_embedding"
 harness = false
 
 # Platform-specific ureq dependencies

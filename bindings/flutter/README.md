@@ -153,6 +153,7 @@ Stream tokens in real-time as the LLM generates:
 
 ```dart
 final model = await XybridModelLoader.fromRegistry('qwen-2.5-0.5b').load();
+print('Token streaming: ${model.supportsTokenStreaming()}');
 
 await for (final token in model.runStreaming(XybridEnvelope.text('What is ML?'))) {
   stdout.write(token.token);
@@ -200,23 +201,23 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 
 | Platform | ONNX Runtime | Candle | LLM (llama.cpp) | MLX | Notes |
 |----------|:---:|:---:|:---:|:---:|-------|
-| **macOS** | ✅ | ✅ Metal | ✅ | ✅ | Apple Silicon only (M1+); MLX auto-selected for supported LLMs |
-| **iOS** | ✅ CoreML | ✅ Metal | ✅ | ✅ | arm64; downloads ORT + MLX xcframework on first build |
+| **macOS** | ✅ | ✅ Metal | ✅ | ✅ | Apple Silicon only (M1+); MLX auto-selected for supported LLMs when `llm-mlx-runtime` is enabled |
+| **iOS** | ✅ CoreML | ✅ Metal | ✅ | Metadata only | arm64; MLX runtime remains staged until upstream ships a Metal-enabled iOS slice |
 | **Android** | ✅ | — | ✅ | — | arm64-v8a, x86_64; ORT from Maven Central |
 | **Linux** | ✅ | ✅ CPU | ✅ | — | x86_64 |
 | **Windows** | ✅ | ✅ CPU | ✅ | — | x86_64 |
 
 ### MLX on Apple Silicon
 
-MLX is a third LLM + embedding backend for `aarch64-apple-darwin` and `aarch64-apple-ios`. **No API changes are needed** — `Xybrid.model(id).load()` and `XybridModelLoader.fromRegistry(id).load()` automatically route to MLX when the model has an `mlx` registry variant and the host is Apple Silicon. On non-Apple platforms and Intel Macs, calls fall through to llama.cpp with no change in behaviour.
+MLX is a third LLM + embedding backend for `aarch64-apple-darwin`. iOS keeps the non-linking MLX skeleton for metadata and registry parity, but real MLX inference is not treated as device-ready until upstream ships a Metal-enabled iOS slice. **No API changes are needed** — `Xybrid.model(id).load()` and `XybridModelLoader.fromRegistry(id).load()` automatically route to MLX when the model has an `mlx` registry variant, the build includes `llm-mlx-runtime`, and the host is Apple Silicon macOS. On non-Apple platforms, Intel Macs, and current iOS builds, calls fall through to llama.cpp or the registry default with no change in behaviour.
 
-Supported MLX models today: Qwen 3 / Qwen 3.5 (end-to-end chat + streaming), BERT / nomic-bert (embeddings). Gemma 4 and LFM 3.5 skeletons are present but their forward pass is pending.
+Supported MLX models today: Qwen 3 (end-to-end chat + streaming), Gemma 4 and LFM 2 / 2.5 (text generation with env-gated real-bundle smoke and informational benchmark rows), LFM 3.5 (synthetic coverage only until a public text-generation SafeTensors fixture is available), and BERT / nomic-bert (embeddings).
 
 To force a specific backend per pipeline stage:
 
 ```yaml
 stages:
-  - model: qwen3.5-0.8b
+  - model: qwen3-4b
     backend: mlx          # "auto" (default) | "mlx" | "llamacpp"
 ```
 
@@ -268,7 +269,7 @@ https://github.com/xybrid-ai/xybrid/tree/main/examples/flutter
 |-------|---------|
 | `Xybrid` | SDK initialization, cache checking, factory methods |
 | `XybridModelLoader` | Load models from registry or local bundle |
-| `XybridModel` | Run inference (batch, streaming, with context) |
+| `XybridModel` | Run inference (batch, streaming, with context) and inspect token streaming support |
 | `XybridEnvelope` | Type-safe inputs: audio, text, embedding |
 | `XybridResult` | Inference output: text, audio, embedding, latency |
 | `StreamToken` | Individual LLM token during streaming |

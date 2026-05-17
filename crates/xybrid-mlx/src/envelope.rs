@@ -16,13 +16,10 @@
 //! | `Audio(Vec<u8>)` | [`EnvelopePayload::Audio`] | [`MlxDtype::U8`] |
 //! | `Embedding(Vec<f32>)` | [`EnvelopePayload::Embedding`] | [`MlxDtype::F32`] |
 //! | `Text(String)` | — (rejected; tokenize first) | — |
-//! | `TokenIds(Vec<i64>)` *(US-009)* | [`EnvelopePayload::TokenIds`] | — (i64 is not in xybrid-mlx's supported dtype set yet) |
+//! | `TokenIds(Vec<i64>)` | [`EnvelopePayload::TokenIds`] | [`MlxDtype::I64`] |
 //!
-//! The `TokenIds` variant is defined here ahead of US-009 so the
-//! `MlxArray::from_envelope` dispatcher can give a structurally-meaningful
-//! error when the caller passes one through early — and so the downstream
-//! `impl EnvelopeSource for Envelope` in US-009 can land without touching
-//! this crate.
+//! The `TokenIds` variant gives decoder models a lossless path from
+//! tokenizer output to MLX without narrowing IDs through `i32`.
 //!
 //! [core-env]: ../xybrid_core/ir/struct.Envelope.html
 
@@ -45,24 +42,18 @@ pub enum EnvelopePayload<'a> {
     Audio(&'a [u8]),
     /// Dense float embedding — mapped to a 1-D `f32` tensor.
     Embedding(&'a [f32]),
-    /// Token IDs — reserved for US-009. `i64` is not yet in xybrid-mlx's
-    /// supported dtype set; feeding this variant in today triggers a
-    /// descriptive error from `MlxArray::from_envelope`.
+    /// Token IDs — mapped to a 1-D `i64` tensor.
     TokenIds(&'a [i64]),
 }
 
 impl EnvelopePayload<'_> {
     /// Dtype the payload maps to inside MLX, if one exists today.
-    ///
-    /// Returns `None` for [`EnvelopePayload::TokenIds`] because `i64` is
-    /// outside the current [`MlxDtype`] surface — US-009 will either
-    /// extend the enum or add an explicit int-tokens constructor.
     #[must_use]
     pub fn dtype(&self) -> Option<MlxDtype> {
         match self {
             Self::Audio(_) => Some(MlxDtype::U8),
             Self::Embedding(_) => Some(MlxDtype::F32),
-            Self::TokenIds(_) => None,
+            Self::TokenIds(_) => Some(MlxDtype::I64),
         }
     }
 
@@ -101,7 +92,7 @@ pub trait EnvelopeSource {
 /// to know about `xybrid-core`. (`MlxArray` is cfg-gated to Apple +
 /// bindings; hence plain backticks rather than an intra-doc link.)
 ///
-/// The two owned variants mirror the two readable-today payload kinds. We
+/// The owned variants mirror the readable payload kinds. We
 /// do not attempt to recover from the "MLX refused to evaluate" case — the
 /// caller receives an error from `to_envelope_payload` in that situation
 /// and no `OwnedEnvelopePayload` is constructed.
@@ -114,4 +105,28 @@ pub enum OwnedEnvelopePayload {
     /// Readback of an `f32` tensor — matches `EnvelopeKind::Embedding`
     /// upstream.
     Embedding(Vec<f32>),
+    /// Readback of an `i64` tensor — matches `EnvelopeKind::TokenIds`
+    /// upstream.
+    TokenIds(Vec<i64>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_ids_payload_reports_i64_dtype() {
+        assert_eq!(
+            EnvelopePayload::TokenIds(&[10, 20, 30]).dtype(),
+            Some(MlxDtype::I64)
+        );
+    }
+
+    #[test]
+    fn owned_payload_can_represent_token_ids() {
+        assert_eq!(
+            OwnedEnvelopePayload::TokenIds(vec![10, 20, 30]),
+            OwnedEnvelopePayload::TokenIds(vec![10, 20, 30])
+        );
+    }
 }
