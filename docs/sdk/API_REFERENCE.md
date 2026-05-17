@@ -518,7 +518,7 @@ class XybridEnvelope {
   });
   factory XybridEnvelope.embedding(List<double> embedding);
 
-  // Vision (planned for v0.2.0)
+  // Vision (planned)
   factory XybridEnvelope.image(
     List<int> imageBytes,
     String format,        // "png" | "jpeg" | "webp"
@@ -550,7 +550,7 @@ sealed class XybridEnvelope {
   ) : XybridEnvelope()
   data class Embedding(val embedding: FloatArray) : XybridEnvelope()
 
-  // Vision (planned for v0.2.0)
+  // Vision (planned)
   data class Image(
     val imageBytes: ByteArray,
     val format: String,          // "png" | "jpeg" | "webp"
@@ -573,7 +573,7 @@ sealed class XybridEnvelope {
     ): XybridEnvelope = Audio(audioBytes, sampleRate, channels)
     fun embedding(embedding: FloatArray): XybridEnvelope = Embedding(embedding)
 
-    // Vision (planned for v0.2.0)
+    // Vision (planned)
     fun image(
       imageBytes: ByteArray,
       format: String,
@@ -599,7 +599,7 @@ sealed class XybridEnvelope {
 | `image()` | 📋 | 📋 | 📋 | 📋 |
 | `userMessage()` | 📋 | 📋 | 📋 | 📋 |
 
-Legend: ✅ implemented · 📋 planned (v0.2.0) · — not applicable for this binding.
+Legend: ✅ implemented · 📋 planned · — not applicable for this binding.
 
 ---
 
@@ -810,11 +810,11 @@ class ConversationContext {
 }
 ```
 
-**Multi-turn vision** (planned for v0.2.0): when a user message contains images
+**Multi-turn vision** (planned): when a user message contains images
 (built via `Envelope.userMessage(text, images: [...])`), the image-bearing envelope
 stays attached to its turn in the conversation history. Vision-capable backends
 re-prefill image tokens at each turn that references them, matching `llama.cpp`'s
-`mtmd` defaults. There is no separate image-embedding cache in v0.2.0; image bytes
+`mtmd` defaults. There is no separate image-embedding cache in the planned initial implementation; image bytes
 remain in memory for as long as the `ConversationContext` references them.
 
 ### MessageRole
