@@ -1,0 +1,20 @@
+crates/xybrid-core/src/execution/executor.rs
+  s_fe92912e12fecd::t_1101aff09bb309 2884-2929,2934-2971,2976-3006
+  s_fe92912e12fecd::t_6a925c612faf1b 2930-2933,2972-2975
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "7e0c51dfb9bdc01e92bde15a76a139c0c3a9c58c",
+  "prompts": {},
+  "sessions": {
+    "s_fe92912e12fecd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5bd3dd2-9d8f-45d0-8769-d90a6512e132",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
