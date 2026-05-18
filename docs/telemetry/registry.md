@@ -85,6 +85,8 @@ Source: `xybrid_sdk::current_platform()` (`crates/xybrid-sdk/src/platform.rs`). 
 | `espeak` | `espeak` | espeak-ng phonemizer (multi-language TTS) |
 | `llm-llamacpp` | `llm-llamacpp` | llama.cpp backend (universal LLM runtime) |
 | `llm-mistral` | `llm-mistral` | mistral.rs backend |
+| `llm-mlx` | `llm-mlx` | MLX SafeTensors metadata, selector, tokenizer, validation, and non-linking routing tier |
+| `llm-mlx-runtime` | `llm-mlx-runtime` | Linked Apple Silicon MLX runtime path for SafeTensors LLM / embedding execution |
 | `ort-coreml` | `ort-coreml` | ONNX Runtime with CoreML execution provider |
 | `ort-cuda` | `ort-cuda` | ONNX Runtime with CUDA execution provider |
 | `ort-download` | `ort-download` | ONNX Runtime resolved via prebuilt downloads |

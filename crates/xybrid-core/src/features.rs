@@ -18,6 +18,8 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-mistral", cfg!(feature = "llm-mistral")),
+    ("llm-mlx", cfg!(feature = "llm-mlx")),
+    ("llm-mlx-runtime", cfg!(feature = "llm-mlx-runtime")),
     ("ort-coreml", cfg!(feature = "ort-coreml")),
     ("ort-cuda", cfg!(feature = "ort-cuda")),
     ("ort-download", cfg!(feature = "ort-download")),
@@ -81,6 +83,13 @@ mod tests {
     }
 
     #[test]
+    fn mlx_features_are_registered_for_runtime_telemetry() {
+        let names: Vec<&str> = ALL_FEATURES.iter().map(|(name, _)| *name).collect();
+        assert!(names.contains(&"llm-mlx"));
+        assert!(names.contains(&"llm-mlx-runtime"));
+    }
+
+    #[test]
     fn enabled_is_deterministic_across_calls() {
         let first = enabled();
         let second = enabled();
@@ -124,5 +133,17 @@ mod tests {
     #[test]
     fn llamacpp_reports_enabled() {
         assert!(enabled().contains(&"llm-llamacpp"));
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn llm_mlx_branch_is_exercised() {
+        assert!(enabled().contains(&"llm-mlx"));
+    }
+
+    #[cfg(feature = "llm-mlx-runtime")]
+    #[test]
+    fn llm_mlx_runtime_branch_is_exercised() {
+        assert!(enabled().contains(&"llm-mlx-runtime"));
     }
 }
