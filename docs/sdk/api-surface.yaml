@@ -250,6 +250,16 @@ classes:
           - { name: text, type: String }
           - { name: role, type: MessageRole }
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+      image:
+        params:
+          - { name: imageBytes, type: "List<int>" }
+          - { name: format, type: String }
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      userMessage:
+        params:
+          - { name: text, type: String }
+          - { name: images, type: "List<XybridEnvelope>", default: "[]" }
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
 
   # -------------------------------------------------------------------
   # 6. VoiceInfo

@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.0-rc3] - 2026-05-16
+
+### Added
+
+- **Adaptive cloud fallback for streaming LLM** (#114): Streaming LLM pipelines can now transparently fall back to a cloud runtime when on-device generation stalls or errors mid-stream. New `RunOptions` controls expose the fallback policy on the SDK; the cloud runtime adapter, llama.cpp adapter, mistral adapter, and orchestrator authority layer all participate in the new flow.
+
+### Fixed
+
+- **Backend and quantization tags on streaming LLM spans** (#118): Telemetry spans emitted from streaming and chat-context LLM execution now carry backend and quantization labels (previously dropped on these code paths), so dashboards correctly attribute traffic to the runtime that actually served the request.
+- **Hybrid LLM architecture support in llama.cpp adapter** (#109, #117): Skip KV prefix-reuse and broaden the recurrent-state gate so hybrid (Mamba / SSM-style) architectures load and run cleanly through the llama.cpp runtime adapter. Adds an `llm_context_integration` test to lock in the behavior.
+
+### Build / CI
+
+- **Inline Flutter publish in release workflow** (#116): The release workflow no longer composes `publish-flutter` as a reusable job — inlining it avoids the `actions/checkout@v6` ref-moved guard that was triggered by the rc2 manifest-checksum self-patch (which force-moves the tag).
+
+---
+
 ## [0.1.0-rc2] - 2026-05-14
 
 ### Fixed

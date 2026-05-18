@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-rc3
+
+* Adaptive cloud fallback for streaming LLM: pipelines can now transparently fall back to a cloud runtime when on-device streaming generation stalls or errors mid-stream; configurable via new run options on the underlying SDK
+* Streaming and chat-context LLM telemetry spans now include backend and quantization tags (previously dropped on these code paths)
+* Hybrid LLM architectures (Mamba / SSM-style) now load and run cleanly through the bundled llama.cpp runtime
+
 ## 0.1.0-rc2
 
 * Republishes 0.1.0-rc1 — the rc1 pub.dev publish was skipped due to an upstream compile failure in `xybrid-core` on `aarch64-linux-android` (fixed in xybrid-ai/xybrid#112). No API or behavior changes in the Flutter binding itself.
