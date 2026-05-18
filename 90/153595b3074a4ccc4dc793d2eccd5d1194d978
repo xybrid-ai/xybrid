@@ -1,0 +1,24 @@
+crates/xybrid-sdk/src/result.rs
+  s_38d968d304e96a::t_8c670aff4c387f 23-24,27-32
+  s_38d968d304e96a::t_899242f7ae31e6 427,430
+docs/sdk/API_REFERENCE.md
+  s_38d968d304e96a::t_4ea85be8474e09 740-751
+crates/xybrid-sdk/src/pipeline/result.rs
+  s_38d968d304e96a::t_7deb5f54af0974 162,164-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "90153595b3074a4ccc4dc793d2eccd5d1194d978",
+  "prompts": {},
+  "sessions": {
+    "s_38d968d304e96a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2aa96bb-d39f-43e8-8a5c-a51eb1a04c8f",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
