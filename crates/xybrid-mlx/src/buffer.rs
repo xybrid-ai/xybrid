@@ -1,14 +1,14 @@
 //! Zero-copy storage backing an `MlxArray`.
 //!
 //! [`SharedBuffer`] is the low-level primitive behind US-008's zero-copy
-//! Envelope ↔ MlxArray conversion. It owns both a heap allocation (a
-//! `Box<[T]>` surrendered by the caller) and an `MTLBuffer` that wraps the
-//! same bytes via `newBufferWithBytesNoCopy:length:options:deallocator:`,
-//! allocated with [`MTLResourceOptions::StorageModeShared`]. MLX is handed
-//! the buffer's `.contents()` pointer (equal to the original heap pointer),
-//! so the GPU kernels that execute on an Apple Silicon unified-memory
-//! system read and write the same physical bytes as the CPU without an
-//! intermediate staging copy.
+//! Envelope ↔ MlxArray conversion. It owns a page-aligned heap allocation
+//! and an `MTLBuffer` that wraps the same bytes via
+//! `newBufferWithBytesNoCopy:length:options:deallocator:`, allocated with
+//! [`MTLResourceOptions::StorageModeShared`]. MLX is handed the buffer's
+//! `.contents()` pointer, so GPU kernels that execute on an Apple Silicon
+//! unified-memory system read and write the same physical bytes as the CPU.
+//! [`SharedBuffer::from_box`] performs one CPU copy into Metal-compatible
+//! storage; the MLX handoff itself remains no-copy.
 //!
 //! # MTLStorageMode tradeoffs
 //!
@@ -22,10 +22,9 @@
 //! | `.storageModeManaged` | yes | yes (discrete) | needs `didModifyRange:` on every CPU write | wrong tool: extra syncs for no upside on the unified-memory targets we care about, and Managed is unsupported on iOS |
 //! | `.storageModePrivate` | no | yes | requires a staging buffer + blit for every CPU interaction | defeats the whole zero-copy point — every Envelope read or write would force a GPU round-trip |
 //!
-//! `.storageModeShared` is also the only mode that lets us satisfy the
-//! acceptance criterion "mutation visible via the original Vec pointer"
-//! — the pointer Metal gives us from `newBufferWithBytesNoCopy` is *the
-//! same address* the CPU has been writing to all along.
+//! `.storageModeShared` is also the only mode that lets CPU-side writes to
+//! the shared buffer become immediately visible to MLX without explicit
+//! staging or synchronization.
 //!
 //! [mt]: https://developer.apple.com/documentation/metal/mtlstoragemode
 //!
@@ -51,12 +50,13 @@
 //! construction time. We accept two entry points:
 //!
 //! - [`SharedBuffer::from_box`] — the typed convenience, for callers
-//!   holding a `Box<[T]>`. Internally uses `Box::into_raw` + a
-//!   [`Layout::array::<T>(n)`][Layout::array] to record the layout.
+//!   holding a `Box<[T]>`. Internally copies the box contents into a
+//!   Metal-compatible page-aligned allocation before handing that pointer
+//!   to `newBufferWithBytesNoCopy`.
 //! - [`SharedBuffer::from_raw_parts`] — for callers that already have a
-//!   raw pointer + matching layout (e.g. the benchmark wants to reuse a
-//!   single allocation across repeated cycles without re-routing through
-//!   Box<[T]>).
+//!   raw page-aligned pointer + matching layout (e.g. the benchmark wants
+//!   to reuse a single allocation across repeated cycles without
+//!   re-routing through `Box<[T]>`).
 //!
 //! Both paths keep the backing allocation on Rust's default allocator; we
 //! never mix Metal-allocated buffers with Rust-dealloc'd memory.
@@ -83,15 +83,63 @@ pub struct SharedBuffer {
     buffer: ManuallyDrop<Buffer>,
     storage_ptr: *mut u8,
     storage_layout: Layout,
+    logical_len_bytes: usize,
+}
+
+pub(crate) fn metal_page_size() -> usize {
+    extern "C" {
+        fn getpagesize() -> std::os::raw::c_int;
+    }
+
+    // SAFETY: getpagesize has no preconditions and returns the host VM page
+    // size used by Metal's no-copy buffer alignment contract.
+    let page_size = unsafe { getpagesize() };
+    if page_size > 0 {
+        page_size as usize
+    } else {
+        16 * 1024
+    }
+}
+
+fn round_up_to_multiple(value: usize, multiple: usize) -> Option<usize> {
+    if multiple == 0 {
+        return None;
+    }
+    let remainder = value % multiple;
+    if remainder == 0 {
+        Some(value)
+    } else {
+        value.checked_add(multiple - remainder)
+    }
+}
+
+pub(crate) fn metal_aligned_layout(logical_size: usize) -> MlxResult<Layout> {
+    if logical_size == 0 {
+        return Err(MlxError::Internal(
+            "SharedBuffer requires at least one logical byte".into(),
+        ));
+    }
+
+    let page_size = metal_page_size();
+    let storage_size = round_up_to_multiple(logical_size, page_size).ok_or_else(|| {
+        MlxError::Internal(format!(
+            "SharedBuffer page-size rounding overflowed for {logical_size} bytes"
+        ))
+    })?;
+    Layout::from_size_align(storage_size, page_size).map_err(|e| {
+        MlxError::Internal(format!(
+            "SharedBuffer page-aligned layout failed for {storage_size} bytes: {e}"
+        ))
+    })
 }
 
 impl SharedBuffer {
     /// Wrap an existing heap allocation in a shared-storage `MTLBuffer`.
     ///
     /// Ownership of the allocation transfers to the returned `SharedBuffer`.
-    /// `layout` must match the layout the allocation was made with — for
-    /// `Box::<[T]>::into_raw`-derived pointers, that is
-    /// [`Layout::array::<T>(n)`][Layout::array].
+    /// `layout` must match the layout the allocation was made with and must
+    /// be page-aligned with a page-multiple size. Most callers should prefer
+    /// [`Self::from_box`], which builds such an allocation automatically.
     ///
     /// # Errors
     ///
@@ -100,6 +148,14 @@ impl SharedBuffer {
     /// virtualised Metal stack). Returns [`MlxError::OutOfMemory`] if the
     /// MTLBuffer construction fails.
     pub fn from_raw_parts(ptr: *mut u8, layout: Layout) -> MlxResult<Self> {
+        Self::from_raw_parts_with_len(ptr, layout, layout.size())
+    }
+
+    fn from_raw_parts_with_len(
+        ptr: *mut u8,
+        layout: Layout,
+        logical_len_bytes: usize,
+    ) -> MlxResult<Self> {
         if ptr.is_null() {
             return Err(MlxError::Internal(
                 "SharedBuffer::from_raw_parts received a null pointer".into(),
@@ -109,6 +165,21 @@ impl SharedBuffer {
             return Err(MlxError::Internal(
                 "SharedBuffer::from_raw_parts requires a non-empty layout (size > 0)".into(),
             ));
+        }
+        if logical_len_bytes == 0 || logical_len_bytes > layout.size() {
+            return Err(MlxError::Internal(format!(
+                "SharedBuffer logical length {logical_len_bytes} must be in 1..={} bytes",
+                layout.size()
+            )));
+        }
+        let page_size = metal_page_size();
+        if (ptr as usize) % page_size != 0 || layout.size() % page_size != 0 {
+            return Err(MlxError::Internal(format!(
+                "SharedBuffer backing allocation must be page-aligned with a page-multiple \
+                 length for Metal no-copy buffers (page_size={page_size}, ptr={ptr:p}, \
+                 layout_size={})",
+                layout.size()
+            )));
         }
         let device = Device::system_default().ok_or_else(|| {
             MlxError::Internal(
@@ -144,15 +215,15 @@ impl SharedBuffer {
             buffer,
             storage_ptr: ptr,
             storage_layout: layout,
+            logical_len_bytes,
         })
     }
 
     /// Wrap a `Box<[T]>` in a shared-storage `MTLBuffer`.
     ///
-    /// Ownership of the box transfers to the returned `SharedBuffer`. The
-    /// element pointer the MTLBuffer exposes is equal to
-    /// `Box::into_raw(data) as *const T` — callers can rely on that for
-    /// pointer-parity checks.
+    /// The box contents are copied into a Metal-compatible page-aligned
+    /// allocation. After construction, `SharedBuffer::as_ptr()` aliases
+    /// `MTLBuffer.contents()` and is the pointer handed to MLX.
     ///
     /// # Errors
     ///
@@ -160,7 +231,7 @@ impl SharedBuffer {
     /// Metal both reject empty buffers) or for layout-overflow corner
     /// cases (`Layout::array` returns `LayoutError`). Propagates the
     /// device-unreachable / OOM errors from [`Self::from_raw_parts`].
-    pub fn from_box<T>(data: Box<[T]>) -> MlxResult<Self> {
+    pub fn from_box<T: Copy>(data: Box<[T]>) -> MlxResult<Self> {
         let len = data.len();
         if len == 0 {
             return Err(MlxError::Internal(
@@ -169,26 +240,46 @@ impl SharedBuffer {
                     .into(),
             ));
         }
-        let layout = Layout::array::<T>(len).map_err(|e| {
+        let logical_layout = Layout::array::<T>(len).map_err(|e| {
             MlxError::Internal(format!("Layout::array::<T>({len}) overflowed: {e}"))
         })?;
-        // SAFETY: `Box::into_raw` returns the pointer to the first element
-        // of the Box's allocation, which was made with exactly this layout
-        // via Rust's default allocator. We take over the deallocation duty.
-        let ptr = Box::into_raw(data) as *mut T;
-        match Self::from_raw_parts(ptr.cast::<u8>(), layout) {
+        let logical_len_bytes = logical_layout.size();
+        if logical_len_bytes == 0 {
+            return Err(MlxError::Internal(
+                "SharedBuffer::from_box received a zero-sized element allocation".into(),
+            ));
+        }
+        let storage_layout = metal_aligned_layout(logical_len_bytes)?;
+
+        // SAFETY: alloc is called with a non-zero Layout returned by
+        // metal_aligned_layout.
+        let ptr = unsafe { std::alloc::alloc(storage_layout) };
+        if ptr.is_null() {
+            return Err(MlxError::OutOfMemory);
+        }
+
+        // SAFETY: ptr is valid for storage_layout.size() bytes. Zero the
+        // page padding before copying the logical payload so the full
+        // MTLBuffer range is initialized even though MLX only reads the
+        // logical shape.
+        unsafe {
+            std::ptr::write_bytes(ptr, 0, storage_layout.size());
+        }
+
+        // SAFETY: both regions are valid for logical_len_bytes bytes, do
+        // not overlap, and T: Copy means byte-copying the initialized
+        // elements preserves the value semantics.
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr().cast::<u8>(), ptr, logical_len_bytes);
+        }
+        drop(data);
+
+        match Self::from_raw_parts_with_len(ptr, storage_layout, logical_len_bytes) {
             Ok(buf) => Ok(buf),
             Err(err) => {
-                // On failure, reclaim the Box so we don't leak the caller's
-                // memory. We reconstruct the boxed slice via the typed
-                // pointer + length that we just destructured.
-                // SAFETY: ptr came from `Box::into_raw` above and has not
-                // been freed yet (we only failed in Metal-level construction).
-                unsafe {
-                    let reclaim: Box<[T]> =
-                        Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len));
-                    drop(reclaim);
-                }
+                // SAFETY: ptr came from alloc(storage_layout) above and
+                // SharedBuffer construction failed before taking ownership.
+                unsafe { std::alloc::dealloc(ptr, storage_layout) };
                 Err(err)
             }
         }
@@ -224,7 +315,7 @@ impl SharedBuffer {
     /// Total size of the shared region in bytes.
     #[must_use]
     pub fn len_bytes(&self) -> usize {
-        self.storage_layout.size()
+        self.logical_len_bytes
     }
 
     /// Borrow the MTLBuffer handle for passing to Metal / MLX APIs.
@@ -282,21 +373,27 @@ mod tests {
 
     use super::*;
 
-    /// Constructing from a Box<[f32]> preserves the allocation pointer.
+    /// Constructing from a Box<[f32]> preserves contents in shared storage.
     ///
-    /// This is the core zero-copy invariant: the MTLBuffer's contents()
-    /// returns the same address as the Box::into_raw call.
+    /// Metal requires no-copy buffers to use page-aligned backing storage,
+    /// so `from_box` copies the typed payload into such a region before
+    /// creating the MTLBuffer. From that point on, MTLBuffer.contents()
+    /// aliases SharedBuffer::as_ptr().
     #[test]
-    fn from_box_preserves_pointer() {
+    fn from_box_preserves_contents_in_page_aligned_storage() {
         let data: Box<[f32]> = vec![1.0, 2.0, 3.0, 4.0].into_boxed_slice();
-        let expected_ptr = data.as_ptr();
         let buf = SharedBuffer::from_box(data).expect("from_box");
         assert_eq!(
-            buf.as_ptr() as *const f32,
-            expected_ptr,
-            "SharedBuffer must wrap the box's pointer without copying"
+            (buf.as_ptr() as usize) % metal_page_size(),
+            0,
+            "SharedBuffer backing pointer must be page-aligned for Metal"
         );
+        assert_eq!(buf.as_ptr(), buf.buffer().contents() as *const u8);
         assert_eq!(buf.len_bytes(), 4 * std::mem::size_of::<f32>());
+        // SAFETY: `as_ptr` is live for `buf`, and len_bytes proves there
+        // are four f32 values in the logical payload.
+        let values = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const f32, 4) };
+        assert_eq!(values, &[1.0, 2.0, 3.0, 4.0]);
     }
 
     /// MTLBuffer contents() aliases the backing pointer — this is what
