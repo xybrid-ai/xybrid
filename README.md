@@ -419,6 +419,8 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 
 We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on setting up your development environment, submitting pull requests, and adding new models.
 
+**New here?** Browse the [`good first issue`](https://github.com/xybrid-ai/xybrid/labels/good%20first%20issue) label for small, self-contained tasks. Tasks are also grouped by area: [`area: core`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20core), [`area: sdk`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20sdk), [`area: examples`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20examples), [`area: bindings`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20bindings), [`area: tests`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20tests). Medium-difficulty tasks live under [`help wanted`](https://github.com/xybrid-ai/xybrid/labels/help%20wanted).
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=xybrid-ai/xybrid&type=date&legend=bottom-right)](https://www.star-history.com/#xybrid-ai/xybrid&type=date&legend=bottom-right)
