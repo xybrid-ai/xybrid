@@ -178,6 +178,13 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// Runs on FRB's worker pool, so the returned `Future` does not block the
   /// Dart isolate. Returns an error string if the warmup inference fails.
   Future<void> warmup();
+
+  /// Check if this model supports true token-by-token streaming.
+  ///
+  /// Returns `true` for token-streaming LLM models (GGUF or runtime-ready
+  /// MLX SafeTensors), `false` for other model types or non-linking MLX
+  /// skeleton builds.
+  bool supportsTokenStreaming();
 }
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>>

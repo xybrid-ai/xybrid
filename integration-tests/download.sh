@@ -180,10 +180,10 @@ check_models() {
         # Check for model.onnx or model_metadata.json
         if [ -d "$model_dir" ] && { [ -f "$model_dir/model_metadata.json" ] || [ -f "$model_dir/model.onnx" ]; }; then
             echo -e "  ${GREEN}✓${NC} $model [$source]"
-            ((present++))
+            present=$((present + 1))
         else
             echo -e "  ${RED}✗${NC} $model [$source] (missing)"
-            ((missing++))
+            missing=$((missing + 1))
         fi
     done
 

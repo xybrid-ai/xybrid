@@ -120,12 +120,12 @@ impl SharedBuffer {
         // This is required because our allocation came from Rust's default
         // allocator, whose `dealloc` call is layout-aware — not compatible
         // with Metal's internal `free()` path.
-        let buffer = device.new_buffer_with_bytes_no_copy(
+        let buffer = ManuallyDrop::new(device.new_buffer_with_bytes_no_copy(
             ptr as *const c_void,
             layout.size() as u64,
             MTLResourceOptions::StorageModeShared,
             /* deallocator */ None,
-        );
+        ));
         if buffer.as_ptr().is_null() {
             return Err(MlxError::OutOfMemory);
         }
@@ -141,7 +141,7 @@ impl SharedBuffer {
              different address — zero-copy invariant violated"
         );
         Ok(Self {
-            buffer: ManuallyDrop::new(buffer),
+            buffer,
             storage_ptr: ptr,
             storage_layout: layout,
         })
@@ -175,8 +175,8 @@ impl SharedBuffer {
         // SAFETY: `Box::into_raw` returns the pointer to the first element
         // of the Box's allocation, which was made with exactly this layout
         // via Rust's default allocator. We take over the deallocation duty.
-        let ptr = Box::into_raw(data) as *mut u8;
-        match Self::from_raw_parts(ptr, layout) {
+        let ptr = Box::into_raw(data) as *mut T;
+        match Self::from_raw_parts(ptr.cast::<u8>(), layout) {
             Ok(buf) => Ok(buf),
             Err(err) => {
                 // On failure, reclaim the Box so we don't leak the caller's
@@ -185,8 +185,8 @@ impl SharedBuffer {
                 // SAFETY: ptr came from `Box::into_raw` above and has not
                 // been freed yet (we only failed in Metal-level construction).
                 unsafe {
-                    let reclaim: Box<[u8]> =
-                        Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, layout.size()));
+                    let reclaim: Box<[T]> =
+                        Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len));
                     drop(reclaim);
                 }
                 Err(err)
