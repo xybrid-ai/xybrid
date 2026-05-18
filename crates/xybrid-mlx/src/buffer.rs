@@ -147,11 +147,20 @@ impl SharedBuffer {
     /// is unreachable (no Metal-capable GPU — typical of a CI VM without a
     /// virtualised Metal stack). Returns [`MlxError::OutOfMemory`] if the
     /// MTLBuffer construction fails.
-    pub fn from_raw_parts(ptr: *mut u8, layout: Layout) -> MlxResult<Self> {
-        Self::from_raw_parts_with_len(ptr, layout, layout.size())
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be a live allocation from Rust's global allocator with the
+    /// exact `layout` passed here. The allocation must not be aliased by any
+    /// other owner after this call because successful construction transfers
+    /// ownership to the returned [`SharedBuffer`], whose [`Drop`] implementation
+    /// releases it with [`std::alloc::dealloc`].
+    pub unsafe fn from_raw_parts(ptr: *mut u8, layout: Layout) -> MlxResult<Self> {
+        // SAFETY: forwarded from this function's caller.
+        unsafe { Self::from_raw_parts_with_len(ptr, layout, layout.size()) }
     }
 
-    fn from_raw_parts_with_len(
+    unsafe fn from_raw_parts_with_len(
         ptr: *mut u8,
         layout: Layout,
         logical_len_bytes: usize,
@@ -274,7 +283,9 @@ impl SharedBuffer {
         }
         drop(data);
 
-        match Self::from_raw_parts_with_len(ptr, storage_layout, logical_len_bytes) {
+        // SAFETY: ptr came from alloc(storage_layout) above, is still live,
+        // and ownership transfers to SharedBuffer only on successful return.
+        match unsafe { Self::from_raw_parts_with_len(ptr, storage_layout, logical_len_bytes) } {
             Ok(buf) => Ok(buf),
             Err(err) => {
                 // SAFETY: ptr came from alloc(storage_layout) above and

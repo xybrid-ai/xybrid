@@ -45,13 +45,13 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryableError};
+use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 use xybrid_core::runtime_adapter::{
     select_with_cfg, BackendChoice, RegistryView, SelectionParams, SelectorCfg,
 };
@@ -459,8 +459,8 @@ pub(crate) fn offline_auto_registry_format(
 pub(crate) fn registry_metadata_error_can_fall_back_to_default(err: &SdkError) -> bool {
     matches!(
         err,
-        SdkError::Offline(_)
-            | SdkError::NetworkError(_)
+        SdkError::Offline { .. }
+            | SdkError::NetworkError { .. }
             | SdkError::Timeout { .. }
             | SdkError::CircuitOpen(_)
     )
@@ -1299,16 +1299,6 @@ impl RegistryClient {
     {
         let cache_key = format_cache_key(mask, format);
 
-        if self.cache.is_extracted(&cache_key) {
-            let extract_dir = self.cache.extraction_dir(&cache_key);
-            debug!(
-                "Using locally extracted model variant '{}' at {}",
-                cache_key,
-                extract_dir.display()
-            );
-            return Ok(extract_dir);
-        }
-
         let resolved = self.resolve_with_format(mask, platform, format)?;
 
         if resolved.passthrough {
@@ -1354,33 +1344,16 @@ impl RegistryClient {
         if metadata_path.exists() {
             append_existing_index_shards(&extract_dir, &mut required_files)?;
             if passthrough_files_exist(&extract_dir, &required_files)? {
-                let mut cache_valid = true;
-                let mut has_unverified_files = false;
-                for file in &required_files {
-                    let path = passthrough_destination(&extract_dir, file)?;
-                    let expected_sha256 = passthrough_expected_sha256(resolved, file);
-                    has_unverified_files |= expected_sha256.is_empty();
-                    cache_valid &= self.passthrough_file_is_valid(&path, expected_sha256)?;
-                }
-
-                if cache_valid {
-                    if has_unverified_files {
-                        warn!(
-                            "Passthrough cache hit for '{}' (one or more files lack hash verification) at {}",
-                            mask,
-                            extract_dir.display()
-                        );
-                    } else {
-                        info!(
-                            "Passthrough cache hit for '{}' at {}",
-                            mask,
-                            extract_dir.display()
-                        );
-                    }
+                ensure_indexed_safetensors_hash_coverage(resolved, &extract_dir, &required_files)?;
+                if passthrough_cached_files_verified(&extract_dir, resolved, &required_files)? {
+                    info!(
+                        "Passthrough cache hit for '{}' at {}",
+                        mask,
+                        extract_dir.display()
+                    );
                     return Ok(extract_dir);
-                } else {
-                    info!("Passthrough hash mismatch for '{}', re-downloading", mask);
                 }
+                info!("Passthrough hash mismatch for '{}', re-downloading", mask);
             }
             info!(
                 "Passthrough cache incomplete or hash mismatch for '{}', re-downloading",
@@ -1397,6 +1370,7 @@ impl RegistryClient {
         }
 
         append_existing_index_shards(&extract_dir, &mut required_files)?;
+        ensure_indexed_safetensors_hash_coverage(resolved, &extract_dir, &required_files)?;
         for file in required_files.clone() {
             self.ensure_passthrough_file(mask, resolved, &extract_dir, &file, &progress_callback)?;
         }
@@ -1428,29 +1402,6 @@ impl RegistryClient {
 
         Ok(extract_dir)
     }
-
-    fn passthrough_file_is_valid(
-        &self,
-        file_path: &PathBuf,
-        expected_sha256: &str,
-    ) -> Result<bool, SdkError> {
-        if !file_path.exists() {
-            return Ok(false);
-        }
-        if expected_sha256.is_empty() {
-            return Ok(true);
-        }
-        if let Some(cached_hash) = read_cached_hash(file_path) {
-            return Ok(cached_hash == expected_sha256);
-        }
-        let computed = compute_sha256(file_path)?;
-        let matches = computed == expected_sha256;
-        if matches {
-            write_cached_hash(file_path, &computed);
-        }
-        Ok(matches)
-    }
-
     fn ensure_passthrough_file<F>(
         &self,
         mask: &str,
@@ -1463,11 +1414,16 @@ impl RegistryClient {
         F: Fn(f32),
     {
         let path = passthrough_destination(extract_dir, file)?;
-        let expected_sha256 = passthrough_expected_sha256(resolved, file);
+        let expected_sha256 = passthrough_expected_sha256(resolved, file)?;
 
         if path.exists() {
-            if self.passthrough_file_is_valid(&path, expected_sha256)? {
+            let Some(expected_sha256) = expected_sha256 else {
                 return Ok(());
+            };
+            if let Some(cached_hash) = read_cached_hash(&path) {
+                if cached_hash == expected_sha256 {
+                    return Ok(());
+                }
             }
             std::fs::remove_file(&path).ok();
             remove_cached_hash(&path);
@@ -1507,7 +1463,7 @@ impl RegistryClient {
             download_duration.as_millis().min(u32::MAX as u128) as u32,
         );
 
-        if !expected_sha256.is_empty() {
+        if let Some(expected_sha256) = expected_sha256 {
             let hash = compute_sha256(&path)?;
             if hash != expected_sha256 {
                 std::fs::remove_file(&path).ok();
@@ -1827,12 +1783,12 @@ fn insert_passthrough_file(files: &mut BTreeSet<String>, file: &str) -> Result<(
 
 fn validate_passthrough_file(file: &str) -> Result<(), SdkError> {
     if file.is_empty() {
-        return Err(SdkError::CacheError(
-            "Passthrough artifact path must not be empty".to_string(),
+        return Err(SdkError::cache(
+            "Passthrough artifact path must not be empty",
         ));
     }
     if file.contains(['\\', '?', '#']) {
-        return Err(SdkError::CacheError(format!(
+        return Err(SdkError::cache(format!(
             "Unsafe passthrough artifact path '{}'",
             file
         )));
@@ -1843,7 +1799,7 @@ fn validate_passthrough_file(file: &str) -> Result<(), SdkError> {
         .components()
         .any(|component| !matches!(component, Component::Normal(_)))
     {
-        return Err(SdkError::CacheError(format!(
+        return Err(SdkError::cache(format!(
             "Unsafe passthrough artifact path '{}'",
             file
         )));
@@ -1864,6 +1820,112 @@ fn passthrough_files_exist(extract_dir: &Path, files: &BTreeSet<String>) -> Resu
         }
     }
     Ok(true)
+}
+
+fn validate_sha256_value<'a>(file: &str, hash: &'a str) -> Result<&'a str, SdkError> {
+    if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(hash)
+    } else {
+        Err(SdkError::cache(format!(
+            "Invalid SHA256 for passthrough artifact '{}'",
+            file
+        )))
+    }
+}
+
+fn passthrough_expected_sha256<'a>(
+    resolved: &'a ResolvedVariant,
+    file: &str,
+) -> Result<Option<&'a str>, SdkError> {
+    if let Some(hash) = resolved.file_sha256.get(file) {
+        return validate_sha256_value(file, hash).map(Some);
+    }
+    if file == resolved.file && !resolved.sha256.is_empty() {
+        return validate_sha256_value(file, &resolved.sha256).map(Some);
+    }
+    if let Some(artifact) = passthrough_artifact_for_file(resolved, file) {
+        if !artifact.sha256.is_empty() {
+            return validate_sha256_value(file, &artifact.sha256).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+fn passthrough_cached_files_verified(
+    extract_dir: &Path,
+    resolved: &ResolvedVariant,
+    files: &BTreeSet<String>,
+) -> Result<bool, SdkError> {
+    let mut saw_hash = false;
+    let mut has_unverified_files = false;
+    for file in files {
+        let path = passthrough_destination(extract_dir, file)?;
+        let Some(expected_hash) = passthrough_expected_sha256(resolved, file)? else {
+            has_unverified_files = true;
+            continue;
+        };
+        saw_hash = true;
+        if read_cached_hash(&path).as_deref() == Some(expected_hash) {
+            continue;
+        }
+
+        let hash = compute_sha256(&path)?;
+        if hash != expected_hash {
+            std::fs::remove_file(&path).ok();
+            remove_cached_hash(&path);
+            return Ok(false);
+        }
+        write_cached_hash(&path, &hash);
+    }
+
+    if !saw_hash {
+        warn!(
+            "Passthrough cache hit for '{}' (no hash verification)",
+            resolved.file
+        );
+    } else if has_unverified_files {
+        warn!(
+            "Passthrough cache hit for '{}' (one or more files lack hash verification)",
+            resolved.file
+        );
+    }
+    Ok(true)
+}
+
+fn ensure_indexed_safetensors_hash_coverage(
+    resolved: &ResolvedVariant,
+    extract_dir: &Path,
+    files: &BTreeSet<String>,
+) -> Result<(), SdkError> {
+    for index_file in files
+        .iter()
+        .filter(|file| file.ends_with(".safetensors.index.json"))
+    {
+        let index_path = passthrough_destination(extract_dir, index_file)?;
+        if !index_path.is_file() {
+            return Err(SdkError::cache(format!(
+                "Indexed SafeTensors manifest '{}' must be downloaded before shard integrity can be verified",
+                index_file
+            )));
+        }
+        if passthrough_expected_sha256(resolved, index_file)?.is_none() {
+            return Err(SdkError::cache(format!(
+                "Indexed SafeTensors passthrough variant '{}' requires SHA256 for index '{}'",
+                resolved.file, index_file
+            )));
+        }
+
+        for shard in safetensors_index_shards(&index_path)? {
+            if passthrough_expected_sha256(resolved, &shard)?.is_none() {
+                return Err(SdkError::cache(format!(
+                    "Indexed SafeTensors passthrough variant '{}' requires SHA256 for shard '{}'",
+                    resolved.file, shard
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn append_existing_index_shards(
@@ -1891,14 +1953,14 @@ fn append_existing_index_shards(
 
 fn safetensors_index_shards(index_path: &Path) -> Result<Vec<String>, SdkError> {
     let raw = std::fs::read_to_string(index_path).map_err(|e| {
-        SdkError::CacheError(format!(
+        SdkError::cache(format!(
             "Failed to read SafeTensors index '{}': {}",
             index_path.display(),
             e
         ))
     })?;
     let index: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
-        SdkError::CacheError(format!(
+        SdkError::cache(format!(
             "Failed to parse SafeTensors index '{}': {}",
             index_path.display(),
             e
@@ -1908,7 +1970,7 @@ fn safetensors_index_shards(index_path: &Path) -> Result<Vec<String>, SdkError> 
         .get("weight_map")
         .and_then(|value| value.as_object())
         .ok_or_else(|| {
-            SdkError::CacheError(format!(
+            SdkError::cache(format!(
                 "SafeTensors index '{}' is missing weight_map",
                 index_path.display()
             ))
@@ -1917,7 +1979,7 @@ fn safetensors_index_shards(index_path: &Path) -> Result<Vec<String>, SdkError> 
     let mut shards = BTreeSet::new();
     for value in weight_map.values() {
         let shard = value.as_str().ok_or_else(|| {
-            SdkError::CacheError(format!(
+            SdkError::cache(format!(
                 "SafeTensors index '{}' contains a non-string shard path",
                 index_path.display()
             ))
@@ -1937,16 +1999,6 @@ fn passthrough_artifact_for_file<'a>(
         .artifacts
         .iter()
         .find(|artifact| artifact.file == file)
-}
-
-fn passthrough_expected_sha256<'a>(resolved: &'a ResolvedVariant, file: &str) -> &'a str {
-    if file == resolved.file {
-        resolved.sha256.as_str()
-    } else {
-        passthrough_artifact_for_file(resolved, file)
-            .map(|artifact| artifact.sha256.as_str())
-            .unwrap_or("")
-    }
 }
 
 fn passthrough_declared_size(resolved: &ResolvedVariant, file: &str) -> u64 {
@@ -1975,7 +2027,7 @@ fn sibling_download_url(base_url: &str, file: &str) -> Result<String, SdkError> 
     validate_passthrough_file(file)?;
     let base_without_query = base_url.split_once('?').map_or(base_url, |(base, _)| base);
     let Some((base_dir, _)) = base_without_query.rsplit_once('/') else {
-        return Err(SdkError::CacheError(format!(
+        return Err(SdkError::cache(format!(
             "Cannot derive sibling URL for '{}' from '{}'",
             file, base_url
         )));
@@ -2100,6 +2152,18 @@ pub struct ResolvedVariant {
     /// Additional files required by this variant, such as VLM mmproj siblings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<ResolvedArtifact>,
+    /// Per-file SHA256 hashes for passthrough variants with sibling files.
+    ///
+    /// Indexed SafeTensors passthrough variants must provide entries for the
+    /// `.index.json` file and every referenced shard before the SDK will load
+    /// them. The top-level `sha256` remains accepted for `file`.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        alias = "file_hashes",
+        alias = "files_sha256"
+    )]
+    pub file_sha256: BTreeMap<String, String>,
     /// Whether this is a passthrough variant (direct download, no .xyb bundle)
     #[serde(default)]
     pub passthrough: bool,
@@ -2198,6 +2262,12 @@ mod tests {
         let bundle_path = temp_dir.path().join(format!("{}.xyb", model_id));
         bundle.write(&bundle_path).unwrap();
         bundle_path
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        format!("{:x}", hasher.finalize())
     }
 
     fn linux_llamacpp_selector_cfg() -> SelectorCfg {
@@ -2875,6 +2945,7 @@ mod tests {
             size_bytes: 100000,
             sha256: "abc123".to_string(),
             artifacts: Vec::new(),
+            file_sha256: BTreeMap::new(),
             passthrough: false,
             model_metadata: None,
         };
@@ -3212,6 +3283,9 @@ mod tests {
             }
         })
         .to_string();
+        let index_sha256 = sha256_hex(index_body.as_bytes());
+        let shard_1_sha256 = sha256_hex(b"shard-1");
+        let shard_2_sha256 = sha256_hex(b"shard-2");
         let resolve_body = format!(
             r#"{{
                 "mask":"{model_id}",
@@ -3223,7 +3297,11 @@ mod tests {
                     "format":"safetensors",
                     "quantization":"bf16",
                     "size_bytes":{},
-                    "sha256":"",
+                    "sha256":"{index_sha256}",
+                    "file_sha256":{{
+                        "model-00001-of-00002.safetensors":"{shard_1_sha256}",
+                        "model-00002-of-00002.safetensors":"{shard_2_sha256}"
+                    }},
                     "passthrough":true,
                     "model_metadata":{{
                         "model_id":"{model_id}",
@@ -3297,6 +3375,168 @@ mod tests {
         assert!(dir.join("model.safetensors.index.json").is_file());
         assert!(dir.join("model-00001-of-00002.safetensors").is_file());
         assert!(dir.join("model-00002-of-00002.safetensors").is_file());
+    }
+
+    #[test]
+    fn passthrough_indexed_safetensors_requires_shard_sha256() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let model_id = format!("test-indexed-{}", uuid::Uuid::new_v4());
+        let index_body = serde_json::json!({
+            "metadata": {},
+            "weight_map": {
+                "model.embed_tokens.weight": "model-00001-of-00001.safetensors"
+            }
+        })
+        .to_string();
+        let index_sha256 = sha256_hex(index_body.as_bytes());
+        let resolve_body = format!(
+            r#"{{
+                "mask":"{model_id}",
+                "platform":"macos-arm64",
+                "resolved":{{
+                    "hf_repo":"xybrid-ai/{model_id}",
+                    "file":"model.safetensors.index.json",
+                    "download_url":"{}/model.safetensors.index.json",
+                    "format":"safetensors",
+                    "quantization":"bf16",
+                    "size_bytes":{},
+                    "sha256":"{index_sha256}",
+                    "passthrough":true,
+                    "model_metadata":{{
+                        "model_id":"{model_id}",
+                        "version":"1.0",
+                        "execution_template":{{
+                            "type":"Safetensors",
+                            "model_file":"model.safetensors.index.json",
+                            "architecture":"qwen3"
+                        }},
+                        "preprocessing":[],
+                        "postprocessing":[],
+                        "files":["model.safetensors.index.json"],
+                        "metadata":{{"task":"text-generation"}}
+                    }}
+                }}
+            }}"#,
+            server.base_url(),
+            index_body.len(),
+        );
+
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v1/models/{model_id}/resolve"))
+                .query_param_exists("platform")
+                .query_param("format", "safetensors");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(resolve_body);
+        });
+        server.mock(|when, then| {
+            when.method(GET).path("/model.safetensors.index.json");
+            then.status(200).body(index_body);
+        });
+
+        let client =
+            RegistryClient::with_url_and_cache_dir(server.base_url(), temp_dir.path().into())
+                .unwrap();
+        let extraction_dir = client.extraction_dir_with_format(&model_id, "safetensors");
+        let err = client
+            .fetch_extracted_with_format(&model_id, Some("macos-arm64"), "safetensors", |_| {})
+            .expect_err("indexed shards without hashes should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("requires SHA256 for shard 'model-00001-of-00001.safetensors'"),
+            "{err}"
+        );
+        assert!(!extraction_dir
+            .join("model-00001-of-00001.safetensors")
+            .exists());
+    }
+
+    #[test]
+    fn passthrough_indexed_safetensors_rejects_shard_sha256_mismatch() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let model_id = format!("test-indexed-{}", uuid::Uuid::new_v4());
+        let index_body = serde_json::json!({
+            "metadata": {},
+            "weight_map": {
+                "model.embed_tokens.weight": "model-00001-of-00001.safetensors"
+            }
+        })
+        .to_string();
+        let index_sha256 = sha256_hex(index_body.as_bytes());
+        let wrong_shard_sha256 = sha256_hex(b"different-shard");
+        let resolve_body = format!(
+            r#"{{
+                "mask":"{model_id}",
+                "platform":"macos-arm64",
+                "resolved":{{
+                    "hf_repo":"xybrid-ai/{model_id}",
+                    "file":"model.safetensors.index.json",
+                    "download_url":"{}/model.safetensors.index.json",
+                    "format":"safetensors",
+                    "quantization":"bf16",
+                    "size_bytes":{},
+                    "sha256":"{index_sha256}",
+                    "file_sha256":{{
+                        "model-00001-of-00001.safetensors":"{wrong_shard_sha256}"
+                    }},
+                    "passthrough":true,
+                    "model_metadata":{{
+                        "model_id":"{model_id}",
+                        "version":"1.0",
+                        "execution_template":{{
+                            "type":"Safetensors",
+                            "model_file":"model.safetensors.index.json",
+                            "architecture":"qwen3"
+                        }},
+                        "preprocessing":[],
+                        "postprocessing":[],
+                        "files":["model.safetensors.index.json"],
+                        "metadata":{{"task":"text-generation"}}
+                    }}
+                }}
+            }}"#,
+            server.base_url(),
+            index_body.len(),
+        );
+
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v1/models/{model_id}/resolve"))
+                .query_param_exists("platform")
+                .query_param("format", "safetensors");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(resolve_body);
+        });
+        server.mock(|when, then| {
+            when.method(GET).path("/model.safetensors.index.json");
+            then.status(200).body(index_body);
+        });
+        server.mock(|when, then| {
+            when.method(GET).path("/model-00001-of-00001.safetensors");
+            then.status(200).body("actual-shard");
+        });
+
+        let client =
+            RegistryClient::with_url_and_cache_dir(server.base_url(), temp_dir.path().into())
+                .unwrap();
+        let err = client
+            .fetch_extracted_with_format(&model_id, Some("macos-arm64"), "safetensors", |_| {})
+            .expect_err("shard hash mismatch should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("Passthrough SHA256 mismatch for 'model-00001-of-00001.safetensors'"),
+            "{err}"
+        );
     }
 
     #[test]
