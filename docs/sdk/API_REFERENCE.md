@@ -497,6 +497,10 @@ are passed through to pipeline stages that understand them. Stages that don't ne
 simply ignore them. This allows a single envelope type to flow through multi-stage pipelines
 (e.g., ASR → LLM → TTS) without type changes.
 
+Image envelopes carry raw bytes plus a `format` tag (`"png" | "jpeg" | "webp"`); preprocessing
+pipelines decode and resize them. Multi-part user messages combine a text prompt with one or
+more image envelopes for vision-language models — see `Envelope.userMessage` below.
+
 ### Dart
 
 ```dart
@@ -513,6 +517,16 @@ class XybridEnvelope {
     int channels = 1,
   });
   factory XybridEnvelope.embedding(List<double> embedding);
+
+  // Vision (planned)
+  factory XybridEnvelope.image(
+    List<int> imageBytes,
+    String format,        // "png" | "jpeg" | "webp"
+  );
+  factory XybridEnvelope.userMessage(
+    String text, {
+    List<XybridEnvelope> images = const [],
+  });
 
   // Role support (for conversational context)
   factory XybridEnvelope.textWithRole(String text, MessageRole role);
@@ -536,6 +550,16 @@ sealed class XybridEnvelope {
   ) : XybridEnvelope()
   data class Embedding(val embedding: FloatArray) : XybridEnvelope()
 
+  // Vision (planned)
+  data class Image(
+    val imageBytes: ByteArray,
+    val format: String,          // "png" | "jpeg" | "webp"
+  ) : XybridEnvelope()
+  data class UserMessage(
+    val text: String,
+    val images: List<XybridEnvelope> = emptyList(),
+  ) : XybridEnvelope()
+
   companion object {
     fun text(
       text: String,
@@ -548,6 +572,16 @@ sealed class XybridEnvelope {
       channels: Int = 1
     ): XybridEnvelope = Audio(audioBytes, sampleRate, channels)
     fun embedding(embedding: FloatArray): XybridEnvelope = Embedding(embedding)
+
+    // Vision (planned)
+    fun image(
+      imageBytes: ByteArray,
+      format: String,
+    ): XybridEnvelope = Image(imageBytes, format)
+    fun userMessage(
+      text: String,
+      images: List<XybridEnvelope> = emptyList(),
+    ): XybridEnvelope = UserMessage(text, images)
   }
 }
 ```
@@ -562,6 +596,10 @@ sealed class XybridEnvelope {
 | `embedding()` | ✅ | ✅ | ✅ | — |
 | `textWithRole()` | ✅ | — | — | ✅ |
 | `withRole()` | ✅ | — | — | — |
+| `image()` | 📋 | 📋 | 📋 | 📋 |
+| `userMessage()` | 📋 | 📋 | 📋 | 📋 |
+
+Legend: ✅ implemented · 📋 planned · — not applicable for this binding.
 
 ---
 
@@ -771,6 +809,13 @@ class ConversationContext {
   fun push(message: Envelope)
 }
 ```
+
+**Multi-turn vision** (planned): when a user message contains images
+(built via `Envelope.userMessage(text, images: [...])`), the image-bearing envelope
+stays attached to its turn in the conversation history. Vision-capable backends
+re-prefill image tokens at each turn that references them, matching `llama.cpp`'s
+`mtmd` defaults. There is no separate image-embedding cache in the planned initial implementation; image bytes
+remain in memory for as long as the `ConversationContext` references them.
 
 ### MessageRole
 

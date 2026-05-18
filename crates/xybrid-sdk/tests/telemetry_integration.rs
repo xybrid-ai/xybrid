@@ -712,6 +712,106 @@ fn execute_streaming_emits_no_outer_telemetry_events() {
     );
 }
 
+/// Regression guard: a chat-context LLM call must carry the `backend` and
+/// `quantization` cost-attribution labels somewhere in its captured span
+/// tree. The SDK's downstream `convert_to_platform_event` hoist reads
+/// from any span via `extract_string_attr_from_any_span`, so as long as
+/// at least one span in the trace carries each key the Traces dashboard
+/// renders the columns.
+///
+/// The subtle thing this is protecting against: the chat-context family
+/// in `execute_with_context_impl` / `execute_streaming_with_context_impl`
+/// dispatches directly to `execute_llm_with_messages` /
+/// `execute_llm_streaming_with_messages` without ever opening the outer
+/// `execute:<model>` span where the original cost-attribution stamps
+/// live. If a future refactor reroutes either of those inner functions
+/// off the helper that stamps `backend` + `quantization`, both columns
+/// blank out on every local LLM chat — the symptom is silent at the
+/// wire layer because the events still publish; the dashboard just
+/// shows two empty cells.
+///
+/// Skips gracefully when the GGUF fixture isn't downloaded so CI without
+/// `--features llm-llamacpp` and developers without the model on disk
+/// don't see spurious failures.
+#[cfg(feature = "llm-llamacpp")]
+#[test]
+fn chat_context_llm_call_carries_backend_and_quantization_on_spans() {
+    use xybrid_core::conversation::ConversationContext;
+    use xybrid_core::ir::MessageRole;
+    use xybrid_core::runtime_adapter::types::GenerationConfig;
+    use xybrid_core::tracing as core_tracing;
+
+    let _serial = listener_test_lock();
+
+    let Some(model_dir) = model_fixtures::model_or_skip("qwen2.5-0.5b-instruct") else {
+        return; // fixture not downloaded — skip gracefully
+    };
+
+    let metadata_path = model_dir.join("model_metadata.json");
+    let mut metadata: ModelMetadata =
+        serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
+
+    // Pin the backend hint so the test asserts the SDK plumbing rather
+    // than whether the published bundle metadata happened to carry it.
+    // A separate concern (bundle hygiene) tracks getting every GGUF
+    // bundle's `metadata.backend` populated at pack time.
+    metadata
+        .metadata
+        .insert("backend".to_string(), serde_json::json!("llamacpp"));
+
+    // Enable + clear the global tracing collector so we read only the
+    // spans this test produced. Other tests that touch tracing share the
+    // collector — the listener_test_lock above serialises them.
+    core_tracing::init_tracing(true);
+    core_tracing::reset_tracing();
+
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+    let input = Envelope::new(EnvelopeKind::Text("hi".to_string())).with_role(MessageRole::User);
+    let ctx = ConversationContext::new();
+
+    // Keep generation tiny — we only need the call to exit cleanly so
+    // the LLM span closes and its metadata flushes into the collector.
+    let gen_config = GenerationConfig {
+        max_tokens: 4,
+        ..GenerationConfig::default()
+    };
+
+    let _ = executor
+        .execute_with_context(&metadata, &input, &ctx, Some(&gen_config))
+        .expect("chat-context LLM call should succeed");
+
+    let stages = core_tracing::get_stages_json();
+    let spans = stages
+        .get("spans")
+        .and_then(|v| v.as_array())
+        .expect("stages should have a spans array");
+
+    let any_span_carries = |key: &str| -> bool {
+        spans.iter().any(|s| {
+            s.get("metadata")
+                .and_then(|m| m.get(key))
+                .and_then(|v| v.as_str())
+                .is_some()
+        })
+    };
+
+    assert!(
+        any_span_carries("backend"),
+        "chat-context LLM call must stamp `backend` onto some span — the chat-context \
+         dispatch bypasses the outer `execute:<model>` span, so the inner LLM span has \
+         to carry it. Spans captured: {:#}",
+        stages
+    );
+    assert!(
+        any_span_carries("quantization"),
+        "chat-context LLM call must stamp `quantization` onto some span — same \
+         rationale as `backend`. Spans captured: {:#}",
+        stages
+    );
+
+    core_tracing::reset_tracing();
+}
+
 /// Smoke test: MNIST inference works without telemetry (no env vars needed).
 /// Ensures the model fixture is valid and the execution pipeline doesn't panic.
 #[test]
