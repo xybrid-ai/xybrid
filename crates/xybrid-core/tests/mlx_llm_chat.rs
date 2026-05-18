@@ -38,6 +38,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
+use xybrid_core::abort::{AbortReason, CloudFallbackAbort};
 use xybrid_core::runtime_adapter::llm::{ChatMessage, GenerationConfig, LlmBackend};
 use xybrid_core::runtime_adapter::mlx::{
     generate::{self, GenerateParams},
@@ -45,6 +46,7 @@ use xybrid_core::runtime_adapter::mlx::{
     MlxLlmAdapter, MlxLlmConfig,
 };
 use xybrid_core::runtime_adapter::types::{PartialToken, StreamingCallback};
+use xybrid_core::runtime_adapter::AdapterError;
 
 fn bundle_dir(env_var: &str) -> Option<PathBuf> {
     std::env::var_os(env_var).map(PathBuf::from)
@@ -124,6 +126,45 @@ fn synthetic_qwen_sharded_bundle_runs_runtime_forward_without_external_fixture()
     assert!(out.tokens_per_second.is_finite());
     assert!(out.tokens_per_second > 0.0);
     assert!(matches!(out.finish_reason.as_str(), "stop" | "length"));
+}
+
+#[test]
+fn synthetic_qwen_streaming_callback_abort_preserves_cloud_fallback_marker() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_synthetic_qwen_bundle(tmp.path());
+
+    let adapter =
+        MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load synthetic qwen3");
+    let seen_tokens = Arc::new(Mutex::new(0usize));
+    let seen_tokens_for_cb = seen_tokens.clone();
+    let cb: StreamingCallback<'_> = Box::new(move |_token: PartialToken| {
+        *seen_tokens_for_cb.lock().unwrap() += 1;
+        Err(Box::new(CloudFallbackAbort::new(AbortReason::StressMemory)))
+    });
+
+    let err = generate::generate_tokens(
+        &adapter,
+        "Hello",
+        GenerateParams::new(&GenerationConfig {
+            max_tokens: 4,
+            ..short_greedy_config()
+        }),
+        Some(cb),
+    )
+    .expect_err("streaming callback abort must stop MLX generation");
+    let err = AdapterError::from(err);
+
+    assert_eq!(
+        err.cloud_fallback_abort_reason(),
+        Some(AbortReason::StressMemory),
+        "MLX callback errors must preserve the typed CloudFallbackAbort marker: {err:?}"
+    );
+    assert_eq!(
+        *seen_tokens.lock().unwrap(),
+        1,
+        "callback should abort after the first generated token"
+    );
 }
 
 #[test]
@@ -368,6 +409,51 @@ fn streaming_matches_non_streaming_for_same_seed() {
         streamed.tokens_generated
     );
     assert!(!recorded_ids.is_empty(), "callback never fired");
+}
+
+#[test]
+fn real_qwen_abort_then_rerun_matches_fresh_adapter_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = qwen_bundle_dir() else {
+        eprintln!("SKIP: neither XYBRID_MLX_QWEN_DIR nor XYBRID_MLX_QWEN_4B_DIR is set");
+        return;
+    };
+
+    let cfg = GenerationConfig {
+        max_tokens: 8,
+        ..short_greedy_config()
+    };
+    let prompt = "Reply with a short phrase about clean runtime state.";
+
+    let adapter = MlxLlmAdapter::load(&dir, &MlxLlmConfig::default()).expect("load qwen3 bundle");
+    let cb: StreamingCallback<'_> = Box::new(move |_token: PartialToken| {
+        Err(Box::new(CloudFallbackAbort::new(AbortReason::StressMemory)))
+    });
+    let err = generate::generate_tokens(&adapter, prompt, GenerateParams::new(&cfg), Some(cb))
+        .expect_err("streaming callback abort must stop MLX generation");
+    let err = AdapterError::from(err);
+    assert_eq!(
+        err.cloud_fallback_abort_reason(),
+        Some(AbortReason::StressMemory),
+        "MLX streaming abort must keep the cloud-fallback marker"
+    );
+
+    let after_abort = generate::generate_tokens(&adapter, prompt, GenerateParams::new(&cfg), None)
+        .expect("same adapter rerun after abort");
+    let fresh_adapter =
+        MlxLlmAdapter::load(&dir, &MlxLlmConfig::default()).expect("load fresh qwen3 bundle");
+    let fresh = generate::generate_tokens(&fresh_adapter, prompt, GenerateParams::new(&cfg), None)
+        .expect("fresh adapter generation");
+
+    assert_eq!(
+        after_abort.text, fresh.text,
+        "abort must not leak KV/decoder state into the next generation"
+    );
+    assert_eq!(after_abort.tokens_generated, fresh.tokens_generated);
+    assert!(
+        after_abort.tokens_generated > 0,
+        "post-abort rerun should generate at least one token"
+    );
 }
 
 struct OwnedTensor {

@@ -580,9 +580,7 @@ mod runtime {
     ) -> MlxLlmResult<()> {
         if let Some(cb) = cb {
             // `cb: &mut Box<dyn FnMut...>` — auto-deref invokes the FnMut.
-            cb(token).map_err(|e| {
-                MlxLlmError::ConfigInvalid(format!("streaming callback error: {e}"))
-            })?;
+            cb(token).map_err(MlxLlmError::StreamingCallback)?;
         }
         Ok(())
     }

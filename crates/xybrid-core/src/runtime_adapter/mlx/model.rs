@@ -35,7 +35,7 @@ use crate::runtime_adapter::inference_backend::{
 };
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
-    StreamingCallback,
+    StreamingCallback, StreamingError,
 };
 use crate::runtime_adapter::AdapterError;
 
@@ -127,6 +127,12 @@ pub enum MlxLlmError {
     #[error("MLX model config failed validation: {0}")]
     ConfigInvalid(String),
 
+    /// Streaming callback returned an error. Keep the original boxed
+    /// error intact so cloud-fallback abort markers survive the
+    /// backend-specific MLX layer.
+    #[error("streaming callback error: {0}")]
+    StreamingCallback(StreamingError),
+
     /// Weight tensor loading failed — either the safetensors file is
     /// malformed or a required tensor is missing / wrong dtype. Carries
     /// the weight path for the error message and a free-form reason.
@@ -153,6 +159,9 @@ impl From<MlxLlmError> for AdapterError {
             MlxLlmError::NotLoaded => AdapterError::ModelNotLoaded(e.to_string()),
             MlxLlmError::MissingFile { .. } | MlxLlmError::Io(_) => {
                 AdapterError::ModelNotFound(e.to_string())
+            }
+            MlxLlmError::StreamingCallback(error) => {
+                AdapterError::from_streaming_callback_error(error)
             }
             _ => AdapterError::RuntimeError(e.to_string()),
         }
