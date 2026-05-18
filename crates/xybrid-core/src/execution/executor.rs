@@ -2881,4 +2881,127 @@ mod tests {
             );
         }
     }
+
+    // ============================================================================
+    // stamp_llm_span_cost_attribution Tests
+    // ============================================================================
+    //
+    // These cases pin the chat-context cost-attribution path: the wire `backend`
+    // label that lands on the currently-open span when
+    // `execute_with_context_impl` / `execute_streaming_with_context_impl` bypass
+    // the outer `execute:<model_id>` span. They share state with the global
+    // span collector, so a process-wide mutex serialises them — `cargo test`
+    // parallelises within a binary and these would otherwise stomp each other's
+    // reset/measure window.
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    mod stamp_llm_span {
+        use super::*;
+        use crate::tracing;
+        use std::sync::Mutex;
+
+        static GLOBAL_TRACE_LOCK: Mutex<()> = Mutex::new(());
+
+        fn gguf_metadata(backend_hint: Option<&str>) -> ModelMetadata {
+            let mut bundle_metadata = HashMap::new();
+            if let Some(hint) = backend_hint {
+                bundle_metadata.insert("backend".to_string(), serde_json::json!(hint));
+            }
+            ModelMetadata {
+                model_id: "test-gguf".into(),
+                version: "1".into(),
+                execution_template: ExecutionTemplate::Gguf {
+                    model_file: "test.gguf".into(),
+                    chat_template: None,
+                    context_length: 2048,
+                    generation_params: None,
+                },
+                preprocessing: Vec::new(),
+                postprocessing: Vec::new(),
+                files: Vec::new(),
+                description: None,
+                metadata: bundle_metadata,
+                voices: None,
+                max_chunk_chars: None,
+                trim_trailing_samples: None,
+            }
+        }
+
+        fn capture_span_metadata(
+            span_name: &str,
+            metadata: &ModelMetadata,
+        ) -> HashMap<String, String> {
+            tracing::init_tracing(true);
+            tracing::reset_tracing();
+            {
+                let _guard = tracing::SpanGuard::new(span_name);
+                stamp_llm_span_cost_attribution(metadata);
+            }
+            let json = tracing::get_stages_json();
+            tracing::reset_tracing();
+
+            let span = json["spans"]
+                .as_array()
+                .and_then(|spans| spans.iter().find(|s| s["name"].as_str() == Some(span_name)))
+                .expect("span recorded by SpanGuard must be present in stages json");
+            span["metadata"]
+                .as_object()
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+
+        #[test]
+        fn unannotated_gguf_stamps_llamacpp_default() {
+            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            let captured = capture_span_metadata("execute:test", &gguf_metadata(None));
+            assert_eq!(
+                captured.get("backend").map(String::as_str),
+                Some("llamacpp"),
+                "chat-context flow must default unannotated GGUF bundles to llamacpp so PlatformEvent.backend is non-empty"
+            );
+        }
+
+        #[test]
+        fn mistralrs_hint_wins_on_gguf() {
+            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            let captured = capture_span_metadata("execute:test", &gguf_metadata(Some("mistralrs")));
+            assert_eq!(
+                captured.get("backend").map(String::as_str),
+                Some("mistralrs")
+            );
+        }
+
+        #[test]
+        fn legacy_mistral_alias_normalises_to_mistralrs() {
+            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            let captured = capture_span_metadata("execute:test", &gguf_metadata(Some("mistral")));
+            assert_eq!(
+                captured.get("backend").map(String::as_str),
+                Some("mistralrs"),
+                "the legacy `mistral` bundle alias must canonicalise to the wire label"
+            );
+        }
+
+        #[test]
+        fn quantization_stamped_from_gguf_filename() {
+            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            let mut metadata = gguf_metadata(None);
+            metadata.execution_template = ExecutionTemplate::Gguf {
+                model_file: "tinyllama-1.1b-chat-q4_k_m.gguf".into(),
+                chat_template: None,
+                context_length: 2048,
+                generation_params: None,
+            };
+            let captured = capture_span_metadata("execute:test", &metadata);
+            assert_eq!(
+                captured.get("quantization").map(String::as_str),
+                Some("q4_k_m"),
+                "stamp must surface the filename-inferred quantization alongside backend"
+            );
+        }
+    }
 }
