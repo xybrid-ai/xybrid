@@ -73,7 +73,10 @@ assert_output_contains() {
     fi
 }
 
-for script in tools/scripts/bench-llm-backends.sh tools/scripts/bench-mlx-embedding.sh; do
+for script in \
+    tools/scripts/bench-llm-backends.sh \
+    tools/scripts/bench-mlx-embedding.sh \
+    tools/scripts/bench-mlx-cancellation-latency.sh; do
     output=$(run_script "$script" Linux x86_64 pass)
     assert_output_contains "$output" 'not Darwin'
 
