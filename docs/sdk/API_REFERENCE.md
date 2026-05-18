@@ -737,13 +737,18 @@ public enum OutputType { Text, Audio, Embedding, Unknown }
 ### InferenceMetrics
 
 Typed inference metrics surfaced on every `XybridResult`. LLM-specific fields
-(`ttftMs`, `tokensPerSecond`, `prefillTps`, `decodeTps`, `tokensIn`,
-`tokensOut`) are `null` when the model is ASR/TTS/embedding. `stageLatenciesMs`
-is empty for `model.run()` and populated for `pipeline.run()`.
+(`ttftMs`, `tokensPerSecond`, `prefillTps`, `decodeTps`, `tokensOut`) are
+`null` when the model is ASR/TTS/embedding. `stageLatenciesMs` is empty for
+`model.run()` and populated for `pipeline.run()`.
 
-Wire-level source: the `Envelope.metadata` string map written by
-`runtime_adapter::llm` and `execution::executor`. The SDK parses known keys
-with graceful failure — unparseable values become `null`.
+Population is best-effort: fields are parsed from the `Envelope.metadata`
+string map written by `runtime_adapter::llm` and `execution::executor`.
+Local LLM runs populate the LLM scalars; **cloud LLM runs currently surface
+only `totalMs`** (the cloud adapter writes `backend` to envelope metadata
+but not per-run scalars — those ride on span metadata today). Unparseable
+values become `null`. Input-token counts (`promptTokens` / `tokensIn`) are
+not on this surface yet — they exist as span metadata only and will be
+added once an adapter writes the key to the envelope.
 
 ```dart
 class XybridInferenceMetrics {
@@ -752,7 +757,6 @@ class XybridInferenceMetrics {
   final double? tokensPerSecond;
   final double? prefillTps;
   final double? decodeTps;
-  final int? tokensIn;
   final int? tokensOut;
   final List<XybridStageLatency> stageLatenciesMs;
 }
@@ -770,7 +774,6 @@ data class XybridInferenceMetrics(
   val tokensPerSecond: Double?,
   val prefillTps: Double?,
   val decodeTps: Double?,
-  val tokensIn: Int?,
   val tokensOut: Int?,
   val stageLatenciesMs: List<XybridStageLatency>
 )
@@ -785,7 +788,6 @@ public struct XybridInferenceMetrics {
   public let tokensPerSecond: Double?
   public let prefillTps: Double?
   public let decodeTps: Double?
-  public let tokensIn: Int?
   public let tokensOut: Int?
   public let stageLatenciesMs: [XybridStageLatency]
 }
@@ -804,7 +806,6 @@ public sealed class InferenceMetrics
   public float? TokensPerSecond { get; }
   public float? PrefillTps { get; }
   public float? DecodeTps { get; }
-  public uint? TokensIn { get; }
   public uint? TokensOut { get; }
   public IReadOnlyList<StageLatency> StageLatenciesMs { get; }
 }

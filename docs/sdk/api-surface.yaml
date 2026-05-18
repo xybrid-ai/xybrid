@@ -345,9 +345,6 @@ classes:
       decodeTps:
         type: "double?"
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
-      tokensIn:
-        type: "int?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
       tokensOut:
         type: "int?"
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }

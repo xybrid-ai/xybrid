@@ -20,13 +20,16 @@ pub struct StageLatency {
 /// Typed inference metrics surfaced on every `InferenceResult`.
 ///
 /// LLM-specific fields (`ttft_ms`, `tokens_per_second`, `prefill_tps`,
-/// `decode_tps`, `tokens_in`, `tokens_out`) are `None` for ASR/TTS/embedding
-/// runs. `stage_latencies_ms` is empty for `model.run()` and populated for
+/// `decode_tps`, `tokens_out`) are `None` for ASR/TTS/embedding runs.
+/// `stage_latencies_ms` is empty for `model.run()` and populated for
 /// `pipeline.run()`.
 ///
-/// The wire-level source is the `Envelope.metadata` string map written by
-/// `runtime_adapter::llm` and `execution::executor`. `from_metadata` parses
-/// the known keys with graceful failure on unparseable values.
+/// Population is best-effort: fields parse from the `Envelope.metadata`
+/// string map written by `runtime_adapter::llm` and `execution::executor`.
+/// Local LLM runs populate the LLM fields; cloud LLM runs currently surface
+/// only `total_ms` (the cloud adapter writes `backend` to envelope metadata
+/// but not the per-run scalars — those ride on span metadata today).
+/// Unparseable values become `None`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct InferenceMetrics {
     /// Wall-clock latency in ms (mirrors `InferenceResult.latency_ms`).
@@ -39,8 +42,6 @@ pub struct InferenceMetrics {
     pub prefill_tps: Option<f32>,
     /// Decode phase tok/s. LLM only.
     pub decode_tps: Option<f32>,
-    /// Prompt tokens consumed. LLM only.
-    pub tokens_in: Option<u32>,
     /// Completion tokens produced. LLM only.
     pub tokens_out: Option<u32>,
     /// Per-stage wall-clock latencies. Empty for single-model runs.
@@ -62,8 +63,6 @@ impl InferenceMetrics {
             tokens_per_second: parse_f32(metadata, "tokens_per_second"),
             prefill_tps: parse_f32(metadata, "prefill_tps"),
             decode_tps: parse_f32(metadata, "decode_tps"),
-            tokens_in: parse_u32(metadata, "tokens_in")
-                .or_else(|| parse_u32(metadata, "prompt_tokens")),
             tokens_out: parse_u32(metadata, "tokens_out")
                 .or_else(|| parse_u32(metadata, "tokens_generated")),
             stage_latencies_ms: Vec::new(),
@@ -198,12 +197,6 @@ impl InferenceResult {
     /// Typed metrics for this run (TTFT, tok/s, per-stage latencies, etc.).
     pub fn metrics(&self) -> &InferenceMetrics {
         &self.metrics
-    }
-
-    /// Mutable access to metrics — used by pipeline call sites to populate
-    /// `stage_latencies_ms` after construction.
-    pub fn metrics_mut(&mut self) -> &mut InferenceMetrics {
-        &mut self.metrics
     }
 
     /// Get a reference to the underlying envelope.
@@ -383,7 +376,6 @@ mod tests {
         metadata.insert("prefill_tps".to_string(), "180.0".to_string());
         metadata.insert("decode_tps".to_string(), "42.5".to_string());
         metadata.insert("tokens_generated".to_string(), "256".to_string());
-        metadata.insert("prompt_tokens".to_string(), "32".to_string());
 
         let envelope = Envelope {
             kind: EnvelopeKind::Text("hi".to_string()),
@@ -397,7 +389,6 @@ mod tests {
         assert_eq!(m.tokens_per_second, Some(42.5));
         assert_eq!(m.prefill_tps, Some(180.0));
         assert_eq!(m.decode_tps, Some(42.5));
-        assert_eq!(m.tokens_in, Some(32));
         assert_eq!(m.tokens_out, Some(256));
         assert!(m.stage_latencies_ms.is_empty());
     }
@@ -413,7 +404,6 @@ mod tests {
         assert_eq!(m.total_ms, 50);
         assert_eq!(m.ttft_ms, None);
         assert_eq!(m.tokens_per_second, None);
-        assert_eq!(m.tokens_in, None);
         assert_eq!(m.tokens_out, None);
     }
 
@@ -434,17 +424,16 @@ mod tests {
     }
 
     #[test]
-    fn test_metrics_aliased_keys() {
+    fn test_metrics_tokens_out_canonical_key_wins_over_alias() {
         let mut metadata = HashMap::new();
-        metadata.insert("tokens_in".to_string(), "16".to_string());
         metadata.insert("tokens_out".to_string(), "64".to_string());
+        metadata.insert("tokens_generated".to_string(), "999".to_string());
 
         let envelope = Envelope {
             kind: EnvelopeKind::Text("x".to_string()),
             metadata,
         };
         let result = InferenceResult::new(envelope, "m", 10);
-        assert_eq!(result.metrics().tokens_in, Some(16));
         assert_eq!(result.metrics().tokens_out, Some(64));
     }
 
