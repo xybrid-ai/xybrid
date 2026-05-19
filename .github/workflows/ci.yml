@@ -149,7 +149,7 @@ jobs:
           key: ubuntu-latest-ort-download
 
       - name: Run tests
-        run: cargo test --workspace --features ort-download
+        run: cargo test --workspace --features ort-download --lib --tests
 
   # Linux-only on push/PR. Per-platform CLI builds run in release.yml.
   build-cli:
