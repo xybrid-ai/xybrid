@@ -376,8 +376,8 @@ pub mod runtime {
     use super::Qwen3Config;
 
     use xybrid_mlx::ops::{
-        add, concat, gather, matmul, mul, reshape, rms_norm, rope, scaled_dot_product_attention,
-        silu, transpose,
+        add, concat, gather, mul, reshape, rms_norm, rope, scaled_dot_product_attention, silu,
+        transpose,
     };
     use xybrid_mlx::{MlxArray, MlxStream};
 
@@ -418,11 +418,12 @@ pub mod runtime {
     #[derive(Debug)]
     pub struct Qwen35Weights {
         pub embed_tokens: MlxArray,
+        pub embed_tokens_linear: LinearWeight,
         pub layers: Vec<Qwen35Layer>,
         pub norm: MlxArray,
         /// `None` when [`Qwen3Config::tie_word_embeddings`] is set — the
         /// forward pass re-uses `embed_tokens` for the LM head.
-        pub lm_head: Option<MlxArray>,
+        pub lm_head: Option<LinearWeight>,
         layer_cache: Vec<Qwen35LayerCache>,
     }
 
@@ -439,13 +440,18 @@ pub mod runtime {
     /// materialising each tensor as an [`MlxArray`].
     ///
     /// Supports dense F32/F16/BF16 weights and MLX affine quantized U32
-    /// projection weights. Embeddings and LM head are dequantized at load
-    /// time because `gather` and final logits still use dense-only ops.
+    /// projection weights. Embeddings are dequantized for lookup, while tied
+    /// or explicit LM heads stay packed for quantized logits matmul.
     pub fn build(cfg: &Qwen3Config, weights: &SafeTensorBundle) -> MlxLlmResult<Qwen35Weights> {
         let quant = quantization(cfg)?;
         let quant = quant.as_ref();
 
         let embed_tokens = load_dense_or_dequantized(weights, "model.embed_tokens.weight", quant)?;
+        let embed_tokens_linear = if cfg.is_quantized() {
+            LinearWeight::load(weights, "model.embed_tokens.weight", quant)?
+        } else {
+            LinearWeight::dense(embed_tokens.clone())?
+        };
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for l in 0..cfg.num_hidden_layers {
             let base = format!("model.layers.{l}");
@@ -498,11 +504,12 @@ pub mod runtime {
         let lm_head = if cfg.tie_word_embeddings {
             None
         } else {
-            Some(load_dense_or_dequantized(weights, "lm_head.weight", quant)?)
+            Some(LinearWeight::load(weights, "lm_head.weight", quant)?)
         };
 
         Ok(Qwen35Weights {
             embed_tokens,
+            embed_tokens_linear,
             layers,
             norm,
             lm_head,
@@ -570,9 +577,11 @@ pub mod runtime {
 
         // Final norm + LM head.
         let final_norm = rms_norm(&hidden, Some(&weights.norm), cfg.rms_norm_eps, stream)?;
-        let lm_w = weights.lm_head.as_ref().unwrap_or(&weights.embed_tokens);
-        let logits = matmul(&final_norm, &transpose(lm_w, &[1, 0], stream)?, stream)?;
-        Ok(logits)
+        let lm_head = weights
+            .lm_head
+            .as_ref()
+            .unwrap_or(&weights.embed_tokens_linear);
+        lm_head.forward(&final_norm, stream)
     }
 
     /// SwiGLU FFN: `down_proj(silu(gate_proj(x)) * up_proj(x))` + residual.

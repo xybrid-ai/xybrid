@@ -13,6 +13,7 @@
 
 use std::ffi::c_void;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::buffer::SharedBuffer;
 use crate::dtype::MlxDtype;
@@ -78,6 +79,60 @@ fn shape_element_count(shape: &[i32]) -> MlxResult<usize> {
             })?;
     }
     Ok(elems)
+}
+
+/// Snapshot of MLX host-synchronizing calls made through this safe wrapper.
+///
+/// The counters are intentionally lightweight and process-local. Generation
+/// code resets them at the start of a profiled run and logs totals at the end.
+/// `eval_calls` includes evals forced by host readback helpers, so compare it
+/// with `to_vec_*_calls` when separating explicit barriers from readbacks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MlxPerfCounters {
+    pub eval_calls: u64,
+    pub async_eval_calls: u64,
+    pub to_vec_f32_calls: u64,
+    pub to_vec_u32_calls: u64,
+}
+
+static EVAL_CALLS: AtomicU64 = AtomicU64::new(0);
+static ASYNC_EVAL_CALLS: AtomicU64 = AtomicU64::new(0);
+static TO_VEC_F32_CALLS: AtomicU64 = AtomicU64::new(0);
+static TO_VEC_U32_CALLS: AtomicU64 = AtomicU64::new(0);
+
+#[must_use]
+pub fn perf_counters() -> MlxPerfCounters {
+    MlxPerfCounters {
+        eval_calls: EVAL_CALLS.load(Ordering::Relaxed),
+        async_eval_calls: ASYNC_EVAL_CALLS.load(Ordering::Relaxed),
+        to_vec_f32_calls: TO_VEC_F32_CALLS.load(Ordering::Relaxed),
+        to_vec_u32_calls: TO_VEC_U32_CALLS.load(Ordering::Relaxed),
+    }
+}
+
+pub fn reset_perf_counters() {
+    EVAL_CALLS.store(0, Ordering::Relaxed);
+    ASYNC_EVAL_CALLS.store(0, Ordering::Relaxed);
+    TO_VEC_F32_CALLS.store(0, Ordering::Relaxed);
+    TO_VEC_U32_CALLS.store(0, Ordering::Relaxed);
+}
+
+/// Schedule lazy MLX arrays for asynchronous evaluation.
+pub fn async_eval(outputs: &[&MlxArray]) -> MlxResult<()> {
+    if outputs.is_empty() {
+        return Ok(());
+    }
+    let raws: Vec<_> = outputs.iter().map(|array| array.as_raw()).collect();
+    // SAFETY: each raw handle is backed by a live `&MlxArray`; the vector
+    // retains its own handles and is freed before returning.
+    let vec = unsafe { ffi::vector_array_from(&raws) };
+    let result = unsafe { ffi::async_eval(vec) };
+    // SAFETY: `vec` was created above and has not been freed.
+    unsafe { ffi::vector_array_free(vec) };
+    if result.is_ok() {
+        ASYNC_EVAL_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+    result
 }
 
 impl MlxArray {
@@ -277,7 +332,11 @@ impl MlxArray {
     /// `eval` is idempotent: subsequent calls are cheap no-ops.
     pub fn eval(&self) -> MlxResult<()> {
         // SAFETY: self.raw is live per struct invariant.
-        unsafe { ffi::array_eval(self.raw) }
+        let result = unsafe { ffi::array_eval(self.raw) };
+        if result.is_ok() {
+            EVAL_CALLS.fetch_add(1, Ordering::Relaxed);
+        }
+        result
     }
 
     /// Materialize this array into row-contiguous storage.
@@ -324,6 +383,7 @@ impl MlxArray {
     /// array, otherwise the final readback may force a device handoff before
     /// evaluation.
     pub fn to_vec_f32_on_stream(&self, stream: Option<&MlxStream>) -> MlxResult<Vec<f32>> {
+        TO_VEC_F32_CALLS.fetch_add(1, Ordering::Relaxed);
         let dt = self.dtype()?;
         if dt != MlxDtype::F32 {
             return Err(MlxError::InvalidDtype {
@@ -345,6 +405,17 @@ impl MlxArray {
     /// results, which are `u32` indices. Returns [`MlxError::InvalidDtype`]
     /// if the underlying dtype is not `U32`.
     pub fn to_vec_u32(&self) -> MlxResult<Vec<u32>> {
+        self.to_vec_u32_on_stream(None)
+    }
+
+    /// Read the array's contents as an owned `Vec<u32>` after making it
+    /// contiguous on the caller-provided stream.
+    ///
+    /// Runtime model code should pass the same stream that produced the
+    /// array, otherwise the final readback may force a device handoff before
+    /// evaluation.
+    pub fn to_vec_u32_on_stream(&self, stream: Option<&MlxStream>) -> MlxResult<Vec<u32>> {
+        TO_VEC_U32_CALLS.fetch_add(1, Ordering::Relaxed);
         let dt = self.dtype()?;
         if dt != MlxDtype::U32 {
             return Err(MlxError::InvalidDtype {
@@ -352,12 +423,32 @@ impl MlxArray {
                 got: dt,
             });
         }
-        let materialized = self.contiguous_for_readback()?;
+        let materialized = self.contiguous(stream)?;
         materialized.eval()?;
         // SAFETY: materialized.raw is live per struct invariant; we just
         // checked dtype and evaluated so `mlx_array_data_uint32` is
         // guaranteed to return a valid pointer.
         unsafe { ffi::array_data_u32(materialized.raw) }
+    }
+
+    /// Read this already-contiguous u32 array after evaluating it.
+    ///
+    /// This is for hot paths that intentionally materialize the array before
+    /// queuing later work. It avoids inserting another `contiguous` op at the
+    /// readback point, preserving MLX command-buffer overlap.
+    pub fn to_vec_u32_evaluated(&self) -> MlxResult<Vec<u32>> {
+        TO_VEC_U32_CALLS.fetch_add(1, Ordering::Relaxed);
+        let dt = self.dtype()?;
+        if dt != MlxDtype::U32 {
+            return Err(MlxError::InvalidDtype {
+                expected: MlxDtype::U32,
+                got: dt,
+            });
+        }
+        self.eval()?;
+        // SAFETY: self.raw is live per struct invariant; we just checked dtype
+        // and evaluated the caller-provided materialized array.
+        unsafe { ffi::array_data_u32(self.raw) }
     }
 
     /// Read the array's contents as an owned `Vec<i64>`.
@@ -949,6 +1040,16 @@ mod tests {
 
         let as_f32 = crate::ops::cast(&array, MlxDtype::F32, None).expect("cast bf16 to f32");
         assert_eq!(as_f32.to_vec_f32().expect("readback"), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn async_eval_accepts_pending_outputs() {
+        let a = MlxArray::from_slice_f32(&[1.0, 2.0], &[2]).unwrap();
+        let b = crate::ops::add(&a, &a, None).unwrap();
+
+        async_eval(&[&b]).expect("async eval");
+
+        assert_eq!(b.to_vec_f32().expect("readback"), vec![2.0, 4.0]);
     }
 
     /// Shared-storage semantics: mutate the SharedBuffer via its pointer

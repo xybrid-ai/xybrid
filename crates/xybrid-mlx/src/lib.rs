@@ -108,7 +108,7 @@ mod resources;
 mod stream;
 
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
-pub use array::MlxArray;
+pub use array::{async_eval, perf_counters, reset_perf_counters, MlxArray, MlxPerfCounters};
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub use buffer::SharedBuffer;
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]

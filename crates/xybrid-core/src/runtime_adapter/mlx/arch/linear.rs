@@ -6,7 +6,8 @@
 //! `scales`/`biases` tensors and must use `mlx_quantized_matmul`.
 
 use safetensors::Dtype as StDtype;
-use xybrid_mlx::ops::{dequantize, matmul, quantized_matmul, transpose};
+use std::ffi::CString;
+use xybrid_mlx::ops::{dequantize, matmul, quantized_matmul_prechecked, transpose};
 use xybrid_mlx::{MlxArray, MlxDtype, MlxStream};
 
 use super::super::model::{MlxLlmError, MlxLlmResult};
@@ -45,8 +46,17 @@ impl LinearQuantization {
 /// Runtime representation of a projection weight.
 #[derive(Debug)]
 pub enum LinearWeight {
-    Dense(MlxArray),
+    Dense(DenseLinear),
     Quantized(QuantizedLinear),
+}
+
+/// Dense projection with both original and matmul-ready transposed weights.
+#[derive(Debug)]
+pub struct DenseLinear {
+    pub weight: MlxArray,
+    /// `None` only for non-rank-2 placeholder tensors used by load/manifest
+    /// tests; real forward calls reject those shapes with a config error.
+    transposed: Option<MlxArray>,
 }
 
 /// Packed affine quantized projection weight plus its scale/bias metadata.
@@ -58,9 +68,19 @@ pub struct QuantizedLinear {
     pub group_size: i32,
     pub bits: i32,
     pub mode: String,
+    mode_cstr: CString,
 }
 
 impl LinearWeight {
+    pub fn dense(weight: MlxArray) -> MlxLlmResult<Self> {
+        let transposed = if weight.ndim() == 2 {
+            Some(transpose(&weight, &[1, 0], None)?.contiguous_on_stream(None)?)
+        } else {
+            None
+        };
+        Ok(Self::Dense(DenseLinear { weight, transposed }))
+    }
+
     pub fn load(
         weights: &SafeTensorBundle,
         base_weight_name: &str,
@@ -81,16 +101,22 @@ impl LinearWeight {
                     quant,
                 )?))
             }
-            _ => Ok(Self::Dense(weights.read_array(base_weight_name)?)),
+            _ => Self::dense(weights.read_array(base_weight_name)?),
         }
     }
 
     pub fn forward(&self, input: &MlxArray, stream: Option<&MlxStream>) -> MlxLlmResult<MlxArray> {
         match self {
             Self::Dense(weight) => {
-                matmul(input, &transpose(weight, &[1, 0], stream)?, stream).map_err(Into::into)
+                let transposed = weight.transposed.as_ref().ok_or_else(|| {
+                    MlxLlmError::ConfigInvalid(format!(
+                        "dense linear weight must be rank-2 for forward, got shape {:?}",
+                        weight.weight.shape()
+                    ))
+                })?;
+                matmul(input, transposed, stream).map_err(Into::into)
             }
-            Self::Quantized(weight) => quantized_matmul(
+            Self::Quantized(weight) => quantized_matmul_prechecked(
                 input,
                 &weight.weight,
                 &weight.scales,
@@ -98,7 +124,7 @@ impl LinearWeight {
                 true,
                 weight.group_size,
                 weight.bits,
-                &weight.mode,
+                weight.mode_cstr.as_c_str(),
                 stream,
             )
             .map_err(Into::into),
@@ -107,7 +133,7 @@ impl LinearWeight {
 
     pub fn dense_ref(&self) -> Option<&MlxArray> {
         match self {
-            Self::Dense(weight) => Some(weight),
+            Self::Dense(weight) => Some(&weight.weight),
             Self::Quantized(_) => None,
         }
     }
@@ -146,6 +172,8 @@ fn load_quantized_linear(
     let (scales_name, biases_name) = quantized_sibling_names(base_weight_name)?;
     require_tensor(weights, &scales_name)?;
     require_tensor(weights, &biases_name)?;
+    let mode_cstr = CString::new(quant.mode.as_str())
+        .map_err(|_| MlxLlmError::ConfigInvalid("MLX quantization mode contains NUL".into()))?;
     Ok(QuantizedLinear {
         weight: weights.read_array(base_weight_name)?,
         scales: weights.read_array(&scales_name)?,
@@ -153,6 +181,7 @@ fn load_quantized_linear(
         group_size: quant.group_size,
         bits: quant.bits,
         mode: quant.mode.clone(),
+        mode_cstr,
     })
 }
 
@@ -198,4 +227,107 @@ fn require_tensor(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<()> {
         path: weights.path_for_error(),
         reason: format!("missing quantized tensor sibling `{name}`"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn quantized_linear_loads_from_safetensors_and_runs_forward() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+        use xybrid_mlx::MlxArray;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let packed_weight = le_u32_bytes(&[0; 16]);
+        let scales = le_f32_bytes(&[1.0, 1.0]);
+        let biases = le_f32_bytes(&[0.0, 0.0]);
+        let tensors = vec![
+            (
+                "proj.weight".to_string(),
+                TensorView::new(Dtype::U32, vec![2, 8], &packed_weight).unwrap(),
+            ),
+            (
+                "proj.scales".to_string(),
+                TensorView::new(Dtype::F32, vec![2, 1], &scales).unwrap(),
+            ),
+            (
+                "proj.biases".to_string(),
+                TensorView::new(Dtype::F32, vec![2, 1], &biases).unwrap(),
+            ),
+        ];
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file(tensors, &None, &path).unwrap();
+
+        let bundle = SafeTensorBundle::from_single_file(path);
+        let quant = LinearQuantization::new(4, 64, "affine").unwrap();
+        let weight = LinearWeight::load(&bundle, "proj.weight", Some(&quant)).unwrap();
+
+        assert!(matches!(weight, LinearWeight::Quantized(_)));
+        let input = MlxArray::from_slice_f32(&[0.25; 64], &[1, 64]).unwrap();
+        let output = weight.forward(&input, None).unwrap();
+        assert_eq!(output.shape(), vec![1, 2]);
+        let values = output.to_vec_f32().unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values.iter().all(|value| value.is_finite()));
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn dense_linear_constructor_runs_forward() {
+        use xybrid_mlx::MlxArray;
+
+        let weight = MlxArray::from_slice_f32(
+            &[
+                1.0, 2.0, 3.0, //
+                4.0, 5.0, 6.0,
+            ],
+            &[2, 3],
+        )
+        .unwrap();
+        let linear = LinearWeight::dense(weight).unwrap();
+        let input = MlxArray::from_slice_f32(&[1.0, 10.0, 100.0], &[1, 3]).unwrap();
+
+        let output = linear.forward(&input, None).unwrap();
+
+        assert_eq!(output.shape(), vec![1, 2]);
+        let values = output.to_vec_f32().unwrap();
+        assert_eq!(values, vec![321.0, 654.0]);
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn le_u32_bytes(values: &[u32]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(values.len() * std::mem::size_of::<u32>());
+        for value in values {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        out
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn le_f32_bytes(values: &[f32]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(values.len() * std::mem::size_of::<f32>());
+        for value in values {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        out
+    }
 }

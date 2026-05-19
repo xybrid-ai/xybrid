@@ -174,7 +174,16 @@ pub fn generate_tokens<'cb>(
 fn resolve_eos_tokens(tokenizer: &tokenizers::Tokenizer) -> Vec<i64> {
     // tokenizers 0.19 exposes the EOS token as part of the added-tokens map,
     // not a dedicated accessor. Look for the HF-canonical names.
-    const EOS_NAMES: &[&str] = &["<|endoftext|>", "<|im_end|>", "</s>", "<|end_of_text|>"];
+    const EOS_NAMES: &[&str] = &[
+        "<|endoftext|>",
+        "<|im_end|>",
+        "</s>",
+        "<|end_of_text|>",
+        "<eos>",
+        "<turn|>",
+        "<end_of_turn>",
+        "<|end_of_turn|>",
+    ];
     let mut out: Vec<i64> = Vec::new();
     for name in EOS_NAMES {
         if let Some(id) = tokenizer.token_to_id(name) {
@@ -406,6 +415,7 @@ mod runtime {
         let runtime_stream = default_runtime_stream()?;
         let stream = Some(&runtime_stream);
         forward.reset_kv_cache();
+        xybrid_mlx::reset_perf_counters();
 
         // Generated token history: starts with the prompt, appended as we
         // decode so the sampler's repetition_penalty sees the whole history.
@@ -413,6 +423,10 @@ mod runtime {
         let mut generated: Vec<i64> = Vec::with_capacity(max_decode);
         let mut cumulative_text = String::new();
         let mut finish_reason = "length";
+        // Streaming and stop-sequence scans require stable text every token.
+        // The async greedy path is intentionally disabled in that case so
+        // stop sequences keep the same behavior as the synchronous loop.
+        let needs_incremental_text = callback.is_some() || !params.config.stop_sequences.is_empty();
 
         info!(
             model_id = adapter.model_id_or_default(),
@@ -425,24 +439,65 @@ mod runtime {
         // last token's logits.
         let prefill_shape = token_batch_shape("prefill prompt", prompt_ids.len())?;
         let prefill_ids = xybrid_mlx::MlxArray::from_slice_i64(prompt_ids, &prefill_shape)?;
-        let logits = forward.forward(&prefill_ids, 0, stream)?;
-        let mut next_logits_row = last_token_logits(&logits, forward.vocab_size(), stream)?;
+        let mut next_logits = forward.forward(&prefill_ids, 0, stream)?;
+        let greedy_decode = params.config.temperature <= 0.0;
+        let use_async_greedy = greedy_decode
+            && !needs_incremental_text
+            && forward.uses_kv_cache()
+            && forward.supports_async_greedy();
+        let mut next_token_ids = if use_async_greedy {
+            let ids = greedy_argmax_token_ids(&next_logits, stream)?;
+            xybrid_mlx::async_eval(&[&ids])?;
+            Some(ids)
+        } else {
+            None
+        };
 
         for step in 0..max_decode {
-            let next_token = params
-                .sampler
-                .sample(&next_logits_row, params.config, &all_tokens)?;
+            let current_token_ids = next_token_ids.take();
+            let next_token = if let Some(token_ids) = current_token_ids.as_ref() {
+                if step + 1 < max_decode {
+                    // Queue one token ahead before the host readback. If the
+                    // current token is EOS, this over-prefetches one cache
+                    // entry that is discarded with the per-run cache.
+                    let position_offset =
+                        position_offset_for_history_len(prompt_ids.len() + step + 1)?;
+                    let decode_tok =
+                        xybrid_mlx::ops::cast(token_ids, xybrid_mlx::MlxDtype::I64, stream)?;
+                    let step_logits = forward.forward(&decode_tok, position_offset, stream)?;
+                    let ids = greedy_argmax_token_ids(&step_logits, stream)?;
+                    xybrid_mlx::async_eval(&[&ids])?;
+                    next_token_ids = Some(ids);
+                }
+                read_greedy_token_id(token_ids)?
+            } else if greedy_decode {
+                greedy_argmax_token(&next_logits, stream)?
+            } else {
+                let next_logits_row =
+                    last_token_logits(&next_logits, forward.vocab_size(), stream)?;
+                params
+                    .sampler
+                    .sample(&next_logits_row, params.config, &all_tokens)?
+            };
 
             all_tokens.push(next_token);
             generated.push(next_token);
 
-            // Decode the stable generated prefix, then compute a delta for
-            // streaming. Qwen byte-fallback tokens can form one Unicode
-            // scalar across multiple token ids; decoding ids one at a time
-            // turns those partial byte sequences into replacement chars.
-            let (token_text, decoded_text) =
-                decode_generated_text(tokenizer, &generated, &cumulative_text)?;
-            cumulative_text = decoded_text;
+            // Streaming callbacks and text stop-sequences need stable text on
+            // every token. Plain batch generation can defer tokenizer decode
+            // until the end and avoid an O(tokens^2) prefix decode loop.
+            let token_text = if needs_incremental_text {
+                // Decode the stable generated prefix, then compute a delta for
+                // streaming. Qwen byte-fallback tokens can form one Unicode
+                // scalar across multiple token ids; decoding ids one at a time
+                // turns those partial byte sequences into replacement chars.
+                let (token_text, decoded_text) =
+                    decode_generated_text(tokenizer, &generated, &cumulative_text)?;
+                cumulative_text = decoded_text;
+                token_text
+            } else {
+                String::new()
+            };
 
             // Timing: first-token latency + inter-chunk gaps.
             let now = Instant::now();
@@ -464,10 +519,12 @@ mod runtime {
             // stop-sequence from the returned text — matches the llama.cpp
             // adapter's contract.
             let mut hit_stop = false;
-            for stop in &params.config.stop_sequences {
-                if !stop.is_empty() && cumulative_text.contains(stop) {
-                    hit_stop = true;
-                    break;
+            if needs_incremental_text {
+                for stop in &params.config.stop_sequences {
+                    if !stop.is_empty() && cumulative_text.contains(stop) {
+                        hit_stop = true;
+                        break;
+                    }
                 }
             }
             if hit_stop {
@@ -491,18 +548,22 @@ mod runtime {
             // Decode step: runtime architectures reset their resident
             // attention/conv caches before prefill, then only forward the
             // newest token at the absolute position.
-            let (decode_ids, position_offset) = if forward.uses_kv_cache() {
-                decode_forward_input_with_kv_cache(&all_tokens)?
-            } else {
-                decode_forward_input_without_kv_cache(&all_tokens)?
-            };
-            let decode_shape = token_batch_shape("decode input", decode_ids.len())?;
-            let decode_tok = xybrid_mlx::MlxArray::from_slice_i64(decode_ids, &decode_shape)?;
-            let step_logits = forward.forward(&decode_tok, position_offset, stream)?;
-            next_logits_row = last_token_logits(&step_logits, forward.vocab_size(), stream)?;
+            if !use_async_greedy {
+                let (decode_ids, position_offset) = if forward.uses_kv_cache() {
+                    decode_forward_input_with_kv_cache(&all_tokens)?
+                } else {
+                    decode_forward_input_without_kv_cache(&all_tokens)?
+                };
+                let decode_shape = token_batch_shape("decode input", decode_ids.len())?;
+                let decode_tok = xybrid_mlx::MlxArray::from_slice_i64(decode_ids, &decode_shape)?;
+                next_logits = forward.forward(&decode_tok, position_offset, stream)?;
+            }
         }
 
         let tokens_generated = generated.len();
+        if !needs_incremental_text {
+            cumulative_text = decode_generated_text(tokenizer, &generated, "")?.1;
+        }
         let fields =
             mlx_streaming_fields(start, &chunk_timestamps, prompt_ids.len(), tokens_generated);
 
@@ -513,6 +574,34 @@ mod runtime {
             finish_reason,
             "mlx.generate.done"
         );
+        let perf = xybrid_mlx::perf_counters();
+        let generated_denominator = tokens_generated.max(1) as f64;
+        debug!(
+            eval_calls = perf.eval_calls,
+            async_eval_calls = perf.async_eval_calls,
+            to_vec_f32_calls = perf.to_vec_f32_calls,
+            to_vec_u32_calls = perf.to_vec_u32_calls,
+            evals_per_token = perf.eval_calls as f64 / generated_denominator,
+            f32_readbacks_per_token = perf.to_vec_f32_calls as f64 / generated_denominator,
+            u32_readbacks_per_token = perf.to_vec_u32_calls as f64 / generated_denominator,
+            async_greedy = use_async_greedy,
+            "mlx.generate.perf"
+        );
+        if std::env::var_os("XYBRID_MLX_PRINT_PERF").is_some() {
+            eprintln!(
+                "mlx perf: eval_calls={} async_eval_calls={} to_vec_f32_calls={} \
+                 to_vec_u32_calls={} evals_per_token={:.4} f32_readbacks_per_token={:.4} \
+                 u32_readbacks_per_token={:.4} async_greedy={}",
+                perf.eval_calls,
+                perf.async_eval_calls,
+                perf.to_vec_f32_calls,
+                perf.to_vec_u32_calls,
+                perf.eval_calls as f64 / generated_denominator,
+                perf.to_vec_f32_calls as f64 / generated_denominator,
+                perf.to_vec_u32_calls as f64 / generated_denominator,
+                use_async_greedy
+            );
+        }
         debug!(
             prefill_tokens = prompt_ids.len(),
             decode_tokens = tokens_generated,
@@ -577,6 +666,10 @@ mod runtime {
             )
         }
 
+        fn supports_async_greedy(&self) -> bool {
+            matches!(self, Self::Qwen35 { .. } | Self::Lfm35 { .. })
+        }
+
         fn forward(
             &mut self,
             input_ids: &xybrid_mlx::MlxArray,
@@ -622,18 +715,93 @@ mod runtime {
         } else {
             xybrid_mlx::ops::cast(logits, xybrid_mlx::MlxDtype::F32, stream)?
         };
-        // Flattened readback. The logits tensor is `[1, T, V]`, and we want
-        // the last `V` slice. For T=1 (decode step) this is just to_vec_f32;
-        // for T>1 (prefill) we take the tail.
-        let data = logits.to_vec_f32_on_stream(stream)?;
-        if data.len() < vocab {
+        let shape = logits.shape();
+        if shape.len() != 3 {
             return Err(MlxLlmError::ConfigInvalid(format!(
-                "logits read back {} elements, expected at least {}",
+                "logits must be rank-3 [1, T, V], got shape {shape:?}"
+            )));
+        }
+        if shape[0] != 1 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "MLX generation currently supports batch size 1, got logits shape {shape:?}"
+            )));
+        }
+        let seq_len = shape[1];
+        let vocab_i32 = token_count_to_i32("vocab", vocab)?;
+        if shape[2] != vocab_i32 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "logits vocab dimension is {}, expected {vocab_i32}",
+                shape[2]
+            )));
+        }
+        let last_pos = seq_len.checked_sub(1).ok_or_else(|| {
+            MlxLlmError::ConfigInvalid("logits sequence dimension must be positive".into())
+        })?;
+        let last = xybrid_mlx::ops::slice(
+            &logits,
+            &[0, last_pos, 0],
+            &[1, seq_len, vocab_i32],
+            &[1, 1, 1],
+            stream,
+        )?;
+        let data = last.to_vec_f32_on_stream(stream)?;
+        if data.len() != vocab {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "last-token logits read back {} elements, expected {}",
                 data.len(),
                 vocab
             )));
         }
-        Ok(data[data.len() - vocab..].to_vec())
+        Ok(data)
+    }
+
+    /// Greedy decode keeps token selection on the MLX stream and reads back
+    /// only the selected token id. This matches the existing sampler's
+    /// temperature=0 semantics and avoids copying a full vocab row to the CPU
+    /// on every token.
+    fn greedy_argmax_token(
+        logits: &xybrid_mlx::MlxArray,
+        stream: Option<&xybrid_mlx::MlxStream>,
+    ) -> MlxLlmResult<i64> {
+        let ids = greedy_argmax_token_ids(logits, stream)?;
+        read_greedy_token_id(&ids)
+    }
+
+    fn greedy_argmax_token_ids(
+        logits: &xybrid_mlx::MlxArray,
+        stream: Option<&xybrid_mlx::MlxStream>,
+    ) -> MlxLlmResult<xybrid_mlx::MlxArray> {
+        debug_assert_eq!(
+            logits.shape().first().copied(),
+            Some(1),
+            "MLX generation currently supports batch size 1"
+        );
+        let ids = xybrid_mlx::ops::argmax(logits, -1, stream)?;
+        let shape = ids.shape();
+        let ids = match shape.as_slice() {
+            [1, 1] => ids,
+            [1, seq_len] if *seq_len > 1 => {
+                let last_pos = seq_len.checked_sub(1).ok_or_else(|| {
+                    MlxLlmError::ConfigInvalid(
+                        "greedy argmax token ids must have positive sequence length".into(),
+                    )
+                })?;
+                xybrid_mlx::ops::slice(&ids, &[0, last_pos], &[1, *seq_len], &[1, 1], stream)
+                    .map_err(MlxLlmError::from)?
+            }
+            _ => Err(MlxLlmError::ConfigInvalid(format!(
+                "greedy argmax returned unexpected shape {shape:?}"
+            )))?,
+        };
+        ids.contiguous_on_stream(stream).map_err(Into::into)
+    }
+
+    fn read_greedy_token_id(ids: &xybrid_mlx::MlxArray) -> MlxLlmResult<i64> {
+        let ids = ids.to_vec_u32_evaluated()?;
+        let token = ids.last().ok_or_else(|| {
+            MlxLlmError::ConfigInvalid("greedy argmax returned no token ids".into())
+        })?;
+        Ok(i64::from(*token))
     }
 
     fn emit_callback<'cb>(

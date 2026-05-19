@@ -11,6 +11,9 @@ use crate::dtype::MlxDtype;
 use crate::error::{MlxError, MlxResult};
 use crate::ffi;
 use crate::stream::MlxStream;
+use std::cell::OnceCell;
+use std::ffi::CStr;
+use std::thread::LocalKey;
 
 /// Borrow the caller-provided stream or, if `None`, fetch a clone of the
 /// thread-local default CPU stream. Returned value's `Drop` cleans up the
@@ -35,6 +38,45 @@ fn resolve_stream(opt: Option<&MlxStream>) -> MlxResult<StreamRef<'_>> {
         Some(s) => Ok(StreamRef::Borrowed(s)),
         None => Ok(StreamRef::Owned(MlxStream::default_cpu()?)),
     }
+}
+
+thread_local! {
+    static SCALAR_HALF: OnceCell<MlxArray> = const { OnceCell::new() };
+    static SCALAR_ONE: OnceCell<MlxArray> = const { OnceCell::new() };
+    static SCALAR_INV_SQRT2: OnceCell<MlxArray> = const { OnceCell::new() };
+    static SCALAR_GELU_CUBIC: OnceCell<MlxArray> = const { OnceCell::new() };
+    static SCALAR_SQRT_2_OVER_PI: OnceCell<MlxArray> = const { OnceCell::new() };
+}
+
+fn scalar_f32(value: f32) -> MlxResult<MlxArray> {
+    let bits = value.to_bits();
+    if bits == 0.5f32.to_bits() {
+        return cached_scalar(&SCALAR_HALF, value);
+    }
+    if bits == 1.0f32.to_bits() {
+        return cached_scalar(&SCALAR_ONE, value);
+    }
+    if bits == std::f32::consts::FRAC_1_SQRT_2.to_bits() {
+        return cached_scalar(&SCALAR_INV_SQRT2, value);
+    }
+    if bits == 0.044_715f32.to_bits() {
+        return cached_scalar(&SCALAR_GELU_CUBIC, value);
+    }
+    if bits == 0.797_884_6f32.to_bits() {
+        return cached_scalar(&SCALAR_SQRT_2_OVER_PI, value);
+    }
+    MlxArray::from_slice_f32(&[value], &[1])
+}
+
+fn cached_scalar(cell: &'static LocalKey<OnceCell<MlxArray>>, value: f32) -> MlxResult<MlxArray> {
+    cell.with(|slot| {
+        if let Some(array) = slot.get() {
+            return Ok(array.clone());
+        }
+        let array = MlxArray::from_slice_f32(&[value], &[1])?;
+        let _ = slot.set(array.clone());
+        Ok(array)
+    })
 }
 
 /// Matrix multiplication `a @ b`.
@@ -71,6 +113,36 @@ pub fn quantized_matmul(
     validate_quantized_args(x, weight, scales, biases, transpose, group_size, bits, mode)?;
     let mode = std::ffi::CString::new(mode)
         .map_err(|_| MlxError::Internal("MLX quantization mode contains NUL".into()))?;
+    quantized_matmul_prechecked(
+        x,
+        weight,
+        scales,
+        biases,
+        transpose,
+        group_size,
+        bits,
+        mode.as_c_str(),
+        stream,
+    )
+}
+
+/// Quantized matrix multiplication for callers that validated static weight
+/// metadata at load time.
+///
+/// This keeps model hot paths from repeatedly checking shapes/dtypes and
+/// allocating a C string for the quantization mode on every token.
+#[allow(clippy::too_many_arguments)]
+pub fn quantized_matmul_prechecked(
+    x: &MlxArray,
+    weight: &MlxArray,
+    scales: &MlxArray,
+    biases: Option<&MlxArray>,
+    transpose: bool,
+    group_size: i32,
+    bits: i32,
+    mode: &CStr,
+    stream: Option<&MlxStream>,
+) -> MlxResult<MlxArray> {
     let s = resolve_stream(stream)?;
     let group_size = ffi::optional_int(Some(group_size));
     let bits = ffi::optional_int(Some(bits));
@@ -85,7 +157,7 @@ pub fn quantized_matmul(
             transpose,
             group_size,
             bits,
-            mode.as_c_str(),
+            mode,
             s.as_stream().as_raw(),
         )?
     };
@@ -97,6 +169,7 @@ pub fn quantized_matmul(
 /// Used for tensors consumed by operations that do not have row-wise
 /// quantized variants yet, such as embedding lookup. Projection weights stay
 /// packed and use [`quantized_matmul`].
+#[allow(clippy::too_many_arguments)]
 pub fn dequantize(
     weight: &MlxArray,
     scales: &MlxArray,
@@ -130,6 +203,7 @@ pub fn dequantize(
     Ok(MlxArray::from_raw(raw))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_quantized_args(
     x: &MlxArray,
     weight: &MlxArray,
@@ -422,9 +496,9 @@ pub fn silu(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
 /// This is the canonical BERT activation. Gemma's gated-GeLU block uses
 /// the tanh approximation upstream; use [`gelu_tanh`] for that path.
 pub fn gelu(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
-    let inv_sqrt2 = MlxArray::from_slice_f32(&[std::f32::consts::FRAC_1_SQRT_2], &[1])?;
-    let half = MlxArray::from_slice_f32(&[0.5], &[1])?;
-    let one = MlxArray::from_slice_f32(&[1.0], &[1])?;
+    let inv_sqrt2 = scalar_f32(std::f32::consts::FRAC_1_SQRT_2)?;
+    let half = scalar_f32(0.5)?;
+    let one = scalar_f32(1.0)?;
 
     let scaled = mul(a, &inv_sqrt2, stream)?;
     let erf_scaled = erf(&scaled, stream)?;
@@ -438,10 +512,10 @@ pub fn gelu(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
 /// Formula: `0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))`.
 /// Gemma-family gated-GeLU FFNs use this approximation in upstream MLX-LM.
 pub fn gelu_tanh(a: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
-    let half = MlxArray::from_slice_f32(&[0.5], &[1])?;
-    let one = MlxArray::from_slice_f32(&[1.0], &[1])?;
-    let cubic_coeff = MlxArray::from_slice_f32(&[0.044_715], &[1])?;
-    let sqrt_2_over_pi = MlxArray::from_slice_f32(&[0.797_884_6], &[1])?;
+    let half = scalar_f32(0.5)?;
+    let one = scalar_f32(1.0)?;
+    let cubic_coeff = scalar_f32(0.044_715)?;
+    let sqrt_2_over_pi = scalar_f32(0.797_884_6)?;
 
     let x2 = mul(a, a, stream)?;
     let x3 = mul(&x2, a, stream)?;
@@ -827,14 +901,7 @@ mod tests {
         let idx = argmax(&x, -1, None).unwrap();
         assert_eq!(idx.shape(), vec![2]);
         assert_eq!(idx.dtype().unwrap(), MlxDtype::U32);
-        // We can't read the u32 data back through our f32 helpers without a
-        // cast; exercise cast-to-f32 as a round-trip sanity check (the
-        // index values round-trip exactly because they fit in f32).
-        let as_f32 = cast(&idx, MlxDtype::F32, None)
-            .unwrap()
-            .to_vec_f32()
-            .unwrap();
-        assert_eq!(as_f32, vec![2.0, 0.0]);
+        assert_eq!(idx.to_vec_u32().unwrap(), vec![2, 0]);
     }
 
     #[test]

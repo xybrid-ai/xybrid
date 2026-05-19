@@ -532,10 +532,12 @@ pub mod runtime {
     use super::{LayerKind, Lfm35Config};
 
     use xybrid_mlx::ops::{
-        add, concat, conv1d, gather, matmul, mul, reshape, rms_norm, rope,
-        scaled_dot_product_attention, silu, transpose,
+        add, concat, conv1d, gather, mul, reshape, rms_norm, rope, scaled_dot_product_attention,
+        silu, slice, slice_update, transpose,
     };
-    use xybrid_mlx::{MlxArray, MlxStream};
+    use xybrid_mlx::{MlxArray, MlxDtype, MlxStream};
+
+    const KV_CACHE_STEP: usize = 256;
 
     /// One full-attention block's weights. Layout mirrors Qwen 3 with
     /// the LFM-specific field names (`out_proj` / `{q,k}_layernorm`).
@@ -595,8 +597,8 @@ pub mod runtime {
     /// K/V cache for a full-attention LFM layer.
     #[derive(Debug, Default)]
     pub struct AttentionCache {
-        keys: Option<MlxArray>,
-        values: Option<MlxArray>,
+        keys: Option<CachedAxis2>,
+        values: Option<CachedAxis2>,
     }
 
     impl AttentionCache {
@@ -604,6 +606,12 @@ pub mod runtime {
             self.keys = None;
             self.values = None;
         }
+    }
+
+    #[derive(Debug)]
+    struct CachedAxis2 {
+        storage: MlxArray,
+        len: usize,
     }
 
     /// Recurrent short-conv state. Stores the previous
@@ -623,10 +631,11 @@ pub mod runtime {
     #[derive(Debug)]
     pub struct Lfm35Weights {
         pub embed_tokens: MlxArray,
+        pub embed_tokens_linear: LinearWeight,
         pub layers: Vec<Lfm35Layer>,
         pub embedding_norm: MlxArray,
         /// `None` when [`Lfm35Config::tie_word_embeddings`] is set.
-        pub lm_head: Option<MlxArray>,
+        pub lm_head: Option<LinearWeight>,
         layer_cache: Vec<Lfm35LayerCache>,
     }
 
@@ -649,6 +658,11 @@ pub mod runtime {
         let quant = quant.as_ref();
 
         let embed_tokens = load_dense_or_dequantized(weights, "model.embed_tokens.weight", quant)?;
+        let embed_tokens_linear = if cfg.is_quantized() {
+            LinearWeight::load(weights, "model.embed_tokens.weight", quant)?
+        } else {
+            LinearWeight::dense(embed_tokens.clone())?
+        };
         let kinds = cfg.layer_kinds();
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for (l, kind) in kinds.iter().enumerate() {
@@ -738,11 +752,12 @@ pub mod runtime {
         let lm_head = if cfg.tie_word_embeddings {
             None
         } else {
-            Some(load_dense_or_dequantized(weights, "lm_head.weight", quant)?)
+            Some(LinearWeight::load(weights, "lm_head.weight", quant)?)
         };
 
         Ok(Lfm35Weights {
             embed_tokens,
+            embed_tokens_linear,
             layers,
             embedding_norm,
             lm_head,
@@ -809,8 +824,11 @@ pub mod runtime {
         }
 
         let final_norm = rms_norm(&hidden, Some(&weights.embedding_norm), cfg.norm_eps, stream)?;
-        let lm_w = weights.lm_head.as_ref().unwrap_or(&weights.embed_tokens);
-        matmul(&final_norm, &transpose(lm_w, &[1, 0], stream)?, stream).map_err(Into::into)
+        let lm_head = weights
+            .lm_head
+            .as_ref()
+            .unwrap_or(&weights.embed_tokens_linear);
+        lm_head.forward(&final_norm, stream)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -936,22 +954,141 @@ pub mod runtime {
     }
 
     fn append_cached_axis2(
-        slot: &mut Option<MlxArray>,
+        slot: &mut Option<CachedAxis2>,
         new_slice: &MlxArray,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
-        match slot.take() {
-            Some(existing) => {
-                let combined = concat(&[&existing, new_slice], 2, stream)?;
-                *slot = Some(combined.clone());
-                Ok(combined)
-            }
-            None => {
-                let cached = new_slice.clone();
-                *slot = Some(cached.clone());
-                Ok(cached)
-            }
+        let shape = new_slice.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "lfm K/V cache slice must be rank-4, got shape {shape:?}"
+            )));
         }
+        debug_assert_eq!(
+            new_slice.dtype().ok(),
+            Some(MlxDtype::F32),
+            "lfm K/V cache storage is f32; quantized LFM projections currently produce f32"
+        );
+        let b = shape[0];
+        let h = shape[1];
+        let step_len = shape_dim_usize("lfm", "kv_cache_step_len", shape[2])?;
+        let d = shape[3];
+        let old_len = slot.as_ref().map_or(0, |cache| cache.len);
+        let new_len = old_len
+            .checked_add(step_len)
+            .ok_or_else(|| MlxLlmError::ConfigInvalid("lfm K/V cache length overflow".into()))?;
+
+        let mut storage = match slot.take() {
+            Some(cache) if new_len <= cache_capacity(&cache.storage)? => cache.storage,
+            Some(cache) => grow_cached_axis2(&cache, b, h, d, new_len, stream)?,
+            None => allocate_cached_axis2(b, h, d, new_len)?,
+        };
+
+        storage = slice_update(
+            &storage,
+            new_slice,
+            &[0, 0, shape_dim_i32("lfm", "kv_cache_old_len", old_len)?, 0],
+            &[b, h, shape_dim_i32("lfm", "kv_cache_new_len", new_len)?, d],
+            &[1, 1, 1, 1],
+            stream,
+        )?;
+
+        let visible = slice(
+            &storage,
+            &[0, 0, 0, 0],
+            &[
+                b,
+                h,
+                shape_dim_i32("lfm", "kv_cache_visible_len", new_len)?,
+                d,
+            ],
+            &[1, 1, 1, 1],
+            stream,
+        )?;
+        *slot = Some(CachedAxis2 {
+            storage,
+            len: new_len,
+        });
+        Ok(visible)
+    }
+
+    fn cache_capacity(cache: &MlxArray) -> MlxLlmResult<usize> {
+        let shape = cache.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "lfm K/V cache storage must be rank-4, got shape {shape:?}"
+            )));
+        }
+        shape_dim_usize("lfm", "kv_cache_capacity", shape[2])
+    }
+
+    fn grow_cached_axis2(
+        cache: &CachedAxis2,
+        b: i32,
+        h: i32,
+        d: i32,
+        required_len: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let grown = allocate_cached_axis2(b, h, d, required_len)?;
+        let visible = slice(
+            &cache.storage,
+            &[0, 0, 0, 0],
+            &[
+                b,
+                h,
+                shape_dim_i32("lfm", "kv_cache_copy_len", cache.len)?,
+                d,
+            ],
+            &[1, 1, 1, 1],
+            stream,
+        )?;
+        slice_update(
+            &grown,
+            &visible,
+            &[0, 0, 0, 0],
+            &[
+                b,
+                h,
+                shape_dim_i32("lfm", "kv_cache_copy_len", cache.len)?,
+                d,
+            ],
+            &[1, 1, 1, 1],
+            stream,
+        )
+        .map_err(Into::into)
+    }
+
+    fn allocate_cached_axis2(
+        b: i32,
+        h: i32,
+        d: i32,
+        required_len: usize,
+    ) -> MlxLlmResult<MlxArray> {
+        let capacity = required_len
+            .max(1)
+            .div_ceil(KV_CACHE_STEP)
+            .checked_mul(KV_CACHE_STEP)
+            .ok_or_else(|| MlxLlmError::ConfigInvalid("lfm K/V cache capacity overflow".into()))?;
+        let b_usize = shape_dim_usize("lfm", "kv_cache_batch", b)?;
+        let h_usize = shape_dim_usize("lfm", "kv_cache_heads", h)?;
+        let d_usize = shape_dim_usize("lfm", "kv_cache_head_dim", d)?;
+        let zeros_len = shape_product_usize(
+            "lfm",
+            "kv_cache_element_count",
+            &[b_usize, h_usize, capacity, d_usize],
+        )?;
+        let zeros = vec![0.0f32; zeros_len];
+        MlxArray::from_slice_f32(
+            &zeros,
+            &[
+                b,
+                h,
+                shape_dim_i32("lfm", "kv_cache_capacity", capacity)?,
+                d,
+            ],
+        )
+        .map_err(Into::into)
     }
 
     fn conv_block(
@@ -1011,12 +1148,30 @@ pub mod runtime {
         let end = start.checked_add(len).ok_or_else(|| {
             MlxLlmError::ConfigInvalid("lfm hidden range end overflows usize".into())
         })?;
-        let indices: Vec<i32> = (start..end)
-            .map(|i| shape_dim_i32("lfm", "hidden_range_index", i))
-            .collect::<MlxLlmResult<_>>()?;
-        let len_i32 = shape_dim_i32("lfm", "hidden_range_len", len)?;
-        let index_array = MlxArray::from_slice_i32(&indices, &[len_i32])?;
-        gather(x, &index_array, 2, stream).map_err(Into::into)
+        let shape = x.shape();
+        if shape.len() != 3 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "lfm hidden range source must be rank-3, got shape {shape:?}"
+            )));
+        }
+        let width = shape_dim_usize("lfm", "hidden_size", shape[2])?;
+        if end > width {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "lfm hidden range {start}..{end} exceeds width {width}"
+            )));
+        }
+        slice(
+            x,
+            &[0, 0, shape_dim_i32("lfm", "hidden_range_start", start)?],
+            &[
+                shape[0],
+                shape[1],
+                shape_dim_i32("lfm", "hidden_range_end", end)?,
+            ],
+            &[1, 1, 1],
+            stream,
+        )
+        .map_err(Into::into)
     }
 
     fn left_pad_sequence(
@@ -1045,14 +1200,22 @@ pub mod runtime {
         len: usize,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
-        let seq_len = shape_dim_usize("lfm", "sequence_len", x.shape()[1])?;
+        let shape = x.shape();
+        if shape.len() != 3 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "lfm sequence slice source must be rank-3, got shape {shape:?}"
+            )));
+        }
+        let seq_len = shape_dim_usize("lfm", "sequence_len", shape[1])?;
         let start = seq_len.saturating_sub(len);
-        let indices: Vec<i32> = (start..seq_len)
-            .map(|i| shape_dim_i32("lfm", "sequence_index", i))
-            .collect::<MlxLlmResult<_>>()?;
-        let indices_len = shape_dim_i32("lfm", "sequence_index_len", indices.len())?;
-        let index_array = MlxArray::from_slice_i32(&indices, &[indices_len])?;
-        gather(x, &index_array, 1, stream).map_err(Into::into)
+        slice(
+            x,
+            &[0, shape_dim_i32("lfm", "sequence_start", start)?, 0],
+            &[shape[0], shape[1], shape[2]],
+            &[1, 1, 1],
+            stream,
+        )
+        .map_err(Into::into)
     }
 
     /// Reshape `[B, T, heads * head_dim]` → `[B, heads, T, head_dim]`.
@@ -1084,6 +1247,68 @@ pub mod runtime {
         let transposed = transpose(x, &[0, 2, 1, 3], stream)?;
         let width = shape_product_i32("lfm", "merged_attention_width", &[heads, head_dim])?;
         reshape(&transposed, &[b, t, width], stream).map_err(Into::into)
+    }
+
+    #[cfg(test)]
+    mod runtime_tests {
+        use super::*;
+
+        #[test]
+        fn take_hidden_range_slices_contiguous_width() {
+            let data: Vec<f32> = (0..12).map(|i| i as f32).collect();
+            let x = MlxArray::from_slice_f32(&data, &[1, 2, 6]).unwrap();
+
+            let got = take_hidden_range(&x, 2, 3, None).unwrap();
+
+            assert_eq!(got.shape(), vec![1, 2, 3]);
+            assert_eq!(
+                got.to_vec_f32().unwrap(),
+                vec![2.0, 3.0, 4.0, 8.0, 9.0, 10.0]
+            );
+        }
+
+        #[test]
+        fn take_last_sequence_tokens_slices_tail() {
+            let data: Vec<f32> = (0..12).map(|i| i as f32).collect();
+            let x = MlxArray::from_slice_f32(&data, &[1, 4, 3]).unwrap();
+
+            let got = take_last_sequence_tokens(&x, 2, None).unwrap();
+
+            assert_eq!(got.shape(), vec![1, 2, 3]);
+            assert_eq!(
+                got.to_vec_f32().unwrap(),
+                vec![6.0, 7.0, 8.0, 9.0, 10.0, 11.0]
+            );
+        }
+
+        #[test]
+        fn append_cached_axis2_returns_visible_prefix() {
+            let mut slot = None;
+            let first = MlxArray::from_slice_f32(&[1.0, 2.0, 3.0, 4.0], &[1, 1, 2, 2]).unwrap();
+            let got = append_cached_axis2(&mut slot, &first, None).unwrap();
+
+            assert_eq!(got.shape(), vec![1, 1, 2, 2]);
+            assert_eq!(got.to_vec_f32().unwrap(), vec![1.0, 2.0, 3.0, 4.0]);
+            assert_eq!(slot.as_ref().unwrap().len, 2);
+            assert_eq!(
+                cache_capacity(&slot.as_ref().unwrap().storage).unwrap(),
+                256
+            );
+
+            let second = MlxArray::from_slice_f32(&[5.0, 6.0], &[1, 1, 1, 2]).unwrap();
+            let got = append_cached_axis2(&mut slot, &second, None).unwrap();
+
+            assert_eq!(got.shape(), vec![1, 1, 3, 2]);
+            assert_eq!(
+                got.to_vec_f32().unwrap(),
+                vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+            );
+            assert_eq!(slot.as_ref().unwrap().len, 3);
+            assert_eq!(
+                cache_capacity(&slot.as_ref().unwrap().storage).unwrap(),
+                256
+            );
+        }
     }
 }
 

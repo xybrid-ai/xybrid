@@ -624,19 +624,14 @@ pub mod runtime {
     use super::Gemma4Config;
 
     use xybrid_mlx::ops::{
-        add, cast, concat, div, gather, gelu_tanh, matmul, mul, reshape, rms_norm, rope,
+        add, cast, concat, div, gather, gelu_tanh, mul, reshape, rms_norm, rope,
         scaled_dot_product_attention, tanh, transpose,
     };
     use xybrid_mlx::{MlxArray, MlxDtype, MlxStream};
 
     /// One transformer block's weights.
     ///
-    /// Projection/FFN weights are materialised as [`MlxArray`]s. Q/K
-    /// per-head norm vectors stay host-side because the public Gemma 4
-    /// BF16 bundle mixes 256-wide local layers with 512-wide global layers,
-    /// and the current MLX fused RMSNorm/reshape path is not reliable for
-    /// that head-prep graph.
-    ///
+    /// Projection/FFN weights are materialised as [`MlxArray`]s.
     /// RMSNorm scale weights are loaded exactly as stored in the MLX
     /// SafeTensors bundle.
     #[derive(Debug)]
@@ -646,8 +641,8 @@ pub mod runtime {
         pub k_proj: LinearWeight,
         pub v_proj: LinearWeight,
         pub o_proj: LinearWeight,
-        pub q_norm: Vec<f32>,
-        pub k_norm: Vec<f32>,
+        pub q_norm: MlxArray,
+        pub k_norm: MlxArray,
         pub post_attention_layernorm: MlxArray,
         pub pre_feedforward_layernorm: MlxArray,
         pub post_feedforward_layernorm: MlxArray,
@@ -700,11 +695,12 @@ pub mod runtime {
     #[derive(Debug)]
     pub struct Gemma4Weights {
         pub embed_tokens: MlxArray,
+        pub embed_tokens_linear: LinearWeight,
         pub per_layer: Option<Gemma4PerLayerWeights>,
         pub layers: Vec<Gemma4Layer>,
         pub norm: MlxArray,
         /// `None` when [`Gemma4Config::tie_word_embeddings`] is set.
-        pub lm_head: Option<MlxArray>,
+        pub lm_head: Option<LinearWeight>,
         layer_cache: Vec<Gemma4LayerCache>,
     }
 
@@ -732,6 +728,11 @@ pub mod runtime {
 
         let embed_tokens =
             load_dense_or_dequantized(weights, &key("model.embed_tokens.weight"), quant)?;
+        let embed_tokens_linear = if cfg.is_quantized() {
+            LinearWeight::load(weights, &key("model.embed_tokens.weight"), quant)?
+        } else {
+            LinearWeight::dense(embed_tokens.clone())?
+        };
         let per_layer = if cfg.has_per_layer_inputs() {
             Some(Gemma4PerLayerWeights {
                 embed_tokens_per_layer: load_dense_or_dequantized(
@@ -801,14 +802,8 @@ pub mod runtime {
                     &key(&format!("{base}.self_attn.o_proj.weight")),
                     quant,
                 )?,
-                q_norm: load_rmsnorm_values(
-                    weights,
-                    &key(&format!("{base}.self_attn.q_norm.weight")),
-                )?,
-                k_norm: load_rmsnorm_values(
-                    weights,
-                    &key(&format!("{base}.self_attn.k_norm.weight")),
-                )?,
+                q_norm: load_rmsnorm(weights, &key(&format!("{base}.self_attn.q_norm.weight")))?,
+                k_norm: load_rmsnorm(weights, &key(&format!("{base}.self_attn.k_norm.weight")))?,
                 post_attention_layernorm: load_rmsnorm(
                     weights,
                     &key(&format!("{base}.post_attention_layernorm.weight")),
@@ -846,15 +841,12 @@ pub mod runtime {
         let lm_head = if cfg.tie_word_embeddings {
             None
         } else {
-            Some(load_dense_or_dequantized(
-                weights,
-                &key("lm_head.weight"),
-                quant,
-            )?)
+            Some(LinearWeight::load(weights, &key("lm_head.weight"), quant)?)
         };
 
         Ok(Gemma4Weights {
             embed_tokens,
+            embed_tokens_linear,
             per_layer,
             layers,
             norm,
@@ -891,11 +883,6 @@ pub mod runtime {
         } else {
             Ok(None)
         }
-    }
-
-    fn load_rmsnorm_values(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<Vec<f32>> {
-        let (floats, _shape_i32) = load_rmsnorm_values_and_shape(weights, name)?;
-        Ok(floats)
     }
 
     fn load_rmsnorm_values_and_shape(
@@ -953,6 +940,7 @@ pub mod runtime {
                             "gemma4 missing hidden_size_per_layer_input".into(),
                         )
                     })?,
+                    stream,
                 )?)
             } else {
                 None
@@ -974,8 +962,11 @@ pub mod runtime {
         }
 
         let final_norm = rms_norm(&hidden, Some(&weights.norm), cfg.rms_norm_eps, stream)?;
-        let lm_w = weights.lm_head.as_ref().unwrap_or(&weights.embed_tokens);
-        let mut logits = matmul(&final_norm, &transpose(lm_w, &[1, 0], stream)?, stream)?;
+        let lm_head = weights
+            .lm_head
+            .as_ref()
+            .unwrap_or(&weights.embed_tokens_linear);
+        let mut logits = lm_head.forward(&final_norm, stream)?;
         if let Some(cap) = cfg.final_logit_softcapping {
             let cap = MlxArray::from_slice_f32(&[cap], &[1])?;
             logits = mul(&tanh(&div(&logits, &cap, stream)?, stream)?, &cap, stream)?;
@@ -1106,6 +1097,7 @@ pub mod runtime {
         per_layer_inputs: &MlxArray,
         layer_idx: usize,
         hidden_per_layer: usize,
+        stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
         let shape = per_layer_inputs.shape();
         if shape.len() != 4 {
@@ -1127,19 +1119,15 @@ pub mod runtime {
                 "gemma4 per-layer input width is {actual_hpl}, expected {hidden_per_layer}"
             )));
         }
-        let data = per_layer_inputs.to_vec_f32()?;
-        let b = shape_dim_usize("gemma4", "batch", b_i32)?;
-        let t = shape_dim_usize("gemma4", "sequence_len", t_i32)?;
-        let mut out = vec![0.0_f32; b * t * hidden_per_layer];
-        for batch in 0..b {
-            for pos in 0..t {
-                let src = (((batch * t + pos) * layers + layer_idx) * hidden_per_layer) as usize;
-                let dst = ((batch * t + pos) * hidden_per_layer) as usize;
-                out[dst..dst + hidden_per_layer]
-                    .copy_from_slice(&data[src..src + hidden_per_layer]);
-            }
-        }
-        MlxArray::from_slice_f32(&out, &[b_i32, t_i32, shape[3]]).map_err(Into::into)
+        let layer_idx_i32 = shape_dim_i32("gemma4", "per_layer_input_index", layer_idx)?;
+        let index = MlxArray::from_slice_i32(&[layer_idx_i32], &[1])?;
+        let selected = gather(per_layer_inputs, &index, 2, stream)?;
+        let selected = reshape(&selected, &[b_i32, t_i32, shape[3]], stream)?;
+        let selected = selected.contiguous_on_stream(stream)?;
+        // Without this materialization, the Gemma per-layer gather graph can
+        // crash inside the native MLX runtime when consumed by the next block.
+        selected.eval()?;
+        Ok(selected)
     }
 
     fn per_layer_block(
@@ -1190,12 +1178,12 @@ pub mod runtime {
         position_offset: i32,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
-        let layer_head_dim = layer.q_norm.len();
-        if layer.k_norm.len() != layer_head_dim {
+        let layer_head_dim = head_norm_width(&layer.q_norm)?;
+        let k_head_dim = head_norm_width(&layer.k_norm)?;
+        if k_head_dim != layer_head_dim {
             return Err(MlxLlmError::ConfigInvalid(format!(
                 "gemma4 q/k norm dimensions differ (q={}, k={})",
-                layer.q_norm.len(),
-                layer.k_norm.len()
+                layer_head_dim, k_head_dim
             )));
         }
         let layer_is_global = cfg.layer_is_global(layer_idx);
@@ -1203,12 +1191,13 @@ pub mod runtime {
 
         let hidden = cast(hidden, MlxDtype::F32, stream)?;
         let q = layer.q_proj.forward(&hidden, stream)?;
-        let q = host_split_heads_with_rms_norm(
+        let q = device_split_heads_with_rms_norm(
             &q,
             n_heads,
             layer_head_dim,
             Some(&layer.q_norm),
             cfg.rms_norm_eps,
+            stream,
         )?;
 
         let rope_base = if layer_is_global {
@@ -1233,19 +1222,21 @@ pub mod runtime {
         } else {
             let k = layer.k_proj.forward(&hidden, stream)?;
             let v = layer.v_proj.forward(&hidden, stream)?;
-            let k = host_split_heads_with_rms_norm(
+            let k = device_split_heads_with_rms_norm(
                 &k,
                 n_kv_heads,
                 layer_head_dim,
                 Some(&layer.k_norm),
                 cfg.rms_norm_eps,
+                stream,
             )?;
-            let v = host_split_heads_with_rms_norm(
+            let v = device_split_heads_with_rms_norm(
                 &v,
                 n_kv_heads,
                 layer_head_dim,
                 None,
                 cfg.rms_norm_eps,
+                stream,
             )?;
             let k = rope(
                 &k,
@@ -1274,6 +1265,37 @@ pub mod runtime {
         layer.o_proj.forward(&attn, stream)
     }
 
+    fn head_norm_width(weight: &MlxArray) -> MlxLlmResult<usize> {
+        let shape = weight.shape();
+        if shape.len() != 1 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 head norm must be rank-1, got shape {shape:?}"
+            )));
+        }
+        shape_dim_usize("gemma4", "head_dim", shape[0])
+    }
+
+    fn device_split_heads_with_rms_norm(
+        x: &MlxArray,
+        heads: usize,
+        head_dim: usize,
+        weight: Option<&MlxArray>,
+        eps: f32,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        if let Some(weight) = weight {
+            let actual = head_norm_width(weight)?;
+            if actual != head_dim {
+                return Err(MlxLlmError::ConfigInvalid(format!(
+                    "gemma4 head norm has {actual} values, expected head_dim={head_dim}"
+                )));
+            }
+        }
+        let split = split_heads(x, heads, head_dim, stream)?;
+        rms_norm(&split, weight, eps, stream).map_err(Into::into)
+    }
+
+    #[cfg(test)]
     fn host_split_heads_with_rms_norm(
         x: &MlxArray,
         heads: usize,
@@ -1510,6 +1532,92 @@ pub mod runtime {
             stream,
         )
         .map_err(Into::into)
+    }
+
+    #[cfg(test)]
+    mod runtime_tests {
+        use super::*;
+
+        fn assert_close(got: &[f32], expected: &[f32], tol: f32, ctx: &str) {
+            assert_eq!(
+                got.len(),
+                expected.len(),
+                "{ctx}: length mismatch got={} expected={}",
+                got.len(),
+                expected.len()
+            );
+            for (idx, (g, e)) in got.iter().zip(expected.iter()).enumerate() {
+                let diff = (g - e).abs();
+                assert!(
+                    diff <= tol,
+                    "{ctx}: element {idx} differs got={g} expected={e} diff={diff}"
+                );
+            }
+        }
+
+        #[test]
+        fn device_split_heads_rms_norm_matches_host_reference() {
+            let x = MlxArray::from_slice_f32(
+                &[
+                    1.0, 2.0, 3.0, 4.0, //
+                    5.0, 6.0, 7.0, 8.0,
+                ],
+                &[1, 2, 4],
+            )
+            .unwrap();
+            let host = host_split_heads_with_rms_norm(&x, 2, 2, Some(&[1.0, 0.5]), 1.0e-5).unwrap();
+            let weight = MlxArray::from_slice_f32(&[1.0, 0.5], &[2]).unwrap();
+
+            let device =
+                device_split_heads_with_rms_norm(&x, 2, 2, Some(&weight), 1.0e-5, None).unwrap();
+
+            assert_eq!(device.shape(), host.shape());
+            assert_close(
+                &device.to_vec_f32().unwrap(),
+                &host.to_vec_f32().unwrap(),
+                1.0e-5,
+                "device split+rms_norm",
+            );
+        }
+
+        #[test]
+        fn device_split_heads_rms_norm_without_weight_matches_host_reference() {
+            let x = MlxArray::from_slice_f32(
+                &[
+                    1.0, 2.0, 3.0, 4.0, //
+                    5.0, 6.0, 7.0, 8.0,
+                ],
+                &[1, 2, 4],
+            )
+            .unwrap();
+            let host = host_split_heads_with_rms_norm(&x, 2, 2, None, 1.0e-5).unwrap();
+
+            let device = device_split_heads_with_rms_norm(&x, 2, 2, None, 1.0e-5, None).unwrap();
+
+            assert_eq!(device.shape(), host.shape());
+            assert_close(
+                &device.to_vec_f32().unwrap(),
+                &host.to_vec_f32().unwrap(),
+                1.0e-5,
+                "device split+rms_norm without weight",
+            );
+        }
+
+        #[test]
+        fn extract_per_layer_input_uses_device_gather() {
+            let data: Vec<f32> = (0..24).map(|i| i as f32).collect();
+            let per_layer = MlxArray::from_slice_f32(&data, &[1, 2, 3, 4]).unwrap();
+
+            let got = extract_per_layer_input(&per_layer, 1, 4, None).unwrap();
+
+            assert_eq!(got.shape(), vec![1, 2, 4]);
+            assert_close(
+                &got.to_vec_f32().unwrap(),
+                &[4.0, 5.0, 6.0, 7.0, 16.0, 17.0, 18.0, 19.0],
+                1.0e-6,
+                "per-layer input gather",
+            );
+        }
     }
 }
 

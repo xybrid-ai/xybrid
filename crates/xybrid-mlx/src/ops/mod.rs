@@ -24,9 +24,12 @@ pub mod attention;
 pub mod basic;
 pub mod convolution;
 
-pub use attention::{concat, gather, reshape, rope, scaled_dot_product_attention, transpose};
+pub use attention::{
+    concat, gather, reshape, rope, scaled_dot_product_attention, slice, slice_update, transpose,
+};
 pub use basic::{
     add, argmax, cast, dequantize, div, erf, exp, gelu, gelu_tanh, layer_norm, matmul, mul, neg,
-    quantized_matmul, reciprocal, rms_norm, sigmoid, silu, softmax, sqrt, square, sub, tanh,
+    quantized_matmul, quantized_matmul_prechecked, reciprocal, rms_norm, sigmoid, silu, softmax,
+    sqrt, square, sub, tanh,
 };
 pub use convolution::conv1d;

@@ -267,6 +267,26 @@ pub(crate) unsafe fn array_eval(arr: mlx_array) -> Result<(), MlxError> {
     check_rc(sys::mlx_array_eval(arr), "mlx_array_eval")
 }
 
+/// Asynchronously schedule evaluation of a vector of arrays.
+///
+/// # Safety
+///
+/// `outputs` must be a live vector handle whose arrays remain live for the
+/// duration of the call. Ownership of the vector is not consumed.
+pub(crate) unsafe fn async_eval(outputs: mlx_vector_array) -> Result<(), MlxError> {
+    check_rc(sys::mlx_async_eval(outputs), "mlx_async_eval")
+}
+
+/// Clear MLX's process-local allocation/cache pool.
+///
+/// # Safety
+///
+/// Safe to call when no caller relies on cached allocations remaining alive.
+#[allow(dead_code)]
+pub(crate) unsafe fn clear_cache() -> Result<(), MlxError> {
+    check_rc(sys::mlx_clear_cache(), "mlx_clear_cache")
+}
+
 /// Copy an evaluated array's f32 data into an owned `Vec<f32>`.
 ///
 /// # Safety
@@ -713,6 +733,72 @@ pub(crate) unsafe fn op_take_axis(
     if rc != 0 {
         let _ = sys::mlx_array_free(res);
         return Err(MlxError::Internal(format!("mlx_take_axis rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_slice(res, a, start, stop, strides, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`]. The start/stop/stride pointers must stay
+/// valid for the duration of the call.
+pub(crate) unsafe fn op_slice(
+    a: mlx_array,
+    start: &[i32],
+    stop: &[i32],
+    strides: &[i32],
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_slice(
+        &mut res,
+        a,
+        start.as_ptr(),
+        start.len(),
+        stop.as_ptr(),
+        stop.len(),
+        strides.as_ptr(),
+        strides.len(),
+        s,
+    );
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_slice rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_slice_update(res, src, update, start, stop, strides, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_slice`]. `src` and `update` must be live arrays.
+#[allow(dead_code)]
+pub(crate) unsafe fn op_slice_update(
+    src: mlx_array,
+    update: mlx_array,
+    start: &[i32],
+    stop: &[i32],
+    strides: &[i32],
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_slice_update(
+        &mut res,
+        src,
+        update,
+        start.as_ptr(),
+        start.len(),
+        stop.as_ptr(),
+        stop.len(),
+        strides.as_ptr(),
+        strides.len(),
+        s,
+    );
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_slice_update rc={rc}")));
     }
     Ok(res)
 }

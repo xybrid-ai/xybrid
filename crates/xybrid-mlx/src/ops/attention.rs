@@ -107,6 +107,62 @@ pub fn gather(
     Ok(MlxArray::from_raw(raw))
 }
 
+/// Static slice using MLX's `[start, stop, stride]` transform.
+pub fn slice(
+    a: &MlxArray,
+    start: &[i32],
+    stop: &[i32],
+    strides: &[i32],
+    stream: Option<&MlxStream>,
+) -> MlxResult<MlxArray> {
+    validate_slice_args(start, stop, strides)?;
+    let s = resolve_stream(stream)?;
+    // SAFETY: all handles and slice argument buffers are live for the call.
+    let raw = unsafe { ffi::op_slice(a.as_raw(), start, stop, strides, s.as_stream().as_raw())? };
+    Ok(MlxArray::from_raw(raw))
+}
+
+/// Static slice update using MLX's `[start, stop, stride]` transform.
+pub fn slice_update(
+    src: &MlxArray,
+    update: &MlxArray,
+    start: &[i32],
+    stop: &[i32],
+    strides: &[i32],
+    stream: Option<&MlxStream>,
+) -> MlxResult<MlxArray> {
+    validate_slice_args(start, stop, strides)?;
+    let s = resolve_stream(stream)?;
+    // SAFETY: all handles and slice argument buffers are live for the call.
+    let raw = unsafe {
+        ffi::op_slice_update(
+            src.as_raw(),
+            update.as_raw(),
+            start,
+            stop,
+            strides,
+            s.as_stream().as_raw(),
+        )?
+    };
+    Ok(MlxArray::from_raw(raw))
+}
+
+fn validate_slice_args(start: &[i32], stop: &[i32], strides: &[i32]) -> MlxResult<()> {
+    if start.len() != stop.len() || start.len() != strides.len() {
+        return Err(MlxError::InvalidShape {
+            expected: vec![start.len() as i32],
+            got: vec![stop.len() as i32, strides.len() as i32],
+        });
+    }
+    if start.is_empty() {
+        return Err(MlxError::InvalidShape {
+            expected: vec![1],
+            got: Vec::new(),
+        });
+    }
+    Ok(())
+}
+
 /// Concatenate an array of arrays along `axis`.
 ///
 /// All input arrays must have identical shapes except along `axis`. Returns
@@ -370,6 +426,40 @@ mod tests {
             &[70.0, 80.0, 90.0, 10.0, 20.0, 30.0, 100.0, 110.0, 120.0],
             MATMUL_TOL,
             "gather rows [2, 0, 3] from a 4x3 table",
+        );
+    }
+
+    #[test]
+    fn slice_selects_static_range() {
+        let data: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let a = MlxArray::from_slice_f32(&data, &[1, 3, 4]).unwrap();
+
+        let out = slice(&a, &[0, 1, 0], &[1, 3, 4], &[1, 1, 1], None).unwrap();
+
+        assert_eq!(out.shape(), vec![1, 2, 4]);
+        let got = out.to_vec_f32().unwrap();
+        assert_close(
+            &got,
+            &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0],
+            MATMUL_TOL,
+            "slice keeps the requested middle-axis range",
+        );
+    }
+
+    #[test]
+    fn slice_update_overwrites_static_range() {
+        let src = MlxArray::from_slice_f32(&[0.0; 6], &[1, 3, 2]).unwrap();
+        let update = MlxArray::from_slice_f32(&[9.0, 8.0], &[1, 1, 2]).unwrap();
+
+        let out = slice_update(&src, &update, &[0, 1, 0], &[1, 2, 2], &[1, 1, 1], None).unwrap();
+
+        assert_eq!(out.shape(), vec![1, 3, 2]);
+        let got = out.to_vec_f32().unwrap();
+        assert_close(
+            &got,
+            &[0.0, 0.0, 9.0, 8.0, 0.0, 0.0],
+            MATMUL_TOL,
+            "slice_update writes only the requested region",
         );
     }
 
