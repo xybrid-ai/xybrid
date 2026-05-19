@@ -7,7 +7,7 @@
 
 use safetensors::Dtype as StDtype;
 use std::ffi::CString;
-use xybrid_mlx::ops::{dequantize, matmul, quantized_matmul_prechecked, transpose};
+use xybrid_mlx::ops::{dequantize, matmul, quantized_matmul_prechecked, slice, transpose};
 use xybrid_mlx::{MlxArray, MlxDtype, MlxStream};
 
 use super::super::model::{MlxLlmError, MlxLlmResult};
@@ -131,12 +131,92 @@ impl LinearWeight {
         }
     }
 
+    pub fn slice_output_rows(
+        &self,
+        start: usize,
+        rows: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<Self> {
+        match self {
+            Self::Dense(weight) => {
+                let sliced = slice_axis0_rows(&weight.weight, start, rows, "dense linear", stream)?;
+                let sliced = sliced.contiguous_on_stream(stream)?;
+                sliced.eval()?;
+                Self::dense(sliced)
+            }
+            Self::Quantized(weight) => {
+                let mode_cstr = CString::new(weight.mode.as_str()).map_err(|_| {
+                    MlxLlmError::ConfigInvalid("MLX quantization mode contains NUL".into())
+                })?;
+                let sliced_weight =
+                    slice_axis0_rows(&weight.weight, start, rows, "quantized weight", stream)?
+                        .contiguous_on_stream(stream)?;
+                let sliced_scales =
+                    slice_axis0_rows(&weight.scales, start, rows, "quantized scales", stream)?
+                        .contiguous_on_stream(stream)?;
+                let sliced_biases =
+                    slice_axis0_rows(&weight.biases, start, rows, "quantized biases", stream)?
+                        .contiguous_on_stream(stream)?;
+                sliced_weight.eval()?;
+                sliced_scales.eval()?;
+                sliced_biases.eval()?;
+                Ok(Self::Quantized(QuantizedLinear {
+                    weight: sliced_weight,
+                    scales: sliced_scales,
+                    biases: sliced_biases,
+                    group_size: weight.group_size,
+                    bits: weight.bits,
+                    mode: weight.mode.clone(),
+                    mode_cstr,
+                }))
+            }
+        }
+    }
+
     pub fn dense_ref(&self) -> Option<&MlxArray> {
         match self {
             Self::Dense(weight) => Some(&weight.weight),
             Self::Quantized(_) => None,
         }
     }
+}
+
+fn slice_axis0_rows(
+    array: &MlxArray,
+    start: usize,
+    rows: usize,
+    label: &str,
+    stream: Option<&MlxStream>,
+) -> MlxLlmResult<MlxArray> {
+    let shape = array.shape();
+    if shape.is_empty() {
+        return Err(MlxLlmError::ConfigInvalid(format!(
+            "{label} slice requires rank >= 1, got scalar"
+        )));
+    }
+    let axis0 = usize::try_from(shape[0]).map_err(|_| {
+        MlxLlmError::ConfigInvalid(format!("{label} axis-0 dimension {} is invalid", shape[0]))
+    })?;
+    let stop = start.checked_add(rows).ok_or_else(|| {
+        MlxLlmError::ConfigInvalid(format!("{label} output-row slice overflows usize"))
+    })?;
+    if rows == 0 || stop > axis0 {
+        return Err(MlxLlmError::ConfigInvalid(format!(
+            "{label} output-row slice [{start}, {stop}) exceeds axis-0 length {axis0}"
+        )));
+    }
+    let start_i32 = i32::try_from(start).map_err(|_| {
+        MlxLlmError::ConfigInvalid(format!("{label} slice start {start} exceeds i32"))
+    })?;
+    let stop_i32 = i32::try_from(stop).map_err(|_| {
+        MlxLlmError::ConfigInvalid(format!("{label} slice stop {stop} exceeds i32"))
+    })?;
+    let mut starts = vec![0; shape.len()];
+    let mut stops = shape;
+    let strides = vec![1; starts.len()];
+    starts[0] = start_i32;
+    stops[0] = stop_i32;
+    slice(array, &starts, &stops, &strides, stream).map_err(Into::into)
 }
 
 /// Load a tensor that must be consumed by dense-only ops.
@@ -303,6 +383,34 @@ mod tests {
         assert_eq!(output.shape(), vec![1, 2]);
         let values = output.to_vec_f32().unwrap();
         assert_eq!(values, vec![321.0, 654.0]);
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn dense_linear_slice_output_rows_keeps_forward_semantics() {
+        use xybrid_mlx::MlxArray;
+
+        let weight = MlxArray::from_slice_f32(
+            &[
+                1.0, 2.0, 3.0, //
+                4.0, 5.0, 6.0, //
+                7.0, 8.0, 9.0,
+            ],
+            &[3, 3],
+        )
+        .unwrap();
+        let linear = LinearWeight::dense(weight).unwrap();
+        let sliced = linear.slice_output_rows(1, 2, None).unwrap();
+        let input = MlxArray::from_slice_f32(&[1.0, 2.0, 3.0], &[1, 3]).unwrap();
+
+        let got = sliced.forward(&input, None).unwrap();
+
+        assert_eq!(got.shape(), vec![1, 2]);
+        assert_eq!(got.to_vec_f32().unwrap(), vec![32.0, 50.0]);
     }
 
     #[cfg(all(

@@ -625,9 +625,11 @@ pub mod runtime {
 
     use xybrid_mlx::ops::{
         add, cast, concat, div, gather, gelu_tanh, mul, reshape, rms_norm, rope,
-        scaled_dot_product_attention, tanh, transpose,
+        scaled_dot_product_attention, slice, slice_update, tanh, transpose,
     };
     use xybrid_mlx::{MlxArray, MlxDtype, MlxStream};
+
+    const GEMMA4_SLIDING_CACHE_BUFFER: usize = 256;
 
     /// One transformer block's weights.
     ///
@@ -657,38 +659,88 @@ pub mod runtime {
 
     /// Resident K/V tensors for one Gemma decoder layer during a generation
     /// call. Reset before prefill; appended one token at a time during decode.
+    #[derive(Debug, Clone, Copy, Default)]
+    enum Gemma4CacheKind {
+        #[default]
+        Global,
+        Sliding {
+            window: usize,
+        },
+    }
+
     #[derive(Debug, Default)]
     pub struct Gemma4LayerCache {
-        keys: Option<MlxArray>,
-        values: Option<MlxArray>,
+        kind: Gemma4CacheKind,
+        keys: Option<CachedAxis2>,
+        values: Option<CachedAxis2>,
+    }
+
+    #[derive(Debug)]
+    struct CachedAxis2 {
+        storage: MlxArray,
+        len: usize,
     }
 
     impl Gemma4LayerCache {
+        fn new(kind: Gemma4CacheKind) -> Self {
+            Self {
+                kind,
+                keys: None,
+                values: None,
+            }
+        }
+
+        fn is_sliding(&self) -> bool {
+            matches!(self.kind, Gemma4CacheKind::Sliding { .. })
+        }
+
+        fn window(&self) -> Option<usize> {
+            match self.kind {
+                Gemma4CacheKind::Global => None,
+                Gemma4CacheKind::Sliding { window } => Some(window),
+            }
+        }
+
         fn reset(&mut self) {
             self.keys = None;
             self.values = None;
         }
 
-        fn cloned_kv(&self, layer_idx: usize) -> MlxLlmResult<(MlxArray, MlxArray)> {
-            let keys = self.keys.clone().ok_or_else(|| {
+        fn cloned_kv(
+            &self,
+            layer_idx: usize,
+            stream: Option<&MlxStream>,
+        ) -> MlxLlmResult<(MlxArray, MlxArray)> {
+            let keys = self.keys.as_ref().ok_or_else(|| {
                 MlxLlmError::ConfigInvalid(format!(
                     "gemma4 shared K/V source layer {layer_idx} has no cached keys"
                 ))
             })?;
-            let values = self.values.clone().ok_or_else(|| {
+            let values = self.values.as_ref().ok_or_else(|| {
                 MlxLlmError::ConfigInvalid(format!(
                     "gemma4 shared K/V source layer {layer_idx} has no cached values"
                 ))
             })?;
-            Ok((keys, values))
+            Ok((
+                cache_visible_axis2(keys, self.window(), stream)?,
+                cache_visible_axis2(values, self.window(), stream)?,
+            ))
         }
     }
 
     #[derive(Debug)]
     pub struct Gemma4PerLayerWeights {
-        pub embed_tokens_per_layer: MlxArray,
-        pub per_layer_model_projection: LinearWeight,
-        pub per_layer_projection_norm: MlxArray,
+        layer_inputs: Vec<Gemma4LayerInputWeights>,
+        token_scale: MlxArray,
+        projection_scale: MlxArray,
+        input_scale: MlxArray,
+    }
+
+    #[derive(Debug)]
+    struct Gemma4LayerInputWeights {
+        embed_tokens: MlxArray,
+        model_projection: LinearWeight,
+        projection_norm: MlxArray,
     }
 
     /// Full Gemma 4 weight set resident in MLX memory.
@@ -701,6 +753,8 @@ pub mod runtime {
         pub norm: MlxArray,
         /// `None` when [`Gemma4Config::tie_word_embeddings`] is set.
         pub lm_head: Option<LinearWeight>,
+        embed_scale: MlxArray,
+        final_logit_softcap: Option<MlxArray>,
         layer_cache: Vec<Gemma4LayerCache>,
     }
 
@@ -734,22 +788,21 @@ pub mod runtime {
             LinearWeight::dense(embed_tokens.clone())?
         };
         let per_layer = if cfg.has_per_layer_inputs() {
-            Some(Gemma4PerLayerWeights {
-                embed_tokens_per_layer: load_dense_or_dequantized(
+            Some(build_per_layer_weights(
+                cfg,
+                load_dense_or_dequantized(
                     weights,
                     &key("model.embed_tokens_per_layer.weight"),
                     quant,
                 )?,
-                per_layer_model_projection: LinearWeight::load(
+                LinearWeight::load(
                     weights,
                     &key("model.per_layer_model_projection.weight"),
                     quant,
                 )?,
-                per_layer_projection_norm: load_rmsnorm(
-                    weights,
-                    &key("model.per_layer_projection_norm.weight"),
-                )?,
-            })
+                load_rmsnorm(weights, &key("model.per_layer_projection_norm.weight"))?,
+                None,
+            )?)
         } else {
             None
         };
@@ -851,8 +904,22 @@ pub mod runtime {
             layers,
             norm,
             lm_head,
-            layer_cache: std::iter::repeat_with(Gemma4LayerCache::default)
-                .take(cfg.num_hidden_layers)
+            embed_scale: MlxArray::from_slice_f32(&[(cfg.hidden_size as f32).sqrt()], &[1])?,
+            final_logit_softcap: cfg
+                .final_logit_softcapping
+                .map(|cap| MlxArray::from_slice_f32(&[cap], &[1]))
+                .transpose()?,
+            layer_cache: (0..cfg.num_hidden_layers)
+                .map(|layer_idx| {
+                    let kind = if cfg.layer_is_global(layer_idx) {
+                        Gemma4CacheKind::Global
+                    } else {
+                        Gemma4CacheKind::Sliding {
+                            window: cfg.sliding_window,
+                        }
+                    };
+                    Gemma4LayerCache::new(kind)
+                })
                 .collect(),
         })
     }
@@ -892,6 +959,163 @@ pub mod runtime {
         weights.read_as_f32(name)
     }
 
+    fn build_per_layer_weights(
+        cfg: &Gemma4Config,
+        embed_tokens_per_layer: MlxArray,
+        per_layer_model_projection: LinearWeight,
+        per_layer_projection_norm: MlxArray,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<Gemma4PerLayerWeights> {
+        let hidden_per_layer = cfg.hidden_size_per_layer_input().ok_or_else(|| {
+            MlxLlmError::ConfigInvalid("gemma4 missing hidden_size_per_layer_input".into())
+        })?;
+        let token_scale = MlxArray::from_slice_f32(&[(hidden_per_layer as f32).sqrt()], &[1])?;
+        let projection_scale =
+            MlxArray::from_slice_f32(&[(cfg.hidden_size as f32).sqrt().recip()], &[1])?;
+        let input_scale = MlxArray::from_slice_f32(&[2.0_f32.sqrt().recip()], &[1])?;
+        let layer_inputs = split_per_layer_input_weights(
+            cfg,
+            &embed_tokens_per_layer,
+            &per_layer_model_projection,
+            &per_layer_projection_norm,
+            stream,
+        )?;
+        Ok(Gemma4PerLayerWeights {
+            layer_inputs,
+            token_scale,
+            projection_scale,
+            input_scale,
+        })
+    }
+
+    fn split_per_layer_input_weights(
+        cfg: &Gemma4Config,
+        embed_tokens_per_layer: &MlxArray,
+        per_layer_model_projection: &LinearWeight,
+        per_layer_projection_norm: &MlxArray,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<Vec<Gemma4LayerInputWeights>> {
+        let hidden_per_layer = cfg.hidden_size_per_layer_input().ok_or_else(|| {
+            MlxLlmError::ConfigInvalid("gemma4 missing hidden_size_per_layer_input".into())
+        })?;
+        let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
+        for layer_idx in 0..cfg.num_hidden_layers {
+            let start = layer_idx.checked_mul(hidden_per_layer).ok_or_else(|| {
+                MlxLlmError::ConfigInvalid("gemma4 per-layer slice start overflows usize".into())
+            })?;
+            let embed_tokens = slice_dim_range(
+                embed_tokens_per_layer,
+                1,
+                start,
+                hidden_per_layer,
+                "gemma4 embed_tokens_per_layer",
+                stream,
+            )?
+            .contiguous_on_stream(stream)?;
+            embed_tokens.eval()?;
+            let model_projection =
+                per_layer_model_projection.slice_output_rows(start, hidden_per_layer, stream)?;
+            let projection_norm = slice_per_layer_projection_norm(
+                per_layer_projection_norm,
+                layer_idx,
+                cfg.num_hidden_layers,
+                hidden_per_layer,
+                stream,
+            )?;
+            layers.push(Gemma4LayerInputWeights {
+                embed_tokens,
+                model_projection,
+                projection_norm,
+            });
+        }
+        Ok(layers)
+    }
+
+    fn slice_per_layer_projection_norm(
+        norm: &MlxArray,
+        layer_idx: usize,
+        num_layers: usize,
+        hidden_per_layer: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let shape = norm.shape();
+        match shape.as_slice() {
+            [width] => {
+                let width = shape_dim_usize("gemma4", "per_layer_projection_norm", *width)?;
+                if width != hidden_per_layer {
+                    return Err(MlxLlmError::ConfigInvalid(format!(
+                        "gemma4 per_layer_projection_norm width is {width}, expected {hidden_per_layer}"
+                    )));
+                }
+                Ok(norm.clone())
+            }
+            [layers, width] => {
+                let layers =
+                    shape_dim_usize("gemma4", "per_layer_projection_norm_layers", *layers)?;
+                let width = shape_dim_usize("gemma4", "per_layer_projection_norm_width", *width)?;
+                if layers != num_layers || width != hidden_per_layer {
+                    return Err(MlxLlmError::ConfigInvalid(format!(
+                        "gemma4 per_layer_projection_norm shape is {shape:?}, expected [{num_layers}, {hidden_per_layer}]"
+                    )));
+                }
+                let sliced = slice_dim_range(
+                    norm,
+                    0,
+                    layer_idx,
+                    1,
+                    "gemma4 per_layer_projection_norm",
+                    stream,
+                )?;
+                let reshaped = reshape(
+                    &sliced,
+                    &[shape_dim_i32(
+                        "gemma4",
+                        "hidden_size_per_layer_input",
+                        hidden_per_layer,
+                    )?],
+                    stream,
+                )?;
+                reshaped.eval()?;
+                Ok(reshaped)
+            }
+            _ => Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 per_layer_projection_norm must be rank-1 or rank-2, got shape {shape:?}"
+            ))),
+        }
+    }
+
+    fn slice_dim_range(
+        array: &MlxArray,
+        axis: usize,
+        start: usize,
+        width: usize,
+        label: &str,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let shape = array.shape();
+        if axis >= shape.len() {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "{label} slice axis {axis} exceeds rank {}",
+                shape.len()
+            )));
+        }
+        let dim = shape_dim_usize("gemma4", label, shape[axis])?;
+        let stop = start.checked_add(width).ok_or_else(|| {
+            MlxLlmError::ConfigInvalid(format!("{label} slice stop overflows usize"))
+        })?;
+        if width == 0 || stop > dim {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "{label} slice [{start}, {stop}) exceeds dimension {dim}"
+            )));
+        }
+        let mut starts = vec![0; shape.len()];
+        let mut stops = shape;
+        let strides = vec![1; starts.len()];
+        starts[axis] = shape_dim_i32("gemma4", "slice_start", start)?;
+        stops[axis] = shape_dim_i32("gemma4", "slice_stop", stop)?;
+        slice(array, &starts, &stops, &strides, stream).map_err(Into::into)
+    }
+
     /// Forward pass through the whole stack.
     ///
     /// `input_ids` shape: `[batch, seq_len]` (i64/i32). Returns logits of
@@ -913,33 +1137,25 @@ pub mod runtime {
         // embedding output by sqrt(hidden_size) immediately after
         // lookup.
         let mut hidden = gather(&weights.embed_tokens, input_ids, 0, stream)?;
-        let embed_scale = MlxArray::from_slice_f32(&[(cfg.hidden_size as f32).sqrt()], &[1])?;
-        hidden = mul(&hidden, &embed_scale, stream)?;
-        let per_layer_inputs = if let Some(per_layer) = weights.per_layer.as_ref() {
-            Some(build_per_layer_inputs(
-                cfg, per_layer, input_ids, &hidden, stream,
-            )?)
-        } else {
-            None
-        };
+        hidden = mul(&hidden, &weights.embed_scale, stream)?;
+        let input_embeds = hidden.clone();
+        let sliding_mask = prebuild_sliding_window_mask(cfg, input_ids, position_offset)?;
 
         let layers = &weights.layers;
         let layer_cache = &mut weights.layer_cache;
         for (layer_idx, layer) in layers.iter().enumerate() {
             let shared_kv = if let Some(source_layer) = cfg.kv_shared_source_layer(layer_idx) {
-                Some(layer_cache[source_layer].cloned_kv(source_layer)?)
+                Some(layer_cache[source_layer].cloned_kv(source_layer, stream)?)
             } else {
                 None
             };
-            let per_layer_input = if let Some(inputs) = per_layer_inputs.as_ref() {
-                Some(extract_per_layer_input(
-                    inputs,
+            let per_layer_input = if let Some(per_layer) = weights.per_layer.as_ref() {
+                Some(build_per_layer_input(
+                    cfg,
+                    per_layer,
                     layer_idx,
-                    cfg.hidden_size_per_layer_input().ok_or_else(|| {
-                        MlxLlmError::ConfigInvalid(
-                            "gemma4 missing hidden_size_per_layer_input".into(),
-                        )
-                    })?,
+                    input_ids,
+                    &input_embeds,
                     stream,
                 )?)
             } else {
@@ -956,6 +1172,7 @@ pub mod runtime {
                 n_kv_heads,
                 per_layer_input.as_ref(),
                 shared_kv.as_ref(),
+                sliding_mask.as_ref(),
                 position_offset,
                 stream,
             )?;
@@ -967,9 +1184,8 @@ pub mod runtime {
             .as_ref()
             .unwrap_or(&weights.embed_tokens_linear);
         let mut logits = lm_head.forward(&final_norm, stream)?;
-        if let Some(cap) = cfg.final_logit_softcapping {
-            let cap = MlxArray::from_slice_f32(&[cap], &[1])?;
-            logits = mul(&tanh(&div(&logits, &cap, stream)?, stream)?, &cap, stream)?;
+        if let Some(cap) = weights.final_logit_softcap.as_ref() {
+            logits = mul(&tanh(&div(&logits, cap, stream)?, stream)?, cap, stream)?;
         }
         Ok(logits)
     }
@@ -988,6 +1204,7 @@ pub mod runtime {
         n_kv_heads: usize,
         per_layer_input: Option<&MlxArray>,
         shared_kv: Option<&(MlxArray, MlxArray)>,
+        sliding_mask: Option<&MlxArray>,
         position_offset: i32,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
@@ -1006,6 +1223,7 @@ pub mod runtime {
             n_heads,
             n_kv_heads,
             shared_kv,
+            sliding_mask,
             position_offset,
             stream,
         )?;
@@ -1053,9 +1271,44 @@ pub mod runtime {
         layer.mlp_down_proj.forward(&gated, stream)
     }
 
-    fn build_per_layer_inputs(
+    fn build_per_layer_input(
         cfg: &Gemma4Config,
         weights: &Gemma4PerLayerWeights,
+        layer_idx: usize,
+        input_ids: &MlxArray,
+        inputs_embeds: &MlxArray,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let layer_weights = weights.layer_inputs.get(layer_idx).ok_or_else(|| {
+            MlxLlmError::ConfigInvalid(format!(
+                "gemma4 missing direct per-layer input weights for layer {layer_idx}"
+            ))
+        })?;
+        let mut token_inputs = gather(&layer_weights.embed_tokens, input_ids, 0, stream)?;
+        token_inputs = mul(&token_inputs, &weights.token_scale, stream)?;
+
+        let mut projected = layer_weights
+            .model_projection
+            .forward(inputs_embeds, stream)?;
+        projected = mul(&projected, &weights.projection_scale, stream)?;
+        projected = rms_norm(
+            &projected,
+            Some(&layer_weights.projection_norm),
+            cfg.rms_norm_eps,
+            stream,
+        )?;
+
+        let combined = add(&projected, &token_inputs, stream)?;
+        mul(&combined, &weights.input_scale, stream).map_err(Into::into)
+    }
+
+    #[cfg(test)]
+    fn build_per_layer_inputs_reference(
+        cfg: &Gemma4Config,
+        embed_tokens_per_layer: &MlxArray,
+        per_layer_model_projection: &LinearWeight,
+        per_layer_projection_norm: &MlxArray,
+        scales: &Gemma4PerLayerWeights,
         input_ids: &MlxArray,
         inputs_embeds: &MlxArray,
         stream: Option<&MlxStream>,
@@ -1069,28 +1322,22 @@ pub mod runtime {
         let hpl_i32 = shape_dim_i32("gemma4", "hidden_size_per_layer_input", hidden_per_layer)?;
         let layers_i32 = shape_dim_i32("gemma4", "num_hidden_layers", cfg.num_hidden_layers)?;
 
-        let mut token_inputs = gather(&weights.embed_tokens_per_layer, input_ids, 0, stream)?;
-        let token_scale = MlxArray::from_slice_f32(&[(hidden_per_layer as f32).sqrt()], &[1])?;
-        token_inputs = mul(&token_inputs, &token_scale, stream)?;
+        let mut token_inputs = gather(embed_tokens_per_layer, input_ids, 0, stream)?;
+        token_inputs = mul(&token_inputs, &scales.token_scale, stream)?;
         token_inputs = reshape(&token_inputs, &[b, t, layers_i32, hpl_i32], stream)?;
 
-        let mut projected = weights
-            .per_layer_model_projection
-            .forward(inputs_embeds, stream)?;
-        let projection_scale =
-            MlxArray::from_slice_f32(&[(cfg.hidden_size as f32).sqrt().recip()], &[1])?;
-        projected = mul(&projected, &projection_scale, stream)?;
+        let mut projected = per_layer_model_projection.forward(inputs_embeds, stream)?;
+        projected = mul(&projected, &scales.projection_scale, stream)?;
         projected = reshape(&projected, &[b, t, layers_i32, hpl_i32], stream)?;
         projected = rms_norm(
             &projected,
-            Some(&weights.per_layer_projection_norm),
+            Some(per_layer_projection_norm),
             cfg.rms_norm_eps,
             stream,
         )?;
 
         let combined = add(&projected, &token_inputs, stream)?;
-        let input_scale = MlxArray::from_slice_f32(&[2.0_f32.sqrt().recip()], &[1])?;
-        mul(&combined, &input_scale, stream).map_err(Into::into)
+        mul(&combined, &scales.input_scale, stream).map_err(Into::into)
     }
 
     fn extract_per_layer_input(
@@ -1120,11 +1367,17 @@ pub mod runtime {
             )));
         }
         let layer_idx_i32 = shape_dim_i32("gemma4", "per_layer_input_index", layer_idx)?;
-        let index = MlxArray::from_slice_i32(&[layer_idx_i32], &[1])?;
-        let selected = gather(per_layer_inputs, &index, 2, stream)?;
+        let layer_stop = checked_i32_add("gemma4", "per_layer_input_stop", layer_idx_i32, 1)?;
+        let selected = slice(
+            per_layer_inputs,
+            &[0, 0, layer_idx_i32, 0],
+            &[b_i32, t_i32, layer_stop, shape[3]],
+            &[1, 1, 1, 1],
+            stream,
+        )?;
         let selected = reshape(&selected, &[b_i32, t_i32, shape[3]], stream)?;
         let selected = selected.contiguous_on_stream(stream)?;
-        // Without this materialization, the Gemma per-layer gather graph can
+        // Without this materialization, the Gemma per-layer slice graph can
         // crash inside the native MLX runtime when consumed by the next block.
         selected.eval()?;
         Ok(selected)
@@ -1175,6 +1428,7 @@ pub mod runtime {
         n_heads: usize,
         n_kv_heads: usize,
         shared_kv: Option<&(MlxArray, MlxArray)>,
+        sliding_mask: Option<&MlxArray>,
         position_offset: i32,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
@@ -1248,8 +1502,9 @@ pub mod runtime {
                 None,
                 stream,
             )?;
-            let k = append_cached_axis2(&mut cache.keys, &k, stream)?;
-            let v = append_cached_axis2(&mut cache.values, &v, stream)?;
+            let max_cache_len = cache.window();
+            let k = append_cached_axis2(&mut cache.keys, &k, max_cache_len, stream)?;
+            let v = append_cached_axis2(&mut cache.values, &v, max_cache_len, stream)?;
             (k, v)
         };
         let q_len = q.shape().get(2).copied().unwrap_or(1);
@@ -1257,6 +1512,12 @@ pub mod runtime {
         let attn = if layer_is_global {
             let causal = position_offset == 0 && q_len > 1;
             scaled_dot_product_attention(&q, &k, &v, layer_scale, causal, None, stream)?
+        } else if !sliding_attention_needs_mask(cache, q_len) {
+            scaled_dot_product_attention(&q, &k, &v, layer_scale, false, None, stream)?
+        } else if sliding_window_is_plain_causal(&q, &k, cfg.sliding_window)? {
+            scaled_dot_product_attention(&q, &k, &v, layer_scale, true, None, stream)?
+        } else if let Some(mask) = sliding_mask {
+            scaled_dot_product_attention(&q, &k, &v, layer_scale, false, Some(mask), stream)?
         } else {
             let mask = sliding_window_mask(&q, &k, cfg.sliding_window, position_offset)?;
             scaled_dot_product_attention(&q, &k, &v, layer_scale, false, Some(&mask), stream)?
@@ -1409,22 +1670,374 @@ pub mod runtime {
     }
 
     fn append_cached_axis2(
-        slot: &mut Option<MlxArray>,
+        slot: &mut Option<CachedAxis2>,
         new_slice: &MlxArray,
+        max_len: Option<usize>,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
+        let shape = new_slice.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 cache tensors must be rank-4, got shape {shape:?}"
+            )));
+        }
+        let incoming = shape_dim_usize("gemma4", "cache_update_len", shape[2])?;
+
+        if let Some(max_len) = max_len {
+            return append_sliding_cached_axis2(slot, new_slice, max_len, incoming, stream);
+        }
+
+        append_global_cached_axis2(slot, new_slice, incoming, stream)
+    }
+
+    fn append_global_cached_axis2(
+        slot: &mut Option<CachedAxis2>,
+        new_slice: &MlxArray,
+        incoming: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let shape = new_slice.shape();
+        let old_len = slot.as_ref().map_or(0, |cache| cache.len);
+        let new_len = old_len
+            .checked_add(incoming)
+            .ok_or_else(|| MlxLlmError::ConfigInvalid("gemma4 K/V cache length overflow".into()))?;
+
+        let mut storage = match slot.take() {
+            Some(cache) if new_len <= cache_capacity_axis2(&cache.storage)? => cache.storage,
+            Some(cache) => {
+                grow_cached_axis2(&cache, shape[0], shape[1], shape[3], new_len, stream)?
+            }
+            None => allocate_cached_axis2(shape[0], shape[1], shape[3], new_len)?,
+        };
+
+        storage = slice_update(
+            &storage,
+            new_slice,
+            &[0, 0, shape_dim_i32("gemma4", "cache_old_len", old_len)?, 0],
+            &[
+                shape[0],
+                shape[1],
+                shape_dim_i32("gemma4", "cache_new_len", new_len)?,
+                shape[3],
+            ],
+            &[1, 1, 1, 1],
+            stream,
+        )?;
+
+        let cached = CachedAxis2 {
+            storage,
+            len: new_len,
+        };
+        let visible = cache_visible_axis2(&cached, None, stream)?;
+        *slot = Some(cached);
+        Ok(visible)
+    }
+
+    fn append_sliding_cached_axis2(
+        slot: &mut Option<CachedAxis2>,
+        new_slice: &MlxArray,
+        window: usize,
+        incoming: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        if window == 0 {
+            return Err(MlxLlmError::ConfigInvalid(
+                "gemma4 sliding K/V cache window must be >= 1".into(),
+            ));
+        }
+
         match slot.take() {
-            Some(existing) => {
-                let combined = concat(&[&existing, new_slice], 2, stream)?;
-                *slot = Some(combined.clone());
-                Ok(combined)
+            Some(cache) if cache.len >= window && incoming == 1 => {
+                let (storage, len) = append_buffered_sliding_axis2(
+                    cache,
+                    new_slice,
+                    window,
+                    sliding_cache_capacity(window),
+                    stream,
+                )?;
+                let cached = CachedAxis2 { storage, len };
+                let visible = cache_visible_axis2(&cached, Some(window), stream)?;
+                *slot = Some(cached);
+                Ok(visible)
+            }
+            Some(cache) => {
+                let prefix = cache_visible_axis2(&cache, Some(window), stream)?;
+                let combined = concat(&[&prefix, new_slice], 2, stream)?;
+                let visible = take_last_axis2(&combined, Some(window), stream)?;
+                let stored = materialize_sliding_cached_axis2(&visible, window, stream)?;
+                *slot = Some(stored);
+                Ok(visible)
             }
             None => {
-                let cached = new_slice.clone();
-                *slot = Some(cached.clone());
-                Ok(cached)
+                let visible = take_last_axis2(new_slice, Some(window), stream)?;
+                let cached = materialize_sliding_cached_axis2(&visible, window, stream)?;
+                *slot = Some(cached);
+                Ok(new_slice.clone())
             }
         }
+    }
+
+    fn append_buffered_sliding_axis2(
+        cache: CachedAxis2,
+        new_slice: &MlxArray,
+        window: usize,
+        target_capacity: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<(MlxArray, usize)> {
+        let shape = new_slice.shape();
+        let current_capacity = cache_capacity_axis2(&cache.storage)?;
+        let (mut storage, old_len) = if cache.len < current_capacity {
+            (cache.storage, cache.len)
+        } else {
+            let tail = cache_visible_axis2(&cache, Some(window), stream)?;
+            let mut storage = allocate_cached_axis2(shape[0], shape[1], shape[3], target_capacity)?;
+            storage = slice_update(
+                &storage,
+                &tail,
+                &[0, 0, 0, 0],
+                &[
+                    shape[0],
+                    shape[1],
+                    shape_dim_i32("gemma4", "cache_window", window)?,
+                    shape[3],
+                ],
+                &[1, 1, 1, 1],
+                stream,
+            )?;
+            (storage, window)
+        };
+        let new_len = old_len.checked_add(1).ok_or_else(|| {
+            MlxLlmError::ConfigInvalid("gemma4 sliding K/V cache length overflow".into())
+        })?;
+        storage = slice_update(
+            &storage,
+            new_slice,
+            &[0, 0, shape_dim_i32("gemma4", "cache_old_len", old_len)?, 0],
+            &[
+                shape[0],
+                shape[1],
+                shape_dim_i32("gemma4", "cache_new_len", new_len)?,
+                shape[3],
+            ],
+            &[1, 1, 1, 1],
+            stream,
+        )?;
+        Ok((storage, new_len))
+    }
+
+    fn materialize_sliding_cached_axis2(
+        visible: &MlxArray,
+        window: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<CachedAxis2> {
+        let len = shape_dim_usize("gemma4", "sliding_cache_visible_len", visible.shape()[2])?;
+        if len < window {
+            return materialize_cached_axis2(visible, stream);
+        }
+        materialize_cached_axis2_with_capacity(visible, sliding_cache_capacity(window), stream)
+    }
+
+    fn sliding_cache_capacity(window: usize) -> usize {
+        window + GEMMA4_SLIDING_CACHE_BUFFER.min(window).max(1)
+    }
+
+    fn materialize_cached_axis2(
+        visible: &MlxArray,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<CachedAxis2> {
+        let visible = visible.contiguous_on_stream(stream)?;
+        let len = shape_dim_usize("gemma4", "cache_visible_len", visible.shape()[2])?;
+        Ok(CachedAxis2 {
+            storage: visible,
+            len,
+        })
+    }
+
+    fn materialize_cached_axis2_with_capacity(
+        visible: &MlxArray,
+        capacity: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<CachedAxis2> {
+        let shape = visible.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 cache tensors must be rank-4, got shape {shape:?}"
+            )));
+        }
+        let len = shape_dim_usize("gemma4", "cache_visible_len", shape[2])?;
+        if len > capacity {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 cache len {len} exceeds requested capacity {capacity}"
+            )));
+        }
+        let mut storage = allocate_cached_axis2(shape[0], shape[1], shape[3], capacity)?;
+        storage = slice_update(
+            &storage,
+            visible,
+            &[0, 0, 0, 0],
+            &[
+                shape[0],
+                shape[1],
+                shape_dim_i32("gemma4", "cache_visible_len", len)?,
+                shape[3],
+            ],
+            &[1, 1, 1, 1],
+            stream,
+        )?;
+        Ok(CachedAxis2 { storage, len })
+    }
+
+    fn grow_cached_axis2(
+        cache: &CachedAxis2,
+        b: i32,
+        h: i32,
+        d: i32,
+        required_len: usize,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let current_capacity = cache_capacity_axis2(&cache.storage)?;
+        let capacity = next_cache_capacity(current_capacity, required_len);
+        let mut storage = allocate_cached_axis2(b, h, d, capacity)?;
+        let visible = cache_visible_axis2(cache, None, stream)?;
+        storage = slice_update(
+            &storage,
+            &visible,
+            &[0, 0, 0, 0],
+            &[b, h, shape_dim_i32("gemma4", "cache_len", cache.len)?, d],
+            &[1, 1, 1, 1],
+            stream,
+        )?;
+        Ok(storage)
+    }
+
+    fn allocate_cached_axis2(b: i32, h: i32, d: i32, capacity: usize) -> MlxLlmResult<MlxArray> {
+        let capacity_i32 = shape_dim_i32("gemma4", "cache_capacity", capacity)?;
+        let len = shape_product_usize(
+            "gemma4",
+            "cache_allocation_len",
+            &[
+                shape_dim_usize("gemma4", "cache_batch", b)?,
+                shape_dim_usize("gemma4", "cache_heads", h)?,
+                capacity,
+                shape_dim_usize("gemma4", "cache_head_dim", d)?,
+            ],
+        )?;
+        let zeros = vec![0.0_f32; len];
+        MlxArray::from_slice_f32(&zeros, &[b, h, capacity_i32, d]).map_err(Into::into)
+    }
+
+    fn next_cache_capacity(current_capacity: usize, required_len: usize) -> usize {
+        let step = GEMMA4_SLIDING_CACHE_BUFFER;
+        let step_capacity = required_len.div_ceil(step) * step;
+        let doubled_capacity = current_capacity.saturating_mul(2);
+        step_capacity.max(doubled_capacity).max(required_len)
+    }
+
+    fn cache_capacity_axis2(storage: &MlxArray) -> MlxLlmResult<usize> {
+        let shape = storage.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 cache storage must be rank-4, got shape {shape:?}"
+            )));
+        }
+        shape_dim_usize("gemma4", "cache_capacity", shape[2])
+    }
+
+    fn cache_visible_axis2(
+        cache: &CachedAxis2,
+        max_len: Option<usize>,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let shape = cache.storage.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 cache storage must be rank-4, got shape {shape:?}"
+            )));
+        }
+        let visible_len = max_len.map_or(cache.len, |max_len| cache.len.min(max_len));
+        let start = cache.len - visible_len;
+        slice(
+            &cache.storage,
+            &[
+                0,
+                0,
+                shape_dim_i32("gemma4", "cache_visible_start", start)?,
+                0,
+            ],
+            &[
+                shape[0],
+                shape[1],
+                shape_dim_i32("gemma4", "cache_visible_stop", cache.len)?,
+                shape[3],
+            ],
+            &[1, 1, 1, 1],
+            stream,
+        )
+        .map_err(Into::into)
+    }
+
+    fn take_last_axis2(
+        array: &MlxArray,
+        max_len: Option<usize>,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let Some(max_len) = max_len else {
+            return Ok(array.clone());
+        };
+        let shape = array.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 cache tensors must be rank-4, got shape {shape:?}"
+            )));
+        }
+        let len = shape_dim_usize("gemma4", "cache_axis2", shape[2])?;
+        if len <= max_len {
+            return Ok(array.clone());
+        }
+        let start = shape_dim_i32("gemma4", "cache_start", len - max_len)?;
+        slice(
+            array,
+            &[0, 0, start, 0],
+            &[shape[0], shape[1], shape[2], shape[3]],
+            &[1, 1, 1, 1],
+            stream,
+        )
+        .map_err(Into::into)
+    }
+
+    fn sliding_attention_needs_mask(cache: &Gemma4LayerCache, q_len: i32) -> bool {
+        !(cache.is_sliding() && q_len == 1)
+    }
+
+    fn prebuild_sliding_window_mask(
+        cfg: &Gemma4Config,
+        input_ids: &MlxArray,
+        position_offset: i32,
+    ) -> MlxLlmResult<Option<MlxArray>> {
+        let shape = input_ids.shape();
+        let Some(&q_len_i32) = shape.get(1) else {
+            return Ok(None);
+        };
+        let q_len = shape_dim_usize("gemma4", "query_len", q_len_i32)?;
+        if q_len <= 1 || q_len <= cfg.sliding_window {
+            return Ok(None);
+        }
+        let has_sliding_layers = (0..cfg.num_hidden_layers).any(|idx| !cfg.layer_is_global(idx));
+        if !has_sliding_layers {
+            return Ok(None);
+        }
+        sliding_window_mask_from_lengths(q_len_i32, q_len_i32, cfg.sliding_window, position_offset)
+            .map(Some)
+    }
+
+    fn sliding_window_is_plain_causal(
+        queries: &MlxArray,
+        keys: &MlxArray,
+        window_size: usize,
+    ) -> MlxLlmResult<bool> {
+        let q_len = shape_dim_usize("gemma4", "query_len", queries.shape()[2])?;
+        let k_len = shape_dim_usize("gemma4", "key_len", keys.shape()[2])?;
+        Ok(q_len == k_len && q_len <= window_size)
     }
 
     fn sliding_window_mask(
@@ -1435,6 +2048,15 @@ pub mod runtime {
     ) -> MlxLlmResult<MlxArray> {
         let q_len_i32 = queries.shape()[2];
         let k_len_i32 = keys.shape()[2];
+        sliding_window_mask_from_lengths(q_len_i32, k_len_i32, window_size, position_offset)
+    }
+
+    fn sliding_window_mask_from_lengths(
+        q_len_i32: i32,
+        k_len_i32: i32,
+        window_size: usize,
+        position_offset: i32,
+    ) -> MlxLlmResult<MlxArray> {
         let q_len = shape_dim_usize("gemma4", "query_len", q_len_i32)?;
         let k_len = shape_dim_usize("gemma4", "key_len", k_len_i32)?;
         let mask_len = shape_product_usize("gemma4", "sliding_window_mask_len", &[q_len, k_len])?;
@@ -1604,7 +2226,7 @@ pub mod runtime {
         }
 
         #[test]
-        fn extract_per_layer_input_uses_device_gather() {
+        fn extract_per_layer_input_uses_device_slice() {
             let data: Vec<f32> = (0..24).map(|i| i as f32).collect();
             let per_layer = MlxArray::from_slice_f32(&data, &[1, 2, 3, 4]).unwrap();
 
@@ -1615,8 +2237,197 @@ pub mod runtime {
                 &got.to_vec_f32().unwrap(),
                 &[4.0, 5.0, 6.0, 7.0, 16.0, 17.0, 18.0, 19.0],
                 1.0e-6,
-                "per-layer input gather",
+                "per-layer input slice",
             );
+        }
+
+        #[test]
+        fn direct_per_layer_input_matches_combined_reference() {
+            let cfg = runtime_dummy_config_with_per_layer_inputs();
+            let embed_tokens_per_layer = MlxArray::from_slice_f32(
+                &[
+                    1.0, 2.0, 3.0, 4.0, //
+                    5.0, 6.0, 7.0, 8.0, //
+                    9.0, 10.0, 11.0, 12.0,
+                ],
+                &[3, 4],
+            )
+            .unwrap();
+            let embed_tokens_per_layer_ref = embed_tokens_per_layer.clone();
+            let projection_weight_data = [
+                1.0, 0.0, 0.0, 0.0, //
+                0.0, 1.0, 0.0, 0.0, //
+                0.0, 0.0, 1.0, 0.0, //
+                0.0, 0.0, 0.0, 1.0,
+            ];
+            let per_layer_model_projection = LinearWeight::dense(
+                MlxArray::from_slice_f32(&projection_weight_data, &[4, 4]).unwrap(),
+            )
+            .unwrap();
+            let per_layer_model_projection_ref = LinearWeight::dense(
+                MlxArray::from_slice_f32(&projection_weight_data, &[4, 4]).unwrap(),
+            )
+            .unwrap();
+            let per_layer_projection_norm = MlxArray::from_slice_f32(&[1.0, 1.0], &[2]).unwrap();
+            let per_layer_projection_norm_ref = per_layer_projection_norm.clone();
+            let weights = build_per_layer_weights(
+                &cfg,
+                embed_tokens_per_layer,
+                per_layer_model_projection,
+                per_layer_projection_norm,
+                None,
+            )
+            .unwrap();
+            let input_ids = MlxArray::from_slice_i32(&[0, 1], &[1, 2]).unwrap();
+            let inputs_embeds = MlxArray::from_slice_f32(
+                &[
+                    0.5, 1.0, 1.5, 2.0, //
+                    2.5, 3.0, 3.5, 4.0,
+                ],
+                &[1, 2, 4],
+            )
+            .unwrap();
+
+            let combined = build_per_layer_inputs_reference(
+                &cfg,
+                &embed_tokens_per_layer_ref,
+                &per_layer_model_projection_ref,
+                &per_layer_projection_norm_ref,
+                &weights,
+                &input_ids,
+                &inputs_embeds,
+                None,
+            )
+            .unwrap();
+            let extracted = extract_per_layer_input(&combined, 1, 2, None).unwrap();
+            let direct =
+                build_per_layer_input(&cfg, &weights, 1, &input_ids, &inputs_embeds, None).unwrap();
+
+            assert_eq!(direct.shape(), extracted.shape());
+            assert_close(
+                &direct.to_vec_f32().unwrap(),
+                &extracted.to_vec_f32().unwrap(),
+                1.0e-5,
+                "direct per-layer input",
+            );
+        }
+
+        fn runtime_dummy_config_with_per_layer_inputs() -> Gemma4Config {
+            Gemma4Config {
+                model_type: "gemma4".into(),
+                hidden_size: 4,
+                num_hidden_layers: 2,
+                num_attention_heads: 2,
+                num_key_value_heads: Some(1),
+                intermediate_size: 8,
+                vocab_size: 16,
+                max_position_embeddings: 128,
+                rope_theta: 1_000_000.0,
+                rope_local_base_freq: 10_000.0,
+                rms_norm_eps: 1.0e-6,
+                tie_word_embeddings: true,
+                head_dim: Some(2),
+                global_head_dim: None,
+                layer_types: None,
+                sliding_window: 16,
+                sliding_window_pattern: 2,
+                query_pre_attn_scalar: None,
+                final_logit_softcapping: None,
+                hidden_size_per_layer_input: Some(2),
+                vocab_size_per_layer_input: Some(3),
+                num_kv_shared_layers: None,
+                full_attention_partial_rotary_factor: 0.25,
+                quantization: None,
+            }
+        }
+
+        #[test]
+        fn sliding_cache_prefill_returns_full_attention_and_stores_tail() {
+            let data: Vec<f32> = (0..10).map(|i| i as f32).collect();
+            let prefill = MlxArray::from_slice_f32(&data, &[1, 1, 5, 2]).unwrap();
+            let mut cache = Gemma4LayerCache::new(Gemma4CacheKind::Sliding { window: 3 });
+
+            let max_cache_len = cache.window();
+            let visible =
+                append_cached_axis2(&mut cache.keys, &prefill, max_cache_len, None).unwrap();
+
+            assert_eq!(visible.shape(), vec![1, 1, 5, 2]);
+            assert_close(
+                &visible.to_vec_f32().unwrap(),
+                &data,
+                1.0e-6,
+                "prefill visible cache",
+            );
+            let stored = cache.keys.as_ref().expect("stored sliding cache tail");
+            assert_eq!(stored.len, 3);
+            assert_eq!(stored.storage.shape(), vec![1, 1, 6, 2]);
+            let stored_visible = cache_visible_axis2(stored, Some(3), None).unwrap();
+            assert_close(
+                &stored_visible.to_vec_f32().unwrap(),
+                &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+                1.0e-6,
+                "stored sliding cache tail",
+            );
+        }
+
+        #[test]
+        fn sliding_cache_decode_keeps_only_window() {
+            let seed =
+                MlxArray::from_slice_f32(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0], &[1, 1, 3, 2]).unwrap();
+            let update = MlxArray::from_slice_f32(&[6.0, 7.0], &[1, 1, 1, 2]).unwrap();
+            let mut cache = Gemma4LayerCache::new(Gemma4CacheKind::Sliding { window: 3 });
+            cache.keys = Some(materialize_cached_axis2(&seed, None).unwrap());
+
+            let max_cache_len = cache.window();
+            let visible =
+                append_cached_axis2(&mut cache.keys, &update, max_cache_len, None).unwrap();
+
+            assert_eq!(visible.shape(), vec![1, 1, 3, 2]);
+            assert_close(
+                &visible.to_vec_f32().unwrap(),
+                &[2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+                1.0e-6,
+                "decode visible cache",
+            );
+            let stored = cache.keys.as_ref().expect("stored sliding decode cache");
+            assert_eq!(stored.len, 4);
+            assert_eq!(stored.storage.shape(), vec![1, 1, 6, 2]);
+            let stored_visible = cache_visible_axis2(stored, Some(3), None).unwrap();
+            assert_close(
+                &stored_visible.to_vec_f32().unwrap(),
+                &[2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+                1.0e-6,
+                "stored sliding visible cache",
+            );
+        }
+
+        #[test]
+        fn sliding_decode_with_bounded_cache_needs_no_mask() {
+            let sliding = Gemma4LayerCache::new(Gemma4CacheKind::Sliding { window: 512 });
+            let global = Gemma4LayerCache::new(Gemma4CacheKind::Global);
+
+            assert!(!sliding_attention_needs_mask(&sliding, 1));
+            assert!(sliding_attention_needs_mask(&sliding, 2));
+            assert!(sliding_attention_needs_mask(&global, 1));
+        }
+
+        #[test]
+        fn global_cache_capacity_grows_geometrically() {
+            assert_eq!(next_cache_capacity(0, 17), GEMMA4_SLIDING_CACHE_BUFFER);
+            assert_eq!(next_cache_capacity(256, 257), 512);
+            assert_eq!(next_cache_capacity(512, 513), 1024);
+            assert_eq!(next_cache_capacity(1024, 1800), 2048);
+        }
+
+        #[test]
+        fn short_sliding_prefill_can_use_causal_attention() {
+            let q = MlxArray::from_slice_f32(&[0.0; 6], &[1, 1, 3, 2]).unwrap();
+            let same_len_k = MlxArray::from_slice_f32(&[0.0; 6], &[1, 1, 3, 2]).unwrap();
+            let longer_k = MlxArray::from_slice_f32(&[0.0; 8], &[1, 1, 4, 2]).unwrap();
+
+            assert!(sliding_window_is_plain_causal(&q, &same_len_k, 3).unwrap());
+            assert!(!sliding_window_is_plain_causal(&q, &same_len_k, 2).unwrap());
+            assert!(!sliding_window_is_plain_causal(&q, &longer_k, 4).unwrap());
         }
     }
 }

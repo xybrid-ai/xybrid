@@ -667,7 +667,10 @@ mod runtime {
         }
 
         fn supports_async_greedy(&self) -> bool {
-            matches!(self, Self::Qwen35 { .. } | Self::Lfm35 { .. })
+            matches!(
+                self,
+                Self::Qwen35 { .. } | Self::Gemma4 { .. } | Self::Lfm35 { .. }
+            )
         }
 
         fn forward(
