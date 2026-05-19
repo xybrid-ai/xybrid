@@ -1,0 +1,34 @@
+crates/xybrid-core/src/execution/executor.rs
+  s_fe92912e12fecd::t_780f8ed7845ccb 1072-1076,1169-1173,1269-1273,1433-1437
+  s_fe92912e12fecd::t_5b61b6eac9affc 3115-3119,3138
+  s_fe92912e12fecd::t_9c0feae9d41e79 76-95
+  s_fe92912e12fecd::t_d8250fa0abbb86 3046-3114,3120-3137,3139-3158
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_fe92912e12fecd::t_f13835bdd2a63f 319-322
+crates/xybrid-core/src/runtime_adapter/mistral/mod.rs
+  s_fe92912e12fecd::t_b17ae44330e4ee 320-323
+crates/xybrid-core/src/execution/strategies/llm.rs
+  s_fe92912e12fecd::t_a20974635bff17 253-264
+  s_fe92912e12fecd::t_232410d73b218c 579-587
+  s_fe92912e12fecd::t_97f4fe5314a23b 14
+  s_fe92912e12fecd::t_a763483ee51ec5 403-406
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_fe92912e12fecd::t_210cbcc39c0c1a 376-383
+  s_fe92912e12fecd::t_4210076949e923 241-261
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "9eb80f5d3981b5368e6b1c0bf083fa61de5567a3",
+  "prompts": {},
+  "sessions": {
+    "s_fe92912e12fecd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5bd3dd2-9d8f-45d0-8769-d90a6512e132",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
