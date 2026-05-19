@@ -1,0 +1,41 @@
+examples/flutter/lib/screens/tts_demo_screen.dart
+  s_56b604a5c7b635::t_e864d483660213 218
+  s_56b604a5c7b635::t_ece5e27030b180 432-435
+  s_56b604a5c7b635::t_f53ad131701de9 87-89
+  s_56b604a5c7b635::t_898903bae0e511 6
+examples/flutter/lib/screens/pipeline_demo_screen.dart
+  s_56b604a5c7b635::t_735d10798a28bf 458-461
+  s_56b604a5c7b635::t_78b8fcb3e03984 3
+  s_56b604a5c7b635::t_69ac602d997e92 124
+  s_56b604a5c7b635::t_961ed96b5ae261 43-45
+  s_56b604a5c7b635::t_cd0d47af957641 69,106,153
+examples/flutter/lib/screens/asr_demo_screen.dart
+  s_56b604a5c7b635::t_c6abe621056a8d 5
+  s_56b604a5c7b635::t_a89662c6f94a7e 81-83
+  s_56b604a5c7b635::t_c18ba2c76f8d04 516-519
+  s_56b604a5c7b635::t_8d51fbf5e13381 228,238
+examples/flutter/pubspec.yaml
+  s_56b604a5c7b635::t_9c41003704015d 36-40
+examples/flutter/lib/widgets/metrics_card.dart
+  s_56b604a5c7b635::t_b4291b5b142a2c 1-99
+bindings/unity/README.md
+  s_56b604a5c7b635::t_9599624950d42d 147-174
+bindings/flutter/lib/xybrid.dart
+  s_56b604a5c7b635::t_1387b7f2621c42 90-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "f5981d1fd65482152992c70d56b2a601b215308f",
+  "prompts": {},
+  "sessions": {
+    "s_56b604a5c7b635": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30ad98a9-9013-4806-8f70-a57cdc5df72d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
