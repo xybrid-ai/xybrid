@@ -12,7 +12,7 @@ pub struct FfiStageLatency {
 }
 
 impl FfiStageLatency {
-    fn from_core(s: &StageLatency) -> Self {
+    pub(crate) fn from_core(s: &StageLatency) -> Self {
         Self {
             stage_id: s.stage_id.clone(),
             latency_ms: s.latency_ms,
@@ -37,7 +37,7 @@ pub struct FfiInferenceMetrics {
 }
 
 impl FfiInferenceMetrics {
-    fn from_core(m: &InferenceMetrics) -> Self {
+    pub(crate) fn from_core(m: &InferenceMetrics) -> Self {
         Self {
             total_ms: m.total_ms,
             ttft_ms: m.ttft_ms,

@@ -44,16 +44,20 @@ impl FfiPipeline {
     /// Execute the pipeline with the given input envelope.
     ///
     /// Returns the inference result from the final stage.
+    ///
+    /// LLM-specific metric fields (`ttft_ms`, `tokens_per_second`,
+    /// `prefill_tps`, `decode_tps`, `tokens_out`) are parsed from the
+    /// **final** stage envelope's metadata, so they are `None` whenever the
+    /// final stage isn't the LLM — e.g. an `ASR → LLM → TTS` pipeline
+    /// produces a TTS envelope and the LLM metrics are not surfaced here.
+    /// Hoisting them from intermediate stages is a follow-up at the SDK
+    /// layer.
     pub fn run(&self, envelope: FfiEnvelope) -> Result<FfiResult, String> {
         use xybrid_sdk::InferenceMetrics;
 
         let input = envelope.into_envelope();
         let result = self.0.run(&input).map_err(|e| e.to_string())?;
 
-        // Build typed metrics from the final envelope's metadata and the
-        // per-stage timings recorded by the pipeline. LLM-specific fields
-        // fall out of `InferenceMetrics::from_metadata` automatically;
-        // stage latencies come from `result.stages`.
         let mut metrics =
             InferenceMetrics::from_metadata(&result.output.metadata, result.total_latency_ms);
         metrics.stage_latencies_ms = result
@@ -71,22 +75,7 @@ impl FfiPipeline {
             audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
             embedding: result.embedding().map(|e| e.to_vec()),
             latency_ms: result.total_latency_ms,
-            metrics: crate::api::result::FfiInferenceMetrics {
-                total_ms: metrics.total_ms,
-                ttft_ms: metrics.ttft_ms,
-                tokens_per_second: metrics.tokens_per_second,
-                prefill_tps: metrics.prefill_tps,
-                decode_tps: metrics.decode_tps,
-                tokens_out: metrics.tokens_out,
-                stage_latencies_ms: metrics
-                    .stage_latencies_ms
-                    .into_iter()
-                    .map(|s| crate::api::result::FfiStageLatency {
-                        stage_id: s.stage_id,
-                        latency_ms: s.latency_ms,
-                    })
-                    .collect(),
-            },
+            metrics: crate::api::result::FfiInferenceMetrics::from_core(&metrics),
         })
     }
 

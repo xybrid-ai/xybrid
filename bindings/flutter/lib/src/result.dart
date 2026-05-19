@@ -25,7 +25,11 @@ class XybridStageLatency {
 /// Typed inference metrics surfaced on every [XybridResult].
 ///
 /// LLM-specific fields ([ttftMs], [tokensPerSecond], [prefillTps],
-/// [decodeTps], [tokensOut]) are `null` for ASR/TTS/embedding runs.
+/// [decodeTps], [tokensOut]) are `null` for ASR/TTS/embedding runs. For
+/// pipeline runs they are parsed from the **final** stage envelope only,
+/// so they are also `null` when the final stage isn't the LLM (e.g. an
+/// `ASR → LLM → TTS` pipeline).
+///
 /// [stageLatenciesMs] is empty for `model.run()` and populated for
 /// `pipeline.run()`.
 class XybridInferenceMetrics {
@@ -123,6 +127,6 @@ class XybridResult {
   ///
   /// LLM-specific fields are null for ASR/TTS/embedding runs;
   /// `stageLatenciesMs` is empty for single-model runs.
-  XybridInferenceMetrics get metrics =>
+  late final XybridInferenceMetrics metrics =
       XybridInferenceMetrics.fromFfi(_inner.metrics);
 }
