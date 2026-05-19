@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/xybrid",
     "crates/xybrid-core",
     "crates/xybrid-sdk",
     "crates/xybrid-cli",
