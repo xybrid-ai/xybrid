@@ -1,0 +1,34 @@
+bindings/unity/Runtime/Api/InferenceResult.cs
+  s_56b604a5c7b635::t_fafd469959b0ac 143-152
+  s_56b604a5c7b635::t_82eacee0bdf7a3 202-229
+  s_56b604a5c7b635::t_5a0740d9b781c1 90
+  s_56b604a5c7b635::t_addff6921c782a 5,11-69
+docs/sdk/API_REFERENCE.md
+  s_56b604a5c7b635::t_097b0452f426f4 893-896
+docs/sdk/api-surface.yaml
+  s_56b604a5c7b635::t_e59a477ce331e9 270,356,368,371,374,377,380,383,386,398,401
+crates/xybrid-ffi/src/lib.rs
+  s_56b604a5c7b635::t_ed5bfdafb6ebba 2380,2535,2956,3113
+  s_56b604a5c7b635::t_c35434d7db18f0 4762
+  s_56b604a5c7b635::t_fb81e0c2505c92 332
+  s_56b604a5c7b635::t_61f32388522c5d 164-167
+  s_56b604a5c7b635::t_84356aa422a082 3565-3599,3601-3727
+  s_56b604a5c7b635::t_3e3c25152cca6d 4733
+  s_56b604a5c7b635::t_46a86f79f5619f 2357,2509,2933,3090
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "3d1fbd9a2144bb20bb7e8aa57c1d4e678b779f58",
+  "prompts": {},
+  "sessions": {
+    "s_56b604a5c7b635": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30ad98a9-9013-4806-8f70-a57cdc5df72d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
