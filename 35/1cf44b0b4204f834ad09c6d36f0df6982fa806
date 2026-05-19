@@ -1,0 +1,19 @@
+.github/workflows/ci.yml
+  s_2a6ad8682b0040::t_cd70fde1a1e158 152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "351cf44b0b4204f834ad09c6d36f0df6982fa806",
+  "prompts": {},
+  "sessions": {
+    "s_2a6ad8682b0040": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "99d57906-be18-454a-91a2-1d01d043ca08",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
