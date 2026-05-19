@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:xybrid_example/utils/recorder.dart';
+import 'package:xybrid_example/widgets/metrics_card.dart';
 import 'package:xybrid_example/widgets/model_status_card.dart';
 import 'package:xybrid_flutter/xybrid.dart';
 
@@ -76,6 +77,9 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
 
   /// Latency of the last inference in milliseconds.
   int? _latencyMs;
+
+  /// Typed metrics from the last inference (if any).
+  XybridInferenceMetrics? _metrics;
 
   /// Transcribed text from last inference.
   String? _transcribedText;
@@ -221,6 +225,7 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
           _state = const AsrReady();
           _transcribedText = '(No speech detected)';
           _latencyMs = result.latencyMs;
+          _metrics = result.metrics;
         });
         return;
       }
@@ -230,6 +235,7 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
           _state = const AsrReady();
           _transcribedText = transcribedText;
           _latencyMs = result.latencyMs;
+          _metrics = result.metrics;
         });
       }
     } on XybridException catch (e) {
@@ -507,6 +513,10 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
                   ),
                 ],
               ),
+              if (_metrics != null) ...[
+                const SizedBox(height: 12),
+                MetricsCard(metrics: _metrics!),
+              ],
             ],
           ],
         ),

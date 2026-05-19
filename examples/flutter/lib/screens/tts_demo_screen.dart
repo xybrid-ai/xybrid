@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:xybrid_example/widgets/metrics_card.dart';
 import 'package:xybrid_example/widgets/model_status_card.dart';
 import 'package:xybrid_flutter/xybrid.dart';
 
@@ -82,6 +83,9 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
 
   /// Latency of the last inference in milliseconds.
   int? _latencyMs;
+
+  /// Typed metrics from the last inference (if any).
+  XybridInferenceMetrics? _metrics;
 
   /// Whether audio is currently playing.
   bool _isPlaying = false;
@@ -211,6 +215,7 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
         setState(() {
           _state = const TtsPlaying();
           _latencyMs = result.latencyMs;
+          _metrics = result.metrics;
         });
 
         await _playAudio(wavBytes);
@@ -423,6 +428,10 @@ class _TextToSpeechScreenState extends State<TextToSpeechScreen> {
                   'Inference latency: ${_latencyMs}ms',
                   style: theme.textTheme.bodyMedium,
                 ),
+              ],
+              if (_metrics != null) ...[
+                const SizedBox(height: 12),
+                MetricsCard(metrics: _metrics!),
               ],
               if (_isPlaying) ...[
                 const SizedBox(height: 16),
