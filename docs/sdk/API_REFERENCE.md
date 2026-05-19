@@ -890,10 +890,10 @@ public sealed class StageLatency
 | `modelId` | — | — | — | ✅ |
 | `isFailure` | ✅ | ✅ | ✅ | ✅ |
 | `audioAsWav()` | ✅ | — | — | — |
-| `metrics` | — | — | — | — |
-| `metrics.ttftMs` | — | — | — | — |
-| `metrics.tokensPerSecond` | — | — | — | — |
-| `metrics.stageLatenciesMs` | — | — | — | — |
+| `metrics` | — | ✅ | ✅ | — |
+| `metrics.ttftMs` | — | ✅ | ✅ | — |
+| `metrics.tokensPerSecond` | — | ✅ | ✅ | — |
+| `metrics.stageLatenciesMs` | — | ✅ | ✅ | — |
 
 ---
 

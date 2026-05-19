@@ -783,21 +783,118 @@ public func FfiConverterTypeXybridGenerationConfig_lower(_ value: XybridGenerati
 }
 
 
+public struct XybridInferenceMetrics {
+    public var totalMs: UInt32
+    public var ttftMs: UInt32?
+    public var tokensPerSecond: Float?
+    public var prefillTps: Float?
+    public var decodeTps: Float?
+    public var tokensOut: UInt32?
+    public var stageLatenciesMs: [XybridStageLatency]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(totalMs: UInt32, ttftMs: UInt32?, tokensPerSecond: Float?, prefillTps: Float?, decodeTps: Float?, tokensOut: UInt32?, stageLatenciesMs: [XybridStageLatency]) {
+        self.totalMs = totalMs
+        self.ttftMs = ttftMs
+        self.tokensPerSecond = tokensPerSecond
+        self.prefillTps = prefillTps
+        self.decodeTps = decodeTps
+        self.tokensOut = tokensOut
+        self.stageLatenciesMs = stageLatenciesMs
+    }
+}
+
+
+extension XybridInferenceMetrics: Equatable, Hashable {
+    public static func ==(lhs: XybridInferenceMetrics, rhs: XybridInferenceMetrics) -> Bool {
+        if lhs.totalMs != rhs.totalMs {
+            return false
+        }
+        if lhs.ttftMs != rhs.ttftMs {
+            return false
+        }
+        if lhs.tokensPerSecond != rhs.tokensPerSecond {
+            return false
+        }
+        if lhs.prefillTps != rhs.prefillTps {
+            return false
+        }
+        if lhs.decodeTps != rhs.decodeTps {
+            return false
+        }
+        if lhs.tokensOut != rhs.tokensOut {
+            return false
+        }
+        if lhs.stageLatenciesMs != rhs.stageLatenciesMs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(totalMs)
+        hasher.combine(ttftMs)
+        hasher.combine(tokensPerSecond)
+        hasher.combine(prefillTps)
+        hasher.combine(decodeTps)
+        hasher.combine(tokensOut)
+        hasher.combine(stageLatenciesMs)
+    }
+}
+
+
+public struct FfiConverterTypeXybridInferenceMetrics: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> XybridInferenceMetrics {
+        return try XybridInferenceMetrics(
+            totalMs: FfiConverterUInt32.read(from: &buf), 
+            ttftMs: FfiConverterOptionUInt32.read(from: &buf), 
+            tokensPerSecond: FfiConverterOptionFloat.read(from: &buf), 
+            prefillTps: FfiConverterOptionFloat.read(from: &buf), 
+            decodeTps: FfiConverterOptionFloat.read(from: &buf), 
+            tokensOut: FfiConverterOptionUInt32.read(from: &buf), 
+            stageLatenciesMs: FfiConverterSequenceTypeXybridStageLatency.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: XybridInferenceMetrics, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.totalMs, into: &buf)
+        FfiConverterOptionUInt32.write(value.ttftMs, into: &buf)
+        FfiConverterOptionFloat.write(value.tokensPerSecond, into: &buf)
+        FfiConverterOptionFloat.write(value.prefillTps, into: &buf)
+        FfiConverterOptionFloat.write(value.decodeTps, into: &buf)
+        FfiConverterOptionUInt32.write(value.tokensOut, into: &buf)
+        FfiConverterSequenceTypeXybridStageLatency.write(value.stageLatenciesMs, into: &buf)
+    }
+}
+
+
+public func FfiConverterTypeXybridInferenceMetrics_lift(_ buf: RustBuffer) throws -> XybridInferenceMetrics {
+    return try FfiConverterTypeXybridInferenceMetrics.lift(buf)
+}
+
+public func FfiConverterTypeXybridInferenceMetrics_lower(_ value: XybridInferenceMetrics) -> RustBuffer {
+    return FfiConverterTypeXybridInferenceMetrics.lower(value)
+}
+
+
 public struct XybridResult {
     public var success: Bool
     public var text: String?
     public var audioBytes: Data?
     public var embedding: [Float]?
     public var latencyMs: UInt32
+    public var metrics: XybridInferenceMetrics
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(success: Bool, text: String?, audioBytes: Data?, embedding: [Float]?, latencyMs: UInt32) {
+    public init(success: Bool, text: String?, audioBytes: Data?, embedding: [Float]?, latencyMs: UInt32, metrics: XybridInferenceMetrics) {
         self.success = success
         self.text = text
         self.audioBytes = audioBytes
         self.embedding = embedding
         self.latencyMs = latencyMs
+        self.metrics = metrics
     }
 }
 
@@ -819,6 +916,9 @@ extension XybridResult: Equatable, Hashable {
         if lhs.latencyMs != rhs.latencyMs {
             return false
         }
+        if lhs.metrics != rhs.metrics {
+            return false
+        }
         return true
     }
 
@@ -828,6 +928,7 @@ extension XybridResult: Equatable, Hashable {
         hasher.combine(audioBytes)
         hasher.combine(embedding)
         hasher.combine(latencyMs)
+        hasher.combine(metrics)
     }
 }
 
@@ -839,7 +940,8 @@ public struct FfiConverterTypeXybridResult: FfiConverterRustBuffer {
             text: FfiConverterOptionString.read(from: &buf), 
             audioBytes: FfiConverterOptionData.read(from: &buf), 
             embedding: FfiConverterOptionSequenceFloat.read(from: &buf), 
-            latencyMs: FfiConverterUInt32.read(from: &buf)
+            latencyMs: FfiConverterUInt32.read(from: &buf), 
+            metrics: FfiConverterTypeXybridInferenceMetrics.read(from: &buf)
         )
     }
 
@@ -849,6 +951,7 @@ public struct FfiConverterTypeXybridResult: FfiConverterRustBuffer {
         FfiConverterOptionData.write(value.audioBytes, into: &buf)
         FfiConverterOptionSequenceFloat.write(value.embedding, into: &buf)
         FfiConverterUInt32.write(value.latencyMs, into: &buf)
+        FfiConverterTypeXybridInferenceMetrics.write(value.metrics, into: &buf)
     }
 }
 
@@ -859,6 +962,61 @@ public func FfiConverterTypeXybridResult_lift(_ buf: RustBuffer) throws -> Xybri
 
 public func FfiConverterTypeXybridResult_lower(_ value: XybridResult) -> RustBuffer {
     return FfiConverterTypeXybridResult.lower(value)
+}
+
+
+public struct XybridStageLatency {
+    public var stageId: String
+    public var latencyMs: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(stageId: String, latencyMs: UInt32) {
+        self.stageId = stageId
+        self.latencyMs = latencyMs
+    }
+}
+
+
+extension XybridStageLatency: Equatable, Hashable {
+    public static func ==(lhs: XybridStageLatency, rhs: XybridStageLatency) -> Bool {
+        if lhs.stageId != rhs.stageId {
+            return false
+        }
+        if lhs.latencyMs != rhs.latencyMs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(stageId)
+        hasher.combine(latencyMs)
+    }
+}
+
+
+public struct FfiConverterTypeXybridStageLatency: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> XybridStageLatency {
+        return try XybridStageLatency(
+            stageId: FfiConverterString.read(from: &buf), 
+            latencyMs: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: XybridStageLatency, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.stageId, into: &buf)
+        FfiConverterUInt32.write(value.latencyMs, into: &buf)
+    }
+}
+
+
+public func FfiConverterTypeXybridStageLatency_lift(_ buf: RustBuffer) throws -> XybridStageLatency {
+    return try FfiConverterTypeXybridStageLatency.lift(buf)
+}
+
+public func FfiConverterTypeXybridStageLatency_lower(_ value: XybridStageLatency) -> RustBuffer {
+    return FfiConverterTypeXybridStageLatency.lower(value)
 }
 
 
@@ -1510,6 +1668,28 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+fileprivate struct FfiConverterSequenceTypeXybridStageLatency: FfiConverterRustBuffer {
+    typealias SwiftType = [XybridStageLatency]
+
+    public static func write(_ value: [XybridStageLatency], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeXybridStageLatency.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [XybridStageLatency] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [XybridStageLatency]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeXybridStageLatency.read(from: &buf))
         }
         return seq
     }

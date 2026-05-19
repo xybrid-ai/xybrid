@@ -353,7 +353,7 @@ classes:
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       metrics:
         type: InferenceMetrics
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: planned }
 
   InferenceMetrics:
     type: data
@@ -365,25 +365,25 @@ classes:
     properties:
       totalMs:
         type: int
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: planned }
       ttftMs:
         type: "int?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: planned }
       tokensPerSecond:
         type: "double?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: planned }
       prefillTps:
         type: "double?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: planned }
       decodeTps:
         type: "double?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: planned }
       tokensOut:
         type: "int?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: planned }
       stageLatenciesMs:
         type: "List<StageLatency>"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: planned }
 
   StageLatency:
     type: data
@@ -395,10 +395,10 @@ classes:
     properties:
       stageId:
         type: String
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: planned }
       latencyMs:
         type: int
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: planned }
 
   # -------------------------------------------------------------------
   # 8. Supporting Types
