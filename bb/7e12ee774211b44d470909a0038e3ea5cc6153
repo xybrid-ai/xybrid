@@ -1,0 +1,24 @@
+examples/ios/XybridExample.xcodeproj/project.pbxproj
+  s_56b604a5c7b635::t_04dd5927dcab57 108,344,346
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "bb7e12ee774211b44d470909a0038e3ea5cc6153",
+  "prompts": {},
+  "humans": {
+    "h_92edd19a2533f1": {
+      "author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_56b604a5c7b635": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30ad98a9-9013-4806-8f70-a57cdc5df72d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
