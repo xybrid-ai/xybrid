@@ -1,0 +1,25 @@
+examples/android/app/src/main/java/ai/xybrid/example/XybridExampleApp.kt
+  s_56b604a5c7b635::t_f34bc881605464 189-190
+examples/android/app/src/main/java/ai/xybrid/example/state/InferenceState.kt
+  s_56b604a5c7b635::t_47ff70d96a1357 3,16-17
+examples/android/app/src/main/java/ai/xybrid/example/components/InferenceCard.kt
+  s_56b604a5c7b635::t_6b078ac4ac53ae 299-349
+examples/ios/XybridExample/ContentView.swift
+  s_56b604a5c7b635::t_99eb0d44276763 480-484,504-551
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "f3e222406a62bfe81be075269465843f43087b44",
+  "prompts": {},
+  "sessions": {
+    "s_56b604a5c7b635": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30ad98a9-9013-4806-8f70-a57cdc5df72d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
