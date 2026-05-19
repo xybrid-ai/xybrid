@@ -316,6 +316,10 @@ impl LlmBackend for LlamaCppBackend {
         "llama-cpp"
     }
 
+    fn wire_label(&self) -> Option<&'static str> {
+        Some("llamacpp")
+    }
+
     fn supported_formats(&self) -> Vec<&'static str> {
         vec!["gguf"]
     }

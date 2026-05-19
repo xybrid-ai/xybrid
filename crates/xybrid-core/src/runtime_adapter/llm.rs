@@ -238,6 +238,27 @@ pub trait LlmBackend: Send + Sync {
     fn last_cached_prefix_len(&self) -> Option<usize> {
         None
     }
+
+    /// Canonical wire label for cost-attribution telemetry.
+    ///
+    /// Returns the closed-set `backend` value the inner `llm_inference`
+    /// span should carry on the wire (`"llamacpp"` / `"mistralrs"` /
+    /// future additions). Defaults to `None` so mock and test backends
+    /// don't claim a real runtime identity.
+    ///
+    /// Real LLM backends override this and the inner-span sites call
+    /// it *after* backend selection so the wire label reflects the
+    /// runtime that actually executes the model — not the
+    /// template-derived default produced by
+    /// `backend_label_from_template`. This matters because the runtime
+    /// is chosen by cargo feature (see [`Self::new`] precedence), so
+    /// non-default-features builds (e.g. `llm-mistral` only, or
+    /// `llm-mistral` + `llm-llamacpp` where the mistral arm wins) would
+    /// otherwise mislabel unannotated GGUF bundles as `"llamacpp"`
+    /// when mistral.rs is the executing backend.
+    fn wire_label(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// Factory function type for creating LLM backends.
@@ -350,6 +371,14 @@ impl LlmRuntimeAdapter {
     /// Get the context length of the loaded model.
     pub fn context_length(&self) -> Option<usize> {
         self.backend.context_length()
+    }
+
+    /// Canonical wire label of the underlying backend (see
+    /// [`LlmBackend::wire_label`]). Inner LLM span sites call this to
+    /// stamp the runtime that actually executed, overwriting the
+    /// template-derived default from `backend_label_from_template`.
+    pub fn wire_label(&self) -> Option<&'static str> {
+        self.backend.wire_label()
     }
 
     /// Get a reference to the underlying backend.

@@ -73,6 +73,26 @@ fn stamp_llm_span_cost_attribution(metadata: &ModelMetadata) {
     }
 }
 
+/// Overwrite the currently-open span's `backend` cost-attribution
+/// metadata with the actual runtime's wire label.
+///
+/// `stamp_llm_span_cost_attribution` stamps the *template-derived*
+/// default first, but the runtime is selected by cargo feature (see
+/// `LlmRuntimeAdapter::new` precedence), so the template-derived
+/// label can disagree with the runtime that actually executes — for
+/// example, an `llm-mistral`-only build loading an unannotated GGUF
+/// bundle runs on mistral.rs but the template default says `llamacpp`.
+/// Calling this after the adapter is resolved replaces the default
+/// with ground truth (via [`LlmRuntimeAdapter::wire_label`]). Spans
+/// without a wire label (mock/test backends) leave the
+/// template-derived stamp in place.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn stamp_llm_runtime_backend(adapter: &LlmRuntimeAdapter) {
+    if let Some(label) = adapter.wire_label() {
+        xybrid_trace::add_metadata("backend", label);
+    }
+}
+
 // Internal: ONNX-specific types needed for optimized execution paths
 // These are implementation details, not part of the public API
 use crate::execution::session_factory::OnnxSessionFactory;
@@ -1049,6 +1069,11 @@ impl TemplateExecutor {
         // local-cache-hit count to the wire payload.
         let (output, backend_name, cached_prefix) =
             if let Some((_, adapter)) = &self.llm_adapter_cache {
+                // Overwrite the template-derived `backend` stamp with
+                // the runtime that actually executes (mistral.rs vs
+                // llama.cpp, selected by cargo feature, not by the
+                // bundle metadata).
+                stamp_llm_runtime_backend(adapter);
                 let backend = adapter.backend();
                 let out = backend.generate_streaming(&messages, &gen_config, on_token)?;
                 let name = backend.name().to_string();
@@ -1141,6 +1166,11 @@ impl TemplateExecutor {
         // Capture backend name + cached-prefix length for the metric mirror.
         let (output, backend_name, cached_prefix) =
             if let Some((_, adapter)) = &self.llm_adapter_cache {
+                // Overwrite the template-derived `backend` stamp with
+                // the runtime that actually executes (mistral.rs vs
+                // llama.cpp, selected by cargo feature, not by the
+                // bundle metadata).
+                stamp_llm_runtime_backend(adapter);
                 let backend = adapter.backend();
                 let out = backend.generate(messages, &gen_config)?;
                 let name = backend.name().to_string();
@@ -1236,6 +1266,11 @@ impl TemplateExecutor {
         // Capture backend name + cached-prefix length for the metric mirror.
         let (output, backend_name, cached_prefix) =
             if let Some((_, adapter)) = &self.llm_adapter_cache {
+                // Overwrite the template-derived `backend` stamp with
+                // the runtime that actually executes (mistral.rs vs
+                // llama.cpp, selected by cargo feature, not by the
+                // bundle metadata).
+                stamp_llm_runtime_backend(adapter);
                 let backend = adapter.backend();
                 let out = backend.generate_streaming(messages, &gen_config, on_token)?;
                 let name = backend.name().to_string();
@@ -1395,6 +1430,11 @@ impl TemplateExecutor {
         // Capture backend name + cached-prefix length for the metric mirror.
         let (output, backend_name, cached_prefix) =
             if let Some((_, adapter)) = &self.llm_adapter_cache {
+                // Overwrite the template-derived `backend` stamp with
+                // the runtime that actually executes (mistral.rs vs
+                // llama.cpp, selected by cargo feature, not by the
+                // bundle metadata).
+                stamp_llm_runtime_backend(adapter);
                 let backend = adapter.backend();
                 let out = backend.generate(&messages, &gen_config)?;
                 let name = backend.name().to_string();
@@ -3001,6 +3041,119 @@ mod tests {
                 captured.get("quantization").map(String::as_str),
                 Some("q4_k_m"),
                 "stamp must surface the filename-inferred quantization alongside backend"
+            );
+        }
+
+        // A backend stub that lets a test pick the wire label so we can
+        // verify `stamp_llm_runtime_backend` overwrites the
+        // template-derived default with the runtime's identity. Needed
+        // because the runtime is chosen by cargo feature, so the
+        // template-derived label can disagree with the runtime that
+        // actually executes (e.g. mistralrs on an `llm-mistral`-only
+        // build loading an unannotated GGUF bundle).
+        struct WireLabelStub(Option<&'static str>);
+
+        impl crate::runtime_adapter::llm::LlmBackend for WireLabelStub {
+            fn name(&self) -> &str {
+                "wire-label-stub"
+            }
+            fn wire_label(&self) -> Option<&'static str> {
+                self.0
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["gguf"]
+            }
+            fn load(
+                &mut self,
+                _config: &crate::runtime_adapter::llm::LlmConfig,
+            ) -> crate::runtime_adapter::llm::LlmResult<()> {
+                Ok(())
+            }
+            fn is_loaded(&self) -> bool {
+                true
+            }
+            fn unload(&mut self) -> crate::runtime_adapter::llm::LlmResult<()> {
+                Ok(())
+            }
+            fn generate(
+                &self,
+                _messages: &[crate::runtime_adapter::llm::ChatMessage],
+                _config: &crate::runtime_adapter::llm::GenerationConfig,
+            ) -> crate::runtime_adapter::llm::LlmResult<crate::runtime_adapter::llm::GenerationOutput>
+            {
+                unreachable!("stub backend should not be invoked for inference in this test")
+            }
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &crate::runtime_adapter::llm::GenerationConfig,
+            ) -> crate::runtime_adapter::llm::LlmResult<crate::runtime_adapter::llm::GenerationOutput>
+            {
+                unreachable!("stub backend should not be invoked for inference in this test")
+            }
+        }
+
+        fn capture_with_runtime_overwrite(
+            metadata: &ModelMetadata,
+            wire_label: Option<&'static str>,
+        ) -> HashMap<String, String> {
+            let adapter = crate::runtime_adapter::llm::LlmRuntimeAdapter::with_backend(Box::new(
+                WireLabelStub(wire_label),
+            ));
+            tracing::init_tracing(true);
+            tracing::reset_tracing();
+            {
+                let _guard = tracing::SpanGuard::new("execute:test");
+                stamp_llm_span_cost_attribution(metadata);
+                stamp_llm_runtime_backend(&adapter);
+            }
+            let json = tracing::get_stages_json();
+            tracing::reset_tracing();
+
+            let span = json["spans"]
+                .as_array()
+                .and_then(|spans| {
+                    spans
+                        .iter()
+                        .find(|s| s["name"].as_str() == Some("execute:test"))
+                })
+                .expect("span recorded by SpanGuard must be present in stages json");
+            span["metadata"]
+                .as_object()
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+
+        #[test]
+        fn runtime_wire_label_overwrites_template_default() {
+            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            // Template default for unannotated GGUF is `llamacpp`, but
+            // the runtime selected by cargo feature is mistral.rs. The
+            // overwrite must flip the stamp to ground truth so the
+            // dashboard reflects the runtime that actually executed.
+            let captured = capture_with_runtime_overwrite(&gguf_metadata(None), Some("mistralrs"));
+            assert_eq!(
+                captured.get("backend").map(String::as_str),
+                Some("mistralrs"),
+                "runtime wire label must overwrite the template-derived default"
+            );
+        }
+
+        #[test]
+        fn runtime_overwrite_preserves_template_default_when_label_absent() {
+            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            // Mock/test backends return None from wire_label so the
+            // template-derived stamp survives — anything else would
+            // erase ground truth that the template *did* carry.
+            let captured = capture_with_runtime_overwrite(&gguf_metadata(None), None);
+            assert_eq!(
+                captured.get("backend").map(String::as_str),
+                Some("llamacpp"),
+                "stub backends without a wire label must not erase the template-derived stamp"
             );
         }
     }

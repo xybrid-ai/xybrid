@@ -11,7 +11,7 @@ use log::{debug, info};
 use std::path::Path;
 
 use super::{ExecutionContext, ExecutionStrategy};
-use crate::execution::template::{normalize_llm_backend_hint, ExecutionTemplate, ModelMetadata};
+use crate::execution::template::{ExecutionTemplate, ModelMetadata};
 use crate::execution::types::ExecutorResult;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::AdapterError;
@@ -250,6 +250,18 @@ pub trait LlmInference: Send + Sync {
 
     /// Get the name of this backend for logging.
     fn backend_name(&self) -> &str;
+
+    /// Canonical wire label of the actual runtime that will execute
+    /// inference (`Some("llamacpp")` / `Some("mistralrs")`), or `None`
+    /// for mock/test backends that shouldn't claim a real identity.
+    ///
+    /// Used by the inner LLM span site to overwrite the
+    /// template-derived `backend` stamp with the runtime that was
+    /// actually selected by cargo feature — see
+    /// `runtime_adapter::llm::LlmBackend::wire_label`.
+    fn wire_label(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 // ============================================================================
@@ -387,6 +399,10 @@ impl LlmInference for DefaultLlmInference {
 
     fn backend_name(&self) -> &str {
         self.backend_hint.as_deref().unwrap_or("default")
+    }
+
+    fn wire_label(&self) -> Option<&'static str> {
+        self.adapter.as_ref().and_then(|a| a.wire_label())
     }
 }
 
@@ -548,17 +564,6 @@ impl<I: LlmInference + 'static> ExecutionStrategy for LlmStrategy<I> {
         );
 
         xybrid_trace::add_metadata("model", &config.model_path);
-        // Emit the canonical wire label (`mistralrs` / `llamacpp`) onto the
-        // inner LLM span so the SDK telemetry hoist surfaces a closed-set
-        // value on `PlatformEvent.backend`. The raw `metadata.backend`
-        // string can still be the legacy `mistral` alias on older bundles.
-        if let Some(hint) = config
-            .backend_hint
-            .as_deref()
-            .and_then(normalize_llm_backend_hint)
-        {
-            xybrid_trace::add_metadata("backend", hint);
-        }
 
         // Load model if needed
         let mut inference = self
@@ -569,6 +574,17 @@ impl<I: LlmInference + 'static> ExecutionStrategy for LlmStrategy<I> {
         if !inference.is_loaded() {
             debug!(target: "xybrid_core", "Loading LLM model: {}", config.model_path);
             inference.load_model(&config)?;
+        }
+
+        // Stamp the canonical wire label (`mistralrs` / `llamacpp`) on
+        // the inner LLM span so the SDK telemetry hoist surfaces a
+        // closed-set value on `PlatformEvent.backend`. Read it from
+        // the loaded backend rather than the bundle hint: the runtime
+        // is selected by cargo feature, so the hint can disagree with
+        // the runtime that actually executes (e.g. unannotated GGUF
+        // on an `llm-mistral`-only build).
+        if let Some(label) = inference.wire_label() {
+            xybrid_trace::add_metadata("backend", label);
         }
 
         // Extract prompt

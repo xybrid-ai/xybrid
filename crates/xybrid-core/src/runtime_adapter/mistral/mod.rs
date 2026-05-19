@@ -317,6 +317,10 @@ impl LlmBackend for MistralBackend {
         "mistral"
     }
 
+    fn wire_label(&self) -> Option<&'static str> {
+        Some("mistralrs")
+    }
+
     fn supported_formats(&self) -> Vec<&'static str> {
         vec!["gguf"]
     }
