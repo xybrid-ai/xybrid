@@ -267,7 +267,7 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       embedding:
         params: [{ name: embedding, type: "List<double>" }]
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       textWithRole:
         params:
           - { name: text, type: String }
@@ -353,7 +353,7 @@ classes:
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       metrics:
         type: InferenceMetrics
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   InferenceMetrics:
     type: data
@@ -365,25 +365,25 @@ classes:
     properties:
       totalMs:
         type: int
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       ttftMs:
         type: "int?"
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       tokensPerSecond:
         type: "double?"
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       prefillTps:
         type: "double?"
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       decodeTps:
         type: "double?"
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       tokensOut:
         type: "int?"
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       stageLatenciesMs:
         type: "List<StageLatency>"
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   StageLatency:
     type: data
@@ -395,10 +395,10 @@ classes:
     properties:
       stageId:
         type: String
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       latencyMs:
         type: int
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 8. Supporting Types
