@@ -415,6 +415,16 @@ impl MlxLlmAdapter {
         // errors are surfaced only when a chat API is actually called.
         let chat_template = match ChatTemplate::load_from_dir(model_dir) {
             Ok(t) => Some(t),
+            Err(super::chat_template::ChatTemplateError::MissingTemplate)
+                if matches!(arch, ModelArchitecture::Gemma4) =>
+            {
+                Some(ChatTemplate::gemma4_fallback())
+            }
+            Err(super::chat_template::ChatTemplateError::Io(_))
+                if matches!(arch, ModelArchitecture::Gemma4) =>
+            {
+                Some(ChatTemplate::gemma4_fallback())
+            }
             Err(super::chat_template::ChatTemplateError::MissingTemplate) => None,
             Err(super::chat_template::ChatTemplateError::Io(_)) => None, // tokenizer_config.json missing
             Err(e) => {
@@ -601,6 +611,25 @@ impl MlxLlmAdapter {
         self.loaded.as_ref().and_then(|s| s.chat_template.as_ref())
     }
 
+    fn prompt_from_messages(&self, messages: &[ChatMessage]) -> MlxLlmResult<String> {
+        if self.loaded.is_none() {
+            return Err(MlxLlmError::NotLoaded);
+        }
+        if self.chat_template().is_some() {
+            return generate::render_prompt(self, messages);
+        }
+        match messages {
+            [ChatMessage {
+                role: crate::ir::MessageRole::User,
+                content,
+            }] => Ok(content.clone()),
+            _ => Err(MlxLlmError::ConfigInvalid(
+                "MLX bundle has no chat template; only a single user prompt can use raw generation"
+                    .into(),
+            )),
+        }
+    }
+
     /// Short model identifier used in telemetry events. Derived from the
     /// bundle directory's trailing path segment; falls back to `"mlx"`
     /// when no model is loaded.
@@ -780,7 +809,9 @@ impl LlmBackend for MlxLlmAdapter {
         if self.loaded.is_none() {
             return Err(MlxLlmError::NotLoaded.into());
         }
-        let prompt = generate::render_prompt(self, messages).map_err(AdapterError::from)?;
+        let prompt = self
+            .prompt_from_messages(messages)
+            .map_err(AdapterError::from)?;
         generate::generate_tokens(self, &prompt, GenerateParams::new(config), None)
             .map_err(AdapterError::from)
     }
@@ -802,7 +833,9 @@ impl LlmBackend for MlxLlmAdapter {
         if self.loaded.is_none() {
             return Err(MlxLlmError::NotLoaded.into());
         }
-        let prompt = generate::render_prompt(self, messages).map_err(AdapterError::from)?;
+        let prompt = self
+            .prompt_from_messages(messages)
+            .map_err(AdapterError::from)?;
         generate::generate_tokens(self, &prompt, GenerateParams::new(config), Some(on_token))
             .map_err(AdapterError::from)
     }
@@ -973,9 +1006,16 @@ mod tests {
                     rms_norm_eps: 1e-6,
                     tie_word_embeddings: true,
                     head_dim: Some(4),
+                    global_head_dim: None,
+                    layer_types: None,
                     sliding_window: 4096,
                     sliding_window_pattern: 6,
                     query_pre_attn_scalar: None,
+                    final_logit_softcapping: None,
+                    hidden_size_per_layer_input: None,
+                    vocab_size_per_layer_input: None,
+                    num_kv_shared_layers: None,
+                    full_attention_partial_rotary_factor: 0.25,
                     quantization: None,
                 };
                 expected_weight_keys(&g_cfg)

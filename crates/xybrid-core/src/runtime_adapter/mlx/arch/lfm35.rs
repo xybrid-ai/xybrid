@@ -152,6 +152,12 @@ fn default_conv_l_cache() -> usize {
 pub struct QuantConfig {
     pub bits: u32,
     pub group_size: u32,
+    #[serde(default = "default_quant_mode")]
+    pub mode: String,
+}
+
+fn default_quant_mode() -> String {
+    "affine".to_string()
 }
 
 impl Lfm35Config {
@@ -363,35 +369,81 @@ fn normalize_config_aliases(value: &mut serde_json::Value) {
 pub fn expected_weight_keys(cfg: &Lfm35Config) -> Vec<String> {
     let kinds = cfg.layer_kinds();
     let mut keys = Vec::with_capacity(2 + 10 * cfg.num_hidden_layers);
-    keys.push("model.embed_tokens.weight".to_string());
+    push_quantized_weight_key(&mut keys, "model.embed_tokens.weight", cfg.is_quantized());
     for (l, kind) in kinds.iter().enumerate() {
         let base = format!("model.layers.{l}");
         keys.push(format!("{base}.operator_norm.weight"));
         match kind {
             LayerKind::FullAttention => {
-                keys.push(format!("{base}.self_attn.q_proj.weight"));
-                keys.push(format!("{base}.self_attn.k_proj.weight"));
-                keys.push(format!("{base}.self_attn.v_proj.weight"));
-                keys.push(format!("{base}.self_attn.out_proj.weight"));
+                push_quantized_weight_key(
+                    &mut keys,
+                    &format!("{base}.self_attn.q_proj.weight"),
+                    cfg.is_quantized(),
+                );
+                push_quantized_weight_key(
+                    &mut keys,
+                    &format!("{base}.self_attn.k_proj.weight"),
+                    cfg.is_quantized(),
+                );
+                push_quantized_weight_key(
+                    &mut keys,
+                    &format!("{base}.self_attn.v_proj.weight"),
+                    cfg.is_quantized(),
+                );
+                push_quantized_weight_key(
+                    &mut keys,
+                    &format!("{base}.self_attn.out_proj.weight"),
+                    cfg.is_quantized(),
+                );
                 keys.push(format!("{base}.self_attn.q_layernorm.weight"));
                 keys.push(format!("{base}.self_attn.k_layernorm.weight"));
             }
             LayerKind::Conv => {
-                keys.push(format!("{base}.conv.in_proj.weight"));
+                push_quantized_weight_key(
+                    &mut keys,
+                    &format!("{base}.conv.in_proj.weight"),
+                    cfg.is_quantized(),
+                );
                 keys.push(format!("{base}.conv.conv.weight"));
-                keys.push(format!("{base}.conv.out_proj.weight"));
+                push_quantized_weight_key(
+                    &mut keys,
+                    &format!("{base}.conv.out_proj.weight"),
+                    cfg.is_quantized(),
+                );
             }
         }
         keys.push(format!("{base}.ffn_norm.weight"));
-        keys.push(format!("{base}.feed_forward.w1.weight"));
-        keys.push(format!("{base}.feed_forward.w2.weight"));
-        keys.push(format!("{base}.feed_forward.w3.weight"));
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.feed_forward.w1.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.feed_forward.w2.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.feed_forward.w3.weight"),
+            cfg.is_quantized(),
+        );
     }
     keys.push("model.embedding_norm.weight".to_string());
     if !cfg.tie_word_embeddings {
-        keys.push("lm_head.weight".to_string());
+        push_quantized_weight_key(&mut keys, "lm_head.weight", cfg.is_quantized());
     }
     keys
+}
+
+fn push_quantized_weight_key(keys: &mut Vec<String>, weight_key: &str, quantized: bool) {
+    keys.push(weight_key.to_string());
+    if quantized {
+        if let Some(base) = weight_key.strip_suffix(".weight") {
+            keys.push(format!("{base}.scales"));
+            keys.push(format!("{base}.biases"));
+        }
+    }
 }
 
 // =============================================================================
@@ -413,17 +465,6 @@ pub fn validate_safetensors_bundle(
     weights: &SafeTensorBundle,
     cfg: &Lfm35Config,
 ) -> MlxLlmResult<()> {
-    if cfg.is_quantized() {
-        let bits = cfg.quantization.as_ref().map(|q| q.bits).unwrap_or(0);
-        let gs = cfg.quantization.as_ref().map(|q| q.group_size).unwrap_or(0);
-        return Err(MlxLlmError::UnsupportedQuantization {
-            model_type: cfg.model_type.clone(),
-            bits,
-            group_size: gs,
-            reason: "mlx_fast_quantized_matmul is not wired for LFM yet",
-        });
-    }
-
     let names = weights.tensor_names()?;
 
     let expected = expected_weight_keys(cfg);
@@ -486,6 +527,7 @@ pub fn resolve_weights_path(model_dir: &Path) -> MlxLlmResult<PathBuf> {
 pub mod runtime {
     use super::super::super::model::{MlxLlmError, MlxLlmResult};
     use super::super::super::weights::SafeTensorBundle;
+    use super::super::linear::{load_dense_or_dequantized, LinearQuantization, LinearWeight};
     use super::super::{shape_dim_i32, shape_dim_usize, shape_product_i32, shape_product_usize};
     use super::{LayerKind, Lfm35Config};
 
@@ -500,16 +542,16 @@ pub mod runtime {
     #[derive(Debug)]
     pub struct AttentionLayer {
         pub operator_norm: MlxArray,
-        pub q_proj: MlxArray,
-        pub k_proj: MlxArray,
-        pub v_proj: MlxArray,
-        pub out_proj: MlxArray,
+        pub q_proj: LinearWeight,
+        pub k_proj: LinearWeight,
+        pub v_proj: LinearWeight,
+        pub out_proj: LinearWeight,
         pub q_layernorm: MlxArray,
         pub k_layernorm: MlxArray,
         pub ffn_norm: MlxArray,
-        pub w1: MlxArray,
-        pub w2: MlxArray,
-        pub w3: MlxArray,
+        pub w1: LinearWeight,
+        pub w2: LinearWeight,
+        pub w3: LinearWeight,
     }
 
     /// One short-conv block's weights. `conv.conv` is the actual 1D
@@ -518,13 +560,13 @@ pub mod runtime {
     #[derive(Debug)]
     pub struct ConvLayer {
         pub operator_norm: MlxArray,
-        pub conv_in_proj: MlxArray,
+        pub conv_in_proj: LinearWeight,
         pub conv_kernel: MlxArray,
-        pub conv_out_proj: MlxArray,
+        pub conv_out_proj: LinearWeight,
         pub ffn_norm: MlxArray,
-        pub w1: MlxArray,
-        pub w2: MlxArray,
-        pub w3: MlxArray,
+        pub w1: LinearWeight,
+        pub w2: LinearWeight,
+        pub w3: LinearWeight,
     }
 
     /// One LFM layer — either [`AttentionLayer`] or [`ConvLayer`].
@@ -603,7 +645,10 @@ pub mod runtime {
     /// Supports F32, F16, and BF16 weights. Quantized bundles are
     /// rejected up-front in [`super::validate_safetensors`].
     pub fn build(cfg: &Lfm35Config, weights: &SafeTensorBundle) -> MlxLlmResult<Lfm35Weights> {
-        let embed_tokens = load_tensor(weights, "model.embed_tokens.weight")?;
+        let quant = quantization(cfg)?;
+        let quant = quant.as_ref();
+
+        let embed_tokens = load_dense_or_dequantized(weights, "model.embed_tokens.weight", quant)?;
         let kinds = cfg.layer_kinds();
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for (l, kind) in kinds.iter().enumerate() {
@@ -611,10 +656,26 @@ pub mod runtime {
             let layer = match kind {
                 LayerKind::FullAttention => Lfm35Layer::Attention(AttentionLayer {
                     operator_norm: load_tensor(weights, &format!("{base}.operator_norm.weight"))?,
-                    q_proj: load_tensor(weights, &format!("{base}.self_attn.q_proj.weight"))?,
-                    k_proj: load_tensor(weights, &format!("{base}.self_attn.k_proj.weight"))?,
-                    v_proj: load_tensor(weights, &format!("{base}.self_attn.v_proj.weight"))?,
-                    out_proj: load_tensor(weights, &format!("{base}.self_attn.out_proj.weight"))?,
+                    q_proj: LinearWeight::load(
+                        weights,
+                        &format!("{base}.self_attn.q_proj.weight"),
+                        quant,
+                    )?,
+                    k_proj: LinearWeight::load(
+                        weights,
+                        &format!("{base}.self_attn.k_proj.weight"),
+                        quant,
+                    )?,
+                    v_proj: LinearWeight::load(
+                        weights,
+                        &format!("{base}.self_attn.v_proj.weight"),
+                        quant,
+                    )?,
+                    out_proj: LinearWeight::load(
+                        weights,
+                        &format!("{base}.self_attn.out_proj.weight"),
+                        quant,
+                    )?,
                     q_layernorm: load_tensor(
                         weights,
                         &format!("{base}.self_attn.q_layernorm.weight"),
@@ -624,19 +685,51 @@ pub mod runtime {
                         &format!("{base}.self_attn.k_layernorm.weight"),
                     )?,
                     ffn_norm: load_tensor(weights, &format!("{base}.ffn_norm.weight"))?,
-                    w1: load_tensor(weights, &format!("{base}.feed_forward.w1.weight"))?,
-                    w2: load_tensor(weights, &format!("{base}.feed_forward.w2.weight"))?,
-                    w3: load_tensor(weights, &format!("{base}.feed_forward.w3.weight"))?,
+                    w1: LinearWeight::load(
+                        weights,
+                        &format!("{base}.feed_forward.w1.weight"),
+                        quant,
+                    )?,
+                    w2: LinearWeight::load(
+                        weights,
+                        &format!("{base}.feed_forward.w2.weight"),
+                        quant,
+                    )?,
+                    w3: LinearWeight::load(
+                        weights,
+                        &format!("{base}.feed_forward.w3.weight"),
+                        quant,
+                    )?,
                 }),
                 LayerKind::Conv => Lfm35Layer::Conv(ConvLayer {
                     operator_norm: load_tensor(weights, &format!("{base}.operator_norm.weight"))?,
-                    conv_in_proj: load_tensor(weights, &format!("{base}.conv.in_proj.weight"))?,
+                    conv_in_proj: LinearWeight::load(
+                        weights,
+                        &format!("{base}.conv.in_proj.weight"),
+                        quant,
+                    )?,
                     conv_kernel: load_tensor(weights, &format!("{base}.conv.conv.weight"))?,
-                    conv_out_proj: load_tensor(weights, &format!("{base}.conv.out_proj.weight"))?,
+                    conv_out_proj: LinearWeight::load(
+                        weights,
+                        &format!("{base}.conv.out_proj.weight"),
+                        quant,
+                    )?,
                     ffn_norm: load_tensor(weights, &format!("{base}.ffn_norm.weight"))?,
-                    w1: load_tensor(weights, &format!("{base}.feed_forward.w1.weight"))?,
-                    w2: load_tensor(weights, &format!("{base}.feed_forward.w2.weight"))?,
-                    w3: load_tensor(weights, &format!("{base}.feed_forward.w3.weight"))?,
+                    w1: LinearWeight::load(
+                        weights,
+                        &format!("{base}.feed_forward.w1.weight"),
+                        quant,
+                    )?,
+                    w2: LinearWeight::load(
+                        weights,
+                        &format!("{base}.feed_forward.w2.weight"),
+                        quant,
+                    )?,
+                    w3: LinearWeight::load(
+                        weights,
+                        &format!("{base}.feed_forward.w3.weight"),
+                        quant,
+                    )?,
                 }),
             };
             layers.push(layer);
@@ -645,7 +738,7 @@ pub mod runtime {
         let lm_head = if cfg.tie_word_embeddings {
             None
         } else {
-            Some(load_tensor(weights, "lm_head.weight")?)
+            Some(load_dense_or_dequantized(weights, "lm_head.weight", quant)?)
         };
 
         Ok(Lfm35Weights {
@@ -668,6 +761,13 @@ pub mod runtime {
     /// Read one tensor from a SafeTensors view into an [`MlxArray`].
     fn load_tensor(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<MlxArray> {
         weights.read_array(name)
+    }
+
+    fn quantization(cfg: &Lfm35Config) -> MlxLlmResult<Option<LinearQuantization>> {
+        cfg.quantization
+            .as_ref()
+            .map(|q| LinearQuantization::new(q.bits, q.group_size, &q.mode))
+            .transpose()
     }
 
     /// Forward pass through the whole stack.
@@ -772,10 +872,10 @@ pub mod runtime {
             Lfm35Layer::Attention(layer) => (&layer.w1, &layer.w2, &layer.w3),
             Lfm35Layer::Conv(layer) => (&layer.w1, &layer.w2, &layer.w3),
         };
-        let gate = matmul(hidden, &transpose(w1, &[1, 0], stream)?, stream)?;
-        let up = matmul(hidden, &transpose(w3, &[1, 0], stream)?, stream)?;
+        let gate = w1.forward(hidden, stream)?;
+        let up = w3.forward(hidden, stream)?;
         let gated = mul(&silu(&gate, stream)?, &up, stream)?;
-        matmul(&gated, &transpose(w2, &[1, 0], stream)?, stream).map_err(Into::into)
+        w2.forward(&gated, stream)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -791,9 +891,9 @@ pub mod runtime {
         position_offset: i32,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
-        let q = matmul(hidden, &transpose(&layer.q_proj, &[1, 0], stream)?, stream)?;
-        let k = matmul(hidden, &transpose(&layer.k_proj, &[1, 0], stream)?, stream)?;
-        let v = matmul(hidden, &transpose(&layer.v_proj, &[1, 0], stream)?, stream)?;
+        let q = layer.q_proj.forward(hidden, stream)?;
+        let k = layer.k_proj.forward(hidden, stream)?;
+        let v = layer.v_proj.forward(hidden, stream)?;
 
         let q = split_heads(&q, n_heads, head_dim, stream)?;
         let k = split_heads(&k, n_kv_heads, head_dim, stream)?;
@@ -832,7 +932,7 @@ pub mod runtime {
 
         let attn = scaled_dot_product_attention(&q, &k, &v, scale, causal, None, stream)?;
         let attn = merge_heads(&attn, n_heads, head_dim, stream)?;
-        matmul(&attn, &transpose(&layer.out_proj, &[1, 0], stream)?, stream).map_err(Into::into)
+        layer.out_proj.forward(&attn, stream)
     }
 
     fn append_cached_axis2(
@@ -861,11 +961,7 @@ pub mod runtime {
         hidden: &MlxArray,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
-        let projected = matmul(
-            hidden,
-            &transpose(&layer.conv_in_proj, &[1, 0], stream)?,
-            stream,
-        )?;
+        let projected = layer.conv_in_proj.forward(hidden, stream)?;
         let b = take_hidden_range(&projected, 0, cfg.hidden_size, stream)?;
         let c = take_hidden_range(&projected, cfg.hidden_size, cfg.hidden_size, stream)?;
         let x = take_hidden_range(&projected, cfg.hidden_size * 2, cfg.hidden_size, stream)?;
@@ -882,12 +978,7 @@ pub mod runtime {
             stream,
         )?;
         let y = mul(&c, &conv, stream)?;
-        matmul(
-            &y,
-            &transpose(&layer.conv_out_proj, &[1, 0], stream)?,
-            stream,
-        )
-        .map_err(Into::into)
+        layer.conv_out_proj.forward(&y, stream)
     }
 
     fn conv_input_with_cache(
@@ -1277,32 +1368,40 @@ mod tests {
     }
 
     #[test]
-    fn quantized_rejected_by_safetensors_check() {
+    fn quantized_manifest_requires_scales_and_biases() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
         let mut cfg = dummy_config(1, true);
         cfg.quantization = Some(QuantConfig {
             bits: 4,
             group_size: 64,
+            mode: "affine".into(),
         });
-        assert!(cfg.is_quantized());
-        let err = validate_safetensors(Path::new("/nonexistent"), &cfg).unwrap_err();
-        match &err {
-            MlxLlmError::UnsupportedQuantization {
-                model_type,
-                bits,
-                group_size,
-                ..
-            } => {
-                assert_eq!(model_type, "lfm3");
-                assert_eq!(*bits, 4);
-                assert_eq!(*group_size, 64);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut keys = expected_weight_keys(&cfg);
+        keys.retain(|k| !k.ends_with(".scales") && !k.ends_with(".biases"));
+        let data = vec![0u8; 4];
+        let tensors: Vec<(String, TensorView<'_>)> = keys
+            .iter()
+            .map(|k| {
+                (
+                    k.clone(),
+                    TensorView::new(Dtype::F32, vec![1], &data).unwrap(),
+                )
+            })
+            .collect();
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file(tensors, &None, &path).unwrap();
+
+        let err = validate_safetensors(&path, &cfg).unwrap_err();
+        match err {
+            MlxLlmError::WeightLoad { reason, .. } => {
+                assert!(reason.contains("missing"), "got: {reason}");
+                assert!(reason.contains(".scales"), "got: {reason}");
             }
-            other => panic!("expected UnsupportedQuantization, got {other:?}"),
+            other => panic!("expected WeightLoad, got {other:?}"),
         }
-        let msg = err.to_string();
-        assert!(msg.contains("unsupported MLX quantization"), "got: {msg}");
-        assert!(msg.contains("lfm"), "got: {msg}");
-        assert!(msg.contains("4-bit/group=64"), "got: {msg}");
-        assert!(msg.contains("GGUF fallback"), "got: {msg}");
     }
 
     #[test]
@@ -1361,6 +1460,42 @@ mod tests {
         safetensors::serialize_to_file(tensors, &None, &path).unwrap();
 
         validate_safetensors(&path, &cfg).expect("full manifest should validate");
+    }
+
+    #[test]
+    fn lfm35_quantized_manifest_accepts_projection_triplets() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut cfg = dummy_config(2, true);
+        cfg.quantization = Some(QuantConfig {
+            bits: 4,
+            group_size: 64,
+            mode: "affine".into(),
+        });
+        let keys = expected_weight_keys(&cfg);
+        assert!(keys
+            .iter()
+            .any(|k| k == "model.layers.0.conv.in_proj.scales"));
+        assert!(keys
+            .iter()
+            .any(|k| k == "model.layers.1.self_attn.q_proj.biases"));
+        assert!(keys.iter().any(|k| k == "model.embed_tokens.scales"));
+        let data = vec![0u8; 4];
+        let tensors: Vec<(String, TensorView<'_>)> = keys
+            .iter()
+            .map(|k| {
+                (
+                    k.clone(),
+                    TensorView::new(Dtype::F32, vec![1], &data).unwrap(),
+                )
+            })
+            .collect();
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file(tensors, &None, &path).unwrap();
+
+        validate_safetensors(&path, &cfg).expect("quantized manifest should validate");
     }
 
     #[test]

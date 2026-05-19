@@ -1,4 +1,5 @@
-//! Basic tensor ops: matmul, add, mul, softmax, norms, cast, activations.
+//! Basic tensor ops: matmul, quantized matmul, add, mul, softmax, norms, cast,
+//! activations.
 //!
 //! Safe, non-panicking wrappers over the corresponding mlx-c entry points.
 //! All ops take an optional `&MlxStream`; `None` dispatches to the
@@ -7,7 +8,7 @@
 
 use crate::array::MlxArray;
 use crate::dtype::MlxDtype;
-use crate::error::MlxResult;
+use crate::error::{MlxError, MlxResult};
 use crate::ffi;
 use crate::stream::MlxStream;
 
@@ -47,6 +48,190 @@ pub fn matmul(a: &MlxArray, b: &MlxArray, stream: Option<&MlxStream>) -> MlxResu
     // SAFETY: all three handles are live for the duration of the call.
     let raw = unsafe { ffi::op_matmul(a.as_raw(), b.as_raw(), s.as_stream().as_raw())? };
     Ok(MlxArray::from_raw(raw))
+}
+
+/// Matrix multiplication where `weight` is an MLX packed quantized matrix.
+///
+/// This wraps `mlx_quantized_matmul`. Xybrid currently enables only affine
+/// quantization because Gemma/LFM 4-bit MLX bundles use
+/// `{ bits: 4, group_size: 64, mode: "affine" }`; MXFP/NVFP modes need
+/// separate fixtures before they are admitted.
+#[allow(clippy::too_many_arguments)]
+pub fn quantized_matmul(
+    x: &MlxArray,
+    weight: &MlxArray,
+    scales: &MlxArray,
+    biases: Option<&MlxArray>,
+    transpose: bool,
+    group_size: i32,
+    bits: i32,
+    mode: &str,
+    stream: Option<&MlxStream>,
+) -> MlxResult<MlxArray> {
+    validate_quantized_args(x, weight, scales, biases, transpose, group_size, bits, mode)?;
+    let mode = std::ffi::CString::new(mode)
+        .map_err(|_| MlxError::Internal("MLX quantization mode contains NUL".into()))?;
+    let s = resolve_stream(stream)?;
+    let group_size = ffi::optional_int(Some(group_size));
+    let bits = ffi::optional_int(Some(bits));
+    // SAFETY: all array/stream handles are live for the duration of the call.
+    // `biases` is either live or the null sentinel accepted by mlx-c.
+    let raw = unsafe {
+        ffi::op_quantized_matmul(
+            x.as_raw(),
+            weight.as_raw(),
+            scales.as_raw(),
+            biases.map_or_else(|| ffi::array_null(), MlxArray::as_raw),
+            transpose,
+            group_size,
+            bits,
+            mode.as_c_str(),
+            s.as_stream().as_raw(),
+        )?
+    };
+    Ok(MlxArray::from_raw(raw))
+}
+
+/// Dequantize an MLX packed quantized matrix.
+///
+/// Used for tensors consumed by operations that do not have row-wise
+/// quantized variants yet, such as embedding lookup. Projection weights stay
+/// packed and use [`quantized_matmul`].
+pub fn dequantize(
+    weight: &MlxArray,
+    scales: &MlxArray,
+    biases: Option<&MlxArray>,
+    group_size: i32,
+    bits: i32,
+    mode: &str,
+    output_dtype: Option<MlxDtype>,
+    stream: Option<&MlxStream>,
+) -> MlxResult<MlxArray> {
+    validate_quantized_weight(weight, scales, biases, group_size, bits, mode)?;
+    let mode = std::ffi::CString::new(mode)
+        .map_err(|_| MlxError::Internal("MLX quantization mode contains NUL".into()))?;
+    let s = resolve_stream(stream)?;
+    let dtype = ffi::optional_dtype(output_dtype.map(Into::into));
+    // SAFETY: all array/stream handles are live for the duration of the call.
+    // `biases` and `global_scale` are null sentinels when absent.
+    let raw = unsafe {
+        ffi::op_dequantize(
+            weight.as_raw(),
+            scales.as_raw(),
+            biases.map_or_else(|| ffi::array_null(), MlxArray::as_raw),
+            ffi::optional_int(Some(group_size)),
+            ffi::optional_int(Some(bits)),
+            mode.as_c_str(),
+            ffi::array_null(),
+            dtype,
+            s.as_stream().as_raw(),
+        )?
+    };
+    Ok(MlxArray::from_raw(raw))
+}
+
+fn validate_quantized_args(
+    x: &MlxArray,
+    weight: &MlxArray,
+    scales: &MlxArray,
+    biases: Option<&MlxArray>,
+    transpose: bool,
+    group_size: i32,
+    bits: i32,
+    mode: &str,
+) -> MlxResult<()> {
+    validate_quantized_weight(weight, scales, biases, group_size, bits, mode)?;
+    let x_dtype = x.dtype()?;
+    if !is_float_dtype(x_dtype) {
+        return Err(MlxError::Internal(format!(
+            "quantized_matmul input dtype must be F32/F16/Bf16, got {x_dtype:?}"
+        )));
+    }
+    let x_shape = x.shape();
+    let Some(&x_inner) = x_shape.last() else {
+        return Err(MlxError::InvalidShape {
+            expected: vec![1],
+            got: x_shape,
+        });
+    };
+    let w_shape = weight.shape();
+    let w_rank = w_shape.len();
+    let w_inner = if transpose {
+        w_shape
+            .get(w_rank.saturating_sub(1))
+            .and_then(|dim| dim.checked_mul(32))
+            .map(|dim| dim / bits)
+    } else {
+        w_shape.get(w_rank.saturating_sub(2)).copied()
+    }
+    .ok_or_else(|| MlxError::InvalidShape {
+        expected: vec![2],
+        got: w_shape.clone(),
+    })?;
+    if w_inner != x_inner {
+        return Err(MlxError::InvalidShape {
+            expected: vec![w_inner],
+            got: vec![x_inner],
+        });
+    }
+    Ok(())
+}
+
+fn validate_quantized_weight(
+    weight: &MlxArray,
+    scales: &MlxArray,
+    biases: Option<&MlxArray>,
+    group_size: i32,
+    bits: i32,
+    mode: &str,
+) -> MlxResult<()> {
+    let weight_dtype = weight.dtype()?;
+    if weight_dtype != MlxDtype::U32 {
+        return Err(MlxError::InvalidDtype {
+            expected: MlxDtype::U32,
+            got: weight_dtype,
+        });
+    }
+    let scales_dtype = scales.dtype()?;
+    if !is_float_dtype(scales_dtype) {
+        return Err(MlxError::Internal(format!(
+            "quantized scales dtype must be F32/F16/Bf16, got {scales_dtype:?}"
+        )));
+    }
+    if let Some(biases) = biases {
+        let bias_dtype = biases.dtype()?;
+        if !is_float_dtype(bias_dtype) {
+            return Err(MlxError::Internal(format!(
+                "quantized biases dtype must be F32/F16/Bf16, got {bias_dtype:?}"
+            )));
+        }
+        if biases.shape() != scales.shape() {
+            return Err(MlxError::InvalidShape {
+                expected: scales.shape(),
+                got: biases.shape(),
+            });
+        }
+    }
+    if mode != "affine" {
+        return Err(MlxError::Internal(format!(
+            "unsupported MLX quantization mode `{mode}`"
+        )));
+    }
+    if !matches!(bits, 2 | 3 | 4 | 5 | 6 | 8) {
+        return Err(MlxError::Internal(format!(
+            "unsupported MLX quantization bits {bits}"
+        )));
+    }
+    if !matches!(group_size, 32 | 64 | 128) {
+        return Err(MlxError::Internal(format!(
+            "unsupported MLX quantization group_size {group_size}"
+        )));
+    }
+    Ok(())
+}
+
+fn is_float_dtype(dtype: MlxDtype) -> bool {
+    matches!(dtype, MlxDtype::F32 | MlxDtype::F16 | MlxDtype::Bf16)
 }
 
 /// Element-wise add with NumPy broadcasting.
@@ -335,6 +520,90 @@ mod tests {
         assert_eq!(c.shape(), vec![2, 2]);
         let got = c.to_vec_f32().unwrap();
         assert_close(&got, &expected, MATMUL_TOL, "matmul 2x3 @ 3x2");
+    }
+
+    #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
+    fn quantize_for_test(
+        weight: &MlxArray,
+        group_size: i32,
+        bits: i32,
+        mode: &str,
+    ) -> MlxResult<(MlxArray, MlxArray, MlxArray)> {
+        let mode = std::ffi::CString::new(mode)
+            .map_err(|_| MlxError::Internal("MLX quantization mode contains NUL".into()))?;
+        let stream = crate::MlxStream::default_cpu()?;
+        // SAFETY: the dense weight and stream handles are live for the call;
+        // mlx_quantize returns three owned array handles for affine mode.
+        let (weight, scales, biases) = unsafe {
+            crate::ffi::op_quantize(
+                weight.as_raw(),
+                crate::ffi::optional_int(Some(group_size)),
+                crate::ffi::optional_int(Some(bits)),
+                mode.as_c_str(),
+                crate::ffi::array_null(),
+                stream.as_raw(),
+            )?
+        };
+        Ok((
+            MlxArray::from_raw(weight),
+            MlxArray::from_raw(scales),
+            MlxArray::from_raw(biases),
+        ))
+    }
+
+    #[test]
+    #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
+    fn quantized_matmul_matches_dequantize_then_matmul() {
+        let weight_data: Vec<f32> = (0..128).map(|i| ((i as f32 % 17.0) - 8.0) / 5.0).collect();
+        let x_data: Vec<f32> = (0..64).map(|i| ((i as f32 % 11.0) - 5.0) / 7.0).collect();
+
+        let dense_weight = MlxArray::from_slice_f32(&weight_data, &[2, 64]).unwrap();
+        let x = MlxArray::from_slice_f32(&x_data, &[1, 64]).unwrap();
+        let (packed_weight, scales, biases) =
+            quantize_for_test(&dense_weight, 64, 4, "affine").unwrap();
+
+        assert_eq!(packed_weight.dtype().unwrap(), MlxDtype::U32);
+        let got = quantized_matmul(
+            &x,
+            &packed_weight,
+            &scales,
+            Some(&biases),
+            true,
+            64,
+            4,
+            "affine",
+            None,
+        )
+        .unwrap()
+        .to_vec_f32()
+        .unwrap();
+
+        let dequantized = dequantize(
+            &packed_weight,
+            &scales,
+            Some(&biases),
+            64,
+            4,
+            "affine",
+            Some(MlxDtype::F32),
+            None,
+        )
+        .unwrap();
+        let expected = matmul(
+            &x,
+            &crate::ops::transpose(&dequantized, &[1, 0], None).unwrap(),
+            None,
+        )
+        .unwrap()
+        .to_vec_f32()
+        .unwrap();
+
+        assert_close(
+            &got,
+            &expected,
+            1.0e-3,
+            "quantized_matmul vs dequantize + matmul",
+        );
     }
 
     #[test]

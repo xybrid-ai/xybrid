@@ -18,6 +18,12 @@ use super::model::{MlxLlmError, MlxLlmResult};
 pub mod bert;
 pub mod gemma4;
 pub mod lfm35;
+#[cfg(all(
+    feature = "llm-mlx-runtime",
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+pub mod linear;
 pub mod qwen35;
 
 pub(super) fn validate_i32_dimensions(

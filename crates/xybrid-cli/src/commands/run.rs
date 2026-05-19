@@ -994,7 +994,14 @@ pub(crate) fn run_huggingface(
     ui::header(&format!("Run · HuggingFace · {}", repo));
 
     let sp = ui::spinner("Loading from HuggingFace...");
-    let loader = xybrid_sdk::ModelLoader::from_huggingface_parsed(repo);
+    let mut loader = xybrid_sdk::ModelLoader::from_huggingface_parsed(repo);
+    if let Some(raw_backend) = backend_override {
+        if let Some(choice) = BackendChoice::parse(raw_backend)
+            .map_err(|err| anyhow::anyhow!("Invalid backend override: {}", err))?
+        {
+            loader = loader.with_backend(choice);
+        }
+    }
     let model = loader.load().context(format!(
         "Failed to load model from HuggingFace repo '{}'",
         repo

@@ -942,9 +942,15 @@ fn build_metadata(
             all_files,
             cache_dir,
         ),
-        ModelFormat::SafeTensors => {
-            build_safetensors_metadata(model_id, model_id, primary, &task, card, model_files)
-        }
+        ModelFormat::SafeTensors => build_safetensors_metadata(
+            model_id,
+            model_id,
+            primary,
+            &task,
+            card,
+            supporting_files,
+            model_files,
+        ),
     }
 }
 
@@ -1223,6 +1229,7 @@ fn build_safetensors_metadata(
     primary: &ModelFileInfo,
     task: &str,
     card: Option<&HfModelCard>,
+    supporting_files: &SupportingFileInfo,
     all_files: &[ModelFileInfo],
 ) -> ModelMetadata {
     let mut files: Vec<String> = vec![primary.filename.clone()];
@@ -1233,24 +1240,7 @@ fn build_safetensors_metadata(
         }
     }
 
-    let architecture = card
-        .and_then(|c| {
-            c.tags.iter().find(|t| {
-                matches!(
-                    t.as_str(),
-                    "whisper"
-                        | "llama"
-                        | "gpt2"
-                        | "bert"
-                        | "t5"
-                        | "mistral"
-                        | "phi"
-                        | "gemma"
-                        | "qwen"
-                )
-            })
-        })
-        .cloned();
+    let architecture = safetensors_architecture(card, supporting_files);
 
     let mut metadata_map = HashMap::new();
     metadata_map.insert(
@@ -1286,6 +1276,45 @@ fn build_safetensors_metadata(
         voices: None,
         max_chunk_chars: None,
         trim_trailing_samples: None,
+    }
+}
+
+fn safetensors_architecture(
+    card: Option<&HfModelCard>,
+    supporting_files: &SupportingFileInfo,
+) -> Option<String> {
+    supporting_files
+        .model_type
+        .as_deref()
+        .and_then(normalize_safetensors_architecture)
+        .map(str::to_string)
+        .or_else(|| {
+            card.and_then(|c| {
+                c.tags
+                    .iter()
+                    .find_map(|tag| normalize_safetensors_architecture(tag).map(str::to_string))
+            })
+        })
+}
+
+fn normalize_safetensors_architecture(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "whisper" => Some("whisper"),
+        "llama" => Some("llama"),
+        "gpt2" => Some("gpt2"),
+        "bert" => Some("bert"),
+        "nomic_bert" | "nomic-bert" => Some("nomic_bert"),
+        "t5" => Some("t5"),
+        "mistral" => Some("mistral"),
+        "phi" => Some("phi"),
+        "gemma" => Some("gemma"),
+        "gemma4" => Some("gemma4"),
+        "qwen" => Some("qwen"),
+        "qwen3" => Some("qwen3"),
+        "lfm2" => Some("lfm2"),
+        "lfm" => Some("lfm"),
+        "lfm3" => Some("lfm3"),
+        _ => None,
     }
 }
 
@@ -2614,6 +2643,50 @@ mod tests {
         assert!(!metadata.files.contains(&".gitkeep".to_string()));
         // model_metadata.json itself should also be excluded
         assert!(!metadata.files.contains(&"model_metadata.json".to_string()));
+    }
+
+    #[test]
+    fn test_generate_safetensors_metadata_uses_config_model_type() {
+        let dir = TempDir::new().unwrap();
+
+        std::fs::write(dir.path().join("model.safetensors"), b"dummy safetensors").unwrap();
+        std::fs::write(
+            dir.path().join("config.json"),
+            serde_json::json!({ "model_type": "gemma4" }).to_string(),
+        )
+        .unwrap();
+
+        let (metadata, _) =
+            generate_metadata(dir.path(), "mlx-community/gemma-4-e2b-4bit").unwrap();
+
+        match metadata.execution_template {
+            xybrid_core::execution::ExecutionTemplate::SafeTensors { architecture, .. } => {
+                assert_eq!(architecture.as_deref(), Some("gemma4"));
+            }
+            other => panic!("expected SafeTensors metadata, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_generate_safetensors_metadata_recognizes_mlx_tags() {
+        let dir = TempDir::new().unwrap();
+
+        std::fs::write(dir.path().join("model.safetensors"), b"dummy safetensors").unwrap();
+        std::fs::write(
+            dir.path().join("README.md"),
+            "---\npipeline_tag: any-to-any\ntags:\n  - mlx\n  - safetensors\n  - gemma4\n---\n# Gemma 4\n",
+        )
+        .unwrap();
+
+        let (metadata, _) =
+            generate_metadata(dir.path(), "mlx-community/gemma-4-e2b-4bit").unwrap();
+
+        match metadata.execution_template {
+            xybrid_core::execution::ExecutionTemplate::SafeTensors { architecture, .. } => {
+                assert_eq!(architecture.as_deref(), Some("gemma4"));
+            }
+            other => panic!("expected SafeTensors metadata, got {other:?}"),
+        }
     }
 
     #[test]

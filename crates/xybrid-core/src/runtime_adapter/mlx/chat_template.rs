@@ -13,9 +13,9 @@
 //!   and keep it in [`super::model::LoadedState`]. `Send + Sync` so the
 //!   adapter stays thread-shareable.
 //! - We pass the standard HuggingFace variables: `messages` (list of
-//!   `{role, content}` maps), `add_generation_prompt` (bool), and the
-//!   tokenizer's `bos_token` / `eos_token` when present. That covers every
-//!   template in the MLX-LM zoo today.
+//!   `{role, content}` maps), `add_generation_prompt` (bool), the tokenizer's
+//!   `bos_token` / `eos_token`, and model-family render switches such as
+//!   `enable_thinking`. That covers every template in the MLX-LM zoo today.
 //! - We do NOT support `tools` / function-calling templates yet — MLX-LM
 //!   models that use them (e.g. Hermes) are not on the US-018 priority list.
 //!   Adding them later is a single new variable in [`RenderOptions`].
@@ -139,12 +139,17 @@ pub struct RenderOptions {
     /// always `true` when the caller plans to call `generate` on the
     /// rendered prompt; set `false` for analysis or dry-run paths.
     pub add_generation_prompt: bool,
+    /// Whether reasoning-model templates should enter their thinking mode.
+    /// Qwen 3 and Gemma 4 instruction templates both honor this switch to
+    /// skip reasoning-channel scaffolding for direct user-facing answers.
+    pub enable_thinking: bool,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
         Self {
             add_generation_prompt: true,
+            enable_thinking: true,
         }
     }
 }
@@ -172,6 +177,25 @@ impl ChatTemplate {
             bos_token: None,
             eos_token: None,
         }
+    }
+
+    /// Built-in Gemma 4 chat fallback used for MLX/VLM bundles that expose
+    /// Gemma 4 turn tokens but do not ship a HuggingFace `chat_template`.
+    pub fn gemma4_fallback() -> Self {
+        Self::from_str(concat!(
+            "{{- '<bos>' -}}",
+            "{%- for message in messages -%}",
+            "{%- set role = 'model' if message.role == 'assistant' else message.role -%}",
+            "{{- '<|turn>' + role + '\\n' + (message.content | trim) + '<turn|>\\n' -}}",
+            "{%- endfor -%}",
+            "{%- if add_generation_prompt -%}",
+            "{%- if enable_thinking is defined and enable_thinking -%}",
+            "{{- '<|turn>model\\n<|channel>thought\\n<channel|>' -}}",
+            "{%- else -%}",
+            "{{- '<|turn>model\\n' -}}",
+            "{%- endif -%}",
+            "{%- endif -%}"
+        ))
     }
 
     /// Builder: set the BOS token.
@@ -260,6 +284,7 @@ impl ChatTemplate {
         let ctx = context! {
             messages => messages_value,
             add_generation_prompt => options.add_generation_prompt,
+            enable_thinking => options.enable_thinking,
             bos_token => self.bos_token.clone().unwrap_or_default(),
             eos_token => self.eos_token.clone().unwrap_or_default(),
         };
@@ -289,6 +314,9 @@ mod tests {
         "{%- endfor %}",
         "{%- if add_generation_prompt %}",
         "{{- '<|im_start|>assistant\n' }}",
+        "{%- if enable_thinking is defined and enable_thinking is false %}",
+        "{{- '<think>\n\n</think>\n\n' }}",
+        "{%- endif %}",
         "{%- endif %}"
     );
 
@@ -350,9 +378,21 @@ mod tests {
         let msgs = vec![ChatMessage::user("hi")];
         let opts = RenderOptions {
             add_generation_prompt: false,
+            ..RenderOptions::default()
         };
         let out = tmpl.render(&msgs, &opts).unwrap();
         assert!(!out.contains("<|im_start|>assistant"));
+    }
+
+    #[test]
+    fn render_can_disable_qwen_thinking() {
+        let tmpl = ChatTemplate::from_str(QWEN_TEMPLATE);
+        let opts = RenderOptions {
+            enable_thinking: false,
+            ..RenderOptions::default()
+        };
+        let out = tmpl.render(&[ChatMessage::user("hi")], &opts).unwrap();
+        assert!(out.ends_with("<|im_start|>assistant\n<think>\n\n</think>\n\n"));
     }
 
     #[test]
@@ -371,6 +411,31 @@ mod tests {
             .unwrap();
         assert!(out.contains("<start_of_turn>user\nhello<end_of_turn>"));
         assert!(out.ends_with("<start_of_turn>assistant"));
+    }
+
+    #[test]
+    fn gemma4_fallback_uses_turn_tokens() {
+        let tmpl = ChatTemplate::gemma4_fallback();
+        let out = tmpl
+            .render(&[ChatMessage::user(" hello ")], &RenderOptions::default())
+            .unwrap();
+
+        assert_eq!(
+            out,
+            "<bos><|turn>user\nhello<turn|>\n<|turn>model\n<|channel>thought\n<channel|>"
+        );
+    }
+
+    #[test]
+    fn gemma4_fallback_can_disable_thinking() {
+        let tmpl = ChatTemplate::gemma4_fallback();
+        let opts = RenderOptions {
+            enable_thinking: false,
+            ..RenderOptions::default()
+        };
+        let out = tmpl.render(&[ChatMessage::user("hello")], &opts).unwrap();
+
+        assert_eq!(out, "<bos><|turn>user\nhello<turn|>\n<|turn>model\n");
     }
 
     #[test]

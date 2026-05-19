@@ -5,12 +5,8 @@
 //! transformer that inherits the Gemma 3 layout with several distinctive
 //! tricks:
 //!
-//! 1. **RMSNorm `(1 + weight)` scale**: every RMSNorm applies
-//!    `x * (1 + weight) * rsqrt(mean(x^2) + eps)` rather than the LLaMA /
-//!    Qwen `x * weight * rsqrt(...)`. The `+1.0` is baked into the scale
-//!    weight at load time (host-side fixup in
-//!    `runtime::load_rmsnorm_plus_one`) so the MLX `mlx_fast_rms_norm`
-//!    kernel can be reused as-is — no additional primitive needed.
+//! 1. **RMSNorm scale**: MLX-converted Gemma 4 weights store the RMSNorm scale directly, so
+//!    runtime loading passes those tensors to `mlx_fast_rms_norm` as-is.
 //! 2. **Gated-GeLU FFN**: `down(gelu(gate_proj(x)) * up_proj(x))`. Uses
 //!    GeLU-tanh approximation instead of SiLU. `xybrid_mlx::ops` exposes
 //!    both exact BERT-style `gelu` and Gemma-style `gelu_tanh`; Gemma
@@ -25,12 +21,10 @@
 //! 4. **Pre- and post-feedforward layernorms**: Gemma wraps the FFN
 //!    residual with an additional RMSNorm on both the input and the
 //!    output of the FFN block. The weight schedule reflects this.
-//! 5. **Per-head RMSNorm on Q and K** (`q_norm` / `k_norm`): applied
-//!    before RoPE, same shape as Qwen 3's but with the `(1 + weight)`
-//!    Gemma scaling.
-//! 6. **Query pre-attention scalar**: Gemma 4 scales the query projection
-//!    by an explicit `query_pre_attn_scalar` (usually `head_dim ** -0.5`
-//!    collapsed into the SDPA `scale` argument).
+//! 5. **Per-head RMSNorm on Q, K, and V**: Q/K use learned scale tensors
+//!    before RoPE; V uses an unscaled RMSNorm before attention.
+//! 6. **Unscaled attention scores**: Gemma 4's MLX-LM path passes
+//!    `scale = 1.0` to SDPA after the per-head normalisation.
 //!
 //! The builder lands in two layers, mirroring Qwen 3:
 //!
@@ -42,9 +36,7 @@
 //!    materialisation, Gemma-specific FFN wiring, sliding-window mask
 //!    construction, and resident K/V append/read for incremental decode.
 //!
-//! Reference (upstream): <https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/gemma3.py>
-//! (Gemma 4 currently mirrors Gemma 3's text-only topology on the MLX-LM
-//! side; the family ID is `"gemma4"` in the config header).
+//! Reference (upstream): <https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/gemma4_text.py>.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -105,6 +97,13 @@ pub struct Gemma4Config {
     /// because `hidden_size` is not divisible by `num_attention_heads`.
     #[serde(default)]
     pub head_dim: Option<usize>,
+    /// Wider head dimension for full-attention layers in Gemma 4 ISWA.
+    #[serde(default)]
+    pub global_head_dim: Option<usize>,
+    /// Ordered layer schedule from `config.json` (`sliding_attention` /
+    /// `full_attention`).
+    #[serde(default)]
+    pub layer_types: Option<Vec<String>>,
     /// Window size (in tokens) for the sliding-window attention layers.
     /// Gemma 3 defaults to 4096; unused for the global layers.
     #[serde(default = "default_sliding_window")]
@@ -119,6 +118,21 @@ pub struct Gemma4Config {
     /// `query_pre_attn_scalar ** -0.5`.
     #[serde(default)]
     pub query_pre_attn_scalar: Option<f32>,
+    /// Optional tanh softcap applied to the final logits.
+    #[serde(default)]
+    pub final_logit_softcapping: Option<f32>,
+    /// Gemma 4 per-layer input embedding width.
+    #[serde(default)]
+    pub hidden_size_per_layer_input: Option<usize>,
+    /// Vocabulary size used by `embed_tokens_per_layer`.
+    #[serde(default)]
+    pub vocab_size_per_layer_input: Option<usize>,
+    /// Number of tail layers that reuse K/V states from earlier layers.
+    #[serde(default)]
+    pub num_kv_shared_layers: Option<usize>,
+    /// Full-attention proportional RoPE rotary fraction.
+    #[serde(default = "default_full_attention_partial_rotary_factor")]
+    pub full_attention_partial_rotary_factor: f32,
     /// Set when weights are quantized. MLX 4-bit bundles report
     /// `{ bits: 4, group_size: 64 }` here.
     #[serde(default)]
@@ -149,11 +163,21 @@ fn default_sliding_window_pattern() -> usize {
     6
 }
 
+fn default_full_attention_partial_rotary_factor() -> f32 {
+    0.25
+}
+
 /// Quantization metadata block from `config.json`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct QuantConfig {
     pub bits: u32,
     pub group_size: u32,
+    #[serde(default = "default_quant_mode")]
+    pub mode: String,
+}
+
+fn default_quant_mode() -> String {
+    "affine".to_string()
 }
 
 impl Gemma4Config {
@@ -181,6 +205,24 @@ impl Gemma4Config {
                             "model_type".to_string(),
                             serde_json::Value::String(model_type.to_string()),
                         );
+                    }
+                    if !obj.contains_key("quantization") {
+                        if let Some(quantization) = root
+                            .get("quantization")
+                            .or_else(|| root.get("quantization_config"))
+                        {
+                            obj.insert("quantization".to_string(), quantization.clone());
+                        }
+                    }
+                    if !obj.contains_key("full_attention_partial_rotary_factor") {
+                        if let Some(value) = obj
+                            .get("rope_parameters")
+                            .and_then(|v| v.get("full_attention"))
+                            .and_then(|v| v.get("partial_rotary_factor"))
+                            .cloned()
+                        {
+                            obj.insert("full_attention_partial_rotary_factor".to_string(), value);
+                        }
                     }
                 }
                 serde_json::from_value(text_config).map_err(MlxLlmError::ConfigParse)
@@ -242,6 +284,26 @@ impl Gemma4Config {
                 ("sliding_window", self.sliding_window),
             ],
         )?;
+        if let Some(global_head_dim) = self.global_head_dim {
+            super::validate_i32_dimensions("gemma4", &[("global_head_dim", global_head_dim)])?;
+        }
+        if let Some(hidden_size_per_layer_input) = self.hidden_size_per_layer_input {
+            super::validate_i32_dimensions(
+                "gemma4",
+                &[("hidden_size_per_layer_input", hidden_size_per_layer_input)],
+            )?;
+            super::validate_i32_product(
+                "gemma4",
+                "per_layer_input_width",
+                &[self.num_hidden_layers, hidden_size_per_layer_input],
+            )?;
+        }
+        if let Some(vocab_size_per_layer_input) = self.vocab_size_per_layer_input {
+            super::validate_i32_dimensions(
+                "gemma4",
+                &[("vocab_size_per_layer_input", vocab_size_per_layer_input)],
+            )?;
+        }
         super::validate_i32_product(
             "gemma4",
             "attention_projection_width",
@@ -284,7 +346,57 @@ impl Gemma4Config {
     /// `true` when layer `l` uses full (global) attention, `false` when
     /// it uses the sliding-window path.
     pub fn layer_is_global(&self, l: usize) -> bool {
+        if let Some(layer_types) = self.layer_types.as_ref() {
+            return layer_types
+                .get(l)
+                .is_some_and(|layer_type| layer_type == "full_attention");
+        }
         l % self.sliding_window_pattern == self.sliding_window_pattern - 1
+    }
+
+    /// Effective attention head dimension for a specific layer.
+    pub fn layer_head_dim(&self, l: usize) -> usize {
+        if self.layer_is_global(l) {
+            self.global_head_dim.unwrap_or_else(|| self.head_dim())
+        } else {
+            self.head_dim()
+        }
+    }
+
+    /// Effective RoPE width for a specific layer.
+    pub fn layer_rope_dims(&self, l: usize) -> usize {
+        let head_dim = self.layer_head_dim(l);
+        if self.layer_is_global(l) {
+            let dims = (head_dim as f32 * self.full_attention_partial_rotary_factor).round();
+            let dims = dims.max(2.0) as usize;
+            dims - (dims % 2)
+        } else {
+            head_dim
+        }
+    }
+
+    pub fn has_per_layer_inputs(&self) -> bool {
+        self.hidden_size_per_layer_input.unwrap_or(0) > 0
+    }
+
+    pub fn hidden_size_per_layer_input(&self) -> Option<usize> {
+        self.hidden_size_per_layer_input.filter(|v| *v > 0)
+    }
+
+    pub fn kv_shared_source_layer(&self, layer_idx: usize) -> Option<usize> {
+        let shared_layers = self.num_kv_shared_layers.unwrap_or(0);
+        if shared_layers == 0 || shared_layers >= self.num_hidden_layers {
+            return None;
+        }
+        let first_shared = self.num_hidden_layers - shared_layers;
+        if layer_idx < first_shared {
+            return None;
+        }
+
+        let target_is_global = self.layer_is_global(layer_idx);
+        (0..first_shared)
+            .rev()
+            .find(|idx| self.layer_is_global(*idx) == target_is_global)
     }
 
     /// `true` when weights are stored in a quantized format.
@@ -316,28 +428,88 @@ impl Gemma4Config {
 ///   [`Gemma4Config::tie_word_embeddings`] is `false`.
 pub fn expected_weight_keys(cfg: &Gemma4Config) -> Vec<String> {
     let mut keys = Vec::with_capacity(3 + 13 * cfg.num_hidden_layers);
-    keys.push("model.embed_tokens.weight".to_string());
+    push_quantized_weight_key(&mut keys, "model.embed_tokens.weight", cfg.is_quantized());
+    if cfg.has_per_layer_inputs() {
+        push_quantized_weight_key(
+            &mut keys,
+            "model.embed_tokens_per_layer.weight",
+            cfg.is_quantized(),
+        );
+        keys.push("model.per_layer_model_projection.weight".to_string());
+        keys.push("model.per_layer_projection_norm.weight".to_string());
+    }
     for l in 0..cfg.num_hidden_layers {
         let base = format!("model.layers.{l}");
         keys.push(format!("{base}.input_layernorm.weight"));
-        keys.push(format!("{base}.self_attn.q_proj.weight"));
-        keys.push(format!("{base}.self_attn.k_proj.weight"));
-        keys.push(format!("{base}.self_attn.v_proj.weight"));
-        keys.push(format!("{base}.self_attn.o_proj.weight"));
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.self_attn.q_proj.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.self_attn.k_proj.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.self_attn.v_proj.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.self_attn.o_proj.weight"),
+            cfg.is_quantized(),
+        );
         keys.push(format!("{base}.self_attn.q_norm.weight"));
         keys.push(format!("{base}.self_attn.k_norm.weight"));
         keys.push(format!("{base}.post_attention_layernorm.weight"));
         keys.push(format!("{base}.pre_feedforward_layernorm.weight"));
         keys.push(format!("{base}.post_feedforward_layernorm.weight"));
-        keys.push(format!("{base}.mlp.gate_proj.weight"));
-        keys.push(format!("{base}.mlp.up_proj.weight"));
-        keys.push(format!("{base}.mlp.down_proj.weight"));
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.mlp.gate_proj.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.mlp.up_proj.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.mlp.down_proj.weight"),
+            cfg.is_quantized(),
+        );
+        if cfg.has_per_layer_inputs() {
+            push_quantized_weight_key(
+                &mut keys,
+                &format!("{base}.per_layer_input_gate.weight"),
+                cfg.is_quantized(),
+            );
+            push_quantized_weight_key(
+                &mut keys,
+                &format!("{base}.per_layer_projection.weight"),
+                cfg.is_quantized(),
+            );
+            keys.push(format!("{base}.post_per_layer_input_norm.weight"));
+        }
     }
     keys.push("model.norm.weight".to_string());
     if !cfg.tie_word_embeddings {
-        keys.push("lm_head.weight".to_string());
+        push_quantized_weight_key(&mut keys, "lm_head.weight", cfg.is_quantized());
     }
     keys
+}
+
+fn push_quantized_weight_key(keys: &mut Vec<String>, weight_key: &str, quantized: bool) {
+    keys.push(weight_key.to_string());
+    if quantized {
+        if let Some(base) = weight_key.strip_suffix(".weight") {
+            keys.push(format!("{base}.scales"));
+            keys.push(format!("{base}.biases"));
+        }
+    }
 }
 
 fn prefixed_weight_key(prefix: &str, key: &str) -> String {
@@ -382,17 +554,6 @@ pub fn validate_safetensors_bundle(
     weights: &SafeTensorBundle,
     cfg: &Gemma4Config,
 ) -> MlxLlmResult<()> {
-    if cfg.is_quantized() {
-        let bits = cfg.quantization.as_ref().map(|q| q.bits).unwrap_or(0);
-        let gs = cfg.quantization.as_ref().map(|q| q.group_size).unwrap_or(0);
-        return Err(MlxLlmError::UnsupportedQuantization {
-            model_type: cfg.model_type.clone(),
-            bits,
-            group_size: gs,
-            reason: "mlx_fast_quantized_matmul is not wired for Gemma yet",
-        });
-    }
-
     let names = weights.tensor_names()?;
 
     let expected = expected_weight_keys(cfg);
@@ -456,14 +617,15 @@ pub fn resolve_weights_path(model_dir: &Path) -> MlxLlmResult<PathBuf> {
 pub mod runtime {
     use super::super::super::model::{MlxLlmError, MlxLlmResult};
     use super::super::super::weights::SafeTensorBundle;
+    use super::super::linear::{load_dense_or_dequantized, LinearQuantization, LinearWeight};
     use super::super::{
         checked_i32_add, shape_dim_i32, shape_dim_usize, shape_product_i32, shape_product_usize,
     };
     use super::Gemma4Config;
 
     use xybrid_mlx::ops::{
-        add, cast, concat, gather, gelu_tanh, matmul, mul, reshape, rms_norm, rope,
-        scaled_dot_product_attention, transpose,
+        add, cast, concat, div, gather, gelu_tanh, matmul, mul, reshape, rms_norm, rope,
+        scaled_dot_product_attention, tanh, transpose,
     };
     use xybrid_mlx::{MlxArray, MlxDtype, MlxStream};
 
@@ -475,24 +637,27 @@ pub mod runtime {
     /// and the current MLX fused RMSNorm/reshape path is not reliable for
     /// that head-prep graph.
     ///
-    /// RMSNorm scale weights have already been transformed into
-    /// `weight + 1.0` (see [`load_rmsnorm_plus_one`]) so the MLX kernel
-    /// sees a single scale factor where it is used.
+    /// RMSNorm scale weights are loaded exactly as stored in the MLX
+    /// SafeTensors bundle.
     #[derive(Debug)]
     pub struct Gemma4Layer {
         pub input_layernorm: MlxArray,
-        pub q_proj: MlxArray,
-        pub k_proj: MlxArray,
-        pub v_proj: MlxArray,
-        pub o_proj: MlxArray,
+        pub q_proj: LinearWeight,
+        pub k_proj: LinearWeight,
+        pub v_proj: LinearWeight,
+        pub o_proj: LinearWeight,
         pub q_norm: Vec<f32>,
         pub k_norm: Vec<f32>,
         pub post_attention_layernorm: MlxArray,
         pub pre_feedforward_layernorm: MlxArray,
         pub post_feedforward_layernorm: MlxArray,
-        pub mlp_gate_proj: MlxArray,
-        pub mlp_up_proj: MlxArray,
-        pub mlp_down_proj: MlxArray,
+        pub mlp_gate_proj: LinearWeight,
+        pub mlp_up_proj: LinearWeight,
+        pub mlp_down_proj: LinearWeight,
+        pub layer_scalar: Option<MlxArray>,
+        pub per_layer_input_gate: Option<LinearWeight>,
+        pub per_layer_projection: Option<LinearWeight>,
+        pub post_per_layer_input_norm: Option<MlxArray>,
     }
 
     /// Resident K/V tensors for one Gemma decoder layer during a generation
@@ -508,12 +673,34 @@ pub mod runtime {
             self.keys = None;
             self.values = None;
         }
+
+        fn cloned_kv(&self, layer_idx: usize) -> MlxLlmResult<(MlxArray, MlxArray)> {
+            let keys = self.keys.clone().ok_or_else(|| {
+                MlxLlmError::ConfigInvalid(format!(
+                    "gemma4 shared K/V source layer {layer_idx} has no cached keys"
+                ))
+            })?;
+            let values = self.values.clone().ok_or_else(|| {
+                MlxLlmError::ConfigInvalid(format!(
+                    "gemma4 shared K/V source layer {layer_idx} has no cached values"
+                ))
+            })?;
+            Ok((keys, values))
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Gemma4PerLayerWeights {
+        pub embed_tokens_per_layer: MlxArray,
+        pub per_layer_model_projection: LinearWeight,
+        pub per_layer_projection_norm: MlxArray,
     }
 
     /// Full Gemma 4 weight set resident in MLX memory.
     #[derive(Debug)]
     pub struct Gemma4Weights {
         pub embed_tokens: MlxArray,
+        pub per_layer: Option<Gemma4PerLayerWeights>,
         pub layers: Vec<Gemma4Layer>,
         pub norm: MlxArray,
         /// `None` when [`Gemma4Config::tie_word_embeddings`] is set.
@@ -540,53 +727,135 @@ pub mod runtime {
         let prefix = super::detect_weight_prefix(&names, &expected);
         let key = |name: &str| super::prefixed_weight_key(prefix, name);
 
-        let embed_tokens = load_tensor(weights, &key("model.embed_tokens.weight"))?;
+        let quant = quantization(cfg)?;
+        let quant = quant.as_ref();
+
+        let embed_tokens =
+            load_dense_or_dequantized(weights, &key("model.embed_tokens.weight"), quant)?;
+        let per_layer = if cfg.has_per_layer_inputs() {
+            Some(Gemma4PerLayerWeights {
+                embed_tokens_per_layer: load_dense_or_dequantized(
+                    weights,
+                    &key("model.embed_tokens_per_layer.weight"),
+                    quant,
+                )?,
+                per_layer_model_projection: LinearWeight::load(
+                    weights,
+                    &key("model.per_layer_model_projection.weight"),
+                    quant,
+                )?,
+                per_layer_projection_norm: load_rmsnorm(
+                    weights,
+                    &key("model.per_layer_projection_norm.weight"),
+                )?,
+            })
+        } else {
+            None
+        };
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for l in 0..cfg.num_hidden_layers {
             let base = format!("model.layers.{l}");
+            let (per_layer_input_gate, per_layer_projection, post_per_layer_input_norm) =
+                if cfg.has_per_layer_inputs() {
+                    (
+                        Some(LinearWeight::load(
+                            weights,
+                            &key(&format!("{base}.per_layer_input_gate.weight")),
+                            quant,
+                        )?),
+                        Some(LinearWeight::load(
+                            weights,
+                            &key(&format!("{base}.per_layer_projection.weight")),
+                            quant,
+                        )?),
+                        Some(load_rmsnorm(
+                            weights,
+                            &key(&format!("{base}.post_per_layer_input_norm.weight")),
+                        )?),
+                    )
+                } else {
+                    (None, None, None)
+                };
             layers.push(Gemma4Layer {
-                input_layernorm: load_rmsnorm_plus_one(
+                input_layernorm: load_rmsnorm(
                     weights,
                     &key(&format!("{base}.input_layernorm.weight")),
                 )?,
-                q_proj: load_tensor_f32(weights, &key(&format!("{base}.self_attn.q_proj.weight")))?,
-                k_proj: load_tensor_f32(weights, &key(&format!("{base}.self_attn.k_proj.weight")))?,
-                v_proj: load_tensor_f32(weights, &key(&format!("{base}.self_attn.v_proj.weight")))?,
-                o_proj: load_tensor(weights, &key(&format!("{base}.self_attn.o_proj.weight")))?,
-                q_norm: load_rmsnorm_plus_one_values(
+                q_proj: LinearWeight::load(
+                    weights,
+                    &key(&format!("{base}.self_attn.q_proj.weight")),
+                    quant,
+                )?,
+                k_proj: LinearWeight::load(
+                    weights,
+                    &key(&format!("{base}.self_attn.k_proj.weight")),
+                    quant,
+                )?,
+                v_proj: LinearWeight::load(
+                    weights,
+                    &key(&format!("{base}.self_attn.v_proj.weight")),
+                    quant,
+                )?,
+                o_proj: LinearWeight::load(
+                    weights,
+                    &key(&format!("{base}.self_attn.o_proj.weight")),
+                    quant,
+                )?,
+                q_norm: load_rmsnorm_values(
                     weights,
                     &key(&format!("{base}.self_attn.q_norm.weight")),
                 )?,
-                k_norm: load_rmsnorm_plus_one_values(
+                k_norm: load_rmsnorm_values(
                     weights,
                     &key(&format!("{base}.self_attn.k_norm.weight")),
                 )?,
-                post_attention_layernorm: load_rmsnorm_plus_one(
+                post_attention_layernorm: load_rmsnorm(
                     weights,
                     &key(&format!("{base}.post_attention_layernorm.weight")),
                 )?,
-                pre_feedforward_layernorm: load_rmsnorm_plus_one(
+                pre_feedforward_layernorm: load_rmsnorm(
                     weights,
                     &key(&format!("{base}.pre_feedforward_layernorm.weight")),
                 )?,
-                post_feedforward_layernorm: load_rmsnorm_plus_one(
+                post_feedforward_layernorm: load_rmsnorm(
                     weights,
                     &key(&format!("{base}.post_feedforward_layernorm.weight")),
                 )?,
-                mlp_gate_proj: load_tensor(weights, &key(&format!("{base}.mlp.gate_proj.weight")))?,
-                mlp_up_proj: load_tensor(weights, &key(&format!("{base}.mlp.up_proj.weight")))?,
-                mlp_down_proj: load_tensor(weights, &key(&format!("{base}.mlp.down_proj.weight")))?,
+                mlp_gate_proj: LinearWeight::load(
+                    weights,
+                    &key(&format!("{base}.mlp.gate_proj.weight")),
+                    quant,
+                )?,
+                mlp_up_proj: LinearWeight::load(
+                    weights,
+                    &key(&format!("{base}.mlp.up_proj.weight")),
+                    quant,
+                )?,
+                mlp_down_proj: LinearWeight::load(
+                    weights,
+                    &key(&format!("{base}.mlp.down_proj.weight")),
+                    quant,
+                )?,
+                layer_scalar: load_optional_array(weights, &key(&format!("{base}.layer_scalar")))?,
+                per_layer_input_gate,
+                per_layer_projection,
+                post_per_layer_input_norm,
             });
         }
-        let norm = load_rmsnorm_plus_one(weights, &key("model.norm.weight"))?;
+        let norm = load_rmsnorm(weights, &key("model.norm.weight"))?;
         let lm_head = if cfg.tie_word_embeddings {
             None
         } else {
-            Some(load_tensor(weights, &key("lm_head.weight"))?)
+            Some(load_dense_or_dequantized(
+                weights,
+                &key("lm_head.weight"),
+                quant,
+            )?)
         };
 
         Ok(Gemma4Weights {
             embed_tokens,
+            per_layer,
             layers,
             norm,
             lm_head,
@@ -596,45 +865,44 @@ pub mod runtime {
         })
     }
 
-    /// Read one tensor from a SafeTensors view into an [`MlxArray`].
-    fn load_tensor(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<MlxArray> {
-        weights.read_array(name)
+    fn quantization(cfg: &Gemma4Config) -> MlxLlmResult<Option<LinearQuantization>> {
+        cfg.quantization
+            .as_ref()
+            .map(|q| LinearQuantization::new(q.bits, q.group_size, &q.mode))
+            .transpose()
     }
 
-    fn load_tensor_f32(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<MlxArray> {
-        let (floats, shape_i32) = weights.read_as_f32(name)?;
-        MlxArray::from_slice_f32(&floats, &shape_i32).map_err(Into::into)
-    }
-
-    /// Gemma RMSNorm weights are used as `(1 + weight)`. Bake the
-    /// offset in at load time so the MLX kernel sees a plain scale
-    /// factor and no extra op is needed on the hot path.
+    /// Load an RMSNorm scale tensor as stored in MLX SafeTensors.
     ///
-    /// This is the single biggest deviation from Qwen 3 — both archs
-    /// store `weight` in safetensors, but Gemma's forward pass uses it
-    /// differently. Host-side fixup keeps the runtime identical.
-    fn load_rmsnorm_plus_one(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<MlxArray> {
-        let (floats, shape_i32) = load_rmsnorm_plus_one_values_and_shape(weights, name)?;
+    /// Raw HuggingFace Gemma modules apply `(1 + weight)`, but MLX
+    /// converted bundles store the effective scale directly. Adding here
+    /// corrupts the public MLX 4-bit Gemma 4 bundles.
+    fn load_rmsnorm(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<MlxArray> {
+        let (floats, shape_i32) = load_rmsnorm_values_and_shape(weights, name)?;
         MlxArray::from_slice_f32(&floats, &shape_i32).map_err(Into::into)
     }
 
-    fn load_rmsnorm_plus_one_values(
+    fn load_optional_array(
         weights: &SafeTensorBundle,
         name: &str,
-    ) -> MlxLlmResult<Vec<f32>> {
-        let (floats, _shape_i32) = load_rmsnorm_plus_one_values_and_shape(weights, name)?;
+    ) -> MlxLlmResult<Option<MlxArray>> {
+        if weights.has_tensor(name)? {
+            Ok(Some(weights.read_array(name)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn load_rmsnorm_values(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<Vec<f32>> {
+        let (floats, _shape_i32) = load_rmsnorm_values_and_shape(weights, name)?;
         Ok(floats)
     }
 
-    fn load_rmsnorm_plus_one_values_and_shape(
+    fn load_rmsnorm_values_and_shape(
         weights: &SafeTensorBundle,
         name: &str,
     ) -> MlxLlmResult<(Vec<f32>, Vec<i32>)> {
-        let (mut floats, shape_i32) = weights.read_as_f32(name)?;
-        for v in &mut floats {
-            *v += 1.0;
-        }
-        Ok((floats, shape_i32))
+        weights.read_as_f32(name)
     }
 
     /// Forward pass through the whole stack.
@@ -651,10 +919,8 @@ pub mod runtime {
         position_offset: i32,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
-        let head_dim = cfg.head_dim();
         let n_heads = cfg.num_attention_heads;
         let n_kv_heads = cfg.kv_heads();
-        let scale = cfg.query_scale();
 
         // Embedding lookup: [B, T] -> [B, T, H]. Gemma scales the
         // embedding output by sqrt(hidden_size) immediately after
@@ -662,10 +928,36 @@ pub mod runtime {
         let mut hidden = gather(&weights.embed_tokens, input_ids, 0, stream)?;
         let embed_scale = MlxArray::from_slice_f32(&[(cfg.hidden_size as f32).sqrt()], &[1])?;
         hidden = mul(&hidden, &embed_scale, stream)?;
+        let per_layer_inputs = if let Some(per_layer) = weights.per_layer.as_ref() {
+            Some(build_per_layer_inputs(
+                cfg, per_layer, input_ids, &hidden, stream,
+            )?)
+        } else {
+            None
+        };
 
         let layers = &weights.layers;
         let layer_cache = &mut weights.layer_cache;
-        for (layer_idx, (layer, cache)) in layers.iter().zip(layer_cache.iter_mut()).enumerate() {
+        for (layer_idx, layer) in layers.iter().enumerate() {
+            let shared_kv = if let Some(source_layer) = cfg.kv_shared_source_layer(layer_idx) {
+                Some(layer_cache[source_layer].cloned_kv(source_layer)?)
+            } else {
+                None
+            };
+            let per_layer_input = if let Some(inputs) = per_layer_inputs.as_ref() {
+                Some(extract_per_layer_input(
+                    inputs,
+                    layer_idx,
+                    cfg.hidden_size_per_layer_input().ok_or_else(|| {
+                        MlxLlmError::ConfigInvalid(
+                            "gemma4 missing hidden_size_per_layer_input".into(),
+                        )
+                    })?,
+                )?)
+            } else {
+                None
+            };
+            let cache = &mut layer_cache[layer_idx];
             hidden = transformer_block(
                 cfg,
                 layer,
@@ -674,8 +966,8 @@ pub mod runtime {
                 layer_idx,
                 n_heads,
                 n_kv_heads,
-                head_dim,
-                scale,
+                per_layer_input.as_ref(),
+                shared_kv.as_ref(),
                 position_offset,
                 stream,
             )?;
@@ -683,7 +975,11 @@ pub mod runtime {
 
         let final_norm = rms_norm(&hidden, Some(&weights.norm), cfg.rms_norm_eps, stream)?;
         let lm_w = weights.lm_head.as_ref().unwrap_or(&weights.embed_tokens);
-        let logits = matmul(&final_norm, &transpose(lm_w, &[1, 0], stream)?, stream)?;
+        let mut logits = matmul(&final_norm, &transpose(lm_w, &[1, 0], stream)?, stream)?;
+        if let Some(cap) = cfg.final_logit_softcapping {
+            let cap = MlxArray::from_slice_f32(&[cap], &[1])?;
+            logits = mul(&tanh(&div(&logits, &cap, stream)?, stream)?, &cap, stream)?;
+        }
         Ok(logits)
     }
 
@@ -699,8 +995,8 @@ pub mod runtime {
         layer_idx: usize,
         n_heads: usize,
         n_kv_heads: usize,
-        head_dim: usize,
-        scale: f32,
+        per_layer_input: Option<&MlxArray>,
+        shared_kv: Option<&(MlxArray, MlxArray)>,
         position_offset: i32,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
@@ -718,8 +1014,7 @@ pub mod runtime {
             layer_idx,
             n_heads,
             n_kv_heads,
-            head_dim,
-            scale,
+            shared_kv,
             position_offset,
             stream,
         )?;
@@ -744,7 +1039,15 @@ pub mod runtime {
             cfg.rms_norm_eps,
             stream,
         )?;
-        add(&hidden, &mlp, stream).map_err(Into::into)
+        let mut hidden = add(&hidden, &mlp, stream)?;
+
+        if let Some(per_layer_input) = per_layer_input {
+            hidden = per_layer_block(cfg, layer, &hidden, per_layer_input, stream)?;
+        }
+        if let Some(layer_scalar) = layer.layer_scalar.as_ref() {
+            hidden = mul(&hidden, layer_scalar, stream)?;
+        }
+        Ok(hidden)
     }
 
     /// Gated-GeLU FFN: `down_proj(gelu_tanh(gate_proj(x)) * up_proj(x))`.
@@ -753,23 +1056,121 @@ pub mod runtime {
         hidden: &MlxArray,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
-        let gate = matmul(
-            hidden,
-            &transpose(&layer.mlp_gate_proj, &[1, 0], stream)?,
-            stream,
-        )?;
-        let up = matmul(
-            hidden,
-            &transpose(&layer.mlp_up_proj, &[1, 0], stream)?,
-            stream,
-        )?;
+        let gate = layer.mlp_gate_proj.forward(hidden, stream)?;
+        let up = layer.mlp_up_proj.forward(hidden, stream)?;
         let gated = mul(&gelu_tanh(&gate, stream)?, &up, stream)?;
-        matmul(
-            &gated,
-            &transpose(&layer.mlp_down_proj, &[1, 0], stream)?,
+        layer.mlp_down_proj.forward(&gated, stream)
+    }
+
+    fn build_per_layer_inputs(
+        cfg: &Gemma4Config,
+        weights: &Gemma4PerLayerWeights,
+        input_ids: &MlxArray,
+        inputs_embeds: &MlxArray,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let hidden_per_layer = cfg.hidden_size_per_layer_input().ok_or_else(|| {
+            MlxLlmError::ConfigInvalid("gemma4 missing hidden_size_per_layer_input".into())
+        })?;
+        let shape = input_ids.shape();
+        let b = shape[0];
+        let t = shape[1];
+        let hpl_i32 = shape_dim_i32("gemma4", "hidden_size_per_layer_input", hidden_per_layer)?;
+        let layers_i32 = shape_dim_i32("gemma4", "num_hidden_layers", cfg.num_hidden_layers)?;
+
+        let mut token_inputs = gather(&weights.embed_tokens_per_layer, input_ids, 0, stream)?;
+        let token_scale = MlxArray::from_slice_f32(&[(hidden_per_layer as f32).sqrt()], &[1])?;
+        token_inputs = mul(&token_inputs, &token_scale, stream)?;
+        token_inputs = reshape(&token_inputs, &[b, t, layers_i32, hpl_i32], stream)?;
+
+        let mut projected = weights
+            .per_layer_model_projection
+            .forward(inputs_embeds, stream)?;
+        let projection_scale =
+            MlxArray::from_slice_f32(&[(cfg.hidden_size as f32).sqrt().recip()], &[1])?;
+        projected = mul(&projected, &projection_scale, stream)?;
+        projected = reshape(&projected, &[b, t, layers_i32, hpl_i32], stream)?;
+        projected = rms_norm(
+            &projected,
+            Some(&weights.per_layer_projection_norm),
+            cfg.rms_norm_eps,
             stream,
-        )
-        .map_err(Into::into)
+        )?;
+
+        let combined = add(&projected, &token_inputs, stream)?;
+        let input_scale = MlxArray::from_slice_f32(&[2.0_f32.sqrt().recip()], &[1])?;
+        mul(&combined, &input_scale, stream).map_err(Into::into)
+    }
+
+    fn extract_per_layer_input(
+        per_layer_inputs: &MlxArray,
+        layer_idx: usize,
+        hidden_per_layer: usize,
+    ) -> MlxLlmResult<MlxArray> {
+        let shape = per_layer_inputs.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 per-layer inputs must be rank-4, got shape {shape:?}"
+            )));
+        }
+        let b_i32 = shape[0];
+        let t_i32 = shape[1];
+        let layers = shape_dim_usize("gemma4", "num_hidden_layers", shape[2])?;
+        if layer_idx >= layers {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 per-layer input index {layer_idx} >= layer count {layers}"
+            )));
+        }
+        let actual_hpl = shape_dim_usize("gemma4", "hidden_size_per_layer_input", shape[3])?;
+        if actual_hpl != hidden_per_layer {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 per-layer input width is {actual_hpl}, expected {hidden_per_layer}"
+            )));
+        }
+        let data = per_layer_inputs.to_vec_f32()?;
+        let b = shape_dim_usize("gemma4", "batch", b_i32)?;
+        let t = shape_dim_usize("gemma4", "sequence_len", t_i32)?;
+        let mut out = vec![0.0_f32; b * t * hidden_per_layer];
+        for batch in 0..b {
+            for pos in 0..t {
+                let src = (((batch * t + pos) * layers + layer_idx) * hidden_per_layer) as usize;
+                let dst = ((batch * t + pos) * hidden_per_layer) as usize;
+                out[dst..dst + hidden_per_layer]
+                    .copy_from_slice(&data[src..src + hidden_per_layer]);
+            }
+        }
+        MlxArray::from_slice_f32(&out, &[b_i32, t_i32, shape[3]]).map_err(Into::into)
+    }
+
+    fn per_layer_block(
+        cfg: &Gemma4Config,
+        layer: &Gemma4Layer,
+        hidden: &MlxArray,
+        per_layer_input: &MlxArray,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let gate = layer
+            .per_layer_input_gate
+            .as_ref()
+            .ok_or_else(|| {
+                MlxLlmError::ConfigInvalid("gemma4 missing per_layer_input_gate".into())
+            })?
+            .forward(hidden, stream)?;
+        let mixed = mul(&gelu_tanh(&gate, stream)?, per_layer_input, stream)?;
+        let projected = layer
+            .per_layer_projection
+            .as_ref()
+            .ok_or_else(|| {
+                MlxLlmError::ConfigInvalid("gemma4 missing per_layer_projection".into())
+            })?
+            .forward(&mixed, stream)?;
+        let normed = rms_norm(
+            &projected,
+            layer.post_per_layer_input_norm.as_ref(),
+            cfg.rms_norm_eps,
+            stream,
+        )?;
+        add(hidden, &normed, stream).map_err(Into::into)
     }
 
     /// The attention half of one transformer block. Global layers use the
@@ -782,11 +1183,10 @@ pub mod runtime {
         layer: &Gemma4Layer,
         cache: &mut Gemma4LayerCache,
         hidden: &MlxArray,
-        _layer_idx: usize,
+        layer_idx: usize,
         n_heads: usize,
         n_kv_heads: usize,
-        _head_dim: usize,
-        _scale: f32,
+        shared_kv: Option<&(MlxArray, MlxArray)>,
         position_offset: i32,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
@@ -798,48 +1198,28 @@ pub mod runtime {
                 layer.k_norm.len()
             )));
         }
-        let layer_is_global = layer_head_dim != cfg.head_dim();
-        let layer_scale = (layer_head_dim as f32).powf(-0.5);
+        let layer_is_global = cfg.layer_is_global(layer_idx);
+        let layer_scale = 1.0;
 
         let hidden = cast(hidden, MlxDtype::F32, stream)?;
-        let q = matmul(&hidden, &transpose(&layer.q_proj, &[1, 0], stream)?, stream)?;
-        let k = matmul(&hidden, &transpose(&layer.k_proj, &[1, 0], stream)?, stream)?;
-        let v = matmul(&hidden, &transpose(&layer.v_proj, &[1, 0], stream)?, stream)?;
+        let q = layer.q_proj.forward(&hidden, stream)?;
         let q = host_split_heads_with_rms_norm(
             &q,
             n_heads,
             layer_head_dim,
-            &layer.q_norm,
+            Some(&layer.q_norm),
             cfg.rms_norm_eps,
         )?;
-        let k = host_split_heads_with_rms_norm(
-            &k,
-            n_kv_heads,
-            layer_head_dim,
-            &layer.k_norm,
-            cfg.rms_norm_eps,
-        )?;
-        let v = host_split_heads(&v, n_kv_heads, layer_head_dim)?;
 
         let rope_base = if layer_is_global {
             cfg.rope_theta
         } else {
             cfg.rope_local_base_freq
         };
-        let layer_head_dim_i32 = shape_dim_i32("gemma4", "layer_head_dim", layer_head_dim)?;
+        let rope_dims_i32 = shape_dim_i32("gemma4", "rope_dims", cfg.layer_rope_dims(layer_idx))?;
         let q = rope(
             &q,
-            layer_head_dim_i32,
-            false,
-            Some(rope_base),
-            1.0,
-            position_offset,
-            None,
-            stream,
-        )?;
-        let k = rope(
-            &k,
-            layer_head_dim_i32,
+            rope_dims_i32,
             false,
             Some(rope_base),
             1.0,
@@ -848,33 +1228,63 @@ pub mod runtime {
             stream,
         )?;
 
-        let had_cached_prefix = cache.keys.is_some();
-        let k = append_cached_axis2(&mut cache.keys, &k, stream)?;
-        let v = append_cached_axis2(&mut cache.values, &v, stream)?;
+        let (k, v) = if let Some((keys, values)) = shared_kv {
+            (keys.clone(), values.clone())
+        } else {
+            let k = layer.k_proj.forward(&hidden, stream)?;
+            let v = layer.v_proj.forward(&hidden, stream)?;
+            let k = host_split_heads_with_rms_norm(
+                &k,
+                n_kv_heads,
+                layer_head_dim,
+                Some(&layer.k_norm),
+                cfg.rms_norm_eps,
+            )?;
+            let v = host_split_heads_with_rms_norm(
+                &v,
+                n_kv_heads,
+                layer_head_dim,
+                None,
+                cfg.rms_norm_eps,
+            )?;
+            let k = rope(
+                &k,
+                rope_dims_i32,
+                false,
+                Some(rope_base),
+                1.0,
+                position_offset,
+                None,
+                stream,
+            )?;
+            let k = append_cached_axis2(&mut cache.keys, &k, stream)?;
+            let v = append_cached_axis2(&mut cache.values, &v, stream)?;
+            (k, v)
+        };
         let q_len = q.shape().get(2).copied().unwrap_or(1);
 
         let attn = if layer_is_global {
-            let causal = !had_cached_prefix && q_len > 1;
+            let causal = position_offset == 0 && q_len > 1;
             scaled_dot_product_attention(&q, &k, &v, layer_scale, causal, None, stream)?
         } else {
             let mask = sliding_window_mask(&q, &k, cfg.sliding_window, position_offset)?;
             scaled_dot_product_attention(&q, &k, &v, layer_scale, false, Some(&mask), stream)?
         };
         let attn = merge_heads(&attn, n_heads, layer_head_dim, stream)?;
-        matmul(&attn, &transpose(&layer.o_proj, &[1, 0], stream)?, stream).map_err(Into::into)
+        layer.o_proj.forward(&attn, stream)
     }
 
     fn host_split_heads_with_rms_norm(
         x: &MlxArray,
         heads: usize,
         head_dim: usize,
-        weight: &[f32],
+        weight: Option<&[f32]>,
         eps: f32,
     ) -> MlxLlmResult<MlxArray> {
-        if weight.len() != head_dim {
+        if weight.is_some_and(|weight| weight.len() != head_dim) {
             return Err(MlxLlmError::ConfigInvalid(format!(
                 "gemma4 head norm has {} values, expected head_dim={head_dim}",
-                weight.len()
+                weight.map_or(0, <[f32]>::len)
             )));
         }
         let shape = x.shape();
@@ -911,7 +1321,8 @@ pub mod runtime {
                     for d in 0..head_dim {
                         let src = head + d;
                         let dst = (((b * heads + h) * seq + t) * head_dim) + d;
-                        out[dst] = data[src] * inv_rms * weight[d];
+                        let scale = weight.map_or(1.0, |weight| weight[d]);
+                        out[dst] = data[src] * inv_rms * scale;
                     }
                 }
             }
@@ -929,6 +1340,7 @@ pub mod runtime {
         .map_err(Into::into)
     }
 
+    #[allow(dead_code)]
     fn host_split_heads(x: &MlxArray, heads: usize, head_dim: usize) -> MlxLlmResult<MlxArray> {
         let shape = x.shape();
         let data = x.to_vec_f32()?;
@@ -1073,7 +1485,7 @@ pub mod runtime {
     /// The RoPE base differs between global and sliding-window layers.
     #[allow(dead_code, clippy::too_many_arguments)]
     pub(crate) fn project_and_rope(
-        proj: &MlxArray,
+        proj: &LinearWeight,
         head_norm: &MlxArray,
         input: &MlxArray,
         heads: usize,
@@ -1083,7 +1495,7 @@ pub mod runtime {
         position_offset: i32,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
-        let projected = matmul(input, &transpose(proj, &[1, 0], stream)?, stream)?;
+        let projected = proj.forward(input, stream)?;
         let heads_out = split_heads(&projected, heads, head_dim, stream)?;
         let normed = rms_norm(&heads_out, Some(head_norm), rms_eps, stream)?;
         let head_dim_i32 = shape_dim_i32("gemma4", "head_dim", head_dim)?;
@@ -1124,9 +1536,16 @@ mod tests {
             rms_norm_eps: 1e-6,
             tie_word_embeddings: tied,
             head_dim: Some(4),
+            global_head_dim: None,
+            layer_types: None,
             sliding_window: 4096,
             sliding_window_pattern: 6,
             query_pre_attn_scalar: None,
+            final_logit_softcapping: None,
+            hidden_size_per_layer_input: None,
+            vocab_size_per_layer_input: None,
+            num_kv_shared_layers: None,
+            full_attention_partial_rotary_factor: 0.25,
             quantization: None,
         }
     }
@@ -1151,6 +1570,39 @@ mod tests {
         assert_eq!(cfg.hidden_size, 16);
         assert_eq!(cfg.intermediate_size, 32);
         assert_eq!(cfg.kv_heads(), 2);
+    }
+
+    #[test]
+    fn nested_text_config_preserves_root_quantization() {
+        let raw = serde_json::json!({
+            "model_type": "gemma4",
+            "quantization": {
+                "bits": 4,
+                "group_size": 64,
+                "mode": "affine"
+            },
+            "text_config": {
+                "model_type": "gemma4_text",
+                "hidden_size": 16,
+                "num_hidden_layers": 1,
+                "num_attention_heads": 4,
+                "num_key_value_heads": 2,
+                "intermediate_size": 32,
+                "vocab_size": 100,
+                "max_position_embeddings": 1024,
+                "head_dim": 4
+            }
+        });
+        let cfg = Gemma4Config::parse_json(&raw.to_string()).expect("parse nested config");
+
+        assert_eq!(cfg.model_type, "gemma4");
+        let quant = cfg
+            .quantization
+            .as_ref()
+            .expect("root quantization should be preserved");
+        assert_eq!(quant.bits, 4);
+        assert_eq!(quant.group_size, 64);
+        assert!(cfg.is_quantized());
     }
 
     #[test]
@@ -1221,32 +1673,40 @@ mod tests {
     }
 
     #[test]
-    fn quantized_rejected_by_safetensors_check() {
+    fn quantized_manifest_requires_scales_and_biases() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
         let mut cfg = dummy_config(1, true);
         cfg.quantization = Some(QuantConfig {
             bits: 4,
             group_size: 64,
+            mode: "affine".into(),
         });
-        assert!(cfg.is_quantized());
-        let err = validate_safetensors(Path::new("/nonexistent"), &cfg).unwrap_err();
-        match &err {
-            MlxLlmError::UnsupportedQuantization {
-                model_type,
-                bits,
-                group_size,
-                ..
-            } => {
-                assert_eq!(model_type, "gemma4");
-                assert_eq!(*bits, 4);
-                assert_eq!(*group_size, 64);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut keys = expected_weight_keys(&cfg);
+        keys.retain(|k| !k.ends_with(".scales") && !k.ends_with(".biases"));
+        let data = vec![0u8; 4];
+        let tensors: Vec<(String, TensorView<'_>)> = keys
+            .iter()
+            .map(|k| {
+                (
+                    k.clone(),
+                    TensorView::new(Dtype::F32, vec![1], &data).unwrap(),
+                )
+            })
+            .collect();
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file(tensors, &None, &path).unwrap();
+
+        let err = validate_safetensors(&path, &cfg).unwrap_err();
+        match err {
+            MlxLlmError::WeightLoad { reason, .. } => {
+                assert!(reason.contains("missing"), "got: {reason}");
+                assert!(reason.contains(".scales"), "got: {reason}");
             }
-            other => panic!("expected UnsupportedQuantization, got {other:?}"),
+            other => panic!("expected WeightLoad, got {other:?}"),
         }
-        let msg = err.to_string();
-        assert!(msg.contains("unsupported MLX quantization"), "got: {msg}");
-        assert!(msg.contains("gemma4"), "got: {msg}");
-        assert!(msg.contains("4-bit/group=64"), "got: {msg}");
-        assert!(msg.contains("GGUF fallback"), "got: {msg}");
     }
 
     #[test]
@@ -1410,5 +1870,38 @@ mod tests {
         safetensors::serialize_to_file(tensors, &None, &path).unwrap();
 
         validate_safetensors(&path, &cfg).expect("prefixed manifest should validate");
+    }
+
+    #[test]
+    fn gemma4_quantized_manifest_accepts_language_model_prefixed_triplets() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut cfg = dummy_config(1, true);
+        cfg.quantization = Some(QuantConfig {
+            bits: 4,
+            group_size: 64,
+            mode: "affine".into(),
+        });
+        let keys = expected_weight_keys(&cfg);
+        assert!(keys
+            .iter()
+            .any(|k| k == "model.layers.0.self_attn.q_proj.scales"));
+        assert!(keys.iter().any(|k| k == "model.embed_tokens.biases"));
+        let data = vec![0u8; 4];
+        let tensors: Vec<(String, TensorView<'_>)> = keys
+            .iter()
+            .map(|k| {
+                (
+                    format!("{LANGUAGE_MODEL_PREFIX}{k}"),
+                    TensorView::new(Dtype::F32, vec![1], &data).unwrap(),
+                )
+            })
+            .collect();
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file(tensors, &None, &path).unwrap();
+
+        validate_safetensors(&path, &cfg).expect("quantized prefixed manifest should validate");
     }
 }

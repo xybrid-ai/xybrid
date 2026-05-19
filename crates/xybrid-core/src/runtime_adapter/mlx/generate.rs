@@ -43,14 +43,20 @@ const DEFAULT_SAMPLER_SEED: u64 = 0;
 /// Render a chat-message list into the raw prompt string the tokenizer
 /// sees. Loads the bundle's chat template from `tokenizer_config.json`
 /// (cached on the adapter's [`LoadedState`](super::model)), applies it with
-/// `add_generation_prompt = true` so the LLM continues mid-turn.
+/// `add_generation_prompt = true` so the LLM continues mid-turn. User-facing
+/// generation disables model thinking channels because the CLI/SDK generation
+/// APIs return answers rather than reasoning traces.
 pub fn render_prompt(adapter: &MlxLlmAdapter, messages: &[ChatMessage]) -> MlxLlmResult<String> {
     let template = adapter
         .chat_template()
         .ok_or(MlxLlmError::NotLoaded)?
         .clone();
+    let options = RenderOptions {
+        enable_thinking: false,
+        ..RenderOptions::default()
+    };
     template
-        .render(messages, &RenderOptions::default())
+        .render(messages, &options)
         .map_err(|e| MlxLlmError::ConfigInvalid(format!("chat template render failed: {e}")))
 }
 
@@ -184,6 +190,63 @@ fn token_id_to_u32(label: &str, token_id: i64) -> MlxLlmResult<u32> {
             "{label} token id {token_id} is outside the tokenizer u32 id range"
         ))
     })
+}
+
+fn decode_generated_text(
+    tokenizer: &tokenizers::Tokenizer,
+    generated_ids: &[i64],
+    previous_text: &str,
+) -> MlxLlmResult<(String, String)> {
+    let ids: Vec<u32> = generated_ids
+        .iter()
+        .map(|&id| token_id_to_u32("generated", id))
+        .collect::<MlxLlmResult<_>>()?;
+    let stable_len = stable_decode_prefix_len(tokenizer, &ids);
+    let decoded = tokenizer
+        .decode(&ids[..stable_len], true)
+        .map_err(|e| MlxLlmError::TokenizerLoad(format!("generated decode failed: {e}")))?;
+    // Byte-level decoders can surface an incomplete trailing scalar as U+FFFD.
+    // Hold that unstable suffix until a later token completes it.
+    let decoded = decoded.trim_end_matches('\u{FFFD}').to_string();
+    let delta = decoded
+        .strip_prefix(previous_text)
+        .map(str::to_string)
+        .unwrap_or_else(|| decoded.clone());
+    Ok((delta, decoded))
+}
+
+fn stable_decode_prefix_len(tokenizer: &tokenizers::Tokenizer, ids: &[u32]) -> usize {
+    let mut trailing_bytes = Vec::new();
+    let mut trailing_count = 0usize;
+    for &id in ids.iter().rev() {
+        let Some(token) = tokenizer.id_to_token(id) else {
+            break;
+        };
+        let Some(byte) = byte_fallback_token_byte(&token) else {
+            break;
+        };
+        trailing_bytes.push(byte);
+        trailing_count += 1;
+    }
+
+    if trailing_count == 0 {
+        return ids.len();
+    }
+
+    trailing_bytes.reverse();
+    if String::from_utf8(trailing_bytes).is_ok() {
+        ids.len()
+    } else {
+        ids.len() - trailing_count
+    }
+}
+
+fn byte_fallback_token_byte(token: &str) -> Option<u8> {
+    if token.len() == 6 && token.starts_with("<0x") && token.ends_with('>') {
+        u8::from_str_radix(&token[3..5], 16).ok()
+    } else {
+        None
+    }
 }
 
 fn mlx_streaming_fields(
@@ -373,14 +436,13 @@ mod runtime {
             all_tokens.push(next_token);
             generated.push(next_token);
 
-            // Decode the new token to text. HuggingFace tokenizers return
-            // bytes for partial-UTF-8 sequences; we tolerate that by falling
-            // back to the replacement character.
-            let token_id = token_id_to_u32("generated", next_token)?;
-            let token_text = tokenizer
-                .decode(&[token_id], true)
-                .unwrap_or_else(|_| "\u{FFFD}".to_string());
-            cumulative_text.push_str(&token_text);
+            // Decode the stable generated prefix, then compute a delta for
+            // streaming. Qwen byte-fallback tokens can form one Unicode
+            // scalar across multiple token ids; decoding ids one at a time
+            // turns those partial byte sequences into replacement chars.
+            let (token_text, decoded_text) =
+                decode_generated_text(tokenizer, &generated, &cumulative_text)?;
+            cumulative_text = decoded_text;
 
             // Timing: first-token latency + inter-chunk gaps.
             let now = Instant::now();
@@ -755,6 +817,46 @@ mod tests {
         }
     }
 
+    #[test]
+    fn generated_text_decode_preserves_byte_fallback_sequences() {
+        let tok_src = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("qwen_tokenizer.json");
+        let tokenizer = tokenizers::Tokenizer::from_file(tok_src).expect("load qwen tokenizer");
+        let text = "Hello! 😊";
+        let encoding = tokenizer.encode(text, false).expect("encode text");
+        let ids: Vec<i64> = encoding.get_ids().iter().map(|&u| i64::from(u)).collect();
+        let decoded_individually = ids
+            .iter()
+            .map(|&id| {
+                let token_id = super::token_id_to_u32("generated", id).unwrap();
+                tokenizer
+                    .decode(&[token_id], true)
+                    .unwrap_or_else(|_| "\u{FFFD}".to_string())
+            })
+            .collect::<String>();
+        assert!(
+            decoded_individually.contains('\u{FFFD}'),
+            "fixture must reproduce per-token byte-fallback replacement: {decoded_individually:?}"
+        );
+
+        let mut generated = Vec::new();
+        let mut cumulative = String::new();
+        let mut streamed_deltas = String::new();
+        for id in ids {
+            generated.push(id);
+            let (delta, decoded) =
+                super::decode_generated_text(&tokenizer, &generated, &cumulative)
+                    .expect("decode generated text");
+            streamed_deltas.push_str(&delta);
+            cumulative = decoded;
+        }
+
+        assert_eq!(cumulative, text);
+        assert_eq!(streamed_deltas, text);
+    }
+
     /// Integration-style test of the generate path on a non-runtime build
     /// (i.e. when `llm-mlx-runtime` is OFF). Loads a dummy Qwen 3 bundle,
     /// calls `LlmBackend::generate`, and asserts the returned error carries
@@ -797,8 +899,8 @@ mod tests {
             "render output missing expected user turn: {prompt}"
         );
         assert!(
-            prompt.ends_with("<|im_start|>assistant\n"),
-            "render must end with trailing assistant scaffold"
+            prompt.ends_with("<|im_start|>assistant\n<think>\n\n</think>\n\n"),
+            "Qwen render must disable thinking before generation: {prompt}"
         );
 
         let cfg = GenerationConfig::default();
@@ -852,11 +954,11 @@ mod tests {
                 .join("qwen_tokenizer.json");
             fs::copy(&tok_src, dir.join("tokenizer.json")).unwrap();
 
-            // Chat template — Qwen-3 style ChatML. The renderer test in
-            // `chat_template.rs` validates the template itself; here we
-            // just need SOMETHING loadable so the adapter finds it.
+            // Chat template — Qwen-3 style ChatML with its no-thinking
+            // branch. The generate path must opt out of thinking by passing
+            // `enable_thinking = false`.
             let tokenizer_cfg = serde_json::json!({
-                "chat_template": "{%- for message in messages %}{{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>' + '\n' }}{%- endfor %}{%- if add_generation_prompt %}{{- '<|im_start|>assistant\n' }}{%- endif %}"
+                "chat_template": "{%- for message in messages %}{{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>' + '\n' }}{%- endfor %}{%- if add_generation_prompt %}{{- '<|im_start|>assistant\n' }}{%- if enable_thinking is defined and enable_thinking is false %}{{- '<think>\n\n</think>\n\n' }}{%- endif %}{%- endif %}"
             });
             std::fs::write(dir.join("tokenizer_config.json"), tokenizer_cfg.to_string()).unwrap();
 

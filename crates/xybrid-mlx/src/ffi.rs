@@ -11,7 +11,8 @@
 //! `mlx_c_sys::bindings` directly.
 
 use mlx_c_sys::bindings::{
-    self as sys, mlx_array, mlx_dtype, mlx_optional_float, mlx_stream, mlx_vector_array,
+    self as sys, mlx_array, mlx_dtype, mlx_optional_dtype, mlx_optional_float, mlx_optional_int,
+    mlx_stream, mlx_vector_array,
 };
 
 use crate::error::MlxError;
@@ -744,6 +745,36 @@ pub(crate) unsafe fn vector_array_free(vec: mlx_vector_array) {
     }
 }
 
+/// Return the number of arrays held by an mlx-c vector.
+///
+/// # Safety
+///
+/// `vec` must be a live vector handle.
+#[cfg(test)]
+pub(crate) unsafe fn vector_array_len(vec: mlx_vector_array) -> usize {
+    sys::mlx_vector_array_size(vec)
+}
+
+/// Retain-copy one array from an mlx-c vector.
+///
+/// # Safety
+///
+/// `vec` must be a live vector handle and `idx` must be in bounds. The
+/// returned array handle is owned by the caller and must be freed via
+/// [`array_free`].
+#[cfg(test)]
+unsafe fn vector_array_get_owned(vec: mlx_vector_array, idx: usize) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_vector_array_get(&mut res, vec, idx);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!(
+            "mlx_vector_array_get idx={idx} rc={rc}"
+        )));
+    }
+    Ok(res)
+}
+
 /// Dispatch `mlx_concatenate_axis(res, arrays, axis, s)`.
 ///
 /// Concatenates a list of arrays along `axis`. All arrays must have matching
@@ -805,6 +836,180 @@ pub(crate) fn optional_float(v: Option<f32>) -> mlx_optional_float {
             has_value: false,
         },
     }
+}
+
+/// Construct an `mlx_optional_int`.
+pub(crate) fn optional_int(v: Option<i32>) -> mlx_optional_int {
+    match v {
+        Some(value) => mlx_optional_int {
+            value,
+            has_value: true,
+        },
+        None => mlx_optional_int {
+            value: 0,
+            has_value: false,
+        },
+    }
+}
+
+/// Construct an `mlx_optional_dtype`.
+pub(crate) fn optional_dtype(v: Option<mlx_dtype>) -> mlx_optional_dtype {
+    match v {
+        Some(value) => mlx_optional_dtype {
+            value,
+            has_value: true,
+        },
+        None => mlx_optional_dtype {
+            value: 0,
+            has_value: false,
+        },
+    }
+}
+
+/// Dispatch `mlx_quantized_matmul(res, x, w, scales, biases, transpose,
+/// group_size, bits, mode, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_matmul`]. `mode` must be a valid nul-terminated
+/// string for the duration of the call. `biases` may be the null sentinel
+/// from [`array_null`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn op_quantized_matmul(
+    x: mlx_array,
+    w: mlx_array,
+    scales: mlx_array,
+    biases: mlx_array,
+    transpose: bool,
+    group_size: mlx_optional_int,
+    bits: mlx_optional_int,
+    mode: &std::ffi::CStr,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_quantized_matmul(
+        &mut res,
+        x,
+        w,
+        scales,
+        biases,
+        transpose,
+        group_size,
+        bits,
+        mode.as_ptr(),
+        s,
+    );
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_quantized_matmul rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_dequantize(res, w, scales, biases, group_size, bits, mode,
+/// global_scale, dtype, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_quantized_matmul`]. `global_scale` and `biases` may
+/// be null sentinels when absent.
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn op_dequantize(
+    w: mlx_array,
+    scales: mlx_array,
+    biases: mlx_array,
+    group_size: mlx_optional_int,
+    bits: mlx_optional_int,
+    mode: &std::ffi::CStr,
+    global_scale: mlx_array,
+    dtype: mlx_optional_dtype,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_dequantize(
+        &mut res,
+        w,
+        scales,
+        biases,
+        group_size,
+        bits,
+        mode.as_ptr(),
+        global_scale,
+        dtype,
+        s,
+    );
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_dequantize rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_quantize(res, w, group_size, bits, mode, global_scale, s)`.
+///
+/// # Safety
+///
+/// Same contract as [`op_dequantize`]. This helper is test-only because the
+/// runtime loads existing packed SafeTensors and does not quantize model
+/// weights itself.
+#[cfg(test)]
+pub(crate) unsafe fn op_quantize(
+    w: mlx_array,
+    group_size: mlx_optional_int,
+    bits: mlx_optional_int,
+    mode: &std::ffi::CStr,
+    global_scale: mlx_array,
+    s: mlx_stream,
+) -> Result<(mlx_array, mlx_array, mlx_array), MlxError> {
+    let mut outputs = sys::mlx_vector_array_new();
+    let rc = sys::mlx_quantize(
+        &mut outputs,
+        w,
+        group_size,
+        bits,
+        mode.as_ptr(),
+        global_scale,
+        s,
+    );
+    if rc != 0 {
+        vector_array_free(outputs);
+        return Err(MlxError::Internal(format!("mlx_quantize rc={rc}")));
+    }
+
+    let len = vector_array_len(outputs);
+    if len != 3 {
+        vector_array_free(outputs);
+        return Err(MlxError::Internal(format!(
+            "mlx_quantize returned {len} arrays, expected 3"
+        )));
+    }
+
+    let weight = match vector_array_get_owned(outputs, 0) {
+        Ok(array) => array,
+        Err(err) => {
+            vector_array_free(outputs);
+            return Err(err);
+        }
+    };
+    let scales = match vector_array_get_owned(outputs, 1) {
+        Ok(array) => array,
+        Err(err) => {
+            array_free(weight);
+            vector_array_free(outputs);
+            return Err(err);
+        }
+    };
+    let biases = match vector_array_get_owned(outputs, 2) {
+        Ok(array) => array,
+        Err(err) => {
+            array_free(weight);
+            array_free(scales);
+            vector_array_free(outputs);
+            return Err(err);
+        }
+    };
+    vector_array_free(outputs);
+    Ok((weight, scales, biases))
 }
 
 /// Dispatch `mlx_fast_rope(res, x, dims, traditional, base, scale, offset,

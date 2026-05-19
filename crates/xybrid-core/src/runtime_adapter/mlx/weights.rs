@@ -6,11 +6,10 @@
 //! consume this module so validation and runtime materialisation share
 //! one view of the bundle layout.
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use safetensors::SafeTensors;
 use serde::Deserialize;
@@ -20,7 +19,14 @@ use super::model::{MlxLlmError, MlxLlmResult};
 #[derive(Debug)]
 pub struct SafeTensorBundle {
     layout: SafeTensorLayout,
-    file_cache: RefCell<Option<(PathBuf, Rc<Vec<u8>>)>>,
+    file_cache: Mutex<Option<(PathBuf, Arc<Vec<u8>>)>>,
+}
+
+/// Lightweight SafeTensors metadata for one tensor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TensorInfo {
+    pub dtype: safetensors::Dtype,
+    pub shape: Vec<i32>,
 }
 
 #[derive(Debug)]
@@ -67,7 +73,7 @@ impl SafeTensorBundle {
     pub fn from_single_file(path: PathBuf) -> Self {
         Self {
             layout: SafeTensorLayout::Single { path },
-            file_cache: RefCell::new(None),
+            file_cache: Mutex::new(None),
         }
     }
 
@@ -99,7 +105,7 @@ impl SafeTensorBundle {
                 index_path,
                 weight_map,
             },
-            file_cache: RefCell::new(None),
+            file_cache: Mutex::new(None),
         })
     }
 
@@ -121,6 +127,28 @@ impl SafeTensorBundle {
             SafeTensorLayout::Single { path } => path.clone(),
             SafeTensorLayout::Sharded { index_path, .. } => index_path.clone(),
         }
+    }
+
+    pub fn tensor_info(&self, name: &str) -> MlxLlmResult<TensorInfo> {
+        let path = self.tensor_path(name)?;
+        let bytes = self.file_bytes(&path)?;
+        let st =
+            SafeTensors::deserialize(bytes.as_slice()).map_err(|e| MlxLlmError::WeightLoad {
+                path: path.clone(),
+                reason: format!("parse safetensors: {e}"),
+            })?;
+        let view = st.tensor(name).map_err(|e| MlxLlmError::WeightLoad {
+            path: path.clone(),
+            reason: format!("tensor `{name}` missing: {e}"),
+        })?;
+        Ok(TensorInfo {
+            dtype: view.dtype(),
+            shape: safetensor_shape_to_i32(view.shape(), &path, name)?,
+        })
+    }
+
+    pub fn has_tensor(&self, name: &str) -> MlxLlmResult<bool> {
+        Ok(self.tensor_names()?.contains(name))
     }
 
     #[cfg(all(
@@ -190,6 +218,7 @@ impl SafeTensorBundle {
             StDtype::F32 => MlxDtype::F32,
             StDtype::F16 => MlxDtype::F16,
             StDtype::BF16 => MlxDtype::Bf16,
+            StDtype::U32 => MlxDtype::U32,
             other => {
                 return Err(MlxLlmError::WeightLoad {
                     path,
@@ -216,17 +245,33 @@ impl SafeTensorBundle {
         }
     }
 
-    fn file_bytes(&self, path: &Path) -> MlxLlmResult<Rc<Vec<u8>>> {
-        if let Some((cached_path, bytes)) = self.file_cache.borrow().as_ref() {
-            if cached_path == path {
-                return Ok(bytes.clone());
+    fn file_bytes(&self, path: &Path) -> MlxLlmResult<Arc<Vec<u8>>> {
+        {
+            let cache = self
+                .file_cache
+                .lock()
+                .map_err(|_| MlxLlmError::WeightLoad {
+                    path: path.to_path_buf(),
+                    reason: "safetensors file cache lock is poisoned".into(),
+                })?;
+            if let Some((cached_path, bytes)) = cache.as_ref() {
+                if cached_path == path {
+                    return Ok(bytes.clone());
+                }
             }
         }
-        let bytes = Rc::new(fs::read(path).map_err(|e| MlxLlmError::WeightLoad {
+        let bytes = Arc::new(fs::read(path).map_err(|e| MlxLlmError::WeightLoad {
             path: path.to_path_buf(),
             reason: format!("read safetensors: {e}"),
         })?);
-        *self.file_cache.borrow_mut() = Some((path.to_path_buf(), bytes.clone()));
+        let mut cache = self
+            .file_cache
+            .lock()
+            .map_err(|_| MlxLlmError::WeightLoad {
+                path: path.to_path_buf(),
+                reason: "safetensors file cache lock is poisoned".into(),
+            })?;
+        *cache = Some((path.to_path_buf(), bytes.clone()));
         Ok(bytes)
     }
 }
@@ -314,7 +359,14 @@ mod tests {
 
     use crate::runtime_adapter::mlx::model::MlxLlmError;
 
-    use super::{f32_le_bytes_to_vec, safetensor_shape_to_i32};
+    use super::{f32_le_bytes_to_vec, safetensor_shape_to_i32, SafeTensorBundle};
+
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    #[test]
+    fn safe_tensor_bundle_is_send_sync() {
+        assert_send_sync::<SafeTensorBundle>();
+    }
 
     #[test]
     fn f32_decoder_handles_unaligned_slices() {
@@ -332,6 +384,52 @@ mod tests {
         let err = f32_le_bytes_to_vec(&[0, 1, 2]).unwrap_err();
 
         assert!(err.contains("not divisible by 4"), "{err}");
+    }
+
+    #[test]
+    fn tensor_info_reports_u32_safetensors_tensor() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let data = vec![0u8; 2 * 3 * 4];
+        let view = TensorView::new(Dtype::U32, vec![2, 3], &data).unwrap();
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file([("linear.weight".to_string(), view)], &None, &path)
+            .unwrap();
+
+        let bundle = SafeTensorBundle::from_single_file(path);
+        let info = bundle.tensor_info("linear.weight").unwrap();
+
+        assert_eq!(info.dtype, Dtype::U32);
+        assert_eq!(info.shape, vec![2, 3]);
+        assert!(bundle.has_tensor("linear.weight").unwrap());
+        assert!(!bundle.has_tensor("linear.scales").unwrap());
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn read_array_accepts_u32_safetensors_tensor() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+        use xybrid_mlx::MlxDtype;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let data = vec![0u8; 2 * 3 * 4];
+        let view = TensorView::new(Dtype::U32, vec![2, 3], &data).unwrap();
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file([("linear.weight".to_string(), view)], &None, &path)
+            .unwrap();
+
+        let bundle = SafeTensorBundle::from_single_file(path);
+        let tensor = bundle.read_array("linear.weight").unwrap();
+
+        assert_eq!(tensor.dtype().unwrap(), MlxDtype::U32);
+        assert_eq!(tensor.shape(), vec![2, 3]);
     }
 
     #[test]

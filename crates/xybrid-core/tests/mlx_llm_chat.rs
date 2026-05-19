@@ -6,8 +6,10 @@
 //!   `xybrid-mlx/bindings` → `mlx-c-sys/bindings` and links
 //!   `vendor/mlx-apple/mlx.xcframework`).
 //! - Optional real MLX bundles staged at `$XYBRID_MLX_QWEN_DIR` or
-//!   `$XYBRID_MLX_QWEN_4B_DIR`, `$XYBRID_MLX_GEMMA_DIR`,
-//!   `$XYBRID_MLX_LFM_DIR`, and `$XYBRID_MLX_LFM25_DIR`. Real-fixture tests
+//!   `$XYBRID_MLX_QWEN_4B_DIR`, `$XYBRID_MLX_QWEN_4BIT_DIR`,
+//!   `$XYBRID_MLX_GEMMA_DIR`,
+//!   `$XYBRID_MLX_GEMMA_4BIT_DIR`, `$XYBRID_MLX_LFM_DIR`,
+//!   `$XYBRID_MLX_LFM25_DIR`, and `$XYBRID_MLX_LFM25_4BIT_DIR`. Real-fixture tests
 //!   skip with a clear message when their env var is unset; synthetic
 //!   Qwen/Gemma/LFM fixtures always run when the linked runtime is available.
 //!
@@ -19,9 +21,12 @@
 //! ./tools/scripts/fetch-mlx-xcframework.sh
 //! # Optionally fetch real MLX bundles:
 //! export XYBRID_MLX_QWEN_4B_DIR=/path/to/qwen3-4b-mlx
+//! export XYBRID_MLX_QWEN_4BIT_DIR=/path/to/qwen3-4b-4bit-mlx
 //! export XYBRID_MLX_GEMMA_DIR=/path/to/gemma4-mlx
+//! export XYBRID_MLX_GEMMA_4BIT_DIR=/path/to/gemma-4-e2b-it-4bit
 //! export XYBRID_MLX_LFM_DIR=/path/to/lfm2-mlx
 //! export XYBRID_MLX_LFM25_DIR=/path/to/lfm2.5-mlx
+//! export XYBRID_MLX_LFM25_4BIT_DIR=/path/to/LFM2.5-1.2B-Instruct-MLX-4bit
 //! cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime --test mlx_llm_chat
 //! ```
 //!
@@ -250,6 +255,17 @@ fn real_gemma_bundle_generates_when_staged() {
 }
 
 #[test]
+fn gemma4_quantized_mlx_generates_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = bundle_dir("XYBRID_MLX_GEMMA_4BIT_DIR") else {
+        eprintln!("SKIP: XYBRID_MLX_GEMMA_4BIT_DIR not set");
+        return;
+    };
+
+    assert_quantized_bundle_generates(&dir, "gemma4 4bit", "Say hello in one sentence");
+}
+
+#[test]
 fn real_lfm_bundle_generates_when_staged() {
     let _guard = mlx_test_lock();
     let Some(dir) = bundle_dir("XYBRID_MLX_LFM_DIR") else {
@@ -271,6 +287,28 @@ fn real_lfm25_bundle_generates_when_staged() {
     assert_lfm_bundle_generates(&dir, "lfm2.5");
 }
 
+#[test]
+fn lfm25_quantized_mlx_generates_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = bundle_dir("XYBRID_MLX_LFM25_4BIT_DIR") else {
+        eprintln!("SKIP: XYBRID_MLX_LFM25_4BIT_DIR not set");
+        return;
+    };
+
+    assert_quantized_bundle_generates(&dir, "lfm2.5 4bit", "Say hello in one sentence");
+}
+
+#[test]
+fn qwen35_quantized_mlx_generates_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = bundle_dir("XYBRID_MLX_QWEN_4BIT_DIR") else {
+        eprintln!("SKIP: XYBRID_MLX_QWEN_4BIT_DIR not set");
+        return;
+    };
+
+    assert_quantized_bundle_generates(&dir, "qwen3 4bit", "Write one short sentence about apples.");
+}
+
 fn assert_lfm_bundle_generates(dir: &Path, label: &str) {
     let adapter = MlxLlmAdapter::load(dir, &MlxLlmConfig::default()).expect("load lfm bundle");
     let config = GenerationConfig {
@@ -288,12 +326,60 @@ fn assert_lfm_bundle_generates(dir: &Path, label: &str) {
     }
     .expect("lfm generate ok");
 
+    eprintln!("{label} output: {:?}", out.text);
     assert!(!out.text.trim().is_empty(), "empty {label} output");
     assert!(out.tokens_generated > 0);
     assert!(out.tokens_per_second > 0.0);
     assert!(
         matches!(out.finish_reason.as_str(), "stop" | "length"),
         "unexpected finish_reason: {}",
+        out.finish_reason
+    );
+}
+
+fn assert_quantized_bundle_generates(dir: &Path, label: &str, prompt: &str) {
+    let adapter = MlxLlmAdapter::load(dir, &MlxLlmConfig::default())
+        .unwrap_or_else(|e| panic!("load {label} bundle: {e}"));
+    let config = GenerationConfig {
+        max_tokens: 8,
+        ..short_greedy_config()
+    };
+    let result = if adapter.chat_template().is_some() {
+        LlmBackend::generate(&adapter, &[ChatMessage::user(prompt)], &config)
+    } else {
+        LlmBackend::generate_raw(&adapter, prompt, &config)
+    };
+    let out = match result {
+        Ok(out) => out,
+        Err(err) => {
+            let msg = err.to_string();
+            assert!(
+                !msg.contains("unsupported tensor dtype U32"),
+                "{label} hit the old U32 dtype failure: {msg}"
+            );
+            assert!(
+                !msg.contains("unsupported MLX quantization"),
+                "{label} hit the old unsupported-quantization failure: {msg}"
+            );
+            panic!("{label} generate failed: {msg}");
+        }
+    };
+
+    eprintln!("{label} output: {:?}", out.text);
+    assert!(!out.text.trim().is_empty(), "empty {label} output");
+    if prompt.to_ascii_lowercase().contains("hello") {
+        assert!(
+            out.text.to_ascii_lowercase().contains("hello"),
+            "{label} did not produce a semantic hello response: {:?}",
+            out.text
+        );
+    }
+    assert!(out.tokens_generated > 0);
+    assert!(out.tokens_generated <= 8);
+    assert!(out.tokens_per_second > 0.0);
+    assert!(
+        matches!(out.finish_reason.as_str(), "stop" | "length"),
+        "unexpected {label} finish_reason: {}",
         out.finish_reason
     );
 }

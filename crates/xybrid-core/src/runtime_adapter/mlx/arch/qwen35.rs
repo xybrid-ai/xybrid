@@ -8,8 +8,7 @@
 //!    `config.json`, enumerates the expected safetensors weight-key
 //!    schedule, and validates the safetensors header before we commit to
 //!    linking Metal. Lets the runtime selector fall back to llama.cpp
-//!    cleanly when a bundle is malformed or quantized in a way we don't
-//!    yet support.
+//!    cleanly when a bundle is malformed.
 //! 2. **Runtime** (gated on `llm-mlx-runtime` + Apple Silicon macOS) — the
 //!    actual per-layer `runtime::Qwen35Weights` + forward pass, built on
 //!    `xybrid_mlx::MlxArray` + the core tensor ops. Prefill writes K/V
@@ -86,11 +85,17 @@ fn default_rms_eps() -> f32 {
     1e-6
 }
 
+fn default_quant_mode() -> String {
+    "affine".into()
+}
+
 /// Quantization metadata block from `config.json`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct QuantConfig {
     pub bits: u32,
     pub group_size: u32,
+    #[serde(default = "default_quant_mode")]
+    pub mode: String,
 }
 
 impl Qwen3Config {
@@ -98,9 +103,21 @@ impl Qwen3Config {
     pub fn from_model_dir(model_dir: &Path) -> MlxLlmResult<Self> {
         let path = model_dir.join("config.json");
         let raw = fs::read_to_string(&path)?;
-        let cfg: Qwen3Config = serde_json::from_str(&raw)?;
+        let cfg = Self::parse_json(&raw)?;
         cfg.validate()?;
         Ok(cfg)
+    }
+
+    fn parse_json(raw: &str) -> MlxLlmResult<Self> {
+        let mut root: serde_json::Value = serde_json::from_str(raw)?;
+        if let Some(obj) = root.as_object_mut() {
+            if !obj.contains_key("quantization") {
+                if let Some(quantization) = obj.get("quantization_config").cloned() {
+                    obj.insert("quantization".to_string(), quantization);
+                }
+            }
+        }
+        serde_json::from_value(root).map_err(MlxLlmError::ConfigParse)
     }
 
     fn validate(&self) -> MlxLlmResult<()> {
@@ -203,26 +220,64 @@ impl Qwen3Config {
 /// - `lm_head.weight` — unless [`Qwen3Config::tie_word_embeddings`] is set.
 pub fn expected_weight_keys(cfg: &Qwen3Config) -> Vec<String> {
     let mut keys = Vec::with_capacity(3 + 11 * cfg.num_hidden_layers);
-    keys.push("model.embed_tokens.weight".to_string());
+    push_quantized_weight_key(&mut keys, "model.embed_tokens.weight", cfg.is_quantized());
     for l in 0..cfg.num_hidden_layers {
         let base = format!("model.layers.{l}");
         keys.push(format!("{base}.input_layernorm.weight"));
-        keys.push(format!("{base}.self_attn.q_proj.weight"));
-        keys.push(format!("{base}.self_attn.k_proj.weight"));
-        keys.push(format!("{base}.self_attn.v_proj.weight"));
-        keys.push(format!("{base}.self_attn.o_proj.weight"));
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.self_attn.q_proj.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.self_attn.k_proj.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.self_attn.v_proj.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.self_attn.o_proj.weight"),
+            cfg.is_quantized(),
+        );
         keys.push(format!("{base}.self_attn.q_norm.weight"));
         keys.push(format!("{base}.self_attn.k_norm.weight"));
         keys.push(format!("{base}.post_attention_layernorm.weight"));
-        keys.push(format!("{base}.mlp.gate_proj.weight"));
-        keys.push(format!("{base}.mlp.up_proj.weight"));
-        keys.push(format!("{base}.mlp.down_proj.weight"));
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.mlp.gate_proj.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.mlp.up_proj.weight"),
+            cfg.is_quantized(),
+        );
+        push_quantized_weight_key(
+            &mut keys,
+            &format!("{base}.mlp.down_proj.weight"),
+            cfg.is_quantized(),
+        );
     }
     keys.push("model.norm.weight".to_string());
     if !cfg.tie_word_embeddings {
-        keys.push("lm_head.weight".to_string());
+        push_quantized_weight_key(&mut keys, "lm_head.weight", cfg.is_quantized());
     }
     keys
+}
+
+fn push_quantized_weight_key(keys: &mut Vec<String>, weight_key: &str, quantized: bool) {
+    keys.push(weight_key.to_string());
+    if quantized {
+        if let Some(base) = weight_key.strip_suffix(".weight") {
+            keys.push(format!("{base}.scales"));
+            keys.push(format!("{base}.biases"));
+        }
+    }
 }
 
 // =============================================================================
@@ -237,10 +292,9 @@ pub fn expected_weight_keys(cfg: &Qwen3Config) -> Vec<String> {
 /// header (a small JSON prefix) so this is cheap — no mmap of the full
 /// weight tensor region.
 ///
-/// Quantized bundles are rejected here with a pointed error — MLX-LM
-/// 4-bit bundles store additional `*.scales` / `*.biases` tensors
-/// alongside packed int8 weights, and our matmul wrappers don't handle
-/// that layout yet.
+/// Quantized MLX-LM bundles store additional `*.scales` / `*.biases`
+/// tensors alongside packed U32 weights; these siblings are required here
+/// so runtime loading can dispatch projections through quantized matmul.
 pub fn validate_safetensors(path: &Path, cfg: &Qwen3Config) -> MlxLlmResult<()> {
     let weights = SafeTensorBundle::from_single_file(path.to_path_buf());
     validate_safetensors_bundle(&weights, cfg)
@@ -250,17 +304,6 @@ pub fn validate_safetensors_bundle(
     weights: &SafeTensorBundle,
     cfg: &Qwen3Config,
 ) -> MlxLlmResult<()> {
-    if cfg.is_quantized() {
-        let bits = cfg.quantization.as_ref().map(|q| q.bits).unwrap_or(0);
-        let gs = cfg.quantization.as_ref().map(|q| q.group_size).unwrap_or(0);
-        return Err(MlxLlmError::UnsupportedQuantization {
-            model_type: cfg.model_type.clone(),
-            bits,
-            group_size: gs,
-            reason: "mlx_fast_quantized_matmul is not wired for Qwen yet",
-        });
-    }
-
     let names = weights.tensor_names()?;
 
     let expected = expected_weight_keys(cfg);
@@ -328,6 +371,7 @@ pub fn resolve_weights_path(model_dir: &Path) -> MlxLlmResult<PathBuf> {
 pub mod runtime {
     use super::super::super::model::MlxLlmResult;
     use super::super::super::weights::SafeTensorBundle;
+    use super::super::linear::{load_dense_or_dequantized, LinearQuantization, LinearWeight};
     use super::super::{shape_dim_i32, shape_product_i32};
     use super::Qwen3Config;
 
@@ -342,16 +386,16 @@ pub mod runtime {
     #[derive(Debug)]
     pub struct Qwen35Layer {
         pub input_layernorm: MlxArray,
-        pub q_proj: MlxArray,
-        pub k_proj: MlxArray,
-        pub v_proj: MlxArray,
-        pub o_proj: MlxArray,
+        pub q_proj: LinearWeight,
+        pub k_proj: LinearWeight,
+        pub v_proj: LinearWeight,
+        pub o_proj: LinearWeight,
         pub q_norm: MlxArray,
         pub k_norm: MlxArray,
         pub post_attention_layernorm: MlxArray,
-        pub mlp_gate_proj: MlxArray,
-        pub mlp_up_proj: MlxArray,
-        pub mlp_down_proj: MlxArray,
+        pub mlp_gate_proj: LinearWeight,
+        pub mlp_up_proj: LinearWeight,
+        pub mlp_down_proj: LinearWeight,
     }
 
     /// Resident K/V tensors for one decoder layer during a single generation
@@ -394,37 +438,67 @@ pub mod runtime {
     /// Build [`Qwen35Weights`] by reading `model.safetensors` and
     /// materialising each tensor as an [`MlxArray`].
     ///
-    /// Supports F32, F16, and BF16 weights. Quantized bundles are
-    /// rejected up-front in [`super::validate_safetensors`], so by the
-    /// time we land here the dtypes are guaranteed to be dequantized
-    /// floats.
+    /// Supports dense F32/F16/BF16 weights and MLX affine quantized U32
+    /// projection weights. Embeddings and LM head are dequantized at load
+    /// time because `gather` and final logits still use dense-only ops.
     pub fn build(cfg: &Qwen3Config, weights: &SafeTensorBundle) -> MlxLlmResult<Qwen35Weights> {
-        let embed_tokens = load_tensor(weights, "model.embed_tokens.weight")?;
+        let quant = quantization(cfg)?;
+        let quant = quant.as_ref();
+
+        let embed_tokens = load_dense_or_dequantized(weights, "model.embed_tokens.weight", quant)?;
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for l in 0..cfg.num_hidden_layers {
             let base = format!("model.layers.{l}");
             layers.push(Qwen35Layer {
                 input_layernorm: load_tensor(weights, &format!("{base}.input_layernorm.weight"))?,
-                q_proj: load_tensor(weights, &format!("{base}.self_attn.q_proj.weight"))?,
-                k_proj: load_tensor(weights, &format!("{base}.self_attn.k_proj.weight"))?,
-                v_proj: load_tensor(weights, &format!("{base}.self_attn.v_proj.weight"))?,
-                o_proj: load_tensor(weights, &format!("{base}.self_attn.o_proj.weight"))?,
+                q_proj: LinearWeight::load(
+                    weights,
+                    &format!("{base}.self_attn.q_proj.weight"),
+                    quant,
+                )?,
+                k_proj: LinearWeight::load(
+                    weights,
+                    &format!("{base}.self_attn.k_proj.weight"),
+                    quant,
+                )?,
+                v_proj: LinearWeight::load(
+                    weights,
+                    &format!("{base}.self_attn.v_proj.weight"),
+                    quant,
+                )?,
+                o_proj: LinearWeight::load(
+                    weights,
+                    &format!("{base}.self_attn.o_proj.weight"),
+                    quant,
+                )?,
                 q_norm: load_tensor(weights, &format!("{base}.self_attn.q_norm.weight"))?,
                 k_norm: load_tensor(weights, &format!("{base}.self_attn.k_norm.weight"))?,
                 post_attention_layernorm: load_tensor(
                     weights,
                     &format!("{base}.post_attention_layernorm.weight"),
                 )?,
-                mlp_gate_proj: load_tensor(weights, &format!("{base}.mlp.gate_proj.weight"))?,
-                mlp_up_proj: load_tensor(weights, &format!("{base}.mlp.up_proj.weight"))?,
-                mlp_down_proj: load_tensor(weights, &format!("{base}.mlp.down_proj.weight"))?,
+                mlp_gate_proj: LinearWeight::load(
+                    weights,
+                    &format!("{base}.mlp.gate_proj.weight"),
+                    quant,
+                )?,
+                mlp_up_proj: LinearWeight::load(
+                    weights,
+                    &format!("{base}.mlp.up_proj.weight"),
+                    quant,
+                )?,
+                mlp_down_proj: LinearWeight::load(
+                    weights,
+                    &format!("{base}.mlp.down_proj.weight"),
+                    quant,
+                )?,
             });
         }
         let norm = load_tensor(weights, "model.norm.weight")?;
         let lm_head = if cfg.tie_word_embeddings {
             None
         } else {
-            Some(load_tensor(weights, "lm_head.weight")?)
+            Some(load_dense_or_dequantized(weights, "lm_head.weight", quant)?)
         };
 
         Ok(Qwen35Weights {
@@ -442,6 +516,13 @@ pub mod runtime {
     ///
     fn load_tensor(weights: &SafeTensorBundle, name: &str) -> MlxLlmResult<MlxArray> {
         weights.read_array(name)
+    }
+
+    fn quantization(cfg: &Qwen3Config) -> MlxLlmResult<Option<LinearQuantization>> {
+        cfg.quantization
+            .as_ref()
+            .map(|q| LinearQuantization::new(q.bits, q.group_size, &q.mode))
+            .transpose()
     }
 
     /// Forward pass through the whole stack.
@@ -512,22 +593,10 @@ pub mod runtime {
             cfg.rms_norm_eps,
             stream,
         )?;
-        let gate = matmul(
-            &normed,
-            &transpose(&layer.mlp_gate_proj, &[1, 0], stream)?,
-            stream,
-        )?;
-        let up = matmul(
-            &normed,
-            &transpose(&layer.mlp_up_proj, &[1, 0], stream)?,
-            stream,
-        )?;
+        let gate = layer.mlp_gate_proj.forward(&normed, stream)?;
+        let up = layer.mlp_up_proj.forward(&normed, stream)?;
         let gated = mul(&silu(&gate, stream)?, &up, stream)?;
-        let out = matmul(
-            &gated,
-            &transpose(&layer.mlp_down_proj, &[1, 0], stream)?,
-            stream,
-        )?;
+        let out = layer.mlp_down_proj.forward(&gated, stream)?;
         add(hidden, &out, stream).map_err(Into::into)
     }
 
@@ -557,11 +626,9 @@ pub mod runtime {
             stream,
         )?;
 
-        // HF weight layout is [out_dim, in_dim]; we need [in_dim, out_dim]
-        // so matmul contracts on in_dim.
-        let q = matmul(&normed, &transpose(&layer.q_proj, &[1, 0], stream)?, stream)?;
-        let k = matmul(&normed, &transpose(&layer.k_proj, &[1, 0], stream)?, stream)?;
-        let v = matmul(&normed, &transpose(&layer.v_proj, &[1, 0], stream)?, stream)?;
+        let q = layer.q_proj.forward(&normed, stream)?;
+        let k = layer.k_proj.forward(&normed, stream)?;
+        let v = layer.v_proj.forward(&normed, stream)?;
 
         let q = split_heads(&q, n_heads, head_dim, stream)?;
         let k = split_heads(&k, n_kv_heads, head_dim, stream)?;
@@ -603,7 +670,7 @@ pub mod runtime {
         let causal = !had_cached_prefix && q.shape().get(2).copied().unwrap_or(1) > 1;
         let attn = scaled_dot_product_attention(&q, &k, &v, scale, causal, None, stream)?;
         let attn = merge_heads(&attn, n_heads, head_dim, stream)?;
-        let attn = matmul(&attn, &transpose(&layer.o_proj, &[1, 0], stream)?, stream)?;
+        let attn = layer.o_proj.forward(&attn, stream)?;
 
         add(hidden, &attn, stream).map_err(Into::into)
     }
@@ -738,35 +805,75 @@ mod tests {
     }
 
     #[test]
-    fn quantized_rejected_by_safetensors_check() {
-        // The Qwen3 *arch* validates — we need to load the bundle — but
-        // the safetensors check emits the "fall back to llama.cpp" error
-        // before touching the file.
+    fn duplicate_quantization_config_alias_parses_once() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.json"),
+            serde_json::json!({
+                "model_type": "qwen3",
+                "hidden_size": 16,
+                "num_hidden_layers": 1,
+                "num_attention_heads": 4,
+                "num_key_value_heads": 2,
+                "intermediate_size": 32,
+                "vocab_size": 100,
+                "max_position_embeddings": 1024,
+                "head_dim": 4,
+                "quantization": {
+                    "bits": 4,
+                    "group_size": 64
+                },
+                "quantization_config": {
+                    "bits": 4,
+                    "group_size": 64
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let cfg = Qwen3Config::from_model_dir(tmp.path()).expect("parse duplicated quant config");
+        let quant = cfg.quantization.expect("quantization should parse");
+        assert_eq!(quant.bits, 4);
+        assert_eq!(quant.group_size, 64);
+        assert_eq!(quant.mode, "affine");
+    }
+
+    #[test]
+    fn qwen35_quantized_manifest_accepts_projection_triplets() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
+        let tmp = tempfile::TempDir::new().unwrap();
         let mut cfg = dummy_config(1, false);
         cfg.quantization = Some(QuantConfig {
             bits: 4,
             group_size: 64,
+            mode: "affine".into(),
         });
-        assert!(cfg.is_quantized());
-        let err = validate_safetensors(Path::new("/nonexistent"), &cfg).unwrap_err();
-        match &err {
-            MlxLlmError::UnsupportedQuantization {
-                model_type,
-                bits,
-                group_size,
-                ..
-            } => {
-                assert_eq!(model_type, "qwen3");
-                assert_eq!(*bits, 4);
-                assert_eq!(*group_size, 64);
-            }
-            other => panic!("expected UnsupportedQuantization, got {other:?}"),
-        }
-        let msg = err.to_string();
-        assert!(msg.contains("unsupported MLX quantization"), "got: {msg}");
-        assert!(msg.contains("qwen3"), "got: {msg}");
-        assert!(msg.contains("4-bit/group=64"), "got: {msg}");
-        assert!(msg.contains("GGUF fallback"), "got: {msg}");
+        let keys = expected_weight_keys(&cfg);
+        assert!(keys
+            .iter()
+            .any(|k| k == "model.layers.0.self_attn.q_proj.scales"));
+        assert!(keys
+            .iter()
+            .any(|k| k == "model.layers.0.self_attn.o_proj.biases"));
+        assert!(keys.iter().any(|k| k == "model.embed_tokens.scales"));
+
+        let data = vec![0u8; 4];
+        let tensors: Vec<(String, TensorView<'_>)> = keys
+            .iter()
+            .map(|k| {
+                (
+                    k.clone(),
+                    TensorView::new(Dtype::F32, vec![1], &data).unwrap(),
+                )
+            })
+            .collect();
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file(tensors, &None, &path).unwrap();
+
+        validate_safetensors(&path, &cfg).expect("quantized manifest should validate");
     }
 
     #[test]
