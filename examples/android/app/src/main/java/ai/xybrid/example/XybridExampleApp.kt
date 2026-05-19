@@ -186,7 +186,8 @@ fun XybridExampleApp() {
                                 task = task,
                                 text = result.text,
                                 audioBytes = result.audioBytes,
-                                latencyMs = result.latencyMs.toLong()
+                                latencyMs = result.latencyMs.toLong(),
+                                metrics = result.metrics
                             )
                         } else {
                             inferenceState = InferenceState.Error(
