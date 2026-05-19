@@ -6,7 +6,7 @@
 //! | Module | Operations |
 //! |--------|-----------|
 //! | [`decode`] | `CTCDecode`, `BPEDecode`, `WhisperDecode` |
-//! | [`tensor_ops`] | `Argmax`, `Softmax`, `TopK`, `Threshold`, `MeanPool` |
+//! | [`tensor_ops`] | `Argmax`, `Softmax`, `TopK`, `Threshold`, `MeanPool`, `Denormalize` |
 //! | [`audio`] | `TTSAudioEncode` |
 
 pub mod audio;
@@ -66,9 +66,8 @@ pub fn apply_postprocessing_step(
             Ok(data)
         }
 
-        PostprocessingStep::Denormalize { mean: _, std: _ } => {
-            // TODO: Implement denormalization
-            Ok(data)
+        PostprocessingStep::Denormalize { mean, std } => {
+            tensor_ops::denormalize_step(data, mean, std)
         }
 
         PostprocessingStep::TTSAudioEncode {
