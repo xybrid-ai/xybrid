@@ -182,7 +182,7 @@ impl SharedBuffer {
             )));
         }
         let page_size = metal_page_size();
-        if (ptr as usize) % page_size != 0 || layout.size() % page_size != 0 {
+        if !(ptr as usize).is_multiple_of(page_size) || !layout.size().is_multiple_of(page_size) {
             return Err(MlxError::Internal(format!(
                 "SharedBuffer backing allocation must be page-aligned with a page-multiple \
                  length for Metal no-copy buffers (page_size={page_size}, ptr={ptr:p}, \
