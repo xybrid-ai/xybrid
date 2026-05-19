@@ -1,0 +1,25 @@
+bindings/flutter/rust/src/api/result.rs
+  s_e08a2d1edc1e85::t_05c225c6dca31d 15
+  s_e08a2d1edc1e85::t_f4974690aa22e0 40
+bindings/flutter/rust/src/api/pipeline.rs
+  s_e08a2d1edc1e85::t_634563c1370296 47-54,78
+bindings/flutter/lib/src/result.dart
+  s_e08a2d1edc1e85::t_21eb3470007be0 28-32
+  s_e08a2d1edc1e85::t_8c7533a37ffaca 130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "71bd66ab270714cb8978199143e3bb9cfda2c28f",
+  "prompts": {},
+  "sessions": {
+    "s_e08a2d1edc1e85": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0adfe992-ec84-41fa-a3e6-397c8a437440",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
