@@ -1,0 +1,28 @@
+docs/sdk/api-surface.yaml
+  s_56b604a5c7b635::t_72fa6844860a7c 356,368,371,374,377,380,383,386
+  s_56b604a5c7b635::t_95d7519e5f1cf5 398,401
+docs/sdk/API_REFERENCE.md
+  s_56b604a5c7b635::t_204a472102a4c7 893-896
+crates/xybrid-uniffi/src/lib.rs
+  s_56b604a5c7b635::t_d4b8950baf0edc 15-16
+  s_56b604a5c7b635::t_40c090fade069f 319-368,380,391
+tools/scripts/api-contract-check.sh
+  s_56b604a5c7b635::t_b15ffed7a40ffa 128-130
+  s_56b604a5c7b635::t_cc0246b24ffd06 135-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "3416844a90bb1609e450ad9a271e4fd1a5ffeeb3",
+  "prompts": {},
+  "sessions": {
+    "s_56b604a5c7b635": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30ad98a9-9013-4806-8f70-a57cdc5df72d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
