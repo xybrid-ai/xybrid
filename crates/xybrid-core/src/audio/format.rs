@@ -156,10 +156,23 @@ mod tests {
     }
 
     #[test]
+    fn test_audio_format_pcm32() {
+        let format = AudioFormat::Pcm32 {
+            sample_rate: 48000,
+            channels: 2,
+        };
+        assert_eq!(format.sample_rate(), Some(48000));
+        assert_eq!(format.channels(), Some(2));
+        assert_eq!(format.bytes_per_sample(), Some(4));
+        assert_eq!(format.as_str(), "pcm32");
+    }
+
+    #[test]
     fn test_audio_format_wav() {
         let format = AudioFormat::Wav;
         assert_eq!(format.sample_rate(), None);
         assert_eq!(format.channels(), None);
+        assert_eq!(format.bytes_per_sample(), None);
         assert_eq!(format.as_str(), "wav");
     }
 
