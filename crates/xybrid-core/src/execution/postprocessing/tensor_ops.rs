@@ -275,12 +275,17 @@ pub fn denormalize_step(data: RawOutputs, mean: &[f32], std: &[f32]) -> Executor
         }
     };
 
-    for (_name, tensor) in tensor_map.iter_mut() {
-        if let Some(tensor_slice) = tensor.as_slice_mut() {
-            for (i, val) in tensor_slice.iter_mut().enumerate() {
-                let channel = i % mean.len();
-                *val = (*val * std[channel]) + mean[channel];
-            }
+    for (name, tensor) in tensor_map.iter_mut() {
+        let tensor_slice = tensor.as_slice_mut().ok_or_else(|| {
+            AdapterError::InvalidInput(format!(
+                "Denormalize requires a contiguous tensor (output \"{}\" is non-contiguous)",
+                name
+            ))
+        })?;
+
+        for (i, val) in tensor_slice.iter_mut().enumerate() {
+            let channel = i % mean.len();
+            *val = (*val * std[channel]) + mean[channel];
         }
     }
 
