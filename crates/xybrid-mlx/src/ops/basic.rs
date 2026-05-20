@@ -308,6 +308,35 @@ fn is_float_dtype(dtype: MlxDtype) -> bool {
     matches!(dtype, MlxDtype::F32 | MlxDtype::F16 | MlxDtype::Bf16)
 }
 
+fn validate_shape(shape: &[i32]) -> MlxResult<()> {
+    let mut elems = 1usize;
+    for &dim in shape {
+        if dim < 0 {
+            return Err(MlxError::InvalidShape {
+                expected: shape.to_vec(),
+                got: vec![dim],
+            });
+        }
+        elems = elems
+            .checked_mul(dim as usize)
+            .ok_or_else(|| MlxError::InvalidShape {
+                expected: shape.to_vec(),
+                got: vec![i32::MAX],
+            })?;
+    }
+    Ok(())
+}
+
+/// Create a zero-filled tensor directly in MLX-managed storage.
+pub fn zeros(shape: &[i32], dtype: MlxDtype, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
+    validate_shape(shape)?;
+    let s = resolve_stream(stream)?;
+    // SAFETY: the shape was validated above and the stream handle is live for
+    // the duration of the call.
+    let raw = unsafe { ffi::op_zeros(shape, dtype.into(), s.as_stream().as_raw())? };
+    Ok(MlxArray::from_raw(raw))
+}
+
 /// Element-wise add with NumPy broadcasting.
 pub fn add(a: &MlxArray, b: &MlxArray, stream: Option<&MlxStream>) -> MlxResult<MlxArray> {
     let s = resolve_stream(stream)?;
@@ -722,6 +751,22 @@ mod tests {
             MATMUL_TOL,
             "div",
         );
+    }
+
+    #[test]
+    fn zeros_allocates_without_host_payload() {
+        let z = zeros(&[2, 3], MlxDtype::F32, None).unwrap();
+
+        assert_eq!(z.shape(), vec![2, 3]);
+        assert_eq!(z.dtype().unwrap(), MlxDtype::F32);
+        assert_close(&z.to_vec_f32().unwrap(), &[0.0; 6], MATMUL_TOL, "zeros f32");
+    }
+
+    #[test]
+    fn zeros_rejects_negative_shape_dimension() {
+        let err = zeros(&[2, -1], MlxDtype::F32, None).unwrap_err();
+
+        assert!(matches!(err, MlxError::InvalidShape { .. }));
     }
 
     #[test]

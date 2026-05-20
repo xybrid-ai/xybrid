@@ -101,6 +101,8 @@ mod buffer;
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 mod ffi;
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
+mod memory;
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub mod ops;
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 mod resources;
@@ -111,5 +113,7 @@ mod stream;
 pub use array::{async_eval, perf_counters, reset_perf_counters, MlxArray, MlxPerfCounters};
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub use buffer::SharedBuffer;
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
+pub use memory::{clear_cache, set_cache_limit};
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub use stream::{Device, MlxStream};

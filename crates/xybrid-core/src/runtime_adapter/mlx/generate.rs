@@ -1,4 +1,4 @@
-//! MLX generation orchestrator (US-014).
+//! MLX generation orchestrator.
 //!
 //! Wires together the pieces the [`MlxLlmAdapter`] doesn't own directly:
 //! chat-template rendering, tokeniser encoding, the arch-specific forward
@@ -384,6 +384,13 @@ mod runtime {
     use crate::runtime_adapter::types::PartialToken;
     use tracing::{debug, info, warn};
 
+    fn clear_mlx_cache(stage: &'static str) {
+        match xybrid_mlx::clear_cache() {
+            Ok(()) => debug!(stage, "mlx.clear_cache.done"),
+            Err(error) => warn!(stage, %error, "mlx.clear_cache.failed"),
+        }
+    }
+
     pub(super) fn generate_runtime<'cb>(
         adapter: &MlxLlmAdapter,
         tokenizer: &tokenizers::Tokenizer,
@@ -415,216 +422,225 @@ mod runtime {
         let runtime_stream = default_runtime_stream()?;
         let stream = Some(&runtime_stream);
         forward.reset_kv_cache();
+        clear_mlx_cache("generation_start");
         xybrid_mlx::reset_perf_counters();
 
-        // Generated token history: starts with the prompt, appended as we
-        // decode so the sampler's repetition_penalty sees the whole history.
-        let mut all_tokens: Vec<i64> = prompt_ids.to_vec();
-        let mut generated: Vec<i64> = Vec::with_capacity(max_decode);
-        let mut cumulative_text = String::new();
-        let mut finish_reason = "length";
-        // Streaming and stop-sequence scans require stable text every token.
-        // The async greedy path is intentionally disabled in that case so
-        // stop sequences keep the same behavior as the synchronous loop.
-        let needs_incremental_text = callback.is_some() || !params.config.stop_sequences.is_empty();
+        let result = (|| -> MlxLlmResult<GenerationOutput> {
+            // Generated token history: starts with the prompt, appended as we
+            // decode so the sampler's repetition_penalty sees the whole history.
+            let mut all_tokens: Vec<i64> = prompt_ids.to_vec();
+            let mut generated: Vec<i64> = Vec::with_capacity(max_decode);
+            let mut cumulative_text = String::new();
+            let mut finish_reason = "length";
+            // Streaming and stop-sequence scans require stable text every token.
+            // The async greedy path is intentionally disabled in that case so
+            // stop sequences keep the same behavior as the synchronous loop.
+            let needs_incremental_text =
+                callback.is_some() || !params.config.stop_sequences.is_empty();
 
-        info!(
-            model_id = adapter.model_id_or_default(),
-            prompt_tokens = prompt_ids.len(),
-            max_tokens = max_decode,
-            "mlx.generate.start"
-        );
+            info!(
+                model_id = adapter.model_id_or_default(),
+                prompt_tokens = prompt_ids.len(),
+                max_tokens = max_decode,
+                "mlx.generate.start"
+            );
 
-        // Prefill: run the forward pass on the full prompt, then slice the
-        // last token's logits.
-        let prefill_shape = token_batch_shape("prefill prompt", prompt_ids.len())?;
-        let prefill_ids = xybrid_mlx::MlxArray::from_slice_i64(prompt_ids, &prefill_shape)?;
-        let mut next_logits = forward.forward(&prefill_ids, 0, stream)?;
-        let greedy_decode = params.config.temperature <= 0.0;
-        let use_async_greedy = greedy_decode
-            && !needs_incremental_text
-            && forward.uses_kv_cache()
-            && forward.supports_async_greedy();
-        let mut next_token_ids = if use_async_greedy {
-            let ids = greedy_argmax_token_ids(&next_logits, stream)?;
-            xybrid_mlx::async_eval(&[&ids])?;
-            Some(ids)
-        } else {
-            None
-        };
+            // Prefill: run the forward pass on the full prompt, then slice the
+            // last token's logits.
+            let prefill_shape = token_batch_shape("prefill prompt", prompt_ids.len())?;
+            let prefill_ids = xybrid_mlx::MlxArray::from_slice_i64(prompt_ids, &prefill_shape)?;
+            let mut next_logits = forward.forward(&prefill_ids, 0, stream)?;
+            let greedy_decode = params.config.temperature <= 0.0;
+            let use_async_greedy = greedy_decode
+                && !needs_incremental_text
+                && forward.uses_kv_cache()
+                && forward.supports_async_greedy();
+            let mut next_token_ids = if use_async_greedy {
+                let ids = greedy_argmax_token_ids(&next_logits, stream)?;
+                xybrid_mlx::async_eval(&[&ids])?;
+                Some(ids)
+            } else {
+                None
+            };
 
-        for step in 0..max_decode {
-            let current_token_ids = next_token_ids.take();
-            let next_token = if let Some(token_ids) = current_token_ids.as_ref() {
-                if step + 1 < max_decode {
-                    // Queue one token ahead before the host readback. If the
-                    // current token is EOS, this over-prefetches one cache
-                    // entry that is discarded with the per-run cache.
-                    let position_offset =
-                        position_offset_for_history_len(prompt_ids.len() + step + 1)?;
-                    let decode_tok =
-                        xybrid_mlx::ops::cast(token_ids, xybrid_mlx::MlxDtype::I64, stream)?;
-                    let step_logits = forward.forward(&decode_tok, position_offset, stream)?;
-                    let ids = greedy_argmax_token_ids(&step_logits, stream)?;
-                    xybrid_mlx::async_eval(&[&ids])?;
-                    next_token_ids = Some(ids);
+            for step in 0..max_decode {
+                let current_token_ids = next_token_ids.take();
+                let next_token = if let Some(token_ids) = current_token_ids.as_ref() {
+                    if step + 1 < max_decode {
+                        // Queue one token ahead before the host readback. If the
+                        // current token is EOS, this over-prefetches one cache
+                        // entry that is discarded with the per-run cache.
+                        let position_offset =
+                            position_offset_for_history_len(prompt_ids.len() + step + 1)?;
+                        let decode_tok =
+                            xybrid_mlx::ops::cast(token_ids, xybrid_mlx::MlxDtype::I64, stream)?;
+                        let step_logits = forward.forward(&decode_tok, position_offset, stream)?;
+                        let ids = greedy_argmax_token_ids(&step_logits, stream)?;
+                        xybrid_mlx::async_eval(&[&ids])?;
+                        next_token_ids = Some(ids);
+                    }
+                    read_greedy_token_id(token_ids)?
+                } else if greedy_decode {
+                    greedy_argmax_token(&next_logits, stream)?
+                } else {
+                    let next_logits_row =
+                        last_token_logits(&next_logits, forward.vocab_size(), stream)?;
+                    params
+                        .sampler
+                        .sample(&next_logits_row, params.config, &all_tokens)?
+                };
+
+                all_tokens.push(next_token);
+                generated.push(next_token);
+
+                // Streaming callbacks and text stop-sequences need stable text on
+                // every token. Plain batch generation can defer tokenizer decode
+                // until the end and avoid an O(tokens^2) prefix decode loop.
+                let token_text = if needs_incremental_text {
+                    // Decode the stable generated prefix, then compute a delta for
+                    // streaming. Qwen byte-fallback tokens can form one Unicode
+                    // scalar across multiple token ids; decoding ids one at a time
+                    // turns those partial byte sequences into replacement chars.
+                    let (token_text, decoded_text) =
+                        decode_generated_text(tokenizer, &generated, &cumulative_text)?;
+                    cumulative_text = decoded_text;
+                    token_text
+                } else {
+                    String::new()
+                };
+
+                // Timing: first-token latency + inter-chunk gaps.
+                let now = Instant::now();
+                chunk_timestamps.push(now);
+
+                // EOS check.
+                if eos_tokens.contains(&next_token) {
+                    finish_reason = "stop";
+                    emit_callback(
+                        callback.as_mut(),
+                        PartialToken::new(token_text.clone(), step, cumulative_text.clone())
+                            .with_token_id(next_token)
+                            .with_finish_reason("stop"),
+                    )?;
+                    break;
                 }
-                read_greedy_token_id(token_ids)?
-            } else if greedy_decode {
-                greedy_argmax_token(&next_logits, stream)?
-            } else {
-                let next_logits_row =
-                    last_token_logits(&next_logits, forward.vocab_size(), stream)?;
-                params
-                    .sampler
-                    .sample(&next_logits_row, params.config, &all_tokens)?
-            };
 
-            all_tokens.push(next_token);
-            generated.push(next_token);
-
-            // Streaming callbacks and text stop-sequences need stable text on
-            // every token. Plain batch generation can defer tokenizer decode
-            // until the end and avoid an O(tokens^2) prefix decode loop.
-            let token_text = if needs_incremental_text {
-                // Decode the stable generated prefix, then compute a delta for
-                // streaming. Qwen byte-fallback tokens can form one Unicode
-                // scalar across multiple token ids; decoding ids one at a time
-                // turns those partial byte sequences into replacement chars.
-                let (token_text, decoded_text) =
-                    decode_generated_text(tokenizer, &generated, &cumulative_text)?;
-                cumulative_text = decoded_text;
-                token_text
-            } else {
-                String::new()
-            };
-
-            // Timing: first-token latency + inter-chunk gaps.
-            let now = Instant::now();
-            chunk_timestamps.push(now);
-
-            // EOS check.
-            if eos_tokens.contains(&next_token) {
-                finish_reason = "stop";
-                emit_callback(
-                    callback.as_mut(),
-                    PartialToken::new(token_text.clone(), step, cumulative_text.clone())
-                        .with_token_id(next_token)
-                        .with_finish_reason("stop"),
-                )?;
-                break;
-            }
-
-            // Stop-sequence check on cumulative text. We don't strip the
-            // stop-sequence from the returned text — matches the llama.cpp
-            // adapter's contract.
-            let mut hit_stop = false;
-            if needs_incremental_text {
-                for stop in &params.config.stop_sequences {
-                    if !stop.is_empty() && cumulative_text.contains(stop) {
-                        hit_stop = true;
-                        break;
+                // Stop-sequence check on cumulative text. We don't strip the
+                // stop-sequence from the returned text — matches the llama.cpp
+                // adapter's contract.
+                let mut hit_stop = false;
+                if needs_incremental_text {
+                    for stop in &params.config.stop_sequences {
+                        if !stop.is_empty() && cumulative_text.contains(stop) {
+                            hit_stop = true;
+                            break;
+                        }
                     }
                 }
-            }
-            if hit_stop {
-                finish_reason = "stop";
+                if hit_stop {
+                    finish_reason = "stop";
+                    emit_callback(
+                        callback.as_mut(),
+                        PartialToken::new(token_text.clone(), step, cumulative_text.clone())
+                            .with_token_id(next_token)
+                            .with_finish_reason("stop"),
+                    )?;
+                    break;
+                }
+
+                // Non-terminal token → emit without finish_reason.
                 emit_callback(
                     callback.as_mut(),
-                    PartialToken::new(token_text.clone(), step, cumulative_text.clone())
-                        .with_token_id(next_token)
-                        .with_finish_reason("stop"),
+                    PartialToken::new(token_text, step, cumulative_text.clone())
+                        .with_token_id(next_token),
                 )?;
-                break;
+
+                // Decode step: runtime architectures reset their resident
+                // attention/conv caches before prefill, then only forward the
+                // newest token at the absolute position.
+                if !use_async_greedy {
+                    let (decode_ids, position_offset) = if forward.uses_kv_cache() {
+                        decode_forward_input_with_kv_cache(&all_tokens)?
+                    } else {
+                        decode_forward_input_without_kv_cache(&all_tokens)?
+                    };
+                    let decode_shape = token_batch_shape("decode input", decode_ids.len())?;
+                    let decode_tok =
+                        xybrid_mlx::MlxArray::from_slice_i64(decode_ids, &decode_shape)?;
+                    next_logits = forward.forward(&decode_tok, position_offset, stream)?;
+                }
             }
 
-            // Non-terminal token → emit without finish_reason.
-            emit_callback(
-                callback.as_mut(),
-                PartialToken::new(token_text, step, cumulative_text.clone())
-                    .with_token_id(next_token),
-            )?;
-
-            // Decode step: runtime architectures reset their resident
-            // attention/conv caches before prefill, then only forward the
-            // newest token at the absolute position.
-            if !use_async_greedy {
-                let (decode_ids, position_offset) = if forward.uses_kv_cache() {
-                    decode_forward_input_with_kv_cache(&all_tokens)?
-                } else {
-                    decode_forward_input_without_kv_cache(&all_tokens)?
-                };
-                let decode_shape = token_batch_shape("decode input", decode_ids.len())?;
-                let decode_tok = xybrid_mlx::MlxArray::from_slice_i64(decode_ids, &decode_shape)?;
-                next_logits = forward.forward(&decode_tok, position_offset, stream)?;
+            let tokens_generated = generated.len();
+            if !needs_incremental_text {
+                cumulative_text = decode_generated_text(tokenizer, &generated, "")?.1;
             }
-        }
+            let fields =
+                mlx_streaming_fields(start, &chunk_timestamps, prompt_ids.len(), tokens_generated);
 
-        let tokens_generated = generated.len();
-        if !needs_incremental_text {
-            cumulative_text = decode_generated_text(tokenizer, &generated, "")?.1;
-        }
-        let fields =
-            mlx_streaming_fields(start, &chunk_timestamps, prompt_ids.len(), tokens_generated);
-
-        info!(
-            model_id = adapter.model_id_or_default(),
-            tokens_generated,
-            tokens_per_second = fields.tokens_per_second,
-            finish_reason,
-            "mlx.generate.done"
-        );
-        let perf = xybrid_mlx::perf_counters();
-        let generated_denominator = tokens_generated.max(1) as f64;
-        debug!(
-            eval_calls = perf.eval_calls,
-            async_eval_calls = perf.async_eval_calls,
-            to_vec_f32_calls = perf.to_vec_f32_calls,
-            to_vec_u32_calls = perf.to_vec_u32_calls,
-            evals_per_token = perf.eval_calls as f64 / generated_denominator,
-            f32_readbacks_per_token = perf.to_vec_f32_calls as f64 / generated_denominator,
-            u32_readbacks_per_token = perf.to_vec_u32_calls as f64 / generated_denominator,
-            async_greedy = use_async_greedy,
-            "mlx.generate.perf"
-        );
-        if std::env::var_os("XYBRID_MLX_PRINT_PERF").is_some() {
-            eprintln!(
-                "mlx perf: eval_calls={} async_eval_calls={} to_vec_f32_calls={} \
+            info!(
+                model_id = adapter.model_id_or_default(),
+                tokens_generated,
+                tokens_per_second = fields.tokens_per_second,
+                finish_reason,
+                "mlx.generate.done"
+            );
+            let perf = xybrid_mlx::perf_counters();
+            let generated_denominator = tokens_generated.max(1) as f64;
+            debug!(
+                eval_calls = perf.eval_calls,
+                async_eval_calls = perf.async_eval_calls,
+                to_vec_f32_calls = perf.to_vec_f32_calls,
+                to_vec_u32_calls = perf.to_vec_u32_calls,
+                evals_per_token = perf.eval_calls as f64 / generated_denominator,
+                f32_readbacks_per_token = perf.to_vec_f32_calls as f64 / generated_denominator,
+                u32_readbacks_per_token = perf.to_vec_u32_calls as f64 / generated_denominator,
+                async_greedy = use_async_greedy,
+                "mlx.generate.perf"
+            );
+            if std::env::var_os("XYBRID_MLX_PRINT_PERF").is_some() {
+                eprintln!(
+                    "mlx perf: eval_calls={} async_eval_calls={} to_vec_f32_calls={} \
                  to_vec_u32_calls={} evals_per_token={:.4} f32_readbacks_per_token={:.4} \
                  u32_readbacks_per_token={:.4} async_greedy={}",
-                perf.eval_calls,
-                perf.async_eval_calls,
-                perf.to_vec_f32_calls,
-                perf.to_vec_u32_calls,
-                perf.eval_calls as f64 / generated_denominator,
-                perf.to_vec_f32_calls as f64 / generated_denominator,
-                perf.to_vec_u32_calls as f64 / generated_denominator,
-                use_async_greedy
+                    perf.eval_calls,
+                    perf.async_eval_calls,
+                    perf.to_vec_f32_calls,
+                    perf.to_vec_u32_calls,
+                    perf.eval_calls as f64 / generated_denominator,
+                    perf.to_vec_f32_calls as f64 / generated_denominator,
+                    perf.to_vec_u32_calls as f64 / generated_denominator,
+                    use_async_greedy
+                );
+            }
+            debug!(
+                prefill_tokens = prompt_ids.len(),
+                decode_tokens = tokens_generated,
+                "mlx.generate.summary"
             );
-        }
-        debug!(
-            prefill_tokens = prompt_ids.len(),
-            decode_tokens = tokens_generated,
-            "mlx.generate.summary"
-        );
 
-        // If a stop was hit *before* we emitted anything (extremely short
-        // generation), cumulative_text may be empty — still return a valid
-        // GenerationOutput so callers can inspect telemetry.
-        Ok(GenerationOutput {
-            text: cumulative_text,
-            tokens_generated,
-            generation_time_ms: fields.generation_time_ms,
-            tokens_per_second: fields.tokens_per_second,
-            finish_reason: finish_reason.to_string(),
-            ttft_ms: fields.ttft_ms,
-            mean_itl_ms: fields.mean_itl_ms,
-            p95_itl_ms: fields.p95_itl_ms,
-            emitted_chunks: fields.emitted_chunks,
-            inter_chunk_ms: fields.inter_chunk_ms,
-            decode_tps: fields.decode_tps,
-            prefill_tps: fields.prefill_tps,
-        })
+            // If a stop was hit *before* we emitted anything (extremely short
+            // generation), cumulative_text may be empty — still return a valid
+            // GenerationOutput so callers can inspect telemetry.
+            Ok(GenerationOutput {
+                text: cumulative_text,
+                tokens_generated,
+                generation_time_ms: fields.generation_time_ms,
+                tokens_per_second: fields.tokens_per_second,
+                finish_reason: finish_reason.to_string(),
+                ttft_ms: fields.ttft_ms,
+                mean_itl_ms: fields.mean_itl_ms,
+                p95_itl_ms: fields.p95_itl_ms,
+                emitted_chunks: fields.emitted_chunks,
+                inter_chunk_ms: fields.inter_chunk_ms,
+                decode_tps: fields.decode_tps,
+                prefill_tps: fields.prefill_tps,
+            })
+        })();
+
+        forward.reset_kv_cache();
+        clear_mlx_cache("generation_end");
+        result
     }
 
     enum ForwardRuntime<'a> {

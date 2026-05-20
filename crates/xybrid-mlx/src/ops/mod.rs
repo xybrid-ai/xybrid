@@ -30,6 +30,6 @@ pub use attention::{
 pub use basic::{
     add, argmax, cast, dequantize, div, erf, exp, gelu, gelu_tanh, layer_norm, matmul, mul, neg,
     quantized_matmul, quantized_matmul_prechecked, reciprocal, rms_norm, sigmoid, silu, softmax,
-    sqrt, square, sub, tanh,
+    sqrt, square, sub, tanh, zeros,
 };
 pub use convolution::conv1d;

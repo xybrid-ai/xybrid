@@ -20,9 +20,8 @@ use crate::error::MlxError;
 /// Translate an mlx-c nonzero return into an [`MlxError`].
 ///
 /// mlx-c's convention is "0 = success, nonzero = error". The underlying
-/// detail is fetched via the companion error surface in later stories;
-/// for US-005's base layer we emit a generic [`MlxError::Internal`] with
-/// the nonzero code so callers get at least a debuggable signal.
+/// detail is fetched via the companion error surface in later stories; this
+/// wrapper preserves the nonzero code so callers get a debuggable signal.
 pub(crate) fn check_rc(rc: i32, ctx: &'static str) -> Result<(), MlxError> {
     if rc == 0 {
         Ok(())
@@ -282,9 +281,25 @@ pub(crate) unsafe fn async_eval(outputs: mlx_vector_array) -> Result<(), MlxErro
 /// # Safety
 ///
 /// Safe to call when no caller relies on cached allocations remaining alive.
-#[allow(dead_code)]
 pub(crate) unsafe fn clear_cache() -> Result<(), MlxError> {
     check_rc(sys::mlx_clear_cache(), "mlx_clear_cache")
+}
+
+/// Set MLX's process-local allocation cache limit.
+///
+/// Returns the previous limit reported by MLX.
+///
+/// # Safety
+///
+/// This mutates MLX process-local allocator state. Callers must coordinate
+/// policy at the application/runtime level.
+pub(crate) unsafe fn set_cache_limit(limit: usize) -> Result<usize, MlxError> {
+    let mut previous = 0usize;
+    check_rc(
+        sys::mlx_set_cache_limit(&mut previous, limit),
+        "mlx_set_cache_limit",
+    )?;
+    Ok(previous)
 }
 
 /// Copy an evaluated array's f32 data into an owned `Vec<f32>`.
@@ -452,6 +467,27 @@ pub(crate) unsafe fn op_div(
     if rc != 0 {
         let _ = sys::mlx_array_free(res);
         return Err(MlxError::Internal(format!("mlx_divide rc={rc}")));
+    }
+    Ok(res)
+}
+
+/// Dispatch `mlx_zeros(res, shape, shape_num, dtype, s)`.
+///
+/// # Safety
+///
+/// `s` must be a live stream handle. `shape` must describe a valid MLX shape.
+/// The returned handle is owned by the caller and must be freed via
+/// [`array_free`] exactly once.
+pub(crate) unsafe fn op_zeros(
+    shape: &[i32],
+    dtype: mlx_dtype,
+    s: mlx_stream,
+) -> Result<mlx_array, MlxError> {
+    let mut res = sys::mlx_array_new();
+    let rc = sys::mlx_zeros(&mut res, shape.as_ptr(), shape.len(), dtype, s);
+    if rc != 0 {
+        let _ = sys::mlx_array_free(res);
+        return Err(MlxError::Internal(format!("mlx_zeros rc={rc}")));
     }
     Ok(res)
 }
@@ -774,7 +810,6 @@ pub(crate) unsafe fn op_slice(
 /// # Safety
 ///
 /// Same contract as [`op_slice`]. `src` and `update` must be live arrays.
-#[allow(dead_code)]
 pub(crate) unsafe fn op_slice_update(
     src: mlx_array,
     update: mlx_array,

@@ -69,8 +69,7 @@ pub enum LayerKind {
 /// where they exist.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Lfm35Config {
-    /// `"lfm2"`, `"lfm"` or `"lfm3"` — all route to this builder per the
-    /// US-013 dispatcher.
+    /// `"lfm2"`, `"lfm"` or `"lfm3"` — all route to this builder.
     pub model_type: String,
     /// Model hidden / embedding dimension.
     pub hidden_size: usize,
@@ -454,8 +453,7 @@ fn push_quantized_weight_key(keys: &mut Vec<String>, weight_key: &str, quantized
 /// runtime reads.
 ///
 /// Mirrors [`super::qwen35::validate_safetensors`] — quantized bundles
-/// bail here with a pointed error so the runtime selector (US-016) can
-/// fall back to llama.cpp.
+/// bail here with a pointed error so the runtime selector can fall back.
 pub fn validate_safetensors(path: &Path, cfg: &Lfm35Config) -> MlxLlmResult<()> {
     let weights = SafeTensorBundle::from_single_file(path.to_path_buf());
     validate_safetensors_bundle(&weights, cfg)
@@ -533,7 +531,7 @@ pub mod runtime {
 
     use xybrid_mlx::ops::{
         add, concat, conv1d, gather, mul, reshape, rms_norm, rope, scaled_dot_product_attention,
-        silu, slice, slice_update, transpose,
+        silu, slice, slice_update, transpose, zeros,
     };
     use xybrid_mlx::{MlxArray, MlxDtype, MlxStream};
 
@@ -964,11 +962,7 @@ pub mod runtime {
                 "lfm K/V cache slice must be rank-4, got shape {shape:?}"
             )));
         }
-        debug_assert_eq!(
-            new_slice.dtype().ok(),
-            Some(MlxDtype::F32),
-            "lfm K/V cache storage is f32; quantized LFM projections currently produce f32"
-        );
+        let dtype = new_slice.dtype()?;
         let b = shape[0];
         let h = shape[1];
         let step_len = shape_dim_usize("lfm", "kv_cache_step_len", shape[2])?;
@@ -980,8 +974,8 @@ pub mod runtime {
 
         let mut storage = match slot.take() {
             Some(cache) if new_len <= cache_capacity(&cache.storage)? => cache.storage,
-            Some(cache) => grow_cached_axis2(&cache, b, h, d, new_len, stream)?,
-            None => allocate_cached_axis2(b, h, d, new_len)?,
+            Some(cache) => grow_cached_axis2(&cache, b, h, d, new_len, dtype, stream)?,
+            None => allocate_cached_axis2(b, h, d, new_len, dtype, stream)?,
         };
 
         storage = slice_update(
@@ -1028,9 +1022,12 @@ pub mod runtime {
         h: i32,
         d: i32,
         required_len: usize,
+        dtype: MlxDtype,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
-        let grown = allocate_cached_axis2(b, h, d, required_len)?;
+        let current_capacity = cache_capacity(&cache.storage)?;
+        let capacity = next_cache_capacity(current_capacity, required_len)?;
+        let grown = allocate_cached_axis2(b, h, d, capacity, dtype, stream)?;
         let visible = slice(
             &cache.storage,
             &[0, 0, 0, 0],
@@ -1059,34 +1056,49 @@ pub mod runtime {
         .map_err(Into::into)
     }
 
+    fn next_cache_capacity(current_capacity: usize, required_len: usize) -> MlxLlmResult<usize> {
+        let required_len = required_len.max(1);
+        let step_capacity = required_len
+            .div_ceil(KV_CACHE_STEP)
+            .checked_mul(KV_CACHE_STEP)
+            .ok_or_else(|| MlxLlmError::ConfigInvalid("lfm K/V cache capacity overflow".into()))?;
+        Ok(step_capacity
+            .max(current_capacity.saturating_mul(2))
+            .max(required_len))
+    }
+
     fn allocate_cached_axis2(
         b: i32,
         h: i32,
         d: i32,
         required_len: usize,
+        dtype: MlxDtype,
+        stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
         let capacity = required_len
             .max(1)
             .div_ceil(KV_CACHE_STEP)
             .checked_mul(KV_CACHE_STEP)
             .ok_or_else(|| MlxLlmError::ConfigInvalid("lfm K/V cache capacity overflow".into()))?;
-        let b_usize = shape_dim_usize("lfm", "kv_cache_batch", b)?;
-        let h_usize = shape_dim_usize("lfm", "kv_cache_heads", h)?;
-        let d_usize = shape_dim_usize("lfm", "kv_cache_head_dim", d)?;
-        let zeros_len = shape_product_usize(
+        shape_product_usize(
             "lfm",
             "kv_cache_element_count",
-            &[b_usize, h_usize, capacity, d_usize],
+            &[
+                shape_dim_usize("lfm", "kv_cache_batch", b)?,
+                shape_dim_usize("lfm", "kv_cache_heads", h)?,
+                capacity,
+                shape_dim_usize("lfm", "kv_cache_head_dim", d)?,
+            ],
         )?;
-        let zeros = vec![0.0f32; zeros_len];
-        MlxArray::from_slice_f32(
-            &zeros,
+        zeros(
             &[
                 b,
                 h,
                 shape_dim_i32("lfm", "kv_cache_capacity", capacity)?,
                 d,
             ],
+            dtype,
+            stream,
         )
         .map_err(Into::into)
     }
@@ -1185,13 +1197,18 @@ pub mod runtime {
         let shape = x.shape();
         let b = shape[0];
         let h = shape[2];
-        let b_usize = shape_dim_usize("lfm", "batch", b)?;
-        let h_usize = shape_dim_usize("lfm", "hidden_size", h)?;
-        let zeros_len =
-            shape_product_usize("lfm", "left_pad_element_count", &[b_usize, pad, h_usize])?;
-        let zeros = vec![0.0f32; zeros_len];
+        let dtype = x.dtype()?;
+        shape_product_usize(
+            "lfm",
+            "left_pad_element_count",
+            &[
+                shape_dim_usize("lfm", "batch", b)?,
+                pad,
+                shape_dim_usize("lfm", "hidden_size", h)?,
+            ],
+        )?;
         let pad_i32 = shape_dim_i32("lfm", "left_pad_len", pad)?;
-        let pad_arr = MlxArray::from_slice_f32(&zeros, &[b, pad_i32, h])?;
+        let pad_arr = zeros(&[b, pad_i32, h], dtype, stream)?;
         concat(&[&pad_arr, x], 1, stream).map_err(Into::into)
     }
 
@@ -1308,6 +1325,37 @@ pub mod runtime {
                 cache_capacity(&slot.as_ref().unwrap().storage).unwrap(),
                 256
             );
+        }
+
+        #[test]
+        fn cache_capacity_grows_geometrically_after_step_boundary() {
+            let mut slot = None;
+            let first = MlxArray::from_slice_f32(&vec![1.0; 256], &[1, 1, 256, 1]).unwrap();
+            append_cached_axis2(&mut slot, &first, None).unwrap();
+            assert_eq!(
+                cache_capacity(&slot.as_ref().unwrap().storage).unwrap(),
+                256
+            );
+
+            let second = MlxArray::from_slice_f32(&vec![2.0; 256], &[1, 1, 256, 1]).unwrap();
+            append_cached_axis2(&mut slot, &second, None).unwrap();
+            assert_eq!(
+                cache_capacity(&slot.as_ref().unwrap().storage).unwrap(),
+                512
+            );
+
+            let third = MlxArray::from_slice_f32(&[3.0], &[1, 1, 1, 1]).unwrap();
+            append_cached_axis2(&mut slot, &third, None).unwrap();
+            assert_eq!(slot.as_ref().unwrap().len, 513);
+            assert_eq!(
+                cache_capacity(&slot.as_ref().unwrap().storage).unwrap(),
+                1024
+            );
+        }
+
+        #[test]
+        fn cache_capacity_rejects_overflow() {
+            assert!(next_cache_capacity(0, usize::MAX).is_err());
         }
     }
 }

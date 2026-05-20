@@ -47,6 +47,8 @@ use super::super::model::{MlxLlmError, MlxLlmResult};
 use super::super::weights::SafeTensorBundle;
 
 const LANGUAGE_MODEL_PREFIX: &str = "language_model.";
+const GEMMA4_LAYER_FULL_ATTENTION: &str = "full_attention";
+const GEMMA4_LAYER_SLIDING_ATTENTION: &str = "sliding_attention";
 
 // =============================================================================
 // Config
@@ -109,8 +111,8 @@ pub struct Gemma4Config {
     #[serde(default = "default_sliding_window")]
     pub sliding_window: usize,
     /// Cadence at which a layer uses full (global) attention. The
-    /// default is `6` — meaning layers `0, 6, 12, ...` are global and
-    /// the rest use the sliding-window path.
+    /// default is `6` — meaning layers `5, 11, 17, ...` are global when
+    /// `layer_types` is absent, and the rest use the sliding-window path.
     #[serde(default = "default_sliding_window_pattern")]
     pub sliding_window_pattern: usize,
     /// Scalar whose inverse square root is used as the attention scale.
@@ -320,6 +322,26 @@ impl Gemma4Config {
                 "gemma4 config has sliding_window_pattern = 0 (must be >= 1)".into(),
             ));
         }
+        if let Some(layer_types) = self.layer_types.as_ref() {
+            if layer_types.len() != self.num_hidden_layers {
+                return Err(MlxLlmError::ConfigInvalid(format!(
+                    "gemma4 config layer_types has {} entries but num_hidden_layers={}",
+                    layer_types.len(),
+                    self.num_hidden_layers,
+                )));
+            }
+            for (idx, layer_type) in layer_types.iter().enumerate() {
+                if layer_type != GEMMA4_LAYER_FULL_ATTENTION
+                    && layer_type != GEMMA4_LAYER_SLIDING_ATTENTION
+                {
+                    return Err(MlxLlmError::ConfigInvalid(format!(
+                        "gemma4 config layer_types[{idx}] has unsupported value `{layer_type}` \
+                         (expected `{GEMMA4_LAYER_FULL_ATTENTION}` or \
+                         `{GEMMA4_LAYER_SLIDING_ATTENTION}`)"
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -349,7 +371,7 @@ impl Gemma4Config {
         if let Some(layer_types) = self.layer_types.as_ref() {
             return layer_types
                 .get(l)
-                .is_some_and(|layer_type| layer_type == "full_attention");
+                .is_some_and(|layer_type| layer_type == GEMMA4_LAYER_FULL_ATTENTION);
         }
         l % self.sliding_window_pattern == self.sliding_window_pattern - 1
     }
@@ -543,8 +565,7 @@ fn detect_weight_prefix(
 /// forward pass reads.
 ///
 /// Mirrors [`super::qwen35::validate_safetensors`] — quantized bundles
-/// bail here with a pointed error so the runtime selector (US-016) can
-/// fall back to llama.cpp.
+/// bail here with a pointed error so the runtime selector can fall back.
 pub fn validate_safetensors(path: &Path, cfg: &Gemma4Config) -> MlxLlmResult<()> {
     let weights = SafeTensorBundle::from_single_file(path.to_path_buf());
     validate_safetensors_bundle(&weights, cfg)
@@ -625,7 +646,7 @@ pub mod runtime {
 
     use xybrid_mlx::ops::{
         add, cast, concat, div, gather, gelu_tanh, mul, reshape, rms_norm, rope,
-        scaled_dot_product_attention, slice, slice_update, tanh, transpose,
+        scaled_dot_product_attention, slice, slice_update, tanh, transpose, zeros,
     };
     use xybrid_mlx::{MlxArray, MlxDtype, MlxStream};
 
@@ -1623,52 +1644,6 @@ pub mod runtime {
         .map_err(Into::into)
     }
 
-    #[allow(dead_code)]
-    fn host_split_heads(x: &MlxArray, heads: usize, head_dim: usize) -> MlxLlmResult<MlxArray> {
-        let shape = x.shape();
-        let data = x.to_vec_f32()?;
-        let b = shape[0];
-        let t = shape[1];
-        let bsz = shape_dim_usize("gemma4", "batch", b)?;
-        let seq = shape_dim_usize("gemma4", "sequence_len", t)?;
-        let width = shape_product_usize("gemma4", "projection_width", &[heads, head_dim])?;
-        let actual_width_i32 = shape.get(2).copied().ok_or_else(|| {
-            MlxLlmError::ConfigInvalid("gemma4 projection is missing width dimension".into())
-        })?;
-        let actual_width = shape_dim_usize("gemma4", "projection_width", actual_width_i32)?;
-        if actual_width != width {
-            return Err(MlxLlmError::ConfigInvalid(format!(
-                "gemma4 projection width is {}, expected heads * head_dim = {width}",
-                actual_width_i32
-            )));
-        }
-
-        let mut out = vec![0.0_f32; data.len()];
-        for b in 0..bsz {
-            for t in 0..seq {
-                let row = ((b * seq) + t) * width;
-                for h in 0..heads {
-                    let head = row + h * head_dim;
-                    for d in 0..head_dim {
-                        let dst = (((b * heads + h) * seq + t) * head_dim) + d;
-                        out[dst] = data[head + d];
-                    }
-                }
-            }
-        }
-
-        MlxArray::from_slice_f32(
-            &out,
-            &[
-                b,
-                shape_dim_i32("gemma4", "num_attention_heads", heads)?,
-                t,
-                shape_dim_i32("gemma4", "head_dim", head_dim)?,
-            ],
-        )
-        .map_err(Into::into)
-    }
-
     fn append_cached_axis2(
         slot: &mut Option<CachedAxis2>,
         new_slice: &MlxArray,
@@ -1682,18 +1657,20 @@ pub mod runtime {
             )));
         }
         let incoming = shape_dim_usize("gemma4", "cache_update_len", shape[2])?;
+        let dtype = new_slice.dtype()?;
 
         if let Some(max_len) = max_len {
-            return append_sliding_cached_axis2(slot, new_slice, max_len, incoming, stream);
+            return append_sliding_cached_axis2(slot, new_slice, max_len, incoming, dtype, stream);
         }
 
-        append_global_cached_axis2(slot, new_slice, incoming, stream)
+        append_global_cached_axis2(slot, new_slice, incoming, dtype, stream)
     }
 
     fn append_global_cached_axis2(
         slot: &mut Option<CachedAxis2>,
         new_slice: &MlxArray,
         incoming: usize,
+        dtype: MlxDtype,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
         let shape = new_slice.shape();
@@ -1705,9 +1682,9 @@ pub mod runtime {
         let mut storage = match slot.take() {
             Some(cache) if new_len <= cache_capacity_axis2(&cache.storage)? => cache.storage,
             Some(cache) => {
-                grow_cached_axis2(&cache, shape[0], shape[1], shape[3], new_len, stream)?
+                grow_cached_axis2(&cache, shape[0], shape[1], shape[3], new_len, dtype, stream)?
             }
-            None => allocate_cached_axis2(shape[0], shape[1], shape[3], new_len)?,
+            None => allocate_cached_axis2(shape[0], shape[1], shape[3], new_len, dtype, stream)?,
         };
 
         storage = slice_update(
@@ -1738,6 +1715,7 @@ pub mod runtime {
         new_slice: &MlxArray,
         window: usize,
         incoming: usize,
+        dtype: MlxDtype,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
         if window == 0 {
@@ -1753,6 +1731,7 @@ pub mod runtime {
                     new_slice,
                     window,
                     sliding_cache_capacity(window),
+                    dtype,
                     stream,
                 )?;
                 let cached = CachedAxis2 { storage, len };
@@ -1764,13 +1743,13 @@ pub mod runtime {
                 let prefix = cache_visible_axis2(&cache, Some(window), stream)?;
                 let combined = concat(&[&prefix, new_slice], 2, stream)?;
                 let visible = take_last_axis2(&combined, Some(window), stream)?;
-                let stored = materialize_sliding_cached_axis2(&visible, window, stream)?;
+                let stored = materialize_sliding_cached_axis2(&visible, window, dtype, stream)?;
                 *slot = Some(stored);
                 Ok(visible)
             }
             None => {
                 let visible = take_last_axis2(new_slice, Some(window), stream)?;
-                let cached = materialize_sliding_cached_axis2(&visible, window, stream)?;
+                let cached = materialize_sliding_cached_axis2(&visible, window, dtype, stream)?;
                 *slot = Some(cached);
                 Ok(new_slice.clone())
             }
@@ -1782,6 +1761,7 @@ pub mod runtime {
         new_slice: &MlxArray,
         window: usize,
         target_capacity: usize,
+        dtype: MlxDtype,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<(MlxArray, usize)> {
         let shape = new_slice.shape();
@@ -1790,7 +1770,14 @@ pub mod runtime {
             (cache.storage, cache.len)
         } else {
             let tail = cache_visible_axis2(&cache, Some(window), stream)?;
-            let mut storage = allocate_cached_axis2(shape[0], shape[1], shape[3], target_capacity)?;
+            let mut storage = allocate_cached_axis2(
+                shape[0],
+                shape[1],
+                shape[3],
+                target_capacity,
+                dtype,
+                stream,
+            )?;
             storage = slice_update(
                 &storage,
                 &tail,
@@ -1828,13 +1815,19 @@ pub mod runtime {
     fn materialize_sliding_cached_axis2(
         visible: &MlxArray,
         window: usize,
+        dtype: MlxDtype,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<CachedAxis2> {
         let len = shape_dim_usize("gemma4", "sliding_cache_visible_len", visible.shape()[2])?;
         if len < window {
             return materialize_cached_axis2(visible, stream);
         }
-        materialize_cached_axis2_with_capacity(visible, sliding_cache_capacity(window), stream)
+        materialize_cached_axis2_with_capacity(
+            visible,
+            sliding_cache_capacity(window),
+            dtype,
+            stream,
+        )
     }
 
     fn sliding_cache_capacity(window: usize) -> usize {
@@ -1856,6 +1849,7 @@ pub mod runtime {
     fn materialize_cached_axis2_with_capacity(
         visible: &MlxArray,
         capacity: usize,
+        dtype: MlxDtype,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<CachedAxis2> {
         let shape = visible.shape();
@@ -1870,7 +1864,8 @@ pub mod runtime {
                 "gemma4 cache len {len} exceeds requested capacity {capacity}"
             )));
         }
-        let mut storage = allocate_cached_axis2(shape[0], shape[1], shape[3], capacity)?;
+        let mut storage =
+            allocate_cached_axis2(shape[0], shape[1], shape[3], capacity, dtype, stream)?;
         storage = slice_update(
             &storage,
             visible,
@@ -1893,11 +1888,12 @@ pub mod runtime {
         h: i32,
         d: i32,
         required_len: usize,
+        dtype: MlxDtype,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
         let current_capacity = cache_capacity_axis2(&cache.storage)?;
-        let capacity = next_cache_capacity(current_capacity, required_len);
-        let mut storage = allocate_cached_axis2(b, h, d, capacity)?;
+        let capacity = next_cache_capacity(current_capacity, required_len)?;
+        let mut storage = allocate_cached_axis2(b, h, d, capacity, dtype, stream)?;
         let visible = cache_visible_axis2(cache, None, stream)?;
         storage = slice_update(
             &storage,
@@ -1910,9 +1906,16 @@ pub mod runtime {
         Ok(storage)
     }
 
-    fn allocate_cached_axis2(b: i32, h: i32, d: i32, capacity: usize) -> MlxLlmResult<MlxArray> {
+    fn allocate_cached_axis2(
+        b: i32,
+        h: i32,
+        d: i32,
+        capacity: usize,
+        dtype: MlxDtype,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
         let capacity_i32 = shape_dim_i32("gemma4", "cache_capacity", capacity)?;
-        let len = shape_product_usize(
+        shape_product_usize(
             "gemma4",
             "cache_allocation_len",
             &[
@@ -1922,15 +1925,18 @@ pub mod runtime {
                 shape_dim_usize("gemma4", "cache_head_dim", d)?,
             ],
         )?;
-        let zeros = vec![0.0_f32; len];
-        MlxArray::from_slice_f32(&zeros, &[b, h, capacity_i32, d]).map_err(Into::into)
+        zeros(&[b, h, capacity_i32, d], dtype, stream).map_err(Into::into)
     }
 
-    fn next_cache_capacity(current_capacity: usize, required_len: usize) -> usize {
+    fn next_cache_capacity(current_capacity: usize, required_len: usize) -> MlxLlmResult<usize> {
         let step = GEMMA4_SLIDING_CACHE_BUFFER;
-        let step_capacity = required_len.div_ceil(step) * step;
+        let required_len = required_len.max(1);
+        let step_capacity = required_len
+            .div_ceil(step)
+            .checked_mul(step)
+            .ok_or_else(|| MlxLlmError::ConfigInvalid("gemma4 cache capacity overflow".into()))?;
         let doubled_capacity = current_capacity.saturating_mul(2);
-        step_capacity.max(doubled_capacity).max(required_len)
+        Ok(step_capacity.max(doubled_capacity).max(required_len))
     }
 
     fn cache_capacity_axis2(storage: &MlxArray) -> MlxLlmResult<usize> {
@@ -2081,9 +2087,7 @@ pub mod runtime {
         MlxArray::from_slice_f32(&mask, &[1, 1, q_len_i32, k_len_i32]).map_err(Into::into)
     }
 
-    /// Reshape `[B, T, heads * head_dim]` → `[B, heads, T, head_dim]`.
-    /// Exported at `pub(crate)` for US-014 to reuse.
-    #[allow(dead_code)]
+    /// Reshape `[B, T, heads * head_dim]` into `[B, heads, T, head_dim]`.
     pub(crate) fn split_heads(
         x: &MlxArray,
         heads: usize,
@@ -2108,8 +2112,7 @@ pub mod runtime {
         reshape(x, &[b, t, heads_i32, head_dim_i32], stream).map_err(Into::into)
     }
 
-    /// Reshape `[B, heads, T, head_dim]` → `[B, T, heads * head_dim]`.
-    #[allow(dead_code)]
+    /// Reshape `[B, heads, T, head_dim]` into `[B, T, heads * head_dim]`.
     pub(crate) fn merge_heads(
         x: &MlxArray,
         heads: usize,
@@ -2122,38 +2125,6 @@ pub mod runtime {
         let transposed = transpose(x, &[0, 2, 1, 3], stream)?;
         let width = shape_product_i32("gemma4", "merged_attention_width", &[heads, head_dim])?;
         reshape(&transposed, &[b, t, width], stream).map_err(Into::into)
-    }
-
-    /// Project, split into heads, apply per-head RMSNorm, then RoPE —
-    /// helper that US-014 will wire into the full attention block.
-    /// The RoPE base differs between global and sliding-window layers.
-    #[allow(dead_code, clippy::too_many_arguments)]
-    pub(crate) fn project_and_rope(
-        proj: &LinearWeight,
-        head_norm: &MlxArray,
-        input: &MlxArray,
-        heads: usize,
-        head_dim: usize,
-        rope_base: f32,
-        rms_eps: f32,
-        position_offset: i32,
-        stream: Option<&MlxStream>,
-    ) -> MlxLlmResult<MlxArray> {
-        let projected = proj.forward(input, stream)?;
-        let heads_out = split_heads(&projected, heads, head_dim, stream)?;
-        let normed = rms_norm(&heads_out, Some(head_norm), rms_eps, stream)?;
-        let head_dim_i32 = shape_dim_i32("gemma4", "head_dim", head_dim)?;
-        rope(
-            &normed,
-            head_dim_i32,
-            false,
-            Some(rope_base),
-            1.0,
-            position_offset,
-            None,
-            stream,
-        )
-        .map_err(Into::into)
     }
 
     #[cfg(test)]
@@ -2413,10 +2384,18 @@ pub mod runtime {
 
         #[test]
         fn global_cache_capacity_grows_geometrically() {
-            assert_eq!(next_cache_capacity(0, 17), GEMMA4_SLIDING_CACHE_BUFFER);
-            assert_eq!(next_cache_capacity(256, 257), 512);
-            assert_eq!(next_cache_capacity(512, 513), 1024);
-            assert_eq!(next_cache_capacity(1024, 1800), 2048);
+            assert_eq!(
+                next_cache_capacity(0, 17).unwrap(),
+                GEMMA4_SLIDING_CACHE_BUFFER
+            );
+            assert_eq!(next_cache_capacity(256, 257).unwrap(), 512);
+            assert_eq!(next_cache_capacity(512, 513).unwrap(), 1024);
+            assert_eq!(next_cache_capacity(1024, 1800).unwrap(), 2048);
+        }
+
+        #[test]
+        fn global_cache_capacity_rejects_overflow() {
+            assert!(next_cache_capacity(0, usize::MAX).is_err());
         }
 
         #[test]
@@ -2706,6 +2685,37 @@ mod tests {
         match cfg.validate().unwrap_err() {
             MlxLlmError::ConfigInvalid(msg) => {
                 assert!(msg.contains("sliding_window_pattern"), "got: {msg}")
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn layer_types_length_must_match_layer_count() {
+        let mut cfg = dummy_config(3, true);
+        cfg.layer_types = Some(vec!["sliding_attention".into(), "full_attention".into()]);
+
+        match cfg.validate().unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("layer_types"), "got: {msg}");
+                assert!(msg.contains("2 entries"), "got: {msg}");
+                assert!(msg.contains("num_hidden_layers=3"), "got: {msg}");
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn layer_types_reject_unknown_values() {
+        let mut cfg = dummy_config(2, true);
+        cfg.layer_types = Some(vec!["sliding_attention".into(), "global_attention".into()]);
+
+        match cfg.validate().unwrap_err() {
+            MlxLlmError::ConfigInvalid(msg) => {
+                assert!(msg.contains("layer_types[1]"), "got: {msg}");
+                assert!(msg.contains("global_attention"), "got: {msg}");
+                assert!(msg.contains("full_attention"), "got: {msg}");
+                assert!(msg.contains("sliding_attention"), "got: {msg}");
             }
             other => panic!("expected ConfigInvalid, got {other:?}"),
         }

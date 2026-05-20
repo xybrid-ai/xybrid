@@ -369,17 +369,19 @@ pub fn resolve_weights_path(model_dir: &Path) -> MlxLlmResult<PathBuf> {
     target_arch = "aarch64"
 ))]
 pub mod runtime {
-    use super::super::super::model::MlxLlmResult;
+    use super::super::super::model::{MlxLlmError, MlxLlmResult};
     use super::super::super::weights::SafeTensorBundle;
     use super::super::linear::{load_dense_or_dequantized, LinearQuantization, LinearWeight};
-    use super::super::{shape_dim_i32, shape_product_i32};
+    use super::super::{shape_dim_i32, shape_dim_usize, shape_product_i32, shape_product_usize};
     use super::Qwen3Config;
 
     use xybrid_mlx::ops::{
-        add, concat, gather, mul, reshape, rms_norm, rope, scaled_dot_product_attention, silu,
-        transpose,
+        add, gather, mul, reshape, rms_norm, rope, scaled_dot_product_attention, silu, slice,
+        slice_update, transpose, zeros,
     };
-    use xybrid_mlx::{MlxArray, MlxStream};
+    use xybrid_mlx::{MlxArray, MlxDtype, MlxStream};
+
+    const KV_CACHE_STEP: usize = 256;
 
     /// One transformer block's weights, materialised as [`MlxArray`]s in
     /// Metal unified memory.
@@ -403,8 +405,8 @@ pub mod runtime {
     /// incremental decode step appends one `[B, kv_heads, 1, head_dim]` slice.
     #[derive(Debug, Default)]
     pub struct Qwen35LayerCache {
-        keys: Option<MlxArray>,
-        values: Option<MlxArray>,
+        keys: Option<CachedAxis2>,
+        values: Option<CachedAxis2>,
     }
 
     impl Qwen35LayerCache {
@@ -412,6 +414,12 @@ pub mod runtime {
             self.keys = None;
             self.values = None;
         }
+    }
+
+    #[derive(Debug)]
+    struct CachedAxis2 {
+        storage: MlxArray,
+        len: usize,
     }
 
     /// Full Qwen 3 weight set resident in MLX memory.
@@ -685,22 +693,164 @@ pub mod runtime {
     }
 
     fn append_cached_axis2(
-        slot: &mut Option<MlxArray>,
+        slot: &mut Option<CachedAxis2>,
         new_slice: &MlxArray,
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<MlxArray> {
-        match slot.take() {
-            Some(existing) => {
-                let combined = concat(&[&existing, new_slice], 2, stream)?;
-                *slot = Some(combined.clone());
-                Ok(combined)
-            }
-            None => {
-                let cached = new_slice.clone();
-                *slot = Some(cached.clone());
-                Ok(cached)
-            }
+        let shape = new_slice.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "qwen3 K/V cache slice must be rank-4, got shape {shape:?}"
+            )));
         }
+
+        let b = shape[0];
+        let h = shape[1];
+        let incoming = shape_dim_usize("qwen3", "kv_cache_update_len", shape[2])?;
+        let d = shape[3];
+        let old_len = slot.as_ref().map_or(0, |cache| cache.len);
+        let new_len = old_len
+            .checked_add(incoming)
+            .ok_or_else(|| MlxLlmError::ConfigInvalid("qwen3 K/V cache length overflow".into()))?;
+        let dtype = new_slice.dtype()?;
+
+        let mut storage = match slot.take() {
+            Some(cache) if new_len <= cache_capacity_axis2(&cache.storage)? => cache.storage,
+            Some(cache) => grow_cached_axis2(&cache, b, h, d, new_len, dtype, stream)?,
+            None => {
+                allocate_cached_axis2(b, h, d, next_cache_capacity(0, new_len)?, dtype, stream)?
+            }
+        };
+
+        storage = slice_update(
+            &storage,
+            new_slice,
+            &[
+                0,
+                0,
+                shape_dim_i32("qwen3", "kv_cache_old_len", old_len)?,
+                0,
+            ],
+            &[
+                b,
+                h,
+                shape_dim_i32("qwen3", "kv_cache_new_len", new_len)?,
+                d,
+            ],
+            &[1, 1, 1, 1],
+            stream,
+        )?;
+
+        let cached = CachedAxis2 {
+            storage,
+            len: new_len,
+        };
+        let visible = cache_visible_axis2(&cached, stream)?;
+        *slot = Some(cached);
+        Ok(visible)
+    }
+
+    fn grow_cached_axis2(
+        cache: &CachedAxis2,
+        b: i32,
+        h: i32,
+        d: i32,
+        required_len: usize,
+        dtype: MlxDtype,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let current_capacity = cache_capacity_axis2(&cache.storage)?;
+        let capacity = next_cache_capacity(current_capacity, required_len)?;
+        let mut storage = allocate_cached_axis2(b, h, d, capacity, dtype, stream)?;
+        let visible = cache_visible_axis2(cache, stream)?;
+        storage = slice_update(
+            &storage,
+            &visible,
+            &[0, 0, 0, 0],
+            &[b, h, shape_dim_i32("qwen3", "kv_cache_len", cache.len)?, d],
+            &[1, 1, 1, 1],
+            stream,
+        )?;
+        Ok(storage)
+    }
+
+    fn allocate_cached_axis2(
+        b: i32,
+        h: i32,
+        d: i32,
+        capacity: usize,
+        dtype: MlxDtype,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        shape_product_usize(
+            "qwen3",
+            "kv_cache_allocation_len",
+            &[
+                shape_dim_usize("qwen3", "kv_cache_batch", b)?,
+                shape_dim_usize("qwen3", "kv_cache_heads", h)?,
+                capacity,
+                shape_dim_usize("qwen3", "kv_cache_head_dim", d)?,
+            ],
+        )?;
+        zeros(
+            &[
+                b,
+                h,
+                shape_dim_i32("qwen3", "kv_cache_capacity", capacity)?,
+                d,
+            ],
+            dtype,
+            stream,
+        )
+        .map_err(Into::into)
+    }
+
+    fn next_cache_capacity(current_capacity: usize, required_len: usize) -> MlxLlmResult<usize> {
+        let required_len = required_len.max(1);
+        let step_capacity = required_len
+            .div_ceil(KV_CACHE_STEP)
+            .checked_mul(KV_CACHE_STEP)
+            .ok_or_else(|| {
+                MlxLlmError::ConfigInvalid("qwen3 K/V cache capacity overflow".into())
+            })?;
+        Ok(step_capacity
+            .max(current_capacity.saturating_mul(2))
+            .max(required_len))
+    }
+
+    fn cache_capacity_axis2(storage: &MlxArray) -> MlxLlmResult<usize> {
+        let shape = storage.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "qwen3 K/V cache storage must be rank-4, got shape {shape:?}"
+            )));
+        }
+        shape_dim_usize("qwen3", "kv_cache_capacity", shape[2])
+    }
+
+    fn cache_visible_axis2(
+        cache: &CachedAxis2,
+        stream: Option<&MlxStream>,
+    ) -> MlxLlmResult<MlxArray> {
+        let shape = cache.storage.shape();
+        if shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "qwen3 K/V cache storage must be rank-4, got shape {shape:?}"
+            )));
+        }
+        slice(
+            &cache.storage,
+            &[0, 0, 0, 0],
+            &[
+                shape[0],
+                shape[1],
+                shape_dim_i32("qwen3", "kv_cache_visible_len", cache.len)?,
+                shape[3],
+            ],
+            &[1, 1, 1, 1],
+            stream,
+        )
+        .map_err(Into::into)
     }
 
     /// Reshape `[B, T, heads * head_dim]` → `[B, heads, T, head_dim]`.
@@ -732,6 +882,115 @@ pub mod runtime {
         let transposed = transpose(x, &[0, 2, 1, 3], stream)?;
         let width = shape_product_i32("qwen3", "merged_attention_width", &[heads, head_dim])?;
         reshape(&transposed, &[b, t, width], stream).map_err(Into::into)
+    }
+
+    #[cfg(test)]
+    mod runtime_tests {
+        use super::*;
+
+        fn assert_close(got: &[f32], expected: &[f32], tol: f32, ctx: &str) {
+            assert_eq!(
+                got.len(),
+                expected.len(),
+                "{ctx}: length mismatch got={} expected={}",
+                got.len(),
+                expected.len()
+            );
+            for (idx, (g, e)) in got.iter().zip(expected.iter()).enumerate() {
+                let diff = (g - e).abs();
+                assert!(
+                    diff <= tol,
+                    "{ctx}: element {idx} differs got={g} expected={e} diff={diff}"
+                );
+            }
+        }
+
+        fn stored_axis2_capacity(slot: &Option<CachedAxis2>) -> usize {
+            cache_capacity_axis2(&slot.as_ref().expect("cache storage").storage).unwrap()
+        }
+
+        #[test]
+        fn append_cached_axis2_returns_visible_prefix_with_preallocated_storage() {
+            let mut slot = None;
+            let first = MlxArray::from_slice_f32(&[1.0, 2.0, 3.0, 4.0], &[1, 1, 2, 2]).unwrap();
+
+            let visible = append_cached_axis2(&mut slot, &first, None).unwrap();
+
+            assert_eq!(visible.shape(), vec![1, 1, 2, 2]);
+            assert_close(
+                &visible.to_vec_f32().unwrap(),
+                &[1.0, 2.0, 3.0, 4.0],
+                1.0e-6,
+                "initial visible cache",
+            );
+            assert_eq!(slot.as_ref().unwrap().len, 2);
+            assert_eq!(stored_axis2_capacity(&slot), KV_CACHE_STEP);
+
+            let second = MlxArray::from_slice_f32(&[5.0, 6.0], &[1, 1, 1, 2]).unwrap();
+            let visible = append_cached_axis2(&mut slot, &second, None).unwrap();
+
+            assert_eq!(visible.shape(), vec![1, 1, 3, 2]);
+            assert_close(
+                &visible.to_vec_f32().unwrap(),
+                &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                1.0e-6,
+                "appended visible cache",
+            );
+            assert_eq!(slot.as_ref().unwrap().len, 3);
+            assert_eq!(stored_axis2_capacity(&slot), KV_CACHE_STEP);
+        }
+
+        #[test]
+        fn append_cached_axis2_reuses_capacity_and_grows_at_step_boundary() {
+            let mut slot = None;
+            let prefill_data: Vec<f32> = (0..500).map(|value| value as f32).collect();
+            let prefill = MlxArray::from_slice_f32(&prefill_data, &[1, 1, 250, 2]).unwrap();
+
+            let visible = append_cached_axis2(&mut slot, &prefill, None).unwrap();
+
+            assert_eq!(visible.shape(), vec![1, 1, 250, 2]);
+            assert_eq!(slot.as_ref().unwrap().len, 250);
+            assert_eq!(stored_axis2_capacity(&slot), KV_CACHE_STEP);
+
+            for step in 0..6 {
+                let base = 500.0 + (step * 2) as f32;
+                let update = MlxArray::from_slice_f32(&[base, base + 1.0], &[1, 1, 1, 2]).unwrap();
+                append_cached_axis2(&mut slot, &update, None).unwrap();
+            }
+
+            assert_eq!(slot.as_ref().unwrap().len, 256);
+            assert_eq!(stored_axis2_capacity(&slot), KV_CACHE_STEP);
+
+            let update = MlxArray::from_slice_f32(&[512.0, 513.0], &[1, 1, 1, 2]).unwrap();
+            let visible = append_cached_axis2(&mut slot, &update, None).unwrap();
+
+            assert_eq!(visible.shape(), vec![1, 1, 257, 2]);
+            assert_eq!(slot.as_ref().unwrap().len, 257);
+            assert_eq!(stored_axis2_capacity(&slot), KV_CACHE_STEP * 2);
+            let values = visible.to_vec_f32().unwrap();
+            assert_close(
+                &values[values.len() - 4..],
+                &[510.0, 511.0, 512.0, 513.0],
+                1.0e-6,
+                "grown visible cache suffix",
+            );
+        }
+
+        #[test]
+        fn append_cached_axis2_preserves_input_dtype() {
+            let mut slot = None;
+            let f16_zeroes = [0_u8; 4];
+            let update =
+                MlxArray::from_dtype_bytes(&f16_zeroes, &[1, 1, 2, 1], MlxDtype::F16).unwrap();
+
+            let visible = append_cached_axis2(&mut slot, &update, None).unwrap();
+
+            assert_eq!(visible.dtype().unwrap(), MlxDtype::F16);
+            assert_eq!(
+                slot.as_ref().unwrap().storage.dtype().unwrap(),
+                MlxDtype::F16
+            );
+        }
     }
 }
 
