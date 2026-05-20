@@ -927,13 +927,10 @@ mod tests {
     /// For non-qwen3 `model_type` values the dispatch fails before
     /// either is read, so the extra fields are harmless.
     fn write_dummy_bundle(dir: &Path, model_type: &str) {
-        // LFM bundles need an extra `layer_types` field (the builder
-        // validates it). Upstream LFM uses `norm_eps` for the RMSNorm
-        // epsilon, but the `Lfm35Config` deserialiser accepts
-        // `rms_norm_eps` as an alias so one JSON blob stays valid for
-        // every arch's dispatch branch — we can't list both fields
-        // here because serde rejects duplicate keys.
-        let cfg = serde_json::json!({
+        // Upstream LFM uses `norm_eps` for the RMSNorm epsilon, but the
+        // `Lfm35Config` deserialiser accepts `rms_norm_eps` as an alias
+        // so one base JSON blob stays valid across dispatch branches.
+        let mut cfg = serde_json::json!({
             "model_type": model_type,
             "hidden_size": 16,
             "num_hidden_layers": 2,
@@ -946,9 +943,11 @@ mod tests {
             "rms_norm_eps": 1.0e-6,
             "tie_word_embeddings": true,
             "head_dim": 4,
-            "layer_types": ["conv", "full_attention"],
-            "conv_l_cache": 3
         });
+        if matches!(model_type, "lfm2" | "lfm" | "lfm3") {
+            cfg["layer_types"] = serde_json::json!(["conv", "full_attention"]);
+            cfg["conv_l_cache"] = serde_json::json!(3);
+        }
         let mut f = fs::File::create(dir.join("config.json")).unwrap();
         f.write_all(cfg.to_string().as_bytes()).unwrap();
 
