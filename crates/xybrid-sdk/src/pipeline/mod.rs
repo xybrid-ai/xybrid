@@ -1579,7 +1579,7 @@ impl Xybrid {
                         // calls that take this code path.
                         let event = crate::telemetry::TelemetryEvent {
                             event_type: "ModelComplete".to_string(),
-                            stage_name: Some(stage_name.clone()),
+                            stage_name: Some(model_id.clone()),
                             target: Some(route.target.clone()),
                             latency_ms: Some(total_latency_ms),
                             error: None,
