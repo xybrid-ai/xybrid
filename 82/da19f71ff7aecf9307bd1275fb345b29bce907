@@ -1,0 +1,42 @@
+crates/xybrid-ffi-facade/src/lib.rs
+  s_93e9e173c209bc::t_19a3a8c9bbc120 441-446
+  s_93e9e173c209bc::t_f05da0bf9dd9e5 515-519
+bindings/flutter/rust/Cargo.toml
+  s_93e9e173c209bc::t_c04e6cf3b95c78 17-22
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_93e9e173c209bc::t_10e8130d587917 104,115-116
+  s_93e9e173c209bc::t_4eef60cc944604 153
+  s_93e9e173c209bc::t_bcb50b00230921 4
+  s_93e9e173c209bc::t_a8f92d186272ac 64-65,70-71,76-80
+bindings/flutter/rust/src/api/device.rs
+  s_93e9e173c209bc::t_0ad5124edbfc42 183-184,190-191,197-198
+  s_93e9e173c209bc::t_98fdbd180c2dc5 75,78-81,86-88
+  s_93e9e173c209bc::t_20bcfeb98d67f5 307,309-310,313-314,317-318,321-322
+  s_93e9e173c209bc::t_23359dedace38f 171-172
+  s_93e9e173c209bc::t_fa0ee8d9aebb6f 217,228,235
+  s_93e9e173c209bc::t_26672d132e91b0 31
+  s_93e9e173c209bc::t_d784499c3f94a4 250-254,261-268
+bindings/flutter/rust/src/api/model.rs
+  s_93e9e173c209bc::t_cb396fb6fce7ae 105-109,111,114,116-121,123,125-130,142-146
+  s_93e9e173c209bc::t_c77f4e33d4bfe8 67-71,85
+  s_93e9e173c209bc::t_15ffddc6631530 72-80,82-83
+  s_93e9e173c209bc::t_b1946ad230659f 131-141
+  s_93e9e173c209bc::t_cae061518d9666 702-705
+  s_93e9e173c209bc::t_44da296d10275b 8-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "82da19f71ff7aecf9307bd1275fb345b29bce907",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
