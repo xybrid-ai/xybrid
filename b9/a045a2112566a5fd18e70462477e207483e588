@@ -1,0 +1,9 @@
+crates/xybrid-core/src/audio/format.rs
+  ai_agent 159-169,175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "b9a045a2112566a5fd18e70462477e207483e588",
+  "prompts": {}
+}
