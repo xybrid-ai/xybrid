@@ -1,0 +1,19 @@
+crates/xybrid-core/Cargo.toml
+  s_24fd14c6e37478::t_99dabb19566b0b 94-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "86a3fc1eccae771baed86d60751dbdcecbe9acba",
+  "prompts": {},
+  "sessions": {
+    "s_24fd14c6e37478": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92911b52-aae5-4f96-8298-b8067ff3579c",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
