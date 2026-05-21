@@ -5,9 +5,8 @@ use std::time::Duration;
 use url::Url;
 use xybrid_core::device::{ResourceSnapshot, ResourceSnapshotProvider};
 use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
-use xybrid_sdk::{
-    AbortPolicy, AbortSignal, GenerationConfig, ModelLoader, RunOptions, XybridModel,
-};
+use xybrid_ffi_facade as facade;
+use xybrid_sdk::{GenerationConfig, ModelLoader, RunOptions, XybridModel};
 
 use crate::frb_generated::StreamSink;
 
@@ -65,30 +64,25 @@ impl FfiGenerationConfig {
         }
     }
 
+    /// Re-shape into the facade POD. The facade owns the single canonical
+    /// mapping into [`xybrid_sdk::GenerationConfig`] (`Option` overrides →
+    /// SDK defaults); calling [`to_sdk`](Self::to_sdk) delegates through
+    /// it instead of duplicating the 20-line `if let Some(...)` chain we
+    /// used to maintain here.
+    pub(crate) fn to_facade(&self) -> facade::GenerationConfig {
+        facade::GenerationConfig {
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            min_p: self.min_p,
+            top_k: self.top_k,
+            repetition_penalty: self.repetition_penalty,
+            stop_sequences: self.stop_sequences.clone().unwrap_or_default(),
+        }
+    }
+
     pub(crate) fn to_sdk(&self) -> GenerationConfig {
-        let mut config = GenerationConfig::default();
-        if let Some(v) = self.max_tokens {
-            config.max_tokens = v as usize;
-        }
-        if let Some(v) = self.temperature {
-            config.temperature = v;
-        }
-        if let Some(v) = self.top_p {
-            config.top_p = v;
-        }
-        if let Some(v) = self.min_p {
-            config.min_p = v;
-        }
-        if let Some(v) = self.top_k {
-            config.top_k = v as usize;
-        }
-        if let Some(v) = self.repetition_penalty {
-            config.repetition_penalty = v;
-        }
-        if let Some(ref v) = self.stop_sequences {
-            config.stop_sequences = v.clone();
-        }
-        config
+        self.to_facade().to_sdk()
     }
 }
 
@@ -108,29 +102,48 @@ pub struct FfiRunOptions {
 }
 
 impl FfiRunOptions {
-    fn to_sdk(&self, generation_config: Option<GenerationConfig>) -> RunOptions {
-        let mut policy = AbortPolicy::default()
-            .with_cloud_fallback(self.fallback_to_cloud)
-            .with_max_grace_tokens(self.max_grace_tokens.unwrap_or(0));
+    /// Re-shape into the facade POD. Drops cloud_provider/cloud_model/
+    /// cloud_gateway_url (those ride on the envelope metadata via
+    /// [`apply_cloud_fallback_metadata`], not on `RunOptions`).
+    fn to_facade(&self, generation_config: Option<facade::GenerationConfig>) -> facade::RunOptions {
+        let mut abort_on = Vec::new();
         if self.abort_on_memory_pressure_critical {
-            policy = policy.stop_on(AbortSignal::MemoryPressureCritical);
+            abort_on.push(facade::AbortSignal::MemoryPressureCritical);
         }
         if self.abort_on_thermal_critical {
-            policy = policy.stop_on(AbortSignal::ThermalCritical);
+            abort_on.push(facade::AbortSignal::ThermalCritical);
         }
-
-        let mut options = RunOptions::new()
-            .with_abort_policy(policy)
-            .with_resource_provider(Arc::new(FlutterFallbackResourceProvider));
-
-        if let Some(config) = generation_config {
-            options = options.with_generation_config(config);
+        facade::RunOptions {
+            generation_config,
+            abort_on,
+            fallback_to_cloud: self.fallback_to_cloud,
+            max_grace_tokens: self.max_grace_tokens.unwrap_or(0),
+            correlation_id: non_empty(self.correlation_id.as_deref()).map(str::to_string),
         }
+    }
 
-        if let Some(correlation_id) = non_empty(self.correlation_id.as_deref()) {
-            options = options.with_correlation_id(correlation_id.to_string());
-        }
-
+    fn to_sdk(&self, generation_config: Option<GenerationConfig>) -> RunOptions {
+        // Facade owns the AbortPolicy → SDK assembly. Flutter's
+        // `FfiRunOptions` carries a couple of extra fields the facade
+        // intentionally doesn't expose (Arc<dyn ResourceSnapshotProvider>,
+        // device_metrics) — we layer those on after the facade hands us
+        // back the canonical SDK options struct.
+        let facade_gc = generation_config
+            .as_ref()
+            .map(|cfg| facade::GenerationConfig {
+                max_tokens: Some(cfg.max_tokens as u32),
+                temperature: Some(cfg.temperature),
+                top_p: Some(cfg.top_p),
+                min_p: Some(cfg.min_p),
+                top_k: Some(cfg.top_k as u32),
+                repetition_penalty: Some(cfg.repetition_penalty),
+                stop_sequences: cfg.stop_sequences.clone(),
+            });
+        let mut options = self.to_facade(facade_gc).to_sdk(None);
+        // Inject the Flutter-specific resource provider; the facade
+        // intentionally omits this field so it stays FFI-safe (the trait
+        // object isn't portable across other generators).
+        options = options.with_resource_provider(Arc::new(FlutterFallbackResourceProvider));
         options
     }
 }
@@ -686,8 +699,10 @@ mod tests {
 
         assert!(sdk
             .abort_policy
-            .observes(AbortSignal::MemoryPressureCritical));
-        assert!(!sdk.abort_policy.observes(AbortSignal::ThermalCritical));
+            .observes(xybrid_sdk::AbortSignal::MemoryPressureCritical));
+        assert!(!sdk
+            .abort_policy
+            .observes(xybrid_sdk::AbortSignal::ThermalCritical));
         assert!(!sdk.abort_policy.fallback_to_cloud);
         assert_eq!(sdk.abort_policy.max_grace_tokens, 2);
         assert_eq!(sdk.correlation_id.as_deref(), Some("corr-flutter"));

@@ -438,7 +438,12 @@ impl GenerationConfig {
         }
     }
 
-    fn to_sdk(&self) -> sdk::GenerationConfig {
+    /// Materialize the SDK type. Binding crates wrapping a non-facade POD
+    /// (e.g. `FfiGenerationConfig` in the Flutter bindings) call this to
+    /// consume the canonical "option overrides → SDK defaults" mapping
+    /// instead of duplicating it. `pub` rather than `pub(crate)` for that
+    /// reason.
+    pub fn to_sdk(&self) -> sdk::GenerationConfig {
         let mut cfg = sdk::GenerationConfig::default();
         if let Some(v) = self.max_tokens {
             cfg.max_tokens = v as usize;
@@ -507,7 +512,11 @@ pub struct RunOptions {
 }
 
 impl RunOptions {
-    fn to_sdk(&self, cancel: Option<&CancellationToken>) -> sdk::RunOptions {
+    /// Materialize the SDK type. `pub` so binding crates with their own
+    /// run-options POD (e.g. `FfiRunOptions` in the Flutter bindings) can
+    /// route through this for the policy-builder assembly without
+    /// re-implementing it.
+    pub fn to_sdk(&self, cancel: Option<&CancellationToken>) -> sdk::RunOptions {
         let mut policy = sdk::AbortPolicy::default()
             .with_cloud_fallback(self.fallback_to_cloud)
             .with_max_grace_tokens(self.max_grace_tokens);

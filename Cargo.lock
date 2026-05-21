@@ -9788,6 +9788,7 @@ dependencies = [
  "tokio-stream",
  "url",
  "xybrid-core",
+ "xybrid-ffi-facade",
  "xybrid-sdk",
 ]
 

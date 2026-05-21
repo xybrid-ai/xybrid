@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use flutter_rust_bridge::frb;
+use xybrid_ffi_facade as facade;
 use xybrid_sdk::ResourceTelemetryMode;
 
 use super::FLUTTER_BINDING;
@@ -60,19 +61,23 @@ fn parse_resource_telemetry_mode(value: Option<&str>) -> Option<ResourceTelemetr
 impl XybridSdkClient {
     #[frb(sync)]
     pub fn init_sdk_cache_dir(cache_dir: String) {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
-        xybrid_sdk::init_sdk_cache_dir(cache_dir);
+        facade::set_binding(FLUTTER_BINDING.to_string());
+        facade::init_sdk_cache_dir(cache_dir);
     }
 
     #[frb(sync)]
     pub fn set_api_key(api_key: &str) {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
-        xybrid_sdk::set_api_key(api_key);
+        facade::set_binding(FLUTTER_BINDING.to_string());
+        facade::set_api_key(api_key.to_string());
     }
 
     #[frb(sync)]
     pub fn set_gateway_url(gateway_url: String) {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
+        facade::set_binding(FLUTTER_BINDING.to_string());
+        // `set_gateway_url` is gateway-routing-specific and not part of the
+        // facade's init surface (would bloat it for one platform). Route
+        // straight to the SDK; the binding identifier is already registered
+        // above so registry calls are still attributed correctly.
         xybrid_sdk::set_gateway_url(gateway_url);
     }
 
@@ -96,7 +101,7 @@ impl XybridSdkClient {
     /// spins up its own background thread for batched sends.
     #[frb(sync)]
     pub fn init_telemetry(endpoint: String, api_key: String) {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
+        facade::set_binding(FLUTTER_BINDING.to_string());
         let config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
         initialize_telemetry_once(config);
     }
@@ -107,8 +112,8 @@ impl XybridSdkClient {
         ingest_url: Option<String>,
         resource_telemetry: Option<String>,
     ) {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
-        xybrid_sdk::set_api_key(&api_key);
+        facade::set_binding(FLUTTER_BINDING.to_string());
+        facade::set_api_key(api_key.clone());
 
         let Some(endpoint) = ingest_url
             .as_deref()
@@ -145,7 +150,7 @@ impl XybridSdkClient {
     /// at `~/.xybrid/cache/extracted/{model_id}/model_metadata.json`.
     #[frb(sync)]
     pub fn is_model_cached(model_id: &str) -> bool {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
+        facade::set_binding(FLUTTER_BINDING.to_string());
         if let Ok(client) = xybrid_sdk::RegistryClient::from_env() {
             return client.is_extracted(model_id);
         }
