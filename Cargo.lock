@@ -9722,6 +9722,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xybrid-ffi-facade"
+version = "0.1.0-rc3"
+dependencies = [
+ "tokio",
+ "xybrid-core",
+ "xybrid-sdk",
+]
+
+[[package]]
 name = "xybrid-macros"
 version = "0.1.0-rc3"
 dependencies = [

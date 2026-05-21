@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/xybrid-core",
     "crates/xybrid-sdk",
+    "crates/xybrid-ffi-facade",
     "crates/xybrid-cli",
     "crates/xybrid-uniffi",
     "crates/xybrid-ffi",
