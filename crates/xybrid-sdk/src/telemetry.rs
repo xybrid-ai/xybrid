@@ -2612,7 +2612,43 @@ fn drain_available_orchestrator_events(subscription: &xybrid_core::event_bus::Su
     }
 }
 
+/// Returns `true` when the orchestrator event is wire-noise that the SDK
+/// already covers via its own publish sites, and should be dropped before
+/// reaching the registered telemetry sender.
+///
+/// Single-stage local LLM calls were producing 6–9 dashboard rows per
+/// turn because the orchestrator emits a full pipeline-execution event
+/// chain (`PipelineStart`, `StageStart`, `ExecutionStarted`,
+/// `ExecutionCompleted`, `StageComplete`, `PipelineComplete`) on top of
+/// the SDK's own `ModelComplete` / `PipelineComplete` — every one of
+/// these landed as its own row. The orchestrator-side events are useful
+/// for in-process subscribers (other code listening on the event bus)
+/// but they're noise at the wire boundary, where the user-facing
+/// contract is one row per turn (the SDK's completion event).
+///
+/// Keep: `PolicyEvaluated`, `RoutingDecided` (routing-decision metadata
+/// shown alongside the completion row), `StageError`, `ExecutionFailed`
+/// (errors must always reach the wire).
+///
+/// Drop: pipeline-frame and per-stage success-path events. Errors on
+/// these paths still surface via the `*Failed` / `*Error` variants
+/// above, which the filter passes through.
+fn orchestrator_event_is_wire_noise(event: &OrchestratorEvent) -> bool {
+    matches!(
+        event,
+        OrchestratorEvent::PipelineStart { .. }
+            | OrchestratorEvent::PipelineComplete { .. }
+            | OrchestratorEvent::StageStart { .. }
+            | OrchestratorEvent::StageComplete { .. }
+            | OrchestratorEvent::ExecutionStarted { .. }
+            | OrchestratorEvent::ExecutionCompleted { .. }
+    )
+}
+
 fn publish_orchestrator_event(event: OrchestratorEvent) {
+    if orchestrator_event_is_wire_noise(&event) {
+        return;
+    }
     let telemetry_event = convert_orchestrator_event(&event);
     publish_telemetry_event(telemetry_event);
 }

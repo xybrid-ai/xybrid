@@ -1119,6 +1119,148 @@ fn pipeline_streaming_fast_path_emits_one_model_complete_event() {
     );
 }
 
+/// Regression guard: when the streaming fast path's
+/// `route.can_stream_locally` evaluates to `false` (e.g. in the standard
+/// test environment where the authority routes to cloud under
+/// stress-throttle conditions), `Xybrid::run_pipeline_streaming` bails to
+/// `pipeline.run_with_options`. That path went through the full
+/// orchestrator-pipeline execution chain, which used to emit
+/// `PipelineStart` / `StageStart` / `ExecutionStarted` /
+/// `ExecutionCompleted` / `StageComplete` plus a duplicate
+/// `PipelineComplete` on top of the SDK wrapper's own — 9 wire events
+/// for a single user turn. The bridge filter at
+/// `publish_orchestrator_event` now drops the pipeline-frame /
+/// per-stage success-path events, leaving the wire shape at the same
+/// three events the streaming-fast-path branch produces: routing
+/// metadata + the SDK's single completion event.
+#[cfg(feature = "llm-llamacpp")]
+#[test]
+fn pipeline_streaming_fallback_emits_bounded_event_shape() {
+    use xybrid_core::execution::listener;
+
+    let _serial = listener_test_lock();
+
+    let Some(_model_dir) = model_fixtures::model_or_skip("qwen2.5-0.5b-instruct") else {
+        return;
+    };
+
+    let (tx, rx) = mpsc::channel::<TelemetryEvent>();
+    register_telemetry_sender(tx);
+
+    listener::set_execution_listener(|event| {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let telemetry_event = match event {
+            xybrid_sdk::ExecutionEvent::Started { model_id, method } => TelemetryEvent {
+                event_type: "ExecutionStarted(listener)".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: None,
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Completed {
+                model_id,
+                method,
+                latency_ms,
+            } => TelemetryEvent {
+                event_type: "ExecutionCompleted(listener)".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Failed {
+                model_id,
+                method,
+                latency_ms,
+                error,
+            } => TelemetryEvent {
+                event_type: "ExecutionFailed(listener)".to_string(),
+                stage_name: Some(model_id.clone()),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: Some(error),
+                data: Some(format!(
+                    r#"{{"model":"{}","method":"{}"}}"#,
+                    model_id, method
+                )),
+                timestamp_ms,
+            },
+        };
+
+        publish_telemetry_event(telemetry_event);
+    });
+
+    // No `target: device` — forces the streaming fast path to bail and
+    // route through `pipeline.run_with_options`, exercising the
+    // orchestrator's full pipeline-execution event chain.
+    let yaml = "name: \"streaming-fallback-diagnostic\"\n\
+                stages:\n  - model: qwen2.5-0.5b-instruct\n";
+
+    let input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+
+    // Ignore the result: fallback path may error out in test env when
+    // the cloud target isn't reachable; we only care about the events
+    // captured up to that point.
+    let _ = xybrid_sdk::Xybrid::run_pipeline_streaming(yaml, &input, Box::new(|_| Ok(())));
+
+    std::thread::sleep(Duration::from_millis(100));
+    listener::clear_execution_listener();
+
+    let mut collected: Vec<TelemetryEvent> = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        collected.push(ev);
+    }
+
+    // No pipeline-frame / per-stage success-path noise should reach
+    // the wire on this path — bridge filter at
+    // `publish_orchestrator_event` drops them. Errors (`StageError`,
+    // `ExecutionFailed`) still pass through if they fire.
+    let leaked: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.event_type.as_str(),
+                "PipelineStart"
+                    | "StageStart"
+                    | "StageComplete"
+                    | "ExecutionStarted"
+                    | "ExecutionCompleted"
+            )
+        })
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "orchestrator pipeline-frame / per-stage success events must not \
+         reach the wire — they duplicate the SDK's own completion event \
+         and produce dashboard row fan-out. Leaked: {:#?}",
+        leaked
+    );
+
+    // At most one `PipelineComplete` per turn. The orchestrator's
+    // version was the duplicate; the SDK wrapper at
+    // `Pipeline::run_with_options` is the wire-authoritative one
+    // (better stage-name attribution for single-stage pipelines).
+    let pipeline_completes: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| e.event_type == "PipelineComplete")
+        .collect();
+    assert!(
+        pipeline_completes.len() <= 1,
+        "fallback path must emit at most one PipelineComplete per turn; \
+         got {}: {:#?}",
+        pipeline_completes.len(),
+        pipeline_completes
+    );
+}
+
 /// Smoke test: MNIST inference works without telemetry (no env vars needed).
 /// Ensures the model fixture is valid and the execution pipeline doesn't panic.
 #[test]
