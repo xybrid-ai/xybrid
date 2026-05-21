@@ -42,6 +42,7 @@
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
 [![Swift Package Manager][spm-shield]][spm-url]
+[![crates.io][crates-shield]][crates-url]
 [![Visitors](https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid)](https://github.com/xybrid-ai/xybrid)
 
 </p>
@@ -71,6 +72,8 @@
 [maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
 [spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat&logo=swift&logoColor=white
 [spm-url]: https://github.com/xybrid-ai/xybrid
+[crates-shield]: https://img.shields.io/crates/v/xybrid?style=flat&label=crates.io&logo=rust
+[crates-url]: https://crates.io/crates/xybrid
 </div>
 
 <p align="center">
@@ -106,7 +109,7 @@ Xybrid 是一个 **Rust 驱动的运行时**，为所有主流平台提供原生
 | **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | 即将推出 | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | 可用 | [README](examples/android/README.md) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | 可用 | — |
-| **[Rust](crates/)** | 全平台 | `xybrid-core` / `xybrid-sdk` | 可用 | — |
+| **[Rust](crates/)** | 全平台 | [crates.io](https://crates.io/crates/xybrid) | 可用 | — |
 
 所有 SDK 封装同一个 Rust 核心——跨平台行为和模型支持完全一致。
 
@@ -213,7 +216,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid-sdk = "0.1"
+xybrid = "0.1"
 ```
 
 **运行模型：**

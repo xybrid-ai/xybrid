@@ -42,6 +42,7 @@
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
 [![Swift Package Manager][spm-shield]][spm-url]
+[![crates.io][crates-shield]][crates-url]
 [![Visitors](https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid)](https://github.com/xybrid-ai/xybrid)
 
 </p>
@@ -71,6 +72,8 @@
 [maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
 [spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat&logo=swift&logoColor=white
 [spm-url]: https://github.com/xybrid-ai/xybrid
+[crates-shield]: https://img.shields.io/crates/v/xybrid?style=flat&label=crates.io&logo=rust
+[crates-url]: https://crates.io/crates/xybrid
 </div>
 
 <p align="center">
@@ -106,7 +109,7 @@ Xybrid is a **Rust-powered runtime** with native bindings for every major platfo
 | **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Coming Soon | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | Available | [README](examples/android/README.md) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | Available | — |
-| **[Rust](crates/)** | All | `xybrid-core` / `xybrid-sdk` | Available | — |
+| **[Rust](crates/)** | All | [crates.io](https://crates.io/crates/xybrid) | Available | — |
 
 Every SDK wraps the same Rust core — identical model support and behavior across all platforms.
 
@@ -195,7 +198,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid-sdk = "0.1"
+xybrid = "0.1"
 ```
 
 **Run a model:**
