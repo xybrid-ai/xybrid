@@ -212,8 +212,8 @@ fn compile_llama_cpp() {
         // If the OUT_DIR clone already exists from a previous build, re-use it
         // when it has the expected commit checked out; otherwise wipe and
         // re-clone so we don't end up mixing two states.
-        let already_initialized = cloned.join(".git").exists()
-            && cloned.join("CMakeLists.txt").exists();
+        let already_initialized =
+            cloned.join(".git").exists() && cloned.join("CMakeLists.txt").exists();
         let needs_clone = !already_initialized;
         if needs_clone && cloned.exists() {
             let _ = std::fs::remove_dir_all(&cloned);

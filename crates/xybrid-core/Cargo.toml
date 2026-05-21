@@ -91,7 +91,11 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 # mistralrs = { version = "0.8", optional = true }
 
 [features]
-default = ["ort-download", "llm-llamacpp"]
+# `llm-llamacpp` is NOT enabled by default — it requires cmake + a C++
+# toolchain and clones ~180MB of llama.cpp source during build. Downstream
+# users opt in via `cargo add xybrid-core --features llm-llamacpp` or one
+# of the `platform-*` presets on xybrid-sdk.
+default = ["ort-download"]
 
 # JSON Schema generation for model_metadata.json
 schema = ["dep:schemars"]
