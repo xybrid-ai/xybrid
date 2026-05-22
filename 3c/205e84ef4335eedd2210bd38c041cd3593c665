@@ -1,0 +1,37 @@
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_93e9e173c209bc::t_f2c41cbfe00811 3-7,46-47,49-53,98-100,113-117,125-133,145,154,157,166,170-187,189-195,201-206,212-214,224-230,234-235,239-240,244-249,253-254,265-289
+  s_93e9e173c209bc::t_24ecccc470ac8c 215-220
+examples/android/app/src/main/java/ai/xybrid/example/components/ModelLoadingCard.kt
+  s_93e9e173c209bc::t_2000de2040a09d 218-223
+crates/xybrid-bolt/boltffi.toml
+  s_93e9e173c209bc::t_7c2b8555c69d49 54-57
+examples/android/app/build.gradle.kts
+  s_93e9e173c209bc::t_fb24057e4f2a5b 48-52
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_93e9e173c209bc::t_df9ee498deda0d 590,592,594,602,604,606,608,610,612,614
+  s_93e9e173c209bc::t_d5a9083aef29a2 1-589,591,593,595-601,603,605,607,609,611,613,615-1529
+examples/android/build.gradle.kts
+  s_93e9e173c209bc::t_b7fcf3a959e40c 5-8
+examples/android/app/src/main/java/ai/xybrid/example/XybridExampleApp.kt
+  s_93e9e173c209bc::t_eeeab3d9dc2a40 20-21
+  s_93e9e173c209bc::t_a2fb405013c1fe 24-29
+  s_93e9e173c209bc::t_5666581f3fb77d 106,116-117,119,121
+  s_93e9e173c209bc::t_5586bbc92ad350 107-112
+  s_93e9e173c209bc::t_79a44ab22794dd 193-197,213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "3c205e84ef4335eedd2210bd38c041cd3593c665",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
