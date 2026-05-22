@@ -1,0 +1,30 @@
+crates/xybrid-bolt/.gitignore
+  s_93e9e173c209bc::t_7918046a757678 1-4
+crates/xybrid-bolt/src/lib.rs
+  s_93e9e173c209bc::t_8ef1ef7eb3ed1c 533,539-540,546-547,555,604,609,613
+  s_93e9e173c209bc::t_f7bdb7e067fb2c 603
+  s_93e9e173c209bc::t_b58a1ad4ddc491 654
+  s_93e9e173c209bc::t_6772d072a110a8 48,55-59,62,83,94-95,97-103,106-115,118,123,126-131,133,135-143,145,147
+  s_93e9e173c209bc::t_a8ab715be9b48f 482-487
+  s_93e9e173c209bc::t_7a6c26cadf32ce 13-14
+  s_93e9e173c209bc::t_c89cfac8ff6069 530,538,545,552
+  s_93e9e173c209bc::t_9da2f49ff70b9b 608,612
+crates/xybrid-bolt/boltffi.toml
+  s_93e9e173c209bc::t_33c6c7de5d5258 18-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "3b64f9f871b70fe4646bcb270b2fb461f63c9c4c",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
