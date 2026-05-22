@@ -12,7 +12,8 @@ uniffi::setup_scaffolding!();
 
 use xybrid_sdk::{
     ir::{Envelope as CoreEnvelope, EnvelopeKind as CoreEnvelopeKind},
-    InferenceResult as CoreInferenceResult, ModelLoader as CoreModelLoader, SdkError,
+    InferenceMetrics as CoreInferenceMetrics, InferenceResult as CoreInferenceResult,
+    ModelLoader as CoreModelLoader, SdkError, StageLatency as CoreStageLatency,
     VoiceInfo as CoreVoiceInfo, XybridModel as CoreXybridModel,
 };
 
@@ -315,6 +316,56 @@ pub enum XybridEnvelope {
     },
 }
 
+/// Per-stage latency entry for pipeline runs.
+///
+/// One entry per executed stage; `stage_id` matches the stage name in the
+/// pipeline definition.
+#[derive(uniffi::Record, Clone)]
+pub struct XybridStageLatency {
+    pub stage_id: String,
+    pub latency_ms: u32,
+}
+
+impl From<&CoreStageLatency> for XybridStageLatency {
+    fn from(s: &CoreStageLatency) -> Self {
+        Self {
+            stage_id: s.stage_id.clone(),
+            latency_ms: s.latency_ms,
+        }
+    }
+}
+
+/// Typed inference metrics surfaced on every `XybridResult`.
+///
+/// LLM-specific fields (`ttft_ms`, `tokens_per_second`, `prefill_tps`,
+/// `decode_tps`, `tokens_in`, `tokens_out`) are `None` for ASR/TTS/embedding
+/// runs. `stage_latencies_ms` is empty for `model.run()` and populated for
+/// `pipeline.run()`.
+#[derive(uniffi::Record, Clone)]
+pub struct XybridInferenceMetrics {
+    pub total_ms: u32,
+    pub ttft_ms: Option<u32>,
+    pub tokens_per_second: Option<f32>,
+    pub prefill_tps: Option<f32>,
+    pub decode_tps: Option<f32>,
+    pub tokens_out: Option<u32>,
+    pub stage_latencies_ms: Vec<XybridStageLatency>,
+}
+
+impl From<&CoreInferenceMetrics> for XybridInferenceMetrics {
+    fn from(m: &CoreInferenceMetrics) -> Self {
+        Self {
+            total_ms: m.total_ms,
+            ttft_ms: m.ttft_ms,
+            tokens_per_second: m.tokens_per_second,
+            prefill_tps: m.prefill_tps,
+            decode_tps: m.decode_tps,
+            tokens_out: m.tokens_out,
+            stage_latencies_ms: m.stage_latencies_ms.iter().map(Into::into).collect(),
+        }
+    }
+}
+
 /// Result type returned from xybrid model inference.
 ///
 /// This struct contains the output from running inference on a model,
@@ -326,6 +377,7 @@ pub struct XybridResult {
     pub audio_bytes: Option<Vec<u8>>,
     pub embedding: Option<Vec<f32>>,
     pub latency_ms: u32,
+    pub metrics: XybridInferenceMetrics,
 }
 
 impl XybridResult {
@@ -336,6 +388,7 @@ impl XybridResult {
             audio_bytes: r.audio_bytes().map(|b| b.to_vec()),
             embedding: r.embedding().map(|e| e.to_vec()),
             latency_ms: r.latency_ms(),
+            metrics: r.metrics().into(),
         }
     }
 }

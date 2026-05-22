@@ -148,8 +148,15 @@ jobs:
         with:
           key: ubuntu-latest-ort-download
 
-      - name: Run tests
-        run: cargo test --workspace --features ort-download
+      # Skip examples — they statically link llama.cpp + ort and exhaust
+      # runner disk during link. `clippy --all-targets` already verifies
+      # examples compile (it stops at .rmeta, so no link step).
+      # `--doc` can't be combined with other target flags, so it runs separately.
+      - name: Run tests (lib, bins, integration)
+        run: cargo test --workspace --features ort-download --lib --bins --tests
+
+      - name: Run doc tests
+        run: cargo test --workspace --features ort-download --doc
 
   # Linux-only on push/PR. Per-platform CLI builds run in release.yml.
   build-cli:

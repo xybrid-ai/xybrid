@@ -1569,6 +1569,40 @@ impl Xybrid {
                             EnvelopeKind::Embedding(_) => OutputType::Embedding,
                         };
 
+                        // Publish a `ModelComplete` mirroring the
+                        // `XybridModel::run_streaming` SDK path so the
+                        // streaming-fast-path branch isn't silent on the
+                        // Traces dashboard. Without this the policy /
+                        // routing events fire but no completion event
+                        // ever lands — billing, cost-attribution, and the
+                        // dashboard's per-turn row all go missing for
+                        // calls that take this code path.
+                        let event = crate::telemetry::TelemetryEvent {
+                            event_type: "ModelComplete".to_string(),
+                            stage_name: Some(model_id.clone()),
+                            target: Some(route.target.clone()),
+                            latency_ms: Some(total_latency_ms),
+                            error: None,
+                            data: Some(
+                                serde_json::json!({
+                                    "model_id": model_id,
+                                    "version": metadata.version,
+                                    "output_type": format!("{:?}", output_type),
+                                    "streaming": true,
+                                })
+                                .to_string(),
+                            ),
+                            timestamp_ms: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0),
+                        };
+                        crate::telemetry::publish_telemetry_event_in_context(
+                            event,
+                            pipeline_id,
+                            Some(trace_id),
+                        );
+
                         return Ok(PipelineExecutionResult {
                             name: pipeline.name.clone(),
                             stages: vec![StageTiming {

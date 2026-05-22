@@ -71,6 +71,88 @@ jobs:
           echo "All versions match v$TAG_VERSION"
 
   #
+  # Publish Rust crates to crates.io
+  #
+  # Independent of the native-artifact build jobs — only needs source. Runs in
+  # parallel with build-apple-all / build-android / build-cli. Idempotent: a
+  # tag re-run skips crates whose <name>@<version> is already on crates.io.
+  #
+  # Dependency order is macros -> core -> sdk -> xybrid. Each publish waits for
+  # the new version to become visible on the crates.io index before moving on,
+  # since the next crate's `cargo publish` resolves the prior one from the
+  # registry.
+  #
+  publish-crates:
+    name: Publish to crates.io
+    needs: [check-version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "publish-crates"
+          save-if: "true"
+
+      - name: Publish crates in dependency order
+        shell: bash
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Publishing version: $TAG_VERSION"
+
+          # Skip if <crate>@<version> is already on crates.io. Treat anything
+          # other than HTTP 200 as "not published yet" so transient 5xx errors
+          # don't silently skip a real publish.
+          already_published() {
+            local crate=$1
+            local status
+            status=$(curl -fsS -o /dev/null -w "%{http_code}" \
+              -A "xybrid-release-workflow/1.0 (+https://github.com/${{ github.repository }})" \
+              "https://crates.io/api/v1/crates/${crate}/${TAG_VERSION}" || echo "000")
+            [ "$status" = "200" ]
+          }
+
+          # Poll the index until the just-published version is visible. The
+          # follow-up `cargo publish` for a downstream crate resolves from the
+          # sparse index, so we need this to succeed before continuing.
+          wait_for_index() {
+            local crate=$1
+            for i in $(seq 1 60); do
+              if already_published "$crate"; then
+                echo "${crate}@${TAG_VERSION} visible on crates.io after ${i} polls."
+                return 0
+              fi
+              sleep 5
+            done
+            echo "::error::${crate}@${TAG_VERSION} did not appear on crates.io after 5 minutes"
+            return 1
+          }
+
+          publish_crate() {
+            local crate=$1
+            if already_published "$crate"; then
+              echo "::notice::${crate}@${TAG_VERSION} already published — skipping."
+              return 0
+            fi
+            echo "Publishing ${crate}@${TAG_VERSION}..."
+            cargo publish -p "$crate"
+            wait_for_index "$crate"
+          }
+
+          publish_crate xybrid-macros
+          publish_crate xybrid-core
+          publish_crate xybrid-sdk
+          publish_crate xybrid
+
+  #
   # Consolidated Apple build: XCFramework + Flutter darwin precompile + CLI macos-arm64
   # Runs all three on one macos-14 runner to share sccache and avoid 3x queue wait.
   #

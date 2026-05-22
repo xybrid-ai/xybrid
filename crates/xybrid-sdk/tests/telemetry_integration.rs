@@ -812,6 +812,313 @@ fn chat_context_llm_call_carries_backend_and_quantization_on_spans() {
     core_tracing::reset_tracing();
 }
 
+/// Regression guard: `XybridModel::run_streaming` must emit exactly one
+/// `ModelComplete` event per turn — no `PipelineComplete`, no leaked
+/// `ExecutionStarted` / `ExecutionCompleted` from the outer execute
+/// guard, no synthetic per-token publishes. Direct-SDK streaming is the
+/// reference shape the pipeline-level streaming paths should mirror.
+///
+/// Both the SDK telemetry channel and the inner `ExecutionEvent`
+/// listener are wired up here so any future regression that re-emits
+/// outer-span `Started` / `Completed` rows trips the assert immediately.
+#[cfg(feature = "llm-llamacpp")]
+#[test]
+fn xybrid_model_run_streaming_emits_one_model_complete_event() {
+    use xybrid_core::execution::listener;
+    use xybrid_core::runtime_adapter::types::GenerationConfig;
+
+    let _serial = listener_test_lock();
+
+    let Some(model_dir) = model_fixtures::model_or_skip("qwen2.5-0.5b-instruct") else {
+        return; // fixture not present — skip gracefully
+    };
+
+    // SDK-level TelemetryEvent channel.
+    let (tx, rx) = mpsc::channel::<TelemetryEvent>();
+    register_telemetry_sender(tx);
+
+    // Inner `ExecutionEvent`s (Started / Completed / Failed) — converted
+    // to TelemetryEvents and published into the same channel so we see
+    // ALL noise sources in one stream. Mirrors the listener wiring in
+    // `executor_execute_emits_no_outer_telemetry_events`.
+    listener::set_execution_listener(|event| {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let telemetry_event = match event {
+            xybrid_sdk::ExecutionEvent::Started { model_id, method } => TelemetryEvent {
+                event_type: "ExecutionStarted".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: None,
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Completed {
+                model_id,
+                method,
+                latency_ms,
+            } => TelemetryEvent {
+                event_type: "ExecutionCompleted".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Failed {
+                model_id,
+                method,
+                latency_ms,
+                error,
+            } => TelemetryEvent {
+                event_type: "ExecutionFailed".to_string(),
+                stage_name: Some(model_id.clone()),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: Some(error),
+                data: Some(format!(
+                    r#"{{"model":"{}","method":"{}"}}"#,
+                    model_id, method
+                )),
+                timestamp_ms,
+            },
+        };
+
+        publish_telemetry_event(telemetry_event);
+    });
+
+    let model = xybrid_sdk::ModelLoader::from_directory(&model_dir)
+        .expect("loader should build from directory")
+        .load()
+        .expect("qwen2.5-0.5b-instruct should load");
+
+    let gen_config = GenerationConfig {
+        max_tokens: 4,
+        ..GenerationConfig::default()
+    };
+
+    let input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+
+    let _result = model
+        .run_streaming(&input, Some(&gen_config), |_token| Ok(()))
+        .expect("run_streaming should succeed");
+
+    // Give async drains a moment to flush.
+    std::thread::sleep(Duration::from_millis(100));
+    listener::clear_execution_listener();
+
+    let mut collected: Vec<TelemetryEvent> = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        collected.push(ev);
+    }
+
+    let model_completes: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| e.event_type == "ModelComplete")
+        .collect();
+    assert_eq!(
+        model_completes.len(),
+        1,
+        "XybridModel::run_streaming must emit exactly one ModelComplete \
+         per turn. Captured {} total events: {:#?}",
+        collected.len(),
+        collected
+    );
+    let mc = model_completes[0];
+    assert_eq!(
+        mc.stage_name.as_deref(),
+        Some("qwen2.5-0.5b-instruct"),
+        "ModelComplete stage_name should be the model id; got {:?}",
+        mc.stage_name
+    );
+    assert_eq!(
+        mc.target.as_deref(),
+        Some("local"),
+        "ModelComplete target should be `local` for on-device streaming; got {:?}",
+        mc.target
+    );
+    assert!(
+        mc.latency_ms.is_some(),
+        "ModelComplete must carry latency_ms; got None"
+    );
+
+    // No outer-span leakage — silent-guard contract.
+    let leaked_outer: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| {
+            e.event_type == "ExecutionStarted"
+                || e.event_type == "ExecutionCompleted"
+                || e.event_type == "PipelineStart"
+                || e.event_type == "PipelineComplete"
+        })
+        .collect();
+    assert!(
+        leaked_outer.is_empty(),
+        "XybridModel::run_streaming must not emit outer-span Started/Completed \
+         or pipeline-frame events. Leaked: {:#?}",
+        leaked_outer
+    );
+}
+
+/// Regression guard: `Xybrid::run_pipeline_streaming` on the
+/// streaming-fast-path branch (explicit `target: device` in YAML, route
+/// resolves to `ResolvedTarget::Device`, `route.can_stream_locally =
+/// true`) must emit exactly one `ModelComplete` per turn alongside the
+/// expected `PolicyEvaluated` + `RoutingDecided` routing-decision events.
+///
+/// Before the fix this path was silent at the wire — the routing
+/// metadata fired but no completion event ever published, so calls that
+/// took the streaming-fast-path branch were invisible to billing,
+/// cost-attribution, and the Traces dashboard's per-turn row.
+#[cfg(feature = "llm-llamacpp")]
+#[test]
+fn pipeline_streaming_fast_path_emits_one_model_complete_event() {
+    use xybrid_core::execution::listener;
+
+    let _serial = listener_test_lock();
+
+    // `model_or_skip` is the gate that exits early when the fixture
+    // hasn't been downloaded. The returned path is not consumed
+    // directly here — the YAML below references the model by registry
+    // name and the cache provider resolves it.
+    let Some(_model_dir) = model_fixtures::model_or_skip("qwen2.5-0.5b-instruct") else {
+        return;
+    };
+
+    let (tx, rx) = mpsc::channel::<TelemetryEvent>();
+    register_telemetry_sender(tx);
+
+    listener::set_execution_listener(|event| {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let telemetry_event = match event {
+            xybrid_sdk::ExecutionEvent::Started { model_id, method } => TelemetryEvent {
+                event_type: "ExecutionStarted".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: None,
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Completed {
+                model_id,
+                method,
+                latency_ms,
+            } => TelemetryEvent {
+                event_type: "ExecutionCompleted".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Failed {
+                model_id,
+                method,
+                latency_ms,
+                error,
+            } => TelemetryEvent {
+                event_type: "ExecutionFailed".to_string(),
+                stage_name: Some(model_id.clone()),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: Some(error),
+                data: Some(format!(
+                    r#"{{"model":"{}","method":"{}"}}"#,
+                    model_id, method
+                )),
+                timestamp_ms,
+            },
+        };
+
+        publish_telemetry_event(telemetry_event);
+    });
+
+    // Minimal local-only single-stage pipeline. Explicit `target: device`
+    // is what flips `can_stream_locally = true` in
+    // `resolve_streaming_fast_path_route` — without it the route default
+    // is `Auto`, which (in the absence of cloud config / device signals
+    // in the test environment) bails to the non-streaming fallback. We
+    // want the happy-path streaming-fast-path branch here.
+    let yaml = "name: \"streaming-diagnostic\"\n\
+                stages:\n  - model: qwen2.5-0.5b-instruct\n    target: device\n";
+
+    let input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+
+    let _result = xybrid_sdk::Xybrid::run_pipeline_streaming(yaml, &input, Box::new(|_| Ok(())))
+        .expect("run_pipeline_streaming should succeed");
+
+    std::thread::sleep(Duration::from_millis(100));
+    listener::clear_execution_listener();
+
+    let mut collected: Vec<TelemetryEvent> = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        collected.push(ev);
+    }
+
+    let model_completes: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| e.event_type == "ModelComplete")
+        .collect();
+    assert_eq!(
+        model_completes.len(),
+        1,
+        "streaming-fast-path must emit exactly one ModelComplete per turn. \
+         Captured {} total events: {:#?}",
+        collected.len(),
+        collected
+    );
+    let mc = model_completes[0];
+    assert_eq!(
+        mc.stage_name.as_deref(),
+        Some("qwen2.5-0.5b-instruct"),
+        "ModelComplete stage_name should be the model id; got {:?}",
+        mc.stage_name
+    );
+    assert_eq!(
+        mc.target.as_deref(),
+        Some("local"),
+        "ModelComplete target should be `local` for on-device streaming; got {:?}",
+        mc.target
+    );
+    assert!(
+        mc.latency_ms.is_some(),
+        "ModelComplete must carry latency_ms; got None"
+    );
+
+    // The streaming-fast-path branch returns before reaching the
+    // pipeline-level run_with_options publish, so neither a
+    // PipelineComplete nor any outer-span Started/Completed should
+    // appear on this trace.
+    let leaked: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| {
+            e.event_type == "PipelineStart"
+                || e.event_type == "PipelineComplete"
+                || e.event_type == "ExecutionStarted"
+                || e.event_type == "ExecutionCompleted"
+                || e.event_type == "StageStart"
+                || e.event_type == "StageComplete"
+        })
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "streaming-fast-path must not emit pipeline-frame / outer-span \
+         events alongside the ModelComplete. Leaked: {:#?}",
+        leaked
+    );
+}
+
 /// Smoke test: MNIST inference works without telemetry (no env vars needed).
 /// Ensures the model fixture is valid and the execution pipeline doesn't panic.
 #[test]

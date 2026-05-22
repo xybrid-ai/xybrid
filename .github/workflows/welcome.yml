@@ -1,0 +1,45 @@
+name: Welcome first-time contributors
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/first-interaction@3c71ce730280171fd1cfb57c00c774f8998586f7 # v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: |
+            👋 Thanks for opening your first issue on `xybrid-ai/xybrid`!
+
+            A maintainer will triage and label this shortly. While you wait, a few pointers:
+
+            - If this is a bug, including a minimal repro (model id, command, error output) makes triage 10× faster.
+            - If you're looking for somewhere to start contributing, see the [`good first issue`](https://github.com/xybrid-ai/xybrid/labels/good%20first%20issue) label and `CONTRIBUTING.md`.
+
+            Welcome aboard.
+          pr-message: |
+            🎉 Thanks for opening your first PR on `xybrid-ai/xybrid` — welcome!
+
+            Before review, please confirm the local checks pass:
+
+            - [ ] `cargo fmt --all` clean
+            - [ ] `cargo clippy --workspace -- -D warnings` clean
+            - [ ] `cargo test -p <affected-crate>` passes
+            - [ ] Commits are DCO-signed (`git commit -s`)
+
+            See [`CONTRIBUTING.md`](https://github.com/xybrid-ai/xybrid/blob/master/CONTRIBUTING.md#where-to-start) for the full guide. A maintainer will be along for review.

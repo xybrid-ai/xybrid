@@ -42,6 +42,7 @@
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
 [![Swift Package Manager][spm-shield]][spm-url]
+[![crates.io][crates-shield]][crates-url]
 [![Visitors](https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid)](https://github.com/xybrid-ai/xybrid)
 
 </p>
@@ -71,6 +72,8 @@
 [maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
 [spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat&logo=swift&logoColor=white
 [spm-url]: https://github.com/xybrid-ai/xybrid
+[crates-shield]: https://img.shields.io/crates/v/xybrid?style=flat&label=crates.io&logo=rust
+[crates-url]: https://crates.io/crates/xybrid
 </div>
 
 <p align="center">
@@ -106,7 +109,7 @@ Xybridは**Rustベースのランタイム**であり、すべての主要プラ
 | **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | 近日公開 | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | 利用可能 | [README](examples/android/README.md) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | 利用可能 | — |
-| **[Rust](crates/)** | すべて | `xybrid-core` / `xybrid-sdk` | 利用可能 | — |
+| **[Rust](crates/)** | すべて | [crates.io](https://crates.io/crates/xybrid) | 利用可能 | — |
 
 すべてのSDKは同じRustコアをラップしており、すべてのプラットフォームで同一のモデルサポートと動作を提供します。
 
@@ -213,7 +216,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid-sdk = "0.1"
+xybrid = "0.1"
 ```
 
 **モデルを実行:**

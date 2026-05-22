@@ -2065,6 +2065,23 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  FfiInferenceMetrics dco_decode_ffi_inference_metrics(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return FfiInferenceMetrics(
+      totalMs: dco_decode_u_32(arr[0]),
+      ttftMs: dco_decode_opt_box_autoadd_u_32(arr[1]),
+      tokensPerSecond: dco_decode_opt_box_autoadd_f_32(arr[2]),
+      prefillTps: dco_decode_opt_box_autoadd_f_32(arr[3]),
+      decodeTps: dco_decode_opt_box_autoadd_f_32(arr[4]),
+      tokensOut: dco_decode_opt_box_autoadd_u_32(arr[5]),
+      stageLatenciesMs: dco_decode_list_ffi_stage_latency(arr[6]),
+    );
+  }
+
+  @protected
   FfiLoadEvent dco_decode_ffi_load_event(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     switch (raw[0]) {
@@ -2117,14 +2134,15 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiResult dco_decode_ffi_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return FfiResult(
       success: dco_decode_bool(arr[0]),
       text: dco_decode_opt_String(arr[1]),
       audioBytes: dco_decode_opt_list_prim_u_8_strict(arr[2]),
       embedding: dco_decode_opt_list_prim_f_32_strict(arr[3]),
       latencyMs: dco_decode_u_32(arr[4]),
+      metrics: dco_decode_ffi_inference_metrics(arr[5]),
     );
   }
 
@@ -2143,6 +2161,18 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       abortOnThermalCritical: dco_decode_bool(arr[5]),
       fallbackToCloud: dco_decode_bool(arr[6]),
       maxGraceTokens: dco_decode_opt_box_autoadd_u_32(arr[7]),
+    );
+  }
+
+  @protected
+  FfiStageLatency dco_decode_ffi_stage_latency(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FfiStageLatency(
+      stageId: dco_decode_String(arr[0]),
+      latencyMs: dco_decode_u_32(arr[1]),
     );
   }
 
@@ -2204,6 +2234,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   List<String> dco_decode_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_String).toList();
+  }
+
+  @protected
+  List<FfiStageLatency> dco_decode_list_ffi_stage_latency(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_stage_latency).toList();
   }
 
   @protected
@@ -2632,6 +2668,27 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  FfiInferenceMetrics sse_decode_ffi_inference_metrics(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_totalMs = sse_decode_u_32(deserializer);
+    var var_ttftMs = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_tokensPerSecond = sse_decode_opt_box_autoadd_f_32(deserializer);
+    var var_prefillTps = sse_decode_opt_box_autoadd_f_32(deserializer);
+    var var_decodeTps = sse_decode_opt_box_autoadd_f_32(deserializer);
+    var var_tokensOut = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_stageLatenciesMs = sse_decode_list_ffi_stage_latency(deserializer);
+    return FfiInferenceMetrics(
+        totalMs: var_totalMs,
+        ttftMs: var_ttftMs,
+        tokensPerSecond: var_tokensPerSecond,
+        prefillTps: var_prefillTps,
+        decodeTps: var_decodeTps,
+        tokensOut: var_tokensOut,
+        stageLatenciesMs: var_stageLatenciesMs);
+  }
+
+  @protected
   FfiLoadEvent sse_decode_ffi_load_event(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -2696,12 +2753,14 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var var_audioBytes = sse_decode_opt_list_prim_u_8_strict(deserializer);
     var var_embedding = sse_decode_opt_list_prim_f_32_strict(deserializer);
     var var_latencyMs = sse_decode_u_32(deserializer);
+    var var_metrics = sse_decode_ffi_inference_metrics(deserializer);
     return FfiResult(
         success: var_success,
         text: var_text,
         audioBytes: var_audioBytes,
         embedding: var_embedding,
-        latencyMs: var_latencyMs);
+        latencyMs: var_latencyMs,
+        metrics: var_metrics);
   }
 
   @protected
@@ -2724,6 +2783,14 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         abortOnThermalCritical: var_abortOnThermalCritical,
         fallbackToCloud: var_fallbackToCloud,
         maxGraceTokens: var_maxGraceTokens);
+  }
+
+  @protected
+  FfiStageLatency sse_decode_ffi_stage_latency(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_stageId = sse_decode_String(deserializer);
+    var var_latencyMs = sse_decode_u_32(deserializer);
+    return FfiStageLatency(stageId: var_stageId, latencyMs: var_latencyMs);
   }
 
   @protected
@@ -2789,6 +2856,19 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var ans_ = <String>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiStageLatency> sse_decode_list_ffi_stage_latency(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiStageLatency>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_stage_latency(deserializer));
     }
     return ans_;
   }
@@ -3294,6 +3374,19 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  void sse_encode_ffi_inference_metrics(
+      FfiInferenceMetrics self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.totalMs, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.ttftMs, serializer);
+    sse_encode_opt_box_autoadd_f_32(self.tokensPerSecond, serializer);
+    sse_encode_opt_box_autoadd_f_32(self.prefillTps, serializer);
+    sse_encode_opt_box_autoadd_f_32(self.decodeTps, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.tokensOut, serializer);
+    sse_encode_list_ffi_stage_latency(self.stageLatenciesMs, serializer);
+  }
+
+  @protected
   void sse_encode_ffi_load_event(FfiLoadEvent self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     switch (self) {
@@ -3344,6 +3437,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_opt_list_prim_u_8_strict(self.audioBytes, serializer);
     sse_encode_opt_list_prim_f_32_strict(self.embedding, serializer);
     sse_encode_u_32(self.latencyMs, serializer);
+    sse_encode_ffi_inference_metrics(self.metrics, serializer);
   }
 
   @protected
@@ -3358,6 +3452,14 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_bool(self.abortOnThermalCritical, serializer);
     sse_encode_bool(self.fallbackToCloud, serializer);
     sse_encode_opt_box_autoadd_u_32(self.maxGraceTokens, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_stage_latency(
+      FfiStageLatency self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.stageId, serializer);
+    sse_encode_u_32(self.latencyMs, serializer);
   }
 
   @protected
@@ -3413,6 +3515,16 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_String(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ffi_stage_latency(
+      List<FfiStageLatency> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_stage_latency(item, serializer);
     }
   }
 
@@ -3878,6 +3990,14 @@ class FfiPipelineImpl extends RustOpaque implements FfiPipeline {
   /// Execute the pipeline with the given input envelope.
   ///
   /// Returns the inference result from the final stage.
+  ///
+  /// LLM-specific metric fields (`ttft_ms`, `tokens_per_second`,
+  /// `prefill_tps`, `decode_tps`, `tokens_out`) are parsed from the
+  /// **final** stage envelope's metadata, so they are `None` whenever the
+  /// final stage isn't the LLM — e.g. an `ASR → LLM → TTS` pipeline
+  /// produces a TTS envelope and the LLM metrics are not surfaced here.
+  /// Hoisting them from intermediate stages is a follow-up at the SDK
+  /// layer.
   Future<FfiResult> run({required FfiEnvelope envelope}) =>
       XybridRustLib.instance.api
           .crateApiPipelineFfiPipelineRun(that: this, envelope: envelope);
