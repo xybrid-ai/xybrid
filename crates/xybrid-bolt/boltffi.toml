@@ -51,7 +51,10 @@ output = "dist/android"
 min_sdk = 24
 
 [targets.android.kotlin]
-package = "com.example.xybrid_bolt"
+# Matches the existing `import ai.xybrid.…` lines in
+# examples/android and bindings/kotlin so the migration to
+# bolt-generated bindings doesn't force the consumer to re-import.
+package = "ai.xybrid"
 desktop_loader = "bundled"
 api_style = "top_level"
 error_style = "throwing"
