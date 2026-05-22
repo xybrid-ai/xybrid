@@ -1,0 +1,32 @@
+README.md
+  s_97461a9774acd5::t_d5c71e376c6e93 130
+  s_97461a9774acd5::t_0b93948e58d875 165
+  s_97461a9774acd5::t_e6b3741f1bd4ee 201
+  s_97461a9774acd5::t_57cec01e73384e 147
+README.zh-CN.md
+  s_97461a9774acd5::t_1c0562ab66752d 219
+  s_97461a9774acd5::t_b98507191213c4 148
+  s_97461a9774acd5::t_ebf24c99922d03 183
+  s_97461a9774acd5::t_0c2f848f8438ec 165
+README.ja-JP.md
+  s_97461a9774acd5::t_9f6d0879256aa9 183
+  s_97461a9774acd5::t_f44e8dbf72928c 165
+  s_97461a9774acd5::t_b2798b244ef565 148
+  s_97461a9774acd5::t_582e2db51d8d25 219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "e733800b1344540948c1e80c00091d598aaf2704",
+  "prompts": {},
+  "sessions": {
+    "s_97461a9774acd5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a263f46b-0880-4189-8ff5-6853c3eae0f0",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
