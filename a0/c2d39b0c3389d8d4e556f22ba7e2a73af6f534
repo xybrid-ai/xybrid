@@ -1,0 +1,27 @@
+Cargo.toml
+  s_93e9e173c209bc::t_150b4854d101ee 8
+crates/xybrid-bolt/Cargo.toml
+  s_93e9e173c209bc::t_f5cf4342214a6a 1-35
+crates/xybrid-bolt/src/lib.rs
+  s_93e9e173c209bc::t_0697eabc772497 625-628,631-634,640
+  s_93e9e173c209bc::t_205243e61abdb4 497,504-512,514-515,519-525,528,530-532,535,537-539,542-547
+  s_93e9e173c209bc::t_86f1caf619a76e 579-583,624
+  s_93e9e173c209bc::t_d4b76829fd5baf 179-182,185-191,194,201-205,214-218
+  s_93e9e173c209bc::t_340c3ccbb65ea0 1-178,183-184,192-193,195-200,206-213,219-496,498-503,513,516-518,526-527,529,533-534,536,540-541,548-578,584-623,629-630,635-639,641-669
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "a0c2d39b0c3389d8d4e556f22ba7e2a73af6f534",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
