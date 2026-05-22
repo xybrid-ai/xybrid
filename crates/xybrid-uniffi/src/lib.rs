@@ -10,11 +10,11 @@ use std::sync::Arc;
 
 uniffi::setup_scaffolding!();
 
+use xybrid_ffi_facade as facade;
 use xybrid_sdk::{
     ir::{Envelope as CoreEnvelope, EnvelopeKind as CoreEnvelopeKind},
-    InferenceMetrics as CoreInferenceMetrics, InferenceResult as CoreInferenceResult,
-    ModelLoader as CoreModelLoader, SdkError, StageLatency as CoreStageLatency,
-    VoiceInfo as CoreVoiceInfo, XybridModel as CoreXybridModel,
+    InferenceResult as CoreInferenceResult, ModelLoader as CoreModelLoader, SdkError,
+    XybridModel as CoreXybridModel,
 };
 
 /// Initialize the SDK cache directory.
@@ -23,7 +23,7 @@ use xybrid_sdk::{
 /// The Kotlin SDK wrapper `Xybrid.init(context)` calls this automatically.
 #[uniffi::export]
 fn init_sdk_cache_dir(cache_dir: String) {
-    xybrid_sdk::init_sdk_cache_dir(cache_dir);
+    facade::init_sdk_cache_dir(cache_dir);
 }
 
 /// Register the binding identifier for this process.
@@ -33,30 +33,15 @@ fn init_sdk_cache_dir(cache_dir: String) {
 /// the Kotlin `Xybrid.init(...)` calls `setBinding("kotlin")`, and the
 /// Swift `Xybrid.initialize()` calls `setBinding(binding: "swift")`.
 ///
-/// Only the known platform values are forwarded to `xybrid_sdk::set_binding`
-/// (which requires a `&'static str`). Any other input collapses to
-/// `xybrid_sdk::DEFAULT_BINDING` to bound cardinality on the registry side
-/// — the same defensive shape used by `build_client_header`'s sanitizer.
+/// Routes through [`facade::set_binding`], which collapses unknown values
+/// to [`xybrid_sdk::DEFAULT_BINDING`] to bound cardinality on the registry
+/// side — same defensive shape as `build_client_header`'s sanitizer.
 ///
 /// First call wins (process-global `OnceLock` in xybrid-sdk); subsequent
 /// calls are silent no-ops.
 #[uniffi::export]
 fn set_binding(binding: String) {
-    xybrid_sdk::set_binding(resolve_binding(binding.as_str()));
-}
-
-/// Pure helper that maps a runtime binding string to a `&'static str`.
-///
-/// Factored out of `set_binding` so tests can exercise every accepted
-/// platform without touching the process-global `OnceLock` in xybrid-sdk
-/// (the OnceLock's first-set-wins semantics make per-platform integration
-/// tests in the same process race-prone).
-fn resolve_binding(binding: &str) -> &'static str {
-    match binding {
-        "kotlin" => "kotlin",
-        "swift" => "swift",
-        _ => xybrid_sdk::DEFAULT_BINDING,
-    }
+    facade::set_binding(binding);
 }
 
 // -- Platform-state push API --
@@ -97,24 +82,13 @@ pub enum XybridThermalState {
     Critical,
 }
 
-impl From<XybridThermalState> for xybrid_sdk::ThermalState {
+impl From<XybridThermalState> for facade::ThermalState {
     fn from(value: XybridThermalState) -> Self {
         match value {
-            XybridThermalState::Normal => xybrid_sdk::ThermalState::Normal,
-            XybridThermalState::Warm => xybrid_sdk::ThermalState::Warm,
-            XybridThermalState::Hot => xybrid_sdk::ThermalState::Hot,
-            XybridThermalState::Critical => xybrid_sdk::ThermalState::Critical,
-        }
-    }
-}
-
-impl From<xybrid_sdk::ThermalState> for XybridThermalState {
-    fn from(value: xybrid_sdk::ThermalState) -> Self {
-        match value {
-            xybrid_sdk::ThermalState::Normal => XybridThermalState::Normal,
-            xybrid_sdk::ThermalState::Warm => XybridThermalState::Warm,
-            xybrid_sdk::ThermalState::Hot => XybridThermalState::Hot,
-            xybrid_sdk::ThermalState::Critical => XybridThermalState::Critical,
+            XybridThermalState::Normal => facade::ThermalState::Normal,
+            XybridThermalState::Warm => facade::ThermalState::Warm,
+            XybridThermalState::Hot => facade::ThermalState::Hot,
+            XybridThermalState::Critical => facade::ThermalState::Critical,
         }
     }
 }
@@ -126,7 +100,7 @@ impl From<xybrid_sdk::ThermalState> for XybridThermalState {
 /// SDK has the freshest possible signal.
 #[uniffi::export]
 fn set_battery_level(percent: u8) {
-    xybrid_sdk::set_battery_level(percent);
+    facade::set_battery_level(percent);
 }
 
 /// Mark the battery level as unknown.
@@ -137,19 +111,19 @@ fn set_battery_level(percent: u8) {
 /// than substituting an optimistic default.
 #[uniffi::export]
 fn clear_battery_level() {
-    xybrid_sdk::clear_battery_level();
+    facade::clear_battery_level();
 }
 
 /// Forward a thermal pressure reading from the host.
 #[uniffi::export]
 fn set_thermal_state(state: XybridThermalState) {
-    xybrid_sdk::set_thermal_state(state.into());
+    facade::set_thermal_state(state.into());
 }
 
 /// Mark the thermal state as unknown.
 #[uniffi::export]
 fn clear_thermal_state() {
-    xybrid_sdk::clear_thermal_state();
+    facade::clear_thermal_state();
 }
 
 /// Error type exposed via UniFFI to Swift/Kotlin consumers.
@@ -195,40 +169,61 @@ pub enum XybridError {
     Timeout { timeout_ms: u64 },
 }
 
-impl From<SdkError> for XybridError {
-    fn from(e: SdkError) -> Self {
+impl From<facade::Error> for XybridError {
+    /// Map the canonical facade error (one definition for the whole
+    /// workspace, lives in [`xybrid_ffi_facade`]) into the UniFFI-exposed
+    /// enum. The SDK→facade leg is owned by the facade crate; this leg
+    /// only handles the uniffi-specific shape decisions:
+    ///
+    /// - `Offline` collapses into `NetworkError` — the Swift/Kotlin
+    ///   public API committed to a fixed variant set in
+    ///   `docs/sdk/api-surface.yaml`. Adding a new variant here would
+    ///   break the generated sealed/enum hierarchies and needs a
+    ///   spec-first contract update.
+    /// - `AbortedForCloudFallback` collapses into `InferenceError` with
+    ///   a formatted message — same backwards-compat reason.
+    fn from(e: facade::Error) -> Self {
         match e {
-            SdkError::ModelNotFound(s) => XybridError::ModelNotFound { message: s },
-            SdkError::DirectoryNotFound(s) => XybridError::DirectoryNotFound { message: s },
-            SdkError::MetadataNotFound(s) => XybridError::MetadataNotFound { message: s },
-            SdkError::MetadataInvalid(s) => XybridError::MetadataInvalid { message: s },
-            SdkError::LoadError(s) => XybridError::LoadError { message: s },
-            SdkError::InferenceError(s) => XybridError::InferenceError { message: s },
-            SdkError::AbortedForCloudFallback { reason } => XybridError::InferenceError {
+            facade::Error::ModelNotFound { id } => XybridError::ModelNotFound { message: id },
+            facade::Error::DirectoryNotFound { path } => {
+                XybridError::DirectoryNotFound { message: path }
+            }
+            facade::Error::MetadataNotFound { path } => {
+                XybridError::MetadataNotFound { message: path }
+            }
+            facade::Error::MetadataInvalid { message } => XybridError::MetadataInvalid { message },
+            facade::Error::LoadError { message } => XybridError::LoadError { message },
+            facade::Error::InferenceError { message } => XybridError::InferenceError { message },
+            facade::Error::AbortedForCloudFallback { reason } => XybridError::InferenceError {
                 message: format!("Aborted for cloud fallback: {reason}"),
             },
-            SdkError::StreamingNotSupported => XybridError::StreamingNotSupported,
-            SdkError::NotLoaded => XybridError::NotLoaded,
-            SdkError::ConfigError(s) => XybridError::ConfigError { message: s },
-            SdkError::NetworkError(s) => XybridError::NetworkError { message: s },
-            // `SdkError::Offline` is a Rust-side refinement of NetworkError
-            // (see xybrid-sdk). We collapse it back to `NetworkError` at the
-            // UniFFI boundary so the Swift/Kotlin public API stays stable —
-            // adding a new variant here would be a breaking change to the
-            // generated sealed/enum hierarchies and needs to go through the
-            // spec-first API contract update in docs/sdk/api-surface.yaml.
-            SdkError::Offline(s) => XybridError::NetworkError { message: s },
-            SdkError::IoError(e) => XybridError::IoError {
-                message: e.to_string(),
-            },
-            SdkError::CacheError(s) => XybridError::CacheError { message: s },
-            SdkError::PipelineError(s) => XybridError::PipelineError { message: s },
-            SdkError::CircuitOpen(s) => XybridError::CircuitOpen { message: s },
-            SdkError::RateLimited { retry_after_secs } => {
+            facade::Error::StreamingNotSupported => XybridError::StreamingNotSupported,
+            facade::Error::NotLoaded => XybridError::NotLoaded,
+            facade::Error::ConfigError { message } => XybridError::ConfigError { message },
+            facade::Error::NetworkError { message } | facade::Error::Offline { message } => {
+                XybridError::NetworkError { message }
+            }
+            facade::Error::IoError { message } => XybridError::IoError { message },
+            facade::Error::CacheError { message } => XybridError::CacheError { message },
+            facade::Error::PipelineError { message } => XybridError::PipelineError { message },
+            facade::Error::CircuitOpen { message } => XybridError::CircuitOpen { message },
+            facade::Error::RateLimited { retry_after_secs } => {
                 XybridError::RateLimited { retry_after_secs }
             }
-            SdkError::Timeout { timeout_ms } => XybridError::Timeout { timeout_ms },
+            facade::Error::Timeout { timeout_ms } => XybridError::Timeout { timeout_ms },
         }
+    }
+}
+
+impl From<SdkError> for XybridError {
+    /// Routes through the facade's canonical `From<SdkError>` map so the
+    /// SDK variant ↔ FFI variant pairing lives in exactly one place
+    /// ([`xybrid_ffi_facade::Error::from`]) rather than being duplicated
+    /// across every binding crate. Adding a new `SdkError` variant only
+    /// requires updating the facade map and (if it surfaces a new
+    /// user-visible category) the [`From<facade::Error>`] arm above.
+    fn from(e: SdkError) -> Self {
+        facade::Error::from(e).into()
     }
 }
 
@@ -257,30 +252,23 @@ pub struct XybridGenerationConfig {
 }
 
 impl XybridGenerationConfig {
+    /// Re-shape into the facade POD; the facade owns the single canonical
+    /// "option overrides → SDK defaults" mapping that this used to
+    /// duplicate inline.
+    fn to_facade(&self) -> facade::GenerationConfig {
+        facade::GenerationConfig {
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            min_p: self.min_p,
+            top_k: self.top_k,
+            repetition_penalty: self.repetition_penalty,
+            stop_sequences: self.stop_sequences.clone().unwrap_or_default(),
+        }
+    }
+
     fn to_sdk(&self) -> xybrid_sdk::GenerationConfig {
-        let mut config = xybrid_sdk::GenerationConfig::default();
-        if let Some(v) = self.max_tokens {
-            config.max_tokens = v as usize;
-        }
-        if let Some(v) = self.temperature {
-            config.temperature = v;
-        }
-        if let Some(v) = self.top_p {
-            config.top_p = v;
-        }
-        if let Some(v) = self.min_p {
-            config.min_p = v;
-        }
-        if let Some(v) = self.top_k {
-            config.top_k = v as usize;
-        }
-        if let Some(v) = self.repetition_penalty {
-            config.repetition_penalty = v;
-        }
-        if let Some(ref v) = self.stop_sequences {
-            config.stop_sequences = v.clone();
-        }
-        config
+        self.to_facade().to_sdk()
     }
 }
 
@@ -326,8 +314,8 @@ pub struct XybridStageLatency {
     pub latency_ms: u32,
 }
 
-impl From<&CoreStageLatency> for XybridStageLatency {
-    fn from(s: &CoreStageLatency) -> Self {
+impl From<&facade::StageLatency> for XybridStageLatency {
+    fn from(s: &facade::StageLatency) -> Self {
         Self {
             stage_id: s.stage_id.clone(),
             latency_ms: s.latency_ms,
@@ -352,8 +340,8 @@ pub struct XybridInferenceMetrics {
     pub stage_latencies_ms: Vec<XybridStageLatency>,
 }
 
-impl From<&CoreInferenceMetrics> for XybridInferenceMetrics {
-    fn from(m: &CoreInferenceMetrics) -> Self {
+impl From<&facade::InferenceMetrics> for XybridInferenceMetrics {
+    fn from(m: &facade::InferenceMetrics) -> Self {
         Self {
             total_ms: m.total_ms,
             ttft_ms: m.ttft_ms,
@@ -381,14 +369,25 @@ pub struct XybridResult {
 }
 
 impl XybridResult {
-    pub(crate) fn from_inference_result(r: &CoreInferenceResult) -> Self {
+    /// Build from the SDK type by routing through the facade — the
+    /// payload-extraction logic (text / audio / embedding accessors,
+    /// metrics conversion) is owned by `facade::InferenceResult` so we
+    /// don't carry per-binding copies.
+    pub(crate) fn from_inference_result(r: CoreInferenceResult) -> Self {
+        let facade_result = facade::InferenceResult::from_sdk(r);
+        let metrics = XybridInferenceMetrics::from(&facade_result.metrics);
+        let (text, audio_bytes, embedding) = match facade_result.envelope.kind {
+            facade::EnvelopeKind::Text { text } => (Some(text), None, None),
+            facade::EnvelopeKind::Audio { bytes } => (None, Some(bytes), None),
+            facade::EnvelopeKind::Embedding { values } => (None, None, Some(values)),
+        };
         Self {
             success: true,
-            text: r.text().map(|s| s.to_string()),
-            audio_bytes: r.audio_bytes().map(|b| b.to_vec()),
-            embedding: r.embedding().map(|e| e.to_vec()),
-            latency_ms: r.latency_ms(),
-            metrics: r.metrics().into(),
+            text,
+            audio_bytes,
+            embedding,
+            latency_ms: facade_result.latency_ms,
+            metrics,
         }
     }
 }
@@ -414,8 +413,8 @@ pub struct XybridVoiceInfo {
     pub style: Option<String>,
 }
 
-impl From<CoreVoiceInfo> for XybridVoiceInfo {
-    fn from(v: CoreVoiceInfo) -> Self {
+impl From<facade::VoiceInfo> for XybridVoiceInfo {
+    fn from(v: facade::VoiceInfo) -> Self {
         Self {
             id: v.id,
             name: v.name,
@@ -487,16 +486,19 @@ impl XybridModel {
             .run_async(&envelope.into(), sdk_config.as_ref())
             .await
             .map_err(XybridError::from)?;
-        Ok(XybridResult::from_inference_result(&result))
+        Ok(XybridResult::from_inference_result(result))
     }
 
     /// Get all available voices for this TTS model.
     ///
     /// Returns `None` for non-TTS models or models without voice configuration.
     pub fn voices(&self) -> Option<Vec<XybridVoiceInfo>> {
-        self.inner
-            .voices()
-            .map(|vs| vs.into_iter().map(XybridVoiceInfo::from).collect())
+        self.inner.voices().map(|vs| {
+            vs.into_iter()
+                .map(facade::VoiceInfo::from_sdk)
+                .map(XybridVoiceInfo::from)
+                .collect()
+        })
     }
 
     /// Get the default voice ID for this TTS model.
@@ -515,7 +517,10 @@ impl XybridModel {
     ///
     /// Returns `None` if the voice is not found or the model has no voice support.
     pub fn voice(&self, voice_id: String) -> Option<XybridVoiceInfo> {
-        self.inner.voice(&voice_id).map(XybridVoiceInfo::from)
+        self.inner
+            .voice(&voice_id)
+            .map(facade::VoiceInfo::from_sdk)
+            .map(XybridVoiceInfo::from)
     }
 }
 
@@ -667,33 +672,11 @@ impl XybridModelLoader {
 mod tests {
     use super::*;
 
-    // Pure-helper tests: exercise every accepted platform without touching
-    // the process-global OnceLock in xybrid-sdk. This is the only way to
-    // assert "swift" → "swift" mapping in the same test process where the
-    // Kotlin integration test below has already locked the OnceLock.
-    #[test]
-    fn resolve_binding_kotlin_returns_kotlin() {
-        assert_eq!(resolve_binding("kotlin"), "kotlin");
-    }
-
-    #[test]
-    fn resolve_binding_swift_returns_swift() {
-        assert_eq!(resolve_binding("swift"), "swift");
-    }
-
-    #[test]
-    fn resolve_binding_unknown_returns_default() {
-        assert_eq!(resolve_binding("evil_unknown"), xybrid_sdk::DEFAULT_BINDING);
-        assert_eq!(resolve_binding(""), xybrid_sdk::DEFAULT_BINDING);
-        assert_eq!(resolve_binding("KOTLIN"), xybrid_sdk::DEFAULT_BINDING);
-        assert_eq!(resolve_binding("flutter"), xybrid_sdk::DEFAULT_BINDING);
-    }
-
     // Single combined integration test: the binding is process-global via
     // OnceLock, so splitting into multiple tests that call `set_binding`
     // would race on which one observes the first set. The Kotlin path is
-    // the canonical wire-through; the Swift path is verified at the pure
-    // `resolve_binding` layer above.
+    // the canonical wire-through; resolution of unknown / Swift platform
+    // strings is covered by the facade's own test suite.
     #[test]
     fn set_binding_kotlin_registers_kotlin_binding() {
         // Kotlin wrapper calls this from Xybrid.init().
@@ -715,13 +698,12 @@ mod tests {
         set_binding("swift".to_string());
         assert_eq!(xybrid_sdk::get_binding(), "kotlin");
 
-        // Unknown values must not propagate raw to the registry header
-        // (defensive sanitization parallel to build_client_header). The
-        // OnceLock is already set, so behavior is unobservable here, but
-        // the wire-through call still goes through `resolve_binding`'s
-        // closed match — the `_ => DEFAULT_BINDING` branch is what
-        // protects a cold-start process from header pollution and is
-        // exercised directly by `resolve_binding_unknown_returns_default`.
+        // Unknown values must not propagate raw to the registry header. The
+        // OnceLock is already set so behavior is unobservable here, but
+        // the wire-through call still goes through the facade's closed
+        // match — the `_ => DEFAULT_BINDING` branch protects a cold-start
+        // process from header pollution and is exercised directly by the
+        // facade's own test suite.
         set_binding("evil_unknown".to_string());
         assert_eq!(xybrid_sdk::get_binding(), "kotlin");
     }
@@ -732,36 +714,43 @@ mod tests {
     // mapping at the conversion layer keeps these tests deterministic
     // regardless of test ordering.
     #[test]
-    fn thermal_state_round_trips_through_sdk_type() {
-        for variant in [
-            XybridThermalState::Normal,
-            XybridThermalState::Warm,
-            XybridThermalState::Hot,
-            XybridThermalState::Critical,
-        ] {
-            let sdk: xybrid_sdk::ThermalState = variant.into();
-            let back: XybridThermalState = sdk.into();
-            assert_eq!(variant, back);
-        }
+    fn thermal_state_maps_to_facade_variants() {
+        assert_eq!(
+            facade::ThermalState::from(XybridThermalState::Normal),
+            facade::ThermalState::Normal
+        );
+        assert_eq!(
+            facade::ThermalState::from(XybridThermalState::Warm),
+            facade::ThermalState::Warm
+        );
+        assert_eq!(
+            facade::ThermalState::from(XybridThermalState::Hot),
+            facade::ThermalState::Hot
+        );
+        assert_eq!(
+            facade::ThermalState::from(XybridThermalState::Critical),
+            facade::ThermalState::Critical
+        );
     }
 
+    // Confirm the SDK→XybridError leg routes through the facade. Spot-check
+    // a couple of variants (full coverage lives in the facade's tests).
     #[test]
-    fn thermal_state_maps_to_documented_sdk_variants() {
-        assert_eq!(
-            xybrid_sdk::ThermalState::from(XybridThermalState::Normal),
-            xybrid_sdk::ThermalState::Normal
-        );
-        assert_eq!(
-            xybrid_sdk::ThermalState::from(XybridThermalState::Warm),
-            xybrid_sdk::ThermalState::Warm
-        );
-        assert_eq!(
-            xybrid_sdk::ThermalState::from(XybridThermalState::Hot),
-            xybrid_sdk::ThermalState::Hot
-        );
-        assert_eq!(
-            xybrid_sdk::ThermalState::from(XybridThermalState::Critical),
-            xybrid_sdk::ThermalState::Critical
-        );
+    fn xybrid_error_from_sdk_routes_via_facade() {
+        let sdk_err = xybrid_sdk::SdkError::ModelNotFound("foo".to_string());
+        match XybridError::from(sdk_err) {
+            XybridError::ModelNotFound { message } => assert_eq!(message, "foo"),
+            other => panic!("expected ModelNotFound, got {other:?}"),
+        }
+
+        // SdkError::Offline → XybridError::NetworkError is the documented
+        // ABI-compat collapse; protect it explicitly so an accidental
+        // facade re-shape doesn't quietly break the Swift/Kotlin sealed
+        // hierarchy.
+        let sdk_err = xybrid_sdk::SdkError::Offline("dns".to_string());
+        match XybridError::from(sdk_err) {
+            XybridError::NetworkError { message } => assert_eq!(message, "dns"),
+            other => panic!("expected NetworkError, got {other:?}"),
+        }
     }
 }

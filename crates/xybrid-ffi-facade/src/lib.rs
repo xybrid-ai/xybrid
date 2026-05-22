@@ -258,8 +258,9 @@ impl Envelope {
     }
 
     /// Consuming conversion to the SDK type — moves owned payload fields
-    /// into [`sdk::ir::Envelope`] without cloning.
-    fn into_sdk(self) -> sdk::ir::Envelope {
+    /// into [`sdk::ir::Envelope`] without cloning. `pub` so binding crates
+    /// with their own Ffi envelope POD can convert through the facade.
+    pub fn into_sdk(self) -> sdk::ir::Envelope {
         let kind = match self.kind {
             EnvelopeKind::Text { text } => sdk::ir::EnvelopeKind::Text(text),
             EnvelopeKind::Audio { bytes } => sdk::ir::EnvelopeKind::Audio(bytes),
@@ -268,7 +269,7 @@ impl Envelope {
         sdk::ir::Envelope::with_metadata(kind, self.metadata)
     }
 
-    fn from_sdk(env: sdk::ir::Envelope) -> Self {
+    pub fn from_sdk(env: sdk::ir::Envelope) -> Self {
         let kind = match env.kind {
             sdk::ir::EnvelopeKind::Text(text) => EnvelopeKind::Text { text },
             sdk::ir::EnvelopeKind::Audio(bytes) => EnvelopeKind::Audio { bytes },
@@ -577,7 +578,7 @@ pub enum OutputType {
 }
 
 impl OutputType {
-    fn from_sdk(t: sdk::OutputType) -> Self {
+    pub fn from_sdk(t: sdk::OutputType) -> Self {
         match t {
             sdk::OutputType::Text => OutputType::Text,
             sdk::OutputType::Audio => OutputType::Audio,
@@ -605,7 +606,7 @@ pub struct InferenceMetrics {
 }
 
 impl InferenceMetrics {
-    fn from_sdk(m: &sdk::InferenceMetrics) -> Self {
+    pub fn from_sdk(m: &sdk::InferenceMetrics) -> Self {
         Self {
             total_ms: m.total_ms,
             ttft_ms: m.ttft_ms,
@@ -642,7 +643,7 @@ pub struct InferenceResult {
 }
 
 impl InferenceResult {
-    fn from_sdk(result: sdk::InferenceResult) -> Self {
+    pub fn from_sdk(result: sdk::InferenceResult) -> Self {
         let output_type = OutputType::from_sdk(result.output_type());
         let model_id = result.model_id().to_string();
         let latency_ms = result.latency_ms();
@@ -734,21 +735,28 @@ pub fn clear_battery_level() {
 
 /// FFI mirror of [`sdk::VoiceInfo`]. Plain fields, no methods, so every
 /// generator describes it as a record.
+///
+/// `index` and `preview_url` from the core type are deliberately dropped:
+/// `index` is a load-time embedding offset that's meaningless to foreign
+/// consumers, and `preview_url` is unused by all current bindings. Add
+/// them back here if a binding starts surfacing them.
 #[derive(Debug, Clone)]
 pub struct VoiceInfo {
     pub id: String,
     pub name: String,
     pub gender: Option<String>,
     pub language: Option<String>,
+    pub style: Option<String>,
 }
 
 impl VoiceInfo {
-    fn from_sdk(v: sdk::VoiceInfo) -> Self {
+    pub fn from_sdk(v: sdk::VoiceInfo) -> Self {
         Self {
             id: v.id,
             name: v.name,
             gender: v.gender,
             language: v.language,
+            style: v.style,
         }
     }
 }

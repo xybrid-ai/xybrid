@@ -7116,6 +7116,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "uniffi",
+ "xybrid-ffi-facade",
  "xybrid-sdk",
 ]
 
