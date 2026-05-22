@@ -1,0 +1,19 @@
+.github/workflows/release-notify.yml
+  s_95805b5d25d999::t_c62092452f3e5d 1-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "25359ef9d74b892414d8e1ed03579dbb8f30c356",
+  "prompts": {},
+  "sessions": {
+    "s_95805b5d25d999": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f8e184c1-f309-48d2-a35e-f4bc9d18cb59",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
