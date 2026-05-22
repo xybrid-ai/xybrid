@@ -1,0 +1,33 @@
+examples/ios/XybridExample.xcodeproj/project.pbxproj
+  s_93e9e173c209bc::t_8c919b4808be6b 195,252
+crates/xybrid-bolt/boltffi.toml
+  s_93e9e173c209bc::t_3d33f52234b384 16-22
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_93e9e173c209bc::t_f29ed8be916d58 1-1012
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_93e9e173c209bc::t_b0a3321597c8bb 183
+  s_93e9e173c209bc::t_a87c6b27f17097 234-235,237,239,241,243,245,247,249,251,253,255,257,259,261,263,265,267,269,271
+  s_93e9e173c209bc::t_6da4c58f76b32b 5-9,105,109,124-131,134-149,155-163,169-173,176,178-180,182,184-188,193,196,198-216,238,240,242,250,260
+  s_93e9e173c209bc::t_b14ad3889df4ab 150-154
+examples/ios/XybridExample/ContentView.swift
+  s_93e9e173c209bc::t_b445095200b4d0 363-365
+  s_93e9e173c209bc::t_5bc6387efebab7 327-329,331,333,337-338
+Package.swift
+  s_93e9e173c209bc::t_04c345655e4f16 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "f1e9d567b08f2ef45c936eb029aed042b381110b",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
