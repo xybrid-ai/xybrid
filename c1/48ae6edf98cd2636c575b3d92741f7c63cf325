@@ -1,0 +1,21 @@
+tools/scripts/build-android-bolt.sh
+  s_93e9e173c209bc::t_f01069a13fc948 121-153
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_93e9e173c209bc::t_fa51e202f0cfee 1379-1393
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "c148ae6edf98cd2636c575b3d92741f7c63cf325",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
