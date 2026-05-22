@@ -1376,6 +1376,21 @@ private object Native {
             vmName.contains("dalvik", ignoreCase = true) ||
             vmName.contains("art", ignoreCase = true)
         if (isAndroidRuntime) {
+            // Pre-load libc++_shared.so before libxybrid-bolt.so. The Rust
+            // crate links llama.cpp / cpp-httplib / ort-dynamic via CMake
+            // with -DANDROID_STL=c++_shared, so the resulting .so has
+            // unresolved typeinfo symbols (e.g. _ZTISt13runtime_error)
+            // that the loader can only satisfy from libc++_shared.so.
+            // Without this pre-load, System.loadLibrary("xybrid-bolt")
+            // fails at process start with UnsatisfiedLinkError.
+            // ABIs we don't ship libc++_shared.so for (armeabi-v7a, x86)
+            // silently skip — the static-only Rust build on those ABIs
+            // has no C++ deps and loads fine on its own.
+            try {
+                System.loadLibrary("c++_shared")
+            } catch (_: UnsatisfiedLinkError) {
+                // Best effort; fall through to the bolt loadLibrary.
+            }
             System.loadLibrary(androidLibrary)
         } else {
             loadDesktopLibraries(desktopPreferredLibrary, desktopFallbackLibrary)

@@ -118,15 +118,39 @@ echo "==> Bundling ORT runtime from vendor/ort-android/"
 # coverage — armeabi-v7a and x86 are not first-class Android targets
 # for ORT).
 for abi in arm64-v8a x86_64; do
-    for lib in libonnxruntime.so libc++_shared.so; do
-        src="$ORT_VENDOR/$abi/$lib"
-        dst="$KOTLIN_LIBS/$abi/$lib"
-        if [ -f "$src" ]; then
-            cp "$src" "$dst"
-        else
-            echo "    [$abi] missing: $src" >&2
-        fi
-    done
+    src="$ORT_VENDOR/$abi/libonnxruntime.so"
+    if [ -f "$src" ]; then
+        cp "$src" "$KOTLIN_LIBS/$abi/libonnxruntime.so"
+    else
+        echo "    [$abi] missing: $src" >&2
+    fi
+done
+
+echo "==> Bundling libc++_shared.so from NDK for every ABI"
+# `libxybrid-bolt.so` is linked against libc++_shared.so (CMake builds
+# llama.cpp / cpp-httplib / candle's native deps with
+# `-DANDROID_STL=c++_shared`). Without c++_shared next to the bolt lib,
+# the loader fails at process start:
+#   dlopen failed: cannot locate symbol "_ZTISt13runtime_error"
+#       referenced by "libxybrid-bolt.so"
+# Source the .so from the NDK sysroot — same lib the toolchain linked
+# the .so against, so versions match exactly.
+declare -A SYSROOT_ABI=(
+    [arm64-v8a]=aarch64-linux-android
+    [armeabi-v7a]=arm-linux-androideabi
+    [x86]=i686-linux-android
+    [x86_64]=x86_64-linux-android
+)
+NDK_SYSROOT_LIB="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST/sysroot/usr/lib"
+for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+    triple="${SYSROOT_ABI[$abi]}"
+    src="$NDK_SYSROOT_LIB/$triple/libc++_shared.so"
+    dst_dir="$KOTLIN_LIBS/$abi"
+    if [ -f "$src" ] && [ -d "$dst_dir" ]; then
+        cp "$src" "$dst_dir/libc++_shared.so"
+    else
+        echo "    [$abi] skipped (src=$src exists?=$([ -f "$src" ] && echo yes || echo no))"
+    fi
 done
 
 echo "==> Done. Rebuild the example with:"
