@@ -391,10 +391,7 @@ fn warmup_models(stages: &[StageDescriptor]) {
         };
         let bundle_path = PathBuf::from(bundle_path_str);
 
-        let loader_result = if bundle_path
-            .extension()
-            .is_some_and(|ext| ext == "xyb")
-        {
+        let loader_result = if bundle_path.extension().is_some_and(|ext| ext == "xyb") {
             ModelLoader::from_bundle(&bundle_path)
         } else {
             ModelLoader::from_directory(&bundle_path)

@@ -1619,9 +1619,7 @@ impl XybridModel {
             handle
                 .executor
                 .execute(&metadata, &warmup_input, None)
-                .map_err(|e| {
-                    SdkError::InferenceError(format!("Warmup execution failed: {}", e))
-                })?;
+                .map_err(|e| SdkError::InferenceError(format!("Warmup execution failed: {}", e)))?;
         }
 
         let latency_ms = start.elapsed().as_millis() as u32;
