@@ -324,17 +324,18 @@ struct InferenceView: View {
         inferenceState = .loading
 
         Task {
+            // Bolt's constructor is `throws` (synchronous). We still run
+            // it inside `Task` because model resolve + download can take
+            // a while; we want the UI thread unblocked.
             do {
-                let loader = XybridModelLoader.fromRegistry(modelId: modelId)
-                let loadedModel = try await loader.load()
-
-                // Get voices if available
+                let loadedModel = try XybridModel(fromRegistry: modelId)
                 let modelVoices = loadedModel.voices()
+                let defaultVoice = loadedModel.defaultVoice()?.id
 
                 await MainActor.run {
                     self.model = loadedModel
-                    self.voices = modelVoices
-                    if let defaultVoice = loadedModel.defaultVoiceId() {
+                    self.voices = modelVoices.isEmpty ? nil : modelVoices
+                    if let defaultVoice = defaultVoice {
                         self.voiceId = defaultVoice
                     }
                     inferenceState = .idle
@@ -359,7 +360,9 @@ struct InferenceView: View {
                     voiceId: voiceId,
                     speed: 1.0
                 )
-                let result = try await model!.run(envelope: envelope, config: nil)
+                // Bolt's `run` is `throws` (synchronous). `Task` keeps
+                // the UI thread free while inference runs.
+                let result = try model!.run(envelope: envelope)
 
                 await MainActor.run {
                     inferenceState = .completed(result)

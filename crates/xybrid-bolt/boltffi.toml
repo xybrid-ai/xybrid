@@ -13,6 +13,13 @@ enabled = true
 output = "dist/apple"
 deployment_target = "16.0"
 include_macos = false
+# Skip the x86_64-apple-ios simulator slice: `ort-sys` (ONNX Runtime
+# bindings transitively pulled in via `xybrid-sdk/platform-ios`) doesn't
+# ship prebuilt binaries for that target. Apple-Silicon Macs run the
+# iOS simulator on the arm64 slice anyway; the x86_64 slice would only
+# matter for Intel-Mac developers, who would need to compile ONNX
+# Runtime from source.
+simulator_architectures = ["arm64"]
 
 [targets.apple.swift]
 # Matches the existing `import Xybrid` line in

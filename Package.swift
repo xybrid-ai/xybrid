@@ -32,7 +32,7 @@ import PackageDescription
 //                            external SPM consumers resolve.
 //
 // =============================================================================
-let useLocalNatives = false
+let useLocalNatives = true
 
 // Version for remote XybridFFI download (used when useLocalNatives = false).
 // Updated by the release workflow at tag time.
