@@ -10,11 +10,18 @@
 //!   re-exports, so the facade's types are re-declared here and converted
 //!   via plain `From` impls.
 //! - The error enum is marked `#[error]` so it surfaces as a typed
-//!   exception in target languages. Named `XybridError` (not `Error`)
-//!   to avoid colliding with Swift's stdlib `Error` protocol.
+//!   exception in target languages.
 //! - Handle types use `#[export] impl Foo { ... }`; BoltFFI manages the
 //!   heap allocation and FFI handle internally — no `Arc<Self>` return is
 //!   required at the call site.
+//!
+//! ## Naming convention
+//!
+//! All FFI-exposed types are prefixed `Xybrid*` to match the existing
+//! foreign-language SDK convention (uniffi already exposes `XybridError`,
+//! `XybridResult`, `XybridEnvelope`, etc.; the Flutter `Ffi*` types live in
+//! a separate generator and aren't affected). The prefix also avoids
+//! collisions with Swift's stdlib `Error` protocol on the error enum.
 //!
 //! Run `boltffi pack all --release` (or per-target,
 //! e.g. `boltffi pack apple`) from `tools/scripts/` to generate the
@@ -22,17 +29,17 @@
 //!
 //! ## Migration status (sketch)
 //!
-//! - **Records and Error**: complete.
+//! - **Records and `XybridError`**: complete.
 //! - **Free functions** (init / push API): complete for the subset every
 //!   binding needs at startup.
-//! - **`XybridModel` + `ModelLoader`**: minimal `#[export]` blocks
-//!   covering the load / run / warmup / voice surface. Enough to validate
-//!   the proc-macro shape against the facade.
+//! - **`XybridModel`**: minimal `#[export]` block covering the load / run /
+//!   warmup / voice surface. Enough to validate the proc-macro shape
+//!   against the facade.
 //! - **Deferred to follow-up commits**:
 //!   - Token streaming (`run_stream` / `run_stream_with_context`) — needs
 //!     BoltFFI's stream-event convention nailed down across all targets.
-//!   - `CancellationToken` as an `Arc<Self>` handle.
-//!   - `ConversationContextHandle` (uniffi opaque object equivalent).
+//!   - `XybridCancellationToken` as an `Arc<Self>` handle.
+//!   - `XybridConversationContext` (uniffi opaque object equivalent).
 //!   - `run_with_options` / `run_with_context`.
 //!   - Pipeline surface.
 //!
@@ -155,71 +162,71 @@ impl From<facade::Error> for XybridError {
 
 #[data]
 #[derive(Clone)]
-pub enum EnvelopeKind {
+pub enum XybridEnvelopeKind {
     Text { text: String },
     Audio { bytes: Vec<u8> },
     Embedding { values: Vec<f32> },
 }
 
-impl From<EnvelopeKind> for facade::EnvelopeKind {
-    fn from(k: EnvelopeKind) -> Self {
+impl From<XybridEnvelopeKind> for facade::EnvelopeKind {
+    fn from(k: XybridEnvelopeKind) -> Self {
         match k {
-            EnvelopeKind::Text { text } => facade::EnvelopeKind::Text { text },
-            EnvelopeKind::Audio { bytes } => facade::EnvelopeKind::Audio { bytes },
-            EnvelopeKind::Embedding { values } => facade::EnvelopeKind::Embedding { values },
+            XybridEnvelopeKind::Text { text } => facade::EnvelopeKind::Text { text },
+            XybridEnvelopeKind::Audio { bytes } => facade::EnvelopeKind::Audio { bytes },
+            XybridEnvelopeKind::Embedding { values } => facade::EnvelopeKind::Embedding { values },
         }
     }
 }
 
-impl From<facade::EnvelopeKind> for EnvelopeKind {
+impl From<facade::EnvelopeKind> for XybridEnvelopeKind {
     fn from(k: facade::EnvelopeKind) -> Self {
         match k {
-            facade::EnvelopeKind::Text { text } => EnvelopeKind::Text { text },
-            facade::EnvelopeKind::Audio { bytes } => EnvelopeKind::Audio { bytes },
-            facade::EnvelopeKind::Embedding { values } => EnvelopeKind::Embedding { values },
+            facade::EnvelopeKind::Text { text } => XybridEnvelopeKind::Text { text },
+            facade::EnvelopeKind::Audio { bytes } => XybridEnvelopeKind::Audio { bytes },
+            facade::EnvelopeKind::Embedding { values } => XybridEnvelopeKind::Embedding { values },
         }
     }
 }
 
 /// Single metadata key/value entry. BoltFFI doesn't auto-derive
 /// `WireEncode` for `HashMap<String, String>`, so we expose metadata as
-/// `Vec<MetadataEntry>`. The conversion back to `HashMap` happens at
-/// the facade boundary inside [`Envelope::into`].
+/// `Vec<XybridMetadataEntry>`. The conversion back to `HashMap` happens
+/// at the facade boundary inside [`XybridEnvelope::into`].
 #[data]
 #[derive(Clone)]
-pub struct MetadataEntry {
+pub struct XybridMetadataEntry {
     pub key: String,
     pub value: String,
 }
 
 #[data]
 #[derive(Clone)]
-pub struct Envelope {
-    pub kind: EnvelopeKind,
-    pub metadata: Vec<MetadataEntry>,
+pub struct XybridEnvelope {
+    pub kind: XybridEnvelopeKind,
+    pub metadata: Vec<XybridMetadataEntry>,
 }
 
-impl From<Envelope> for facade::Envelope {
-    fn from(e: Envelope) -> Self {
+impl From<XybridEnvelope> for facade::Envelope {
+    fn from(e: XybridEnvelope) -> Self {
         facade::Envelope {
             kind: e.kind.into(),
             metadata: e
                 .metadata
                 .into_iter()
-                .map(|MetadataEntry { key, value }| (key, value))
+                .map(|XybridMetadataEntry { key, value }| (key, value))
                 .collect(),
         }
     }
 }
 
-impl From<facade::Envelope> for Envelope {
+impl From<facade::Envelope> for XybridEnvelope {
     fn from(e: facade::Envelope) -> Self {
         Self {
             kind: e.kind.into(),
             metadata: e
                 .metadata
                 .into_iter()
-                .map(|(key, value)| MetadataEntry { key, value })
+                .map(|(key, value)| XybridMetadataEntry { key, value })
                 .collect(),
         }
     }
@@ -227,18 +234,18 @@ impl From<facade::Envelope> for Envelope {
 
 #[data]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum MessageRole {
+pub enum XybridMessageRole {
     System,
     User,
     Assistant,
 }
 
-impl From<MessageRole> for facade::MessageRole {
-    fn from(r: MessageRole) -> Self {
+impl From<XybridMessageRole> for facade::MessageRole {
+    fn from(r: XybridMessageRole) -> Self {
         match r {
-            MessageRole::System => facade::MessageRole::System,
-            MessageRole::User => facade::MessageRole::User,
-            MessageRole::Assistant => facade::MessageRole::Assistant,
+            XybridMessageRole::System => facade::MessageRole::System,
+            XybridMessageRole::User => facade::MessageRole::User,
+            XybridMessageRole::Assistant => facade::MessageRole::Assistant,
         }
     }
 }
@@ -249,7 +256,7 @@ impl From<MessageRole> for facade::MessageRole {
 
 #[data]
 #[derive(Clone)]
-pub struct GenerationConfig {
+pub struct XybridGenerationConfig {
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
@@ -259,8 +266,8 @@ pub struct GenerationConfig {
     pub stop_sequences: Vec<String>,
 }
 
-impl From<GenerationConfig> for facade::GenerationConfig {
-    fn from(c: GenerationConfig) -> Self {
+impl From<XybridGenerationConfig> for facade::GenerationConfig {
+    fn from(c: XybridGenerationConfig) -> Self {
         Self {
             max_tokens: c.max_tokens,
             temperature: c.temperature,
@@ -275,36 +282,38 @@ impl From<GenerationConfig> for facade::GenerationConfig {
 
 #[data]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum AbortSignal {
+pub enum XybridAbortSignal {
     MemoryPressureWarn,
     MemoryPressureCritical,
     ThermalHot,
     ThermalCritical,
 }
 
-impl From<AbortSignal> for facade::AbortSignal {
-    fn from(s: AbortSignal) -> Self {
+impl From<XybridAbortSignal> for facade::AbortSignal {
+    fn from(s: XybridAbortSignal) -> Self {
         match s {
-            AbortSignal::MemoryPressureWarn => facade::AbortSignal::MemoryPressureWarn,
-            AbortSignal::MemoryPressureCritical => facade::AbortSignal::MemoryPressureCritical,
-            AbortSignal::ThermalHot => facade::AbortSignal::ThermalHot,
-            AbortSignal::ThermalCritical => facade::AbortSignal::ThermalCritical,
+            XybridAbortSignal::MemoryPressureWarn => facade::AbortSignal::MemoryPressureWarn,
+            XybridAbortSignal::MemoryPressureCritical => {
+                facade::AbortSignal::MemoryPressureCritical
+            }
+            XybridAbortSignal::ThermalHot => facade::AbortSignal::ThermalHot,
+            XybridAbortSignal::ThermalCritical => facade::AbortSignal::ThermalCritical,
         }
     }
 }
 
 #[data]
 #[derive(Clone)]
-pub struct RunOptions {
-    pub generation_config: Option<GenerationConfig>,
-    pub abort_on: Vec<AbortSignal>,
+pub struct XybridRunOptions {
+    pub generation_config: Option<XybridGenerationConfig>,
+    pub abort_on: Vec<XybridAbortSignal>,
     pub fallback_to_cloud: bool,
     pub max_grace_tokens: u32,
     pub correlation_id: Option<String>,
 }
 
-impl From<RunOptions> for facade::RunOptions {
-    fn from(o: RunOptions) -> Self {
+impl From<XybridRunOptions> for facade::RunOptions {
+    fn from(o: XybridRunOptions) -> Self {
         Self {
             generation_config: o.generation_config.map(Into::into),
             abort_on: o.abort_on.into_iter().map(Into::into).collect(),
@@ -321,32 +330,32 @@ impl From<RunOptions> for facade::RunOptions {
 
 #[data]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum OutputType {
+pub enum XybridOutputType {
     Text,
     Audio,
     Embedding,
     Unknown,
 }
 
-impl From<facade::OutputType> for OutputType {
+impl From<facade::OutputType> for XybridOutputType {
     fn from(t: facade::OutputType) -> Self {
         match t {
-            facade::OutputType::Text => OutputType::Text,
-            facade::OutputType::Audio => OutputType::Audio,
-            facade::OutputType::Embedding => OutputType::Embedding,
-            facade::OutputType::Unknown => OutputType::Unknown,
+            facade::OutputType::Text => XybridOutputType::Text,
+            facade::OutputType::Audio => XybridOutputType::Audio,
+            facade::OutputType::Embedding => XybridOutputType::Embedding,
+            facade::OutputType::Unknown => XybridOutputType::Unknown,
         }
     }
 }
 
 #[data]
 #[derive(Clone)]
-pub struct StageLatency {
+pub struct XybridStageLatency {
     pub stage_id: String,
     pub latency_ms: u32,
 }
 
-impl From<&facade::StageLatency> for StageLatency {
+impl From<&facade::StageLatency> for XybridStageLatency {
     fn from(s: &facade::StageLatency) -> Self {
         Self {
             stage_id: s.stage_id.clone(),
@@ -357,17 +366,17 @@ impl From<&facade::StageLatency> for StageLatency {
 
 #[data]
 #[derive(Clone)]
-pub struct InferenceMetrics {
+pub struct XybridInferenceMetrics {
     pub total_ms: u32,
     pub ttft_ms: Option<u32>,
     pub tokens_per_second: Option<f32>,
     pub prefill_tps: Option<f32>,
     pub decode_tps: Option<f32>,
     pub tokens_out: Option<u32>,
-    pub stage_latencies_ms: Vec<StageLatency>,
+    pub stage_latencies_ms: Vec<XybridStageLatency>,
 }
 
-impl From<&facade::InferenceMetrics> for InferenceMetrics {
+impl From<&facade::InferenceMetrics> for XybridInferenceMetrics {
     fn from(m: &facade::InferenceMetrics) -> Self {
         Self {
             total_ms: m.total_ms,
@@ -381,19 +390,22 @@ impl From<&facade::InferenceMetrics> for InferenceMetrics {
     }
 }
 
+/// Inference output. Named `XybridResult` (not `XybridInferenceResult`)
+/// to match the existing uniffi-generated Kotlin/Swift name — the iOS
+/// example references `XybridResult` directly.
 #[data]
 #[derive(Clone)]
-pub struct InferenceResult {
-    pub envelope: Envelope,
-    pub output_type: OutputType,
+pub struct XybridResult {
+    pub envelope: XybridEnvelope,
+    pub output_type: XybridOutputType,
     pub model_id: String,
     pub latency_ms: u32,
-    pub metrics: InferenceMetrics,
+    pub metrics: XybridInferenceMetrics,
 }
 
-impl From<facade::InferenceResult> for InferenceResult {
+impl From<facade::InferenceResult> for XybridResult {
     fn from(r: facade::InferenceResult) -> Self {
-        let metrics = InferenceMetrics::from(&r.metrics);
+        let metrics = XybridInferenceMetrics::from(&r.metrics);
         Self {
             envelope: r.envelope.into(),
             output_type: r.output_type.into(),
@@ -410,7 +422,7 @@ impl From<facade::InferenceResult> for InferenceResult {
 
 #[data]
 #[derive(Clone)]
-pub struct VoiceInfo {
+pub struct XybridVoiceInfo {
     pub id: String,
     pub name: String,
     pub gender: Option<String>,
@@ -418,7 +430,7 @@ pub struct VoiceInfo {
     pub style: Option<String>,
 }
 
-impl From<facade::VoiceInfo> for VoiceInfo {
+impl From<facade::VoiceInfo> for XybridVoiceInfo {
     fn from(v: facade::VoiceInfo) -> Self {
         Self {
             id: v.id,
@@ -436,26 +448,26 @@ impl From<facade::VoiceInfo> for VoiceInfo {
 
 #[data]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ThermalState {
+pub enum XybridThermalState {
     Normal,
     Warm,
     Hot,
     Critical,
 }
 
-impl From<ThermalState> for facade::ThermalState {
-    fn from(s: ThermalState) -> Self {
+impl From<XybridThermalState> for facade::ThermalState {
+    fn from(s: XybridThermalState) -> Self {
         match s {
-            ThermalState::Normal => facade::ThermalState::Normal,
-            ThermalState::Warm => facade::ThermalState::Warm,
-            ThermalState::Hot => facade::ThermalState::Hot,
-            ThermalState::Critical => facade::ThermalState::Critical,
+            XybridThermalState::Normal => facade::ThermalState::Normal,
+            XybridThermalState::Warm => facade::ThermalState::Warm,
+            XybridThermalState::Hot => facade::ThermalState::Hot,
+            XybridThermalState::Critical => facade::ThermalState::Critical,
         }
     }
 }
 
 #[export]
-pub fn set_thermal_state(state: ThermalState) {
+pub fn set_thermal_state(state: XybridThermalState) {
     facade::set_thermal_state(state.into());
 }
 
@@ -517,8 +529,9 @@ pub fn set_provider_api_key(provider: String, api_key: String) {
 // loaded model from `ModelLoader::load` back to `XybridModel` would
 // require manual handle-table plumbing. Collapsing it into
 // `XybridModel::from_*` constructors removes that whole layer (the
-// foreign API becomes one type, like caracas's `Dict::install_*`) and
-// matches the facade's existing handle convention.
+// foreign API becomes `try XybridModel(fromRegistry:)` rather than
+// `XybridModelLoader.fromRegistry().load()` — fewer concepts, same
+// capability) and matches the facade's existing handle convention.
 
 pub struct XybridModel {
     inner: std::sync::Arc<facade::XybridModel>,
@@ -564,7 +577,7 @@ impl XybridModel {
         self.inner.version()
     }
 
-    pub fn output_type(&self) -> OutputType {
+    pub fn output_type(&self) -> XybridOutputType {
         self.inner.output_type().into()
     }
 
@@ -584,23 +597,23 @@ impl XybridModel {
         self.inner.has_voices()
     }
 
-    pub fn voices(&self) -> Vec<VoiceInfo> {
+    pub fn voices(&self) -> Vec<XybridVoiceInfo> {
         self.inner
             .voices()
             .into_iter()
-            .map(VoiceInfo::from)
+            .map(XybridVoiceInfo::from)
             .collect()
     }
 
-    pub fn default_voice(&self) -> Option<VoiceInfo> {
-        self.inner.default_voice().map(VoiceInfo::from)
+    pub fn default_voice(&self) -> Option<XybridVoiceInfo> {
+        self.inner.default_voice().map(XybridVoiceInfo::from)
     }
 
-    pub fn voice(&self, voice_id: String) -> Option<VoiceInfo> {
-        self.inner.voice(voice_id).map(VoiceInfo::from)
+    pub fn voice(&self, voice_id: String) -> Option<XybridVoiceInfo> {
+        self.inner.voice(voice_id).map(XybridVoiceInfo::from)
     }
 
-    pub fn run(&self, envelope: Envelope) -> Result<InferenceResult, XybridError> {
+    pub fn run(&self, envelope: XybridEnvelope) -> Result<XybridResult, XybridError> {
         let result = self.inner.run(envelope.into()).map_err(XybridError::from)?;
         Ok(result.into())
     }
@@ -629,9 +642,9 @@ mod tests {
 
     #[test]
     fn envelope_roundtrips_through_facade() {
-        let env = Envelope {
-            kind: EnvelopeKind::Text { text: "hi".into() },
-            metadata: vec![MetadataEntry {
+        let env = XybridEnvelope {
+            kind: XybridEnvelopeKind::Text { text: "hi".into() },
+            metadata: vec![XybridMetadataEntry {
                 key: "role".into(),
                 value: "user".into(),
             }],
@@ -641,9 +654,9 @@ mod tests {
         // Vec → HashMap conversion (and the test also pins the round trip
         // back through the bolt-side Vec representation).
         assert_eq!(facade_env.metadata.get("role"), Some(&"user".to_string()));
-        let back: Envelope = facade_env.into();
+        let back: XybridEnvelope = facade_env.into();
         match back.kind {
-            EnvelopeKind::Text { text } => assert_eq!(text, "hi"),
+            XybridEnvelopeKind::Text { text } => assert_eq!(text, "hi"),
             _ => panic!("expected text"),
         }
         assert_eq!(back.metadata.len(), 1);
@@ -660,9 +673,9 @@ mod tests {
 
     #[test]
     fn run_options_threads_abort_signals() {
-        let opts = RunOptions {
+        let opts = XybridRunOptions {
             generation_config: None,
-            abort_on: vec![AbortSignal::ThermalCritical],
+            abort_on: vec![XybridAbortSignal::ThermalCritical],
             fallback_to_cloud: true,
             max_grace_tokens: 4,
             correlation_id: Some("trace".into()),
