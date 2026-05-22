@@ -10,8 +10,8 @@
 //!   re-exports, so the facade's types are re-declared here and converted
 //!   via plain `From` impls.
 //! - The error enum is marked `#[error]` so it surfaces as a typed
-//!   exception in target languages (`enum Error: Error` in Swift,
-//!   `sealed class XybridException : Exception()` in Kotlin, etc.).
+//!   exception in target languages. Named `XybridError` (not `Error`)
+//!   to avoid colliding with Swift's stdlib `Error` protocol.
 //! - Handle types use `#[export] impl Foo { ... }`; BoltFFI manages the
 //!   heap allocation and FFI handle internally — no `Arc<Self>` return is
 //!   required at the call site.
@@ -45,16 +45,21 @@ use boltffi::*;
 use xybrid_ffi_facade as facade;
 
 // ============================================================================
-// Error
+// XybridError
 // ============================================================================
 
 /// Errors surfaced across the FFI boundary. Variants mirror
 /// [`facade::Error`] — the facade owns the SDK→FFI translation; this enum
 /// only re-decorates it for the BoltFFI generator (proc macros must live
 /// on the type definition).
+///
+/// Named `XybridError` (not `Error`) so the emitted Swift type doesn't
+/// shadow / collide with Swift's stdlib `Error` protocol, and so the
+/// Kotlin sealed-hierarchy name matches the existing uniffi consumer
+/// expectations.
 #[error]
 #[derive(Debug, Clone)]
-pub enum Error {
+pub enum XybridError {
     ModelNotFound { id: String },
     DirectoryNotFound { path: String },
     MetadataNotFound { path: String },
@@ -75,7 +80,7 @@ pub enum Error {
     Timeout { timeout_ms: u64 },
 }
 
-impl Error {
+impl XybridError {
     /// Stable numeric discriminant inherited from the facade. Same wire
     /// codes across every binding so foreign consumers can switch on a
     /// shared protocol.
@@ -86,60 +91,60 @@ impl Error {
     }
 }
 
-impl From<Error> for facade::Error {
-    fn from(e: Error) -> Self {
+impl From<XybridError> for facade::Error {
+    fn from(e: XybridError) -> Self {
         match e {
-            Error::ModelNotFound { id } => facade::Error::ModelNotFound { id },
-            Error::DirectoryNotFound { path } => facade::Error::DirectoryNotFound { path },
-            Error::MetadataNotFound { path } => facade::Error::MetadataNotFound { path },
-            Error::MetadataInvalid { message } => facade::Error::MetadataInvalid { message },
-            Error::LoadError { message } => facade::Error::LoadError { message },
-            Error::InferenceError { message } => facade::Error::InferenceError { message },
-            Error::AbortedForCloudFallback { reason } => {
+            XybridError::ModelNotFound { id } => facade::Error::ModelNotFound { id },
+            XybridError::DirectoryNotFound { path } => facade::Error::DirectoryNotFound { path },
+            XybridError::MetadataNotFound { path } => facade::Error::MetadataNotFound { path },
+            XybridError::MetadataInvalid { message } => facade::Error::MetadataInvalid { message },
+            XybridError::LoadError { message } => facade::Error::LoadError { message },
+            XybridError::InferenceError { message } => facade::Error::InferenceError { message },
+            XybridError::AbortedForCloudFallback { reason } => {
                 facade::Error::AbortedForCloudFallback { reason }
             }
-            Error::StreamingNotSupported => facade::Error::StreamingNotSupported,
-            Error::NotLoaded => facade::Error::NotLoaded,
-            Error::ConfigError { message } => facade::Error::ConfigError { message },
-            Error::NetworkError { message } => facade::Error::NetworkError { message },
-            Error::Offline { message } => facade::Error::Offline { message },
-            Error::IoError { message } => facade::Error::IoError { message },
-            Error::CacheError { message } => facade::Error::CacheError { message },
-            Error::PipelineError { message } => facade::Error::PipelineError { message },
-            Error::CircuitOpen { message } => facade::Error::CircuitOpen { message },
-            Error::RateLimited { retry_after_secs } => {
+            XybridError::StreamingNotSupported => facade::Error::StreamingNotSupported,
+            XybridError::NotLoaded => facade::Error::NotLoaded,
+            XybridError::ConfigError { message } => facade::Error::ConfigError { message },
+            XybridError::NetworkError { message } => facade::Error::NetworkError { message },
+            XybridError::Offline { message } => facade::Error::Offline { message },
+            XybridError::IoError { message } => facade::Error::IoError { message },
+            XybridError::CacheError { message } => facade::Error::CacheError { message },
+            XybridError::PipelineError { message } => facade::Error::PipelineError { message },
+            XybridError::CircuitOpen { message } => facade::Error::CircuitOpen { message },
+            XybridError::RateLimited { retry_after_secs } => {
                 facade::Error::RateLimited { retry_after_secs }
             }
-            Error::Timeout { timeout_ms } => facade::Error::Timeout { timeout_ms },
+            XybridError::Timeout { timeout_ms } => facade::Error::Timeout { timeout_ms },
         }
     }
 }
 
-impl From<facade::Error> for Error {
+impl From<facade::Error> for XybridError {
     fn from(e: facade::Error) -> Self {
         match e {
-            facade::Error::ModelNotFound { id } => Error::ModelNotFound { id },
-            facade::Error::DirectoryNotFound { path } => Error::DirectoryNotFound { path },
-            facade::Error::MetadataNotFound { path } => Error::MetadataNotFound { path },
-            facade::Error::MetadataInvalid { message } => Error::MetadataInvalid { message },
-            facade::Error::LoadError { message } => Error::LoadError { message },
-            facade::Error::InferenceError { message } => Error::InferenceError { message },
+            facade::Error::ModelNotFound { id } => XybridError::ModelNotFound { id },
+            facade::Error::DirectoryNotFound { path } => XybridError::DirectoryNotFound { path },
+            facade::Error::MetadataNotFound { path } => XybridError::MetadataNotFound { path },
+            facade::Error::MetadataInvalid { message } => XybridError::MetadataInvalid { message },
+            facade::Error::LoadError { message } => XybridError::LoadError { message },
+            facade::Error::InferenceError { message } => XybridError::InferenceError { message },
             facade::Error::AbortedForCloudFallback { reason } => {
-                Error::AbortedForCloudFallback { reason }
+                XybridError::AbortedForCloudFallback { reason }
             }
-            facade::Error::StreamingNotSupported => Error::StreamingNotSupported,
-            facade::Error::NotLoaded => Error::NotLoaded,
-            facade::Error::ConfigError { message } => Error::ConfigError { message },
-            facade::Error::NetworkError { message } => Error::NetworkError { message },
-            facade::Error::Offline { message } => Error::Offline { message },
-            facade::Error::IoError { message } => Error::IoError { message },
-            facade::Error::CacheError { message } => Error::CacheError { message },
-            facade::Error::PipelineError { message } => Error::PipelineError { message },
-            facade::Error::CircuitOpen { message } => Error::CircuitOpen { message },
+            facade::Error::StreamingNotSupported => XybridError::StreamingNotSupported,
+            facade::Error::NotLoaded => XybridError::NotLoaded,
+            facade::Error::ConfigError { message } => XybridError::ConfigError { message },
+            facade::Error::NetworkError { message } => XybridError::NetworkError { message },
+            facade::Error::Offline { message } => XybridError::Offline { message },
+            facade::Error::IoError { message } => XybridError::IoError { message },
+            facade::Error::CacheError { message } => XybridError::CacheError { message },
+            facade::Error::PipelineError { message } => XybridError::PipelineError { message },
+            facade::Error::CircuitOpen { message } => XybridError::CircuitOpen { message },
             facade::Error::RateLimited { retry_after_secs } => {
-                Error::RateLimited { retry_after_secs }
+                XybridError::RateLimited { retry_after_secs }
             }
-            facade::Error::Timeout { timeout_ms } => Error::Timeout { timeout_ms },
+            facade::Error::Timeout { timeout_ms } => XybridError::Timeout { timeout_ms },
         }
     }
 }
@@ -474,8 +479,12 @@ pub fn clear_battery_level() {
 // ============================================================================
 
 #[export]
-pub fn init_sdk_cache_dir(path: String) {
-    facade::init_sdk_cache_dir(path);
+pub fn init_sdk_cache_dir(cache_dir: String) {
+    // Param name pinned to `cache_dir` (not `path`) so the emitted Swift
+    // is `initSdkCacheDir(cacheDir:)`, matching the existing
+    // `examples/ios/XybridExample` call site that uniffi already exposes
+    // under that label.
+    facade::init_sdk_cache_dir(cache_dir);
 }
 
 #[export]
@@ -518,32 +527,32 @@ pub struct XybridModel {
 #[export]
 impl XybridModel {
     /// Load from the xybrid registry. Recommended path.
-    pub fn from_registry(id: String) -> Result<Self, Error> {
+    pub fn from_registry(id: String) -> Result<Self, XybridError> {
         let model = facade::ModelLoader::from_registry(id)
             .load()
-            .map_err(Error::from)?;
+            .map_err(XybridError::from)?;
         Ok(Self { inner: model })
     }
 
     /// Load from a local model directory (must contain `model_metadata.json`).
-    pub fn from_directory(path: String) -> Result<Self, Error> {
-        let loader = facade::ModelLoader::from_directory(path).map_err(Error::from)?;
-        let model = loader.load().map_err(Error::from)?;
+    pub fn from_directory(path: String) -> Result<Self, XybridError> {
+        let loader = facade::ModelLoader::from_directory(path).map_err(XybridError::from)?;
+        let model = loader.load().map_err(XybridError::from)?;
         Ok(Self { inner: model })
     }
 
     /// Load from a local `.xyb` bundle.
-    pub fn from_bundle(path: String) -> Result<Self, Error> {
-        let loader = facade::ModelLoader::from_bundle(path).map_err(Error::from)?;
-        let model = loader.load().map_err(Error::from)?;
+    pub fn from_bundle(path: String) -> Result<Self, XybridError> {
+        let loader = facade::ModelLoader::from_bundle(path).map_err(XybridError::from)?;
+        let model = loader.load().map_err(XybridError::from)?;
         Ok(Self { inner: model })
     }
 
     /// Resolve and load from a HuggingFace repo (`org/repo` or `org/repo:variant`).
-    pub fn from_huggingface(repo: String) -> Result<Self, Error> {
+    pub fn from_huggingface(repo: String) -> Result<Self, XybridError> {
         let model = facade::ModelLoader::from_huggingface(repo)
             .load()
-            .map_err(Error::from)?;
+            .map_err(XybridError::from)?;
         Ok(Self { inner: model })
     }
 
@@ -591,17 +600,17 @@ impl XybridModel {
         self.inner.voice(voice_id).map(VoiceInfo::from)
     }
 
-    pub fn run(&self, envelope: Envelope) -> Result<InferenceResult, Error> {
-        let result = self.inner.run(envelope.into()).map_err(Error::from)?;
+    pub fn run(&self, envelope: Envelope) -> Result<InferenceResult, XybridError> {
+        let result = self.inner.run(envelope.into()).map_err(XybridError::from)?;
         Ok(result.into())
     }
 
-    pub fn warmup(&self) -> Result<(), Error> {
-        self.inner.warmup().map_err(Error::from)
+    pub fn warmup(&self) -> Result<(), XybridError> {
+        self.inner.warmup().map_err(XybridError::from)
     }
 
-    pub fn unload(&self) -> Result<(), Error> {
-        self.inner.unload().map_err(Error::from)
+    pub fn unload(&self) -> Result<(), XybridError> {
+        self.inner.unload().map_err(XybridError::from)
     }
 }
 
@@ -642,7 +651,7 @@ mod tests {
 
     #[test]
     fn error_code_matches_facade() {
-        let e = Error::Timeout { timeout_ms: 42 };
+        let e = XybridError::Timeout { timeout_ms: 42 };
         // Same wire code as facade::Error::Timeout — protects the
         // foreign-language consumer's switch-on-code logic from drift.
         let f: facade::Error = e.clone().into();
