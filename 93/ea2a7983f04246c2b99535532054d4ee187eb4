@@ -1,0 +1,42 @@
+crates/xybrid-uniffi/Cargo.toml
+  s_93e9e173c209bc::t_727b7127638273 21-26
+crates/xybrid-uniffi/src/lib.rs
+  s_93e9e173c209bc::t_be9edec84094e8 103,114,120,126
+  s_93e9e173c209bc::t_edda61495366f6 85,88-91
+  s_93e9e173c209bc::t_28edee9c5f1268 36-38,44
+  s_93e9e173c209bc::t_5c62a1f8b23f3d 343-344
+  s_93e9e173c209bc::t_0f2090c7afc341 317-318
+  s_93e9e173c209bc::t_e28ec262f94bd4 255-266,268-271
+  s_93e9e173c209bc::t_2ae3838e707430 416-417
+  s_93e9e173c209bc::t_1c2d95535cdca7 489
+  s_93e9e173c209bc::t_ded1e9ce210906 678-679,701-706,717,719-720,723-724,727-728,731-732,735-754
+  s_93e9e173c209bc::t_0f0848b7da3553 13,16-17,26
+  s_93e9e173c209bc::t_efdfcc36846870 372-383,386-390
+  s_93e9e173c209bc::t_124e9c2d6f9cf9 172-185,187-197,200-210,213,218-226
+  s_93e9e173c209bc::t_70784eb2607cfe 520-523
+  s_93e9e173c209bc::t_9a62eaa0d5a139 496-501
+crates/xybrid-ffi-facade/src/lib.rs
+  s_93e9e173c209bc::t_3f8d493d618e80 646
+  s_93e9e173c209bc::t_eb6e11b884104a 261-263
+  s_93e9e173c209bc::t_8684ff1e970288 272
+  s_93e9e173c209bc::t_f69e5d3e35a412 581
+  s_93e9e173c209bc::t_6dbd7e17a4a635 609
+  s_93e9e173c209bc::t_006b07d83d950d 738-742,749,759
+  s_93e9e173c209bc::t_6cc6854a663f36 753
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "93ea2a7983f04246c2b99535532054d4ee187eb4",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
