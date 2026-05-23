@@ -60,6 +60,73 @@ class InferenceRepository {
 }
 ```
 
+
+## ASR 麦克风权限
+
+Android 语音识别流程在创建音频 envelope 前需要麦克风权限。先在应用清单中添加权限：
+
+```xml title="AndroidManifest.xml"
+<manifest ...>
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application ...>
+        ...
+    </application>
+</manifest>
+```
+
+录音前使用标准 Activity Result API 请求 `RECORD_AUDIO` 运行时权限。下面示例基于 `ComponentActivity`：
+
+```kotlin
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+
+class MainActivity : ComponentActivity() {
+    private val requestAudioPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startRecordingForAsr()
+        } else {
+            showMicrophonePermissionMessage()
+        }
+    }
+
+    fun ensureMicrophonePermission() {
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (granted) {
+            startRecordingForAsr()
+        } else {
+            requestAudioPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+}
+```
+
+权限授予后，采集 16 kHz 单声道 PCM，并将字节传给 Whisper 模型：
+
+```kotlin
+suspend fun transcribeRecordedAudio(audioBytes: ByteArray): String =
+    withContext(Dispatchers.IO) {
+        val model = XybridModelLoader.fromRegistry("whisper-tiny").load()
+        val envelope = Envelope.audio(
+            bytes = audioBytes,
+            sampleRate = 16000u,
+            channels = 1u,
+        )
+        val result = model.run(envelope)
+
+        result.text ?: error(result.error ?: "ASR did not produce text")
+    }
+```
+
 ## Jetpack Compose 集成
 
 ```kotlin
