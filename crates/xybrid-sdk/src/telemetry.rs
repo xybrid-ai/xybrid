@@ -940,6 +940,14 @@ fn convert_to_platform_event(
                 // `json:$.local_reliability_hint.*` without descending
                 // into the nested data object.
                 "local_reliability_hint",
+                // Streaming flag — `XybridModel::run_streaming` and the
+                // streaming-fast-path `ModelComplete` (Pipeline) both
+                // stamp `data.streaming = true`. Hoisting to the top
+                // level lets the Tinybird datasource pick it up as a
+                // typed column for a `streaming` badge / filter on the
+                // Traces dashboard, distinguishing chat-flow / REPL
+                // turns from batch-style inferences at a glance.
+                "streaming",
             ]
             .iter()
             {
@@ -4297,6 +4305,79 @@ mod tests {
             parsed["quantization"].as_str(),
             Some("q4_k_m"),
             "quantization must be hoisted: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
+    fn streaming_field_hoists_to_payload_top_level() {
+        // `XybridModel::run_streaming` and the streaming-fast-path
+        // `ModelComplete` (Pipeline) both stamp `data.streaming = true`.
+        // The hoist must surface it on the wire payload's top level so
+        // the platform's Tinybird datasource can read it as a typed
+        // column for a `streaming` badge / filter on the Traces
+        // dashboard.
+        //
+        // Unlike `task` / `quantization` (which are sourced from spans),
+        // `streaming` is published directly on the event's `data` blob
+        // — no span involvement. Test exercises the convert path with a
+        // minimal `data` payload mirroring the production publish shape.
+        let data = serde_json::json!({
+            "model_id": "qwen2.5-0.5b-instruct",
+            "version": "1.0",
+            "output_type": "Text",
+            "streaming": true,
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b-instruct".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(1_200),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert_eq!(
+            parsed["streaming"].as_bool(),
+            Some(true),
+            "streaming must be hoisted to payload top level: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
+    fn streaming_field_omitted_when_data_does_not_carry_it() {
+        // Non-streaming inference events (`XybridModel::run`,
+        // non-streaming pipeline runs) don't stamp `data.streaming`.
+        // The hoist must leave the top-level key absent in that case so
+        // the platform-side column reads `NULL` (not `false`) for batch
+        // calls — preserves the three-valued logic the Tinybird
+        // datasource encodes via `Nullable(UInt8)`.
+        let data = serde_json::json!({
+            "model_id": "qwen2.5-0.5b-instruct",
+            "version": "1.0",
+            "output_type": "Text",
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b-instruct".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(1_200),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert!(
+            parsed.get("streaming").is_none(),
+            "streaming must be omitted from top-level payload when absent in data: {}",
             serde_json::to_string(&parsed).unwrap()
         );
     }
