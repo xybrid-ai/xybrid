@@ -1596,6 +1596,17 @@ impl XybridModel {
             },
         };
 
+        // Warmup measures model-load + first-token latency, not full
+        // generation. Cap LLM decoding at 1 token so a 2048-token
+        // `GenerationConfig::default()` doesn't turn warmup into a real
+        // inference. `executor::execute_llm` reads this from envelope
+        // metadata when no explicit `GenerationConfig` is passed;
+        // non-LLM paths ignore it.
+        let mut warmup_input = warmup_input;
+        warmup_input
+            .metadata
+            .insert("max_tokens".to_string(), "1".to_string());
+
         // Run the inference inline (rather than delegating to `self.run`)
         // so the publish at the end is a `ModelWarmup` event rather than
         // a `ModelComplete`. Warmups should be visible to billing /
@@ -1705,6 +1716,13 @@ impl XybridModel {
                     metadata: std::collections::HashMap::new(),
                 },
             };
+
+            // See sync `warmup()` for rationale — cap LLM decoding at
+            // 1 token so warmup doesn't run a full generation.
+            let mut warmup_input = warmup_input;
+            warmup_input
+                .metadata
+                .insert("max_tokens".to_string(), "1".to_string());
 
             let start = Instant::now();
             let resource_guard = crate::telemetry::begin_resource_run();
