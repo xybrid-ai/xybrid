@@ -1,0 +1,20 @@
+crates/xybrid-sdk/src/telemetry.rs
+  s_8f56dbac22da72::t_120b28ea7b750d 4313-4384
+  s_8f56dbac22da72::t_a56d6dc201100c 943-950
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "908023ab6f502b2043998fa8e2a46f9eaca68238",
+  "prompts": {},
+  "sessions": {
+    "s_8f56dbac22da72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "27b157b1-8f3f-4ff4-9f50-a69b925c6772",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
