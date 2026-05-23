@@ -181,9 +181,9 @@ classes:
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       benchmark:
         async: true
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       unload:
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       executionProviderInfo:
         return: ExecutionProviderInfo
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
@@ -277,12 +277,24 @@ classes:
         params:
           - { name: imageBytes, type: "List<int>" }
           - { name: format, type: String }
+        notes: "Supports png, jpeg, and webp. Shared constructor enforces 10 MiB encoded-byte and 16,777,216 decoded-pixel defaults, rejects animated WebP for v1, records width/height metadata, and redacts image bytes from human-readable serialization."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      imageRaw:
+        params:
+          - { name: pixels, type: "List<int>" }
+          - { name: pixelFormat, type: PixelFormat }
+          - { name: width, type: int }
+          - { name: height, type: int }
+          - { name: planes, type: "List<ImagePlane>" }
+          - { name: color, type: "YuvColorInfo?", default: "null" }
+        notes: "Planned binding surface for camera/canvas frames without JPEG re-encoding. PixelFormat covers rgb8, rgba8, bgra8, nv12, nv21, and i420. Unsupported raw formats such as p010, 10-bit YUV, premultiplied alpha, or opaque handles surface as UnsupportedPixelFormat. Plane validation enforces row stride, pixel stride, extents, and YUV color metadata; diagnostics redact pixel bytes."
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
       userMessage:
         params:
           - { name: text, type: String }
-          - { name: images, type: "List<XybridEnvelope>", default: "[]" }
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+          - { name: images, type: "List<ImageEnvelope>", default: "[]" }
+        notes: "Accepts image envelopes from image() or imageRaw(); rejects text/audio/embedding and nested multipart envelopes."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 6. VoiceInfo

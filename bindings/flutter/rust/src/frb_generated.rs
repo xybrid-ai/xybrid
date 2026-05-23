@@ -43,7 +43,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -250798265;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 462306757;
 
 // Section: executor
 
@@ -630,6 +630,37 @@ fn wire__crate__api__envelope__FfiEnvelope_embedding_impl(
         },
     )
 }
+fn wire__crate__api__envelope__FfiEnvelope_image_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiEnvelope_image",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_bytes = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_format = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::envelope::FfiEnvelope::image(api_bytes, api_format)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__envelope__FfiEnvelope_local_id_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -789,6 +820,38 @@ fn wire__crate__api__envelope__FfiEnvelope_text_with_role_impl(
                 let output_ok = Result::<_, ()>::Ok(
                     crate::api::envelope::FfiEnvelope::text_with_role(api_text, api_role),
                 )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__envelope__FfiEnvelope_user_message_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiEnvelope_user_message",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_text = <String>::sse_decode(&mut deserializer);
+            let api_images = <Vec<FfiEnvelope>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok =
+                    crate::api::envelope::FfiEnvelope::user_message(api_text, api_images)?;
                 Ok(output_ok)
             })())
         },
@@ -2492,6 +2555,7 @@ impl SseDecode for crate::api::result::FfiInferenceMetrics {
         let mut var_prefillTps = <Option<f32>>::sse_decode(deserializer);
         let mut var_decodeTps = <Option<f32>>::sse_decode(deserializer);
         let mut var_tokensOut = <Option<u32>>::sse_decode(deserializer);
+        let mut var_imagePreprocessMs = <Option<u32>>::sse_decode(deserializer);
         let mut var_stageLatenciesMs =
             <Vec<crate::api::result::FfiStageLatency>>::sse_decode(deserializer);
         return crate::api::result::FfiInferenceMetrics {
@@ -2501,6 +2565,7 @@ impl SseDecode for crate::api::result::FfiInferenceMetrics {
             prefill_tps: var_prefillTps,
             decode_tps: var_decodeTps,
             tokens_out: var_tokensOut,
+            image_preprocess_ms: var_imagePreprocessMs,
             stage_latencies_ms: var_stageLatenciesMs,
         };
     }
@@ -2704,6 +2769,18 @@ impl SseDecode for i64 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_i64::<NativeEndian>().unwrap()
+    }
+}
+
+impl SseDecode for Vec<FfiEnvelope> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<FfiEnvelope>::sse_decode(deserializer));
+        }
+        return ans_;
     }
 }
 
@@ -2924,34 +3001,34 @@ fn pde_ffi_dispatcher_primary_impl(
 ) {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        23 => wire__crate__api__model__FfiModelLoader_load_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__model__FfiModelLoader_load_with_progress_impl(
+        25 => wire__crate__api__model__FfiModelLoader_load_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__model__FfiModelLoader_load_with_progress_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        25 => wire__crate__api__model__FfiModel_run_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__model__FfiModel_run_stream_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__model__FfiModel_run_stream_with_context_impl(
+        27 => wire__crate__api__model__FfiModel_run_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__model__FfiModel_run_stream_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__model__FfiModel_run_stream_with_context_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        28 => wire__crate__api__model__FfiModel_run_stream_with_fallback_impl(
+        30 => wire__crate__api__model__FfiModel_run_stream_with_fallback_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        29 => wire__crate__api__model__FfiModel_run_with_context_impl(
+        31 => wire__crate__api__model__FfiModel_run_with_context_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        34 => wire__crate__api__pipeline__FfiPipeline_run_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__pipeline__FfiPipeline_run_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3015,112 +3092,116 @@ fn pde_ffi_dispatcher_sync_impl(
         ),
         12 => wire__crate__api__envelope__FfiEnvelope_audio_impl(ptr, rust_vec_len, data_len),
         13 => wire__crate__api__envelope__FfiEnvelope_embedding_impl(ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__envelope__FfiEnvelope_local_id_impl(ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__envelope__FfiEnvelope_role_impl(ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__envelope__FfiEnvelope_text_impl(ptr, rust_vec_len, data_len),
-        17 => {
+        14 => wire__crate__api__envelope__FfiEnvelope_image_impl(ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__envelope__FfiEnvelope_local_id_impl(ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__envelope__FfiEnvelope_role_impl(ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__envelope__FfiEnvelope_text_impl(ptr, rust_vec_len, data_len),
+        18 => {
             wire__crate__api__envelope__FfiEnvelope_text_with_role_impl(ptr, rust_vec_len, data_len)
         }
-        18 => wire__crate__api__envelope__FfiEnvelope_with_role_impl(ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__model__FfiModelLoader_from_bundle_impl(ptr, rust_vec_len, data_len),
-        20 => {
+        19 => {
+            wire__crate__api__envelope__FfiEnvelope_user_message_impl(ptr, rust_vec_len, data_len)
+        }
+        20 => wire__crate__api__envelope__FfiEnvelope_with_role_impl(ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__model__FfiModelLoader_from_bundle_impl(ptr, rust_vec_len, data_len),
+        22 => {
             wire__crate__api__model__FfiModelLoader_from_directory_impl(ptr, rust_vec_len, data_len)
         }
-        21 => wire__crate__api__model__FfiModelLoader_from_huggingface_impl(
+        23 => wire__crate__api__model__FfiModelLoader_from_huggingface_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        22 => {
+        24 => {
             wire__crate__api__model__FfiModelLoader_from_registry_impl(ptr, rust_vec_len, data_len)
         }
-        30 => wire__crate__api__pipeline__FfiPipeline_from_bundle_impl(ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__pipeline__FfiPipeline_from_file_impl(ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__pipeline__FfiPipeline_from_yaml_impl(ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__pipeline__FfiPipeline_name_impl(ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__pipeline__FfiPipeline_stage_count_impl(ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__pipeline__FfiPipeline_stage_names_impl(ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__device__XybridDevice_apply_debug_memory_pressure_impl(
+        32 => wire__crate__api__pipeline__FfiPipeline_from_bundle_impl(ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__pipeline__FfiPipeline_from_file_impl(ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__pipeline__FfiPipeline_from_yaml_impl(ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__pipeline__FfiPipeline_name_impl(ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__pipeline__FfiPipeline_stage_count_impl(ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__pipeline__FfiPipeline_stage_names_impl(ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__device__XybridDevice_apply_debug_memory_pressure_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        38 => wire__crate__api__device__XybridDevice_clear_battery_level_impl(
+        40 => wire__crate__api__device__XybridDevice_clear_battery_level_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        39 => wire__crate__api__device__XybridDevice_clear_debug_memory_pressure_impl(
+        41 => wire__crate__api__device__XybridDevice_clear_debug_memory_pressure_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        40 => wire__crate__api__device__XybridDevice_clear_thermal_state_impl(
+        42 => wire__crate__api__device__XybridDevice_clear_thermal_state_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        41 => wire__crate__api__device__XybridDevice_current_snapshot_impl(
+        43 => wire__crate__api__device__XybridDevice_current_snapshot_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        42 => wire__crate__api__device__XybridDevice_set_battery_level_impl(
+        44 => wire__crate__api__device__XybridDevice_set_battery_level_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        43 => wire__crate__api__device__XybridDevice_set_thermal_state_impl(
+        45 => wire__crate__api__device__XybridDevice_set_thermal_state_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        44 => wire__crate__api__sdk_client__XybridSdkClient_configure_platform_telemetry_impl(
+        46 => wire__crate__api__sdk_client__XybridSdkClient_configure_platform_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        45 => wire__crate__api__sdk_client__XybridSdkClient_flush_platform_telemetry_impl(
+        47 => wire__crate__api__sdk_client__XybridSdkClient_flush_platform_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
+        48 => wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        47 => wire__crate__api__sdk_client__XybridSdkClient_init_telemetry_impl(
+        49 => wire__crate__api__sdk_client__XybridSdkClient_init_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        48 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
+        50 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        49 => wire__crate__api__sdk_client__XybridSdkClient_is_telemetry_initialized_impl(
+        51 => wire__crate__api__sdk_client__XybridSdkClient_is_telemetry_initialized_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        50 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
+        52 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        51 => wire__crate__api__sdk_client__XybridSdkClient_set_gateway_url_impl(
+        53 => wire__crate__api__sdk_client__XybridSdkClient_set_gateway_url_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        52 => wire__crate__api__model__ffi_generation_config_creative_impl(
+        54 => wire__crate__api__model__ffi_generation_config_creative_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        53 => {
+        55 => {
             wire__crate__api__model__ffi_generation_config_greedy_impl(ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -3275,6 +3356,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::result::FfiInferenceMetrics {
             self.prefill_tps.into_into_dart().into_dart(),
             self.decode_tps.into_into_dart().into_dart(),
             self.tokens_out.into_into_dart().into_dart(),
+            self.image_preprocess_ms.into_into_dart().into_dart(),
             self.stage_latencies_ms.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -3749,6 +3831,7 @@ impl SseEncode for crate::api::result::FfiInferenceMetrics {
         <Option<f32>>::sse_encode(self.prefill_tps, serializer);
         <Option<f32>>::sse_encode(self.decode_tps, serializer);
         <Option<u32>>::sse_encode(self.tokens_out, serializer);
+        <Option<u32>>::sse_encode(self.image_preprocess_ms, serializer);
         <Vec<crate::api::result::FfiStageLatency>>::sse_encode(self.stage_latencies_ms, serializer);
     }
 }
@@ -3921,6 +4004,16 @@ impl SseEncode for i64 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_i64::<NativeEndian>(self).unwrap();
+    }
+}
+
+impl SseEncode for Vec<FfiEnvelope> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <FfiEnvelope>::sse_encode(item, serializer);
+        }
     }
 }
 

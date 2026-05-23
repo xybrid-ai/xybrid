@@ -456,6 +456,32 @@ namespace Xybrid.Native
         internal static extern XybridEnvelopeHandle* xybrid_envelope_text_with_voice(byte* text, byte* voice_id, double speed);
 
         /// <summary>
+        ///  Create an envelope containing encoded image data.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `bytes`: Pointer to encoded image bytes. May be null only when `len` is 0.
+        ///  - `len`: Length of the encoded byte array.
+        ///  - `format`: Null-terminated image format (`png`, `jpeg`, `jpg`, or `webp`).
+        ///
+        ///  # Returns
+        ///
+        ///  A handle to the envelope, or null on failure.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_envelope_image", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridEnvelopeHandle* xybrid_envelope_image(byte* bytes, nuint len, byte* format);
+
+        /// <summary>
+        ///  Create a user-role multi-part envelope from text and image attachments.
+        ///
+        ///  The `images` array is borrowed for the duration of the call. The returned
+        ///  envelope owns cloned image payloads and does not take ownership of the input
+        ///  handles.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_envelope_user_message", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridEnvelopeHandle* xybrid_envelope_user_message(byte* text, XybridEnvelopeHandle** images, nuint image_count);
+
+        /// <summary>
         ///  Free an envelope handle.
         ///
         ///  This function frees the memory associated with an envelope handle.

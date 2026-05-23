@@ -100,6 +100,50 @@ pub enum PreprocessingStep {
         interpolation: InterpolationMethod,
     },
 
+    /// Resize an image tensor with explicit aspect-ratio policy.
+    ///
+    /// Use for: Vision models that need deterministic stretch, letterbox, or
+    /// center-crop resizing after `ImageDecode`.
+    #[cfg(feature = "vision")]
+    ImageResize {
+        /// Target width.
+        width: usize,
+
+        /// Target height.
+        height: usize,
+
+        /// Aspect-ratio handling mode.
+        #[serde(default)]
+        mode: ImageResizeMode,
+
+        /// Interpolation method.
+        #[serde(default)]
+        interpolation: InterpolationMethod,
+
+        /// Letterbox fill color in normalized channel values.
+        #[serde(default = "default_image_fill")]
+        fill: Vec<f32>,
+
+        /// Input/output tensor layout.
+        #[serde(default)]
+        layout: ImageTensorLayout,
+    },
+
+    /// Normalize an image tensor with a known vision-model preset.
+    ///
+    /// Use for: ImageNet classifiers, CLIP/SigLIP encoders, and VLM
+    /// preprocessors that require per-channel mean/std normalization.
+    #[cfg(feature = "vision")]
+    ImageNormalize {
+        /// Normalization preset or custom per-channel values.
+        #[serde(default)]
+        preset: ImageNormalizePreset,
+
+        /// Tensor layout to use when locating the channel axis.
+        #[serde(default)]
+        layout: ImageTensorLayout,
+    },
+
     /// Center crop image to target dimensions
     ///
     /// Use for: Image classifiers (ResNet, EfficientNet) that need centered crops
@@ -120,6 +164,36 @@ pub enum PreprocessingStep {
 
         /// Number of channels (1 = mono, 2 = stereo)
         channels: usize,
+    },
+
+    /// Decode an image envelope into a float tensor in [0, 1].
+    ///
+    /// Use for: Image classifiers and vision-language models that need
+    /// encoded PNG/JPEG/WebP bytes converted before resize/normalize steps.
+    #[cfg(feature = "vision")]
+    ImageDecode {
+        /// Output channel count. Supported: 1 (grayscale) or 3 (RGB).
+        #[serde(default = "default_image_channels")]
+        channels: usize,
+
+        /// Output tensor layout.
+        #[serde(default)]
+        layout: ImageTensorLayout,
+    },
+
+    /// Ingress an image envelope into a float tensor in [0, 1].
+    ///
+    /// Use for: image classifiers and vision-language models that accept either
+    /// encoded PNG/JPEG/WebP bytes or raw camera/canvas frames.
+    #[cfg(feature = "vision")]
+    ImageIngress {
+        /// Output channel count. Supported: 1 (grayscale) or 3 (RGB).
+        #[serde(default = "default_image_channels")]
+        channels: usize,
+
+        /// Output tensor layout.
+        #[serde(default)]
+        layout: ImageTensorLayout,
     },
 
     /// Reshape tensor to target dimensions
@@ -189,8 +263,16 @@ impl PreprocessingStep {
             PreprocessingStep::Tokenize { .. } => "Tokenize",
             PreprocessingStep::Normalize { .. } => "Normalize",
             PreprocessingStep::Resize { .. } => "Resize",
+            #[cfg(feature = "vision")]
+            PreprocessingStep::ImageResize { .. } => "ImageResize",
+            #[cfg(feature = "vision")]
+            PreprocessingStep::ImageNormalize { .. } => "ImageNormalize",
             PreprocessingStep::CenterCrop { .. } => "CenterCrop",
             PreprocessingStep::AudioDecode { .. } => "AudioDecode",
+            #[cfg(feature = "vision")]
+            PreprocessingStep::ImageDecode { .. } => "ImageDecode",
+            #[cfg(feature = "vision")]
+            PreprocessingStep::ImageIngress { .. } => "ImageIngress",
             PreprocessingStep::Reshape { .. } => "Reshape",
             PreprocessingStep::PhonemeRaw { .. } => "PhonemeRaw",
             PreprocessingStep::Phonemize { .. } => "Phonemize",
@@ -477,6 +559,45 @@ pub enum InterpolationMethod {
     Bicubic,
 }
 
+/// Aspect-ratio handling mode for `ImageResize`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub enum ImageResizeMode {
+    /// Resize directly to the target dimensions.
+    #[default]
+    Stretch,
+    /// Preserve aspect ratio and pad the remaining area.
+    Letterbox,
+    /// Preserve aspect ratio and center-crop the overflow.
+    Center,
+}
+
+/// Tensor layout emitted by `ImageDecode`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub enum ImageTensorLayout {
+    /// Batch, channels, height, width.
+    #[default]
+    Nchw,
+    /// Batch, height, width, channels.
+    Nhwc,
+}
+
+/// Named per-channel normalization presets for vision inputs.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub enum ImageNormalizePreset {
+    /// ImageNet RGB normalization.
+    #[default]
+    ImageNet,
+    /// OpenAI CLIP RGB normalization.
+    Clip,
+    /// SigLIP RGB normalization.
+    SigLip,
+    /// Custom per-channel normalization.
+    Custom { mean: Vec<f32>, std: Vec<f32> },
+}
+
 // ============================================================================
 // Default Functions
 // ============================================================================
@@ -491,6 +612,14 @@ fn default_n_mels() -> usize {
 
 fn default_sample_rate() -> u32 {
     16000
+}
+
+fn default_image_channels() -> usize {
+    3
+}
+
+fn default_image_fill() -> Vec<f32> {
+    vec![0.0, 0.0, 0.0]
 }
 
 fn default_fft_size() -> usize {

@@ -21,6 +21,8 @@ pub struct StageLatency {
 ///
 /// LLM-specific fields (`ttft_ms`, `tokens_per_second`, `prefill_tps`,
 /// `decode_tps`, `tokens_out`) are `None` for ASR/TTS/embedding runs.
+/// `image_preprocess_ms` is populated only for vision-language runs that
+/// process one or more images.
 /// `stage_latencies_ms` is empty for `model.run()` and populated for
 /// `pipeline.run()`.
 ///
@@ -44,6 +46,8 @@ pub struct InferenceMetrics {
     pub decode_tps: Option<f32>,
     /// Completion tokens produced. LLM only.
     pub tokens_out: Option<u32>,
+    /// Image preprocessing latency in ms. Vision-language runs only.
+    pub image_preprocess_ms: Option<u32>,
     /// Per-stage wall-clock latencies. Empty for single-model runs.
     pub stage_latencies_ms: Vec<StageLatency>,
 }
@@ -65,6 +69,7 @@ impl InferenceMetrics {
             decode_tps: parse_f32(metadata, "decode_tps"),
             tokens_out: parse_u32(metadata, "tokens_out")
                 .or_else(|| parse_u32(metadata, "tokens_generated")),
+            image_preprocess_ms: parse_u32(metadata, "image_preprocess_ms"),
             stage_latencies_ms: Vec::new(),
         }
     }
@@ -146,6 +151,8 @@ impl InferenceResult {
             EnvelopeKind::Text(_) => OutputType::Text,
             EnvelopeKind::Audio(_) => OutputType::Audio,
             EnvelopeKind::Embedding(_) => OutputType::Embedding,
+            #[cfg(feature = "vision")]
+            EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => OutputType::Unknown,
         };
         let metrics = InferenceMetrics::from_metadata(&envelope.metadata, latency_ms);
 
@@ -376,6 +383,7 @@ mod tests {
         metadata.insert("prefill_tps".to_string(), "180.0".to_string());
         metadata.insert("decode_tps".to_string(), "42.5".to_string());
         metadata.insert("tokens_generated".to_string(), "256".to_string());
+        metadata.insert("image_preprocess_ms".to_string(), "17".to_string());
 
         let envelope = Envelope {
             kind: EnvelopeKind::Text("hi".to_string()),
@@ -390,6 +398,7 @@ mod tests {
         assert_eq!(m.prefill_tps, Some(180.0));
         assert_eq!(m.decode_tps, Some(42.5));
         assert_eq!(m.tokens_out, Some(256));
+        assert_eq!(m.image_preprocess_ms, Some(17));
         assert!(m.stage_latencies_ms.is_empty());
     }
 
@@ -405,6 +414,7 @@ mod tests {
         assert_eq!(m.ttft_ms, None);
         assert_eq!(m.tokens_per_second, None);
         assert_eq!(m.tokens_out, None);
+        assert_eq!(m.image_preprocess_ms, None);
     }
 
     #[test]

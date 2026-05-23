@@ -37,6 +37,8 @@ use crate::runtime_adapter::streaming_postprocess::{
     StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
 };
 use crate::runtime_adapter::AdapterError;
+#[cfg(feature = "vision")]
+use crate::runtime_adapter::{MultimodalChatMessage, MultimodalMessagePart};
 use crate::tracing as xybrid_trace;
 use std::sync::Mutex;
 #[cfg(feature = "llm-llamacpp")]
@@ -53,6 +55,9 @@ use std::sync::Once;
 /// skipping it is safe. The OS reclaims all resources at process exit.
 #[cfg(feature = "llm-llamacpp")]
 static BACKEND_INIT: Once = Once::new();
+
+#[cfg(feature = "vision")]
+const MTMD_MEDIA_MARKER: &str = "<__media__>";
 
 /// LlamaCppBackend - LLM inference using llama.cpp.
 ///
@@ -95,6 +100,13 @@ pub struct LlamaCppBackend {
     /// natural critical section (we already hold the context lock when
     /// we mutate the cache via seq_rm).
     kv_state: Mutex<KvCacheState>,
+    /// Backend-owned mtmd projector context for vision-language models.
+    ///
+    /// The mtmd context references the loaded llama text model, so `Drop`,
+    /// `unload`, and model replacement always take this before dropping the
+    /// llama context/model pair.
+    #[cfg(feature = "vision")]
+    mtmd_context: Mutex<Option<MtmdContextState>>,
 }
 
 /// Cross-call state for the multi-turn KV cache reuse path. `Default::default()`
@@ -118,6 +130,60 @@ struct KvCacheState {
     last_prefix_hit: Option<usize>,
 }
 
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+struct MtmdContextState {
+    mmproj_path: String,
+    _context: sys::MtmdContext,
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+struct MtmdPromptImage {
+    bytes: Vec<u8>,
+    local_id: String,
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+struct MtmdPromptInputs {
+    chat_messages: Vec<ChatMessage>,
+    images: Vec<MtmdPromptImage>,
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+fn mtmd_prompt_inputs_from_messages(
+    messages: &[MultimodalChatMessage],
+) -> LlmResult<MtmdPromptInputs> {
+    let mut chat_messages = Vec::with_capacity(messages.len());
+    let mut images = Vec::new();
+
+    for message in messages {
+        let content = message.marker_prompt(MTMD_MEDIA_MARKER)?;
+        chat_messages.push(ChatMessage {
+            role: message.role,
+            content,
+        });
+
+        for part in &message.parts {
+            let MultimodalMessagePart::Image(image) = part else {
+                continue;
+            };
+            let Some((bytes, _format)) = image.source.as_encoded() else {
+                return Err(AdapterError::InvalidInput(
+                    "llama.cpp mtmd currently requires encoded image bytes".to_string(),
+                ));
+            };
+            images.push(MtmdPromptImage {
+                bytes: bytes.to_vec(),
+                local_id: image.local_id.clone(),
+            });
+        }
+    }
+
+    Ok(MtmdPromptInputs {
+        chat_messages,
+        images,
+    })
+}
+
 #[cfg(feature = "llm-llamacpp")]
 impl LlamaCppBackend {
     /// Create a new LlamaCppBackend.
@@ -139,6 +205,8 @@ impl LlamaCppBackend {
             context: Mutex::new(None),
             config: None,
             kv_state: Mutex::new(KvCacheState::default()),
+            #[cfg(feature = "vision")]
+            mtmd_context: Mutex::new(None),
         })
     }
 }
@@ -146,9 +214,12 @@ impl LlamaCppBackend {
 #[cfg(feature = "llm-llamacpp")]
 impl Drop for LlamaCppBackend {
     fn drop(&mut self) {
-        // Drop context first, then model (order matters: context references model).
+        // Drop mtmd first, then context, then model (order matters: both mtmd
+        // and llama context reference the model).
         // LlamaContext and LlamaModel implement Drop, so take() + drop handles cleanup.
         // get_mut() doesn't lock — safe because Drop has &mut self.
+        #[cfg(feature = "vision")]
+        let _ = self.mtmd_context.get_mut().unwrap().take(); // drops MtmdContext
         let _ = self.context.get_mut().unwrap().take(); // drops LlamaContext
         let _ = self.model.take(); // drops LlamaModel
 
@@ -287,6 +358,78 @@ impl LlamaCppBackend {
             *state = KvCacheState::default();
         }
     }
+
+    #[cfg(feature = "vision")]
+    fn ensure_mtmd_context_loaded_with<F>(&self, mmproj_path: &str, loader: F) -> LlmResult<bool>
+    where
+        F: FnOnce(&str) -> LlmResult<sys::MtmdContext>,
+    {
+        let (loaded, ()) = self.with_mtmd_context_loaded_with(mmproj_path, loader, |_| Ok(()))?;
+        Ok(loaded)
+    }
+
+    #[cfg(feature = "vision")]
+    fn with_mtmd_context_loaded_with<F, G, R>(
+        &self,
+        mmproj_path: &str,
+        loader: F,
+        f: G,
+    ) -> LlmResult<(bool, R)>
+    where
+        F: FnOnce(&str) -> LlmResult<sys::MtmdContext>,
+        G: FnOnce(&sys::MtmdContext) -> LlmResult<R>,
+    {
+        let mut guard = self
+            .mtmd_context
+            .lock()
+            .map_err(|_| AdapterError::RuntimeError("mtmd context mutex poisoned".to_string()))?;
+
+        let mut loaded = false;
+        if let Some(state) = guard.as_ref() {
+            if state.mmproj_path == mmproj_path {
+                let result = f(&state._context)?;
+                return Ok((loaded, result));
+            }
+        }
+
+        let context = loader(mmproj_path)?;
+        *guard = Some(MtmdContextState {
+            mmproj_path: mmproj_path.to_string(),
+            _context: context,
+        });
+        loaded = true;
+
+        let state = guard.as_ref().ok_or_else(|| {
+            AdapterError::RuntimeError("mtmd context missing after load".to_string())
+        })?;
+        let result = f(&state._context)?;
+        Ok((loaded, result))
+    }
+
+    #[cfg(feature = "vision")]
+    fn with_mtmd_context_loaded<G, R>(
+        &self,
+        model: &sys::LlamaModel,
+        mmproj_path: &str,
+        f: G,
+    ) -> LlmResult<(bool, R)>
+    where
+        G: FnOnce(&sys::MtmdContext) -> LlmResult<R>,
+    {
+        let config = self.config.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No config. Call load() first.".to_string())
+        })?;
+        let use_gpu = config.gpu_layers != 0;
+        let warmup = false;
+        let n_threads = config.n_threads;
+        let flash_attn = config.flash_attn;
+
+        self.with_mtmd_context_loaded_with(
+            mmproj_path,
+            |path| sys::mtmd_init_from_file(path, model, use_gpu, warmup, n_threads, flash_attn),
+            f,
+        )
+    }
 }
 
 /// Longest-common-prefix length between the cached tokens and the new
@@ -330,6 +473,15 @@ impl LlmBackend for LlamaCppBackend {
         let model_path = Path::new(&config.model_path);
         if !model_path.exists() {
             return Err(AdapterError::ModelNotFound(config.model_path.clone()));
+        }
+        if let Some(vision_encoder_path) = &config.vision_encoder_path {
+            let path = Path::new(vision_encoder_path);
+            if !path.exists() {
+                return Err(AdapterError::MissingArtifact {
+                    artifact: "vision_encoder".to_string(),
+                    path: vision_encoder_path.clone(),
+                });
+            }
         }
 
         // Find the GGUF file
@@ -382,9 +534,15 @@ impl LlmBackend for LlamaCppBackend {
         )
         .map_err(|e| AdapterError::RuntimeError(format!("Failed to create context: {}", e)))?;
 
+        #[cfg(feature = "vision")]
+        let _ = self.mtmd_context.get_mut().unwrap().take();
+        let _ = self.context.get_mut().unwrap().take();
+        let _ = self.model.take();
+
         self.model = Some(model);
         *self.context.get_mut().unwrap() = Some(context);
         self.config = Some(config.clone());
+        *self.kv_state.get_mut().unwrap() = KvCacheState::default();
 
         Ok(())
     }
@@ -394,8 +552,10 @@ impl LlmBackend for LlamaCppBackend {
     }
 
     fn unload(&mut self) -> LlmResult<()> {
-        // Drop context first, then model (order matters).
+        // Drop mtmd first, then context, then model (order matters).
         // LlamaContext and LlamaModel implement Drop, so take() handles cleanup.
+        #[cfg(feature = "vision")]
+        let _ = self.mtmd_context.get_mut().unwrap().take();
         let _ = self.context.get_mut().unwrap().take();
         let _ = self.model.take();
         self.config = None;
@@ -547,6 +707,7 @@ impl LlmBackend for LlamaCppBackend {
                 inter_chunk_ms: fields.inter_chunk_ms,
                 decode_tps: fields.decode_tps,
                 prefill_tps: fields.prefill_tps,
+                image_preprocess_ms: None,
             })
         })
     }
@@ -631,6 +792,7 @@ impl LlmBackend for LlamaCppBackend {
                 inter_chunk_ms: fields.inter_chunk_ms,
                 decode_tps: fields.decode_tps,
                 prefill_tps: fields.prefill_tps,
+                image_preprocess_ms: None,
             })
         })
     }
@@ -780,6 +942,7 @@ impl LlmBackend for LlamaCppBackend {
                 inter_chunk_ms: fields.inter_chunk_ms,
                 decode_tps: fields.decode_tps,
                 prefill_tps: fields.prefill_tps,
+                image_preprocess_ms: None,
             })
         })
     }
@@ -804,6 +967,163 @@ impl LlmBackend for LlamaCppBackend {
     /// events when the value is positive.
     fn last_cached_prefix_len(&self) -> Option<usize> {
         self.kv_state.lock().ok().and_then(|s| s.last_prefix_hit)
+    }
+
+    #[cfg(feature = "vision")]
+    fn supports_vision(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "vision")]
+    fn generate_multimodal(
+        &self,
+        messages: &[MultimodalChatMessage],
+        config: &GenerationConfig,
+    ) -> LlmResult<GenerationOutput> {
+        let inputs = mtmd_prompt_inputs_from_messages(messages)?;
+        let mmproj_path = self
+            .config
+            .as_ref()
+            .and_then(|config| config.vision_encoder_path.as_deref())
+            .ok_or_else(|| {
+                AdapterError::InvalidInput(
+                    "llama.cpp vision generation requires a vision encoder artifact".to_string(),
+                )
+            })?
+            .to_string();
+
+        self.with_model_and_context(|model, context| {
+            let prompt = sys::llama_format_chat(model, &inputs.chat_messages)?;
+            let (_loaded, (output_tokens, stopped_by_callback, fields, image_preprocess_ms)) = self
+                .with_mtmd_context_loaded(model, &mmproj_path, |mtmd_context| {
+                    let image_preprocess_started = std::time::Instant::now();
+                    let mut bitmaps = inputs
+                        .images
+                        .iter()
+                        .map(|image| {
+                            sys::MtmdBitmap::from_encoded_bytes(mtmd_context, &image.bytes)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    for (bitmap, image) in bitmaps.iter_mut().zip(inputs.images.iter()) {
+                        bitmap.set_id(&image.local_id)?;
+                    }
+
+                    let chunks = sys::MtmdInputChunks::tokenize(
+                        mtmd_context,
+                        &prompt,
+                        true,
+                        true,
+                        &bitmaps,
+                    )?;
+                    let summary = chunks.summary()?;
+                    let image_preprocess_ms = if !inputs.images.is_empty() {
+                        let elapsed_ms = image_preprocess_started.elapsed().as_millis().max(1);
+                        let image_preprocess_ms = elapsed_ms.min(u32::MAX as u128) as u32;
+                        xybrid_trace::add_metadata(
+                            "image_preprocess_ms",
+                            image_preprocess_ms.to_string(),
+                        );
+                        Some(image_preprocess_ms)
+                    } else {
+                        None
+                    };
+                    sys::llama_kv_cache_clear(context);
+                    self.clear_cached_prefix_state();
+                    xybrid_trace::add_metadata(
+                        "tokens_in",
+                        summary.helper_total_tokens.to_string(),
+                    );
+                    let n_batch = self.config.as_ref().map_or(512, |config| {
+                        if config.n_batch == 0 {
+                            512
+                        } else {
+                            config.n_batch
+                        }
+                    });
+                    let new_n_past = sys::mtmd_helper_eval_chunks(
+                        mtmd_context,
+                        context,
+                        &chunks,
+                        0,
+                        0,
+                        n_batch,
+                        true,
+                    )?;
+                    if new_n_past < 0 {
+                        return Err(AdapterError::RuntimeError(format!(
+                            "mtmd helper eval returned negative n_past: {}",
+                            new_n_past
+                        )));
+                    }
+
+                    let mut tel = StreamingTelemetry::new(summary.helper_total_tokens);
+                    let (output_tokens, stopped_by_callback) =
+                        sys::llama_generate_from_current_logits_streaming(
+                            context,
+                            model,
+                            config.max_tokens,
+                            config.temperature,
+                            config.top_p,
+                            config.min_p,
+                            config.top_k,
+                            config.repetition_penalty,
+                            &config.stop_sequences,
+                            new_n_past as usize,
+                            |_token_id, _token_text| {
+                                tel.record_chunk();
+                                Ok(())
+                            },
+                        )?;
+                    let fields = tel.finalize(output_tokens.len());
+                    Ok((
+                        output_tokens,
+                        stopped_by_callback,
+                        fields,
+                        image_preprocess_ms,
+                    ))
+                })?;
+
+            let final_stop_patterns = {
+                let mut extras: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
+                extras.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
+                merge_stop_patterns(&config.stop_sequences, &extras)
+            };
+            let mut text = sys::llama_detokenize(model, &output_tokens)?;
+            let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
+            let text = strip_thinking_tags(&text).trim().to_string();
+            let finish_reason = if stopped_in_text || stopped_by_callback {
+                "stop"
+            } else {
+                "length"
+            }
+            .to_string();
+
+            Ok(GenerationOutput {
+                text,
+                tokens_generated: output_tokens.len(),
+                generation_time_ms: fields.generation_time_ms,
+                tokens_per_second: fields.tokens_per_second,
+                finish_reason,
+                ttft_ms: fields.ttft_ms,
+                mean_itl_ms: fields.mean_itl_ms,
+                p95_itl_ms: fields.p95_itl_ms,
+                emitted_chunks: fields.emitted_chunks,
+                inter_chunk_ms: fields.inter_chunk_ms,
+                decode_tps: fields.decode_tps,
+                prefill_tps: fields.prefill_tps,
+                image_preprocess_ms,
+            })
+        })
+    }
+
+    #[cfg(feature = "vision")]
+    fn generate_multimodal_streaming(
+        &self,
+        messages: &[MultimodalChatMessage],
+        config: &GenerationConfig,
+        _on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+    ) -> LlmResult<GenerationOutput> {
+        self.generate_multimodal(messages, config)
     }
 }
 
@@ -880,6 +1200,154 @@ mod tests {
             backend.supports_streaming(),
             "llama.cpp must stay on the true streaming path so SDK abort checks can interrupt generation"
         );
+    }
+
+    #[test]
+    fn load_rejects_missing_vision_encoder_before_parsing_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        std::fs::write(&model_path, b"not a real gguf").unwrap();
+        let missing_mmproj = dir.path().join("missing-mmproj.gguf");
+
+        let mut backend = LlamaCppBackend::new().unwrap();
+        let err = backend
+            .load(
+                &LlmConfig::new(model_path.to_string_lossy().to_string())
+                    .with_vision_encoder(missing_mmproj.to_string_lossy().to_string()),
+            )
+            .unwrap_err();
+
+        match err {
+            AdapterError::MissingArtifact { artifact, path } => {
+                assert_eq!(artifact, "vision_encoder");
+                assert!(path.contains("missing-mmproj.gguf"));
+            }
+            other => panic!("expected MissingArtifact for missing mmproj, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn mtmd_context_load_is_lazy_and_reused_for_same_mmproj() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        let backend = LlamaCppBackend::new().unwrap();
+        let load_count = Arc::new(AtomicUsize::new(0));
+        let count_for_first_load = load_count.clone();
+
+        let first_loaded = backend
+            .ensure_mtmd_context_loaded_with("/models/mmproj.gguf", move |_| {
+                count_for_first_load.fetch_add(1, Ordering::SeqCst);
+                Ok(sys::MtmdContext::test_stub())
+            })
+            .unwrap();
+        let second_loaded = backend
+            .ensure_mtmd_context_loaded_with("/models/mmproj.gguf", |_| {
+                panic!("same mmproj path should reuse existing mtmd context")
+            })
+            .unwrap();
+
+        assert!(first_loaded);
+        assert!(!second_loaded);
+        assert_eq!(load_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn mtmd_context_loader_exposes_reused_context_to_callers() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        let backend = LlamaCppBackend::new().unwrap();
+        let load_count = Arc::new(AtomicUsize::new(0));
+        let closure_count = Arc::new(AtomicUsize::new(0));
+        let count_for_first_load = load_count.clone();
+        let count_for_first_closure = closure_count.clone();
+
+        let (first_loaded, first_value) = backend
+            .with_mtmd_context_loaded_with(
+                "/models/mmproj.gguf",
+                move |_| {
+                    count_for_first_load.fetch_add(1, Ordering::SeqCst);
+                    Ok(sys::MtmdContext::test_stub())
+                },
+                move |_| {
+                    count_for_first_closure.fetch_add(1, Ordering::SeqCst);
+                    Ok(41)
+                },
+            )
+            .unwrap();
+        let count_for_second_closure = closure_count.clone();
+        let (second_loaded, second_value) = backend
+            .with_mtmd_context_loaded_with(
+                "/models/mmproj.gguf",
+                |_| panic!("same mmproj path should reuse existing mtmd context"),
+                move |_| {
+                    count_for_second_closure.fetch_add(1, Ordering::SeqCst);
+                    Ok(42)
+                },
+            )
+            .unwrap();
+
+        assert!(first_loaded);
+        assert_eq!(first_value, 41);
+        assert!(!second_loaded);
+        assert_eq!(second_value, 42);
+        assert_eq!(load_count.load(Ordering::SeqCst), 1);
+        assert_eq!(closure_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn mtmd_prompt_inputs_preserve_image_order_and_marker_parity() {
+        use crate::ir::{Envelope, EnvelopeKind, MessageRole};
+        use crate::runtime_adapter::MultimodalChatMessage;
+
+        fn png_image(red: u8) -> Vec<u8> {
+            let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                1,
+                1,
+                image::Rgb([red, 34, 51]),
+            ));
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            image
+                .write_to(&mut encoded, image::ImageFormat::Png)
+                .expect("test image encodes");
+            encoded.into_inner()
+        }
+
+        let first = Envelope::image(png_image(17), "png")
+            .unwrap()
+            .with_local_id("first-image");
+        let second = Envelope::image(png_image(99), "png")
+            .unwrap()
+            .with_local_id("second-image");
+        let message = Envelope::new(EnvelopeKind::MultiPart(vec![
+            Envelope::new(EnvelopeKind::Text("look ".to_string())),
+            first,
+            Envelope::new(EnvelopeKind::Text(" compare ".to_string())),
+            second,
+        ]))
+        .with_role(MessageRole::User);
+        let messages = vec![MultimodalChatMessage::from_envelope(&message).unwrap()];
+
+        let inputs = mtmd_prompt_inputs_from_messages(&messages).unwrap();
+
+        assert_eq!(inputs.chat_messages.len(), 1);
+        assert_eq!(inputs.chat_messages[0].role, MessageRole::User);
+        assert_eq!(
+            inputs.chat_messages[0].content,
+            "look <__media__> compare <__media__>"
+        );
+        assert_eq!(inputs.images.len(), 2);
+        assert_eq!(inputs.images[0].local_id, "first-image");
+        assert_eq!(inputs.images[1].local_id, "second-image");
+        assert!(inputs.images.iter().all(|image| !image.bytes.is_empty()));
     }
 
     #[test]

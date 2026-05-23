@@ -75,6 +75,23 @@ pub enum SdkError {
     LoadError(String),
     #[error("Inference failed: {0}")]
     InferenceError(String),
+    #[error("Missing artifact: {artifact} at {path}")]
+    MissingArtifact { artifact: String, path: String },
+    #[error(
+        "Unsupported model capability: model '{model_id}' does not support {capability}; {hint}"
+    )]
+    UnsupportedModelCapability {
+        model_id: String,
+        capability: String,
+        hint: String,
+    },
+    #[error("Unsupported backend capability: model '{model_id}' requires {capability}, but backend/build '{backend}' does not support {capability}; {hint}")]
+    UnsupportedBackendCapability {
+        model_id: String,
+        backend: String,
+        capability: String,
+        hint: String,
+    },
     /// Local streaming aborted under resource pressure with the caller's
     /// permission to retry on cloud (`AbortPolicy::fallback_to_cloud`).
     /// `run_streaming_with_fallback` catches this variant; lower-level
@@ -135,6 +152,9 @@ impl xybrid_core::http::RetryableError for SdkError {
             SdkError::MetadataInvalid(_) => false,
             SdkError::LoadError(_) => false,
             SdkError::InferenceError(_) => false,
+            SdkError::MissingArtifact { .. } => false,
+            SdkError::UnsupportedModelCapability { .. } => false,
+            SdkError::UnsupportedBackendCapability { .. } => false,
             // Resource-driven abort is not retryable on the same path; the
             // wrapper redirects to cloud instead.
             SdkError::AbortedForCloudFallback { .. } => false,
@@ -155,6 +175,39 @@ impl xybrid_core::http::RetryableError for SdkError {
             }
             _ => None,
         }
+    }
+}
+
+fn sdk_execution_error<E>(context: &str, error: E) -> SdkError
+where
+    E: Into<xybrid_core::error::XybridError>,
+{
+    let error = error.into();
+    match error {
+        xybrid_core::error::XybridError::MissingArtifact { artifact, path } => {
+            SdkError::MissingArtifact { artifact, path }
+        }
+        xybrid_core::error::XybridError::UnsupportedModelCapability {
+            model_id,
+            capability,
+            hint,
+        } => SdkError::UnsupportedModelCapability {
+            model_id,
+            capability,
+            hint,
+        },
+        xybrid_core::error::XybridError::UnsupportedBackendCapability {
+            model_id,
+            backend,
+            capability,
+            hint,
+        } => SdkError::UnsupportedBackendCapability {
+            model_id,
+            backend,
+            capability,
+            hint,
+        },
+        other => SdkError::InferenceError(format!("{context}: {other}")),
     }
 }
 
@@ -1674,7 +1727,7 @@ impl XybridModel {
             let _ = guard
                 .executor
                 .execute(&metadata, &warmup_input, None)
-                .map_err(|e| SdkError::InferenceError(format!("Warmup failed: {}", e)))?;
+                .map_err(|e| sdk_execution_error("Warmup failed", e))?;
 
             let elapsed = start.elapsed();
             log::info!(
@@ -1765,7 +1818,7 @@ impl XybridModel {
         let output = handle
             .executor
             .execute(&metadata, envelope, config)
-            .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+            .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
         let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -1880,7 +1933,7 @@ impl XybridModel {
         let output = handle
             .executor
             .execute_with_context(&metadata, envelope, context, config)
-            .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+            .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
         let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -2016,7 +2069,7 @@ impl XybridModel {
             let result = handle
                 .executor
                 .execute_with_context(&metadata, envelope, context, config)
-                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+                .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
             // Extract text from result (if any) and emit as single token
             if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
@@ -2177,7 +2230,7 @@ impl XybridModel {
             let result = handle
                 .executor
                 .execute(&metadata, envelope, config)
-                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+                .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
             // Extract text from result (if any) and emit as single token
             if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
@@ -2461,9 +2514,7 @@ impl XybridModel {
                     let result = guard
                         .executor
                         .execute(&metadata, &envelope, config.as_ref())
-                        .map_err(|e| {
-                            SdkError::InferenceError(format!("Execution failed: {}", e))
-                        })?;
+                        .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
                     // Emit single token with full result
                     if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
@@ -2593,7 +2644,7 @@ impl XybridModel {
             let output = guard
                 .executor
                 .execute(&metadata, &envelope, config.as_ref())
-                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+                .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
             let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -2750,6 +2801,78 @@ mod tests {
                 assert!(message.contains("user_cancelled"));
             }
             other => panic!("expected inference error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn execution_error_preserves_unsupported_model_capability() {
+        let error = sdk_execution_error(
+            "Execution failed",
+            xybrid_core::error::XybridError::UnsupportedModelCapability {
+                model_id: "smollm2-360m".to_string(),
+                capability: "image input".to_string(),
+                hint: "select a VisionLanguage model".to_string(),
+            },
+        );
+
+        match error {
+            SdkError::UnsupportedModelCapability {
+                model_id,
+                capability,
+                hint,
+            } => {
+                assert_eq!(model_id, "smollm2-360m");
+                assert_eq!(capability, "image input");
+                assert!(hint.contains("VisionLanguage"));
+            }
+            other => panic!("expected unsupported model capability, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn execution_error_preserves_unsupported_backend_capability() {
+        let error = sdk_execution_error(
+            "Execution failed",
+            xybrid_core::error::XybridError::UnsupportedBackendCapability {
+                model_id: "lfm2-vl-450m".to_string(),
+                backend: "llama.cpp".to_string(),
+                capability: "vision input".to_string(),
+                hint: "rebuild with llm-llamacpp-vision".to_string(),
+            },
+        );
+
+        match error {
+            SdkError::UnsupportedBackendCapability {
+                model_id,
+                backend,
+                capability,
+                hint,
+            } => {
+                assert_eq!(model_id, "lfm2-vl-450m");
+                assert_eq!(backend, "llama.cpp");
+                assert_eq!(capability, "vision input");
+                assert!(hint.contains("llm-llamacpp-vision"));
+            }
+            other => panic!("expected unsupported backend capability, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn execution_error_preserves_missing_artifact() {
+        let error = sdk_execution_error(
+            "Execution failed",
+            xybrid_core::error::XybridError::MissingArtifact {
+                artifact: "vision_encoder".to_string(),
+                path: "/models/mmproj.gguf".to_string(),
+            },
+        );
+
+        match error {
+            SdkError::MissingArtifact { artifact, path } => {
+                assert_eq!(artifact, "vision_encoder");
+                assert_eq!(path, "/models/mmproj.gguf");
+            }
+            other => panic!("expected missing artifact, got {other:?}"),
         }
     }
 

@@ -209,9 +209,21 @@ mod tests {
 
         clear_execution_listener();
         let events = events.lock().unwrap();
-        assert_eq!(events.len(), 1);
+        let local_events = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ExecutionEvent::Started { model_id, method }
+                        | ExecutionEvent::Completed { model_id, method, .. }
+                        | ExecutionEvent::Failed { model_id, method, .. }
+                        if model_id == "local-model" && method == "execute_streaming"
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(local_events.len(), 1);
         assert!(matches!(
-            &events[0],
+            local_events[0],
             ExecutionEvent::Started { model_id, method }
                 if model_id == "local-model" && method == "execute_streaming"
         ));
@@ -238,10 +250,22 @@ mod tests {
 
         clear_execution_listener();
         let events = events.lock().unwrap();
+        let local_events = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ExecutionEvent::Started { model_id, method }
+                        | ExecutionEvent::Completed { model_id, method, .. }
+                        | ExecutionEvent::Failed { model_id, method, .. }
+                        if model_id == "local-model" && method == "execute_streaming_with_context"
+                )
+            })
+            .collect::<Vec<_>>();
         assert!(
-            events.is_empty(),
+            local_events.is_empty(),
             "silent guard on a success path must not emit any events; got: {:?}",
-            events
+            local_events
         );
     }
 
@@ -266,9 +290,21 @@ mod tests {
 
         clear_execution_listener();
         let events = events.lock().unwrap();
-        assert_eq!(events.len(), 1);
+        let local_events = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ExecutionEvent::Started { model_id, method }
+                        | ExecutionEvent::Completed { model_id, method, .. }
+                        | ExecutionEvent::Failed { model_id, method, .. }
+                        if model_id == "local-model" && method == "execute_streaming_with_context"
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(local_events.len(), 1);
         assert!(matches!(
-            &events[0],
+            local_events[0],
             ExecutionEvent::Failed { model_id, method, error, .. }
                 if model_id == "local-model"
                     && method == "execute_streaming_with_context"

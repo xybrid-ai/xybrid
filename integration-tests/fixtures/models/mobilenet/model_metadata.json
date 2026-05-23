@@ -1,20 +1,24 @@
 {
   "model_id": "mobilenetv2-imagenet",
   "version": "v2-12",
-  "description": "MobileNetV2 lightweight image classification model trained on ImageNet. Input: [1, 3, 224, 224] RGB image normalized to [0, 1] with ImageNet mean/std. Output: [1, 1000] probabilities for ImageNet classes.",
+  "description": "MobileNetV2 lightweight image classification model trained on ImageNet. Input: encoded PNG/JPEG/WebP image decoded to RGB, resized to 256x256, center-cropped to [1, 3, 224, 224], and normalized with ImageNet mean/std. Output: [1, 1000] probabilities for ImageNet classes.",
   "execution_template": {
-    "type": "SimpleMode",
+    "type": "Onnx",
     "model_file": "mobilenetv2-12.onnx"
   },
   "preprocessing": [
     {
-      "type": "Reshape",
-      "shape": [
-        1,
-        3,
-        256,
-        256
-      ]
+      "type": "ImageDecode",
+      "channels": 3,
+      "layout": "Nchw"
+    },
+    {
+      "type": "ImageResize",
+      "width": 256,
+      "height": 256,
+      "mode": "Stretch",
+      "interpolation": "Bilinear",
+      "layout": "Nchw"
     },
     {
       "type": "CenterCrop",
@@ -22,17 +26,9 @@
       "height": 224
     },
     {
-      "type": "Normalize",
-      "mean": [
-        0.485,
-        0.456,
-        0.406
-      ],
-      "std": [
-        0.229,
-        0.224,
-        0.225
-      ]
+      "type": "ImageNormalize",
+      "preset": "ImageNet",
+      "layout": "Nchw"
     }
   ],
   "postprocessing": [

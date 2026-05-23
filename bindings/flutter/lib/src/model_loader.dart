@@ -66,9 +66,7 @@ class XybridModelLoader {
   ///
   /// The [modelId] should match a model ID in the registry (e.g., "kokoro-82m").
   factory XybridModelLoader.fromRegistry(String modelId) {
-    return XybridModelLoader._(
-      FfiModelLoader.fromRegistry(modelId: modelId),
-    );
+    return XybridModelLoader._(FfiModelLoader.fromRegistry(modelId: modelId));
   }
 
   /// Create a loader for a model from a local bundle path.
@@ -76,9 +74,7 @@ class XybridModelLoader {
   /// The [path] should point to a directory containing model_metadata.json.
   /// Throws if the bundle is invalid.
   factory XybridModelLoader.fromBundle(String path) {
-    return XybridModelLoader._(
-      FfiModelLoader.fromBundle(path: path),
-    );
+    return XybridModelLoader._(FfiModelLoader.fromBundle(path: path));
   }
 
   /// Create a loader for a model from a local directory path.
@@ -87,9 +83,7 @@ class XybridModelLoader {
   /// and all required model files.
   /// Throws if the directory doesn't exist or metadata is missing/invalid.
   factory XybridModelLoader.fromDirectory(String path) {
-    return XybridModelLoader._(
-      FfiModelLoader.fromDirectory(path: path),
-    );
+    return XybridModelLoader._(FfiModelLoader.fromDirectory(path: path));
   }
 
   /// Create a loader for a model from a HuggingFace Hub repository.
@@ -100,9 +94,7 @@ class XybridModelLoader {
   ///
   /// Requires the `huggingface` feature flag to be enabled in the Rust SDK.
   factory XybridModelLoader.fromHuggingFace(String repo) {
-    return XybridModelLoader._(
-      FfiModelLoader.fromHuggingface(repo: repo),
-    );
+    return XybridModelLoader._(FfiModelLoader.fromHuggingface(repo: repo));
   }
 
   /// Load the model asynchronously.
@@ -275,6 +267,7 @@ class XybridModel {
                 cumulativeText: field0.text ?? '',
                 isFinal: true,
                 finishReason: 'stop',
+                metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
               );
             }
           case FfiStreamEvent_Error(:final field0):
@@ -336,6 +329,7 @@ class XybridModel {
                 cumulativeText: field0.text ?? '',
                 isFinal: true,
                 finishReason: 'stop',
+                metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
               );
             }
           case FfiStreamEvent_Error(:final field0):
@@ -415,6 +409,7 @@ class XybridModel {
               cumulativeText: field0.text ?? '',
               isFinal: true,
               finishReason: 'stop',
+              metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
             );
           case FfiStreamEvent_Error(:final field0):
             yield StreamToken(

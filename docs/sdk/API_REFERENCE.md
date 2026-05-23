@@ -518,9 +518,26 @@ are passed through to pipeline stages that understand them. Stages that don't ne
 simply ignore them. This allows a single envelope type to flow through multi-stage pipelines
 (e.g., ASR → LLM → TTS) without type changes.
 
-Image envelopes carry raw bytes plus a `format` tag (`"png" | "jpeg" | "webp"`); preprocessing
-pipelines decode and resize them. Multi-part user messages combine a text prompt with one or
-more image envelopes for vision-language models — see `Envelope.userMessage` below.
+Image envelopes carry encoded bytes plus a `format` tag (`"png" | "jpeg" | "webp"`); preprocessing
+pipelines decode and resize them. The shared image constructor validates the encoded payload before
+any binding or CLI surface hands it to model execution. Defaults are capped at 10 MiB encoded bytes
+and 16,777,216 decoded pixels, with PNG, JPEG, and WebP supported. Animated WebP is rejected for v1;
+EXIF orientation is not applied at envelope construction and remains the responsibility of the
+future image preprocessing step. Debug output, human-readable JSON, telemetry summaries, and errors
+must report only low-risk metadata such as format, byte count, width, and height, never image bytes.
+
+Multi-part user messages combine a text prompt with one or more image envelopes for vision-language
+models — see `Envelope.userMessage` below. The `images` list accepts only image envelopes returned
+by `Envelope.image` or `Envelope.imageRaw`; text, audio, embedding, or nested multi-part envelopes
+are invalid.
+
+Raw image envelopes are the planned binding surface for camera or canvas frames that already exist
+as pixels. `Envelope.imageRaw` carries owned pixel bytes plus explicit `ImagePlane` descriptors
+rather than a single stride, so packed RGB/BGRA/RGBA, NV12/NV21, and I420 buffers are all
+representable without JPEG re-encoding. YUV inputs require `YuvColorInfo`; RGB-family inputs must
+not carry it. Unsupported v1 raw formats such as P010, 10-bit YUV, premultiplied alpha, or opaque
+handles surface as `UnsupportedPixelFormat` before any pixel bytes are read. Debug output and JSON
+summaries report only format, byte count, dimensions, and plane count.
 
 ### Dart
 
@@ -539,13 +556,23 @@ class XybridEnvelope {
   });
   factory XybridEnvelope.embedding(List<double> embedding);
 
-  // Vision (planned)
-  factory XybridEnvelope.image(
-    List<int> imageBytes,
-    String format,        // "png" | "jpeg" | "webp"
-  );
-  factory XybridEnvelope.userMessage(
-    String text, {
+  // Vision
+  factory XybridEnvelope.image({
+    required List<int> bytes,
+    required String format, // "png" | "jpeg" | "jpg" | "webp"
+  });
+
+  // Raw vision frames (planned)
+  factory XybridEnvelope.imageRaw(
+    List<int> pixels, {
+    required PixelFormat pixelFormat,
+    required int width,
+    required int height,
+    required List<ImagePlane> planes,
+    YuvColorInfo? color,
+  });
+  factory XybridEnvelope.userMessage({
+    required String text,
     List<XybridEnvelope> images = const [],
   });
 
@@ -565,15 +592,15 @@ sealed class XybridEnvelope {
     val speed: Double? = null
   ) : XybridEnvelope()
   data class Audio(
-    val audioBytes: ByteArray,
-    val sampleRate: Int = 16000,
-    val channels: Int = 1
+    val bytes: ByteArray,
+    val sampleRate: UInt = 16000u,
+    val channels: UInt = 1u
   ) : XybridEnvelope()
-  data class Embedding(val embedding: FloatArray) : XybridEnvelope()
+  data class Embedding(val data: List<Float>) : XybridEnvelope()
 
-  // Vision (planned)
+  // Vision
   data class Image(
-    val imageBytes: ByteArray,
+    val bytes: ByteArray,
     val format: String,          // "png" | "jpeg" | "webp"
   ) : XybridEnvelope()
   data class UserMessage(
@@ -581,30 +608,50 @@ sealed class XybridEnvelope {
     val images: List<XybridEnvelope> = emptyList(),
   ) : XybridEnvelope()
 
-  companion object {
-    fun text(
-      text: String,
-      voiceId: String? = null,
-      speed: Double? = null
-    ): XybridEnvelope = Text(text, voiceId, speed)
-    fun audio(
-      audioBytes: ByteArray,
-      sampleRate: Int = 16000,
-      channels: Int = 1
-    ): XybridEnvelope = Audio(audioBytes, sampleRate, channels)
-    fun embedding(embedding: FloatArray): XybridEnvelope = Embedding(embedding)
-
-    // Vision (planned)
-    fun image(
-      imageBytes: ByteArray,
-      format: String,
-    ): XybridEnvelope = Image(imageBytes, format)
-    fun userMessage(
-      text: String,
-      images: List<XybridEnvelope> = emptyList(),
-    ): XybridEnvelope = UserMessage(text, images)
-  }
+  // Raw vision frames (planned)
+  data class RawImage(
+    val pixels: ByteArray,
+    val pixelFormat: PixelFormat,
+    val width: Int,
+    val height: Int,
+    val planes: List<ImagePlane>,
+    val color: YuvColorInfo? = null,
+  ) : XybridEnvelope()
 }
+
+object Envelope {
+  fun text(text: String): XybridEnvelope
+  fun text(text: String, voiceId: String, speed: Double = 1.0): XybridEnvelope
+  fun audio(bytes: ByteArray, sampleRate: UInt = 16000u, channels: UInt = 1u): XybridEnvelope
+  fun embedding(data: List<Float>): XybridEnvelope
+  fun image(bytes: ByteArray, format: String): XybridEnvelope
+  fun userMessage(text: String, images: List<XybridEnvelope> = emptyList()): XybridEnvelope
+}
+```
+
+### Swift
+
+```swift
+// Generated enum cases
+let encoded = XybridEnvelope.image(bytes: imageData, format: "jpeg")
+let message = XybridEnvelope.userMessage(text: "describe this", images: [encoded])
+
+// Validated convenience overloads
+let checkedImage = try XybridEnvelope.image(imageData, format: "jpg")
+let checkedMessage = try XybridEnvelope.userMessage("describe this", images: [checkedImage])
+```
+
+### C# (Unity)
+
+```csharp
+// Encoded vision input
+using var image = Envelope.Image(imageBytes, "jpeg");
+using var message = Envelope.UserMessage(
+    "Describe this image",
+    new[] { image }
+);
+
+using var result = model.Run(message);
 ```
 
 ### Implementation Status
@@ -617,8 +664,9 @@ sealed class XybridEnvelope {
 | `embedding()` | ✅ | ✅ | ✅ | — |
 | `textWithRole()` | ✅ | — | — | ✅ |
 | `withRole()` | ✅ | — | — | — |
-| `image()` | 📋 | 📋 | 📋 | 📋 |
-| `userMessage()` | 📋 | 📋 | 📋 | 📋 |
+| `image()` | ✅ | ✅ | ✅ | ✅ |
+| `imageRaw()` | 📋 | 📋 | 📋 | 📋 |
+| `userMessage()` | ✅ | ✅ | ✅ | ✅ |
 
 Legend: ✅ implemented · 📋 planned · — not applicable for this binding.
 

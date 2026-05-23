@@ -2,6 +2,8 @@
 //!
 //! This module contains the core types that define how models are executed.
 
+#[cfg(feature = "vision")]
+use super::steps::{ImageNormalizePreset, ImageResizeMode, ImageTensorLayout, InterpolationMethod};
 use super::steps::{PostprocessingStep, PreprocessingStep};
 use super::voice::{VoiceConfig, VoiceInfo};
 use serde::{Deserialize, Serialize};
@@ -84,6 +86,25 @@ pub enum ExecutionTemplate {
         /// field is absent, the consuming strategy supplies its own defaults.
         /// Used by codec TTS models (e.g. NeuTTS) that need specific sampling
         /// config for speech-token generation.
+        #[serde(default)]
+        generation_params: Option<GenerationParams>,
+    },
+
+    /// Vision-language model execution for image+text LLM inputs.
+    #[cfg(feature = "vision")]
+    VisionLanguage {
+        /// Path to the language model file (usually GGUF) relative to bundle root.
+        model_file: String,
+
+        /// Path to chat template JSON file.
+        #[serde(default)]
+        chat_template: Option<String>,
+
+        /// Maximum context length (tokens).
+        #[serde(default = "default_context_length")]
+        context_length: usize,
+
+        /// Per-model generation sampling parameters.
         #[serde(default)]
         generation_params: Option<GenerationParams>,
     },
@@ -200,6 +221,87 @@ pub enum RefinementSchedule {
 // Model Metadata
 // ============================================================================
 
+/// Named vision preprocessing preset used by sibling vision encoders.
+#[cfg(feature = "vision")]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub enum VisionPreprocessingPreset {
+    /// Gemma 3 / SigLIP-style image preprocessing.
+    #[serde(rename = "gemma3_vision")]
+    Gemma3Vision,
+    /// Gemma 4 image preprocessing.
+    #[serde(rename = "gemma4_vision")]
+    Gemma4Vision,
+    /// CLIP ViT-style preprocessing.
+    #[serde(rename = "clip_vit")]
+    ClipVit,
+    /// SigLIP-style preprocessing.
+    #[serde(rename = "siglip")]
+    SigLip,
+}
+
+#[cfg(feature = "vision")]
+impl VisionPreprocessingPreset {
+    /// Resolve this preset into concrete preprocessing steps.
+    pub fn resolve_steps(self, image_size: usize) -> Vec<PreprocessingStep> {
+        let normalize_preset = match self {
+            Self::Gemma3Vision | Self::SigLip => ImageNormalizePreset::SigLip,
+            Self::Gemma4Vision => ImageNormalizePreset::Custom {
+                mean: vec![0.0, 0.0, 0.0],
+                std: vec![1.0, 1.0, 1.0],
+            },
+            Self::ClipVit => ImageNormalizePreset::Clip,
+        };
+        let resize_mode = match self {
+            Self::ClipVit => ImageResizeMode::Center,
+            Self::Gemma3Vision | Self::Gemma4Vision | Self::SigLip => ImageResizeMode::Letterbox,
+        };
+
+        vec![
+            PreprocessingStep::ImageDecode {
+                channels: 3,
+                layout: ImageTensorLayout::Nchw,
+            },
+            PreprocessingStep::ImageResize {
+                width: image_size,
+                height: image_size,
+                mode: resize_mode,
+                interpolation: InterpolationMethod::Bilinear,
+                fill: vec![0.0, 0.0, 0.0],
+                layout: ImageTensorLayout::Nchw,
+            },
+            PreprocessingStep::ImageNormalize {
+                preset: normalize_preset,
+                layout: ImageTensorLayout::Nchw,
+            },
+        ]
+    }
+}
+
+/// Optional sibling vision encoder declaration in `model_metadata.json`.
+#[cfg(feature = "vision")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct VisionEncoderConfig {
+    /// Sibling mmproj / vision encoder file, relative to bundle root.
+    pub file: String,
+    /// Named preprocessing preset for the encoder.
+    pub preprocessing_preset: VisionPreprocessingPreset,
+    /// Square image size expected by the encoder.
+    pub image_size: usize,
+    /// Optional patch size for patch-count/capability planning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch_size: Option<usize>,
+}
+
+#[cfg(feature = "vision")]
+impl VisionEncoderConfig {
+    /// Resolve the configured preset into concrete preprocessing steps.
+    pub fn preprocessing_steps(&self) -> Vec<PreprocessingStep> {
+        self.preprocessing_preset.resolve_steps(self.image_size)
+    }
+}
+
 /// Complete model metadata describing execution strategy
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -223,6 +325,11 @@ pub struct ModelMetadata {
 
     /// List of files included in the model bundle
     pub files: Vec<String>,
+
+    /// Optional sibling vision encoder / mmproj declaration for VLMs.
+    #[cfg(feature = "vision")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vision_encoder: Option<VisionEncoderConfig>,
 
     /// Optional: Human-readable description
     #[serde(default)]
@@ -270,6 +377,8 @@ impl ModelMetadata {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: vec![model_file],
+            #[cfg(feature = "vision")]
+            vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
             voices: None,
@@ -298,6 +407,8 @@ impl ModelMetadata {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: vec![model_file],
+            #[cfg(feature = "vision")]
+            vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
             voices: None,
@@ -323,6 +434,8 @@ impl ModelMetadata {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files,
+            #[cfg(feature = "vision")]
+            vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
             voices: None,
@@ -381,6 +494,36 @@ impl ModelMetadata {
     pub fn has_voices(&self) -> bool {
         self.voices.is_some()
     }
+
+    /// Validate cross-field metadata invariants that serde cannot check alone.
+    pub fn validate(&self) -> Result<(), String> {
+        #[cfg(feature = "vision")]
+        if matches!(
+            self.execution_template,
+            ExecutionTemplate::VisionLanguage { .. }
+        ) && self.vision_encoder.is_none()
+        {
+            return Err(
+                "ExecutionTemplate::VisionLanguage requires a vision_encoder block".to_string(),
+            );
+        }
+
+        #[cfg(feature = "vision")]
+        if let Some(vision_encoder) = &self.vision_encoder {
+            if !self.files.iter().any(|file| file == &vision_encoder.file) {
+                return Err(format!(
+                    "vision_encoder file '{}' must be listed in files",
+                    vision_encoder.file
+                ));
+            }
+
+            if vision_encoder.image_size == 0 {
+                return Err("vision_encoder image_size must be greater than 0".to_string());
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -411,7 +554,9 @@ pub fn stage_kind_from_task(task: &str) -> Option<&'static str> {
         "text-to-speech" | "tts" => Some("tts"),
         "text-generation" | "chat" | "llm" => Some("llm"),
         "translation" => Some("translate"),
-        "image-classification" | "image-to-text" | "vision" => Some("vision"),
+        "image-classification" | "image-to-text" | "vision" | "vision-language" | "vlm" => {
+            Some("vision")
+        }
         "embedding" | "sentence-embedding" => Some("embed"),
         "audio-classification" | "vad" => Some("audio"),
         _ => None,
@@ -479,6 +624,10 @@ pub fn backend_label_from_template(
         ExecutionTemplate::Gguf { .. } => hint
             .and_then(normalize_llm_backend_hint)
             .or(Some("llamacpp")),
+        #[cfg(feature = "vision")]
+        ExecutionTemplate::VisionLanguage { .. } => hint
+            .and_then(normalize_llm_backend_hint)
+            .or(Some("llamacpp")),
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::ModelGraph { .. } => None,
@@ -542,7 +691,13 @@ pub fn quantization_label_from_metadata(metadata: &ModelMetadata) -> Option<Stri
     {
         return Some(normalize_quantization_label(declared));
     }
-    if let ExecutionTemplate::Gguf { model_file, .. } = &metadata.execution_template {
+    let model_file = match &metadata.execution_template {
+        ExecutionTemplate::Gguf { model_file, .. } => Some(model_file),
+        #[cfg(feature = "vision")]
+        ExecutionTemplate::VisionLanguage { model_file, .. } => Some(model_file),
+        _ => None,
+    };
+    if let Some(model_file) = model_file {
         return infer_quantization_from_gguf_filename(model_file);
     }
     None
@@ -572,6 +727,23 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
             // set the outer execute span to the same best-guess value so the
             // swim-lane bar colour is consistent whether we read it off the
             // outer or inner span.
+            #[cfg(all(
+                any(feature = "llm-mistral-metal", feature = "llm-llamacpp"),
+                target_os = "macos"
+            ))]
+            {
+                "gpu"
+            }
+            #[cfg(not(all(
+                any(feature = "llm-mistral-metal", feature = "llm-llamacpp"),
+                target_os = "macos"
+            )))]
+            {
+                "cpu"
+            }
+        }
+        #[cfg(feature = "vision")]
+        ExecutionTemplate::VisionLanguage { .. } => {
             #[cfg(all(
                 any(feature = "llm-mistral-metal", feature = "llm-llamacpp"),
                 target_os = "macos"
@@ -758,6 +930,8 @@ mod tests {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: Vec::new(),
+            #[cfg(feature = "vision")]
+            vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
             voices: None,
@@ -793,6 +967,8 @@ mod tests {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: Vec::new(),
+            #[cfg(feature = "vision")]
+            vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
             voices: None,
@@ -835,6 +1011,8 @@ mod tests {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: Vec::new(),
+            #[cfg(feature = "vision")]
+            vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
             voices: None,
@@ -860,6 +1038,11 @@ mod tests {
             quantization_label_from_metadata(&gguf_unknown).is_none(),
             "GGUF with no quantization marker in filename must omit"
         );
+    }
+
+    #[test]
+    fn stage_kind_maps_vlm_task_to_vision_lane() {
+        assert_eq!(stage_kind_from_task("vlm"), Some("vision"));
     }
 
     #[test]

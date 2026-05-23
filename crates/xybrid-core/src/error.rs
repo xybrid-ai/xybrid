@@ -46,6 +46,29 @@ pub enum XybridError {
     #[error("Not found: {0}")]
     NotFound(String),
 
+    /// Required model artifact was missing before inference could start.
+    #[error("Missing artifact: {artifact} at {path}")]
+    MissingArtifact { artifact: String, path: String },
+
+    /// The selected model cannot consume the requested input capability.
+    #[error(
+        "Unsupported model capability: model '{model_id}' does not support {capability}; {hint}"
+    )]
+    UnsupportedModelCapability {
+        model_id: String,
+        capability: String,
+        hint: String,
+    },
+
+    /// The active backend or build lacks a capability required by the model.
+    #[error("Unsupported backend capability: model '{model_id}' requires {capability}, but backend/build '{backend}' does not support {capability}; {hint}")]
+    UnsupportedBackendCapability {
+        model_id: String,
+        backend: String,
+        capability: String,
+        hint: String,
+    },
+
     /// Invalid configuration
     #[error("Configuration error: {0}")]
     Config(String),
@@ -124,6 +147,29 @@ impl From<crate::runtime_adapter::AdapterError> for XybridError {
         use crate::runtime_adapter::AdapterError;
         match e {
             AdapterError::ModelNotFound(s) => XybridError::NotFound(s),
+            AdapterError::MissingArtifact { artifact, path } => {
+                XybridError::MissingArtifact { artifact, path }
+            }
+            AdapterError::UnsupportedModelCapability {
+                model_id,
+                capability,
+                hint,
+            } => XybridError::UnsupportedModelCapability {
+                model_id,
+                capability,
+                hint,
+            },
+            AdapterError::UnsupportedBackendCapability {
+                model_id,
+                backend,
+                capability,
+                hint,
+            } => XybridError::UnsupportedBackendCapability {
+                model_id,
+                backend,
+                capability,
+                hint,
+            },
             AdapterError::ModelNotLoaded(s) => {
                 XybridError::Inference(InferenceError::ModelNotLoaded(s))
             }
@@ -269,6 +315,53 @@ mod tests {
         assert!(matches!(
             xybrid_err,
             XybridError::Inference(InferenceError::Backend(_))
+        ));
+    }
+
+    #[test]
+    fn adapter_missing_artifact_preserves_typed_core_error() {
+        use crate::runtime_adapter::AdapterError;
+
+        let adapter_err = AdapterError::MissingArtifact {
+            artifact: "vision_encoder".to_string(),
+            path: "/models/mmproj.gguf".to_string(),
+        };
+        let xybrid_err: XybridError = adapter_err.into();
+
+        match xybrid_err {
+            XybridError::MissingArtifact { artifact, path } => {
+                assert_eq!(artifact, "vision_encoder");
+                assert_eq!(path, "/models/mmproj.gguf");
+            }
+            other => panic!("expected typed missing artifact error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn adapter_unsupported_capabilities_preserve_typed_core_errors() {
+        use crate::runtime_adapter::AdapterError;
+
+        let model_err: XybridError = AdapterError::UnsupportedModelCapability {
+            model_id: "smollm2-360m".to_string(),
+            capability: "image input".to_string(),
+            hint: "select a VisionLanguage model".to_string(),
+        }
+        .into();
+        assert!(matches!(
+            model_err,
+            XybridError::UnsupportedModelCapability { .. }
+        ));
+
+        let backend_err: XybridError = AdapterError::UnsupportedBackendCapability {
+            model_id: "lfm2-vl-450m".to_string(),
+            backend: "llama.cpp".to_string(),
+            capability: "vision input".to_string(),
+            hint: "rebuild with llm-llamacpp-vision".to_string(),
+        }
+        .into();
+        assert!(matches!(
+            backend_err,
+            XybridError::UnsupportedBackendCapability { .. }
         ));
     }
 

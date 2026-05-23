@@ -11,6 +11,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **OpenUPM registry**: Publish Unity SDK to [openupm.com](https://openupm.com) for scoped registry install
 
+### Planned (0.2.0) — Vision-Language Models
+
+The draft below tracks the vision-language epic on `feat/vision-models-support`. Move into a dated `[0.2.0]` section when the release cut is approved. Acceptance evidence is anchored in [`meta/docs/vision-models-handoff.md`](../../docs/vision-models-handoff.md) and [`meta/docs/vision-models-release-plan.md`](../../docs/vision-models-release-plan.md) (paths relative to this file in the meta workstation).
+
+### Added — Vision-Language
+
+- **Backend-agnostic vision-language model support** (epic [Vision Models](https://linear.app/xybrid/project/vision-models-0f1ea931ee62), v0.2.0):
+  - Encoded image input via `Envelope::image(bytes, format)` (PNG / JPEG / WebP) plus raw camera-frame ingress via `Envelope::image_raw(...)` for `PixelFormat::{Rgb8, Rgba8, Bgra8, Nv12, Nv21, I420}` with `YuvColorInfo` (matrix + range).
+  - Ordered multi-part user messages via `Envelope::user_message(text, images)`, preserved across `ConversationContext` push/pop for multi-turn VLM chat.
+  - Image guardrails — corrupt, unsupported, oversized encoded, and oversized decoded inputs are rejected before decode or model execution. Image bytes are never logged; `Debug` and error formatting are redacted.
+  - Backend-neutral `VisionEncoder` / `VisionEmbeddings` contract for embedding-style runtimes (MLX, Candle, ORT). llama.cpp deliberately bypasses this surface and owns its `mtmd` chunk/eval path internally so per-backend complexity stays behind the backend boundary.
+  - `ExecutionTemplate::VisionLanguage` wired through `TemplateExecutor` with `vision_encoder` metadata (`preprocessing_preset`, `image_size`, `patch_size`, sibling file declarations).
+  - Image preprocessing primitives (`ImageDecode`, `ImageResize` letterbox / pad / crop, `ImageNormalize`) with SigLIP, CLIP, ImageNet, and `gemma4_vision` presets.
+  - First concrete backend: llama.cpp `mtmd` / mmproj path behind the new `llm-llamacpp-vision` feature umbrella. Includes capability declaration, stop-pattern handling for Gemma 3 / Gemma 3n (`<end_of_turn>`) and Gemma 4 (`<turn|>`) chat templates, and image-preprocess timing capture.
+  - Two reference models published as URL-backed integration fixtures: `lfm2-vl-450m` (Q4 language + Q8 mmproj, ≈323 MB total) for the compact runtime proof, and `gemma-4-e2b` (Q8 language + Q8 mmproj, ≈5.5 GB total) for the heavyweight correctness target.
+  - Telemetry on every VLM inference: `task=vlm` plus `image_preprocess_ms` surfaced through SDK metrics, Tinybird ingest, the dashboard's trace detail console, and the Studio token-rate footer.
+  - Typed capability errors (`UnsupportedBackendCapability`, `UnsupportedModelCapability`, `MissingArtifact`) raised before any tokens are generated when a backend or device cannot satisfy a vision-bearing turn — covered by both batch and streaming-path tests in `crates/xybrid-core/src/execution/executor.rs`.
+- **SDK binding surface (all four)**:
+  - Flutter: `XybridEnvelope.image(...)` and `XybridEnvelope.userMessage(...)` on the FRB-generated bridge; Studio dogfood path wires the attach menu, capability gates, image-bearing turns, and `image_preprocess_ms` display. Native `flutter analyze` / `flutter test` is open work tracked in the release plan.
+  - Kotlin: `Envelope.image(...)`, `Envelope.userMessage(...)` on the UniFFI surface plus JUnit tests under `bindings/kotlin/src/test/kotlin/ai/xybrid/`. Running `./gradlew test` on a JDK-17+ host is open work tracked in the release plan.
+  - Swift: `Envelope.image(_:format:)`, `Envelope.userMessage(_:images:)` on the UniFFI surface plus the Apple package README example. Running `swift test` against the XCFramework is open work tracked in the release plan.
+  - Unity: `Envelope.Image(...)`, `Envelope.UserMessage(...)` on the C# C-FFI surface plus Editor tests under `bindings/unity/Tests/Editor/EnvelopeVisionTests.cs`. Running them through the Unity Editor is open work tracked in the release plan.
+- **CLI** `xybrid run`: `--input-image <path>` accepts PNG / JPEG / WebP; the REPL accepts `/image <path>` for staged multimodal turns. Both inherit the same core image guardrails.
+- **Packaging + registry**:
+  - `xybrid-pack` learns multi-file VLM bundle support (primary model plus mmproj sibling, both hash-verified before registration).
+  - `RegistryClient::fetch_extracted` returns a directory with every required vision artifact in place, ready to hand to `TemplateExecutor`.
+  - Pack pipeline dry-run validated for `gemma-4-e2b`; production publish to `xybrid-ai/Gemma-4-E2B-Instruct-GGUF` is the release-day step.
+
+### Fixed — Vision-Language
+
+- **Gemma 4 E2B trailing `<turn|>` token leak**: the Q8 GGUF at `ggml-org/gemma-4-E2B-it-GGUF` decodes its chat end-of-turn special token to the literal string `<turn|>` (not the expected `<end_of_turn>`), confirmed against `vendor/llama.cpp/src/llama-vocab.cpp`. Added `<turn|>` to `CHAT_STOP_PATTERNS` so the marker no longer leaks as the trailing tail of caption text. Unit + streaming regression tests in `crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs`. The matching broken-tokenizer variant `turn|>` is intentionally **not** added to `CHAT_STOP_PATTERNS_BROKEN` — the body starts with the common letter `t`, and `trim_partial_stop_suffix` would then chop benign words ending in `t` / `tu` / `tur` / `turn`; regression guard added.
+
+### Docs — Vision-Language
+
+- New tutorial at `docs/content/docs/guides/vision-models.mdx` covering supported models, build flags, CLI flow, all four SDK bindings, multi-turn replay, and typed-error troubleshooting.
+- `docs/FEATURE_MATRIX.md` gains a "Release Gates" section documenting the supported clippy / test invocations per platform preset. Acceptance criteria across `task-management/issues/vision-models/0{2,3,4,5,20}-*.md` now link to the new section instead of the broken `cargo … --all-features -- -D warnings` gate (which is invalid for this workspace because of mutually-exclusive ORT load modes, Candle GPU backends, and the marker-only `llm-mistral*` features).
+- `docs/sdk/API_REFERENCE.md` and `docs/sdk/api-surface.yaml` document the new image envelope and multi-part user-message API on every binding row.
+
 ---
 
 ## [0.1.0-rc3] - 2026-05-16

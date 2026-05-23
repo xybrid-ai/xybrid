@@ -26,6 +26,7 @@ pub(crate) fn run_pipeline(
     policy_path: Option<&PathBuf>,
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
+    input_images: &[PathBuf],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     target: Option<&str>,
@@ -49,7 +50,7 @@ pub(crate) fn run_pipeline(
 
     let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
     let stages = resolve_pipeline_stages(&config, &client)?;
-    let input = build_input_envelope(input_audio, input_text, voice)?;
+    let input = build_input_envelope(input_audio, input_text, input_images, voice)?;
 
     let metrics = DeviceMetrics::default();
     let availability_fn = build_availability_fn(&stages);
@@ -181,8 +182,24 @@ fn download_model(
 fn build_input_envelope(
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
+    input_images: &[PathBuf],
     voice: Option<&str>,
 ) -> Result<Envelope> {
+    if !input_images.is_empty() {
+        if input_audio.is_some() {
+            return Err(anyhow::anyhow!(
+                "--input-image cannot be combined with --input-audio"
+            ));
+        }
+        if voice.is_some() {
+            return Err(anyhow::anyhow!(
+                "--voice cannot be combined with --input-image"
+            ));
+        }
+
+        return build_multimodal_input_envelope(input_text, input_images);
+    }
+
     let mut input = if let Some(audio_path) = input_audio {
         ui::kv("Input", &format!("audio ({})", audio_path.display()));
         let audio_bytes = fs::read(audio_path)
@@ -204,6 +221,50 @@ fn build_input_envelope(
     }
 
     Ok(input)
+}
+
+fn build_multimodal_input_envelope(
+    input_text: Option<&str>,
+    input_images: &[PathBuf],
+) -> Result<Envelope> {
+    #[cfg(feature = "vision")]
+    {
+        let text = input_text.unwrap_or_default();
+        if !text.is_empty() {
+            ui::kv("Input", &format!("\"{}\"", text));
+        }
+
+        let mut images = Vec::with_capacity(input_images.len());
+        for image_path in input_images {
+            ui::kv("Input image", &image_path.display().to_string());
+            let image_bytes = fs::read(image_path)
+                .with_context(|| format!("Failed to read image file: {}", image_path.display()))?;
+            let format = image_format_hint(image_path)?;
+            ui::kv("Image size", &format!("{} bytes", image_bytes.len()));
+            images.push(
+                Envelope::image(image_bytes, format)
+                    .with_context(|| format!("Invalid image input: {}", image_path.display()))?,
+            );
+        }
+
+        Envelope::user_message(text, images).context("Failed to build multimodal user input")
+    }
+
+    #[cfg(not(feature = "vision"))]
+    {
+        let _ = input_text;
+        let _ = input_images;
+        Err(anyhow::anyhow!(
+            "This xybrid binary was built without vision support. Rebuild with --features vision or --features llm-llamacpp-vision to use --input-image."
+        ))
+    }
+}
+
+#[cfg(feature = "vision")]
+fn image_format_hint(path: &Path) -> Result<&str> {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .ok_or_else(|| anyhow::anyhow!("Image file has no extension: {}", path.display()))
 }
 
 fn build_availability_fn(stages: &[StageDescriptor]) -> impl Fn(&str) -> LocalAvailability + '_ {
@@ -307,6 +368,10 @@ fn run_dry_run(
             EnvelopeKind::Audio(_) => EnvelopeKind::Text("transcribed".to_string()),
             EnvelopeKind::Text(t) => EnvelopeKind::Text(format!("{}-output", t)),
             EnvelopeKind::Embedding(_) => EnvelopeKind::Text("result".to_string()),
+            #[cfg(feature = "vision")]
+            EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
+                EnvelopeKind::Text("vision-output".to_string())
+            }
         };
         current_input = Envelope::new(new_kind);
         ui::kv("  Output", current_input.kind_str());
@@ -403,6 +468,14 @@ fn print_pipeline_results(
                     println!("    {:?} ...", &vec[..5]);
                 }
             }
+            #[cfg(feature = "vision")]
+            EnvelopeKind::Image { .. } => {
+                print_image_summary("  ", &result.output);
+            }
+            #[cfg(feature = "vision")]
+            EnvelopeKind::MultiPart(parts) => {
+                ui::kv("  Parts", &format!("{}", parts.len()));
+            }
         }
         println!();
     }
@@ -440,6 +513,14 @@ fn save_pipeline_output(
                     })?;
                     ui::ok(&format!("Embedding saved to {}", path.display()));
                 }
+                #[cfg(feature = "vision")]
+                EnvelopeKind::Image { .. } => {
+                    save_image_output(path, &last_result.output)?;
+                }
+                #[cfg(feature = "vision")]
+                EnvelopeKind::MultiPart(_) => {
+                    save_envelope_json(path, &last_result.output)?;
+                }
             }
         }
     } else if let Some(last_result) = results.last() {
@@ -474,6 +555,7 @@ pub(crate) fn run_bundle(
     bundle_path: &Path,
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
+    input_images: &[PathBuf],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     dry_run: bool,
@@ -509,8 +591,14 @@ pub(crate) fn run_bundle(
         .context("Failed to extract bundle")?;
     sp.finish_and_clear();
 
-    let (metadata, input) =
-        prepare_bundle_execution(&extract_dir, input_audio, input_text, voice, dry_run)?;
+    let (metadata, input) = prepare_bundle_execution(
+        &extract_dir,
+        input_audio,
+        input_text,
+        input_images,
+        voice,
+        dry_run,
+    )?;
 
     emit_pipeline_start_event(&metadata, &bundle_path.display().to_string());
 
@@ -524,7 +612,7 @@ pub(crate) fn run_bundle(
     }
 
     let input = input.ok_or_else(|| {
-        anyhow::anyhow!("No input provided. Use --input-audio <file> or --input-text <text>")
+        anyhow::anyhow!("No input provided. Use --input-audio <file>, --input-text <text>, or --input-image <file>")
     })?;
 
     let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
@@ -583,6 +671,7 @@ pub(crate) fn run_model(
     model_id: &str,
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
+    input_images: &[PathBuf],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     platform: Option<&str>,
@@ -674,8 +763,14 @@ pub(crate) fn run_model(
         }
     };
 
-    let (metadata, input) =
-        prepare_bundle_execution(&extract_dir, input_audio, input_text, voice, dry_run)?;
+    let (metadata, input) = prepare_bundle_execution(
+        &extract_dir,
+        input_audio,
+        input_text,
+        input_images,
+        voice,
+        dry_run,
+    )?;
 
     emit_pipeline_start_event(&metadata, "registry");
 
@@ -689,7 +784,7 @@ pub(crate) fn run_model(
     }
 
     let input = input.ok_or_else(|| {
-        anyhow::anyhow!("No input provided. Use --input-audio <file> or --input-text <text>")
+        anyhow::anyhow!("No input provided. Use --input-audio <file>, --input-text <text>, or --input-image <file>")
     })?;
 
     let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
@@ -711,6 +806,7 @@ pub(crate) fn run_directory(
     dir: &Path,
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
+    input_images: &[PathBuf],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     dry_run: bool,
@@ -728,7 +824,8 @@ pub(crate) fn run_directory(
         return Err(anyhow::anyhow!("Directory not found: {}", dir.display()));
     }
 
-    let (metadata, input) = prepare_bundle_execution(dir, input_audio, input_text, voice, dry_run)?;
+    let (metadata, input) =
+        prepare_bundle_execution(dir, input_audio, input_text, input_images, voice, dry_run)?;
 
     emit_pipeline_start_event(&metadata, "directory");
 
@@ -742,7 +839,7 @@ pub(crate) fn run_directory(
     }
 
     let input = input.ok_or_else(|| {
-        anyhow::anyhow!("No input provided. Use --input-audio <file> or --input-text <text>")
+        anyhow::anyhow!("No input provided. Use --input-audio <file>, --input-text <text>, or --input-image <file>")
     })?;
 
     let (output, elapsed) = run_inference(dir, &metadata, &input, trace_enabled)?;
@@ -763,6 +860,7 @@ pub(crate) fn run_huggingface(
     repo: &str,
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
+    input_images: &[PathBuf],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     dry_run: bool,
@@ -794,8 +892,14 @@ pub(crate) fn run_huggingface(
         .join("hf")
         .join(&sanitized);
 
-    let (metadata, input) =
-        prepare_bundle_execution(&cache_dir, input_audio, input_text, voice, dry_run)?;
+    let (metadata, input) = prepare_bundle_execution(
+        &cache_dir,
+        input_audio,
+        input_text,
+        input_images,
+        voice,
+        dry_run,
+    )?;
 
     emit_pipeline_start_event(&metadata, "huggingface");
 
@@ -809,7 +913,7 @@ pub(crate) fn run_huggingface(
     }
 
     let input = input.ok_or_else(|| {
-        anyhow::anyhow!("No input provided. Use --input-audio <file> or --input-text <text>")
+        anyhow::anyhow!("No input provided. Use --input-audio <file>, --input-text <text>, or --input-image <file>")
     })?;
 
     let (output, elapsed) = run_inference(&cache_dir, &metadata, &input, trace_enabled)?;
@@ -830,6 +934,7 @@ pub(crate) fn run_model_file(
     gguf_path: &Path,
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
+    input_images: &[PathBuf],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     dry_run: bool,
@@ -886,24 +991,11 @@ pub(crate) fn run_model_file(
         return Ok(());
     }
 
-    let input = if let Some(audio_path) = input_audio {
-        ui::kv("Input", &format!("audio ({})", audio_path.display()));
-        let audio_bytes = fs::read(audio_path)
-            .with_context(|| format!("Failed to read audio file: {}", audio_path.display()))?;
-        Envelope::new(EnvelopeKind::Audio(audio_bytes))
-    } else if let Some(text) = input_text {
-        ui::kv("Input", &format!("\"{}\"", text));
-        let mut envelope = Envelope::new(EnvelopeKind::Text(text.to_string()));
-        if let Some(voice_id) = voice {
-            ui::kv("Voice", voice_id);
-            envelope
-                .metadata
-                .insert("voice_id".to_string(), voice_id.to_string());
-        }
-        envelope
+    let input = if input_audio.is_some() || input_text.is_some() || !input_images.is_empty() {
+        build_input_envelope(input_audio, input_text, input_images, voice)?
     } else {
         return Err(anyhow::anyhow!(
-            "No input provided. Use --input-audio <file> or --input-text <text>"
+            "No input provided. Use --input-audio <file>, --input-text <text>, or --input-image <file>"
         ));
     };
 
@@ -955,6 +1047,7 @@ fn prepare_bundle_execution(
     extract_dir: &Path,
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
+    input_images: &[PathBuf],
     voice: Option<&str>,
     dry_run: bool,
 ) -> Result<(ModelMetadata, Option<Envelope>)> {
@@ -985,25 +1078,11 @@ fn prepare_bundle_execution(
         return Ok((metadata, None));
     }
 
-    let mut input = if let Some(audio_path) = input_audio {
-        ui::kv("Input", &format!("audio ({})", audio_path.display()));
-        let audio_bytes = fs::read(audio_path)
-            .with_context(|| format!("Failed to read audio file: {}", audio_path.display()))?;
-        ui::kv("Size", &format!("{} bytes", audio_bytes.len()));
-        Envelope::new(EnvelopeKind::Audio(audio_bytes))
-    } else if let Some(text) = input_text {
-        ui::kv("Input", &format!("\"{}\"", text));
-        Envelope::new(EnvelopeKind::Text(text.to_string()))
-    } else {
+    if input_audio.is_none() && input_text.is_none() && input_images.is_empty() {
         return Ok((metadata, None));
-    };
-
-    if let Some(voice_id) = voice {
-        ui::kv("Voice", voice_id);
-        input
-            .metadata
-            .insert("voice_id".to_string(), voice_id.to_string());
     }
+
+    let input = build_input_envelope(input_audio, input_text, input_images, voice)?;
     println!();
 
     Ok((metadata, Some(input)))
@@ -1035,7 +1114,7 @@ fn run_inference(
     let start_time = std::time::Instant::now();
     let output = executor
         .execute(metadata, input, None)
-        .map_err(|e| anyhow::anyhow!("Inference failed: {:?}", e))?;
+        .context("Inference failed")?;
     let elapsed = start_time.elapsed();
 
     sp.finish_and_clear();
@@ -1100,12 +1179,60 @@ fn print_inference_results(
                 ui::ok(&format!("Embedding saved to {}", path.display()));
             }
         }
+        #[cfg(feature = "vision")]
+        EnvelopeKind::Image { .. } => {
+            print_image_summary("", output);
+            if let Some(path) = output_path {
+                save_image_output(path, output)?;
+            }
+        }
+        #[cfg(feature = "vision")]
+        EnvelopeKind::MultiPart(parts) => {
+            ui::kv("Parts", &format!("{}", parts.len()));
+            if let Some(path) = output_path {
+                save_envelope_json(path, output)?;
+            }
+        }
     }
 
     println!();
     ui::ok("Inference completed successfully");
     println!();
 
+    Ok(())
+}
+
+#[cfg(feature = "vision")]
+fn print_image_summary(prefix: &str, output: &Envelope) {
+    ui::kv(
+        &format!("{prefix}Size"),
+        &format!("{} bytes", output.payload_size()),
+    );
+    if let Some(dimensions) = output.image_dimensions() {
+        ui::kv(
+            &format!("{prefix}Dimensions"),
+            &format!("{}x{}", dimensions.width, dimensions.height),
+        );
+    }
+}
+
+#[cfg(feature = "vision")]
+fn save_image_output(path: &PathBuf, output: &Envelope) -> Result<()> {
+    let (bytes, _format) = output
+        .as_image()
+        .ok_or_else(|| anyhow::anyhow!("Image output is not encoded"))?;
+    fs::write(path, bytes)
+        .with_context(|| format!("Failed to write image to {}", path.display()))?;
+    ui::ok(&format!("Image saved to {}", path.display()));
+    Ok(())
+}
+
+#[cfg(feature = "vision")]
+fn save_envelope_json(path: &PathBuf, output: &Envelope) -> Result<()> {
+    let json = serde_json::to_string_pretty(output).context("Failed to serialize envelope")?;
+    fs::write(path, json)
+        .with_context(|| format!("Failed to write envelope to {}", path.display()))?;
+    ui::ok(&format!("Envelope saved to {}", path.display()));
     Ok(())
 }
 
@@ -1155,4 +1282,96 @@ fn emit_pipeline_complete_event(
             .unwrap()
             .as_millis() as u64,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "vision")]
+    fn png_image(width: u32, height: u32) -> Vec<u8> {
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            width,
+            height,
+            image::Rgb([17, 34, 51]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test image encodes");
+        encoded.into_inner()
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn build_input_envelope_combines_text_and_image_parts() {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("fixture.png");
+        fs::write(&image_path, png_image(2, 3)).unwrap();
+
+        let input = build_input_envelope(None, Some("describe this"), &[image_path], None).unwrap();
+        let parts = input.as_multipart().expect("text+image input is multipart");
+
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].as_text(), Some("describe this"));
+        assert!(parts[1].is_image());
+        assert_eq!(
+            parts[1].image_dimensions(),
+            Some(xybrid_core::ir::ImageDimensions {
+                width: 2,
+                height: 3,
+            })
+        );
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn build_input_envelope_rejects_corrupt_image_with_redacted_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("corrupt.jpeg");
+        fs::write(&image_path, [42_u8, 42, 42, 42]).unwrap();
+
+        let err =
+            build_input_envelope(None, Some("describe this"), &[image_path], None).unwrap_err();
+        let message = format!("{err:#}");
+
+        assert!(message.contains("Invalid image input"));
+        assert!(message.contains("invalid or corrupt jpeg image bytes"));
+        assert!(!message.contains("[42"));
+        assert!(!message.contains("42, 42"));
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn build_input_envelope_rejects_oversized_image_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("huge.png");
+        fs::write(
+            &image_path,
+            vec![0_u8; xybrid_core::ir::envelope::DEFAULT_MAX_ENCODED_IMAGE_BYTES + 1],
+        )
+        .unwrap();
+
+        let err =
+            build_input_envelope(None, Some("describe this"), &[image_path], None).unwrap_err();
+        let message = format!("{err:#}");
+
+        assert!(message.contains("Invalid image input"));
+        assert!(message.contains("Image payload too large"));
+        assert!(!message.contains("[0"));
+    }
+
+    #[cfg(not(feature = "vision"))]
+    #[test]
+    fn image_input_requires_vision_feature() {
+        let err = build_input_envelope(
+            None,
+            Some("describe this"),
+            &[PathBuf::from("fixture.png")],
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("built without vision support"));
+    }
 }

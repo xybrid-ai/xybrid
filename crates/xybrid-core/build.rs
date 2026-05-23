@@ -172,6 +172,7 @@ fn compile_llama_cpp() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let wrapper_path = manifest_dir.join("vendor/llama_wrapper.cpp");
+    let vision_enabled = env::var_os("CARGO_FEATURE_VISION").is_some();
 
     // Pinned llama.cpp upstream — keep in sync with the git submodule SHA in
     // .gitmodules / `git submodule status`. The fallback clone below uses this
@@ -301,6 +302,10 @@ fn compile_llama_cpp() {
 
     println!("cargo:rerun-if-changed=vendor/llama.cpp");
     println!("cargo:rerun-if-changed=vendor/llama_wrapper.cpp");
+    if vision_enabled {
+        println!("cargo:rerun-if-changed=vendor/llama.cpp/tools/mtmd/mtmd.h");
+        println!("cargo:rerun-if-changed=vendor/llama.cpp/tools/mtmd/mtmd-helper.h");
+    }
 
     // Configure CMake
     let mut cmake_config = cmake::Config::new(&llama_cpp_dir);
@@ -310,6 +315,10 @@ fn compile_llama_cpp() {
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("LLAMA_BUILD_EXAMPLES", "OFF")
         .define("LLAMA_BUILD_TESTS", "OFF")
+        .define(
+            "LLAMA_BUILD_TOOLS",
+            if vision_enabled { "ON" } else { "OFF" },
+        )
         .define("LLAMA_BUILD_SERVER", "OFF")
         .define("LLAMA_CURL", "OFF")
         .define("GGML_OPENMP", "OFF");
@@ -432,6 +441,9 @@ fn compile_llama_cpp() {
     println!("cargo:rustc-link-search=native={}", dst.display());
 
     // Link llama.cpp static libraries
+    if vision_enabled {
+        println!("cargo:rustc-link-lib=static=mtmd");
+    }
     println!("cargo:rustc-link-lib=static=llama");
     println!("cargo:rustc-link-lib=static=ggml");
     println!("cargo:rustc-link-lib=static=ggml-base");
@@ -446,8 +458,12 @@ fn compile_llama_cpp() {
         .std("c++17")
         .file(&wrapper_path)
         .include(llama_cpp_dir.join("include"))
-        .include(llama_cpp_dir.join("ggml/include"))
-        .include(dst.join("include"));
+        .include(llama_cpp_dir.join("ggml/include"));
+    if vision_enabled {
+        wrapper_build.include(llama_cpp_dir.join("tools/mtmd"));
+        wrapper_build.define("XYBRID_LLAMA_VISION", None);
+    }
+    wrapper_build.include(dst.join("include"));
 
     // Windows MSVC CRT: Do NOT call static_crt() — let the cc crate auto-detect from
     // CARGO_CFG_TARGET_FEATURE. When crt-static is set (CLI via RUSTFLAGS), cc uses /MT.

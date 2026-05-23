@@ -58,6 +58,7 @@ mel_spec = "0.2"  # For mel spectrogram computation (audio preprocessing)
 num-complex = "0.4"  # Required by mel_spec for Complex numbers
 rustfft = "6.2"  # For custom Whisper-compatible FFT (Slaney mel scale)
 image = "0.25"  # For image resizing and processing
+yuvutils-rs = { version = "0.8.3", default-features = false }  # For raw YUV camera-frame conversion
 # Disable default features to exclude esaxx_fast (esaxx-rs/cpp) which hardcodes
 # static_crt(true) on MSVC, producing /MT objects that conflict with ORT's /MD.
 # We only run tokenizer models, we don't train them — esaxx-rs is only for BPE training.
@@ -100,6 +101,10 @@ default = ["ort-download"]
 # JSON Schema generation for model_metadata.json
 schema = ["dep:schemars"]
 
+# Vision input primitives. Backend implementations, preprocessing, and binding
+# surfaces are layered on top in later feature slices.
+vision = []
+
 # ONNX Runtime
 ort-download = ["ort/download-binaries", "ort/tls-native"]  # Desktop/macOS/iOS: download prebuilt binaries
 ort-dynamic = ["ort/load-dynamic"]                          # Android: load .so at runtime from AAR
@@ -126,6 +131,7 @@ llm-mistral-cuda = ["llm-mistral"]
 # and source code (#[cfg(feature = "llm-llamacpp")] blocks), not external dependencies.
 # Requires: vendor/llama.cpp directory with cloned llama.cpp source.
 llm-llamacpp = []
+llm-llamacpp-vision = ["llm-llamacpp", "vision"]
 
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
 # downstream demos, integration tests, and benchmarks. Off by default.
@@ -140,7 +146,7 @@ cmake = "0.1"
 
 [dev-dependencies]
 tempfile = "3.8"
-xybrid-sdk = { path = "../xybrid-sdk" }
+xybrid-sdk = { path = "../xybrid-sdk", features = ["vision"] }
 dirs = "6.0"
 filetime = "0.2"
 hound = "3.5"  # WAV file reading for tests
@@ -163,6 +169,11 @@ harness = false
 [[bench]]
 name = "routing_feedback"
 harness = false
+
+[[bench]]
+name = "raw_image_ingress"
+harness = false
+required-features = ["vision", "dev-tools"]
 
 # Platform-specific ureq dependencies
 # Non-Android: Use default ureq with TLS

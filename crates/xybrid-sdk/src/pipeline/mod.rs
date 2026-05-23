@@ -1146,6 +1146,8 @@ impl Pipeline {
                 EnvelopeKind::Text(_) => OutputType::Text,
                 EnvelopeKind::Audio(_) => OutputType::Audio,
                 EnvelopeKind::Embedding(_) => OutputType::Embedding,
+                #[cfg(feature = "vision")]
+                EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => OutputType::Unknown,
             };
             (output_type, last.output.clone())
         } else {
@@ -1303,6 +1305,8 @@ impl Pipeline {
                     EnvelopeKind::Text(_) => OutputType::Text,
                     EnvelopeKind::Audio(_) => OutputType::Audio,
                     EnvelopeKind::Embedding(_) => OutputType::Embedding,
+                    #[cfg(feature = "vision")]
+                    EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => OutputType::Unknown,
                 };
                 (output_type, last.output.clone())
             } else {
@@ -1567,6 +1571,10 @@ impl Xybrid {
                             EnvelopeKind::Text(_) => OutputType::Text,
                             EnvelopeKind::Audio(_) => OutputType::Audio,
                             EnvelopeKind::Embedding(_) => OutputType::Embedding,
+                            #[cfg(feature = "vision")]
+                            EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
+                                OutputType::Unknown
+                            }
                         };
 
                         // Publish a `ModelComplete` mirroring the

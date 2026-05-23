@@ -16,17 +16,30 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>>
 abstract class FfiEnvelope implements RustOpaqueInterface {
   /// Create audio envelope with raw bytes and format metadata.
-  static FfiEnvelope audio(
-          {required List<int> bytes,
-          required int sampleRate,
-          required int channels}) =>
-      XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeAudio(
-          bytes: bytes, sampleRate: sampleRate, channels: channels);
+  static FfiEnvelope audio({
+    required List<int> bytes,
+    required int sampleRate,
+    required int channels,
+  }) => XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeAudio(
+    bytes: bytes,
+    sampleRate: sampleRate,
+    channels: channels,
+  );
 
   /// Create embedding envelope from float vector.
-  static FfiEnvelope embedding({required List<double> data}) =>
-      XybridRustLib.instance.api
-          .crateApiEnvelopeFfiEnvelopeEmbedding(data: data);
+  static FfiEnvelope embedding({required List<double> data}) => XybridRustLib
+      .instance
+      .api
+      .crateApiEnvelopeFfiEnvelopeEmbedding(data: data);
+
+  /// Create an encoded image envelope.
+  static FfiEnvelope image({
+    required List<int> bytes,
+    required String format,
+  }) => XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeImage(
+    bytes: bytes,
+    format: format,
+  );
 
   /// Get the unique local ID of this envelope.
   ///
@@ -38,18 +51,35 @@ abstract class FfiEnvelope implements RustOpaqueInterface {
   FfiMessageRole? role();
 
   /// Create text envelope for TTS with optional voice and speed.
-  static FfiEnvelope text(
-          {required String text, String? voiceId, double? speed}) =>
-      XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeText(
-          text: text, voiceId: voiceId, speed: speed);
+  static FfiEnvelope text({
+    required String text,
+    String? voiceId,
+    double? speed,
+  }) => XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeText(
+    text: text,
+    voiceId: voiceId,
+    speed: speed,
+  );
 
   /// Create a text envelope with a specific message role.
   ///
   /// This is useful for building conversation context.
-  static FfiEnvelope textWithRole(
-          {required String text, required FfiMessageRole role}) =>
-      XybridRustLib.instance.api
-          .crateApiEnvelopeFfiEnvelopeTextWithRole(text: text, role: role);
+  static FfiEnvelope textWithRole({
+    required String text,
+    required FfiMessageRole role,
+  }) => XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeTextWithRole(
+    text: text,
+    role: role,
+  );
+
+  /// Create a user-role multi-part envelope with image attachments.
+  static FfiEnvelope userMessage({
+    required String text,
+    required List<FfiEnvelope> images,
+  }) => XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeUserMessage(
+    text: text,
+    images: images,
+  );
 
   /// Set the message role on this envelope.
   ///

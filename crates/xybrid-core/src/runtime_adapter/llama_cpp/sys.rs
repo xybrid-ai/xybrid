@@ -42,6 +42,15 @@ unsafe impl Send for LlamaModel {}
 #[cfg(feature = "llm-llamacpp")]
 unsafe impl Sync for LlamaModel {}
 
+#[cfg(all(test, feature = "llm-llamacpp"))]
+impl LlamaModel {
+    pub(crate) fn test_stub() -> Self {
+        Self {
+            ptr: std::ptr::null_mut(),
+        }
+    }
+}
+
 #[cfg(feature = "llm-llamacpp")]
 impl Drop for LlamaModel {
     fn drop(&mut self) {
@@ -72,6 +81,15 @@ unsafe impl Send for LlamaContext {}
 // NOTE: Sync intentionally NOT implemented. llama_decode() mutates internal
 // state and is not thread-safe. Use Mutex for shared access.
 
+#[cfg(all(test, feature = "llm-llamacpp"))]
+impl LlamaContext {
+    pub(crate) fn test_stub() -> Self {
+        Self {
+            ptr: std::ptr::null_mut(),
+        }
+    }
+}
+
 #[cfg(feature = "llm-llamacpp")]
 impl Drop for LlamaContext {
     fn drop(&mut self) {
@@ -79,6 +97,124 @@ impl Drop for LlamaContext {
             unsafe { llama_free_c(self.ptr) };
             self.ptr = std::ptr::null_mut();
         }
+    }
+}
+
+/// Opaque handle to an mtmd multimodal projector context.
+///
+/// The context owns projector-side state that references the loaded
+/// `llama_model`, so callers must drop it before dropping the text model.
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+pub struct MtmdContext {
+    ptr: *mut c_void,
+    owned: bool,
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+unsafe impl Send for MtmdContext {}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+impl Drop for MtmdContext {
+    fn drop(&mut self) {
+        if self.owned && !self.ptr.is_null() {
+            unsafe { mtmd_free_c(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
+
+#[cfg(all(test, feature = "llm-llamacpp", feature = "vision"))]
+impl MtmdContext {
+    pub(crate) fn test_stub() -> Self {
+        Self {
+            ptr: std::ptr::null_mut(),
+            owned: false,
+        }
+    }
+}
+
+/// Opaque handle to an mtmd decoded bitmap.
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+pub struct MtmdBitmap {
+    ptr: *mut c_void,
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+unsafe impl Send for MtmdBitmap {}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+impl Drop for MtmdBitmap {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { mtmd_bitmap_free_c(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+impl MtmdBitmap {
+    /// Decode encoded image bytes into an mtmd bitmap.
+    pub fn from_encoded_bytes(ctx: &MtmdContext, bytes: &[u8]) -> Result<Self, AdapterError> {
+        Self::from_encoded_bytes_with_context(ctx.ptr, bytes)
+    }
+
+    /// Decode encoded image bytes without an mtmd context.
+    ///
+    /// This is only valid for image bytes; audio inputs need a context so mtmd
+    /// can read the model's expected sample rate.
+    pub fn from_encoded_image_bytes(bytes: &[u8]) -> Result<Self, AdapterError> {
+        Self::from_encoded_bytes_with_context(ptr::null_mut(), bytes)
+    }
+
+    fn from_encoded_bytes_with_context(
+        ctx: *mut c_void,
+        bytes: &[u8],
+    ) -> Result<Self, AdapterError> {
+        if bytes.is_empty() {
+            return Err(AdapterError::InvalidInput(
+                "encoded image bytes must not be empty".to_string(),
+            ));
+        }
+
+        let ptr = unsafe { mtmd_bitmap_init_from_buf_c(ctx, bytes.as_ptr(), bytes.len()) };
+        if ptr.is_null() {
+            return Err(AdapterError::InvalidInput(
+                "mtmd failed to decode encoded image bytes".to_string(),
+            ));
+        }
+
+        Ok(Self { ptr })
+    }
+
+    pub fn width(&self) -> u32 {
+        unsafe { mtmd_bitmap_get_nx_c(self.ptr) }
+    }
+
+    pub fn height(&self) -> u32 {
+        unsafe { mtmd_bitmap_get_ny_c(self.ptr) }
+    }
+
+    pub fn n_bytes(&self) -> usize {
+        unsafe { mtmd_bitmap_get_n_bytes_c(self.ptr) }
+    }
+
+    pub fn id(&self) -> Option<String> {
+        let ptr = unsafe { mtmd_bitmap_get_id_c(self.ptr) };
+        if ptr.is_null() {
+            return None;
+        }
+        unsafe { std::ffi::CStr::from_ptr(ptr) }
+            .to_str()
+            .ok()
+            .map(ToOwned::to_owned)
+    }
+
+    pub fn set_id(&mut self, id: &str) -> Result<(), AdapterError> {
+        let c_id = CString::new(id)
+            .map_err(|_| AdapterError::InvalidInput("Image id contains null byte".to_string()))?;
+        unsafe { mtmd_bitmap_set_id_c(self.ptr, c_id.as_ptr()) };
+        Ok(())
     }
 }
 
@@ -99,6 +235,32 @@ extern "C" {
     // Model loading
     fn llama_load_model_from_file_c(path_model: *const c_char, n_gpu_layers: c_int) -> *mut c_void;
     fn llama_free_model_c(model: *mut c_void);
+
+    #[cfg(feature = "vision")]
+    fn mtmd_init_from_file_c(
+        mmproj_fname: *const c_char,
+        text_model: *const c_void,
+        use_gpu: bool,
+        warmup: bool,
+        n_threads: c_int,
+        flash_attn: bool,
+    ) -> *mut c_void;
+    #[cfg(feature = "vision")]
+    fn mtmd_free_c(ctx: *mut c_void);
+    #[cfg(feature = "vision")]
+    fn mtmd_bitmap_init_from_buf_c(ctx: *mut c_void, buf: *const u8, len: usize) -> *mut c_void;
+    #[cfg(feature = "vision")]
+    fn mtmd_bitmap_free_c(bitmap: *mut c_void);
+    #[cfg(feature = "vision")]
+    fn mtmd_bitmap_get_nx_c(bitmap: *const c_void) -> u32;
+    #[cfg(feature = "vision")]
+    fn mtmd_bitmap_get_ny_c(bitmap: *const c_void) -> u32;
+    #[cfg(feature = "vision")]
+    fn mtmd_bitmap_get_n_bytes_c(bitmap: *const c_void) -> usize;
+    #[cfg(feature = "vision")]
+    fn mtmd_bitmap_get_id_c(bitmap: *const c_void) -> *const c_char;
+    #[cfg(feature = "vision")]
+    fn mtmd_bitmap_set_id_c(bitmap: *mut c_void, id: *const c_char);
 
     // Context management
     fn llama_new_context_with_model_c(
@@ -229,6 +391,26 @@ extern "C" {
         n_past_in: c_int,
     ) -> c_int;
 
+    // Continue generation from logits already present in the context.
+    fn llama_generate_from_current_logits_c(
+        ctx: *mut c_void,
+        model: *const c_void,
+        output_tokens: *mut i32,
+        max_tokens: c_int,
+        temperature: c_float,
+        top_p: c_float,
+        min_p: c_float,
+        top_k: c_int,
+        repeat_penalty: c_float,
+        seed: u32,
+        stop_seqs: *const i32,
+        stop_lens: *const c_int,
+        n_stop_seqs: c_int,
+        callback: Option<TokenCallback>,
+        user_data: *mut c_void,
+        n_past: c_int,
+    ) -> c_int;
+
     // Truncate the KV cache to a prefix length, dropping tokens past it.
     // Pairs with the n_past_in parameter on llama_generate_streaming_c —
     // see the C wrapper for the prefix-reuse contract.
@@ -241,6 +423,332 @@ extern "C" {
 #[cfg(feature = "llm-llamacpp")]
 pub type TokenCallback =
     extern "C" fn(token_id: i32, token_text: *const c_char, user_data: *mut c_void) -> c_int;
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+const MTMD_INPUT_CHUNK_TYPE_TEXT: c_int = 0;
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+const MTMD_INPUT_CHUNK_TYPE_IMAGE: c_int = 1;
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+const MTMD_INPUT_CHUNK_TYPE_AUDIO: c_int = 2;
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+#[repr(C)]
+pub struct MtmdInputChunksRaw {
+    _private: [u8; 0],
+    _marker: std::marker::PhantomData<(*mut u8, std::marker::PhantomPinned)>,
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+#[repr(C)]
+pub struct MtmdInputChunkRaw {
+    _private: [u8; 0],
+    _marker: std::marker::PhantomData<(*mut u8, std::marker::PhantomPinned)>,
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+#[repr(C)]
+pub struct MtmdImageTokensRaw {
+    _private: [u8; 0],
+    _marker: std::marker::PhantomData<(*mut u8, std::marker::PhantomPinned)>,
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MtmdDecoderPos {
+    pub t: u32,
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
+}
+
+/// Summary of the vendored mtmd C-API fixture used by the INF-245 seam spike.
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MtmdTestChunksSummary {
+    pub total_chunks: usize,
+    pub text_chunks: usize,
+    pub image_chunks: usize,
+    pub audio_chunks: usize,
+    pub text_tokens: usize,
+    pub image_tokens: usize,
+    pub image_n_pos: usize,
+    pub helper_total_tokens: usize,
+    pub helper_total_n_pos: i32,
+}
+
+/// Owned mtmd input chunks.
+///
+/// The upstream `mtmd_input_chunks` allocation owns the ordered text/image
+/// chunk list produced by `mtmd_tokenize()`. Keep it inside the llama.cpp
+/// backend boundary because chunk metadata includes image token positions and
+/// backend-specific decode state that should not leak into public SDK types.
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+pub struct MtmdInputChunks {
+    ptr: *mut MtmdInputChunksRaw,
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+unsafe impl Send for MtmdInputChunks {}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+impl Drop for MtmdInputChunks {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { mtmd_input_chunks_free_c(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+extern "C" {
+    fn mtmd_test_create_input_chunks() -> *mut MtmdInputChunksRaw;
+    fn mtmd_input_chunks_init_c() -> *mut MtmdInputChunksRaw;
+    fn mtmd_input_chunks_size_c(chunks: *const MtmdInputChunksRaw) -> usize;
+    fn mtmd_input_chunks_get_c(
+        chunks: *const MtmdInputChunksRaw,
+        idx: usize,
+    ) -> *const MtmdInputChunkRaw;
+    fn mtmd_input_chunks_free_c(chunks: *mut MtmdInputChunksRaw);
+    fn mtmd_input_chunk_get_type_c(chunk: *const MtmdInputChunkRaw) -> c_int;
+    fn mtmd_input_chunk_get_tokens_text_c(
+        chunk: *const MtmdInputChunkRaw,
+        n_tokens_output: *mut usize,
+    ) -> *const i32;
+    fn mtmd_input_chunk_get_tokens_image_c(
+        chunk: *const MtmdInputChunkRaw,
+    ) -> *const MtmdImageTokensRaw;
+    fn mtmd_input_chunk_get_n_tokens_c(chunk: *const MtmdInputChunkRaw) -> usize;
+    fn mtmd_input_chunk_get_n_pos_c(chunk: *const MtmdInputChunkRaw) -> i32;
+    fn mtmd_image_tokens_get_n_tokens_c(image_tokens: *const MtmdImageTokensRaw) -> usize;
+    fn mtmd_image_tokens_get_n_pos_c(image_tokens: *const MtmdImageTokensRaw) -> i32;
+    fn mtmd_image_tokens_get_decoder_pos_c(
+        image_tokens: *const MtmdImageTokensRaw,
+        pos_0: i32,
+        i: usize,
+    ) -> MtmdDecoderPos;
+    fn mtmd_helper_get_n_tokens_c(chunks: *const MtmdInputChunksRaw) -> usize;
+    fn mtmd_helper_get_n_pos_c(chunks: *const MtmdInputChunksRaw) -> i32;
+    fn mtmd_tokenize_c(
+        ctx: *mut c_void,
+        output: *mut MtmdInputChunksRaw,
+        text: *const c_char,
+        add_special: bool,
+        parse_special: bool,
+        bitmaps: *const *const c_void,
+        n_bitmaps: usize,
+    ) -> c_int;
+    fn mtmd_helper_eval_chunks_c(
+        ctx: *mut c_void,
+        lctx: *mut c_void,
+        chunks: *const MtmdInputChunksRaw,
+        n_past: i32,
+        seq_id: i32,
+        n_batch: i32,
+        logits_last: bool,
+        new_n_past: *mut i32,
+    ) -> c_int;
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+impl MtmdInputChunks {
+    pub fn empty() -> Result<Self, AdapterError> {
+        let ptr = unsafe { mtmd_input_chunks_init_c() };
+        if ptr.is_null() {
+            return Err(AdapterError::RuntimeError(
+                "mtmd failed to allocate input chunks".to_string(),
+            ));
+        }
+        Ok(Self { ptr })
+    }
+
+    pub fn from_test_fixture() -> Result<Self, AdapterError> {
+        let ptr = unsafe { mtmd_test_create_input_chunks() };
+        if ptr.is_null() {
+            return Err(AdapterError::RuntimeError(
+                "mtmd test fixture returned null chunks".to_string(),
+            ));
+        }
+        Ok(Self { ptr })
+    }
+
+    pub fn tokenize(
+        ctx: &MtmdContext,
+        text: &str,
+        add_special: bool,
+        parse_special: bool,
+        bitmaps: &[MtmdBitmap],
+    ) -> Result<Self, AdapterError> {
+        let chunks = Self::empty()?;
+        let c_text = CString::new(text).map_err(|_| {
+            AdapterError::InvalidInput("mtmd prompt text contains null byte".to_string())
+        })?;
+        let bitmap_ptrs = bitmaps
+            .iter()
+            .map(|bitmap| bitmap.ptr as *const c_void)
+            .collect::<Vec<_>>();
+
+        let result = unsafe {
+            mtmd_tokenize_c(
+                ctx.ptr,
+                chunks.ptr,
+                c_text.as_ptr(),
+                add_special,
+                parse_special,
+                bitmap_ptrs.as_ptr(),
+                bitmap_ptrs.len(),
+            )
+        };
+
+        if result != 0 {
+            let detail = match result {
+                -1 => "invalid arguments",
+                1 => "number of bitmaps does not match media markers",
+                2 => "image preprocessing failed",
+                _ => "unknown",
+            };
+            return Err(AdapterError::RuntimeError(format!(
+                "mtmd_tokenize failed with error code {} ({})",
+                result, detail
+            )));
+        }
+
+        Ok(chunks)
+    }
+
+    pub fn summary(&self) -> Result<MtmdTestChunksSummary, AdapterError> {
+        let total_chunks = unsafe { mtmd_input_chunks_size_c(self.ptr) };
+        let mut summary = MtmdTestChunksSummary {
+            total_chunks,
+            helper_total_tokens: unsafe { mtmd_helper_get_n_tokens_c(self.ptr) },
+            helper_total_n_pos: unsafe { mtmd_helper_get_n_pos_c(self.ptr) },
+            ..MtmdTestChunksSummary::default()
+        };
+
+        for idx in 0..total_chunks {
+            let chunk = unsafe { mtmd_input_chunks_get_c(self.ptr, idx) };
+            if chunk.is_null() {
+                return Err(AdapterError::RuntimeError(format!(
+                    "mtmd returned null chunk at index {}",
+                    idx
+                )));
+            }
+
+            match unsafe { mtmd_input_chunk_get_type_c(chunk) } {
+                MTMD_INPUT_CHUNK_TYPE_TEXT => {
+                    let mut n_tokens = 0usize;
+                    let tokens =
+                        unsafe { mtmd_input_chunk_get_tokens_text_c(chunk, &mut n_tokens) };
+                    if tokens.is_null() || n_tokens == 0 {
+                        return Err(AdapterError::RuntimeError(format!(
+                            "mtmd text chunk at index {} has no tokens",
+                            idx
+                        )));
+                    }
+                    summary.text_chunks += 1;
+                    summary.text_tokens += n_tokens;
+                }
+                MTMD_INPUT_CHUNK_TYPE_IMAGE => {
+                    let image_tokens = unsafe { mtmd_input_chunk_get_tokens_image_c(chunk) };
+                    if image_tokens.is_null() {
+                        return Err(AdapterError::RuntimeError(format!(
+                            "mtmd image chunk at index {} has no image tokens",
+                            idx
+                        )));
+                    }
+
+                    let chunk_tokens = unsafe { mtmd_input_chunk_get_n_tokens_c(chunk) };
+                    let image_tokens_count =
+                        unsafe { mtmd_image_tokens_get_n_tokens_c(image_tokens) };
+                    if chunk_tokens == 0 || image_tokens_count == 0 {
+                        return Err(AdapterError::RuntimeError(format!(
+                            "mtmd image chunk at index {} has zero tokens",
+                            idx
+                        )));
+                    }
+
+                    let chunk_n_pos = unsafe { mtmd_input_chunk_get_n_pos_c(chunk) };
+                    let image_n_pos = unsafe { mtmd_image_tokens_get_n_pos_c(image_tokens) };
+                    if chunk_n_pos <= 0 || image_n_pos <= 0 {
+                        return Err(AdapterError::RuntimeError(format!(
+                            "mtmd image chunk at index {} has no decoder positions",
+                            idx
+                        )));
+                    }
+
+                    let last_pos = unsafe {
+                        mtmd_image_tokens_get_decoder_pos_c(image_tokens, 0, image_tokens_count - 1)
+                    };
+                    if last_pos.x == 0 && last_pos.y == 0 && image_tokens_count > 1 {
+                        return Err(AdapterError::RuntimeError(format!(
+                            "mtmd image chunk at index {} lacks spatial decoder metadata",
+                            idx
+                        )));
+                    }
+
+                    summary.image_chunks += 1;
+                    summary.image_tokens += image_tokens_count;
+                    summary.image_n_pos += image_n_pos as usize;
+                }
+                MTMD_INPUT_CHUNK_TYPE_AUDIO => {
+                    summary.audio_chunks += 1;
+                }
+                other => {
+                    return Err(AdapterError::RuntimeError(format!(
+                        "mtmd chunk at index {} has unknown type {}",
+                        idx, other
+                    )));
+                }
+            }
+        }
+
+        Ok(summary)
+    }
+}
+
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+pub fn mtmd_helper_eval_chunks(
+    ctx: &MtmdContext,
+    lctx: &LlamaContext,
+    chunks: &MtmdInputChunks,
+    n_past: i32,
+    seq_id: i32,
+    n_batch: usize,
+    logits_last: bool,
+) -> Result<i32, AdapterError> {
+    let mut new_n_past = n_past;
+    let result = unsafe {
+        mtmd_helper_eval_chunks_c(
+            ctx.ptr,
+            lctx.ptr,
+            chunks.ptr,
+            n_past,
+            seq_id,
+            n_batch.min(i32::MAX as usize) as i32,
+            logits_last,
+            &mut new_n_past,
+        )
+    };
+    if result != 0 {
+        return Err(AdapterError::RuntimeError(format!(
+            "mtmd_helper_eval_chunks failed with error code {}",
+            result
+        )));
+    }
+    Ok(new_n_past)
+}
+
+/// Probe the vendored mtmd chunk representation without loading a real mmproj.
+///
+/// This intentionally stops at chunk-shape discovery. Upstream documents
+/// `mtmd_helper_eval_chunks()` as not thread-safe, so INF-234 must keep that
+/// eval path behind the llama.cpp backend's serialized context boundary if it
+/// adopts helper-driven multimodal prefill.
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+pub fn mtmd_test_chunks_summary() -> Result<MtmdTestChunksSummary, AdapterError> {
+    MtmdInputChunks::from_test_fixture()?.summary()
+}
 
 // =============================================================================
 // Safe Wrapper Functions
@@ -315,6 +823,40 @@ pub fn llama_free_model(mut model: LlamaModel) {
         unsafe { llama_free_model_c(model.ptr) };
         model.ptr = std::ptr::null_mut();
     }
+}
+
+/// Load an mtmd multimodal projector for a loaded llama.cpp text model.
+#[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+pub fn mtmd_init_from_file(
+    path: &str,
+    model: &LlamaModel,
+    use_gpu: bool,
+    warmup: bool,
+    n_threads: usize,
+    flash_attn: bool,
+) -> Result<MtmdContext, AdapterError> {
+    let c_path = CString::new(path)
+        .map_err(|_| AdapterError::InvalidInput("Invalid path encoding".to_string()))?;
+
+    let ptr = unsafe {
+        mtmd_init_from_file_c(
+            c_path.as_ptr(),
+            model.ptr,
+            use_gpu,
+            warmup,
+            n_threads as c_int,
+            flash_attn,
+        )
+    };
+
+    if ptr.is_null() {
+        return Err(AdapterError::RuntimeError(format!(
+            "Failed to initialize mtmd context from {}",
+            path
+        )));
+    }
+
+    Ok(MtmdContext { ptr, owned: true })
 }
 
 /// Create a new context for a model
@@ -1131,6 +1673,149 @@ where
     Ok((output_tokens, stopped_by_callback))
 }
 
+/// Continue generation from logits already present in the llama context.
+///
+/// Multimodal llama.cpp prefills prompt/image chunks through mtmd helper eval,
+/// not through a flat text-token array. After helper eval leaves logits for
+/// the last prompt position, this wrapper samples from those logits and then
+/// continues regular autoregressive decoding.
+#[cfg(feature = "llm-llamacpp")]
+#[allow(clippy::too_many_arguments)]
+pub fn llama_generate_from_current_logits_streaming<F>(
+    ctx: &LlamaContext,
+    model: &LlamaModel,
+    max_tokens: usize,
+    temperature: f32,
+    top_p: f32,
+    min_p: f32,
+    top_k: usize,
+    repeat_penalty: f32,
+    stop_sequences: &[String],
+    n_past: usize,
+    mut on_token: F,
+) -> Result<(Vec<i32>, bool), AdapterError>
+where
+    F: FnMut(i32, &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+{
+    if max_tokens == 0 {
+        return Err(AdapterError::InvalidInput(
+            "max_tokens must be greater than zero".to_string(),
+        ));
+    }
+
+    let mut stop_tokens: Vec<i32> = Vec::new();
+    let mut stop_lens: Vec<c_int> = Vec::new();
+
+    for seq in stop_sequences {
+        let tokens = llama_tokenize_special(model, seq, false)?;
+        if !tokens.is_empty() {
+            stop_lens.push(tokens.len() as c_int);
+            stop_tokens.extend(tokens);
+        }
+    }
+
+    let mut output_tokens = vec![0i32; max_tokens];
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u32)
+        .unwrap_or(42);
+
+    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = if stop_lens.is_empty() {
+        (ptr::null(), ptr::null(), 0)
+    } else {
+        (
+            stop_tokens.as_ptr(),
+            stop_lens.as_ptr(),
+            stop_lens.len() as c_int,
+        )
+    };
+
+    let mut streaming_ctx = StreamingContext {
+        callback: &mut on_token,
+        error: None,
+    };
+
+    let result = unsafe {
+        llama_generate_from_current_logits_c(
+            ctx.ptr,
+            model.ptr,
+            output_tokens.as_mut_ptr(),
+            max_tokens as c_int,
+            temperature,
+            top_p,
+            min_p,
+            top_k as c_int,
+            repeat_penalty,
+            seed,
+            stop_seqs_ptr,
+            stop_lens_ptr,
+            n_stop_seqs,
+            Some(streaming_trampoline::<F>),
+            &mut streaming_ctx as *mut StreamingContext<F> as *mut c_void,
+            n_past.min(c_int::MAX as usize) as c_int,
+        )
+    };
+
+    if (-5..=-1).contains(&result) {
+        let detail = match result {
+            -1 => "invalid arguments (null context/model/output, non-positive max_tokens, or negative n_past)",
+            -2 => "sampler chain creation failed",
+            -3 => "llama_decode failed while continuing generation from current logits",
+            -4 => "prefilled context or generated continuation exceeds context window",
+            -5 => "no current logits available; caller must prefill with logits_last=true first",
+            _ => "unknown",
+        };
+        return Err(AdapterError::RuntimeError(format!(
+            "Generation from current logits failed with error code {} ({})",
+            result, detail
+        )));
+    }
+
+    if let Some(err) = streaming_ctx.error {
+        return Err(AdapterError::from_streaming_callback_error(err));
+    }
+
+    let (n_generated, stopped_by_callback) = if result < 0 {
+        ((-result) as usize, true)
+    } else {
+        (result as usize, false)
+    };
+
+    output_tokens.truncate(n_generated);
+    Ok((output_tokens, stopped_by_callback))
+}
+
+/// Continue generation from current logits without observing streaming chunks.
+#[cfg(feature = "llm-llamacpp")]
+#[allow(clippy::too_many_arguments)]
+pub fn llama_generate_from_current_logits(
+    ctx: &LlamaContext,
+    model: &LlamaModel,
+    max_tokens: usize,
+    temperature: f32,
+    top_p: f32,
+    min_p: f32,
+    top_k: usize,
+    repeat_penalty: f32,
+    stop_sequences: &[String],
+    n_past: usize,
+) -> Result<Vec<i32>, AdapterError> {
+    let (tokens, _stopped_by_callback) = llama_generate_from_current_logits_streaming(
+        ctx,
+        model,
+        max_tokens,
+        temperature,
+        top_p,
+        min_p,
+        top_k,
+        repeat_penalty,
+        stop_sequences,
+        n_past,
+        |_token_id, _token_text| Ok(()),
+    )?;
+    Ok(tokens)
+}
+
 // =============================================================================
 // Stub implementations when feature is disabled
 // =============================================================================
@@ -1339,6 +2024,123 @@ mod tests {
         assert_eq!(stop_tokens.len(), 3); // 2 + 1 tokens total
         assert_eq!(stop_lens[0], 2); // first sequence: 2 tokens
         assert_eq!(stop_lens[1], 1); // third sequence: 1 token
+    }
+
+    #[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+    #[test]
+    fn mtmd_test_chunks_expose_text_and_image_shape() {
+        let summary =
+            super::mtmd_test_chunks_summary().expect("mtmd test chunks should be readable");
+
+        assert!(
+            summary.total_chunks >= 2,
+            "mtmd chunks must preserve ordered text/image parts"
+        );
+        assert!(summary.text_chunks > 0, "expected at least one text chunk");
+        assert!(
+            summary.image_chunks > 0,
+            "expected at least one image chunk"
+        );
+        assert!(
+            summary.image_tokens > 0,
+            "image chunks must expose token counts"
+        );
+        assert!(
+            summary.image_n_pos > 0,
+            "image chunks must expose decoder positions"
+        );
+    }
+
+    #[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+    #[test]
+    fn mtmd_bitmap_from_encoded_image_exposes_dimensions_and_rgb_bytes() {
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            2,
+            3,
+            image::Rgb([17, 34, 51]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test image encodes");
+
+        let bitmap = super::MtmdBitmap::from_encoded_image_bytes(encoded.get_ref())
+            .expect("mtmd should decode png bytes into an RGB bitmap");
+
+        assert_eq!(bitmap.width(), 2);
+        assert_eq!(bitmap.height(), 3);
+        assert_eq!(bitmap.n_bytes(), 2 * 3 * 3);
+    }
+
+    #[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+    #[test]
+    fn mtmd_bitmap_preserves_local_id_for_tokenized_image_chunks() {
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            1,
+            1,
+            image::Rgb([17, 34, 51]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test image encodes");
+
+        let mut bitmap = super::MtmdBitmap::from_encoded_image_bytes(encoded.get_ref())
+            .expect("mtmd should decode png bytes into an RGB bitmap");
+        bitmap
+            .set_id("first-image")
+            .expect("image id should be accepted");
+
+        assert_eq!(bitmap.id().as_deref(), Some("first-image"));
+    }
+
+    #[cfg(all(feature = "llm-llamacpp", feature = "vision"))]
+    #[test]
+    fn mtmd_input_chunks_wrapper_summarizes_owned_chunks() {
+        let chunks =
+            super::MtmdInputChunks::from_test_fixture().expect("mtmd test chunks should load");
+        let summary = chunks.summary().expect("mtmd chunks should summarize");
+
+        assert!(
+            summary.total_chunks >= 2,
+            "owned mtmd chunks must preserve ordered text/image parts"
+        );
+        assert!(summary.text_chunks > 0, "expected at least one text chunk");
+        assert!(
+            summary.image_chunks > 0,
+            "expected at least one image chunk"
+        );
+        assert!(
+            summary.helper_total_n_pos > 0,
+            "helper position count should be available from the owned wrapper"
+        );
+    }
+
+    #[cfg(feature = "llm-llamacpp")]
+    #[test]
+    fn llama_generate_from_current_logits_maps_invalid_prefill_state() {
+        let context = super::LlamaContext::test_stub();
+        let model = super::LlamaModel::test_stub();
+        let err = super::llama_generate_from_current_logits(
+            &context,
+            &model,
+            1,
+            0.0,
+            1.0,
+            0.0,
+            0,
+            1.0,
+            &[],
+            0,
+        )
+        .unwrap_err();
+
+        match err {
+            super::AdapterError::RuntimeError(message) => {
+                assert!(message.contains("invalid arguments"));
+            }
+            other => panic!("expected runtime error for invalid prefill state, got {other:?}"),
+        }
     }
 
     #[cfg(feature = "llm-llamacpp")]

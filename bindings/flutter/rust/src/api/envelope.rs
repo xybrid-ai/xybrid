@@ -41,6 +41,23 @@ impl FfiEnvelope {
         FfiEnvelope(Envelope::new(EnvelopeKind::Embedding(data)))
     }
 
+    /// Create an encoded image envelope.
+    #[frb(sync)]
+    pub fn image(bytes: Vec<u8>, format: String) -> Result<FfiEnvelope, String> {
+        Envelope::image(bytes, format)
+            .map(FfiEnvelope)
+            .map_err(|err| err.to_string())
+    }
+
+    /// Create a user-role multi-part envelope with image attachments.
+    #[frb(sync)]
+    pub fn user_message(text: String, images: Vec<FfiEnvelope>) -> Result<FfiEnvelope, String> {
+        let images = images.into_iter().map(|image| image.0).collect();
+        Envelope::user_message(text, images)
+            .map(FfiEnvelope)
+            .map_err(|err| err.to_string())
+    }
+
     /// Create a text envelope with a specific message role.
     ///
     /// This is useful for building conversation context.
@@ -82,5 +99,60 @@ impl FfiEnvelope {
     #[allow(dead_code)]
     pub(crate) fn clone_envelope(&self) -> Envelope {
         self.0.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xybrid_sdk::ir::MessageRole;
+
+    #[test]
+    fn image_rejects_unsupported_format() {
+        let error = match FfiEnvelope::image(vec![1, 2, 3], "heic".to_string()) {
+            Ok(_) => panic!("expected unsupported image format error"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("Unsupported image format 'heic'"));
+    }
+
+    #[test]
+    fn image_rejects_corrupt_bytes_with_redacted_error() {
+        let error = match FfiEnvelope::image(vec![42, 42, 42, 42], "jpeg".to_string()) {
+            Ok(_) => panic!("expected corrupt image bytes error"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("invalid or corrupt jpeg image bytes"));
+        assert!(!error.contains("[42"));
+        assert!(!error.contains("42, 42"));
+    }
+
+    #[test]
+    fn image_rejects_oversized_encoded_payload() {
+        let bytes = vec![0; xybrid_sdk::ir::envelope::DEFAULT_MAX_ENCODED_IMAGE_BYTES + 1];
+        let error = match FfiEnvelope::image(bytes, "png".to_string()) {
+            Ok(_) => panic!("expected oversized image payload error"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("Image payload too large"));
+        assert!(!error.contains("[0"));
+    }
+
+    #[test]
+    fn user_message_sets_user_role_and_multipart_shape() {
+        let envelope = FfiEnvelope::user_message("Describe this image".to_string(), Vec::new())
+            .expect("empty image list still produces a user multipart envelope");
+
+        assert_eq!(envelope.0.role(), Some(MessageRole::User));
+        match envelope.0.kind {
+            EnvelopeKind::MultiPart(parts) => {
+                assert_eq!(parts.len(), 1);
+                assert_eq!(parts[0].as_text(), Some("Describe this image"));
+            }
+            other => panic!("expected multipart envelope, got {other:?}"),
+        }
     }
 }

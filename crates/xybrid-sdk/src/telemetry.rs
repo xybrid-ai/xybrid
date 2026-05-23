@@ -934,6 +934,9 @@ fn convert_to_platform_event(
                 "correlation_id",
                 "outcome_category",
                 "abort_reason",
+                // VLM-specific executor timing: image decode / resize /
+                // normalize before local vision-language inference.
+                "image_preprocess_ms",
                 // Per-routing-decision reliability hint (object with
                 // `recent_abort_rate` + `sample_size`). Lives in the SDK
                 // hoist list so the analytics backend can extract it via
@@ -1112,6 +1115,11 @@ fn convert_to_platform_event(
         if payload.get("prompt_cached_tokens").is_none() {
             if let Some(n) = extract_llm_prompt_cached_tokens(&spans) {
                 payload["prompt_cached_tokens"] = serde_json::json!(n);
+            }
+        }
+        if payload.get("image_preprocess_ms").is_none() {
+            if let Some(n) = extract_u64_attr_from_any_span(&spans, "image_preprocess_ms") {
+                payload["image_preprocess_ms"] = serde_json::json!(n);
             }
         }
         Some(spans)
@@ -1340,6 +1348,24 @@ fn extract_string_attr_from_any_span(stages: &serde_json::Value, key: &str) -> O
         if let Some(v) = meta.and_then(|m| m.get(key)).and_then(|v| v.as_str()) {
             // Same last-span-wins rule as the LLM-gated hoist.
             found = Some(v.to_string());
+        }
+    }
+    found
+}
+
+fn extract_u64_attr_from_any_span(stages: &serde_json::Value, key: &str) -> Option<u64> {
+    let spans = stages.get("spans")?.as_array()?;
+    let mut found: Option<u64> = None;
+    for span in spans {
+        let Some(v) = span.get("metadata").and_then(|meta| meta.get(key)) else {
+            continue;
+        };
+        if let Some(n) = v.as_u64() {
+            found = Some(n);
+        } else if let Some(s) = v.as_str() {
+            if let Ok(n) = s.parse::<u64>() {
+                found = Some(n);
+            }
         }
     }
     found
@@ -2456,6 +2482,14 @@ pub(crate) fn publish_telemetry_event_in_context(
 }
 
 fn dispatch_telemetry_event(event: TelemetryEvent) {
+    dispatch_telemetry_event_with_optout(event, crate::telemetry_optout::is_telemetry_opted_out());
+}
+
+fn dispatch_telemetry_event_with_optout(event: TelemetryEvent, opted_out: bool) {
+    if opted_out {
+        return;
+    }
+
     // Use unwrap_or_else to recover from poisoned mutex - this prevents
     // a panic in one component from permanently breaking telemetry
     let Ok(senders) = TELEMETRY_SENDERS.lock() else {
@@ -3696,6 +3730,37 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_skips_all_senders_when_telemetry_is_opted_out() {
+        let _guard = TelemetrySenderTestGuard::acquire();
+        let (tx, rx) = mpsc::channel();
+        register_telemetry_sender(tx);
+
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("lfm2-vl-450m".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(42),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "task": "vlm",
+                    "image_preprocess_ms": 17
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 0,
+        };
+
+        dispatch_telemetry_event_with_optout(event, true);
+
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_millis(50))
+                .is_err(),
+            "XYBRID_TELEMETRY_OPTOUT must suppress VLM inference events entirely"
+        );
+    }
+
+    #[test]
     fn test_telemetry_config_defaults() {
         let config = TelemetryConfig::default();
         assert_eq!(config.batch_size, 10);
@@ -4297,6 +4362,77 @@ mod tests {
             parsed["quantization"].as_str(),
             Some("q4_k_m"),
             "quantization must be hoisted: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
+    fn image_preprocess_ms_hoists_to_payload_top_level() {
+        // INF-236: VLM image preprocessing is timed on the executor
+        // span tree, then hoisted so analytics and Studio can show a
+        // dedicated "Image preprocess" row without decoding the full
+        // trace detail client-side.
+        xybrid_core::tracing::init_tracing(true);
+        let data = serde_json::json!({
+            "spans": [
+                {
+                    "name": "vlm_inference_with_messages",
+                    "metadata": { "task": "vlm", "image_count": "1" }
+                },
+                {
+                    "name": "vision_encoder",
+                    "metadata": { "image_preprocess_ms": "17", "image_count": "1" }
+                }
+            ]
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("lfm2-vl-450m".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(900),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert_eq!(
+            parsed["image_preprocess_ms"].as_u64(),
+            Some(17),
+            "image_preprocess_ms must be hoisted: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
+    fn image_preprocess_ms_omitted_when_span_does_not_carry_it() {
+        xybrid_core::tracing::init_tracing(true);
+        let data = serde_json::json!({
+            "spans": [
+                {
+                    "name": "llm_inference_with_messages",
+                    "metadata": { "task": "chat", "tokens_out": "12" }
+                }
+            ]
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(200),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert!(
+            parsed.get("image_preprocess_ms").is_none(),
+            "text-only inference must omit image_preprocess_ms: {}",
             serde_json::to_string(&parsed).unwrap()
         );
     }

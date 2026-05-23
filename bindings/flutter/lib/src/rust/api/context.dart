@@ -58,9 +58,10 @@ abstract class FfiConversationContext implements RustOpaqueInterface {
   /// Create a new conversation context with a specific ID.
   ///
   /// Useful for resuming conversations or tracking sessions.
-  static FfiConversationContext withId({required String id}) =>
-      XybridRustLib.instance.api
-          .crateApiContextFfiConversationContextWithId(id: id);
+  static FfiConversationContext withId({required String id}) => XybridRustLib
+      .instance
+      .api
+      .crateApiContextFfiConversationContextWithId(id: id);
 }
 
 /// Message role for conversation turns.
@@ -73,5 +74,4 @@ enum FfiMessageRole {
 
   /// Assistant response.
   assistant,
-  ;
 }

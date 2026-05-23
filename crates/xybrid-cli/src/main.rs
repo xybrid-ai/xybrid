@@ -188,6 +188,10 @@ enum Commands {
         #[arg(long, value_name = "TEXT")]
         input_text: Option<String>,
 
+        /// Path to an input image for vision-language models (repeatable)
+        #[arg(long = "input-image", value_name = "FILE")]
+        input_images: Vec<PathBuf>,
+
         /// Voice ID for TTS models (e.g., "af_bella", "am_adam")
         #[arg(long, value_name = "VOICE")]
         voice: Option<String>,
@@ -483,6 +487,7 @@ fn run_command(cli: Cli) -> Result<()> {
             policy,
             input_audio,
             input_text,
+            input_images,
             voice,
             output,
             target,
@@ -498,6 +503,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     &gguf_path,
                     input_audio.as_ref(),
                     input_text.as_deref(),
+                    &input_images,
                     voice.as_deref(),
                     output.as_ref(),
                     dry_run,
@@ -511,6 +517,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     &model_id,
                     input_audio.as_ref(),
                     input_text.as_deref(),
+                    &input_images,
                     voice.as_deref(),
                     output.as_ref(),
                     target.as_deref(),
@@ -525,6 +532,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     &dir,
                     input_audio.as_ref(),
                     input_text.as_deref(),
+                    &input_images,
                     voice.as_deref(),
                     output.as_ref(),
                     dry_run,
@@ -538,6 +546,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     &repo,
                     input_audio.as_ref(),
                     input_text.as_deref(),
+                    &input_images,
                     voice.as_deref(),
                     output.as_ref(),
                     dry_run,
@@ -551,6 +560,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     &bundle_path,
                     input_audio.as_ref(),
                     input_text.as_deref(),
+                    &input_images,
                     voice.as_deref(),
                     output.as_ref(),
                     dry_run,
@@ -566,6 +576,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 policy.as_ref(),
                 input_audio.as_ref(),
                 input_text.as_deref(),
+                &input_images,
                 voice.as_deref(),
                 output.as_ref(),
                 target.as_deref(),

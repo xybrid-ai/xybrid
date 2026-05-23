@@ -3,6 +3,8 @@
     "---[Book]Introduction---",
     "introduction",
     "quickstart", 
+    "---[BookOpen]Guides---",
+    "...guides",
     "---[Puzzle]Integration---",
     "...(integration)"
   ]

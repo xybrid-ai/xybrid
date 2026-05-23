@@ -13,11 +13,15 @@ import 'rust/api/envelope.dart';
 /// - [XybridEnvelope.audio] for speech recognition
 /// - [XybridEnvelope.text] for text-to-speech
 /// - [XybridEnvelope.embedding] for embedding models
+/// - [XybridEnvelope.image] for encoded image input
+/// - [XybridEnvelope.userMessage] for vision-language prompts
 class XybridEnvelope {
   /// The underlying FRB envelope.
   final FfiEnvelope inner;
 
-  XybridEnvelope._(this.inner);
+  final _EnvelopeModality _modality;
+
+  XybridEnvelope._(this.inner, this._modality);
 
   /// Create an audio envelope for speech recognition.
   ///
@@ -35,6 +39,7 @@ class XybridEnvelope {
         sampleRate: sampleRate,
         channels: channels,
       ),
+      _EnvelopeModality.audio,
     );
   }
 
@@ -43,17 +48,10 @@ class XybridEnvelope {
   /// [text] - The text to synthesize
   /// [voiceId] - Optional voice identifier (model-specific)
   /// [speed] - Optional speed multiplier (default 1.0)
-  factory XybridEnvelope.text(
-    String text, {
-    String? voiceId,
-    double? speed,
-  }) {
+  factory XybridEnvelope.text(String text, {String? voiceId, double? speed}) {
     return XybridEnvelope._(
-      FfiEnvelope.text(
-        text: text,
-        voiceId: voiceId,
-        speed: speed,
-      ),
+      FfiEnvelope.text(text: text, voiceId: voiceId, speed: speed),
+      _EnvelopeModality.text,
     );
   }
 
@@ -63,6 +61,49 @@ class XybridEnvelope {
   factory XybridEnvelope.embedding(List<double> data) {
     return XybridEnvelope._(
       FfiEnvelope.embedding(data: data),
+      _EnvelopeModality.embedding,
+    );
+  }
+
+  /// Create an encoded image envelope for vision models.
+  ///
+  /// [bytes] - Encoded PNG, JPEG, or WebP image bytes
+  /// [format] - Image format hint: `png`, `jpeg`, `jpg`, or `webp`
+  factory XybridEnvelope.image({
+    required List<int> bytes,
+    required String format,
+  }) {
+    final normalizedFormat = _normalizeImageFormat(format);
+    return XybridEnvelope._(
+      FfiEnvelope.image(bytes: bytes, format: normalizedFormat),
+      _EnvelopeModality.image,
+    );
+  }
+
+  /// Create a user-role multi-part message with image attachments.
+  ///
+  /// [images] must contain envelopes created by [XybridEnvelope.image].
+  factory XybridEnvelope.userMessage({
+    required String text,
+    List<XybridEnvelope> images = const [],
+  }) {
+    final nonImageIndex = images.indexWhere(
+      (image) => image._modality != _EnvelopeModality.image,
+    );
+    if (nonImageIndex != -1) {
+      throw ArgumentError.value(
+        images,
+        'images',
+        'all attachments must be image envelopes',
+      );
+    }
+
+    return XybridEnvelope._(
+      FfiEnvelope.userMessage(
+        text: text,
+        images: images.map((image) => image.inner).toList(growable: false),
+      ),
+      _EnvelopeModality.multipart,
     );
   }
 
@@ -75,6 +116,7 @@ class XybridEnvelope {
   factory XybridEnvelope.textWithRole(String text, MessageRole role) {
     return XybridEnvelope._(
       FfiEnvelope.textWithRole(text: text, role: role.toFfi()),
+      _EnvelopeModality.text,
     );
   }
 
@@ -82,7 +124,7 @@ class XybridEnvelope {
   ///
   /// Returns a new envelope with the role set.
   XybridEnvelope withRole(MessageRole role) {
-    return XybridEnvelope._(inner.withRole(role: role.toFfi()));
+    return XybridEnvelope._(inner.withRole(role: role.toFfi()), _modality);
   }
 
   /// Get the message role of this envelope, if set.
@@ -90,4 +132,24 @@ class XybridEnvelope {
     final ffiRole = inner.role();
     return ffiRole != null ? MessageRole.fromFfi(ffiRole) : null;
   }
+
+  static String _normalizeImageFormat(String format) {
+    switch (format.trim().toLowerCase()) {
+      case 'png':
+        return 'png';
+      case 'jpg':
+      case 'jpeg':
+        return 'jpeg';
+      case 'webp':
+        return 'webp';
+      default:
+        throw ArgumentError.value(
+          format,
+          'format',
+          'expected png, jpeg, jpg, or webp',
+        );
+    }
+  }
 }
+
+enum _EnvelopeModality { audio, text, embedding, image, multipart }

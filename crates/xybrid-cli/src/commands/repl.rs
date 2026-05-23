@@ -4,6 +4,8 @@
 
 use anyhow::{Context, Result};
 use std::fs;
+#[cfg(feature = "vision")]
+use std::path::Path;
 use std::path::PathBuf;
 use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::conversation::ConversationContext;
@@ -179,9 +181,12 @@ pub(crate) fn handle_repl_command(
 
     println!();
     ui::hint("Enter text and press Enter to run inference");
+    #[cfg(feature = "vision")]
+    ui::hint("Use '/image <path>' to attach an image to the next message");
     println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
 
     let stdin = io::stdin();
+    let mut pending_images = ReplPendingImages::default();
     loop {
         print!("\n  {} ", "❯".truecolor(120, 180, 255).bold());
         io::stdout().flush()?;
@@ -193,7 +198,12 @@ pub(crate) fn handle_repl_command(
 
         let input_line = input_line.trim();
 
-        let handled = handle_special_command(input_line, &mut conversation_context, verbose);
+        let handled = handle_special_command(
+            input_line,
+            &mut conversation_context,
+            &mut pending_images,
+            verbose,
+        );
 
         match handled {
             SpecialCommandResult::Quit => break,
@@ -201,15 +211,18 @@ pub(crate) fn handle_repl_command(
             SpecialCommandResult::NotSpecial => {}
         }
 
-        let mut input = Envelope::new(EnvelopeKind::Text(input_line.to_string()));
-        if conversation_context.is_some() {
-            input = input.with_role(MessageRole::User);
-        }
-        if let Some(ref voice_id) = voice {
-            input
-                .metadata
-                .insert("voice_id".to_string(), voice_id.clone());
-        }
+        let input = match build_repl_input(
+            input_line,
+            voice.as_deref(),
+            conversation_context.is_some(),
+            &mut pending_images,
+        ) {
+            Ok(input) => input,
+            Err(e) => {
+                ui::err(&format!("{}", e));
+                continue;
+            }
+        };
 
         if let Some(ref mut ctx) = conversation_context {
             ctx.push(input.clone());
@@ -385,11 +398,42 @@ enum SpecialCommandResult {
     NotSpecial,
 }
 
+#[derive(Default)]
+struct ReplPendingImages {
+    paths: Vec<PathBuf>,
+}
+
+impl ReplPendingImages {
+    fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+
+    #[cfg(feature = "vision")]
+    fn len(&self) -> usize {
+        self.paths.len()
+    }
+
+    #[cfg(feature = "vision")]
+    fn push(&mut self, path: PathBuf) {
+        self.paths.push(path);
+    }
+
+    #[cfg(feature = "vision")]
+    fn clear(&mut self) {
+        self.paths.clear();
+    }
+}
+
 fn handle_special_command(
     input: &str,
     conversation_context: &mut Option<ConversationContext>,
+    pending_images: &mut ReplPendingImages,
     verbose: u8,
 ) -> SpecialCommandResult {
+    if let Some(result) = handle_image_command(input, pending_images) {
+        return result;
+    }
+
     match input.to_lowercase().as_str() {
         "quit" | "exit" | "q" => {
             println!();
@@ -401,6 +445,11 @@ fn handle_special_command(
             ui::hint("Commands:");
             println!("    {}  Exit REPL", ui::dim("quit, exit, q"));
             println!("    {}       Show this help", ui::dim("help, ?"));
+            #[cfg(feature = "vision")]
+            println!(
+                "    {}   Attach image to next message",
+                ui::dim("/image <path>")
+            );
             if conversation_context.is_some() {
                 println!("    {}      Show conversation history", ui::dim("history"));
                 println!("    {}        Clear conversation history", ui::dim("clear"));
@@ -452,6 +501,122 @@ fn handle_special_command(
         "" => SpecialCommandResult::Continue,
         _ => SpecialCommandResult::NotSpecial,
     }
+}
+
+fn handle_image_command(
+    input: &str,
+    pending_images: &mut ReplPendingImages,
+) -> Option<SpecialCommandResult> {
+    let trimmed = input.trim();
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let command = parts.next().unwrap_or_default();
+    if !command.eq_ignore_ascii_case("/image") {
+        return None;
+    }
+
+    let Some(path) = parts.next().map(str::trim).filter(|path| !path.is_empty()) else {
+        ui::err("Usage: /image <path>");
+        return Some(SpecialCommandResult::Continue);
+    };
+
+    #[cfg(feature = "vision")]
+    {
+        let path = PathBuf::from(path);
+        if !path.exists() {
+            ui::err(&format!("Image not found: {}", path.display()));
+            return Some(SpecialCommandResult::Continue);
+        }
+
+        pending_images.push(path);
+        ui::ok(&format!(
+            "Image attached to next message ({} pending)",
+            pending_images.len()
+        ));
+    }
+
+    #[cfg(not(feature = "vision"))]
+    {
+        let _ = path;
+        let _ = pending_images;
+        ui::err(
+            "This xybrid binary was built without vision support. Rebuild with --features vision or --features llm-llamacpp-vision to use /image.",
+        );
+    }
+
+    Some(SpecialCommandResult::Continue)
+}
+
+fn build_repl_input(
+    input_line: &str,
+    voice: Option<&str>,
+    conversation_context_enabled: bool,
+    pending_images: &mut ReplPendingImages,
+) -> Result<Envelope> {
+    if !pending_images.is_empty() {
+        if voice.is_some() {
+            return Err(anyhow::anyhow!(
+                "--voice cannot be combined with /image attachments"
+            ));
+        }
+        return build_repl_multimodal_input(input_line, pending_images);
+    }
+
+    let mut input = Envelope::new(EnvelopeKind::Text(input_line.to_string()));
+    if conversation_context_enabled {
+        input = input.with_role(MessageRole::User);
+    }
+    if let Some(voice_id) = voice {
+        input
+            .metadata
+            .insert("voice_id".to_string(), voice_id.to_string());
+    }
+
+    Ok(input)
+}
+
+fn build_repl_multimodal_input(
+    input_line: &str,
+    pending_images: &mut ReplPendingImages,
+) -> Result<Envelope> {
+    #[cfg(feature = "vision")]
+    {
+        let images = read_repl_images(&pending_images.paths)?;
+        let input = Envelope::user_message(input_line, images)
+            .context("Failed to build multimodal REPL input")?;
+        pending_images.clear();
+        Ok(input)
+    }
+
+    #[cfg(not(feature = "vision"))]
+    {
+        let _ = input_line;
+        let _ = pending_images;
+        Err(anyhow::anyhow!(
+            "This xybrid binary was built without vision support. Rebuild with --features vision or --features llm-llamacpp-vision to use /image."
+        ))
+    }
+}
+
+#[cfg(feature = "vision")]
+fn read_repl_images(image_paths: &[PathBuf]) -> Result<Vec<Envelope>> {
+    let mut images = Vec::with_capacity(image_paths.len());
+    for image_path in image_paths {
+        let image_bytes = fs::read(image_path)
+            .with_context(|| format!("Failed to read image file: {}", image_path.display()))?;
+        let format = image_format_hint(image_path)?;
+        images.push(
+            Envelope::image(image_bytes, format)
+                .with_context(|| format!("Invalid image input: {}", image_path.display()))?,
+        );
+    }
+    Ok(images)
+}
+
+#[cfg(feature = "vision")]
+fn image_format_hint(path: &Path) -> Result<&str> {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .ok_or_else(|| anyhow::anyhow!("Image file has no extension: {}", path.display()))
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -655,6 +820,17 @@ fn execute_batch(
                     EnvelopeKind::Embedding(vec) => {
                         ui::ok(&format!("Embedding: {} dimensions", vec.len()));
                     }
+                    #[cfg(feature = "vision")]
+                    EnvelopeKind::Image { .. } => {
+                        ui::ok(&format!(
+                            "Image output: {} bytes",
+                            result.output.payload_size()
+                        ));
+                    }
+                    #[cfg(feature = "vision")]
+                    EnvelopeKind::MultiPart(parts) => {
+                        ui::ok(&format!("Multi-part output: {} parts", parts.len()));
+                    }
                 }
             }
 
@@ -664,5 +840,90 @@ fn execute_batch(
         Err(e) => {
             ui::err(&format!("{}", e));
         }
+    }
+}
+
+#[cfg(all(test, feature = "vision"))]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn image_command_is_handled() {
+        let mut conversation_context = None;
+        let mut pending_images = ReplPendingImages::default();
+
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("fixture.png");
+        fs::write(&image_path, png_image(2, 3)).unwrap();
+
+        let result = handle_special_command(
+            &format!("/image {}", image_path.display()),
+            &mut conversation_context,
+            &mut pending_images,
+            0,
+        );
+
+        assert!(matches!(result, SpecialCommandResult::Continue));
+        assert_eq!(pending_images.len(), 1);
+        assert_eq!(pending_images.paths[0], image_path);
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn repl_multimodal_input_consumes_pending_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("fixture.png");
+        fs::write(&image_path, png_image(2, 3)).unwrap();
+        let mut pending_images = ReplPendingImages::default();
+        pending_images.push(image_path);
+
+        let input = build_repl_input("describe this", None, true, &mut pending_images).unwrap();
+        let parts = input.as_multipart().expect("REPL input is multipart");
+
+        assert!(pending_images.is_empty());
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].as_text(), Some("describe this"));
+        assert!(parts[1].is_image());
+        assert_eq!(
+            parts[1].image_dimensions(),
+            Some(xybrid_core::ir::ImageDimensions {
+                width: 2,
+                height: 3,
+            })
+        );
+        assert_eq!(input.role(), Some(MessageRole::User));
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn repl_multimodal_input_rejects_corrupt_image_with_redacted_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("corrupt.jpeg");
+        fs::write(&image_path, [42_u8, 42, 42, 42]).unwrap();
+        let mut pending_images = ReplPendingImages::default();
+        pending_images.push(image_path);
+
+        let err = build_repl_input("describe this", None, true, &mut pending_images).unwrap_err();
+        let message = format!("{err:#}");
+
+        assert!(message.contains("Invalid image input"));
+        assert!(message.contains("invalid or corrupt jpeg image bytes"));
+        assert!(!message.contains("[42"));
+        assert!(!message.contains("42, 42"));
+    }
+
+    #[cfg(feature = "vision")]
+    fn png_image(width: u32, height: u32) -> Vec<u8> {
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            width,
+            height,
+            image::Rgb([17, 34, 51]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test image encodes");
+        encoded.into_inner()
     }
 }
