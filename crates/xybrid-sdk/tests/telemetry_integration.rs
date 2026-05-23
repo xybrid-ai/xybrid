@@ -1261,6 +1261,164 @@ fn pipeline_streaming_fallback_emits_bounded_event_shape() {
     );
 }
 
+/// Regression guard: `XybridModel::warmup` must emit exactly one
+/// `ModelWarmup` telemetry event per warmup pass — distinct from
+/// `ModelComplete` so the Traces dashboard can render it with a
+/// `warmup` badge and default-filter it out of cost-attribution
+/// rollups. Carries the same attribution fields (`stage_name`,
+/// `target`, `latency_ms`) as a real inference's completion event.
+///
+/// Before this contract landed, `warmup` delegated to `self.run`,
+/// which emitted `ModelComplete` — making warmups indistinguishable
+/// from real inferences on the wire and inflating cost-attribution
+/// rollups with synthetic warmup runs.
+#[cfg(feature = "llm-llamacpp")]
+#[test]
+fn xybrid_model_warmup_emits_one_model_warmup_event() {
+    use xybrid_core::execution::listener;
+
+    let _serial = listener_test_lock();
+
+    let Some(model_dir) = model_fixtures::model_or_skip("qwen2.5-0.5b-instruct") else {
+        return;
+    };
+
+    let (tx, rx) = mpsc::channel::<TelemetryEvent>();
+    register_telemetry_sender(tx);
+
+    listener::set_execution_listener(|event| {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let telemetry_event = match event {
+            xybrid_sdk::ExecutionEvent::Started { model_id, method } => TelemetryEvent {
+                event_type: "ExecutionStarted".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: None,
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Completed {
+                model_id,
+                method,
+                latency_ms,
+            } => TelemetryEvent {
+                event_type: "ExecutionCompleted".to_string(),
+                stage_name: Some(method),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: None,
+                data: Some(format!(r#"{{"model":"{}"}}"#, model_id)),
+                timestamp_ms,
+            },
+            xybrid_sdk::ExecutionEvent::Failed {
+                model_id,
+                method,
+                latency_ms,
+                error,
+            } => TelemetryEvent {
+                event_type: "ExecutionFailed".to_string(),
+                stage_name: Some(model_id.clone()),
+                target: Some("device".to_string()),
+                latency_ms: Some(latency_ms as u32),
+                error: Some(error),
+                data: Some(format!(
+                    r#"{{"model":"{}","method":"{}"}}"#,
+                    model_id, method
+                )),
+                timestamp_ms,
+            },
+        };
+
+        publish_telemetry_event(telemetry_event);
+    });
+
+    let model = xybrid_sdk::ModelLoader::from_directory(&model_dir)
+        .expect("loader should build from directory")
+        .load()
+        .expect("qwen2.5-0.5b-instruct should load");
+
+    model.warmup().expect("warmup should succeed");
+
+    std::thread::sleep(Duration::from_millis(100));
+    listener::clear_execution_listener();
+
+    let mut collected: Vec<TelemetryEvent> = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        collected.push(ev);
+    }
+
+    let warmups: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| e.event_type == "ModelWarmup")
+        .collect();
+    assert_eq!(
+        warmups.len(),
+        1,
+        "XybridModel::warmup must emit exactly one ModelWarmup per call. \
+         Captured {} total events: {:#?}",
+        collected.len(),
+        collected
+    );
+    let warmup = warmups[0];
+    assert_eq!(
+        warmup.stage_name.as_deref(),
+        Some("qwen2.5-0.5b-instruct"),
+        "ModelWarmup stage_name should be the model id; got {:?}",
+        warmup.stage_name
+    );
+    assert_eq!(
+        warmup.target.as_deref(),
+        Some("local"),
+        "ModelWarmup target should be `local`; got {:?}",
+        warmup.target
+    );
+    assert!(
+        warmup.latency_ms.is_some_and(|ms| ms > 0),
+        "ModelWarmup must carry positive latency_ms; got {:?}",
+        warmup.latency_ms
+    );
+
+    // No `ModelComplete` should fire on a warmup pass — the warmup is a
+    // distinct event category, not a real inference completion.
+    let model_completes: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| e.event_type == "ModelComplete")
+        .collect();
+    assert!(
+        model_completes.is_empty(),
+        "warmup must NOT emit ModelComplete — that would inflate \
+         cost-attribution rollups with synthetic warmup runs. Leaked: {:#?}",
+        model_completes
+    );
+
+    // No outer-span or pipeline-frame leakage either.
+    let leaked_outer: Vec<&TelemetryEvent> = collected
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.event_type.as_str(),
+                "ExecutionStarted"
+                    | "ExecutionCompleted"
+                    | "PipelineStart"
+                    | "PipelineComplete"
+                    | "StageStart"
+                    | "StageComplete"
+            )
+        })
+        .collect();
+    assert!(
+        leaked_outer.is_empty(),
+        "warmup must not emit outer-span Started/Completed or pipeline-frame \
+         events alongside the ModelWarmup. Leaked: {:#?}",
+        leaked_outer
+    );
+}
+
 /// Smoke test: MNIST inference works without telemetry (no env vars needed).
 /// Ensures the model fixture is valid and the execution pipeline doesn't panic.
 #[test]

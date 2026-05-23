@@ -1596,16 +1596,71 @@ impl XybridModel {
             },
         };
 
-        // Run inference (this loads the model)
+        // Warmup measures model-load + first-token latency, not full
+        // generation. Cap LLM decoding at 1 token so a 2048-token
+        // `GenerationConfig::default()` doesn't turn warmup into a real
+        // inference. `executor::execute_llm` reads this from envelope
+        // metadata when no explicit `GenerationConfig` is passed;
+        // non-LLM paths ignore it.
+        let mut warmup_input = warmup_input;
+        warmup_input
+            .metadata
+            .insert("max_tokens".to_string(), "1".to_string());
+
+        // Run the inference inline (rather than delegating to `self.run`)
+        // so the publish at the end is a `ModelWarmup` event rather than
+        // a `ModelComplete`. Warmups should be visible to billing /
+        // perf-debugging but distinguishable from real inferences on
+        // the Traces dashboard — `ModelWarmup` carries the same
+        // attribution fields (`stage_name`, `target`, `latency_ms`) but
+        // its own event_type so the platform can render with a `warmup`
+        // badge and default-filter it out of cost-attribution rollups.
         let start = Instant::now();
-        let _ = self.run(&warmup_input, None)?;
-        let elapsed = start.elapsed();
+        let resource_guard = crate::telemetry::begin_resource_run();
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
+        {
+            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            if !handle.loaded {
+                return Err(SdkError::NotLoaded);
+            }
+            let metadata = handle.metadata.clone();
+            handle
+                .executor
+                .execute(&metadata, &warmup_input, None)
+                .map_err(|e| SdkError::InferenceError(format!("Warmup execution failed: {}", e)))?;
+        }
+
+        let latency_ms = start.elapsed().as_millis() as u32;
+
+        let event = crate::telemetry::TelemetryEvent {
+            event_type: "ModelWarmup".to_string(),
+            stage_name: Some(self.model_id.clone()),
+            target: Some("local".to_string()),
+            latency_ms: Some(latency_ms),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": self.model_id,
+                    "version": self.version,
+                    "output_type": format!("{:?}", self.output_type),
+                })
+                .to_string(),
+            ),
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
+        crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
         log::info!(
             target: "xybrid_sdk",
-            "Model {} warmed up in {:?}",
+            "Model {} warmed up in {}ms",
             self.model_id,
-            elapsed
+            latency_ms
         );
 
         Ok(())
@@ -1662,26 +1717,69 @@ impl XybridModel {
                 },
             };
 
-            let start = Instant::now();
+            // See sync `warmup()` for rationale — cap LLM decoding at
+            // 1 token so warmup doesn't run a full generation.
+            let mut warmup_input = warmup_input;
+            warmup_input
+                .metadata
+                .insert("max_tokens".to_string(), "1".to_string());
 
-            // Run inference
-            let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
-            if !guard.loaded {
-                return Err(SdkError::NotLoaded);
+            let start = Instant::now();
+            let resource_guard = crate::telemetry::begin_resource_run();
+            let trace_id = uuid::Uuid::new_v4();
+            let _telemetry_ctx =
+                crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
+            // Run inference inline and publish a `ModelWarmup` event —
+            // same shape as the sync `warmup()` above. Previously this
+            // path published nothing at all, so async warmups were
+            // silent on the wire (visible only via logs).
+            let version_for_event;
+            let output_type_str;
+            {
+                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                if !guard.loaded {
+                    return Err(SdkError::NotLoaded);
+                }
+
+                let metadata = guard.metadata.clone();
+                guard
+                    .executor
+                    .execute(&metadata, &warmup_input, None)
+                    .map_err(|e| SdkError::InferenceError(format!("Warmup failed: {}", e)))?;
+
+                version_for_event = metadata.version.clone();
+                output_type_str = format!("{:?}", output_type);
             }
 
-            let metadata = guard.metadata.clone();
-            let _ = guard
-                .executor
-                .execute(&metadata, &warmup_input, None)
-                .map_err(|e| SdkError::InferenceError(format!("Warmup failed: {}", e)))?;
+            let latency_ms = start.elapsed().as_millis() as u32;
 
-            let elapsed = start.elapsed();
+            let event = crate::telemetry::TelemetryEvent {
+                event_type: "ModelWarmup".to_string(),
+                stage_name: Some(model_id.clone()),
+                target: Some("local".to_string()),
+                latency_ms: Some(latency_ms),
+                error: None,
+                data: Some(
+                    serde_json::json!({
+                        "model_id": model_id,
+                        "version": version_for_event,
+                        "output_type": output_type_str,
+                    })
+                    .to_string(),
+                ),
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+            };
+            crate::telemetry::publish_with_resource_summary(event, resource_guard);
+
             log::info!(
                 target: "xybrid_sdk",
-                "Model {} warmed up (async) in {:?}",
+                "Model {} warmed up (async) in {}ms",
                 model_id,
-                elapsed
+                latency_ms
             );
 
             Ok(())
