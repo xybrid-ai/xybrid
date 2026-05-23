@@ -38,11 +38,22 @@ ORT_VENDOR="$REPO_ROOT/vendor/ort-android"
 
 # Resolve NDK. Honor the user's ANDROID_NDK_HOME if set; otherwise look
 # under the canonical SDK install location.
+#
+# Pin to NDK r27 by default. r29 (latest as of this script) has linker /
+# toolchain differences that surface as build failures on x86_64 with
+# our llama.cpp + cpp-httplib + candle native deps. r27 is the version
+# the project's existing flutter binding and uniffi build flow target;
+# stick with it until r29 is explicitly validated.
 : "${ANDROID_HOME:=$HOME/Library/Android/sdk}"
 if [ -z "${ANDROID_NDK_HOME:-}" ]; then
-    # Pick the highest version directory under sdk/ndk/ — works regardless
-    # of whether the user has r26 / r27 / r29 installed.
-    ANDROID_NDK_HOME="$(ls -d "$ANDROID_HOME"/ndk/*/ 2>/dev/null | sort -V | tail -n1 | sed 's:/$::')"
+    # Prefer an explicit r27.x install; fall back to the highest version
+    # available so the script still does *something* on hosts that only
+    # have r28+.
+    if compgen -G "$ANDROID_HOME/ndk/27.*" > /dev/null; then
+        ANDROID_NDK_HOME="$(ls -d "$ANDROID_HOME"/ndk/27.*/ 2>/dev/null | sort -V | tail -n1 | sed 's:/$::')"
+    else
+        ANDROID_NDK_HOME="$(ls -d "$ANDROID_HOME"/ndk/*/ 2>/dev/null | sort -V | tail -n1 | sed 's:/$::')"
+    fi
 fi
 if [ -z "$ANDROID_NDK_HOME" ] || [ ! -d "$ANDROID_NDK_HOME" ]; then
     echo "error: ANDROID_NDK_HOME not set and no NDK found under $ANDROID_HOME/ndk/" >&2
@@ -111,6 +122,27 @@ for abi in arm64-v8a armeabi-v7a x86 x86_64; do
         echo "    [$abi] skipped (no artifact)"
     fi
 done
+
+echo "==> Patching DT_NEEDED to include libc++_shared.so"
+# boltffi 0.25's android pack does a second link step
+# (pack/android/link.rs::android_shared_link_args) with hardcoded link
+# args — only `-lm -llog -ldl`, no `-lc++_shared`. The cargo-staticlib
+# pulled in c++_shared via rustflags, but the final clang `-shared` link
+# strips that dep out. Result: dlopen on device fails with
+#   cannot locate symbol "_ZTISt13runtime_error" referenced by libxybrid-bolt.so
+# Fix: add DT_NEEDED post-link via patchelf. Works regardless of which
+# linker boltffi invoked; treats the .so as an opaque ELF artifact.
+if command -v patchelf > /dev/null 2>&1; then
+    for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+        so="$KOTLIN_LIBS/$abi/libxybrid-bolt.so"
+        if [ -f "$so" ]; then
+            patchelf --add-needed libc++_shared.so "$so"
+        fi
+    done
+else
+    echo "    error: patchelf not on PATH (brew install patchelf). Aborting" >&2
+    exit 1
+fi
 
 echo "==> Bundling ORT runtime from vendor/ort-android/"
 # `ort-dynamic` mode dlopen's libonnxruntime.so at runtime. Only the
