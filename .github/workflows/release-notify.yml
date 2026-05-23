@@ -1,0 +1,69 @@
+name: Release notify to Discord
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    # TODO: once promoted from #dev-tests to #releases, decide whether to add
+    #   if: github.event.release.prerelease == false
+    # to suppress rc/beta notifications.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_RELEASES }}
+          NAME: ${{ github.event.release.name }}
+          TAG: ${{ github.event.release.tag_name }}
+          URL: ${{ github.event.release.html_url }}
+          BODY: ${{ github.event.release.body }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK_RELEASES is unset — skipping post."
+            exit 0
+          fi
+
+          # Truncate release notes to ~400 chars; ellipsis if cut.
+          TRUNCATED=$(printf '%s' "$BODY" | head -c 400)
+          if [ "${#BODY}" -gt 400 ]; then
+            TRUNCATED="${TRUNCATED}…"
+          fi
+          # If release notes are empty, give the embed a usable description.
+          if [ -z "$TRUNCATED" ]; then
+            TRUNCATED="See full notes on GitHub."
+          fi
+
+          # 🚀 for stable releases, 🧪 for prereleases.
+          if [ "$PRERELEASE" = "true" ]; then
+            EMOJI="🧪"
+          else
+            EMOJI="🚀"
+          fi
+
+          DISPLAY_NAME="${NAME:-$TAG}"
+
+          payload=$(jq -n \
+            --arg title "$EMOJI Xybrid $DISPLAY_NAME released" \
+            --arg url "$URL" \
+            --arg desc "$TRUNCATED" \
+            --arg footer "Full notes on GitHub" \
+            '{
+              username: "Xybrid Bot",
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $desc,
+                color: 15844367,
+                footer: { text: $footer }
+              }]
+            }')
+          curl -sS -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK" > /dev/null

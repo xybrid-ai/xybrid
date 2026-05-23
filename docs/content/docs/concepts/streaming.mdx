@@ -89,6 +89,30 @@ string response = model.RunStreamingText("Tell me a story.", token =>
 
 ---
 
+## Troubleshooting
+
+### Surfacing llama.cpp C++ logs
+
+When debugging model load failures, unexpected streaming output, or other backend issues, set the `XYBRID_LLAMACPP_VERBOSITY` environment variable before your process starts. This raises the verbosity of llama.cpp's internal C++ logger from the default (suppressed at normal log levels).
+
+| Value | Meaning |
+|-------|---------|
+| `0` | Silent (no llama.cpp logs) |
+| `1` | Errors only |
+| `2` | Warnings and errors |
+| `3` | Info, warnings, and errors |
+| `4` | Full debug output (all library logs) |
+
+Example invocation:
+
+```bash
+XYBRID_LLAMACPP_VERBOSITY=4 ./my-xybrid-app
+```
+
+Use `4` when investigating model load failures: it surfaces the underlying llama.cpp diagnostic that the Rust-side error wraps. The variable is read once when the llama.cpp backend is initialized, so set it before launching the process. Available since `v0.1.0-beta5`.
+
+---
+
 ## Real-Time Audio Streaming (Planned)
 
 Real-time audio transcription with partial results (chunked Whisper inference) is planned for a future release. This will enable:
