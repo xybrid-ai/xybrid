@@ -60,6 +60,73 @@ class InferenceRepository {
 }
 ```
 
+
+## Microphone Permissions for ASR
+
+Android speech-recognition flows need microphone permission before creating an audio envelope. Add the permission to your app manifest:
+
+```xml title="AndroidManifest.xml"
+<manifest ...>
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application ...>
+        ...
+    </application>
+</manifest>
+```
+
+Request `RECORD_AUDIO` at runtime before recording. This example uses the standard Activity Result API from a `ComponentActivity`:
+
+```kotlin
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+
+class MainActivity : ComponentActivity() {
+    private val requestAudioPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startRecordingForAsr()
+        } else {
+            showMicrophonePermissionMessage()
+        }
+    }
+
+    fun ensureMicrophonePermission() {
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (granted) {
+            startRecordingForAsr()
+        } else {
+            requestAudioPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+}
+```
+
+After permission is granted, capture mono PCM at 16 kHz and pass the bytes to a Whisper model:
+
+```kotlin
+suspend fun transcribeRecordedAudio(audioBytes: ByteArray): String =
+    withContext(Dispatchers.IO) {
+        val model = XybridModelLoader.fromRegistry("whisper-tiny").load()
+        val envelope = Envelope.audio(
+            bytes = audioBytes,
+            sampleRate = 16000u,
+            channels = 1u,
+        )
+        val result = model.run(envelope)
+
+        result.text ?: error(result.error ?: "ASR produced no text")
+    }
+```
+
 ## Jetpack Compose Integration
 
 ```kotlin
