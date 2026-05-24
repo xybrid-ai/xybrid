@@ -1000,16 +1000,22 @@ fn convert_to_platform_event(
     // Span-bearing event types: completion-family events publish a final
     // ModelComplete/PipelineComplete that drains the collector, AND the
     // cloud-fallback flow publishes LocalAborted/CloudRetry as terminal
-    // markers for each leg without ever firing a *Complete. Both kinds
-    // need their flamegraph attached at the wire layer or the dashboard
-    // sees an empty trace detail. Adding LocalAborted/CloudRetry here is
-    // the symmetric counterpart of the same addition in
-    // `snapshot_spans_into_event` — both gates must agree, otherwise the
-    // SDK attaches spans to event.data["spans"] but `convert_to_platform_event`
-    // strips them again before the wire.
+    // markers for each leg without ever firing a *Complete, AND
+    // ModelWarmup is its own completion category (XybridModel::warmup
+    // opens executor spans then publishes a single ModelWarmup —
+    // distinct from ModelComplete so the dashboard can filter warmups
+    // out of cost-attribution rollups). All four kinds need their
+    // flamegraph attached at the wire layer or the dashboard sees an
+    // empty trace detail. This list MUST match `snapshot_spans_into_event`
+    // above; otherwise the SDK attaches spans to event.data["spans"]
+    // but `convert_to_platform_event` strips them again before the wire.
     let stages = if matches!(
         event.event_type.as_str(),
-        "PipelineComplete" | "ModelComplete" | "LocalAborted" | "CloudRetry"
+        "PipelineComplete"
+            | "ModelComplete"
+            | "ModelWarmup"
+            | "LocalAborted"
+            | "CloudRetry"
     ) && core_tracing::is_tracing_enabled()
     {
         let embedded_spans: Option<serde_json::Value> = payload
@@ -2265,9 +2271,22 @@ fn snapshot_spans_into_event(event: TelemetryEvent) -> TelemetryEvent {
     // so without these the cloud-leg `SpanGuard`s in
     // `runtime_adapter/cloud/mod.rs` get stranded in the global collector
     // and the dashboard's flamegraph stays empty.
+    //
+    // `ModelWarmup` follows the same shape: `XybridModel::warmup` opens
+    // `execute:<model>` + `llm_inference` spans via the executor before
+    // publishing. Without this entry those spans would (a) never reach
+    // the warmup event's payload — the dashboard falls back to a
+    // synthesized placeholder flamegraph — and (b) leak into the next
+    // event's snapshot (typically the first real inference of the
+    // session), giving that inference's trace two stray spans it
+    // didn't generate.
     let is_span_bearing = matches!(
         event.event_type.as_str(),
-        "PipelineComplete" | "ModelComplete" | "LocalAborted" | "CloudRetry"
+        "PipelineComplete"
+            | "ModelComplete"
+            | "ModelWarmup"
+            | "LocalAborted"
+            | "CloudRetry"
     );
     if !is_span_bearing || !core_tracing::is_tracing_enabled() {
         return event;
