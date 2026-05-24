@@ -316,7 +316,7 @@ pub fn prepare_audio_samples(
         // not implemented here. Callers that need N→M upmix (N < M, M > 2)
         // must pre-process the audio before passing it to this function.
         return Err(ConvertError::ConversionFailed(format!(
-            "upmixing from {} to {} channels is not supported",
+            "conversion from {} to {} channels is not supported",
             source_channels, target_channels
         )));
     };
