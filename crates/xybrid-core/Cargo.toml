@@ -8,17 +8,25 @@ homepage.workspace = true
 documentation.workspace = true
 description = "Core runtime for hybrid cloud-edge AI inference: model execution, pipeline orchestration, and routing primitives."
 readme = "README.md"
-# vendor/llama.cpp (~180MB) is cloned on-demand by build.rs when the
-# llm-llamacpp feature is enabled, so we exclude it from the published
-# tarball to stay under crates.io's size limit. Other files under
-# vendor/ (e.g. llama_wrapper.cpp) are first-party and must ship.
-exclude = ["vendor/llama.cpp/**"]
+# Upstream llama backend source lives at workspace `vendor/llama-cpp/`
+# (see `.gitmodules`), consumed by the `llama-cpp-sys` crate's build
+# script. No tarball-exclude needed here — the source is not under this
+# crate's manifest dir.
 
 [lib]
 name = "xybrid_core"
 path = "src/lib.rs"
 
 [dependencies]
+# Raw FFI bindings + cmake build for llama.cpp. Gated entirely behind the
+# `llm-llamacpp` feature (which activates both `llama-cpp-sys/bindings`
+# and `xybrid-llama/bindings`) so default builds — and any consumer not
+# opting into llama.cpp — pay zero compile cost. The 3-layer shape:
+#   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
+#   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
+#   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
+llama-cpp-sys = { path = "../llama-cpp-sys", optional = true }
+xybrid-llama = { path = "../xybrid-llama", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
@@ -121,11 +129,32 @@ llm-mistral = []
 llm-mistral-metal = ["llm-mistral"]
 llm-mistral-cuda = ["llm-mistral"]
 
-# llama.cpp backend (Android-compatible, runtime SIMD detection)
-# Note: This is a marker feature - it gates build.rs (compiles llama.cpp via cmake)
-# and source code (#[cfg(feature = "llm-llamacpp")] blocks), not external dependencies.
-# Requires: vendor/llama.cpp directory with cloned llama.cpp source.
+# llama.cpp backend — TWO TIERS, matching the MLX precedent in
+# `xybrid-core/Cargo.toml`.
+#
+# Tier 1 (skeleton): `llm-llamacpp`
+#   - Compiles types (`LlamaCppBackend` constructor + adapter glue) on
+#     any target without cmake, without a C++ toolchain, without git
+#     access to fetch llama.cpp source.
+#   - `LlamaCppBackend::new()` returns `AdapterError::BackendNotLinked`
+#     at runtime with a "rebuild with `llm-llamacpp-runtime`" message.
+#   - For downstreams that want type access only (e.g., Linux CI
+#     runners) or that intend to link a custom llama.cpp build out of
+#     tree.
 llm-llamacpp = []
+
+# Tier 2 (runtime): `llm-llamacpp-runtime`
+#   - Activates both `llama-cpp-sys/bindings` (cmake build of llama.cpp +
+#     wrapper.cpp shim) and `xybrid-llama/bindings` (safe wrappers).
+#   - All four `platform-*` presets on `xybrid-sdk` depend on this tier
+#     since they ship runtime inference.
+llm-llamacpp-runtime = [
+    "llm-llamacpp",
+    "dep:llama-cpp-sys",
+    "llama-cpp-sys/bindings",
+    "dep:xybrid-llama",
+    "xybrid-llama/bindings",
+]
 
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
 # downstream demos, integration tests, and benchmarks. Off by default.
@@ -134,9 +163,9 @@ llm-llamacpp = []
 dev-tools = []
 
 [build-dependencies]
-# For compiling llama.cpp C/C++ source (used by build.rs when llm-llamacpp is enabled)
-cc = "1.0"
-cmake = "0.1"
+# No build-time native dependencies in xybrid-core: the llama.cpp cmake
+# build was relocated to `crates/llama-cpp-sys/build.rs` as Phase 1 of the
+# `llamacpp-crate-split` epic, and `xybrid-core/build.rs` is now a stub.
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -150,7 +179,10 @@ criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarking fra
 
 [[example]]
 name = "neutts_tts"
-required-features = ["llm-llamacpp"]
+# Real inference — needs the runtime tier, not the skeleton.
+# Pre-Phase-4 `llm-llamacpp` meant runtime; the split made `llm-llamacpp`
+# skeleton-only, so this required-features value moves to `-runtime`.
+required-features = ["llm-llamacpp-runtime"]
 
 [[bench]]
 name = "inference_backends"

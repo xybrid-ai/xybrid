@@ -4,7 +4,7 @@
 //! Useful for verifying the generation loop works correctly.
 //!
 //! Run with:
-//!   cargo run --example llama_cpp_test -p xybrid-core --features llm-llamacpp
+//!   cargo run --example llama_cpp_test -p xybrid-core --features llm-llamacpp-runtime
 //!
 //! Requires a GGUF model:
 //!   ./integration-tests/download.sh qwen2.5-0.5b-instruct
@@ -96,6 +96,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn main() {
     eprintln!("This example requires the `llm-llamacpp` feature.");
     eprintln!(
-        "Run with: cargo run --example llama_cpp_test -p xybrid-core --features llm-llamacpp"
+        "Run with: cargo run --example llama_cpp_test -p xybrid-core --features llm-llamacpp-runtime"
     );
 }

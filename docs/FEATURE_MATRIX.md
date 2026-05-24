@@ -20,7 +20,7 @@ This document provides a comprehensive reference for all feature flags, platform
 
 | Feature | Description | Enables |
 |---------|-------------|---------|
-| **default** | Default features | `ort-download`, `llm-llamacpp` |
+| **default** | Default features | `ort-download` (llama.cpp opted into via `llm-llamacpp-runtime` or platform preset) |
 | **ort-download** | Download prebuilt ONNX Runtime binaries | `ort/download-binaries`, `ort/tls-native` |
 | **ort-dynamic** | Load ONNX Runtime .so at runtime | `ort/load-dynamic` |
 | **ort-coreml** | Apple Neural Engine acceleration | `ort/coreml` |
@@ -31,14 +31,26 @@ This document provides a comprehensive reference for all feature flags, platform
 | **llm-mistral** | mistral.rs LLM backend (CPU) | `mistralrs` |
 | **llm-mistral-metal** | mistral.rs with Metal acceleration | `llm-mistral`, `mistralrs/metal` |
 | **llm-mistral-cuda** | mistral.rs with CUDA acceleration | `llm-mistral`, `mistralrs/cuda` |
-| **llm-llamacpp** | llama.cpp backend (Android-compatible) | *(marker feature - triggers build.rs)* |
+| **llm-llamacpp** | llama.cpp backend — **skeleton tier** (types compile, no link) | *(no native deps)* |
+| **llm-llamacpp-runtime** | llama.cpp backend — **runtime tier** (real cmake build + link) | `llama-cpp-sys/bindings`, `xybrid-llama/bindings` |
 
 ### Notes
 
-- `llm-llamacpp` is a **marker feature** - it doesn't enable external crate dependencies but instead:
-  1. Triggers `build.rs` to compile vendored llama.cpp via CMake
-  2. Gates source code with `#[cfg(feature = "llm-llamacpp")]` blocks
-  3. Requires `vendor/llama.cpp` directory with cloned llama.cpp source
+- The llama.cpp backend is split into two tiers, mirroring MLX's `llm-mlx`
+  vs `llm-mlx-runtime` pattern (PR xybrid#124):
+  - **`llm-llamacpp`** (skeleton): exposes `LlamaCppBackend` types on every
+    target without cmake / a C++ toolchain / a llama.cpp source clone.
+    `LlamaCppBackend::new()` returns
+    `AdapterError::BackendNotLinked { backend: "llamacpp" }` at runtime
+    with a "rebuild with `llm-llamacpp-runtime`" hint. For Linux CI
+    runners and downstreams that want type access only.
+  - **`llm-llamacpp-runtime`** (runtime): activates `llama-cpp-sys/bindings`
+    (the cmake build of llama.cpp + the `wrapper.cpp` shim) and
+    `xybrid-llama/bindings` (safe RAII wrappers). All four `platform-*`
+    presets on `xybrid-sdk` depend on this tier.
+- The 3-layer crate shape mirrors MLX precedent:
+  `llama-cpp-sys` (raw FFI + cmake build) → `xybrid-llama` (safe wrappers,
+  typed errors) → `xybrid-core::runtime_adapter::llama_cpp` (thin adapter).
 
 ---
 
@@ -47,10 +59,10 @@ This document provides a comprehensive reference for all feature flags, platform
 | Feature | Description | Forwards to xybrid-core |
 |---------|-------------|-------------------------|
 | **default** | No default features | *(none)* |
-| **platform-android** | Android preset | `ort-dynamic`, `candle`, `llm-llamacpp` |
-| **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` |
-| **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` |
-| **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-llamacpp` |
+| **platform-android** | Android preset | `ort-dynamic`, `candle`, `llm-llamacpp-runtime` |
+| **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp-runtime` |
+| **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp-runtime` |
+| **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-llamacpp-runtime` |
 | **ort-download** | Forward to core | `xybrid-core/ort-download` |
 | **ort-dynamic** | Forward to core | `xybrid-core/ort-dynamic` |
 | **ort-coreml** | Forward to core | `xybrid-core/ort-coreml` |
@@ -61,7 +73,13 @@ This document provides a comprehensive reference for all feature flags, platform
 | **llm-mistral** | Forward to core | `xybrid-core/llm-mistral` |
 | **llm-mistral-metal** | Forward to core | `xybrid-core/llm-mistral-metal` |
 | **llm-mistral-cuda** | Forward to core | `xybrid-core/llm-mistral-cuda` |
-| **llm-llamacpp** | Forward to core | `xybrid-core/llm-llamacpp` |
+| **llm-llamacpp** | Skeleton tier — forward to core | `xybrid-core/llm-llamacpp` |
+| **llm-llamacpp-runtime** | Runtime tier — activates local skeleton + forwards runtime | `llm-llamacpp`, `xybrid-core/llm-llamacpp-runtime` |
+
+> The runtime tier **must** activate its own crate's skeleton tier so
+> `#[cfg(feature = "llm-llamacpp")]` source gates in this crate fire
+> alongside the runtime link. Otherwise platform presets would link
+> llama.cpp while the SDK API surface that consumes it stays gated off.
 
 ---
 
@@ -94,10 +112,10 @@ Platform presets are the **single source of truth** for platform-specific featur
 
 | Preset | Target Platform | Core Features Enabled | Rationale |
 |--------|-----------------|----------------------|-----------|
-| **platform-android** | Android (all ABIs) | `ort-dynamic`, `candle`, `llm-llamacpp` | Dynamic ORT loading for AAR distribution; Candle (CPU) for Whisper ASR; llama.cpp has runtime SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
-| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `candle-metal`, `llm-llamacpp` | Static ORT linking; CoreML for ANE acceleration; Metal for GPU |
-| **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `candle-metal`, `llm-llamacpp` | Same as iOS - unified Apple platform features |
-| **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp` | Static ORT linking; llama.cpp for LLM inference (unified across all platforms) |
+| **platform-android** | Android (all ABIs) | `ort-dynamic`, `candle`, `llm-llamacpp-runtime` | Dynamic ORT loading for AAR distribution; Candle (CPU) for Whisper ASR; llama.cpp runtime tier has SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
+| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `candle-metal`, `llm-llamacpp-runtime` | Static ORT linking; CoreML for ANE acceleration; Metal for GPU; llama.cpp runtime tier linked |
+| **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `candle-metal`, `llm-llamacpp-runtime` | Same as iOS — unified Apple platform features; llama.cpp runtime tier linked |
+| **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp-runtime` | Static ORT linking; llama.cpp runtime tier linked for LLM inference (unified across all platforms) |
 
 > **Note**: The CLI (`xybrid-cli`) adds `huggingface` to all its platform presets so `xybrid run --huggingface` works in release builds. SDK/FFI presets do not include `huggingface` by default — add it individually if needed.
 

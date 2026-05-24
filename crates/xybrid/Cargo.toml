@@ -37,6 +37,9 @@ llm-mistral = ["xybrid-sdk/llm-mistral"]
 llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
+# Runtime tier activates local skeleton so any future `#[cfg(...)]`
+# gates on this crate fire alongside the runtime link.
+llm-llamacpp-runtime = ["llm-llamacpp", "xybrid-sdk/llm-llamacpp-runtime"]
 huggingface = ["xybrid-sdk/huggingface"]
 onnx-inspect = ["xybrid-sdk/onnx-inspect"]
 dev-tools = ["xybrid-sdk/dev-tools"]

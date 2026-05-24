@@ -3,7 +3,7 @@
 //! This example demonstrates token streaming for LLM inference.
 //!
 //! Run with:
-//!   cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp
+//!   cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp-runtime
 
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         eprintln!("This example requires the llm-llamacpp feature.");
         eprintln!(
-            "Run with: cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp"
+            "Run with: cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp-runtime"
         );
         return Ok(());
     }

@@ -10,10 +10,10 @@
 //! - espeak-ng installed for PhonemeRaw preprocessing
 //!
 //! Usage:
-//!   cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp
-//!   cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp -- --voice dave
-//!   cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp -- --model-dir path/to/neutts-nano-q4
-//!   cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp -- --text "Hello world" --output out.wav
+//!   cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp-runtime
+//!   cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp-runtime -- --voice dave
+//!   cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp-runtime -- --model-dir path/to/neutts-nano-q4
+//!   cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp-runtime -- --text "Hello world" --output out.wav
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -68,9 +68,9 @@ fn parse_args() -> Args {
                 println!("  --help, -h                Show this help");
                 println!();
                 println!("Examples:");
-                println!("  cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp");
-                println!("  cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp -- --voice dave");
-                println!("  cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp -- -t \"Good morning\" -o morning.wav");
+                println!("  cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp-runtime");
+                println!("  cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp-runtime -- --voice dave");
+                println!("  cargo run -p xybrid-core --example neutts_tts --features llm-llamacpp-runtime -- -t \"Good morning\" -o morning.wav");
                 std::process::exit(0);
             }
             arg if !arg.starts_with('-') => {
