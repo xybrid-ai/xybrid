@@ -415,18 +415,12 @@ fn format_chat_chatml<M: ChatMessageView>(messages: &[M]) -> String {
                 "<|im_start|>system\n{}<|im_end|>\n",
                 msg.content()
             )),
-            "user" => prompt.push_str(&format!(
-                "<|im_start|>user\n{}<|im_end|>\n",
-                msg.content()
-            )),
+            "user" => prompt.push_str(&format!("<|im_start|>user\n{}<|im_end|>\n", msg.content())),
             "assistant" => prompt.push_str(&format!(
                 "<|im_start|>assistant\n{}<|im_end|>\n",
                 msg.content()
             )),
-            _ => prompt.push_str(&format!(
-                "<|im_start|>user\n{}<|im_end|>\n",
-                msg.content()
-            )),
+            _ => prompt.push_str(&format!("<|im_start|>user\n{}<|im_end|>\n", msg.content())),
         }
     }
     prompt.push_str("<|im_start|>assistant\n");

@@ -203,9 +203,7 @@ impl From<xybrid_llama::LlamaError> for AdapterError {
             LlamaError::ContextCreationFailed(msg) => {
                 Self::RuntimeError(format!("Failed to create context: {msg}"))
             }
-            LlamaError::TokenizationFailed => {
-                Self::RuntimeError("Tokenization failed".to_string())
-            }
+            LlamaError::TokenizationFailed => Self::RuntimeError("Tokenization failed".to_string()),
             LlamaError::DecodeFailed {
                 code,
                 n_past_in,

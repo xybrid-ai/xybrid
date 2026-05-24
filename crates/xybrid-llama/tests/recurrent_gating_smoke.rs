@@ -45,8 +45,8 @@ fn locate_lfm2_gguf() -> Option<PathBuf> {
         }
     }
     let home = std::env::var("HOME").ok()?;
-    let cached = PathBuf::from(home)
-        .join(".xybrid/cache/extracted/lfm2.5-350m/LFM2.5-350M-Q4_K_M.gguf");
+    let cached =
+        PathBuf::from(home).join(".xybrid/cache/extracted/lfm2.5-350m/LFM2.5-350M-Q4_K_M.gguf");
     if cached.exists() {
         Some(cached)
     } else {
@@ -143,7 +143,11 @@ fn lfm2_350m_two_turns_does_not_fail_with_decode_error() {
         Ok(_) => {
             // Pass — turn 2 didn't fail with llama_decode != 0.
         }
-        Err(LlamaError::DecodeFailed { code, n_past_in, detail }) => {
+        Err(LlamaError::DecodeFailed {
+            code,
+            n_past_in,
+            detail,
+        }) => {
             panic!(
                 "INF-162 regression — turn 2 on lfm2.5-350m failed with \
                  llama_decode != 0: code={code}, n_past_in={n_past_in}, detail={detail}"

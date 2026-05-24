@@ -469,9 +469,13 @@ fn compile_llama_cpp() {
             cmake_config.define("ANDROID_STL", "c++_shared");
             cmake_config.define("ANDROID_NDK", ndk);
         } else {
-            println!("cargo:warning=================================================================");
+            println!(
+                "cargo:warning================================================================="
+            );
             println!("cargo:warning=ERROR: Android NDK not found!");
-            println!("cargo:warning=================================================================");
+            println!(
+                "cargo:warning================================================================="
+            );
             println!("cargo:warning=Paths tried:");
             for path in &ndk_result.tried_paths {
                 println!("cargo:warning=  - {}", path);
@@ -481,8 +485,12 @@ fn compile_llama_cpp() {
             println!("cargo:warning=  export ANDROID_NDK_HOME=/path/to/android-ndk");
             println!("cargo:warning=  export ANDROID_HOME=/path/to/android-sdk  (with ndk/ subdirectory)");
             println!("cargo:warning=");
-            println!("cargo:warning=Or install Android Studio which sets up the NDK automatically.");
-            println!("cargo:warning=================================================================");
+            println!(
+                "cargo:warning=Or install Android Studio which sets up the NDK automatically."
+            );
+            println!(
+                "cargo:warning================================================================="
+            );
             process::exit(1);
         }
     } else if target_os == "macos" || target_os == "ios" {
@@ -584,7 +592,8 @@ fn clone_pinned_commit(out_dir: &Path) -> PathBuf {
             .unwrap_or(false)
     };
 
-    let already_initialized = cloned.join(".git").exists() && cloned.join("CMakeLists.txt").exists();
+    let already_initialized =
+        cloned.join(".git").exists() && cloned.join("CMakeLists.txt").exists();
     let needs_clone = !already_initialized;
     if needs_clone && cloned.exists() {
         let _ = std::fs::remove_dir_all(&cloned);
