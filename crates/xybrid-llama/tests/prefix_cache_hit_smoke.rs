@@ -105,11 +105,7 @@ fn qwen2_5_0_5b_three_turns_show_prefix_cache_hit_on_turn_2_and_3() {
         .expect("qwen2.5-0.5b context creation must succeed");
 
     let system = "You are a concise assistant. Answer in one short sentence.";
-    let turn_prompts = [
-        "What is 2 + 2?",
-        "And 3 + 3?",
-        "Now 4 + 4?",
-    ];
+    let turn_prompts = ["What is 2 + 2?", "And 3 + 3?", "Now 4 + 4?"];
 
     let mut prior_full_prompt_tokens: Option<Vec<i32>> = None;
     let mut cache_tip: Vec<i32> = Vec::new();

@@ -84,8 +84,11 @@ pub mod bindings {
     /// extern "C" fn(...)` so `xybrid-llama` can construct
     /// `Some(streaming_trampoline::<F>)` against an
     /// `Option<TokenCallback>`-shaped FFI argument.
-    pub type TokenCallback =
-        unsafe extern "C" fn(token_id: c_int, token_text: *const c_char, user_data: *mut c_void) -> c_int;
+    pub type TokenCallback = unsafe extern "C" fn(
+        token_id: c_int,
+        token_text: *const c_char,
+        user_data: *mut c_void,
+    ) -> c_int;
 }
 
 /// Initialize the llama.cpp backend. Idempotent across calls thanks to the

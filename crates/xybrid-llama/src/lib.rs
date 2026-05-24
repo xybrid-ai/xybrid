@@ -42,28 +42,28 @@ pub use llama_cpp_sys::backend_init;
 pub(crate) mod ffi;
 
 #[cfg(feature = "bindings")]
-mod sampling;
+mod context;
+#[cfg(feature = "bindings")]
+mod generation;
 #[cfg(feature = "bindings")]
 mod log_control;
 #[cfg(feature = "bindings")]
 mod model;
 #[cfg(feature = "bindings")]
-mod context;
-#[cfg(feature = "bindings")]
-mod generation;
+mod sampling;
 
-#[cfg(feature = "bindings")]
-pub use sampling::SamplingParams;
-#[cfg(feature = "bindings")]
-pub use log_control::{get_verbosity, set_verbosity};
-#[cfg(feature = "bindings")]
-pub use model::LlamaModel;
 #[cfg(feature = "bindings")]
 pub use context::LlamaContext;
 #[cfg(feature = "bindings")]
 pub use generation::{
     format_chat, generate_streaming, generate_with_stops, ChatMessageView, StreamingCallback,
 };
+#[cfg(feature = "bindings")]
+pub use log_control::{get_verbosity, set_verbosity};
+#[cfg(feature = "bindings")]
+pub use model::LlamaModel;
+#[cfg(feature = "bindings")]
+pub use sampling::SamplingParams;
 
 /// Internal hooks exposed for integration tests in `tests/`. Not part of
 /// the stable public surface — opting in requires the `bindings` feature
