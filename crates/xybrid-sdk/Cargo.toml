@@ -53,17 +53,17 @@ onnx-inspect = ["dep:ort", "ort/download-binaries", "ort/tls-native"]
 
 # PLATFORM PRESETS (SINGLE SOURCE OF TRUTH)
 
-# Android: Dynamic ORT loading + Candle + llama.cpp (mistral.rs has SIGILL issues on ARM)
-platform-android = ["xybrid-core/ort-dynamic", "xybrid-core/llm-llamacpp", "xybrid-core/candle", "llm-llamacpp"]
+# Android: Dynamic ORT loading + Candle + llama.cpp runtime (mistral.rs has SIGILL issues on ARM)
+platform-android = ["xybrid-core/ort-dynamic", "xybrid-core/llm-llamacpp-runtime", "xybrid-core/candle", "llm-llamacpp-runtime"]
 
-# iOS: CoreML + Metal acceleration + llama.cpp
-platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "xybrid-core/llm-llamacpp", "llm-llamacpp"]
+# iOS: CoreML + Metal acceleration + llama.cpp runtime
+platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "xybrid-core/llm-llamacpp-runtime", "llm-llamacpp-runtime"]
 
-# macOS: CoreML + Metal + llama.cpp
-platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "xybrid-core/llm-llamacpp", "llm-llamacpp"]
+# macOS: CoreML + Metal + llama.cpp runtime
+platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "xybrid-core/llm-llamacpp-runtime", "llm-llamacpp-runtime"]
 
-# Desktop (Linux/Windows): CPU with llama.cpp
-platform-desktop = ["xybrid-core/ort-download", "xybrid-core/llm-llamacpp", "llm-llamacpp"]
+# Desktop (Linux/Windows): CPU with llama.cpp runtime
+platform-desktop = ["xybrid-core/ort-download", "xybrid-core/llm-llamacpp-runtime", "llm-llamacpp-runtime"]
 
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 
@@ -83,6 +83,11 @@ llm-mistral = ["xybrid-core/llm-mistral"]
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-core/llm-llamacpp"]
+# Runtime tier MUST also activate the local skeleton tier so the SDK's
+# own `#[cfg(feature = "llm-llamacpp")]` source gates fire — otherwise
+# the platform preset links llama.cpp but the SDK API surface that
+# consumes it stays gated off (silent functional regression).
+llm-llamacpp-runtime = ["llm-llamacpp", "xybrid-core/llm-llamacpp-runtime"]
 
 # Dev-tools (test seams for demos and integration tests)
 dev-tools = ["xybrid-core/dev-tools"]
@@ -101,7 +106,8 @@ all-features = true
 [[example]]
 name = "cloud_fallback_demo"
 path = "examples/cloud_fallback_demo.rs"
-required-features = ["llm-llamacpp", "dev-tools"]
+# Real inference path — needs the runtime tier post-Phase-4 split.
+required-features = ["llm-llamacpp-runtime", "dev-tools"]
 
 [[test]]
 name = "cloud_fallback_e2e"

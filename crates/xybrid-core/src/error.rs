@@ -137,6 +137,11 @@ impl From<crate::runtime_adapter::AdapterError> for XybridError {
             AdapterError::AbortedForCloudFallback { reason } => XybridError::Inference(
                 InferenceError::Backend(format!("aborted for cloud fallback: {reason}")),
             ),
+            AdapterError::BackendNotLinked { backend } => {
+                XybridError::Inference(InferenceError::Backend(format!(
+                    "backend `{backend}` not linked into this build — rebuild with the corresponding runtime feature flag"
+                )))
+            }
         }
     }
 }

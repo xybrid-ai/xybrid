@@ -118,6 +118,23 @@ impl ChatMessage {
     }
 }
 
+/// Bridge from this crate's `ChatMessage` to `xybrid-llama`'s
+/// `ChatMessageView` consumer trait, so `xybrid_llama::format_chat` can
+/// accept `&[ChatMessage]` without `xybrid-llama` taking a circular
+/// dependency on `xybrid-core`. Phase 2 of the `llamacpp-crate-split`
+/// epic. The role string maps `MessageRole` to the lowercase tokens
+/// llama.cpp templates expect ("system" / "user" / "assistant").
+#[cfg(feature = "llm-llamacpp-runtime")]
+impl xybrid_llama::ChatMessageView for ChatMessage {
+    fn role(&self) -> &str {
+        self.role.as_str()
+    }
+
+    fn content(&self) -> &str {
+        &self.content
+    }
+}
+
 // =============================================================================
 // Generation Configuration
 // =============================================================================
