@@ -18,6 +18,7 @@ xybrid-core = { path = "../../../crates/xybrid-core", default-features = false }
 # Async runtime for streaming
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync"] }
 tokio-stream = "0.1"
+url = "2.5"
 
 # Logging (optional - for debugging)
 log = "0.4"

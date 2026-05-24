@@ -13,8 +13,10 @@ import 'package:xybrid_flutter/src/rust/api/sdk_client.dart';
 import 'package:path_provider/path_provider.dart';
 import 'rust/frb_generated.dart';
 
-import '../xybrid.dart';
 import 'device_snapshot.dart';
+import 'model_loader.dart';
+import 'pipeline.dart';
+import 'runtime_config.dart';
 
 /// Main entry point for the Xybrid SDK.
 ///
@@ -65,15 +67,33 @@ class Xybrid {
   /// ```
   ///
   /// Throws an exception if initialization fails (e.g., native library not found).
-  static Future<void> init() async {
+  static Future<void> init({
+    String? apiKey,
+    String? gatewayUrl,
+    String? ingestUrl,
+    String? resourceTelemetry,
+  }) async {
     // Fast path: already initialized
     if (_initialized) {
+      _applyRuntimeConfig(
+        apiKey: apiKey,
+        gatewayUrl: gatewayUrl,
+        ingestUrl: ingestUrl,
+        resourceTelemetry: resourceTelemetry,
+      );
       return;
     }
 
     // Handle concurrent initialization attempts
     if (_initializing) {
-      return _initCompleter.future;
+      await _initCompleter.future;
+      _applyRuntimeConfig(
+        apiKey: apiKey,
+        gatewayUrl: gatewayUrl,
+        ingestUrl: ingestUrl,
+        resourceTelemetry: resourceTelemetry,
+      );
+      return;
     }
 
     _initializing = true;
@@ -99,6 +119,12 @@ class Xybrid {
 
       _initialized = true;
       _initCompleter.complete();
+      _applyRuntimeConfig(
+        apiKey: apiKey,
+        gatewayUrl: gatewayUrl,
+        ingestUrl: ingestUrl,
+        resourceTelemetry: resourceTelemetry,
+      );
     } catch (e) {
       _initCompleter.completeError(e);
       _initializing = false;
@@ -113,6 +139,15 @@ class Xybrid {
 
   static void setApiKey(String apiKey) {
     XybridSdkClient.setApiKey(apiKey: apiKey);
+  }
+
+  static void setGatewayUrl(String gatewayUrl) {
+    XybridRuntimeConfig.gatewayUrl = gatewayUrl;
+    XybridSdkClient.setGatewayUrl(gatewayUrl: gatewayUrl);
+  }
+
+  static void applyDebugMemoryPressure() {
+    XybridDevice.applyDebugMemoryPressure();
   }
 
   /// Check if a model is cached locally (extracted and ready to use).
@@ -164,7 +199,8 @@ class Xybrid {
   ///   runApp(...);
   /// }
   /// ```
-  static void initTelemetry({required String endpoint, required String apiKey}) {
+  static void initTelemetry(
+      {required String endpoint, required String apiKey}) {
     if (!_initialized) {
       throw StateError('Xybrid.init() must complete before initTelemetry()');
     }
@@ -193,6 +229,37 @@ class Xybrid {
   /// not poll this — the engine reads it internally.
   static DeviceSnapshot currentDeviceSnapshot() {
     return DeviceSnapshot.fromFfi(XybridDevice.currentSnapshot());
+  }
+
+  static void _applyRuntimeConfig({
+    String? apiKey,
+    String? gatewayUrl,
+    String? ingestUrl,
+    String? resourceTelemetry,
+  }) {
+    final key = _nonEmpty(apiKey);
+    final gateway = _nonEmpty(gatewayUrl);
+    final ingest = _nonEmpty(ingestUrl);
+    final resourceMode = _nonEmpty(resourceTelemetry);
+
+    if (key != null) {
+      setApiKey(key);
+    }
+    if (gateway != null) {
+      setGatewayUrl(gateway);
+    }
+    if (key != null && ingest != null) {
+      XybridSdkClient.configurePlatformTelemetry(
+        apiKey: key,
+        ingestUrl: ingest,
+        resourceTelemetry: resourceMode,
+      );
+    }
+  }
+
+  static String? _nonEmpty(String? value) {
+    final trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
   }
 
   /// Create a ModelLoader for the specified model.

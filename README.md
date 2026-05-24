@@ -42,6 +42,7 @@
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
 [![Swift Package Manager][spm-shield]][spm-url]
+[![crates.io][crates-shield]][crates-url]
 [![Visitors](https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid)](https://github.com/xybrid-ai/xybrid)
 
 </p>
@@ -71,6 +72,8 @@
 [maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
 [spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat&logo=swift&logoColor=white
 [spm-url]: https://github.com/xybrid-ai/xybrid
+[crates-shield]: https://img.shields.io/crates/v/xybrid?style=flat&label=crates.io&logo=rust
+[crates-url]: https://crates.io/crates/xybrid
 </div>
 
 <p align="center">
@@ -106,7 +109,7 @@ Xybrid is a **Rust-powered runtime** with native bindings for every major platfo
 | **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Coming Soon | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | Available | [README](examples/android/README.md) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | Available | — |
-| **[Rust](crates/)** | All | `xybrid-core` / `xybrid-sdk` | Available | — |
+| **[Rust](crates/)** | All | [crates.io](https://crates.io/crates/xybrid) | Available | — |
 
 Every SDK wraps the same Rust core — identical model support and behavior across all platforms.
 
@@ -124,7 +127,7 @@ See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) fo
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.1.0
+  xybrid_flutter: ^0.1.0-rc3
 ```
 
 **Run a model:**
@@ -141,7 +144,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.0-rc1")
+    implementation("ai.xybrid:xybrid-kotlin:0.1.0-rc3")
 }
 ```
 
@@ -159,7 +162,7 @@ val result = model.run(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", exact: "0.1.0-rc1")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", exact: "0.1.0-rc3")
 ]
 ```
 
@@ -195,7 +198,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid-sdk = "0.1"
+xybrid = "0.1.0-rc3"
 ```
 
 **Run a model:**
@@ -418,6 +421,8 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 ## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on setting up your development environment, submitting pull requests, and adding new models.
+
+**New here?** Browse the [`good first issue`](https://github.com/xybrid-ai/xybrid/labels/good%20first%20issue) label for small, self-contained tasks. Tasks are also grouped by area: [`area: core`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20core), [`area: sdk`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20sdk), [`area: examples`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20examples), [`area: bindings`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20bindings), [`area: tests`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20tests). Medium-difficulty tasks live under [`help wanted`](https://github.com/xybrid-ai/xybrid/labels/help%20wanted).
 
 ## Star History
 

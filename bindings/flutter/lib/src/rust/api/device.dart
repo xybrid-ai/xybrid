@@ -10,10 +10,19 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `current_snapshot_with_debug_memory_pressure`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>>
 abstract class XybridDevice implements RustOpaqueInterface {
+  /// Inject a short-lived critical memory-pressure sample for dogfood tests.
+  ///
+  /// The next fallback stream resource checks observe
+  /// `MemoryPressure::Critical`, then the override expires. This keeps the
+  /// demo deterministic without leaving the process permanently poisoned.
+  static void applyDebugMemoryPressure() => XybridRustLib.instance.api
+      .crateApiDeviceXybridDeviceApplyDebugMemoryPressure();
+
   /// Mark the battery level as unknown.
   ///
   /// Hosts call this on observer teardown or when the OS reports an
@@ -22,6 +31,10 @@ abstract class XybridDevice implements RustOpaqueInterface {
   /// than substituting an optimistic default.
   static void clearBatteryLevel() =>
       XybridRustLib.instance.api.crateApiDeviceXybridDeviceClearBatteryLevel();
+
+  /// Clear any pending debug memory-pressure override.
+  static void clearDebugMemoryPressure() => XybridRustLib.instance.api
+      .crateApiDeviceXybridDeviceClearDebugMemoryPressure();
 
   /// Mark the thermal state as unknown.
   static void clearThermalState() =>

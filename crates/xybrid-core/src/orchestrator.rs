@@ -46,6 +46,7 @@ pub use authority::{
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal imports
 // ─────────────────────────────────────────────────────────────────────────────
+use crate::context::DEVICE_CLASS_SCHEMA_VERSION;
 use crate::context::{DeviceMetrics, StageDescriptor};
 use crate::control_sync::ControlSync;
 use crate::device::ResourceMonitor;
@@ -347,6 +348,8 @@ impl Orchestrator {
             metrics: metrics.clone(),
             resource_monitor: self.resource_monitor.clone(),
             explicit_target: stage.target.clone(),
+            device_class: Some(metrics.canonical_device_class()),
+            device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
         };
         let target_resolution = self.authority.resolve_target_with_feedback(&stage_context);
 
@@ -590,6 +593,8 @@ impl Orchestrator {
             metrics: metrics.clone(),
             resource_monitor: self.resource_monitor.clone(),
             explicit_target: stage.target.clone(),
+            device_class: Some(metrics.canonical_device_class()),
+            device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
         };
         let target_resolution = self.authority.resolve_target_with_feedback(&stage_context);
 
@@ -1081,6 +1086,8 @@ mod tests {
             metrics: DeviceMetrics::default(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
+            device_class: None,
+            device_class_schema_version: None,
         }
     }
 

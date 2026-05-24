@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use flutter_rust_bridge::frb;
+use xybrid_sdk::ResourceTelemetryMode;
 
 use super::FLUTTER_BINDING;
 
@@ -21,6 +22,41 @@ static TELEMETRY_INITIALIZED: AtomicBool = AtomicBool::new(false);
 #[frb(opaque)]
 pub struct XybridSdkClient;
 
+fn initialize_telemetry_once(config: xybrid_sdk::TelemetryConfig) {
+    if TELEMETRY_INITIALIZED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
+    xybrid_sdk::telemetry::init_platform_telemetry(config);
+}
+
+fn parse_resource_telemetry_mode(value: Option<&str>) -> Option<ResourceTelemetryMode> {
+    let raw = value?.trim().to_ascii_lowercase();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let (head, interval) = match raw.split_once(':') {
+        Some((head, tail)) => (head, tail.parse::<u32>().ok()),
+        None => (raw.as_str(), None),
+    };
+    let default_interval = ResourceTelemetryMode::DEFAULT_SUMMARY_INTERVAL_MS;
+    let mode = match head {
+        "off" => ResourceTelemetryMode::Off,
+        "boundary" => ResourceTelemetryMode::Boundary,
+        "summary" => ResourceTelemetryMode::Summary {
+            interval_ms: interval.unwrap_or(default_interval),
+        },
+        "debug_local" | "debuglocal" | "debug-local" => ResourceTelemetryMode::DebugLocal {
+            interval_ms: interval.unwrap_or(default_interval),
+        },
+        _ => return None,
+    };
+    Some(mode.normalized())
+}
+
 impl XybridSdkClient {
     #[frb(sync)]
     pub fn init_sdk_cache_dir(cache_dir: String) {
@@ -32,6 +68,12 @@ impl XybridSdkClient {
     pub fn set_api_key(api_key: &str) {
         xybrid_sdk::set_binding(FLUTTER_BINDING);
         xybrid_sdk::set_api_key(api_key);
+    }
+
+    #[frb(sync)]
+    pub fn set_gateway_url(gateway_url: String) {
+        xybrid_sdk::set_binding(FLUTTER_BINDING);
+        xybrid_sdk::set_gateway_url(gateway_url);
     }
 
     /// Initialize the platform telemetry exporter for this process.
@@ -55,14 +97,32 @@ impl XybridSdkClient {
     #[frb(sync)]
     pub fn init_telemetry(endpoint: String, api_key: String) {
         xybrid_sdk::set_binding(FLUTTER_BINDING);
-        if TELEMETRY_INITIALIZED
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return;
-        }
         let config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
-        xybrid_sdk::telemetry::init_platform_telemetry(config);
+        initialize_telemetry_once(config);
+    }
+
+    #[frb(sync)]
+    pub fn configure_platform_telemetry(
+        api_key: String,
+        ingest_url: Option<String>,
+        resource_telemetry: Option<String>,
+    ) {
+        xybrid_sdk::set_binding(FLUTTER_BINDING);
+        xybrid_sdk::set_api_key(&api_key);
+
+        let Some(endpoint) = ingest_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return;
+        };
+
+        let mut config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
+        if let Some(mode) = parse_resource_telemetry_mode(resource_telemetry.as_deref()) {
+            config = config.with_resource_telemetry(mode);
+        }
+        initialize_telemetry_once(config);
     }
 
     /// Whether [`Self::init_telemetry`] has run at least once in this
@@ -71,6 +131,11 @@ impl XybridSdkClient {
     #[frb(sync)]
     pub fn is_telemetry_initialized() -> bool {
         TELEMETRY_INITIALIZED.load(Ordering::Acquire)
+    }
+
+    #[frb(sync)]
+    pub fn flush_platform_telemetry() {
+        xybrid_sdk::telemetry::flush_platform_telemetry();
     }
 
     /// Check if a model is cached locally (extracted and ready to use).

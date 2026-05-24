@@ -446,6 +446,16 @@ pub fn normalize_llm_backend_hint(hint: &str) -> Option<&'static str> {
 /// (e.g. CoreML, TFLite, ModelGraph) — the contract is "additive, omit
 /// when unknown" so unrecognised templates simply leave the field absent.
 ///
+/// **GGUF templates** default to `llamacpp` when no recognised hint is
+/// supplied. llama.cpp is the universal GGUF runtime in this checkout
+/// (the only one with platform-android support and the platform-wide
+/// preset on macOS / iOS / desktop); the `metadata.backend` hint is
+/// reserved for the opt-out path that selects `mistralrs` instead. This
+/// is a deliberate departure from the "omit when unknown" rule above:
+/// for GGUF the runtime is *known* (the template fixes it), so the
+/// dashboard column is more useful populated than silent on every
+/// unannotated old bundle.
+///
 /// `cloud` is intentionally not represented here: the cloud adapter
 /// emits the label from its own span site (see
 /// `runtime_adapter::cloud::CloudRuntimeAdapter::execute`) where the
@@ -462,7 +472,13 @@ pub fn backend_label_from_template(
         ExecutionTemplate::SafeTensors { .. } => {
             hint.and_then(normalize_llm_backend_hint).or(Some("candle"))
         }
-        ExecutionTemplate::Gguf { .. } => hint.and_then(normalize_llm_backend_hint),
+        // GGUF: llama.cpp is the universal runtime in this checkout,
+        // so fall back to it when the hint is absent or unrecognised.
+        // Unannotated bundles in the registry then surface `llamacpp`
+        // on the dashboard instead of a blank column.
+        ExecutionTemplate::Gguf { .. } => hint
+            .and_then(normalize_llm_backend_hint)
+            .or(Some("llamacpp")),
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::ModelGraph { .. } => None,
@@ -641,21 +657,31 @@ mod tests {
             "deferred mlx hints must not claim an unavailable runtime"
         );
 
-        // GGUF: hint required to disambiguate llama.cpp vs mistral.rs;
-        // omit when the bundle didn't pin a backend so downstream can
-        // tell "we don't know" from "we know it's X".
+        // GGUF: llama.cpp is the universal runtime in this checkout
+        // (the only one with Android support, the macOS/iOS/desktop
+        // platform-preset backend, and the runtime that executes any
+        // bundle the registry serves today). When the bundle didn't
+        // pin a `metadata.backend` hint, default to `llamacpp` rather
+        // than emitting nothing — the runtime is known from the
+        // template itself, and a populated column is more useful than
+        // a silent one on every old / unannotated bundle in the registry.
         let gguf = ExecutionTemplate::Gguf {
             model_file: "m.gguf".into(),
             chat_template: None,
             context_length: 2048,
             generation_params: None,
         };
-        assert_eq!(backend_label_from_template(&gguf, None), None);
+        assert_eq!(
+            backend_label_from_template(&gguf, None),
+            Some("llamacpp"),
+            "unannotated GGUF bundles must default to the universal llama.cpp runtime"
+        );
         assert_eq!(
             backend_label_from_template(&gguf, Some("llamacpp")),
             Some("llamacpp")
         );
-        // Accept both the bundle-file alias and the canonical name.
+        // The `mistralrs` opt-out still wins: bundles that explicitly
+        // hint at the alternative runtime select it.
         assert_eq!(
             backend_label_from_template(&gguf, Some("mistral")),
             Some("mistralrs")
@@ -664,9 +690,14 @@ mod tests {
             backend_label_from_template(&gguf, Some("mistralrs")),
             Some("mistralrs")
         );
-        // MLX is deferred in this checkout, so the hint path must not
-        // emit an unavailable runtime label.
-        assert_eq!(backend_label_from_template(&gguf, Some("mlx")), None);
+        // MLX is deferred in this checkout, so an mlx hint falls
+        // through to the GGUF default — the model will actually run
+        // on llama.cpp, which is what the dashboard should reflect.
+        assert_eq!(
+            backend_label_from_template(&gguf, Some("mlx")),
+            Some("llamacpp"),
+            "deferred mlx hints must reflect the runtime that actually executes the model"
+        );
     }
 
     #[test]

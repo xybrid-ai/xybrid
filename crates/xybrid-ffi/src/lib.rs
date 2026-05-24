@@ -161,6 +161,10 @@ pub(crate) struct ResultData {
     pub audio_bytes: Option<Vec<u8>>,
     /// Inference latency in milliseconds.
     pub latency_ms: u32,
+    /// Typed inference metrics (TTFT, tok/s, per-stage latencies).
+    /// All LLM-specific fields are `None` on error paths and for
+    /// non-LLM models; `stage_latencies_ms` is empty for `model.run()`.
+    pub metrics: xybrid_sdk::InferenceMetrics,
 }
 
 /// Internal conversation context.
@@ -325,6 +329,7 @@ fn inference_result_to_data(result: &xybrid_sdk::InferenceResult) -> ResultData 
         embedding: result.embedding().map(|e| e.to_vec()),
         audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
         latency_ms: result.latency_ms(),
+        metrics: result.metrics().clone(),
     }
 }
 
@@ -2349,6 +2354,7 @@ pub unsafe extern "C" fn xybrid_model_run(
                     embedding: None,
                     audio_bytes: None,
                     latency_ms: 0,
+                    metrics: xybrid_sdk::InferenceMetrics::default(),
                 };
                 return XybridResultHandle::from_boxed(Box::new(result));
             }
@@ -2371,6 +2377,7 @@ pub unsafe extern "C" fn xybrid_model_run(
                 embedding: None,
                 audio_bytes: None,
                 latency_ms: 0,
+                metrics: xybrid_sdk::InferenceMetrics::default(),
             };
             XybridResultHandle::from_boxed(Box::new(result))
         }
@@ -2499,6 +2506,7 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
                     embedding: None,
                     audio_bytes: None,
                     latency_ms: 0,
+                    metrics: xybrid_sdk::InferenceMetrics::default(),
                 };
                 return XybridResultHandle::from_boxed(Box::new(result));
             }
@@ -2524,6 +2532,7 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
                 embedding: None,
                 audio_bytes: None,
                 latency_ms: 0,
+                metrics: xybrid_sdk::InferenceMetrics::default(),
             };
             XybridResultHandle::from_boxed(Box::new(result))
         }
@@ -2921,6 +2930,7 @@ pub unsafe extern "C" fn xybrid_model_run_streaming(
                     embedding: None,
                     audio_bytes: None,
                     latency_ms: 0,
+                    metrics: xybrid_sdk::InferenceMetrics::default(),
                 };
                 XybridResultHandle::from_boxed(Box::new(result))
             }
@@ -2943,6 +2953,7 @@ pub unsafe extern "C" fn xybrid_model_run_streaming(
                 embedding: None,
                 audio_bytes: None,
                 latency_ms: 0,
+                metrics: xybrid_sdk::InferenceMetrics::default(),
             };
             XybridResultHandle::from_boxed(Box::new(result))
         }
@@ -3076,6 +3087,7 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
                     embedding: None,
                     audio_bytes: None,
                     latency_ms: 0,
+                    metrics: xybrid_sdk::InferenceMetrics::default(),
                 };
                 XybridResultHandle::from_boxed(Box::new(result))
             }
@@ -3098,6 +3110,7 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
                 embedding: None,
                 audio_bytes: None,
                 latency_ms: 0,
+                metrics: xybrid_sdk::InferenceMetrics::default(),
             };
             XybridResultHandle::from_boxed(Box::new(result))
         }
@@ -3545,6 +3558,170 @@ pub unsafe extern "C" fn xybrid_result_free(handle: *mut XybridResultHandle) {
     if !handle.is_null() {
         // Take ownership and let it drop to free memory
         let _ = XybridResultHandle::into_boxed(handle);
+    }
+}
+
+// ============================================================================
+// Inference Metrics Accessors
+// ============================================================================
+//
+// Sentinel convention:
+// - Optional `u32` fields return `i64`; absent value is `-1`, present
+//   values fit in `u32` and are zero-extended into `i64`.
+// - Optional `f32` fields return `f32`; absent value is `f32::NAN`.
+// - `stage_count` is the total number of stage-latency entries.
+// - `stage_id(idx)` / `stage_latency_ms(idx)` return null / 0 for
+//   out-of-bounds indices; callers should check `stage_count` first.
+
+/// Get time-to-first-token in milliseconds (LLM only).
+///
+/// Returns `-1` if the result is not from an LLM run, the LLM did not
+/// emit a `ttft_ms` metric, or the handle is null/invalid.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_ttft_ms(result: *mut XybridResultHandle) -> i64 {
+    if result.is_null() {
+        return -1;
+    }
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => match data.metrics.ttft_ms {
+            Some(v) => v as i64,
+            None => -1,
+        },
+        None => -1,
+    }
+}
+
+/// Get generation throughput in tokens/sec (LLM only).
+///
+/// Returns `f32::NAN` when the metric is absent (non-LLM run, the LLM
+/// did not emit it, or the handle is null/invalid). Use `isnan()` to
+/// check.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_tokens_per_second(result: *mut XybridResultHandle) -> f32 {
+    if result.is_null() {
+        return f32::NAN;
+    }
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => data.metrics.tokens_per_second.unwrap_or(f32::NAN),
+        None => f32::NAN,
+    }
+}
+
+/// Get prefill-phase throughput in tokens/sec (LLM only).
+///
+/// Returns `f32::NAN` when the metric is absent.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_prefill_tps(result: *mut XybridResultHandle) -> f32 {
+    if result.is_null() {
+        return f32::NAN;
+    }
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => data.metrics.prefill_tps.unwrap_or(f32::NAN),
+        None => f32::NAN,
+    }
+}
+
+/// Get decode-phase throughput in tokens/sec (LLM only).
+///
+/// Returns `f32::NAN` when the metric is absent.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_decode_tps(result: *mut XybridResultHandle) -> f32 {
+    if result.is_null() {
+        return f32::NAN;
+    }
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => data.metrics.decode_tps.unwrap_or(f32::NAN),
+        None => f32::NAN,
+    }
+}
+
+/// Get completion token count (LLM only).
+///
+/// Returns `-1` when the metric is absent.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_tokens_out(result: *mut XybridResultHandle) -> i64 {
+    if result.is_null() {
+        return -1;
+    }
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => match data.metrics.tokens_out {
+            Some(v) => v as i64,
+            None => -1,
+        },
+        None => -1,
+    }
+}
+
+/// Get the number of per-stage latency entries.
+///
+/// Returns 0 for `model.run()` results (no stages) or when the handle
+/// is null/invalid. Pipeline runs return one entry per executed stage.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_stage_count(result: *mut XybridResultHandle) -> usize {
+    if result.is_null() {
+        return 0;
+    }
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => data.metrics.stage_latencies_ms.len(),
+        None => 0,
+    }
+}
+
+/// Get the stage_id string for the entry at `index`.
+///
+/// Returns a thread-local pointer valid until the next call to this
+/// function on the same thread. Do NOT free. Returns null if `index`
+/// is out of bounds or the handle is null/invalid. Callers should
+/// check `xybrid_result_stage_count` first.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_stage_id(
+    result: *mut XybridResultHandle,
+    index: usize,
+) -> *const c_char {
+    if result.is_null() {
+        return std::ptr::null();
+    }
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => match data.metrics.stage_latencies_ms.get(index) {
+            Some(stage) => {
+                thread_local! {
+                    static RESULT_STAGE_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
+                }
+                RESULT_STAGE_ID.with(|e| {
+                    *e.borrow_mut() = CString::new(stage.stage_id.as_str()).ok();
+                    match e.borrow().as_ref() {
+                        Some(cstr) => cstr.as_ptr(),
+                        None => std::ptr::null(),
+                    }
+                })
+            }
+            None => std::ptr::null(),
+        },
+        None => std::ptr::null(),
+    }
+}
+
+/// Get the latency_ms value for the stage at `index`.
+///
+/// Returns 0 if `index` is out of bounds or the handle is null/invalid.
+/// Callers should check `xybrid_result_stage_count` first to disambiguate
+/// "stage took 0 ms" from "index out of bounds".
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_stage_latency_ms(
+    result: *mut XybridResultHandle,
+    index: usize,
+) -> u32 {
+    if result.is_null() {
+        return 0;
+    }
+    match XybridResultHandle::as_ref(result) {
+        Some(data) => data
+            .metrics
+            .stage_latencies_ms
+            .get(index)
+            .map(|s| s.latency_ms)
+            .unwrap_or(0),
+        None => 0,
     }
 }
 
@@ -4553,6 +4730,7 @@ mod tests {
             embedding: None,
             audio_bytes: None,
             latency_ms: 100,
+            metrics: xybrid_sdk::InferenceMetrics::default(),
         });
 
         let handle = XybridResultHandle::from_boxed(result);
@@ -4581,6 +4759,7 @@ mod tests {
             embedding: None,
             audio_bytes: None,
             latency_ms: 0,
+            metrics: xybrid_sdk::InferenceMetrics::default(),
         });
 
         let handle = XybridResultHandle::from_boxed(result);

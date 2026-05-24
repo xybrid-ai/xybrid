@@ -13,7 +13,7 @@ use xybrid_core::device::{
 };
 use xybrid_core::runtime_adapter::types::GenerationConfig;
 
-const RESOURCE_ABORT_CHECK_INTERVAL: Duration = Duration::from_millis(500);
+const RESOURCE_ABORT_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) trait ResourceSnapshotReader: Send + Sync {
     fn current_snapshot(&self, max_age: Duration) -> ResourceSnapshot;
@@ -893,6 +893,36 @@ mod tests {
         assert_eq!(
             xybrid_core::abort::cloud_fallback_reason_from_error(err.as_ref()),
             Some(xybrid_core::abort::AbortReason::StressMemory)
+        );
+    }
+
+    #[test]
+    fn streaming_thermal_abort_check_stays_within_low_end_android_budget() {
+        let snapshot = ResourceSnapshot {
+            thermal_state: ThermalState::Critical,
+            ..Default::default()
+        };
+        let reader = Arc::new(CountingResourceReader::new(snapshot));
+        let options = RunOptions::new().with_abort_policy(
+            AbortPolicy::default()
+                .stop_on(AbortSignal::ThermalCritical)
+                .with_cloud_fallback(true),
+        );
+        let mut state = AbortState::with_resource_reader(&options, reader);
+
+        let started = Instant::now();
+        let err = check_abort_for_streaming(/* supports_streaming */ true, &mut state, true)
+            .expect_err("streaming thermal pressure must become a cloud fallback abort");
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed <= Duration::from_millis(200),
+            "low-end Android thermal cancellation budget exceeded: {:?}",
+            elapsed
+        );
+        assert_eq!(
+            xybrid_core::abort::cloud_fallback_reason_from_error(err.as_ref()),
+            Some(xybrid_core::abort::AbortReason::StressThermal)
         );
     }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:xybrid_example/ui.dart';
+import 'package:xybrid_example/widgets/metrics_card.dart';
 import 'package:xybrid_flutter/xybrid.dart';
 
 /// Pipeline demo screen.
@@ -39,6 +40,9 @@ stages:
   /// Result text from the last execution (if any).
   String? _resultText;
 
+  /// Typed metrics from the last execution (if any).
+  XybridInferenceMetrics? _metrics;
+
   @override
   void dispose() {
     _yamlController.dispose();
@@ -62,6 +66,7 @@ stages:
       _pipeline = null;
       _resultText = null;
       _latencyMs = null;
+      _metrics = null;
     });
 
     try {
@@ -98,6 +103,7 @@ stages:
       _errorMessage = null;
       _resultText = null;
       _latencyMs = null;
+      _metrics = null;
     });
 
     try {
@@ -115,6 +121,7 @@ stages:
         setState(() {
           _state = _PipelineState.loaded;
           _latencyMs = result.latencyMs;
+          _metrics = result.metrics;
           _resultText = result.text ?? '(No text output)';
         });
       }
@@ -143,6 +150,7 @@ stages:
       _errorMessage = null;
       _resultText = null;
       _latencyMs = null;
+      _metrics = null;
     });
   }
 
@@ -447,6 +455,10 @@ stages:
                   ),
                 ],
               ),
+            if (_metrics != null) ...[
+              const SizedBox(height: 12),
+              MetricsCard(metrics: _metrics!),
+            ],
           ],
         ),
       ),

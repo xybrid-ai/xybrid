@@ -1,5 +1,6 @@
 package ai.xybrid.example.state
 
+import ai.xybrid.XybridInferenceMetrics
 import ai.xybrid.example.data.ModelTask
 
 /**
@@ -12,7 +13,8 @@ sealed class InferenceState {
         val task: ModelTask,
         val text: String?,
         val audioBytes: ByteArray?,
-        val latencyMs: Long
+        val latencyMs: Long,
+        val metrics: XybridInferenceMetrics? = null
     ) : InferenceState()
     data class Error(val message: String) : InferenceState()
 }

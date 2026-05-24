@@ -162,8 +162,8 @@ pub use benchmark::{compare_benchmarks, BenchmarkResult, ExecutionProviderInfo};
 pub use cache::{CacheManager, CacheStatus, SdkCacheProvider};
 pub use device::{device_id, Device};
 pub use llm::{
-    default_gateway_url, ChatMessage, CompletionRequest, CompletionResponse, LlmBackend,
-    LlmClientConfig, MessageRole, TokenUsage,
+    default_gateway_url, set_gateway_url, ChatMessage, CompletionRequest, CompletionResponse,
+    LlmBackend, LlmClientConfig, MessageRole, TokenUsage,
 };
 pub use model::SdkError;
 pub use model::{
@@ -196,7 +196,7 @@ pub use pipeline::{
     TextInputConfig,
     Xybrid,
 };
-pub use result::{InferenceResult, OutputType};
+pub use result::{InferenceMetrics, InferenceResult, OutputType, StageLatency};
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)

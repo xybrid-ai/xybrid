@@ -25,6 +25,7 @@
 //! assert_eq!(error_result.error, Some("Model not found".to_string()));
 //! ```
 
+use crate::result::{InferenceMetrics, StageLatency};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -158,6 +159,16 @@ pub struct FfiPipelineExecutionResult {
     pub stages_executed: u32,
     /// Stages skipped (due to conditions)
     pub stages_skipped: u32,
+    /// Typed metrics (`total_ms`, per-stage latencies).
+    ///
+    /// `total_ms` is set by the constructors; `stage_latencies_ms` is
+    /// populated from `stages` by `with_stages`. LLM-specific fields
+    /// (`ttft_ms`, `tokens_per_second`, `tokens_out`, …) stay `None` on
+    /// pipeline results today — they will be wired in a follow-up PR that
+    /// hoists them from the final stage's envelope. For single-model LLM
+    /// runs, use `InferenceResult::metrics()` which already populates them.
+    #[serde(default)]
+    pub metrics: InferenceMetrics,
 }
 
 impl FfiPipelineExecutionResult {
@@ -213,6 +224,10 @@ impl FfiPipelineExecutionResult {
             stages: Vec::new(),
             stages_executed: 1,
             stages_skipped: 0,
+            metrics: InferenceMetrics {
+                total_ms: latency_ms,
+                ..InferenceMetrics::default()
+            },
         }
     }
 
@@ -246,6 +261,10 @@ impl FfiPipelineExecutionResult {
             stages: Vec::new(),
             stages_executed: 1,
             stages_skipped: 0,
+            metrics: InferenceMetrics {
+                total_ms: latency_ms,
+                ..InferenceMetrics::default()
+            },
         }
     }
 
@@ -281,6 +300,7 @@ impl FfiPipelineExecutionResult {
             stages: Vec::new(),
             stages_executed: 0,
             stages_skipped: 0,
+            metrics: InferenceMetrics::default(),
         }
     }
 
@@ -313,6 +333,14 @@ impl FfiPipelineExecutionResult {
     pub fn with_stages(&mut self, stages: Vec<FfiStageExecutionResult>) {
         self.stages_executed = stages.iter().filter(|s| s.executed).count() as u32;
         self.stages_skipped = stages.iter().filter(|s| !s.executed).count() as u32;
+        self.metrics.stage_latencies_ms = stages
+            .iter()
+            .filter(|s| s.executed)
+            .map(|s| StageLatency {
+                stage_id: s.stage_id.clone(),
+                latency_ms: s.latency_ms,
+            })
+            .collect();
         self.stages = stages;
     }
 
@@ -346,6 +374,7 @@ impl Default for FfiPipelineExecutionResult {
             stages: Vec::new(),
             stages_executed: 0,
             stages_skipped: 0,
+            metrics: InferenceMetrics::default(),
         }
     }
 }
@@ -496,6 +525,12 @@ mod tests {
         assert_eq!(result.stages.len(), 3);
         assert_eq!(result.stages_executed, 2);
         assert_eq!(result.stages_skipped, 1);
+        // Stage latencies populated from executed stages only.
+        assert_eq!(result.metrics.stage_latencies_ms.len(), 2);
+        assert_eq!(result.metrics.stage_latencies_ms[0].stage_id, "stage1");
+        assert_eq!(result.metrics.stage_latencies_ms[0].latency_ms, 50);
+        assert_eq!(result.metrics.stage_latencies_ms[1].stage_id, "stage2");
+        assert_eq!(result.metrics.stage_latencies_ms[1].latency_ms, 100);
     }
 
     #[test]

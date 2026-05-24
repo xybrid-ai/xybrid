@@ -19,9 +19,17 @@ classes:
     methods:
       init:
         async: true
+        params:
+          - { name: apiKey, type: "String?" }
+          - { name: gatewayUrl, type: "String?" }
+          - { name: ingestUrl, type: "String?" }
+          - { name: resourceTelemetry, type: "String?" }
         status: { dart: implemented, kotlin: implemented, swift: planned, csharp: implemented }
       setApiKey:
         params: [{ name: apiKey, type: String }]
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      setGatewayUrl:
+        params: [{ name: gatewayUrl, type: String }]
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       model:
         params:
@@ -150,6 +158,13 @@ classes:
           - { name: options, type: RunOptions }
         return: "Stream<StreamToken>"
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      runStreamingWithFallback:
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: options, type: RunOptions }
+          - { name: config, type: "GenerationConfig?", default: "null" }
+        return: "Stream<StreamToken>"
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       runStreamingWithContext:
         params:
           - { name: envelope, type: Envelope }
@@ -205,6 +220,14 @@ classes:
           - { name: envelope, type: Envelope }
           - { name: options, type: RunOptions }
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      runPipelineStreamingWithOptions:
+        params:
+          - { name: yaml, type: String }
+          - { name: envelope, type: Envelope }
+          - { name: options, type: RunOptions }
+          - { name: on_token, type: StreamingCallback }
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Single-stage LLM streaming fast path that preserves caller RunOptions for routing metrics and fallback to non-streaming pipeline execution."
     properties:
       name:
         type: "String?"
@@ -244,7 +267,7 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       embedding:
         params: [{ name: embedding, type: "List<double>" }]
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       textWithRole:
         params:
           - { name: text, type: String }
@@ -328,6 +351,54 @@ classes:
       audioAsWav:
         type: "Uint8List?"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      metrics:
+        type: InferenceMetrics
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  InferenceMetrics:
+    type: data
+    section: "7. Result Types"
+    dart_name: XybridInferenceMetrics
+    kotlin_name: XybridInferenceMetrics
+    swift_name: XybridInferenceMetrics
+    csharp_name: InferenceMetrics
+    properties:
+      totalMs:
+        type: int
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      ttftMs:
+        type: "int?"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      tokensPerSecond:
+        type: "double?"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      prefillTps:
+        type: "double?"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      decodeTps:
+        type: "double?"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      tokensOut:
+        type: "int?"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      stageLatenciesMs:
+        type: "List<StageLatency>"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  StageLatency:
+    type: data
+    section: "7. Result Types"
+    dart_name: XybridStageLatency
+    kotlin_name: XybridStageLatency
+    swift_name: XybridStageLatency
+    csharp_name: StageLatency
+    properties:
+      stageId:
+        type: String
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      latencyMs:
+        type: int
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 8. Supporting Types
@@ -618,6 +689,26 @@ classes:
   RunOptions:
     type: data
     section: "8. Supporting Types"
+    properties:
+      abortPolicy:
+        type: AbortPolicy
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      cloudProvider:
+        type: "String?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      cloudModel:
+        type: "String?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      cloudGatewayUrl:
+        type: "String?"
+        notes: "Optional Xybrid cloud gateway base URL. Customer builds accept HTTPS Xybrid hosts with a /v1 base path; debug builds also accept local/private gateways for local platform stacks."
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      correlationId:
+        type: "String?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      maxGraceTokens:
+        type: "int?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
     methods:
       with_generation_config:
         params: [{ name: config, type: GenerationConfig }]
@@ -639,12 +730,36 @@ classes:
       stop_on:
         type: "List<AbortSignal>"
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      stopOn:
+        type: "Set<AbortSignal>"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       fallback_to_cloud:
         type: bool
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      fallbackToCloud:
+        type: bool
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       max_grace_tokens:
         type: int
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      maxGraceTokens:
+        type: "int?"
+        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+
+  AbortSignal:
+    type: enum
+    section: "8. Supporting Types"
+    variants:
+      UserCancelled:
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      MemoryPressureWarn:
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      MemoryPressureCritical:
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      ThermalHot:
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      ThermalCritical:
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
 
   CancellationToken:
     type: class

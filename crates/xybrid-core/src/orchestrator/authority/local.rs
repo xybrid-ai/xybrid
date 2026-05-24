@@ -634,6 +634,8 @@ signature: "test-deny-all"
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
+            device_class: None,
+            device_class_schema_version: None,
         }
     }
 
@@ -670,6 +672,8 @@ signature: "test-deny-all"
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: Some(ExecutionTarget::Device),
+            device_class: None,
+            device_class_schema_version: None,
         };
 
         let decision = authority.resolve_target(&context);
@@ -687,6 +691,8 @@ signature: "test-deny-all"
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: Some(ExecutionTarget::Cloud),
+            device_class: None,
+            device_class_schema_version: None,
         };
 
         let decision = authority.resolve_target(&context);

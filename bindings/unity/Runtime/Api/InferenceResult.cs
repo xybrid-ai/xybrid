@@ -2,11 +2,71 @@
 // Wrapper for the output of model inference.
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Xybrid.Native;
 
 namespace Xybrid
 {
+    /// <summary>
+    /// Per-stage latency entry for pipeline runs. One entry per executed
+    /// stage; <see cref="StageId"/> matches the stage name in the pipeline
+    /// definition.
+    /// </summary>
+    public sealed class StageLatency
+    {
+        public string StageId { get; }
+        public uint LatencyMs { get; }
+
+        internal StageLatency(string stageId, uint latencyMs)
+        {
+            StageId = stageId;
+            LatencyMs = latencyMs;
+        }
+    }
+
+    /// <summary>
+    /// Typed inference metrics surfaced on every <see cref="InferenceResult"/>.
+    /// </summary>
+    /// <remarks>
+    /// LLM-specific fields (<see cref="TtftMs"/>, <see cref="TokensPerSecond"/>,
+    /// <see cref="PrefillTps"/>, <see cref="DecodeTps"/>, <see cref="TokensOut"/>)
+    /// are <c>null</c> for ASR/TTS/embedding runs. For pipeline runs they are
+    /// parsed from the final stage's envelope only, so they are also <c>null</c>
+    /// when the final stage isn't the LLM (e.g. an ASR → LLM → TTS pipeline).
+    ///
+    /// <see cref="StageLatenciesMs"/> is empty for <c>model.Run()</c> and
+    /// populated for pipeline runs.
+    /// </remarks>
+    public sealed class InferenceMetrics
+    {
+        public uint TotalMs { get; }
+        public uint? TtftMs { get; }
+        public float? TokensPerSecond { get; }
+        public float? PrefillTps { get; }
+        public float? DecodeTps { get; }
+        public uint? TokensOut { get; }
+        public IReadOnlyList<StageLatency> StageLatenciesMs { get; }
+
+        internal InferenceMetrics(
+            uint totalMs,
+            uint? ttftMs,
+            float? tokensPerSecond,
+            float? prefillTps,
+            float? decodeTps,
+            uint? tokensOut,
+            IReadOnlyList<StageLatency> stageLatenciesMs)
+        {
+            TotalMs = totalMs;
+            TtftMs = ttftMs;
+            TokensPerSecond = tokensPerSecond;
+            PrefillTps = prefillTps;
+            DecodeTps = decodeTps;
+            TokensOut = tokensOut;
+            StageLatenciesMs = stageLatenciesMs;
+        }
+    }
+
     /// <summary>
     /// Represents the result of model inference.
     /// </summary>
@@ -27,6 +87,7 @@ namespace Xybrid
         private readonly OutputType _outputType;
         private readonly byte[] _audioBytes;
         private readonly float[] _embedding;
+        private readonly InferenceMetrics _metrics;
 
         /// <summary>
         /// Gets whether this result has been disposed.
@@ -79,6 +140,16 @@ namespace Xybrid
         /// </summary>
         public bool HasEmbedding => _embedding != null && _embedding.Length > 0;
 
+        /// <summary>
+        /// Gets the typed inference metrics (TTFT, tok/s, per-stage latencies).
+        /// </summary>
+        /// <remarks>
+        /// LLM-specific fields are <c>null</c> for ASR/TTS/embedding runs;
+        /// <see cref="InferenceMetrics.StageLatenciesMs"/> is empty for
+        /// single-model runs.
+        /// </remarks>
+        public InferenceMetrics Metrics => _metrics;
+
         internal unsafe InferenceResult(XybridResultHandle* handle)
         {
             _handle = handle;
@@ -128,6 +199,34 @@ namespace Xybrid
                     Marshal.Copy((IntPtr)embPtr, _embedding, 0, (int)embLen);
                 }
             }
+
+            // Cache typed metrics. Sentinel conventions match the C ABI:
+            // -1 for absent optional integers, NaN for absent optional floats.
+            long ttft = NativeMethods.xybrid_result_ttft_ms(handle);
+            float tps = NativeMethods.xybrid_result_tokens_per_second(handle);
+            float prefill = NativeMethods.xybrid_result_prefill_tps(handle);
+            float decode = NativeMethods.xybrid_result_decode_tps(handle);
+            long tokensOut = NativeMethods.xybrid_result_tokens_out(handle);
+
+            nuint stageCount = NativeMethods.xybrid_result_stage_count(handle);
+            var stages = new List<StageLatency>((int)stageCount);
+            for (nuint i = 0; i < stageCount; i++)
+            {
+                byte* stageIdPtr = NativeMethods.xybrid_result_stage_id(handle, i);
+                string stageId = NativeHelpers.FromUtf8Ptr(stageIdPtr) ?? string.Empty;
+                uint stageLatencyMs = NativeMethods.xybrid_result_stage_latency_ms(handle, i);
+                stages.Add(new StageLatency(stageId, stageLatencyMs));
+            }
+
+            _metrics = new InferenceMetrics(
+                totalMs: _latencyMs,
+                ttftMs: ttft < 0 ? (uint?)null : (uint)ttft,
+                tokensPerSecond: float.IsNaN(tps) ? (float?)null : tps,
+                prefillTps: float.IsNaN(prefill) ? (float?)null : prefill,
+                decodeTps: float.IsNaN(decode) ? (float?)null : decode,
+                tokensOut: tokensOut < 0 ? (uint?)null : (uint)tokensOut,
+                stageLatenciesMs: stages
+            );
         }
 
         /// <summary>

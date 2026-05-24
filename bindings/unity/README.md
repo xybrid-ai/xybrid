@@ -144,6 +144,34 @@ result.ThrowIfFailed();
 Debug.Log($"Player said: {result.Text}");
 ```
 
+### Inference Metrics
+
+Every `InferenceResult` carries a typed `InferenceMetrics` with TTFT,
+tok/s, per-stage latencies, and token counts. LLM-specific fields are
+`null` for ASR / TTS / embedding runs.
+
+```csharp
+using Xybrid;
+
+using var model = XybridClient.LoadModel("lfm2.5-350m");
+using var result = model.Run(Envelope.Text("Tell me a joke."));
+result.ThrowIfFailed();
+
+var metrics = result.Metrics;
+Debug.Log($"Total: {metrics.TotalMs} ms");
+if (metrics.TtftMs.HasValue)
+    Debug.Log($"TTFT: {metrics.TtftMs.Value} ms");
+if (metrics.TokensPerSecond.HasValue)
+    Debug.Log($"Throughput: {metrics.TokensPerSecond.Value:F1} tok/s");
+if (metrics.TokensOut.HasValue)
+    Debug.Log($"Tokens out: {metrics.TokensOut.Value}");
+
+// For pipeline runs, per-stage latencies are populated.
+// model.Run() leaves StageLatenciesMs empty.
+foreach (var stage in metrics.StageLatenciesMs)
+    Debug.Log($"  stage {stage.StageId}: {stage.LatencyMs} ms");
+```
+
 ### Multi-Turn Conversation
 
 ```csharp

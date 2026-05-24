@@ -125,12 +125,16 @@ check_method_in_sdk() {
         kotlin)
             src_dir="$KOTLIN_SRC"
             [ ! -d "$src_dir" ] && return 2
-            pattern="(fun ${method_name}|val ${method_name}|var ${method_name}|${method_name}\()"
+            # Match both plain (val foo) and backticked (var `foo`) — UniFFI
+            # generates the backticked form for record fields.
+            pattern="(fun ${method_name}|val ${method_name}|var ${method_name}|val \`${method_name}\`|var \`${method_name}\`|${method_name}\()"
             ;;
         swift)
             src_dir="$SWIFT_SRC"
             [ ! -d "$src_dir" ] && return 2
-            pattern="(func ${method_name}|var ${method_name}|let ${method_name}|${method_name}\()"
+            # Match plain declarations and record-field forms produced by
+            # UniFFI's Swift generator (`public var foo`, `public let foo`).
+            pattern="(func ${method_name}|var ${method_name}|let ${method_name}|public var ${method_name}|public let ${method_name}|${method_name}\()"
             ;;
         csharp)
             src_dir="$UNITY_SRC"

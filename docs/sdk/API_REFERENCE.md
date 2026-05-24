@@ -60,10 +60,16 @@ The main SDK entry point with static methods.
 ```dart
 class Xybrid {
   // Initialization
-  static Future<void> init();
+  static Future<void> init({
+    String? apiKey,
+    String? gatewayUrl,
+    String? ingestUrl,
+    String? resourceTelemetry,
+  });
 
-  // API Key Management
+  // Runtime configuration
   static void setApiKey(String apiKey);
+  static void setGatewayUrl(String gatewayUrl);
 
   // Model Loading (returns XybridModelLoader)
   static XybridModelLoader model({
@@ -110,6 +116,7 @@ object Xybrid {
 |--------|------|--------|-------|----|
 | `init()` | ✅ | ✅ | — | ✅ |
 | `setApiKey()` | ✅ | — | — | — |
+| `setGatewayUrl()` | ✅ | — | — | — |
 | `model()` | ✅ | — | — | ✅ |
 | `pipeline()` | ✅ | — | — | — |
 | `isModelCached()` | ✅ | — | — | — |
@@ -302,6 +309,11 @@ class XybridModel {
     required Envelope envelope,
     GenerationConfig? config,
   });
+  Stream<StreamToken> runStreamingWithFallback({
+    required Envelope envelope,
+    required RunOptions options,
+    GenerationConfig? config,
+  });
   Stream<StreamToken> runStreamingWithContext({
     required Envelope envelope,
     required ConversationContext context,
@@ -382,6 +394,7 @@ impl XybridModel {
 | `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
 | `runStreaming()` | ✅ | — | — | ✅ |
 | `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | planned | planned | planned |
+| `runStreamingWithFallback()` | ✅ | planned | planned | planned |
 | `runStreamingWithContext()` | ✅ | — | — | ✅ |
 | `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |
 | `benchmark()` | — | — | — | — |
@@ -465,6 +478,13 @@ impl Xybrid {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> PipelineResult<PipelineExecutionResult>;
+
+    pub fn run_pipeline_streaming_with_options<F>(
+        yaml: &str,
+        envelope: &Envelope,
+        options: &RunOptions,
+        on_token: F,
+    ) -> PipelineResult<PipelineExecutionResult>;
 }
 ```
 
@@ -482,6 +502,7 @@ impl Xybrid {
 | `load()` | ✅ | — | — | — |
 | `run()` | ✅ | — | — | — |
 | `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
+| `runPipelineStreamingWithOptions()` / `run_pipeline_streaming_with_options()` | Rust ✅ | planned | planned | planned |
 
 > **Note**: The Dart SDK currently uses a single `XybridPipeline` class (no separate `PipelineRef`).
 > The Kotlin spec shows the two-step `PipelineRef` → `Pipeline` pattern which is the target design.
@@ -772,6 +793,89 @@ public sealed class InferenceResult : IDisposable
 public enum OutputType { Text, Audio, Embedding, Unknown }
 ```
 
+### InferenceMetrics
+
+Typed inference metrics surfaced on every `XybridResult`. LLM-specific fields
+(`ttftMs`, `tokensPerSecond`, `prefillTps`, `decodeTps`, `tokensOut`) are
+`null` when the model is ASR/TTS/embedding. `stageLatenciesMs` is empty for
+`model.run()` and populated for `pipeline.run()`.
+
+Population is best-effort: fields are parsed from the `Envelope.metadata`
+string map written by `runtime_adapter::llm` and `execution::executor`.
+Local LLM runs populate the LLM scalars; **cloud LLM runs currently surface
+only `totalMs`** (the cloud adapter writes `backend` to envelope metadata
+but not per-run scalars — those ride on span metadata today). Unparseable
+values become `null`. Input-token counts (`promptTokens` / `tokensIn`) are
+not on this surface yet — they exist as span metadata only and will be
+added once an adapter writes the key to the envelope.
+
+```dart
+class XybridInferenceMetrics {
+  final int totalMs;
+  final int? ttftMs;
+  final double? tokensPerSecond;
+  final double? prefillTps;
+  final double? decodeTps;
+  final int? tokensOut;
+  final List<XybridStageLatency> stageLatenciesMs;
+}
+
+class XybridStageLatency {
+  final String stageId;
+  final int latencyMs;
+}
+```
+
+```kotlin
+data class XybridInferenceMetrics(
+  val totalMs: Int,
+  val ttftMs: Int?,
+  val tokensPerSecond: Double?,
+  val prefillTps: Double?,
+  val decodeTps: Double?,
+  val tokensOut: Int?,
+  val stageLatenciesMs: List<XybridStageLatency>
+)
+
+data class XybridStageLatency(val stageId: String, val latencyMs: Int)
+```
+
+```swift
+public struct XybridInferenceMetrics {
+  public let totalMs: Int
+  public let ttftMs: Int?
+  public let tokensPerSecond: Double?
+  public let prefillTps: Double?
+  public let decodeTps: Double?
+  public let tokensOut: Int?
+  public let stageLatenciesMs: [XybridStageLatency]
+}
+
+public struct XybridStageLatency {
+  public let stageId: String
+  public let latencyMs: Int
+}
+```
+
+```csharp
+public sealed class InferenceMetrics
+{
+  public uint TotalMs { get; }
+  public uint? TtftMs { get; }
+  public float? TokensPerSecond { get; }
+  public float? PrefillTps { get; }
+  public float? DecodeTps { get; }
+  public uint? TokensOut { get; }
+  public IReadOnlyList<StageLatency> StageLatenciesMs { get; }
+}
+
+public sealed class StageLatency
+{
+  public string StageId { get; }
+  public uint LatencyMs { get; }
+}
+```
+
 ### Implementation Status
 
 | Property | Dart | Kotlin | Swift | C# |
@@ -786,6 +890,10 @@ public enum OutputType { Text, Audio, Embedding, Unknown }
 | `modelId` | — | — | — | ✅ |
 | `isFailure` | ✅ | ✅ | ✅ | ✅ |
 | `audioAsWav()` | ✅ | — | — | — |
+| `metrics` | ✅ | ✅ | ✅ | ✅ |
+| `metrics.ttftMs` | ✅ | ✅ | ✅ | ✅ |
+| `metrics.tokensPerSecond` | ✅ | ✅ | ✅ | ✅ |
+| `metrics.stageLatenciesMs` | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
@@ -891,7 +999,8 @@ Per-run controls for cooperative cancellation and resource-driven local abort.
 Rust SDK methods with options are available as model-level `run_with_options`,
 `run_with_context_options`, `run_streaming_with_options`, and
 `run_streaming_with_context_options`, plus pipeline-level `run_with_options`,
-`run_async_with_options`, and `Xybrid::run_pipeline_with_options`.
+`run_async_with_options`, `Xybrid::run_pipeline_with_options`, and
+`Xybrid::run_pipeline_streaming_with_options`.
 
 ```rust
 let token = CancellationToken::new();
@@ -917,6 +1026,25 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
 
+`AbortSignal` is the shared policy enum. Rust currently supports
+`UserCancelled`, `MemoryPressureWarn`, `MemoryPressureCritical`, `ThermalHot`,
+and `ThermalCritical`; Flutter currently exposes the customer-facing fallback
+signals `memoryPressureCritical` and `thermalCritical`.
+
+Flutter exposes the customer opt-in surface as `RunOptions.cloudFallback(...)`
+plus `AbortPolicy.cloudFallback(...)`; plain `RunOptions()` stays neutral and
+does not opt into cloud retry. The Flutter FFI adapter maps that policy to the
+Rust SDK abort policy, including the selected memory/thermal stop signals,
+`fallbackToCloud`, and grace-token budget, and uses
+`runStreamingWithFallback(...)` for the continuous token stream.
+
+`cloudGatewayUrl` is an optional override for the Xybrid cloud gateway base URL.
+Customer builds accept HTTPS Xybrid gateway hosts with a `/v1` base path. Debug
+builds also accept localhost, private IP, and link-local gateways so apps can
+exercise fallback against the local platform stack. URLs with embedded
+credentials, query strings, fragments, unsupported schemes, or missing `/v1`
+are rejected before the cloud retry starts.
+
 Routing feedback is recorded inside the core orchestrator using low-cardinality
 resource buckets. The SDK keeps `correlation_id` as an opaque string for
 cross-binding compatibility; telemetry may include flat `routing_source`,
@@ -932,6 +1060,7 @@ cross-binding compatibility; telemetry may include flat `routing_source`,
 | `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
 | `RunOptions` | ✅ | planned | planned | planned |
 | `AbortPolicy` | ✅ | planned | planned | planned |
+| `AbortSignal` | ✅ | planned | planned | planned |
 | `CancellationToken` | ✅ | planned | planned | planned |
 | `StreamToken` | ✅ | — | — | ✅ |
 

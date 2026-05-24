@@ -2,6 +2,6 @@
 ///
 /// This is the main entry point for the xybrid_flutter package.
 /// See [xybrid.dart] for detailed API documentation.
-library xybrid_flutter;
+library;
 
 export 'xybrid.dart';

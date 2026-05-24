@@ -15,8 +15,9 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `to_sdk`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `from`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `to_sdk`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `current_snapshot`, `fmt`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>
 abstract class FfiModel implements RustOpaqueInterface {
@@ -56,6 +57,17 @@ abstract class FfiModel implements RustOpaqueInterface {
   Stream<FfiStreamEvent> runStreamWithContext(
       {required FfiEnvelope envelope,
       required FfiConversationContext context,
+      FfiGenerationConfig? config});
+
+  /// Run streaming inference with local abort and Xybrid cloud fallback.
+  ///
+  /// The Rust SDK owns the fallback semantics: abort on configured resource
+  /// pressure, re-check cloud policy, retry the original prompt through the
+  /// authenticated gateway, and emit local/cloud telemetry under one
+  /// correlation id.
+  Stream<FfiStreamEvent> runStreamWithFallback(
+      {required FfiEnvelope envelope,
+      required FfiRunOptions options,
       FfiGenerationConfig? config});
 
   /// Run inference with conversation context.
@@ -194,6 +206,58 @@ sealed class FfiLoadEvent with _$FfiLoadEvent {
   const factory FfiLoadEvent.error(
     String field0,
   ) = FfiLoadEvent_Error;
+}
+
+/// Cloud fallback controls exposed to Flutter callers.
+///
+/// This mirrors the customer-facing Dart `RunOptions` wrapper and maps into
+/// `xybrid_sdk::RunOptions` at the FFI boundary.
+class FfiRunOptions {
+  final String? cloudProvider;
+  final String? cloudModel;
+  final String? cloudGatewayUrl;
+  final String? correlationId;
+  final bool abortOnMemoryPressureCritical;
+  final bool abortOnThermalCritical;
+  final bool fallbackToCloud;
+  final int? maxGraceTokens;
+
+  const FfiRunOptions({
+    this.cloudProvider,
+    this.cloudModel,
+    this.cloudGatewayUrl,
+    this.correlationId,
+    required this.abortOnMemoryPressureCritical,
+    required this.abortOnThermalCritical,
+    required this.fallbackToCloud,
+    this.maxGraceTokens,
+  });
+
+  @override
+  int get hashCode =>
+      cloudProvider.hashCode ^
+      cloudModel.hashCode ^
+      cloudGatewayUrl.hashCode ^
+      correlationId.hashCode ^
+      abortOnMemoryPressureCritical.hashCode ^
+      abortOnThermalCritical.hashCode ^
+      fallbackToCloud.hashCode ^
+      maxGraceTokens.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiRunOptions &&
+          runtimeType == other.runtimeType &&
+          cloudProvider == other.cloudProvider &&
+          cloudModel == other.cloudModel &&
+          cloudGatewayUrl == other.cloudGatewayUrl &&
+          correlationId == other.correlationId &&
+          abortOnMemoryPressureCritical ==
+              other.abortOnMemoryPressureCritical &&
+          abortOnThermalCritical == other.abortOnThermalCritical &&
+          fallbackToCloud == other.fallbackToCloud &&
+          maxGraceTokens == other.maxGraceTokens;
 }
 
 @freezed

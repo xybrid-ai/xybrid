@@ -2,6 +2,17 @@
 name = "xybrid-core"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Core runtime for hybrid cloud-edge AI inference: model execution, pipeline orchestration, and routing primitives."
+readme = "README.md"
+# vendor/llama.cpp (~180MB) is cloned on-demand by build.rs when the
+# llm-llamacpp feature is enabled, so we exclude it from the published
+# tarball to stay under crates.io's size limit. Other files under
+# vendor/ (e.g. llama_wrapper.cpp) are first-party and must ship.
+exclude = ["vendor/llama.cpp/**"]
 
 [lib]
 name = "xybrid_core"
@@ -73,13 +84,18 @@ byteorder = { version = "1.5", optional = true }  # For reading mel filter bytes
 num-traits = { version = "0.2", optional = true }  # Required by candle audio
 
 # Mistral.rs - Pure Rust LLM inference (optional, for local LLMs)
-# Enable with: cargo build --features llm-mistral
-# For GPU: cargo build --features llm-mistral-metal (macOS) or llm-mistral-cuda (NVIDIA)
-# Xcode 26 Metal fix merged: https://github.com/EricLBuehler/mistral.rs/pull/1846
-mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", branch = "master", optional = true }
+# DISABLED for the crates.io publish — `mistralrs` is currently a git dep
+# upstream, which cargo publish rejects. To re-enable: switch to the
+# crates.io release (mistralrs 0.8.1 or newer) and restore the
+# `dep:mistralrs` wiring in the `llm-mistral*` features below.
+# mistralrs = { version = "0.8", optional = true }
 
 [features]
-default = ["ort-download", "llm-llamacpp"]
+# `llm-llamacpp` is NOT enabled by default — it requires cmake + a C++
+# toolchain and clones ~180MB of llama.cpp source during build. Downstream
+# users opt in via `cargo add xybrid-core --features llm-llamacpp` or one
+# of the `platform-*` presets on xybrid-sdk.
+default = ["ort-download"]
 
 # JSON Schema generation for model_metadata.json
 schema = ["dep:schemars"]
@@ -97,9 +113,13 @@ candle-metal = ["candle", "candle-core/metal", "candle-nn/metal"]
 candle-cuda = ["candle", "candle-core/cuda"]
 
 # Local LLM inference
-llm-mistral = ["dep:mistralrs"]                             # mistral.rs (CPU)
-llm-mistral-metal = ["llm-mistral", "mistralrs/metal"]      # mistral.rs + Metal (macOS/iOS)
-llm-mistral-cuda = ["llm-mistral", "mistralrs/cuda"]        # mistral.rs + CUDA (NVIDIA)
+# NOTE: marker features only — see the commented-out `mistralrs` dep above.
+# Enabling these on the crates.io build will fail to compile because the
+# `mistralrs` crate is not pulled in. Restore once we move to crates.io
+# mistralrs 0.8.x.
+llm-mistral = []
+llm-mistral-metal = ["llm-mistral"]
+llm-mistral-cuda = ["llm-mistral"]
 
 # llama.cpp backend (Android-compatible, runtime SIMD detection)
 # Note: This is a marker feature - it gates build.rs (compiles llama.cpp via cmake)

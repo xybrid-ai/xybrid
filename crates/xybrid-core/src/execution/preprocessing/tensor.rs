@@ -28,11 +28,13 @@ pub fn normalize_step(
         }
     };
 
-    if let Some(tensor_slice) = tensor.as_slice_mut() {
-        for (i, val) in tensor_slice.iter_mut().enumerate() {
-            let channel = i % mean.len();
-            *val = (*val - mean[channel]) / std[channel];
-        }
+    let tensor_slice = tensor.as_slice_mut().ok_or_else(|| {
+        AdapterError::InvalidInput("Normalize requires a contiguous tensor".to_string())
+    })?;
+
+    for (i, val) in tensor_slice.iter_mut().enumerate() {
+        let channel = i % mean.len();
+        *val = (*val - mean[channel]) / std[channel];
     }
 
     Ok(PreprocessedData::Tensor(tensor))

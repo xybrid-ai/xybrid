@@ -9,6 +9,63 @@ import 'dart:typed_data';
 import 'rust/api/result.dart';
 import 'utils/audio.dart';
 
+/// Per-stage latency entry for pipeline runs.
+///
+/// One entry per executed stage; the [stageId] matches the stage name in
+/// the pipeline definition.
+class XybridStageLatency {
+  XybridStageLatency.fromFfi(FfiStageLatency inner)
+      : stageId = inner.stageId,
+        latencyMs = inner.latencyMs;
+
+  final String stageId;
+  final int latencyMs;
+}
+
+/// Typed inference metrics surfaced on every [XybridResult].
+///
+/// LLM-specific fields ([ttftMs], [tokensPerSecond], [prefillTps],
+/// [decodeTps], [tokensOut]) are `null` for ASR/TTS/embedding runs. For
+/// pipeline runs they are parsed from the **final** stage envelope only,
+/// so they are also `null` when the final stage isn't the LLM (e.g. an
+/// `ASR → LLM → TTS` pipeline).
+///
+/// [stageLatenciesMs] is empty for `model.run()` and populated for
+/// `pipeline.run()`.
+class XybridInferenceMetrics {
+  XybridInferenceMetrics.fromFfi(FfiInferenceMetrics inner)
+      : totalMs = inner.totalMs,
+        ttftMs = inner.ttftMs,
+        tokensPerSecond = inner.tokensPerSecond,
+        prefillTps = inner.prefillTps,
+        decodeTps = inner.decodeTps,
+        tokensOut = inner.tokensOut,
+        stageLatenciesMs = inner.stageLatenciesMs
+            .map(XybridStageLatency.fromFfi)
+            .toList(growable: false);
+
+  /// Wall-clock latency in ms (mirrors [XybridResult.latencyMs]).
+  final int totalMs;
+
+  /// Time to first token, ms. LLM streaming only.
+  final int? ttftMs;
+
+  /// Generation throughput, tokens/sec. LLM only.
+  final double? tokensPerSecond;
+
+  /// Prefill phase tok/s. LLM only.
+  final double? prefillTps;
+
+  /// Decode phase tok/s. LLM only.
+  final double? decodeTps;
+
+  /// Completion tokens produced. LLM only.
+  final int? tokensOut;
+
+  /// Per-stage wall-clock latencies. Empty for single-model runs.
+  final List<XybridStageLatency> stageLatenciesMs;
+}
+
 /// Result of a model inference operation.
 ///
 /// Access the output using the appropriate getter based on model type:
@@ -65,4 +122,11 @@ class XybridResult {
 
   /// Inference latency in milliseconds.
   int get latencyMs => _inner.latencyMs;
+
+  /// Typed metrics for this run (TTFT, tok/s, per-stage latencies, etc.).
+  ///
+  /// LLM-specific fields are null for ASR/TTS/embedding runs;
+  /// `stageLatenciesMs` is empty for single-model runs.
+  late final XybridInferenceMetrics metrics =
+      XybridInferenceMetrics.fromFfi(_inner.metrics);
 }

@@ -2,6 +2,20 @@
 
 Thank you for your interest in contributing to Xybrid! This guide will help you get started.
 
+## Where to start
+
+If you're looking for a first task, browse the [`good first issue`](https://github.com/xybrid-ai/xybrid/labels/good%20first%20issue) label — these are scoped to be self-contained, with clear acceptance criteria and no platform-internals knowledge required.
+
+Issues are also grouped by area so you can find ones that match your interest:
+
+- [`area: core`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20core) — `xybrid-core` (execution, audio, runtime adapters)
+- [`area: sdk`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20sdk) — `xybrid-sdk` (registry client, high-level Rust API)
+- [`area: examples`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20examples) — example apps and runnable demos
+- [`area: bindings`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20bindings) — Flutter, Kotlin, Swift, Unity bindings
+- [`area: tests`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20tests) — test coverage and the test harness
+
+Medium-difficulty tasks are labeled [`help wanted`](https://github.com/xybrid-ai/xybrid/labels/help%20wanted). If you want to claim an issue, leave a comment so we can avoid duplicate work — no formal assignment process is needed.
+
 ## Prerequisites
 
 - **Rust** 1.75+ with `cargo` ([rustup.rs](https://rustup.rs))

@@ -10,8 +10,56 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `from_inference_result`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`
+// These functions are ignored because they are not marked as `pub`: `from_core`, `from_core`, `from_inference_result`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`
+
+/// Typed inference metrics.
+///
+/// Mirrors `xybrid_sdk::InferenceMetrics`. LLM-specific fields are `None`
+/// for ASR/TTS/embedding runs. `stage_latencies_ms` is empty for
+/// `model.run()` and populated for `pipeline.run()`.
+class FfiInferenceMetrics {
+  final int totalMs;
+  final int? ttftMs;
+  final double? tokensPerSecond;
+  final double? prefillTps;
+  final double? decodeTps;
+  final int? tokensOut;
+  final List<FfiStageLatency> stageLatenciesMs;
+
+  const FfiInferenceMetrics({
+    required this.totalMs,
+    this.ttftMs,
+    this.tokensPerSecond,
+    this.prefillTps,
+    this.decodeTps,
+    this.tokensOut,
+    required this.stageLatenciesMs,
+  });
+
+  @override
+  int get hashCode =>
+      totalMs.hashCode ^
+      ttftMs.hashCode ^
+      tokensPerSecond.hashCode ^
+      prefillTps.hashCode ^
+      decodeTps.hashCode ^
+      tokensOut.hashCode ^
+      stageLatenciesMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiInferenceMetrics &&
+          runtimeType == other.runtimeType &&
+          totalMs == other.totalMs &&
+          ttftMs == other.ttftMs &&
+          tokensPerSecond == other.tokensPerSecond &&
+          prefillTps == other.prefillTps &&
+          decodeTps == other.decodeTps &&
+          tokensOut == other.tokensOut &&
+          stageLatenciesMs == other.stageLatenciesMs;
+}
 
 /// FFI wrapper for inference results.
 /// Fields are public and accessible directly via FRB-generated bindings.
@@ -21,6 +69,7 @@ class FfiResult {
   final Uint8List? audioBytes;
   final Float32List? embedding;
   final int latencyMs;
+  final FfiInferenceMetrics metrics;
 
   const FfiResult({
     required this.success,
@@ -28,6 +77,7 @@ class FfiResult {
     this.audioBytes,
     this.embedding,
     required this.latencyMs,
+    required this.metrics,
   });
 
   @override
@@ -36,7 +86,8 @@ class FfiResult {
       text.hashCode ^
       audioBytes.hashCode ^
       embedding.hashCode ^
-      latencyMs.hashCode;
+      latencyMs.hashCode ^
+      metrics.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -47,5 +98,31 @@ class FfiResult {
           text == other.text &&
           audioBytes == other.audioBytes &&
           embedding == other.embedding &&
+          latencyMs == other.latencyMs &&
+          metrics == other.metrics;
+}
+
+/// Per-stage latency entry for pipeline runs.
+///
+/// Mirrors `xybrid_sdk::StageLatency`. One entry per executed stage; the
+/// `stage_id` matches the stage name in the pipeline definition.
+class FfiStageLatency {
+  final String stageId;
+  final int latencyMs;
+
+  const FfiStageLatency({
+    required this.stageId,
+    required this.latencyMs,
+  });
+
+  @override
+  int get hashCode => stageId.hashCode ^ latencyMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiStageLatency &&
+          runtimeType == other.runtimeType &&
+          stageId == other.stageId &&
           latencyMs == other.latencyMs;
 }

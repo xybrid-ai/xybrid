@@ -30,6 +30,10 @@ pub struct StageContext {
     pub resource_monitor: Arc<ResourceMonitor>,
     /// Explicit target from pipeline YAML (if specified).
     pub explicit_target: Option<ExecutionTarget>,
+    /// Canonical stable hardware-family bucket used by fleet reliability.
+    pub device_class: Option<String>,
+    /// Schema version for `device_class`.
+    pub device_class_schema_version: Option<u16>,
 }
 
 /// Request for model selection.

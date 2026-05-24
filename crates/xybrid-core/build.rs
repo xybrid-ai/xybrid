@@ -170,35 +170,37 @@ fn compile_llama_cpp() {
     use std::process;
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let llama_cpp_dir = manifest_dir.join("vendor/llama.cpp");
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let wrapper_path = manifest_dir.join("vendor/llama_wrapper.cpp");
 
     // Pinned llama.cpp upstream — keep in sync with the git submodule SHA in
     // .gitmodules / `git submodule status`. The fallback clone below uses this
     // exact commit so consumers without submodule support (e.g. Flutter pub
-    // cache git deps) get a reproducible build instead of upstream HEAD.
+    // cache git deps, crates.io tarballs) get a reproducible build instead of
+    // upstream HEAD.
     const LLAMA_CPP_REPO: &str = "https://github.com/ggml-org/llama.cpp";
     const LLAMA_CPP_COMMIT: &str = "b46812de78f8fbcb6cf0154947e8633ebc78d9ac";
 
-    // Check if llama.cpp is vendored
-    // When consumed as a git dependency (e.g., Flutter pub cache), git submodules
-    // are not initialized — the directory exists but is empty (no CMakeLists.txt).
-    let cmake_lists = llama_cpp_dir.join("CMakeLists.txt");
-    if !cmake_lists.exists() {
+    // Prefer the in-tree submodule when present (developer workflow). Fall back
+    // to a clone in OUT_DIR for consumers that don't ship it: crates.io tarball
+    // (no vendor/), Flutter pub cache (empty submodule placeholder), etc.
+    // Writing to OUT_DIR (not the source tree) is required by cargo — `cargo
+    // publish` rejects build.rs scripts that modify $CARGO_MANIFEST_DIR.
+    let in_tree = manifest_dir.join("vendor/llama.cpp");
+    let llama_cpp_dir = if in_tree.join("CMakeLists.txt").exists() {
+        in_tree
+    } else {
+        let cloned = out_dir.join("llama.cpp");
         println!(
-            "cargo:warning=llama.cpp submodule not initialized, cloning {}@{}...",
+            "cargo:warning=llama.cpp not vendored in-tree, cloning {}@{} into OUT_DIR...",
             LLAMA_CPP_REPO, LLAMA_CPP_COMMIT
         );
 
-        // Remove the empty stub directory if it exists (git submodule placeholder)
-        if llama_cpp_dir.exists() {
-            let _ = std::fs::remove_dir_all(&llama_cpp_dir);
-        }
-
         // Pinned-commit clone: init empty repo, fetch the exact SHA at depth 1,
         // then check it out. `git clone --depth 1` cannot target an arbitrary
-        // commit, so we do it in three steps.
-        let dir_str = llama_cpp_dir.to_string_lossy().to_string();
+        // commit, so we do it in three steps. Idempotent: re-using an existing
+        // OUT_DIR clone is fine because the checked-out commit is pinned.
+        let dir_str = cloned.to_string_lossy().to_string();
         let run = |args: &[&str]| -> bool {
             process::Command::new("git")
                 .args(args)
@@ -206,23 +208,39 @@ fn compile_llama_cpp() {
                 .map(|s| s.success())
                 .unwrap_or(false)
         };
-        let ok = std::fs::create_dir_all(&llama_cpp_dir).is_ok()
-            && run(&["-C", &dir_str, "init", "-q"])
-            && run(&["-C", &dir_str, "remote", "add", "origin", LLAMA_CPP_REPO])
-            && run(&[
-                "-C",
-                &dir_str,
-                "fetch",
-                "--depth",
-                "1",
-                "origin",
-                LLAMA_CPP_COMMIT,
-            ])
-            && run(&["-C", &dir_str, "checkout", "--detach", "FETCH_HEAD"]);
+
+        // If the OUT_DIR clone already exists from a previous build, re-use it
+        // when it has the expected commit checked out; otherwise wipe and
+        // re-clone so we don't end up mixing two states.
+        let already_initialized =
+            cloned.join(".git").exists() && cloned.join("CMakeLists.txt").exists();
+        let needs_clone = !already_initialized;
+        if needs_clone && cloned.exists() {
+            let _ = std::fs::remove_dir_all(&cloned);
+        }
+
+        let ok = if needs_clone {
+            std::fs::create_dir_all(&cloned).is_ok()
+                && run(&["-C", &dir_str, "init", "-q"])
+                && run(&["-C", &dir_str, "remote", "add", "origin", LLAMA_CPP_REPO])
+                && run(&[
+                    "-C",
+                    &dir_str,
+                    "fetch",
+                    "--depth",
+                    "1",
+                    "origin",
+                    LLAMA_CPP_COMMIT,
+                ])
+                && run(&["-C", &dir_str, "checkout", "--detach", "FETCH_HEAD"])
+        } else {
+            true
+        };
 
         if ok {
             println!(
-                "cargo:warning=llama.cpp cloned successfully at {}",
+                "cargo:warning=llama.cpp ready at {} ({})",
+                cloned.display(),
                 LLAMA_CPP_COMMIT
             );
         } else {
@@ -233,20 +251,17 @@ fn compile_llama_cpp() {
             println!(
                 "cargo:warning================================================================="
             );
-            println!(
-                "cargo:warning=Expected location: {}",
-                llama_cpp_dir.display()
-            );
+            println!("cargo:warning=Expected location: {}", cloned.display());
             println!("cargo:warning=");
             println!("cargo:warning=To fix this manually, run:");
             println!(
                 "cargo:warning=  git clone {} {} && \\",
                 LLAMA_CPP_REPO,
-                llama_cpp_dir.display()
+                cloned.display()
             );
             println!(
                 "cargo:warning=    git -C {} checkout {}",
-                llama_cpp_dir.display(),
+                cloned.display(),
                 LLAMA_CPP_COMMIT
             );
             println!("cargo:warning=");
@@ -257,7 +272,9 @@ fn compile_llama_cpp() {
             );
             process::exit(1);
         }
-    }
+
+        cloned
+    };
 
     // Check if CMake is available
     if !check_cmake_available() {

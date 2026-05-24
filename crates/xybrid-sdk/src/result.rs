@@ -4,7 +4,79 @@
 //! with convenient accessors for different output types.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+
+/// Per-stage latency entry for pipeline runs.
+///
+/// One entry per executed stage; the `stage_id` matches the stage name in the
+/// pipeline definition.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct StageLatency {
+    pub stage_id: String,
+    pub latency_ms: u32,
+}
+
+/// Typed inference metrics surfaced on every `InferenceResult`.
+///
+/// LLM-specific fields (`ttft_ms`, `tokens_per_second`, `prefill_tps`,
+/// `decode_tps`, `tokens_out`) are `None` for ASR/TTS/embedding runs.
+/// `stage_latencies_ms` is empty for `model.run()` and populated for
+/// `pipeline.run()`.
+///
+/// Population is best-effort: fields parse from the `Envelope.metadata`
+/// string map written by `runtime_adapter::llm` and `execution::executor`.
+/// Local LLM runs populate the LLM fields; cloud LLM runs currently surface
+/// only `total_ms` (the cloud adapter writes `backend` to envelope metadata
+/// but not the per-run scalars — those ride on span metadata today).
+/// Unparseable values become `None`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct InferenceMetrics {
+    /// Wall-clock latency in ms (mirrors `InferenceResult.latency_ms`).
+    pub total_ms: u32,
+    /// Time to first token, ms. LLM streaming only.
+    pub ttft_ms: Option<u32>,
+    /// Generation throughput, tokens/sec. LLM only.
+    pub tokens_per_second: Option<f32>,
+    /// Prefill phase tok/s. LLM only.
+    pub prefill_tps: Option<f32>,
+    /// Decode phase tok/s. LLM only.
+    pub decode_tps: Option<f32>,
+    /// Completion tokens produced. LLM only.
+    pub tokens_out: Option<u32>,
+    /// Per-stage wall-clock latencies. Empty for single-model runs.
+    pub stage_latencies_ms: Vec<StageLatency>,
+}
+
+impl InferenceMetrics {
+    /// Build metrics from an envelope's metadata map.
+    ///
+    /// `total_ms` is passed in from the caller's outer latency measurement
+    /// (envelope metadata doesn't carry it). LLM keys that are absent or
+    /// fail to parse become `None`. `stage_latencies_ms` is left empty —
+    /// pipeline call sites populate it from their `FfiStageExecutionResult`
+    /// list.
+    pub fn from_metadata(metadata: &HashMap<String, String>, total_ms: u32) -> Self {
+        Self {
+            total_ms,
+            ttft_ms: parse_u32(metadata, "ttft_ms"),
+            tokens_per_second: parse_f32(metadata, "tokens_per_second"),
+            prefill_tps: parse_f32(metadata, "prefill_tps"),
+            decode_tps: parse_f32(metadata, "decode_tps"),
+            tokens_out: parse_u32(metadata, "tokens_out")
+                .or_else(|| parse_u32(metadata, "tokens_generated")),
+            stage_latencies_ms: Vec::new(),
+        }
+    }
+}
+
+fn parse_u32(metadata: &HashMap<String, String>, key: &str) -> Option<u32> {
+    metadata.get(key).and_then(|v| v.parse::<u32>().ok())
+}
+
+fn parse_f32(metadata: &HashMap<String, String>, key: &str) -> Option<f32> {
+    metadata.get(key).and_then(|v| v.parse::<f32>().ok())
+}
 
 /// Output type enumeration for model inference results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +135,8 @@ pub struct InferenceResult {
     latency_ms: u32,
     /// Model ID that produced this result
     model_id: String,
+    /// Typed metrics parsed from `envelope.metadata`
+    metrics: InferenceMetrics,
 }
 
 impl InferenceResult {
@@ -73,12 +147,14 @@ impl InferenceResult {
             EnvelopeKind::Audio(_) => OutputType::Audio,
             EnvelopeKind::Embedding(_) => OutputType::Embedding,
         };
+        let metrics = InferenceMetrics::from_metadata(&envelope.metadata, latency_ms);
 
         Self {
             envelope,
             output_type,
             latency_ms,
             model_id: model_id.into(),
+            metrics,
         }
     }
 
@@ -89,11 +165,13 @@ impl InferenceResult {
         model_id: impl Into<String>,
         latency_ms: u32,
     ) -> Self {
+        let metrics = InferenceMetrics::from_metadata(&envelope.metadata, latency_ms);
         Self {
             envelope,
             output_type,
             latency_ms,
             model_id: model_id.into(),
+            metrics,
         }
     }
 
@@ -114,6 +192,11 @@ impl InferenceResult {
     /// Get the model ID that produced this result.
     pub fn model_id(&self) -> &str {
         &self.model_id
+    }
+
+    /// Typed metrics for this run (TTFT, tok/s, per-stage latencies, etc.).
+    pub fn metrics(&self) -> &InferenceMetrics {
+        &self.metrics
     }
 
     /// Get a reference to the underlying envelope.
@@ -226,7 +309,6 @@ impl InferenceResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
     fn test_text_result() {
@@ -284,6 +366,75 @@ mod tests {
         };
         let result = InferenceResult::new(envelope, "model", 0);
         result.unwrap_text(); // Should panic
+    }
+
+    #[test]
+    fn test_metrics_parsed_from_envelope_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert("ttft_ms".to_string(), "120".to_string());
+        metadata.insert("tokens_per_second".to_string(), "42.50".to_string());
+        metadata.insert("prefill_tps".to_string(), "180.0".to_string());
+        metadata.insert("decode_tps".to_string(), "42.5".to_string());
+        metadata.insert("tokens_generated".to_string(), "256".to_string());
+
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("hi".to_string()),
+            metadata,
+        };
+        let result = InferenceResult::new(envelope, "llm-model", 500);
+
+        let m = result.metrics();
+        assert_eq!(m.total_ms, 500);
+        assert_eq!(m.ttft_ms, Some(120));
+        assert_eq!(m.tokens_per_second, Some(42.5));
+        assert_eq!(m.prefill_tps, Some(180.0));
+        assert_eq!(m.decode_tps, Some(42.5));
+        assert_eq!(m.tokens_out, Some(256));
+        assert!(m.stage_latencies_ms.is_empty());
+    }
+
+    #[test]
+    fn test_metrics_missing_keys_default_to_none() {
+        let envelope = Envelope {
+            kind: EnvelopeKind::Audio(vec![1, 2]),
+            metadata: HashMap::new(),
+        };
+        let result = InferenceResult::new(envelope, "tts-model", 50);
+        let m = result.metrics();
+        assert_eq!(m.total_ms, 50);
+        assert_eq!(m.ttft_ms, None);
+        assert_eq!(m.tokens_per_second, None);
+        assert_eq!(m.tokens_out, None);
+    }
+
+    #[test]
+    fn test_metrics_unparseable_values_become_none() {
+        let mut metadata = HashMap::new();
+        metadata.insert("ttft_ms".to_string(), "not-a-number".to_string());
+        metadata.insert("tokens_per_second".to_string(), "nan-ish".to_string());
+
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("x".to_string()),
+            metadata,
+        };
+        let result = InferenceResult::new(envelope, "m", 10);
+        let m = result.metrics();
+        assert_eq!(m.ttft_ms, None);
+        assert_eq!(m.tokens_per_second, None);
+    }
+
+    #[test]
+    fn test_metrics_tokens_out_canonical_key_wins_over_alias() {
+        let mut metadata = HashMap::new();
+        metadata.insert("tokens_out".to_string(), "64".to_string());
+        metadata.insert("tokens_generated".to_string(), "999".to_string());
+
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("x".to_string()),
+            metadata,
+        };
+        let result = InferenceResult::new(envelope, "m", 10);
+        assert_eq!(result.metrics().tokens_out, Some(64));
     }
 
     #[test]

@@ -12,6 +12,7 @@ import 'generation_config.dart';
 import 'llm.dart';
 import 'result.dart';
 import 'rust/api/model.dart';
+import 'run_options.dart';
 
 /// Exception thrown when Xybrid operations fail.
 class XybridException implements Exception {
@@ -290,6 +291,66 @@ class XybridModel {
       }
     } catch (e) {
       // Emit error token
+      yield StreamToken(
+        token: '',
+        index: 0,
+        cumulativeText: '',
+        isFinal: true,
+        finishReason: 'error: $e',
+      );
+    }
+  }
+
+  /// Run streaming inference with local abort and cloud fallback.
+  Stream<StreamToken> runStreamingWithFallback(
+    XybridEnvelope envelope, {
+    required RunOptions options,
+    GenerationConfig? config,
+  }) async* {
+    try {
+      final stream = inner.runStreamWithFallback(
+        envelope: envelope.inner,
+        options: options.toFfi(),
+        config: config?.toFfi(),
+      );
+
+      var emittedFinal = false;
+
+      await for (final event in stream) {
+        switch (event) {
+          case FfiStreamEvent_Token(:final field0):
+            final isFinal = field0.finishReason != null;
+            if (isFinal) emittedFinal = true;
+            yield StreamToken(
+              token: field0.token,
+              index: field0.index,
+              cumulativeText: field0.cumulativeText,
+              isFinal: isFinal,
+              finishReason: field0.finishReason,
+            );
+          case FfiStreamEvent_Complete(:final field0):
+            if (!emittedFinal) {
+              yield StreamToken(
+                token: '',
+                index: 0,
+                cumulativeText: field0.text ?? '',
+                isFinal: true,
+                finishReason: 'stop',
+              );
+            }
+          case FfiStreamEvent_Error(:final field0):
+            if (!emittedFinal) {
+              yield StreamToken(
+                token: '',
+                index: 0,
+                cumulativeText: '',
+                isFinal: true,
+                finishReason: 'error: $field0',
+              );
+            }
+        }
+      }
+    } catch (e) {
       yield StreamToken(
         token: '',
         index: 0,

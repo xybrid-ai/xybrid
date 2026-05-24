@@ -1309,12 +1309,63 @@ public object FfiConverterTypeXybridGenerationConfig: FfiConverterRustBuffer<Xyb
 
 
 
+data class XybridInferenceMetrics (
+    var `totalMs`: UInt, 
+    var `ttftMs`: UInt?, 
+    var `tokensPerSecond`: Float?, 
+    var `prefillTps`: Float?, 
+    var `decodeTps`: Float?, 
+    var `tokensOut`: UInt?, 
+    var `stageLatenciesMs`: List<XybridStageLatency>
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeXybridInferenceMetrics: FfiConverterRustBuffer<XybridInferenceMetrics> {
+    override fun read(buf: ByteBuffer): XybridInferenceMetrics {
+        return XybridInferenceMetrics(
+            FfiConverterUInt.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterOptionalFloat.read(buf),
+            FfiConverterOptionalFloat.read(buf),
+            FfiConverterOptionalFloat.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterSequenceTypeXybridStageLatency.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: XybridInferenceMetrics) = (
+            FfiConverterUInt.allocationSize(value.`totalMs`) +
+            FfiConverterOptionalUInt.allocationSize(value.`ttftMs`) +
+            FfiConverterOptionalFloat.allocationSize(value.`tokensPerSecond`) +
+            FfiConverterOptionalFloat.allocationSize(value.`prefillTps`) +
+            FfiConverterOptionalFloat.allocationSize(value.`decodeTps`) +
+            FfiConverterOptionalUInt.allocationSize(value.`tokensOut`) +
+            FfiConverterSequenceTypeXybridStageLatency.allocationSize(value.`stageLatenciesMs`)
+    )
+
+    override fun write(value: XybridInferenceMetrics, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`totalMs`, buf)
+            FfiConverterOptionalUInt.write(value.`ttftMs`, buf)
+            FfiConverterOptionalFloat.write(value.`tokensPerSecond`, buf)
+            FfiConverterOptionalFloat.write(value.`prefillTps`, buf)
+            FfiConverterOptionalFloat.write(value.`decodeTps`, buf)
+            FfiConverterOptionalUInt.write(value.`tokensOut`, buf)
+            FfiConverterSequenceTypeXybridStageLatency.write(value.`stageLatenciesMs`, buf)
+    }
+}
+
+
+
+
 data class XybridResult (
     var `success`: Boolean, 
     var `text`: String?, 
     var `audioBytes`: ByteArray?, 
     var `embedding`: List<Float>?, 
-    var `latencyMs`: UInt
+    var `latencyMs`: UInt, 
+    var `metrics`: XybridInferenceMetrics
 ) {
     
     companion object
@@ -1328,6 +1379,7 @@ public object FfiConverterTypeXybridResult: FfiConverterRustBuffer<XybridResult>
             FfiConverterOptionalByteArray.read(buf),
             FfiConverterOptionalSequenceFloat.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterTypeXybridInferenceMetrics.read(buf),
         )
     }
 
@@ -1336,7 +1388,8 @@ public object FfiConverterTypeXybridResult: FfiConverterRustBuffer<XybridResult>
             FfiConverterOptionalString.allocationSize(value.`text`) +
             FfiConverterOptionalByteArray.allocationSize(value.`audioBytes`) +
             FfiConverterOptionalSequenceFloat.allocationSize(value.`embedding`) +
-            FfiConverterUInt.allocationSize(value.`latencyMs`)
+            FfiConverterUInt.allocationSize(value.`latencyMs`) +
+            FfiConverterTypeXybridInferenceMetrics.allocationSize(value.`metrics`)
     )
 
     override fun write(value: XybridResult, buf: ByteBuffer) {
@@ -1344,6 +1397,37 @@ public object FfiConverterTypeXybridResult: FfiConverterRustBuffer<XybridResult>
             FfiConverterOptionalString.write(value.`text`, buf)
             FfiConverterOptionalByteArray.write(value.`audioBytes`, buf)
             FfiConverterOptionalSequenceFloat.write(value.`embedding`, buf)
+            FfiConverterUInt.write(value.`latencyMs`, buf)
+            FfiConverterTypeXybridInferenceMetrics.write(value.`metrics`, buf)
+    }
+}
+
+
+
+
+data class XybridStageLatency (
+    var `stageId`: String, 
+    var `latencyMs`: UInt
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeXybridStageLatency: FfiConverterRustBuffer<XybridStageLatency> {
+    override fun read(buf: ByteBuffer): XybridStageLatency {
+        return XybridStageLatency(
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: XybridStageLatency) = (
+            FfiConverterString.allocationSize(value.`stageId`) +
+            FfiConverterUInt.allocationSize(value.`latencyMs`)
+    )
+
+    override fun write(value: XybridStageLatency, buf: ByteBuffer) {
+            FfiConverterString.write(value.`stageId`, buf)
             FfiConverterUInt.write(value.`latencyMs`, buf)
     }
 }
@@ -2200,6 +2284,31 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<String>> {
         buf.putInt(value.size)
         value.forEach {
             FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+public object FfiConverterSequenceTypeXybridStageLatency: FfiConverterRustBuffer<List<XybridStageLatency>> {
+    override fun read(buf: ByteBuffer): List<XybridStageLatency> {
+        val len = buf.getInt()
+        return List<XybridStageLatency>(len) {
+            FfiConverterTypeXybridStageLatency.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<XybridStageLatency>): Int {
+        val sizeForLength = 4
+        val sizeForItems = value.map { FfiConverterTypeXybridStageLatency.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<XybridStageLatency>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.forEach {
+            FfiConverterTypeXybridStageLatency.write(it, buf)
         }
     }
 }
