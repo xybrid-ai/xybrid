@@ -1477,8 +1477,7 @@ fn xybrid_model_warmup_drains_span_collector_to_avoid_leak_into_next_event() {
         "global span collector must be drained after `XybridModel::warmup` publishes \
          its `ModelWarmup` event — leftover spans leak into the next event's \
          snapshot. Got {} stranded spans: {}",
-        leftover_spans,
-        after
+        leftover_spans, after
     );
 
     core_tracing::reset_tracing();

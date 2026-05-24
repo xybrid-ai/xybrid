@@ -1011,11 +1011,7 @@ fn convert_to_platform_event(
     // but `convert_to_platform_event` strips them again before the wire.
     let stages = if matches!(
         event.event_type.as_str(),
-        "PipelineComplete"
-            | "ModelComplete"
-            | "ModelWarmup"
-            | "LocalAborted"
-            | "CloudRetry"
+        "PipelineComplete" | "ModelComplete" | "ModelWarmup" | "LocalAborted" | "CloudRetry"
     ) && core_tracing::is_tracing_enabled()
     {
         let embedded_spans: Option<serde_json::Value> = payload
@@ -2282,11 +2278,7 @@ fn snapshot_spans_into_event(event: TelemetryEvent) -> TelemetryEvent {
     // didn't generate.
     let is_span_bearing = matches!(
         event.event_type.as_str(),
-        "PipelineComplete"
-            | "ModelComplete"
-            | "ModelWarmup"
-            | "LocalAborted"
-            | "CloudRetry"
+        "PipelineComplete" | "ModelComplete" | "ModelWarmup" | "LocalAborted" | "CloudRetry"
     );
     if !is_span_bearing || !core_tracing::is_tracing_enabled() {
         return event;
