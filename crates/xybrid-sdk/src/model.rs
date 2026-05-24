@@ -291,6 +291,7 @@ fn local_reliability_hint_after_abort(
         metrics: metrics.clone(),
         resource_monitor: xybrid_core::device::ResourceMonitor::global(),
         explicit_target: None,
+        local_availability: None,
         device_class: Some(metrics.canonical_device_class()),
         device_class_schema_version: Some(xybrid_core::context::DEVICE_CLASS_SCHEMA_VERSION),
     };

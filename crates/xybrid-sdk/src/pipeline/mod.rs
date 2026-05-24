@@ -60,6 +60,8 @@ use crate::result::OutputType;
 use crate::run_options::RunOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -358,6 +360,16 @@ impl CacheProvider for StreamingFastPathCacheProvider {
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn stage_descriptor_with_bundle_path(
+    stage_descriptor: &StageDescriptor,
+    bundle_path: &Path,
+) -> StageDescriptor {
+    let mut stage_descriptor = stage_descriptor.clone();
+    stage_descriptor.bundle_path = Some(bundle_path.to_string_lossy().to_string());
+    stage_descriptor
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 #[derive(Debug, Clone)]
 struct StreamingFastPathRoute {
     policy_allowed: bool,
@@ -393,6 +405,7 @@ fn resolve_streaming_fast_path_route(
         metrics: metrics.clone(),
         resource_monitor: ResourceMonitor::global(),
         explicit_target: stage.target.clone(),
+        local_availability: Some(LocalAvailability::new(stage.is_locally_runnable())),
         device_class: Some(metrics.canonical_device_class()),
         device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
     };
@@ -405,6 +418,7 @@ fn resolve_streaming_fast_path_route(
     let hint = resolution.local_reliability_hint.unwrap_or_default();
     let can_stream_locally = policy_allowed
         && matches!(resolution.decision.result, ResolvedTarget::Device)
+        && stage.is_locally_runnable()
         && !policy_transform;
 
     StreamingFastPathRoute {
@@ -853,7 +867,7 @@ impl Pipeline {
             .stages
             .iter()
             .enumerate()
-            .filter(|(_, s)| matches!(s.status, StageStatus::NeedsDownload))
+            .filter(|(_, s)| matches!(s.status, StageStatus::Cached | StageStatus::NeedsDownload))
             .filter_map(|(idx, s)| {
                 s.model_id.as_ref().map(|m| {
                     (
@@ -862,17 +876,35 @@ impl Pipeline {
                         m.clone(),
                         s.download_bytes.unwrap_or(0),
                         s.target.clone(),
+                        s.status.clone(),
                     )
                 })
             })
             .collect();
 
-        let total_stages = stages_to_fetch.len();
+        let total_stages = stages_to_fetch
+            .iter()
+            .filter(|(_, _, _, _, _, status)| matches!(status, StageStatus::NeedsDownload))
+            .count();
         let mut skipped_count = 0;
 
-        for (stage_idx, (_, stage_id, model_id, total_bytes, stage_target)) in
-            stages_to_fetch.into_iter().enumerate()
-        {
+        let mut download_stage_idx = 0;
+        for (_, stage_id, model_id, total_bytes, stage_target, stage_status) in stages_to_fetch {
+            if matches!(stage_status, StageStatus::Cached) {
+                let model_dir = client.fetch_extracted(&model_id, None, |_| {})?;
+                let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+                handle.availability_map.insert(model_id.clone(), true);
+                handle.availability_map.insert(stage_id.clone(), true);
+                handle
+                    .bundle_paths
+                    .insert(stage_id.clone(), model_dir.clone());
+                handle.bundle_paths.insert(model_id, model_dir);
+                continue;
+            }
+
+            let stage_idx = download_stage_idx;
+            download_stage_idx += 1;
+
             // Convert StageTarget to ExecutionTarget for authority
             // - Device: user explicitly wants local, authority should respect it
             // - Auto: let authority decide based on device conditions
@@ -892,6 +924,7 @@ impl Pipeline {
                 metrics: metrics.clone(),
                 resource_monitor: ResourceMonitor::global(),
                 explicit_target,
+                local_availability: None,
                 device_class: Some(metrics.canonical_device_class()),
                 device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
             };
@@ -1088,7 +1121,10 @@ impl Pipeline {
                 desc.bundle_path = Some(bundle_path.to_string_lossy().to_string());
             }
         }
-        let availability_map = handle.availability_map.clone();
+        let availability_map: HashMap<String, bool> = stage_descriptors
+            .iter()
+            .map(|stage| (stage.name.clone(), stage.is_locally_runnable()))
+            .collect();
         drop(handle);
 
         // Collect runtime metrics from caller options when provided.
@@ -1237,7 +1273,12 @@ impl Pipeline {
                 }
             }
 
-            (descriptors, handle.availability_map.clone())
+            let availability_map: HashMap<String, bool> = descriptors
+                .iter()
+                .map(|stage| (stage.name.clone(), stage.is_locally_runnable()))
+                .collect();
+
+            (descriptors, availability_map)
         };
 
         let envelope_clone = envelope.clone();
@@ -1494,10 +1535,11 @@ impl Xybrid {
         // For streaming, we need to identify if there's an LLM stage and execute it with streaming
         // For now, support single-stage LLM pipelines
         if handle.stage_descriptors.len() == 1 {
-            let stage_descriptor = handle.stage_descriptors[0].clone();
-            let stage_name = stage_descriptor.name.clone();
+            let stage_name = handle.stage_descriptors[0].name.clone();
             if let Some(bundle_path) = handle.bundle_paths.get(&stage_name) {
                 let bundle_path = bundle_path.clone(); // Clone to avoid borrow issues
+                let stage_descriptor =
+                    stage_descriptor_with_bundle_path(&handle.stage_descriptors[0], &bundle_path);
                 let metadata_path = bundle_path.join("model_metadata.json");
                 if metadata_path.exists() {
                     let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
@@ -1735,6 +1777,7 @@ stages:
         ));
         let stage = StageDescriptor::new("llm")
             .with_model(model_id)
+            .with_bundle_path(tempdir.path().to_string_lossy().to_string())
             .with_target(ExecutionTarget::Device);
         let envelope = Envelope::new(EnvelopeKind::Text("prompt".to_string()));
         let metrics = DeviceMetrics::default();
@@ -1747,6 +1790,43 @@ stages:
         assert_eq!(route.target, "local");
         assert_eq!(route.sample_size, 0);
         assert!(route.reason.contains("Explicit target"));
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_descriptor_uses_loaded_bundle_path() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let stage = StageDescriptor::new("llm")
+            .with_model("streaming-local-model")
+            .with_target(ExecutionTarget::Device);
+
+        assert!(!stage.is_locally_runnable());
+
+        let stage = stage_descriptor_with_bundle_path(&stage, tempdir.path());
+
+        assert!(stage.is_locally_runnable());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_network_target_disables_local_streaming() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let model_id = "streaming-cloud-model";
+        let authority = LocalAuthority::with_cache_provider(Arc::new(
+            StreamingFastPathCacheProvider::new(model_id, tempdir.path().to_path_buf()),
+        ));
+        let stage = StageDescriptor::new("llm")
+            .with_model(model_id)
+            .with_bundle_path(tempdir.path().to_string_lossy().to_string())
+            .with_target(ExecutionTarget::Cloud);
+        let envelope = Envelope::new(EnvelopeKind::Text("prompt".to_string()));
+        let metrics = DeviceMetrics::default();
+
+        let route =
+            resolve_streaming_fast_path_route(&authority, &stage, model_id, &envelope, &metrics);
+
+        assert!(!route.can_stream_locally);
+        assert_eq!(route.target, "cloud");
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]

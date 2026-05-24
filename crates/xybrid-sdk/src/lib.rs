@@ -662,12 +662,17 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
     // Create device metrics
     let metrics = DeviceMetrics::default();
 
-    // Create availability function from config
-    let availability_map = config.availability.clone();
-    let availability_fn = move |stage: &str| -> LocalAvailability {
-        let exists = availability_map.get(stage).copied().unwrap_or(false);
-        LocalAvailability::new(exists)
-    };
+    // Ignore legacy availability hints because these configs have no resolved
+    // bundle paths. Without a bundle path or preloaded adapter, local execution
+    // is not runnable.
+    if !config.availability.is_empty() {
+        log::warn!(
+            target: "xybrid_sdk",
+            "Legacy pipeline availability hints are ignored; use PipelineRef::load() and load_models() for local execution"
+        );
+    }
+    let availability_fn =
+        move |_stage: &str| -> LocalAvailability { LocalAvailability::new(false) };
 
     // Create orchestrator
     let mut orchestrator = Orchestrator::new();
@@ -773,12 +778,17 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
     // Create device metrics
     let metrics = DeviceMetrics::default();
 
-    // Create availability function from config
-    let availability_map = config.availability.clone();
-    let availability_fn = move |stage: &str| -> LocalAvailability {
-        let exists = availability_map.get(stage).copied().unwrap_or(false);
-        LocalAvailability::new(exists)
-    };
+    // Ignore legacy availability hints because these configs have no resolved
+    // bundle paths. Without a bundle path or preloaded adapter, local execution
+    // is not runnable.
+    if !config.availability.is_empty() {
+        log::warn!(
+            target: "xybrid_sdk",
+            "Legacy pipeline availability hints are ignored; use PipelineRef::load() and load_models() for local execution"
+        );
+    }
+    let availability_fn =
+        move |_stage: &str| -> LocalAvailability { LocalAvailability::new(false) };
 
     // Create orchestrator
     let mut orchestrator = Orchestrator::new();
