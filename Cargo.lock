@@ -2335,7 +2335,7 @@ dependencies = [
  "fnv",
  "futures-core",
  "futures-sink",
- "http 1.4.0",
+ "http 1.4.1",
  "indexmap 2.14.0",
  "slab",
  "tokio",
@@ -2443,7 +2443,7 @@ checksum = "aef3982638978efa195ff11b305f51f1f22f4f0a6cabee7af79b383ebee6a213"
 dependencies = [
  "dirs 6.0.0",
  "futures",
- "http 1.4.0",
+ "http 1.4.1",
  "indicatif 0.18.4",
  "libc",
  "log",
@@ -2495,9 +2495,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.4.0"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a"
+checksum = "8be7462df143984c4598a256ef469b251d7d7f9e271135073e78fc535414f3d0"
 dependencies = [
  "bytes",
  "itoa",
@@ -2521,7 +2521,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184"
 dependencies = [
  "bytes",
- "http 1.4.0",
+ "http 1.4.1",
 ]
 
 [[package]]
@@ -2532,7 +2532,7 @@ checksum = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a"
 dependencies = [
  "bytes",
  "futures-core",
- "http 1.4.0",
+ "http 1.4.1",
  "http-body 1.0.1",
  "pin-project-lite",
 ]
@@ -2618,7 +2618,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "h2 0.4.14",
- "http 1.4.0",
+ "http 1.4.1",
  "http-body 1.0.1",
  "httparse",
  "itoa",
@@ -2634,7 +2634,7 @@ version = "0.27.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
 dependencies = [
- "http 1.4.0",
+ "http 1.4.1",
  "hyper 1.9.0",
  "hyper-util",
  "rustls",
@@ -2682,7 +2682,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "http 1.4.0",
+ "http 1.4.1",
  "http-body 1.0.1",
  "hyper 1.9.0",
  "ipnet",
@@ -4641,7 +4641,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2 0.4.14",
- "http 1.4.0",
+ "http 1.4.1",
  "http-body 1.0.1",
  "http-body-util",
  "hyper 1.9.0",
@@ -5686,7 +5686,7 @@ dependencies = [
  "bitflags 2.11.1",
  "bytes",
  "futures-util",
- "http 1.4.0",
+ "http 1.4.1",
  "http-body 1.0.1",
  "pin-project-lite",
  "tower",
@@ -6122,7 +6122,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e994ba84b0bd1b1b0cf92878b7ef898a5c1760108fe7b6010327e274917a808c"
 dependencies = [
  "base64 0.22.1",
- "http 1.4.0",
+ "http 1.4.1",
  "httparse",
  "log",
 ]
@@ -7112,7 +7112,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid_flutter"
-version = "0.1.0-rc1"
+version = "0.1.0-rc4-dryrun"
 dependencies = [
  "android_logger",
  "flutter_rust_bridge",

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-rc4-dryrun
+
+* Dry-run of the new release-branch flow. Not published to pub.dev — the corresponding PR is closed without merging.
+
 ## 0.1.0-rc3
 
 * Adaptive cloud fallback for streaming LLM: pipelines can now transparently fall back to a cloud runtime when on-device streaming generation stalls or errors mid-stream; configurable via new run options on the underlying SDK

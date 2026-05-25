@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.0-rc4-dryrun] - 2026-05-25
+
+### Internal
+
+- Dry-run validation of the new release-branch flow (release-prep.yml + release-publish.yml). This release will not be tagged or published — the PR is closed without merging.
+
+---
+
 ## [0.1.0-rc3] - 2026-05-16
 
 ### Added
