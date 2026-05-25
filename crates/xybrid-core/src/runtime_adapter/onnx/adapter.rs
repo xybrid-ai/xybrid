@@ -77,11 +77,16 @@ impl OnnxRuntimeAdapter {
     ///
     /// // CPU execution
     /// let adapter = OnnxRuntimeAdapter::with_execution_provider(ExecutionProviderKind::Cpu);
+    /// ```
     ///
-    /// // CoreML with Neural Engine (requires ort-coreml feature)
-    /// #[cfg(feature = "ort-coreml")]
+    /// With the `ort-coreml` feature, additionally:
+    ///
+    /// ```ignore
+    /// use xybrid_core::runtime_adapter::onnx::{
+    ///     CoreMLConfig, ExecutionProviderKind, OnnxRuntimeAdapter,
+    /// };
     /// let adapter = OnnxRuntimeAdapter::with_execution_provider(
-    ///     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
+    ///     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine()),
     /// );
     /// ```
     pub fn with_execution_provider(execution_provider: ExecutionProviderKind) -> Self {
