@@ -1,0 +1,27 @@
+crates/xybrid-core/src/runtime_adapter/candle/adapter.rs
+  s_a18a912543c207::t_c912b3a8d263c8 25,36-38
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_a18a912543c207::t_f9fe823f1ac427 72,78-79
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_a18a912543c207::t_e27c7adb305558 177-183,186,189-190
+crates/xybrid-core/src/runtime_adapter/candle/mod.rs
+  s_a18a912543c207::t_d0fa6f37454bef 23,26,30,32-34
+crates/xybrid-core/src/runtime_adapter/onnx/adapter.rs
+  s_a18a912543c207::t_b9fb922e1b046e 80-82,84-87,89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "e74d28f0f64f79fb946385bbb567b94682e5d656",
+  "prompts": {},
+  "sessions": {
+    "s_a18a912543c207": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6151f2d-3717-4da9-9a58-e6d6c3d6efeb",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
