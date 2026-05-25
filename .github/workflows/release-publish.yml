@@ -208,7 +208,10 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.publish-release.outputs.tag }}
-      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
+      # flutter-actions/setup-flutter is pinned to an untagged commit
+      # (mirrors the SHA the upstream pub.dev publish workflow uses; no
+      # corresponding release tag exists on flutter-actions/setup-flutter).
       - uses: flutter-actions/setup-flutter@18c66a64fb6f6d3338c63cabbc5cd6da395e7f1d
       - name: Install dependencies
         run: dart pub get

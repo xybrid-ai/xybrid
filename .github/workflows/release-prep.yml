@@ -160,7 +160,7 @@ jobs:
       - name: Install LLVM
         run: brew install llvm
 
-      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
 
       # --- Step 1: Build XCFramework (cold compile, ~18 min) ---
       - name: Build XCFramework
@@ -332,7 +332,7 @@ jobs:
           cache-all-crates: "true"
           save-if: "true"
 
-      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
 
       - name: Install LLVM
         run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
@@ -404,7 +404,7 @@ jobs:
           cache-all-crates: "true"
           save-if: "true"
 
-      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
 
       - name: Install LLVM and NASM
         run: choco install llvm nasm
@@ -631,9 +631,24 @@ jobs:
           BRANCH: ${{ needs.check-release-branch.outputs.branch }}
         run: |
           set -euo pipefail
-          # Delete any pre-existing draft for this tag so reruns are clean.
-          # Safe: drafts have no real tag yet, so --cleanup-tag is a no-op.
-          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          # If a release already exists for this tag, clean it up *only* if
+          # it's still a draft (e.g. a previous release-prep run that never
+          # got merged). Refuse to touch published releases — a fixup push
+          # to a stale release/v* branch must not silently wipe a real
+          # release and its git tag.
+          STATE=$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null || echo "missing")
+          case "$STATE" in
+            true)
+              echo "::notice::Deleting pre-existing DRAFT release for ${TAG} so this run can recreate it."
+              gh release delete "$TAG" --yes --cleanup-tag
+              ;;
+            false)
+              echo "::error::Release ${TAG} is already PUBLISHED. Refusing to delete. Bump the version on this branch (or pick a new branch name) and re-push."
+              exit 1
+              ;;
+            missing)
+              ;;
+          esac
 
           PRERELEASE_FLAG=""
           case "$TAG" in
