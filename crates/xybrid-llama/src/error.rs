@@ -71,6 +71,17 @@ pub enum LlamaError {
     #[error("streaming callback aborted: {0}")]
     StreamingCallbackAborted(Box<dyn Error + Send + Sync>),
 
+    /// The model embeds a chat template, but llama.cpp could not render it.
+    /// This is intentionally distinct from "no embedded template": callers
+    /// may fallback when no template exists, but a present template that fails
+    /// should surface as a real runtime error instead of silently switching
+    /// prompt families.
+    #[error("chat template render failed: {detail}")]
+    ChatTemplateFailed {
+        /// Human-readable failure detail from the safe wrapper.
+        detail: String,
+    },
+
     /// Catch-all for other non-zero C return codes. Carries whatever
     /// contextual string the safe wrapper could gather.
     #[error("internal llama.cpp error: {0}")]

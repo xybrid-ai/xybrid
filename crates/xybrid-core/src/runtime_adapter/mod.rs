@@ -219,6 +219,9 @@ impl From<xybrid_llama::LlamaError> for AdapterError {
             LlamaError::StreamingCallbackAborted(boxed) => {
                 Self::from_streaming_callback_error(boxed)
             }
+            LlamaError::ChatTemplateFailed { detail } => {
+                Self::RuntimeError(format!("Chat template render failed: {detail}"))
+            }
             LlamaError::Internal(msg) => Self::RuntimeError(msg),
             // Forward-compatibility for `#[non_exhaustive]` LlamaError —
             // any variant added in xybrid-llama after this match was

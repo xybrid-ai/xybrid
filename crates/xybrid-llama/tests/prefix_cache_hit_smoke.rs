@@ -113,8 +113,8 @@ fn qwen2_5_0_5b_three_turns_show_prefix_cache_hit_on_turn_2_and_3() {
     for (turn_idx, user_prompt) in turn_prompts.iter().enumerate() {
         // Build a ChatML conversation that grows across turns. This is
         // the shape `xybrid-core::runtime_adapter::llama_cpp::generate`
-        // would produce after going through `xybrid_llama::format_chat`
-        // — the test bypasses ChatMessageView to keep the dep surface
+        // would produce after going through `xybrid_llama::format_chat`;
+        // the test bypasses template rendering to keep the dep surface
         // minimal.
         let mut prompt = format!("<|im_start|>system\n{system}<|im_end|>\n");
         for prev in turn_prompts.iter().take(turn_idx) {

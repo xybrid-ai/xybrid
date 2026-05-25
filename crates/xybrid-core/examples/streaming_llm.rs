@@ -5,34 +5,37 @@
 //! Run with:
 //!   cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp-runtime
 
+#[cfg(feature = "llm-llamacpp-runtime")]
 use std::collections::HashMap;
+#[cfg(feature = "llm-llamacpp-runtime")]
 use std::io::{self, Write};
+#[cfg(feature = "llm-llamacpp-runtime")]
 use std::path::PathBuf;
 
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 use xybrid_core::execution::ModelMetadata;
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 use xybrid_core::execution::TemplateExecutor;
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(not(feature = "llm-llamacpp"))]
+    #[cfg(not(feature = "llm-llamacpp-runtime"))]
     {
-        eprintln!("This example requires the llm-llamacpp feature.");
+        eprintln!("This example requires the llm-llamacpp-runtime feature.");
         eprintln!(
             "Run with: cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp-runtime"
         );
         return Ok(());
     }
 
-    #[cfg(feature = "llm-llamacpp")]
+    #[cfg(feature = "llm-llamacpp-runtime")]
     {
         run_streaming_example()
     }
 }
 
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 fn run_streaming_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
     println!("  Streaming LLM - Gemma 3 1B Instruct (GGUF)");
@@ -55,7 +58,7 @@ fn run_streaming_example() -> Result<(), Box<dyn std::error::Error>> {
     run_with_model_dir(&model_dir)
 }
 
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 fn run_with_model_dir(model_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     // Load metadata
     let metadata_path = model_dir.join("model_metadata.json");

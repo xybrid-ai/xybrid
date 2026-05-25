@@ -9,7 +9,7 @@
 //! - Batch buffer overflow when input > 512 tokens → heap corruption
 //!
 //! Run with:
-//!   cargo test -p xybrid-core --test llm_context_integration --features llm-llamacpp
+//!   cargo test -p xybrid-core --test llm_context_integration --features llm-llamacpp-runtime
 
 use std::path::Path;
 use xybrid_core::conversation::ConversationContext;

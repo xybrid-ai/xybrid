@@ -19,7 +19,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # Raw FFI bindings + cmake build for llama.cpp. Gated entirely behind the
-# `llm-llamacpp` feature (which activates both `llama-cpp-sys/bindings`
+# `llm-llamacpp-runtime` feature (which activates both `llama-cpp-sys/bindings`
 # and `xybrid-llama/bindings`) so default builds — and any consumer not
 # opting into llama.cpp — pay zero compile cost. The 3-layer shape:
 #   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
@@ -99,10 +99,10 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 # mistralrs = { version = "0.8", optional = true }
 
 [features]
-# `llm-llamacpp` is NOT enabled by default — it requires cmake + a C++
+# `llm-llamacpp-runtime` is NOT enabled by default — it requires cmake + a C++
 # toolchain and clones ~180MB of llama.cpp source during build. Downstream
-# users opt in via `cargo add xybrid-core --features llm-llamacpp` or one
-# of the `platform-*` presets on xybrid-sdk.
+# users opt in via `cargo add xybrid-core --features llm-llamacpp-runtime`
+# or one of the `platform-*` presets on xybrid-sdk.
 default = ["ort-download"]
 
 # JSON Schema generation for model_metadata.json
@@ -136,8 +136,9 @@ llm-mistral-cuda = ["llm-mistral"]
 #   - Compiles types (`LlamaCppBackend` constructor + adapter glue) on
 #     any target without cmake, without a C++ toolchain, without git
 #     access to fetch llama.cpp source.
-#   - `LlamaCppBackend::new()` returns `AdapterError::BackendNotLinked`
-#     at runtime with a "rebuild with `llm-llamacpp-runtime`" message.
+#   - `LlamaCppBackend::new()` constructs a type-only backend; runtime
+#     methods return `AdapterError::BackendNotLinked` with a "rebuild
+#     with `llm-llamacpp-runtime`" message.
 #   - For downstreams that want type access only (e.g., Linux CI
 #     runners) or that intend to link a custom llama.cpp build out of
 #     tree.

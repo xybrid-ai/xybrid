@@ -33,10 +33,28 @@
 mod error;
 pub use error::{LlamaError, LlamaResult};
 
-/// Initialize the llama.cpp backend. Re-export from `llama_cpp_sys` so
-/// callers can spell `xybrid_llama::backend_init()` rather than reaching
-/// into the `-sys` crate directly.
-pub use llama_cpp_sys::backend_init;
+/// Initialize the llama.cpp backend and apply Xybrid's log policy once.
+///
+/// The `-sys` crate owns only native backend initialization. This wrapper
+/// keeps the Xybrid-specific `XYBRID_LLAMACPP_VERBOSITY` env-var contract
+/// in the safe wrapper crate while preserving the historical one-time
+/// init timing: the env var is read during the same `Once` closure as
+/// `llama_backend_init_c()`.
+pub fn backend_init() {
+    llama_cpp_sys::backend_init_with_configure(configure_verbosity_from_env);
+}
+
+#[cfg(feature = "bindings")]
+fn configure_verbosity_from_env() {
+    if let Ok(level) = std::env::var("XYBRID_LLAMACPP_VERBOSITY") {
+        if let Ok(v) = level.parse::<i32>() {
+            crate::log_control::set_verbosity(v);
+        }
+    }
+}
+
+#[cfg(not(feature = "bindings"))]
+fn configure_verbosity_from_env() {}
 
 #[cfg(feature = "bindings")]
 pub(crate) mod ffi;
@@ -55,25 +73,13 @@ mod sampling;
 #[cfg(feature = "bindings")]
 pub use context::LlamaContext;
 #[cfg(feature = "bindings")]
-pub use generation::{
-    format_chat, generate_streaming, generate_with_stops, ChatMessageView, StreamingCallback,
-};
+pub use generation::{format_chat, generate_streaming, generate_with_stops, StreamingCallback};
 #[cfg(feature = "bindings")]
 pub use log_control::{get_verbosity, set_verbosity};
 #[cfg(feature = "bindings")]
 pub use model::LlamaModel;
 #[cfg(feature = "bindings")]
 pub use sampling::SamplingParams;
-
-/// Internal hooks exposed for integration tests in `tests/`. Not part of
-/// the stable public surface — opting in requires the `bindings` feature
-/// and these symbols may move at any time. The `#[doc(hidden)]` keeps
-/// them out of rustdoc and IDE autocomplete.
-#[cfg(feature = "bindings")]
-#[doc(hidden)]
-pub mod __test_hooks {
-    pub use crate::generation::{streaming_trampoline, StreamingContext};
-}
 
 // =========================================================================
 // No-bindings stubs

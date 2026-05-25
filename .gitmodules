@@ -2,4 +2,3 @@
 	path = vendor/llama-cpp
 	url = https://github.com/ggml-org/llama.cpp
 	shallow = true
-	branch = master

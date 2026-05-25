@@ -1,7 +1,8 @@
 //! LlamaCppBackend - LLM inference using llama.cpp
 //!
 //! This module provides llama.cpp bindings for LLM inference.
-//! It is feature-gated behind `llm-llamacpp`.
+//! The skeleton tier is feature-gated behind `llm-llamacpp`; the
+//! linked runtime is feature-gated behind `llm-llamacpp-runtime`.
 //!
 //! # Why llama.cpp?
 //!
@@ -27,6 +28,8 @@
 // `crate::telemetry::events` and the `runtime_adapter::mod` re-export
 // keep their existing identifiers.
 #[cfg(feature = "llm-llamacpp-runtime")]
+mod chat;
+#[cfg(feature = "llm-llamacpp-runtime")]
 pub use xybrid_llama::{
     get_verbosity as llama_log_get_verbosity, set_verbosity as llama_log_set_verbosity,
 };
@@ -35,7 +38,7 @@ use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
 };
 #[cfg(feature = "llm-llamacpp-runtime")]
-use crate::runtime_adapter::llm_telemetry::StreamingTelemetry;
+use crate::runtime_adapter::llm_telemetry::{StreamingTelemetry, StreamingTelemetryFields};
 #[cfg(feature = "llm-llamacpp-runtime")]
 use crate::runtime_adapter::streaming_postprocess::{
     merge_stop_patterns, strip_thinking_tags, trim_partial_stop_suffix, truncate_at_first_stop,
@@ -47,10 +50,8 @@ use crate::tracing as xybrid_trace;
 #[cfg(feature = "llm-llamacpp-runtime")]
 use std::sync::Mutex;
 
-// `BACKEND_INIT` (formerly a `Once` static here) now lives in
-// `llama_cpp_sys::backend_init()`. Idempotent across calls; the OS
-// reclaims llama.cpp resources at process exit so we deliberately
-// never call `llama_backend_free_c`.
+// Backend init is idempotent through `xybrid_llama::backend_init`; the OS
+// reclaims llama.cpp resources at process exit.
 
 /// LlamaCppBackend - LLM inference using llama.cpp.
 ///
@@ -123,11 +124,10 @@ struct KvCacheState {
 impl LlamaCppBackend {
     /// Create a new LlamaCppBackend.
     pub fn new() -> LlmResult<Self> {
-        // Initialize llama.cpp backend exactly once. The `Once` guard now
-        // lives in `llama_cpp_sys::backend_init` and atomically pairs the
-        // `llama_backend_init_c` call with the `XYBRID_LLAMACPP_VERBOSITY`
-        // env-var read, preserving the pre-refactor coupling exactly.
-        llama_cpp_sys::backend_init();
+        // Initialize llama.cpp backend exactly once through the safe wrapper.
+        // The wrapper keeps Xybrid's log-policy hook paired with native
+        // backend init while leaving the `-sys` crate policy-free.
+        xybrid_llama::backend_init();
 
         Ok(Self {
             model: None,
@@ -282,6 +282,132 @@ impl LlamaCppBackend {
             *state = KvCacheState::default();
         }
     }
+
+    fn tokenize_chat_prompt(
+        model: &xybrid_llama::LlamaModel,
+        messages: &[ChatMessage],
+    ) -> LlmResult<Vec<i32>> {
+        let prompt = chat::format_chat_prompt(model, messages)?;
+        Ok(model.tokenize_special(&prompt, true)?)
+    }
+
+    fn tokenize_raw_prompt(model: &xybrid_llama::LlamaModel, prompt: &str) -> LlmResult<Vec<i32>> {
+        Ok(model.tokenize_special(prompt, true)?)
+    }
+
+    fn prepare_generation(
+        &self,
+        model: &xybrid_llama::LlamaModel,
+        context: &xybrid_llama::LlamaContext,
+        tokens: Vec<i32>,
+        config: &GenerationConfig,
+        prompt_kind: PromptKind,
+    ) -> LlmResult<PreparedGeneration> {
+        let n_ctx = context.n_ctx();
+        if tokens.len() >= n_ctx {
+            return Err(AdapterError::InvalidInput(
+                prompt_kind.input_too_long_message(tokens.len(), n_ctx),
+            ));
+        }
+
+        let prompt_token_count = tokens.len();
+        let (tail, n_past) =
+            self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
+
+        Ok(PreparedGeneration {
+            prompt_token_count,
+            tail,
+            n_past,
+        })
+    }
+
+    fn run_streaming_generation<F>(
+        context: &xybrid_llama::LlamaContext,
+        model: &xybrid_llama::LlamaModel,
+        prepared: &PreparedGeneration,
+        config: &GenerationConfig,
+        stop_sequences: &[String],
+        mut on_chunk: F,
+    ) -> LlmResult<(Vec<i32>, bool, StreamingTelemetryFields)>
+    where
+        F: FnMut(
+            i32,
+            &str,
+            &mut StreamingTelemetry,
+        ) -> Result<(), crate::runtime_adapter::llm::StreamingError>,
+    {
+        xybrid_trace::add_metadata("tokens_in", prepared.prompt_token_count.to_string());
+        let mut tel = StreamingTelemetry::new(prepared.prompt_token_count);
+        let (output_tokens, stopped_by_callback) = xybrid_llama::generate_streaming(
+            context,
+            model,
+            &prepared.tail,
+            config.max_tokens,
+            config.temperature,
+            config.top_p,
+            config.min_p,
+            config.top_k,
+            config.repetition_penalty,
+            stop_sequences,
+            |token_id, token_text| on_chunk(token_id, token_text, &mut tel),
+            prepared.n_past,
+        )?;
+        let fields = tel.finalize(output_tokens.len());
+        Ok((output_tokens, stopped_by_callback, fields))
+    }
+}
+
+#[cfg(feature = "llm-llamacpp-runtime")]
+struct PreparedGeneration {
+    prompt_token_count: usize,
+    tail: Vec<i32>,
+    n_past: usize,
+}
+
+#[cfg(feature = "llm-llamacpp-runtime")]
+enum PromptKind {
+    Chat,
+    Raw,
+}
+
+#[cfg(feature = "llm-llamacpp-runtime")]
+impl PromptKind {
+    fn input_too_long_message(&self, tokens_len: usize, n_ctx: usize) -> String {
+        match self {
+            Self::Chat => format!(
+                "Input too long: {} tokens exceeds context window of {} tokens. \
+                     Reduce the prompt size or conversation history.",
+                tokens_len, n_ctx
+            ),
+            Self::Raw => format!(
+                "Input too long: {} tokens exceeds context window of {} tokens.",
+                tokens_len, n_ctx
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "llm-llamacpp-runtime")]
+fn output_from_fields(
+    text: String,
+    tokens_generated: usize,
+    finish_reason: String,
+    fields: StreamingTelemetryFields,
+) -> GenerationOutput {
+    GenerationOutput {
+        text,
+        tokens_generated,
+        generation_time_ms: fields.generation_time_ms,
+        tokens_per_second: fields.tokens_per_second,
+        finish_reason,
+        ttft_ms: fields.ttft_ms,
+        mean_itl_ms: fields.mean_itl_ms,
+        p95_itl_ms: fields.p95_itl_ms,
+        emitted_chunks: fields.emitted_chunks,
+        inter_chunk_ms: fields.inter_chunk_ms,
+        decode_tps: fields.decode_tps,
+        prefill_tps: fields.prefill_tps,
+    }
 }
 
 /// Longest-common-prefix length between the cached tokens and the new
@@ -406,82 +532,42 @@ impl LlmBackend for LlamaCppBackend {
         config: &GenerationConfig,
     ) -> LlmResult<GenerationOutput> {
         self.with_model_and_context(|model, context| {
-            // Format messages into prompt using chat template
-            let prompt = xybrid_llama::format_chat(model, messages)?;
-
             // Tokenize with special token parsing enabled — the chat template contains
             // special tokens like <|im_start|>, <end_of_turn>, etc. that must be
             // recognized as their special token IDs, not as individual characters.
-            let tokens = model.tokenize_special(&prompt, true)?;
-
-            // Validate: input tokens must fit within the context window with room to generate
-            let n_ctx = context.n_ctx();
-            if tokens.len() >= n_ctx {
-                return Err(AdapterError::InvalidInput(format!(
-                    "Input too long: {} tokens exceeds context window of {} tokens. \
-                     Reduce the prompt size or conversation history.",
-                    tokens.len(),
-                    n_ctx
-                )));
-            }
-
-            // Multi-turn KV cache reuse: keep the prefix the previous call
-            // already prefilled, only re-prefill the diverged tail. On a
-            // first turn (or no shared prefix) `tail == tokens` and
-            // `n_past == 0` — same observable behaviour as the legacy
-            // unconditional clear, just without the duplicate work in
-            // multi-turn chats.
-            let (tail, n_past) =
-                self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
+            let tokens = Self::tokenize_chat_prompt(model, messages)?;
+            let prepared =
+                self.prepare_generation(model, context, tokens, config, PromptKind::Chat)?;
 
             // Per-chunk timestamps capture the streaming cadence for TTFT +
             // inter-token-latency telemetry. The closure is observation-only
             // (no external emission) — generation still returns the full
             // token vector like `llama_generate_with_stops` did. Keeps the
             // non-streaming contract of this function intact.
-            // Capture prompt size up-front so we can attach `tokens_in` to
-            // the active span after the loop. The executor opens
-            // `llm_inference_streaming` around this call, so this metadata
-            // lands on the same span as the rest of the LLM telemetry that
-            // `mirror_llm_metrics_to_span` writes post-return.
-            let prompt_token_count = tokens.len();
             // Surface prompt size on the active span BEFORE the streaming
             // loop, so cloud-fallback aborts (which short-circuit before
             // tel.finalize runs) still attach tokens_in to LocalAborted.
             // Without this the dashboard's TOKENS column shows `—` for the
             // local leg of every aborted run. Successful runs harmlessly
             // overwrite this with the same value after finalize.
-            xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
-            let mut tel = StreamingTelemetry::new(prompt_token_count);
-            let stream_result = xybrid_llama::generate_streaming(
+            let stream_result = Self::run_streaming_generation(
                 context,
                 model,
-                &tail,
-                config.max_tokens,
-                config.temperature,
-                config.top_p,
-                config.min_p,
-                config.top_k,
-                config.repetition_penalty,
+                &prepared,
+                config,
                 &config.stop_sequences,
-                |_token_id, _token_text| {
+                |_token_id, _token_text, tel| {
                     tel.record_chunk();
                     Ok(())
                 },
-                n_past,
             );
-            let (output_tokens, stopped_by_callback) = match stream_result {
+            let (output_tokens, stopped_by_callback, fields) = match stream_result {
                 Ok(result) => result,
                 Err(err) => {
                     self.reset_kv_cache_after_failed_stream(context);
-                    return Err(err.into());
+                    return Err(err);
                 }
             };
-
-            // Finalize telemetry before the post-processing work below so
-            // `generation_time_ms` reflects pure generation wallclock and is
-            // not inflated by detokenization / stop-sequence scanning.
-            let fields = tel.finalize(output_tokens.len());
 
             // Log generated token count and last few tokens for debugging
             log::debug!(
@@ -528,20 +614,12 @@ impl LlmBackend for LlamaCppBackend {
             // `llama_perf_context`'s `t_p_eval_ms` / `t_eval_ms`, so the
             // numbers are derived from per-chunk timestamps. See
             // `compute_streaming_fields` for formula semantics.
-            Ok(GenerationOutput {
+            Ok(output_from_fields(
                 text,
-                tokens_generated: output_tokens.len(),
-                generation_time_ms: fields.generation_time_ms,
-                tokens_per_second: fields.tokens_per_second,
+                output_tokens.len(),
                 finish_reason,
-                ttft_ms: fields.ttft_ms,
-                mean_itl_ms: fields.mean_itl_ms,
-                p95_itl_ms: fields.p95_itl_ms,
-                emitted_chunks: fields.emitted_chunks,
-                inter_chunk_ms: fields.inter_chunk_ms,
-                decode_tps: fields.decode_tps,
-                prefill_tps: fields.prefill_tps,
-            })
+                fields,
+            ))
         })
     }
 
@@ -552,56 +630,31 @@ impl LlmBackend for LlamaCppBackend {
             // collapse to single vocab IDs instead of 8-10 subword pieces each.
             // Matches llama-cpp-python's Llama.__call__ default (special=True),
             // which is required for NeuTTS-style codec TTS models.
-            let tokens = model.tokenize_special(prompt, true)?;
-
-            let n_ctx = context.n_ctx();
-            if tokens.len() >= n_ctx {
-                return Err(AdapterError::InvalidInput(format!(
-                    "Input too long: {} tokens exceeds context window of {} tokens.",
-                    tokens.len(),
-                    n_ctx
-                )));
-            }
-
-            // Multi-turn KV cache reuse: see prepare_kv_cache_and_get_tail
-            // for the LCP + truncate-or-clear contract. raw-prompt callers
-            // (TTS codec preludes etc.) typically don't share prefixes
-            // across calls so the LCP path will mostly clear-and-refill,
-            // but the unified helper keeps behaviour consistent.
-            let (tail, n_past) =
-                self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
+            let tokens = Self::tokenize_raw_prompt(model, prompt)?;
+            let prepared =
+                self.prepare_generation(model, context, tokens, config, PromptKind::Raw)?;
 
             // Use the streaming-capable API with an observation-only
             // callback so raw generation gets the same TTFT / ITL /
             // decode-tps telemetry as `generate()`. Stop handling stays
             // raw — only user-supplied sequences, no chat markers.
-            let prompt_token_count = tokens.len();
             // Surface prompt size on the active span BEFORE the streaming
             // loop, so cloud-fallback aborts (which short-circuit before
             // tel.finalize runs) still attach tokens_in to LocalAborted.
             // Without this the dashboard's TOKENS column shows `—` for the
             // local leg of every aborted run. Successful runs harmlessly
             // overwrite this with the same value after finalize.
-            xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
-            let mut tel = StreamingTelemetry::new(prompt_token_count);
-            let (output_tokens, stopped_by_callback) = xybrid_llama::generate_streaming(
+            let (output_tokens, stopped_by_callback, fields) = Self::run_streaming_generation(
                 context,
                 model,
-                &tail,
-                config.max_tokens,
-                config.temperature,
-                config.top_p,
-                config.min_p,
-                config.top_k,
-                config.repetition_penalty,
+                &prepared,
+                config,
                 &config.stop_sequences,
-                |_token_id, _token_text| {
+                |_token_id, _token_text, tel| {
                     tel.record_chunk();
                     Ok(())
                 },
-                n_past,
             )?;
-            let fields = tel.finalize(output_tokens.len());
 
             let text = model.detokenize(&output_tokens)?;
             let text = text.trim().to_string();
@@ -612,20 +665,12 @@ impl LlmBackend for LlamaCppBackend {
             }
             .to_string();
 
-            Ok(GenerationOutput {
+            Ok(output_from_fields(
                 text,
-                tokens_generated: output_tokens.len(),
-                generation_time_ms: fields.generation_time_ms,
-                tokens_per_second: fields.tokens_per_second,
+                output_tokens.len(),
                 finish_reason,
-                ttft_ms: fields.ttft_ms,
-                mean_itl_ms: fields.mean_itl_ms,
-                p95_itl_ms: fields.p95_itl_ms,
-                emitted_chunks: fields.emitted_chunks,
-                inter_chunk_ms: fields.inter_chunk_ms,
-                decode_tps: fields.decode_tps,
-                prefill_tps: fields.prefill_tps,
-            })
+                fields,
+            ))
         })
     }
 
@@ -639,28 +684,10 @@ impl LlmBackend for LlamaCppBackend {
         let mut on_token = on_token;
 
         self.with_model_and_context(|model, context| {
-            // Format messages into prompt using chat template
-            let prompt = xybrid_llama::format_chat(model, messages)?;
-
             // Tokenize with special token parsing — chat template contains special tokens
-            let tokens = model.tokenize_special(&prompt, true)?;
-
-            // Validate: input tokens must fit within the context window with room to generate
-            let n_ctx = context.n_ctx();
-            if tokens.len() >= n_ctx {
-                return Err(AdapterError::InvalidInput(format!(
-                    "Input too long: {} tokens exceeds context window of {} tokens. \
-                     Reduce the prompt size or conversation history.",
-                    tokens.len(),
-                    n_ctx
-                )));
-            }
-
-            // Multi-turn KV cache reuse: keep the prefix the previous call
-            // already prefilled, only re-prefill the diverged tail. See
-            // prepare_kv_cache_and_get_tail for the full contract.
-            let (tail, n_past) =
-                self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
+            let tokens = Self::tokenize_chat_prompt(model, messages)?;
+            let prepared =
+                self.prepare_generation(model, context, tokens, config, PromptKind::Chat)?;
 
             // Shared streaming state: telemetry recorder + text filter.
             // The filter owns cumulative text, think-block state, stop-pattern
@@ -673,31 +700,23 @@ impl LlmBackend for LlamaCppBackend {
             // `_BROKEN` variants are intentionally excluded from streaming
             // (they false-positive on legitimate text) — they only run in
             // the final cleanup pass below.
-            let prompt_token_count = tokens.len();
             // Surface prompt size on the active span BEFORE the streaming
             // loop, so cloud-fallback aborts (which short-circuit before
             // tel.finalize runs) still attach tokens_in to LocalAborted.
             // Without this the dashboard's TOKENS column shows `—` for the
             // local leg of every aborted run. Successful runs harmlessly
             // overwrite this with the same value after finalize.
-            xybrid_trace::add_metadata("tokens_in", prompt_token_count.to_string());
-            let mut tel = StreamingTelemetry::new(prompt_token_count);
             let stop_patterns = merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let mut filter = StreamingTextFilter::new(stop_patterns.clone());
             let mut token_index = 0usize;
 
-            let (output_tokens, stopped_by_callback) = xybrid_llama::generate_streaming(
+            let (output_tokens, stopped_by_callback, fields) = Self::run_streaming_generation(
                 context,
                 model,
-                &tail,
-                config.max_tokens,
-                config.temperature,
-                config.top_p,
-                config.min_p,
-                config.top_k,
-                config.repetition_penalty,
+                &prepared,
+                config,
                 &stop_patterns, // C layer uses these for early stop / llama_vocab_is_eog
-                |token_id, token_text| {
+                |token_id, token_text, tel| {
                     // Timestamp every C-layer callback, before any filtering —
                     // the stream itself is what's being measured, not the
                     // user-visible emission.
@@ -716,14 +735,7 @@ impl LlmBackend for LlamaCppBackend {
 
                     Ok(())
                 },
-                n_past,
             )?;
-
-            // Finalize telemetry before post-processing so `generation_time_ms`
-            // reflects only the generation loop, not detokenization or
-            // stop-pattern cleanup. Shared with `generate()` — see
-            // `compute_streaming_fields`.
-            let fields = tel.finalize(output_tokens.len());
 
             // Final-output cleanup: detokenize the full token vector (rather
             // than using the filter's cumulative text) as a belt-and-braces
@@ -761,20 +773,12 @@ impl LlmBackend for LlamaCppBackend {
                 let _ = on_token(final_partial);
             }
 
-            Ok(GenerationOutput {
+            Ok(output_from_fields(
                 text,
-                tokens_generated: output_tokens.len(),
-                generation_time_ms: fields.generation_time_ms,
-                tokens_per_second: fields.tokens_per_second,
+                output_tokens.len(),
                 finish_reason,
-                ttft_ms: fields.ttft_ms,
-                mean_itl_ms: fields.mean_itl_ms,
-                p95_itl_ms: fields.p95_itl_ms,
-                emitted_chunks: fields.emitted_chunks,
-                inter_chunk_ms: fields.inter_chunk_ms,
-                decode_tps: fields.decode_tps,
-                prefill_tps: fields.prefill_tps,
-            })
+                fields,
+            ))
         })
     }
 
@@ -801,68 +805,7 @@ impl LlmBackend for LlamaCppBackend {
     }
 }
 
-// =============================================================================
-// Stub implementation when llm-llamacpp feature is not enabled
-// =============================================================================
-
-#[cfg(not(feature = "llm-llamacpp"))]
-pub struct LlamaCppBackend;
-
-#[cfg(not(feature = "llm-llamacpp"))]
-impl LlamaCppBackend {
-    pub fn new() -> LlmResult<Self> {
-        Err(AdapterError::RuntimeError(
-            "llm-llamacpp feature not enabled. Build with --features llm-llamacpp".to_string(),
-        ))
-    }
-}
-
-#[cfg(not(feature = "llm-llamacpp"))]
-impl LlmBackend for LlamaCppBackend {
-    fn name(&self) -> &str {
-        "llama-cpp"
-    }
-
-    fn supported_formats(&self) -> Vec<&'static str> {
-        vec!["gguf"]
-    }
-
-    fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
-        Err(AdapterError::RuntimeError(
-            "llm-llamacpp feature not enabled".to_string(),
-        ))
-    }
-
-    fn is_loaded(&self) -> bool {
-        false
-    }
-
-    fn unload(&mut self) -> LlmResult<()> {
-        Ok(())
-    }
-
-    fn generate(
-        &self,
-        _messages: &[ChatMessage],
-        _config: &GenerationConfig,
-    ) -> LlmResult<GenerationOutput> {
-        Err(AdapterError::RuntimeError(
-            "llm-llamacpp feature not enabled".to_string(),
-        ))
-    }
-
-    fn generate_raw(
-        &self,
-        _prompt: &str,
-        _config: &GenerationConfig,
-    ) -> LlmResult<GenerationOutput> {
-        Err(AdapterError::RuntimeError(
-            "llm-llamacpp feature not enabled".to_string(),
-        ))
-    }
-}
-
-#[cfg(all(test, feature = "llm-llamacpp"))]
+#[cfg(all(test, feature = "llm-llamacpp-runtime"))]
 mod tests {
     use super::*;
 
@@ -956,54 +899,48 @@ mod tests {
 }
 
 // =============================================================================
-// Skeleton-tier stub
+// Non-runtime backend
 // =============================================================================
 //
-// Active when `llm-llamacpp` is on but `llm-llamacpp-runtime` is NOT.
-// Compiles on every target without cmake or a C++ toolchain, so
-// downstream consumers that want type-level access (or test seams) can
-// pull in `xybrid-core --features llm-llamacpp` without paying the
-// ~180 MB llama.cpp clone + link cost.
-//
-// Every fallible method returns `AdapterError::BackendNotLinked` with a
-// rebuild hint. Brief §4.5.
+// Active whenever the linked llama.cpp runtime is absent. With
+// `llm-llamacpp` enabled this is the constructible skeleton tier:
+// type-level access works, while fallible runtime paths return
+// `AdapterError::BackendNotLinked`. With neither feature enabled, the
+// same unit shape preserves the historical no-feature diagnostics while
+// pointing at the real runtime feature.
 
-/// Skeleton-tier `LlamaCppBackend`. Compiles without linking llama.cpp;
-/// every constructor / load / generate path fails with a
-/// [`AdapterError::BackendNotLinked`] suggesting `llm-llamacpp-runtime`
-/// as the rebuild flag.
-#[cfg(all(feature = "llm-llamacpp", not(feature = "llm-llamacpp-runtime")))]
+#[cfg(not(feature = "llm-llamacpp-runtime"))]
 pub struct LlamaCppBackend;
 
-#[cfg(all(feature = "llm-llamacpp", not(feature = "llm-llamacpp-runtime")))]
+#[cfg(not(feature = "llm-llamacpp-runtime"))]
 impl LlamaCppBackend {
     pub fn new() -> LlmResult<Self> {
-        Err(AdapterError::BackendNotLinked {
-            backend: "llamacpp",
-        })
+        #[cfg(feature = "llm-llamacpp")]
+        {
+            Ok(Self)
+        }
+        #[cfg(not(feature = "llm-llamacpp"))]
+        {
+            Err(llamacpp_runtime_unavailable())
+        }
     }
 }
 
-#[cfg(all(feature = "llm-llamacpp", not(feature = "llm-llamacpp-runtime")))]
+#[cfg(not(feature = "llm-llamacpp-runtime"))]
 impl Default for LlamaCppBackend {
     fn default() -> Self {
-        // Cannot infallibly construct — but the trait demands it. Panic
-        // here is acceptable in the skeleton tier: any path that reaches
-        // `Default::default()` has already taken a wrong turn (real call
-        // sites construct via `LlamaCppBackend::new()` and propagate the
-        // typed `BackendNotLinked` error).
-        panic!("llamacpp skeleton tier: rebuild with `llm-llamacpp-runtime` to construct LlamaCppBackend");
+        Self
     }
 }
 
-#[cfg(all(feature = "llm-llamacpp", not(feature = "llm-llamacpp-runtime")))]
+#[cfg(not(feature = "llm-llamacpp-runtime"))]
 impl LlmBackend for LlamaCppBackend {
     fn name(&self) -> &str {
         "llama-cpp"
     }
 
     fn wire_label(&self) -> Option<&'static str> {
-        Some("llamacpp")
+        llamacpp_non_runtime_wire_label()
     }
 
     fn supported_formats(&self) -> Vec<&'static str> {
@@ -1011,9 +948,7 @@ impl LlmBackend for LlamaCppBackend {
     }
 
     fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
-        Err(AdapterError::BackendNotLinked {
-            backend: "llamacpp",
-        })
+        Err(llamacpp_runtime_unavailable())
     }
 
     fn is_loaded(&self) -> bool {
@@ -1029,9 +964,7 @@ impl LlmBackend for LlamaCppBackend {
         _messages: &[ChatMessage],
         _config: &GenerationConfig,
     ) -> LlmResult<GenerationOutput> {
-        Err(AdapterError::BackendNotLinked {
-            backend: "llamacpp",
-        })
+        Err(llamacpp_runtime_unavailable())
     }
 
     fn generate_raw(
@@ -1039,8 +972,31 @@ impl LlmBackend for LlamaCppBackend {
         _prompt: &str,
         _config: &GenerationConfig,
     ) -> LlmResult<GenerationOutput> {
-        Err(AdapterError::BackendNotLinked {
-            backend: "llamacpp",
-        })
+        Err(llamacpp_runtime_unavailable())
     }
+}
+
+#[cfg(all(feature = "llm-llamacpp", not(feature = "llm-llamacpp-runtime")))]
+fn llamacpp_runtime_unavailable() -> AdapterError {
+    AdapterError::BackendNotLinked {
+        backend: "llamacpp",
+    }
+}
+
+#[cfg(all(feature = "llm-llamacpp", not(feature = "llm-llamacpp-runtime")))]
+fn llamacpp_non_runtime_wire_label() -> Option<&'static str> {
+    Some("llamacpp")
+}
+
+#[cfg(not(feature = "llm-llamacpp"))]
+fn llamacpp_runtime_unavailable() -> AdapterError {
+    AdapterError::RuntimeError(
+        "llm-llamacpp-runtime feature not enabled. Build with --features llm-llamacpp-runtime"
+            .to_string(),
+    )
+}
+
+#[cfg(not(feature = "llm-llamacpp"))]
+fn llamacpp_non_runtime_wire_label() -> Option<&'static str> {
+    None
 }

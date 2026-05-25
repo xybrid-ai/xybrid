@@ -76,15 +76,15 @@
 
 // llm-mistral uses x86 AVX2/FP16 intrinsics that cause SIGILL on Android ARM devices
 // without ARMv8.2-A FP16 extensions (which most devices lack).
-// Use llm-llamacpp instead - it has runtime SIMD detection.
+// Use llm-llamacpp-runtime instead - it has runtime SIMD detection.
 #[cfg(all(feature = "llm-mistral", target_os = "android"))]
 compile_error!(
     "Invalid feature combination: `llm-mistral` is not supported on Android.\n\n\
     Reason: mistral.rs uses x86 AVX2/FP16 intrinsics that cause SIGILL on ARM devices \
     without ARMv8.2-A FP16 extensions (most Android devices lack this).\n\n\
-    Solution: Use `llm-llamacpp` instead. It performs runtime SIMD detection and works \
+    Solution: Use `llm-llamacpp-runtime` instead. It performs runtime SIMD detection and works \
     on all Android devices.\n\n\
-    Change: --features llm-mistral -> --features llm-llamacpp"
+    Change: --features llm-mistral -> --features llm-llamacpp-runtime"
 );
 
 // ort-download and ort-dynamic are mutually exclusive ORT loading strategies.

@@ -40,10 +40,10 @@ This document provides a comprehensive reference for all feature flags, platform
   vs `llm-mlx-runtime` pattern (PR xybrid#124):
   - **`llm-llamacpp`** (skeleton): exposes `LlamaCppBackend` types on every
     target without cmake / a C++ toolchain / a llama.cpp source clone.
-    `LlamaCppBackend::new()` returns
-    `AdapterError::BackendNotLinked { backend: "llamacpp" }` at runtime
-    with a "rebuild with `llm-llamacpp-runtime`" hint. For Linux CI
-    runners and downstreams that want type access only.
+    `LlamaCppBackend::new()` constructs a type-only backend; runtime methods
+    return `AdapterError::BackendNotLinked { backend: "llamacpp" }` with a
+    "rebuild with `llm-llamacpp-runtime`" hint. For Linux CI runners and
+    downstreams that want type access only.
   - **`llm-llamacpp-runtime`** (runtime): activates `llama-cpp-sys/bindings`
     (the cmake build of llama.cpp + the `wrapper.cpp` shim) and
     `xybrid-llama/bindings` (safe RAII wrappers). All four `platform-*`
@@ -164,7 +164,7 @@ The following types and modules are conditionally compiled based on feature flag
 | `ChatMessage`, `GenerationConfig`, `GenerationOutput`, `LlmBackend`, `LlmConfig`, `LlmResult`, `LlmRuntimeAdapter` | `feature = "llm-mistral" OR feature = "llm-llamacpp"` |
 | `MistralBackend` | `feature = "llm-mistral"` |
 | `LlamaCppBackend` | `feature = "llm-llamacpp"` |
-| `llama_log_get_verbosity`, `llama_log_set_verbosity` | `feature = "llm-llamacpp"` |
+| `llama_log_get_verbosity`, `llama_log_set_verbosity` | `feature = "llm-llamacpp-runtime"` |
 
 ---
 
@@ -174,7 +174,7 @@ The following feature combinations are invalid and should produce compile-time e
 
 | Combination | Reason | Recommended Alternative |
 |-------------|--------|------------------------|
-| `llm-mistral` on `target_os = "android"` | SIGILL crash on devices without ARMv8.2-A FP16 | Use `llm-llamacpp` instead |
+| `llm-mistral` on `target_os = "android"` | SIGILL crash on devices without ARMv8.2-A FP16 | Use `llm-llamacpp-runtime` or a platform preset instead |
 | `ort-download` AND `ort-dynamic` | Mutually exclusive ORT loading strategies | Choose one based on platform |
 | `candle-metal` on non-Apple targets | Metal is Apple-only | Use `candle` (CPU) or `candle-cuda` |
 | `candle-cuda` on Apple targets | CUDA not available on Apple | Use `candle-metal` |
@@ -265,9 +265,9 @@ Xybrid uses a **two-layer build architecture**:
 - Linker configuration
 - CMake invocation
 
-### Layer 2: build.rs (Compilation)
+### Layer 2: llama-cpp-sys build.rs (Compilation)
 
-**Location**: `crates/xybrid-core/build.rs`
+**Location**: `crates/llama-cpp-sys/build.rs`
 
 **Responsibilities**:
 - Compiling vendored llama.cpp via CMake
@@ -276,8 +276,8 @@ Xybrid uses a **two-layer build architecture**:
 - Setting `cargo:rustc-link-lib` and `cargo:rustc-link-search`
 
 **Triggered by**:
-- `#[cfg(feature = "llm-llamacpp")]` in the build script
-- Cargo's build process when xybrid-core is compiled
+- The `llama-cpp-sys/bindings` feature, reached through `xybrid-core/llm-llamacpp-runtime`
+- Cargo's build process when the runtime tier is compiled
 
 ### NDK Detection Duplication
 
@@ -286,7 +286,7 @@ Both xtask and build.rs need to detect the Android NDK:
 | Component | Purpose | Environment Variables Checked |
 |-----------|---------|------------------------------|
 | **xtask** | Locate NDK for `cargo-ndk` invocation | `ANDROID_NDK_HOME`, checks for `cargo ndk --version` |
-| **build.rs** | Locate NDK for CMake toolchain file | `ANDROID_NDK_HOME`, `NDK_HOME`, `CC_*`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, common paths |
+| **llama-cpp-sys build.rs** | Locate NDK for CMake toolchain file | `ANDROID_NDK_HOME`, `NDK_HOME`, `CC_*`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, common paths |
 
 This duplication exists because:
 1. xtask runs **before** cargo builds the crate
@@ -312,14 +312,14 @@ User runs: cargo xtask build-android --release
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ build.rs (Compilation) - runs for each target               │
+│ llama-cpp-sys build.rs (Compilation) - runs for each target │
 ├─────────────────────────────────────────────────────────────┤
-│ 1. Check #[cfg(feature = "llm-llamacpp")]                   │
+│ 1. Runs when llama-cpp-sys/bindings is enabled              │
 │ 2. If enabled:                                              │
 │    a. Find Android NDK (from CC env var or ANDROID_NDK_HOME)│
 │    b. Configure CMake with NDK toolchain file               │
 │    c. Build llama.cpp static libraries                      │
-│    d. Build llama_wrapper.cpp                               │
+│    d. Build wrapper.cpp                                     │
 │    e. Output cargo:rustc-link-lib directives                │
 │ 3. Cargo links everything together                          │
 └─────────────────────────────────────────────────────────────┘
@@ -338,7 +338,7 @@ cargo check -p xybrid-core --no-default-features --features ort-download
 ### macOS Development
 
 ```bash
-cargo build -p xybrid-core --features "ort-download,ort-coreml,llm-llamacpp"
+cargo build -p xybrid-core --features "ort-download,ort-coreml,llm-llamacpp-runtime"
 ```
 
 ### Android Build
@@ -352,5 +352,5 @@ cargo xtask build-android --release
 
 ```bash
 # macOS only (includes Metal features)
-cargo check -p xybrid-core --features "ort-download,ort-coreml,candle-metal,llm-llamacpp"
+cargo check -p xybrid-core --features "ort-download,ort-coreml,candle-metal,llm-llamacpp-runtime"
 ```
