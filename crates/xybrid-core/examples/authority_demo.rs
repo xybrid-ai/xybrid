@@ -157,6 +157,7 @@ fn demo_single_model(authority: &LocalAuthority, model_id: &str, metrics: &Devic
         metrics: metrics.clone(),
         resource_monitor: ResourceMonitor::global(),
         explicit_target: None, // Let authority decide
+        local_availability: None,
         device_class: None,
         device_class_schema_version: None,
     };
@@ -213,6 +214,7 @@ fn demo_pipeline(authority: &LocalAuthority, metrics: &DeviceMetrics) {
             metrics: metrics.clone(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
+            local_availability: None,
             device_class: None,
             device_class_schema_version: None,
         };
@@ -257,6 +259,7 @@ fn demo_explicit_target(authority: &LocalAuthority, metrics: &DeviceMetrics) {
         metrics: metrics.clone(),
         resource_monitor: ResourceMonitor::global(),
         explicit_target: None, // Auto-routing
+        local_availability: None,
         device_class: None,
         device_class_schema_version: None,
     };
@@ -273,6 +276,7 @@ fn demo_explicit_target(authority: &LocalAuthority, metrics: &DeviceMetrics) {
         metrics: metrics.clone(),
         resource_monitor: ResourceMonitor::global(),
         explicit_target: Some(ExecutionTarget::Device), // Force on-device
+        local_availability: None,
         device_class: None,
         device_class_schema_version: None,
     };

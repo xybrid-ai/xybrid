@@ -321,37 +321,10 @@ impl OrchestrationAuthority for LocalAuthority {
     }
 
     fn resolve_target_with_feedback(&self, context: &StageContext) -> TargetResolution {
-        // If explicit target specified in pipeline, use it
-        if let Some(explicit) = &context.explicit_target {
-            let target = match explicit {
-                ExecutionTarget::Device => ResolvedTarget::Device,
-                ExecutionTarget::Server => ResolvedTarget::Server {
-                    endpoint: "https://api.xybrid.dev".to_string(),
-                },
-                ExecutionTarget::Cloud => ResolvedTarget::Cloud {
-                    provider: "xybrid".to_string(),
-                },
-                ExecutionTarget::Auto => {
-                    // Fall through to routing engine
-                    return self.resolve_with_routing_engine(context);
-                }
-            };
-
-            let metrics = self.routing_metrics(context);
-            return TargetResolution::new(
-                AuthorityDecision {
-                    result: target,
-                    reason: format!("Explicit target from pipeline YAML: {:?}", explicit),
-                    source: DecisionSource::Local,
-                    confidence: 1.0,
-                    timestamp_ms: now_ms(),
-                },
-                context.model_id.clone(),
-                Some(SignalContext::from_metrics(&metrics)),
-            );
+        if let Some(resolution) = self.explicit_target_resolution(context) {
+            return resolution;
         }
 
-        // Otherwise, use routing engine heuristics
         self.resolve_with_routing_engine(context)
     }
 
@@ -467,12 +440,47 @@ impl LocalAuthority {
         }
     }
 
-    /// Internal: resolve target using the routing engine.
-    fn resolve_with_routing_engine(&self, context: &StageContext) -> TargetResolution {
-        let availability = LocalAvailability {
-            local_model_exists: self.check_model_exists(&context.model_id),
+    fn explicit_target_resolution(&self, context: &StageContext) -> Option<TargetResolution> {
+        let explicit = context.explicit_target.as_ref()?;
+        let target = match explicit {
+            ExecutionTarget::Device => ResolvedTarget::Device,
+            ExecutionTarget::Server => ResolvedTarget::Server {
+                endpoint: "https://api.xybrid.dev".to_string(),
+            },
+            ExecutionTarget::Cloud => ResolvedTarget::Cloud {
+                provider: "xybrid".to_string(),
+            },
+            ExecutionTarget::Auto => return None,
         };
 
+        let metrics = self.routing_metrics(context);
+        Some(TargetResolution::new(
+            AuthorityDecision {
+                result: target,
+                reason: format!("Explicit target from pipeline YAML: {:?}", explicit),
+                source: DecisionSource::Local,
+                confidence: 1.0,
+                timestamp_ms: now_ms(),
+            },
+            context.model_id.clone(),
+            Some(SignalContext::from_metrics(&metrics)),
+        ))
+    }
+
+    /// Internal: resolve target using the routing engine.
+    fn resolve_with_routing_engine(&self, context: &StageContext) -> TargetResolution {
+        let availability = context
+            .local_availability
+            .clone()
+            .unwrap_or_else(|| LocalAvailability::new(self.check_model_exists(&context.model_id)));
+        self.resolve_with_routing_engine_and_availability(context, availability)
+    }
+
+    fn resolve_with_routing_engine_and_availability(
+        &self,
+        context: &StageContext,
+        availability: LocalAvailability,
+    ) -> TargetResolution {
         // Create a minimal envelope for policy check
         let envelope = Envelope::new(context.input_kind.clone());
         let live_metrics = self.routing_metrics(context);
@@ -634,6 +642,7 @@ signature: "test-deny-all"
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
+            local_availability: None,
             device_class: None,
             device_class_schema_version: None,
         }
@@ -672,6 +681,7 @@ signature: "test-deny-all"
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: Some(ExecutionTarget::Device),
+            local_availability: None,
             device_class: None,
             device_class_schema_version: None,
         };
@@ -691,12 +701,25 @@ signature: "test-deny-all"
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: Some(ExecutionTarget::Cloud),
+            local_availability: None,
             device_class: None,
             device_class_schema_version: None,
         };
 
         let decision = authority.resolve_target(&context);
         assert!(matches!(decision.result, ResolvedTarget::Cloud { .. }));
+    }
+
+    #[test]
+    fn caller_local_availability_overrides_cache_provider() {
+        let authority = LocalAuthority::with_cache_provider(Arc::new(CachedProvider));
+        let mut context = text_context();
+        context.local_availability = Some(LocalAvailability::new(false));
+
+        let decision = authority.resolve_target(&context);
+
+        assert!(matches!(decision.result, ResolvedTarget::Cloud { .. }));
+        assert!(decision.reason.contains("model_unavailable"));
     }
 
     #[test]

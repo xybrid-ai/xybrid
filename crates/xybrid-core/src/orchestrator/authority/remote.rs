@@ -211,7 +211,7 @@ impl RemoteAuthority {
 
     fn target_cache_key(context: &StageContext, metrics: &DeviceMetrics) -> String {
         format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             context.stage_id,
             context.model_id,
             context.input_kind.as_str(),
@@ -229,7 +229,12 @@ impl RemoteAuthority {
                 .explicit_target
                 .as_ref()
                 .map(|target| target.to_string())
-                .unwrap_or_else(|| "auto".to_string())
+                .unwrap_or_else(|| "auto".to_string()),
+            context
+                .local_availability
+                .as_ref()
+                .map(|availability| availability.local_model_exists.to_string())
+                .unwrap_or_else(|| "unknown-local".to_string())
         )
     }
 
@@ -259,6 +264,12 @@ impl RemoteAuthority {
             }
             if let Some(explicit_target) = &context.explicit_target {
                 qp.append_pair("explicit_target", &explicit_target.to_string());
+            }
+            if let Some(availability) = &context.local_availability {
+                qp.append_pair(
+                    "local_model_exists",
+                    &availability.local_model_exists.to_string(),
+                );
             }
         }
         Some(url.to_string())
@@ -425,6 +436,7 @@ mod tests {
     use crate::context::DeviceMetrics;
     use crate::device::ResourceMonitor;
     use crate::ir::{Envelope, EnvelopeKind};
+    use crate::orchestrator::routing_engine::LocalAvailability;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
@@ -446,6 +458,7 @@ mod tests {
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
+            local_availability: None,
             device_class: None,
             device_class_schema_version: None,
         }
@@ -642,6 +655,18 @@ mod tests {
     }
 
     #[test]
+    fn target_advice_url_includes_local_availability_when_known() {
+        let authority = RemoteAuthority::new("https://api.xybrid.dev");
+        let mut context = default_context("available");
+        context.local_availability = Some(LocalAvailability::new(false));
+        let url = authority
+            .target_advice_url(&context, &context.metrics)
+            .expect("routing advice url");
+
+        assert!(url.contains("local_model_exists=false"), "{url}");
+    }
+
+    #[test]
     fn target_cache_key_differs_by_device_class_and_schema() {
         let a = context_with_device_class("cached-class", "iphone-15-pro");
         let b = context_with_device_class("cached-class", "iphone-15");
@@ -768,6 +793,19 @@ mod tests {
         let cloud_key = RemoteAuthority::target_cache_key(&cloud_context, &cloud_context.metrics);
 
         assert_ne!(auto_key, cloud_key);
+    }
+
+    #[test]
+    fn target_cache_key_differs_by_local_availability() {
+        let mut available = context_with_device_class("cached-availability", "iphone-15-pro");
+        available.local_availability = Some(LocalAvailability::new(true));
+        let mut unavailable = available.clone();
+        unavailable.local_availability = Some(LocalAvailability::new(false));
+
+        let available_key = RemoteAuthority::target_cache_key(&available, &available.metrics);
+        let unavailable_key = RemoteAuthority::target_cache_key(&unavailable, &unavailable.metrics);
+
+        assert_ne!(available_key, unavailable_key);
     }
 
     #[test]

@@ -6,21 +6,32 @@
 //!
 //! # Example (Simple - just run)
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{PipelineRef, Envelope};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::PipelineRef;
+//! use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 //!
+//! # let yaml_content = "stages: []";
+//! # let audio_bytes: Vec<u8> = vec![];
 //! // Load and run in a few lines
 //! let pipeline = PipelineRef::from_yaml(yaml_content)?.load()?;
 //! pipeline.load_models()?;  // Optional: explicit preloading
-//! let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+//! let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+//! let result = pipeline.run(&envelope)?;
 //! println!("Pipeline completed in {}ms", result.total_latency_ms);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Example (Staged - inspect and preload)
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{PipelineRef, Envelope};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::PipelineRef;
+//! use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 //!
+//! # let yaml_content = "stages: []";
+//! # let audio_bytes: Vec<u8> = vec![];
 //! // Step 1: Parse YAML (instant, no network)
 //! let ref_ = PipelineRef::from_yaml(yaml_content)?;
 //! println!("Stages: {:?}", ref_.stage_ids());
@@ -35,7 +46,11 @@
 //! })?;
 //!
 //! // Step 4: Run
-//! let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+//! let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+//! let result = pipeline.run(&envelope)?;
+//! # let _ = result;
+//! # Ok(())
+//! # }
 //! ```
 
 // ============================================================================
@@ -60,6 +75,8 @@ use crate::result::OutputType;
 use crate::run_options::RunOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -93,14 +110,19 @@ pub type PipelineResult<T> = Result<T, SdkError>;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 /// use xybrid_sdk::PipelineRef;
 ///
+/// # let yaml = "stages: []";
 /// let ref_ = PipelineRef::from_yaml(yaml)?;
 /// println!("Pipeline: {:?}", ref_.name());
 /// println!("Stages: {:?}", ref_.stage_ids());
 ///
 /// let pipeline = ref_.load()?;
+/// # let _ = pipeline;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct PipelineRef {
@@ -358,6 +380,16 @@ impl CacheProvider for StreamingFastPathCacheProvider {
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn stage_descriptor_with_bundle_path(
+    stage_descriptor: &StageDescriptor,
+    bundle_path: &Path,
+) -> StageDescriptor {
+    let mut stage_descriptor = stage_descriptor.clone();
+    stage_descriptor.bundle_path = Some(bundle_path.to_string_lossy().to_string());
+    stage_descriptor
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 #[derive(Debug, Clone)]
 struct StreamingFastPathRoute {
     policy_allowed: bool,
@@ -393,6 +425,7 @@ fn resolve_streaming_fast_path_route(
         metrics: metrics.clone(),
         resource_monitor: ResourceMonitor::global(),
         explicit_target: stage.target.clone(),
+        local_availability: Some(LocalAvailability::new(stage.is_locally_runnable())),
         device_class: Some(metrics.canonical_device_class()),
         device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
     };
@@ -405,6 +438,7 @@ fn resolve_streaming_fast_path_route(
     let hint = resolution.local_reliability_hint.unwrap_or_default();
     let can_stream_locally = policy_allowed
         && matches!(resolution.decision.result, ResolvedTarget::Device)
+        && stage.is_locally_runnable()
         && !policy_transform;
 
     StreamingFastPathRoute {
@@ -516,9 +550,13 @@ struct PipelineHandle {
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// use xybrid_sdk::{PipelineRef, Envelope};
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use xybrid_sdk::PipelineRef;
+/// use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 ///
+/// # let yaml = "stages: []";
+/// # let audio_bytes: Vec<u8> = vec![];
 /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
 ///
 /// // Inspect the pipeline
@@ -530,7 +568,10 @@ struct PipelineHandle {
 /// pipeline.load_models()?;
 ///
 /// // Run inference
-/// let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+/// let result = pipeline.run(&Envelope::new(EnvelopeKind::Audio(audio_bytes)))?;
+/// # let _ = result;
+/// # Ok(())
+/// # }
 /// ```
 pub struct Pipeline {
     name: Option<String>,
@@ -853,7 +894,7 @@ impl Pipeline {
             .stages
             .iter()
             .enumerate()
-            .filter(|(_, s)| matches!(s.status, StageStatus::NeedsDownload))
+            .filter(|(_, s)| matches!(s.status, StageStatus::Cached | StageStatus::NeedsDownload))
             .filter_map(|(idx, s)| {
                 s.model_id.as_ref().map(|m| {
                     (
@@ -862,17 +903,35 @@ impl Pipeline {
                         m.clone(),
                         s.download_bytes.unwrap_or(0),
                         s.target.clone(),
+                        s.status.clone(),
                     )
                 })
             })
             .collect();
 
-        let total_stages = stages_to_fetch.len();
+        let total_stages = stages_to_fetch
+            .iter()
+            .filter(|(_, _, _, _, _, status)| matches!(status, StageStatus::NeedsDownload))
+            .count();
         let mut skipped_count = 0;
 
-        for (stage_idx, (_, stage_id, model_id, total_bytes, stage_target)) in
-            stages_to_fetch.into_iter().enumerate()
-        {
+        let mut download_stage_idx = 0;
+        for (_, stage_id, model_id, total_bytes, stage_target, stage_status) in stages_to_fetch {
+            if matches!(stage_status, StageStatus::Cached) {
+                let model_dir = client.fetch_extracted(&model_id, None, |_| {})?;
+                let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+                handle.availability_map.insert(model_id.clone(), true);
+                handle.availability_map.insert(stage_id.clone(), true);
+                handle
+                    .bundle_paths
+                    .insert(stage_id.clone(), model_dir.clone());
+                handle.bundle_paths.insert(model_id, model_dir);
+                continue;
+            }
+
+            let stage_idx = download_stage_idx;
+            download_stage_idx += 1;
+
             // Convert StageTarget to ExecutionTarget for authority
             // - Device: user explicitly wants local, authority should respect it
             // - Auto: let authority decide based on device conditions
@@ -892,6 +951,7 @@ impl Pipeline {
                 metrics: metrics.clone(),
                 resource_monitor: ResourceMonitor::global(),
                 explicit_target,
+                local_availability: None,
                 device_class: Some(metrics.canonical_device_class()),
                 device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
             };
@@ -968,13 +1028,21 @@ impl Pipeline {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::PipelineRef;
+    /// # use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+    /// # let yaml = "stages: []";
     /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
     /// pipeline.load_models()?;  // Download models
     /// pipeline.warmup()?;       // Pre-load into memory
     ///
     /// // First inference is now fast
-    /// let result = pipeline.run(&Envelope::text("Hello"))?;
+    /// let envelope = Envelope::new(EnvelopeKind::Text("Hello".into()));
+    /// let result = pipeline.run(&envelope)?;
+    /// # let _ = result;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn warmup(&self) -> PipelineResult<()> {
         log::info!(target: "xybrid_sdk", "Warming up pipeline: {:?}", self.name);
@@ -1011,7 +1079,10 @@ impl Pipeline {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # async fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::PipelineRef;
+    /// # let yaml = "stages: []";
     /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
     /// pipeline.load_models()?;
     ///
@@ -1025,6 +1096,8 @@ impl Pipeline {
     ///
     /// // Wait for warmup if needed
     /// warmup_handle.await??;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn warmup_async(&self) -> PipelineResult<()> {
         log::info!(target: "xybrid_sdk", "Warming up pipeline (async): {:?}", self.name);
@@ -1088,7 +1161,10 @@ impl Pipeline {
                 desc.bundle_path = Some(bundle_path.to_string_lossy().to_string());
             }
         }
-        let availability_map = handle.availability_map.clone();
+        let availability_map: HashMap<String, bool> = stage_descriptors
+            .iter()
+            .map(|stage| (stage.name.clone(), stage.is_locally_runnable()))
+            .collect();
         drop(handle);
 
         // Collect runtime metrics from caller options when provided.
@@ -1237,7 +1313,12 @@ impl Pipeline {
                 }
             }
 
-            (descriptors, handle.availability_map.clone())
+            let availability_map: HashMap<String, bool> = descriptors
+                .iter()
+                .map(|stage| (stage.name.clone(), stage.is_locally_runnable()))
+                .collect();
+
+            (descriptors, availability_map)
         };
 
         let envelope_clone = envelope.clone();
@@ -1392,11 +1473,18 @@ impl Xybrid {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// use xybrid_sdk::{Xybrid, Envelope};
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_sdk::Xybrid;
+    /// use xybrid_sdk::ir::{Envelope, EnvelopeKind};
     ///
-    /// let result = Xybrid::run_pipeline(yaml_content, &Envelope::audio(audio_bytes))?;
+    /// # let yaml_content = "stages: []";
+    /// # let audio_bytes: Vec<u8> = vec![];
+    /// let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+    /// let result = Xybrid::run_pipeline(yaml_content, &envelope)?;
     /// println!("Output: {:?}", result.text());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_pipeline(
         yaml: &str,
@@ -1436,19 +1524,27 @@ impl Xybrid {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// use xybrid_sdk::{Xybrid, Envelope, PartialToken};
+    /// ```no_run
+    /// # #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_sdk::{Xybrid, PartialToken};
+    /// use xybrid_sdk::ir::{Envelope, EnvelopeKind};
     /// use std::io::Write;
     ///
+    /// # let yaml_content = "stages: []";
+    /// let envelope = Envelope::new(EnvelopeKind::Text("Hello, how are you?".into()));
     /// let result = Xybrid::run_pipeline_streaming(
     ///     yaml_content,
-    ///     &Envelope::text("Hello, how are you?"),
+    ///     &envelope,
     ///     Box::new(|token: PartialToken| {
     ///         print!("{}", token.token);
     ///         std::io::stdout().flush()?;
     ///         Ok(())
     ///     }),
     /// )?;
+    /// # let _ = result;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Note
@@ -1494,10 +1590,11 @@ impl Xybrid {
         // For streaming, we need to identify if there's an LLM stage and execute it with streaming
         // For now, support single-stage LLM pipelines
         if handle.stage_descriptors.len() == 1 {
-            let stage_descriptor = handle.stage_descriptors[0].clone();
-            let stage_name = stage_descriptor.name.clone();
+            let stage_name = handle.stage_descriptors[0].name.clone();
             if let Some(bundle_path) = handle.bundle_paths.get(&stage_name) {
                 let bundle_path = bundle_path.clone(); // Clone to avoid borrow issues
+                let stage_descriptor =
+                    stage_descriptor_with_bundle_path(&handle.stage_descriptors[0], &bundle_path);
                 let metadata_path = bundle_path.join("model_metadata.json");
                 if metadata_path.exists() {
                     let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
@@ -1735,6 +1832,7 @@ stages:
         ));
         let stage = StageDescriptor::new("llm")
             .with_model(model_id)
+            .with_bundle_path(tempdir.path().to_string_lossy().to_string())
             .with_target(ExecutionTarget::Device);
         let envelope = Envelope::new(EnvelopeKind::Text("prompt".to_string()));
         let metrics = DeviceMetrics::default();
@@ -1747,6 +1845,43 @@ stages:
         assert_eq!(route.target, "local");
         assert_eq!(route.sample_size, 0);
         assert!(route.reason.contains("Explicit target"));
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_descriptor_uses_loaded_bundle_path() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let stage = StageDescriptor::new("llm")
+            .with_model("streaming-local-model")
+            .with_target(ExecutionTarget::Device);
+
+        assert!(!stage.is_locally_runnable());
+
+        let stage = stage_descriptor_with_bundle_path(&stage, tempdir.path());
+
+        assert!(stage.is_locally_runnable());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_network_target_disables_local_streaming() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let model_id = "streaming-cloud-model";
+        let authority = LocalAuthority::with_cache_provider(Arc::new(
+            StreamingFastPathCacheProvider::new(model_id, tempdir.path().to_path_buf()),
+        ));
+        let stage = StageDescriptor::new("llm")
+            .with_model(model_id)
+            .with_bundle_path(tempdir.path().to_string_lossy().to_string())
+            .with_target(ExecutionTarget::Cloud);
+        let envelope = Envelope::new(EnvelopeKind::Text("prompt".to_string()));
+        let metrics = DeviceMetrics::default();
+
+        let route =
+            resolve_streaming_fast_path_route(&authority, &stage, model_id, &envelope, &metrics);
+
+        assert!(!route.can_stream_locally);
+        assert_eq!(route.target, "cloud");
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]

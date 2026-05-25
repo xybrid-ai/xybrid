@@ -1419,6 +1419,70 @@ fn xybrid_model_warmup_emits_one_model_warmup_event() {
     );
 }
 
+/// Regression guard: `XybridModel::warmup` must drain the global span
+/// collector when it publishes — otherwise the executor spans opened
+/// during warmup (`execute:<model>`, `llm_inference`) stay in the
+/// collector and leak into the snapshot of the next event the SDK
+/// publishes. On a real CLI REPL session that means the first chat
+/// turn's `ModelComplete` snapshot captures three spans (two leaked
+/// warmup spans + one real chat span) and the warmup's own
+/// `ModelWarmup` event reaches the dashboard with no real spans —
+/// the dashboard falls back to its synthesized placeholder
+/// flamegraph.
+///
+/// The fix is that `ModelWarmup` is in the span-bearing event-type
+/// list inside `publish_telemetry_event::snapshot_spans_into_event`
+/// (and the matching gate in `convert_to_platform_event`). This test
+/// asserts the observable consequence: the global collector is empty
+/// after `model.warmup()` returns.
+#[cfg(feature = "llm-llamacpp")]
+#[test]
+fn xybrid_model_warmup_drains_span_collector_to_avoid_leak_into_next_event() {
+    use xybrid_core::tracing as core_tracing;
+
+    let _serial = listener_test_lock();
+
+    let Some(model_dir) = model_fixtures::model_or_skip("qwen2.5-0.5b-instruct") else {
+        return;
+    };
+
+    // Need tracing enabled for the executor's SpanGuards to actually
+    // open spans, and for `snapshot_spans_into_event` to consider this
+    // event span-bearing. Reset first so leftover spans from earlier
+    // tests don't pollute the assertion.
+    core_tracing::init_tracing(true);
+    core_tracing::reset_tracing();
+
+    let (tx, _rx) = mpsc::channel::<TelemetryEvent>();
+    register_telemetry_sender(tx);
+
+    let model = xybrid_sdk::ModelLoader::from_directory(&model_dir)
+        .expect("loader should build from directory")
+        .load()
+        .expect("qwen2.5-0.5b-instruct should load");
+
+    model.warmup().expect("warmup should succeed");
+
+    // After publish, the collector must be empty. Any leftover span
+    // here would attach to whatever event publishes next, polluting
+    // its trace detail on the dashboard.
+    let after = core_tracing::get_stages_json();
+    let leftover_spans = after
+        .get("spans")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    assert_eq!(
+        leftover_spans, 0,
+        "global span collector must be drained after `XybridModel::warmup` publishes \
+         its `ModelWarmup` event — leftover spans leak into the next event's \
+         snapshot. Got {} stranded spans: {}",
+        leftover_spans, after
+    );
+
+    core_tracing::reset_tracing();
+}
+
 /// Smoke test: MNIST inference works without telemetry (no env vars needed).
 /// Ensures the model fixture is valid and the execution pipeline doesn't panic.
 #[test]
