@@ -1,0 +1,29 @@
+Cargo.lock
+  ai_agent 460,462,673,675,679,681,1233,1235,1537,1539,2338,2446,2498,2500,2524,2535,2621,2637,2685,3057,3059,3211,3213,3229,3231,3599,3601,3854,3856,3885,3887,4644,4944,4946,5317,5319,5682,5684,5689,6125,6253,6255,6266,6268,6276,6278,6286,6288,6299,6301,6355,6357,7115
+tools/scripts/version-sync.sh
+  s_25b32f3dc12c03::t_022a22524e07d7 98-102,105
+  s_25b32f3dc12c03::t_52e349168879c6 127
+  s_25b32f3dc12c03::t_60e1d5288e9cf1 160
+  s_25b32f3dc12c03::t_e0d7762ebb534b 180
+  s_25b32f3dc12c03::t_5cb34c3f0d5e24 103-104,106-108
+  s_25b32f3dc12c03::t_b2fb8cbaaeaa37 18-23
+  s_25b32f3dc12c03::t_81970c4dbc73a6 52-57
+bindings/flutter/rust/Cargo.toml
+  s_25b32f3dc12c03::t_e87f79d4ae0338 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "3e3f24bb6515f90d97fe35e21b62b6da7da9c91d",
+  "prompts": {},
+  "sessions": {
+    "s_25b32f3dc12c03": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "42c57ab9-ee27-4dec-91e2-2a6d1952500e",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
