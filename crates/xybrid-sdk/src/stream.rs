@@ -116,7 +116,12 @@ struct StreamHandle {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
+/// # use xybrid_sdk::{XybridModel, StreamConfig};
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # let model: XybridModel = unimplemented!();
+/// # let audio_chunk_1: Vec<f32> = vec![];
+/// # let audio_chunk_2: Vec<f32> = vec![];
 /// let stream = model.stream(StreamConfig::with_vad())?;
 ///
 /// // Feed audio samples (16kHz mono f32)
@@ -134,6 +139,8 @@ struct StreamHandle {
 ///
 /// // Reset for new utterance
 /// stream.reset()?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct XybridStream {
     handle: Arc<RwLock<StreamHandle>>,

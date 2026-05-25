@@ -27,37 +27,48 @@
 //!
 //! ## Batch Inference
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{ModelLoader, Envelope};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::ModelLoader;
+//! use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 //!
 //! // Load model from registry
-//! let loader = ModelLoader::from_registry("http://localhost:8080", "whisper-tiny", "1.0");
+//! let loader = ModelLoader::from_registry("whisper-tiny");
 //! let model = loader.load()?;
 //!
 //! // Run inference
-//! let result = model.run(&Envelope::audio(audio_bytes))?;
+//! let audio_bytes: Vec<u8> = vec![];
+//! let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+//! let result = model.run(&envelope, None)?;
 //! println!("Transcription: {}", result.unwrap_text());
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Streaming ASR
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_sdk::{ModelLoader, StreamConfig};
 //!
 //! let model = ModelLoader::from_directory("/path/to/whisper-model")?.load()?;
 //! let stream = model.stream(StreamConfig::with_vad())?;
 //!
 //! // Feed audio chunks
+//! let audio_samples: Vec<f32> = vec![];
 //! stream.feed(&audio_samples)?;
 //!
 //! // Get final transcript
 //! let result = stream.flush()?;
 //! println!("Transcript: {}", result.text);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Pipelines
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_sdk::run_pipeline;
 //!
 //! let result = run_pipeline("examples/pipeline.yaml")?;
@@ -65,31 +76,40 @@
 //! for stage in &result.stages {
 //!     println!("  {}: {}ms ({})", stage.name, stage.latency_ms, stage.target);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Model Warmup (for LLM and other large models)
 //!
 //! Pre-load models at app startup for fast first inference:
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{ModelLoader, PipelineRef, Envelope};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::{ModelLoader, PipelineRef};
+//! use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 //!
 //! // Option 1: Warmup a single model
-//! let model = ModelLoader::from_registry("gemma-3-1b").load()?;
+//! let loader = ModelLoader::from_registry("gemma-3-1b");
+//! let model = loader.load()?;
 //! model.warmup()?;  // Pre-loads model weights, compiles shaders
-//! let result = model.run(&Envelope::text("Hello"))?;  // Fast!
+//! let envelope = Envelope::new(EnvelopeKind::Text("Hello".into()));
+//! let result = model.run(&envelope, None)?;  // Fast!
 //!
 //! // Option 2: Warmup a pipeline
+//! let yaml = "stages: []";
 //! let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
 //! pipeline.load_models()?;  // Download models
 //! pipeline.warmup()?;       // Pre-load into memory
-//! let result = pipeline.run(&Envelope::text("Hello"))?;  // Fast!
+//! let result = pipeline.run(&envelope)?;  // Fast!
 //!
 //! // Option 3: Async warmup for background loading
 //! let model = loader.load()?;
 //! tokio::spawn(async move {
 //!     model.warmup_async().await
 //! });
+//! # Ok(())
+//! # }
 //! ```
 
 use anyhow::Result;
@@ -523,7 +543,7 @@ pub mod hybrid {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
     /// use xybrid_sdk::hybrid;
     ///
     /// #[hybrid::route]
@@ -613,7 +633,7 @@ pub enum PipelineConfigError {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_sdk::run_pipeline;
 ///
 /// match run_pipeline("examples/hiiipe.yaml") {
@@ -729,7 +749,7 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_sdk::run_pipeline_async;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {

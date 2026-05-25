@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use xybrid_sdk::CacheManager;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -455,10 +455,16 @@ impl CacheManager {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::CacheManager;
+    /// # use std::path::PathBuf;
+    /// # let xyb_path = PathBuf::from("model.xyb");
     /// let cache = CacheManager::new()?;
     /// let model_dir = cache.ensure_extracted(&xyb_path)?;
     /// // model_dir now contains: model_metadata.json, model.gguf, etc.
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn ensure_extracted(&self, xyb_path: &Path) -> Result<PathBuf, SdkError> {
         use xybrid_core::execution::ModelMetadata;

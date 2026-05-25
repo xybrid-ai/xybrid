@@ -5,16 +5,21 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_sdk::SdkCacheProvider;
-//! use xybrid_core::orchestrator::LocalAuthority;
+//! use xybrid_sdk::orchestrator::LocalAuthority;
+//! use std::path::PathBuf;
 //! use std::sync::Arc;
 //!
 //! // Create SDK cache provider
-//! let provider = Arc::new(SdkCacheProvider::new()?);
+//! let provider = Arc::new(SdkCacheProvider::with_dir(PathBuf::from("/tmp/cache"))?);
 //!
 //! // Inject into LocalAuthority
 //! let authority = LocalAuthority::with_cache_provider(provider);
+//! # let _ = authority;
+//! # Ok(())
+//! # }
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -38,13 +43,17 @@ use crate::model::SdkError;
 ///
 /// ## Example
 ///
-/// ```rust,ignore
-/// use xybrid_sdk::SdkCacheProvider;
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use xybrid_sdk::{CacheProvider, SdkCacheProvider};
+/// use std::path::PathBuf;
 ///
-/// let provider = SdkCacheProvider::new()?;
+/// let provider = SdkCacheProvider::with_dir(PathBuf::from("/tmp/cache"))?;
 /// if provider.is_model_cached("kokoro-82m") {
 ///     println!("Model is available locally");
 /// }
+/// # Ok(())
+/// # }
 /// ```
 pub struct SdkCacheProvider {
     cache: CacheManager,

@@ -11,7 +11,8 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_sdk::registry_client::RegistryClient;
 //!
 //! let client = RegistryClient::default_client()?;
@@ -30,6 +31,8 @@
 //! let bundle_path = client.fetch("kokoro-82m", None, |progress| {
 //!     println!("Downloaded: {:.1}%", progress * 100.0);
 //! })?;
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::cache::CacheManager;
@@ -758,7 +761,9 @@ impl RegistryClient {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::RegistryClient;
     /// let client = RegistryClient::default_client()?;
     /// let model_dir = client.fetch_extracted("kokoro-82m", None, |p| {
     ///     println!("Downloaded: {:.1}%", p * 100.0);
@@ -766,6 +771,8 @@ impl RegistryClient {
     ///
     /// // model_dir now contains model_metadata.json and all model files
     /// let metadata_path = model_dir.join("model_metadata.json");
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn fetch_extracted<F>(
         &self,

@@ -1368,7 +1368,7 @@ static PLATFORM_EXPORTER: RwLock<Option<HttpTelemetryExporter>> = RwLock::new(No
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_sdk::telemetry::{init_platform_telemetry, TelemetryConfig};
 ///
 /// let config = TelemetryConfig::new("https://ingest.xybrid.dev", "your-api-key")

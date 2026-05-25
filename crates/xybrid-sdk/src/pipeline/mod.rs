@@ -6,21 +6,32 @@
 //!
 //! # Example (Simple - just run)
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{PipelineRef, Envelope};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::PipelineRef;
+//! use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 //!
+//! # let yaml_content = "stages: []";
+//! # let audio_bytes: Vec<u8> = vec![];
 //! // Load and run in a few lines
 //! let pipeline = PipelineRef::from_yaml(yaml_content)?.load()?;
 //! pipeline.load_models()?;  // Optional: explicit preloading
-//! let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+//! let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+//! let result = pipeline.run(&envelope)?;
 //! println!("Pipeline completed in {}ms", result.total_latency_ms);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Example (Staged - inspect and preload)
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{PipelineRef, Envelope};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::PipelineRef;
+//! use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 //!
+//! # let yaml_content = "stages: []";
+//! # let audio_bytes: Vec<u8> = vec![];
 //! // Step 1: Parse YAML (instant, no network)
 //! let ref_ = PipelineRef::from_yaml(yaml_content)?;
 //! println!("Stages: {:?}", ref_.stage_ids());
@@ -35,7 +46,11 @@
 //! })?;
 //!
 //! // Step 4: Run
-//! let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+//! let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+//! let result = pipeline.run(&envelope)?;
+//! # let _ = result;
+//! # Ok(())
+//! # }
 //! ```
 
 // ============================================================================
@@ -95,14 +110,19 @@ pub type PipelineResult<T> = Result<T, SdkError>;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 /// use xybrid_sdk::PipelineRef;
 ///
+/// # let yaml = "stages: []";
 /// let ref_ = PipelineRef::from_yaml(yaml)?;
 /// println!("Pipeline: {:?}", ref_.name());
 /// println!("Stages: {:?}", ref_.stage_ids());
 ///
 /// let pipeline = ref_.load()?;
+/// # let _ = pipeline;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct PipelineRef {
@@ -530,9 +550,13 @@ struct PipelineHandle {
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// use xybrid_sdk::{PipelineRef, Envelope};
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use xybrid_sdk::PipelineRef;
+/// use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 ///
+/// # let yaml = "stages: []";
+/// # let audio_bytes: Vec<u8> = vec![];
 /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
 ///
 /// // Inspect the pipeline
@@ -544,7 +568,10 @@ struct PipelineHandle {
 /// pipeline.load_models()?;
 ///
 /// // Run inference
-/// let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+/// let result = pipeline.run(&Envelope::new(EnvelopeKind::Audio(audio_bytes)))?;
+/// # let _ = result;
+/// # Ok(())
+/// # }
 /// ```
 pub struct Pipeline {
     name: Option<String>,
@@ -1001,13 +1028,21 @@ impl Pipeline {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::PipelineRef;
+    /// # use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+    /// # let yaml = "stages: []";
     /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
     /// pipeline.load_models()?;  // Download models
     /// pipeline.warmup()?;       // Pre-load into memory
     ///
     /// // First inference is now fast
-    /// let result = pipeline.run(&Envelope::text("Hello"))?;
+    /// let envelope = Envelope::new(EnvelopeKind::Text("Hello".into()));
+    /// let result = pipeline.run(&envelope)?;
+    /// # let _ = result;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn warmup(&self) -> PipelineResult<()> {
         log::info!(target: "xybrid_sdk", "Warming up pipeline: {:?}", self.name);
@@ -1044,7 +1079,10 @@ impl Pipeline {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # async fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::PipelineRef;
+    /// # let yaml = "stages: []";
     /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
     /// pipeline.load_models()?;
     ///
@@ -1058,6 +1096,8 @@ impl Pipeline {
     ///
     /// // Wait for warmup if needed
     /// warmup_handle.await??;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn warmup_async(&self) -> PipelineResult<()> {
         log::info!(target: "xybrid_sdk", "Warming up pipeline (async): {:?}", self.name);
@@ -1433,11 +1473,18 @@ impl Xybrid {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// use xybrid_sdk::{Xybrid, Envelope};
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_sdk::Xybrid;
+    /// use xybrid_sdk::ir::{Envelope, EnvelopeKind};
     ///
-    /// let result = Xybrid::run_pipeline(yaml_content, &Envelope::audio(audio_bytes))?;
+    /// # let yaml_content = "stages: []";
+    /// # let audio_bytes: Vec<u8> = vec![];
+    /// let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+    /// let result = Xybrid::run_pipeline(yaml_content, &envelope)?;
     /// println!("Output: {:?}", result.text());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_pipeline(
         yaml: &str,
@@ -1477,19 +1524,27 @@ impl Xybrid {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// use xybrid_sdk::{Xybrid, Envelope, PartialToken};
+    /// ```no_run
+    /// # #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_sdk::{Xybrid, PartialToken};
+    /// use xybrid_sdk::ir::{Envelope, EnvelopeKind};
     /// use std::io::Write;
     ///
+    /// # let yaml_content = "stages: []";
+    /// let envelope = Envelope::new(EnvelopeKind::Text("Hello, how are you?".into()));
     /// let result = Xybrid::run_pipeline_streaming(
     ///     yaml_content,
-    ///     &Envelope::text("Hello, how are you?"),
+    ///     &envelope,
     ///     Box::new(|token: PartialToken| {
     ///         print!("{}", token.token);
     ///         std::io::stdout().flush()?;
     ///         Ok(())
     ///     }),
     /// )?;
+    /// # let _ = result;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Note

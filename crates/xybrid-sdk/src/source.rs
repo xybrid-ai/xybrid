@@ -21,11 +21,12 @@ pub enum ModelSource {
     /// SHA256 verification.
     ///
     /// # Example
-    /// ```ignore
-    /// ModelSource::Registry {
+    /// ```no_run
+    /// # use xybrid_sdk::ModelSource;
+    /// let _ = ModelSource::Registry {
     ///     id: "kokoro-82m".to_string(),
     ///     platform: None, // Auto-detect
-    /// }
+    /// };
     /// ```
     Registry {
         /// Model ID (e.g., "kokoro-82m", "whisper-tiny")
@@ -41,13 +42,15 @@ pub enum ModelSource {
     /// which is less flexible than registry API resolution.
     ///
     /// # Example
-    /// ```ignore
-    /// ModelSource::LegacyRegistry {
+    /// ```no_run
+    /// # #![allow(deprecated)]
+    /// # use xybrid_sdk::ModelSource;
+    /// let _ = ModelSource::LegacyRegistry {
     ///     url: "http://localhost:8080".to_string(),
     ///     model_id: "whisper-tiny".to_string(),
     ///     version: "1.0".to_string(),
     ///     platform: None, // Auto-detect
-    /// }
+    /// };
     /// ```
     #[deprecated(since = "0.0.17", note = "Use ModelSource::Registry instead")]
     LegacyRegistry {
@@ -64,10 +67,12 @@ pub enum ModelSource {
     /// Load from local .xyb bundle file.
     ///
     /// # Example
-    /// ```ignore
-    /// ModelSource::Bundle {
+    /// ```no_run
+    /// # use xybrid_sdk::ModelSource;
+    /// # use std::path::PathBuf;
+    /// let _ = ModelSource::Bundle {
     ///     path: PathBuf::from("models/whisper-tiny.xyb"),
-    /// }
+    /// };
     /// ```
     Bundle {
         /// Path to the .xyb bundle file
@@ -79,10 +84,12 @@ pub enum ModelSource {
     /// The directory must contain `model_metadata.json` and model files.
     ///
     /// # Example
-    /// ```ignore
-    /// ModelSource::Directory {
+    /// ```no_run
+    /// # use xybrid_sdk::ModelSource;
+    /// # use std::path::PathBuf;
+    /// let _ = ModelSource::Directory {
     ///     path: PathBuf::from("/path/to/whisper-model"),
-    /// }
+    /// };
     /// ```
     Directory {
         /// Path to model directory containing model_metadata.json
@@ -98,12 +105,13 @@ pub enum ModelSource {
     /// auto-generated in a future version.
     ///
     /// # Example
-    /// ```ignore
-    /// ModelSource::HuggingFace {
+    /// ```no_run
+    /// # use xybrid_sdk::ModelSource;
+    /// let _ = ModelSource::HuggingFace {
     ///     repo: "xybrid-ai/kokoro-82m".to_string(),
     ///     revision: None, // Uses default branch
     ///     variant: None, // Auto-selects Q4_K_M for GGUF repos
-    /// }
+    /// };
     /// ```
     HuggingFace {
         /// HuggingFace repository ID (e.g., "xybrid-ai/kokoro-82m")
@@ -123,7 +131,8 @@ impl ModelSource {
     /// for the current platform.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # use xybrid_sdk::ModelSource;
     /// let source = ModelSource::registry("kokoro-82m");
     /// ```
     pub fn registry(id: impl Into<String>) -> Self {
@@ -136,7 +145,8 @@ impl ModelSource {
     /// Create a registry source with explicit platform.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # use xybrid_sdk::ModelSource;
     /// let source = ModelSource::registry_with_platform("kokoro-82m", "macos-arm64");
     /// ```
     pub fn registry_with_platform(id: impl Into<String>, platform: impl Into<String>) -> Self {
