@@ -1,0 +1,27 @@
+CHANGELOG.md
+  s_25b32f3dc12c03::t_cc374790160393 16-51
+README.zh-CN.md
+  s_25b32f3dc12c03::t_a51cd905a0e640 148,165,183,219
+README.md
+  s_25b32f3dc12c03::t_d003b8991e8dcc 130,147,165,201
+bindings/flutter/CHANGELOG.md
+  s_25b32f3dc12c03::t_aef9cd959eb86a 3-13
+README.ja-JP.md
+  s_25b32f3dc12c03::t_3755a7e83d824d 148,165,183,219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "aef9c729d5068d0f14d971b5a1235d0a6bba2fdb",
+  "prompts": {},
+  "sessions": {
+    "s_25b32f3dc12c03": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "42c57ab9-ee27-4dec-91e2-2a6d1952500e",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
