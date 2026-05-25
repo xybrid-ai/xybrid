@@ -1,0 +1,83 @@
+crates/xybrid-sdk/src/registry_client.rs
+  s_550476cfca49a0::t_ad04a8e293be07 14,764
+  s_550476cfca49a0::t_e577eeaf11f6f6 765-766,774-775
+  s_550476cfca49a0::t_a610cfff4c3ef5 15,34-35
+crates/xybrid-sdk/src/stream.rs
+  s_550476cfca49a0::t_adb10d63df70b9 121,123-124,142-143
+  s_550476cfca49a0::t_ad04a8e293be07 119
+  s_550476cfca49a0::t_b67d093cf176ad 120,122
+crates/xybrid-sdk/src/model.rs
+  s_550476cfca49a0::t_ea78b11e60a6e4 879-880,883-884
+  s_550476cfca49a0::t_a2baaeac1566ce 1734-1736,1748-1749
+  s_550476cfca49a0::t_7f9849a89d8929 2113-2116,2124,2132-2133
+  s_550476cfca49a0::t_76ed9e098414fe 706-707,710-711
+  s_550476cfca49a0::t_50bed56c61acc9 1447-1452,1456,1468-1469
+  s_550476cfca49a0::t_d535dbbf904932 932-934,938-939
+  s_550476cfca49a0::t_cdc848197c7c69 1559-1560
+  s_550476cfca49a0::t_081f5759007a1d 857-859,861-862
+  s_550476cfca49a0::t_f73584c069c752 1513-1515,1522-1523
+  s_550476cfca49a0::t_2492c8caaedeed 838-839,842-843
+  s_550476cfca49a0::t_ad04a8e293be07 624,639,705,724,837,856,878,931,1446,1512,1558,1613,1733,1994,2112,2296,2557,2822
+  s_550476cfca49a0::t_5e311c186abf68 625-628,632-634,640-641,646-647
+  s_550476cfca49a0::t_6c4a30a2390755 2297-2301,2303,2308-2309
+  s_550476cfca49a0::t_bba242986757f9 2558-2562,2565,2573
+  s_550476cfca49a0::t_18d99676e6fb67 2823-2826,2839-2840
+  s_550476cfca49a0::t_3d8c3f046a59da 1995-1997,1999,2008,2014-2015
+  s_550476cfca49a0::t_4423ce06d3f67d 1614-1618,1623-1625
+  s_550476cfca49a0::t_b714e3743da5f0 725-726,729-730
+crates/xybrid-sdk/src/lib.rs
+  s_550476cfca49a0::t_ad04a8e293be07 30,50,70,87,546,636,752
+  s_550476cfca49a0::t_c63dbddc44a2a3 31-33,36,40-42,44-45,51,58,64-65,71,79-80,88-90,93,96-97,100,104,111-112
+  s_550476cfca49a0::t_6ce4d496e74f7e 94
+crates/xybrid-sdk/src/telemetry.rs
+  s_550476cfca49a0::t_ad04a8e293be07 1371
+crates/xybrid-sdk/src/cache/mod.rs
+  s_550476cfca49a0::t_ad04a8e293be07 18
+  s_550476cfca49a0::t_a91dc1ddec4736 19-21,29,33-34
+crates/xybrid-sdk/src/cache/cache_manager.rs
+  s_550476cfca49a0::t_ce71bc503b9ea8 459-462,466-467
+  s_550476cfca49a0::t_ad04a8e293be07 9,458
+crates/xybrid-sdk/src/cache/cache_provider.rs
+  s_550476cfca49a0::t_ad04a8e293be07 8,46
+  s_550476cfca49a0::t_54ba82a46ed77f 47-49,51,55-56
+  s_550476cfca49a0::t_e4b703e1ec9127 9,11-12,16,20-22
+crates/xybrid-sdk/src/result.rs
+  s_550476cfca49a0::t_ed88069dd8e628 114,131-132
+  s_550476cfca49a0::t_4bd9583a40b16f 113,115-116
+  s_550476cfca49a0::t_7aeb7517466763 117
+  s_550476cfca49a0::t_ad04a8e293be07 112
+crates/xybrid-sdk/src/pipeline/mod.rs
+  s_550476cfca49a0::t_7ea1f62aa3f3a5 1528-1531,1534-1535,1538,1545-1547
+  s_550476cfca49a0::t_ad04a8e293be07 9,28,113,553,1031,1082,1476,1527
+  s_550476cfca49a0::t_708054142323ba 1477-1479,1481-1484,1486-1487
+  s_550476cfca49a0::t_ac66769b93e8a9 1032-1035,1041-1045
+  s_550476cfca49a0::t_0ee51bacb74be0 1083-1085,1099-1100
+  s_550476cfca49a0::t_5bbee589c73f6d 114,117,123-125
+  s_550476cfca49a0::t_39949b2b66a896 554-556,558-559,571-574
+  s_550476cfca49a0::t_d7e3a72827fc7f 10-12,14-15,19-20,22-23,29-31,33-34,49-53
+crates/xybrid-sdk/src/source.rs
+  s_550476cfca49a0::t_ad04a8e293be07 24,45,70,87,108,134,148
+  s_550476cfca49a0::t_36fecaca522bc7 135
+  s_550476cfca49a0::t_61119b5800dfae 25-26,29
+  s_550476cfca49a0::t_ca0e4ac9be39bc 46-48,53
+  s_550476cfca49a0::t_98cadb74f780c6 149
+  s_550476cfca49a0::t_b752d44a888c28 71-73,75
+  s_550476cfca49a0::t_1111b9c4fe382b 88-90,92
+  s_550476cfca49a0::t_47df838f216c0f 109-110,114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "c4f4971cb539e57e3a13d6a41746ed20aacb5fc0",
+  "prompts": {},
+  "sessions": {
+    "s_550476cfca49a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "674ee713-21e6-4202-8d89-5b31b6753d45",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
