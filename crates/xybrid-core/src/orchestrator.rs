@@ -299,7 +299,7 @@ impl Orchestrator {
         stage: &StageDescriptor,
         input: &Envelope,
         metrics: &DeviceMetrics,
-        _availability: &LocalAvailability,
+        availability: &LocalAvailability,
     ) -> OrchestratorResult<StageExecutionResult> {
         let _start_time = std::time::Instant::now();
 
@@ -348,6 +348,7 @@ impl Orchestrator {
             metrics: metrics.clone(),
             resource_monitor: self.resource_monitor.clone(),
             explicit_target: stage.target.clone(),
+            local_availability: Some(availability.clone()),
             device_class: Some(metrics.canonical_device_class()),
             device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
         };
@@ -547,7 +548,7 @@ impl Orchestrator {
         stage: &StageDescriptor,
         input: &Envelope,
         metrics: &DeviceMetrics,
-        _availability: &LocalAvailability,
+        availability: &LocalAvailability,
     ) -> OrchestratorResult<StageExecutionResult> {
         // Emit stage start event (consistent with sync execute_stage)
         self.event_bus.publish(OrchestratorEvent::StageStart {
@@ -593,6 +594,7 @@ impl Orchestrator {
             metrics: metrics.clone(),
             resource_monitor: self.resource_monitor.clone(),
             explicit_target: stage.target.clone(),
+            local_availability: Some(availability.clone()),
             device_class: Some(metrics.canonical_device_class()),
             device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
         };
@@ -1086,6 +1088,7 @@ mod tests {
             metrics: DeviceMetrics::default(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
+            local_availability: None,
             device_class: None,
             device_class_schema_version: None,
         }
@@ -1118,13 +1121,16 @@ mod tests {
         let stage = StageDescriptor::new("test_stage");
         let input = text_envelope("Text");
         let metrics = DeviceMetrics::default();
-        let availability = LocalAvailability::new(true);
+        // This test exercises the cloud/mock execution path; the model is
+        // intentionally not advertised as locally runnable.
+        let availability = LocalAvailability::new(false);
 
         let result = orchestrator.execute_stage(&stage, &input, &metrics, &availability);
 
         assert!(result.is_ok());
         let exec_result = result.unwrap();
         assert_eq!(exec_result.stage, "test_stage");
+        assert_eq!(exec_result.routing_decision.target.as_str(), "cloud");
         match &exec_result.output.kind {
             EnvelopeKind::Text(text) => assert!(text.contains("output")),
             other => panic!("expected text output, got {:?}", other),
@@ -1172,7 +1178,7 @@ mod tests {
         let stage = StageDescriptor::new("test_stage");
         let input = audio_envelope(&[9, 9, 9, 9]);
         let metrics = DeviceMetrics::default();
-        let availability = LocalAvailability::new(true);
+        let availability = LocalAvailability::new(false);
 
         let result = orchestrator.execute_stage(&stage, &input, &metrics, &availability);
 
@@ -1184,6 +1190,39 @@ mod tests {
             .routing_decision
             .reason
             .contains("model_unavailable"));
+    }
+
+    #[test]
+    fn test_execute_stage_uses_local_availability_hint() {
+        let mut orchestrator = orchestrator_with_mock_adapter(ExecutionMode::Batch);
+        let stage = StageDescriptor::new("test_stage");
+        let input = text_envelope("hello");
+        let metrics = DeviceMetrics::default();
+        let availability = LocalAvailability::new(true);
+
+        let result = orchestrator
+            .execute_stage(&stage, &input, &metrics, &availability)
+            .unwrap();
+
+        assert_eq!(result.routing_decision.target.as_str(), "local");
+    }
+
+    #[test]
+    fn test_execute_stage_ignores_bundle_path_when_local_availability_is_false() {
+        let mut orchestrator = orchestrator_with_mock_adapter(ExecutionMode::Batch);
+        let model_dir = tempfile::tempdir().unwrap();
+        let stage = StageDescriptor::new("test_stage")
+            .with_bundle_path(model_dir.path().to_string_lossy().to_string());
+        let input = text_envelope("hello");
+        let metrics = DeviceMetrics::default();
+        let availability = LocalAvailability::new(false);
+
+        let result = orchestrator
+            .execute_stage(&stage, &input, &metrics, &availability)
+            .unwrap();
+
+        assert_eq!(result.routing_decision.target.as_str(), "cloud");
+        assert!(result.routing_decision.reason.contains("model_unavailable"));
     }
 
     #[test]

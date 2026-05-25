@@ -291,6 +291,7 @@ fn local_reliability_hint_after_abort(
         metrics: metrics.clone(),
         resource_monitor: xybrid_core::device::ResourceMonitor::global(),
         explicit_target: None,
+        local_availability: None,
         device_class: Some(metrics.canonical_device_class()),
         device_class_schema_version: Some(xybrid_core::context::DEVICE_CLASS_SCHEMA_VERSION),
     };
@@ -620,20 +621,30 @@ struct ModelHandle {
 ///
 /// # Example (Recommended - Registry-based)
 ///
-/// ```ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # use xybrid_sdk::ModelLoader;
+/// # use xybrid_sdk::ir::Envelope;
+/// # let envelope: Envelope = unimplemented!();
 /// // Load using registry (recommended - auto-resolves to best variant)
 /// let loader = ModelLoader::from_registry("kokoro-82m");
 /// let model = loader.load()?;
-/// let result = model.run(&envelope)?;
+/// let result = model.run(&envelope, None)?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Example (With progress callback)
 ///
-/// ```ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # use xybrid_sdk::ModelLoader;
 /// let loader = ModelLoader::from_registry("kokoro-82m");
 /// let model = loader.load_with_progress(|progress| {
 ///     println!("Download: {:.1}%", progress * 100.0);
 /// })?;
+/// # Ok(())
+/// # }
 /// ```
 /// GGUF quantization preference order for automatic selection.
 /// Q4_K_M is the default — best quality/size tradeoff for edge devices.
@@ -691,9 +702,13 @@ impl ModelLoader {
     /// caching and SHA256 verification.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_registry("kokoro-82m");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_registry(id: &str) -> Self {
         Self {
@@ -706,9 +721,13 @@ impl ModelLoader {
     /// Create loader from registry with explicit platform.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_registry_with_platform("kokoro-82m", "macos-arm64");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_registry_with_platform(id: &str, platform: &str) -> Self {
         Self {
@@ -815,9 +834,13 @@ impl ModelLoader {
     /// `SdkError::ConfigError` if the feature is not enabled.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_huggingface("xybrid-ai/kokoro-82m");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_huggingface(repo: &str) -> Self {
         Self {
@@ -830,9 +853,13 @@ impl ModelLoader {
     /// Create loader from a HuggingFace Hub repository with explicit revision.
     ///
     /// # Example
-    /// ```ignore
-    /// let loader = ModelLoader::from_huggingface_with_revision("xybrid-ai/kokoro-82m", "v1.0")?;
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// let loader = ModelLoader::from_huggingface_with_revision("xybrid-ai/kokoro-82m", "v1.0");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_huggingface_with_revision(repo: &str, revision: &str) -> Self {
         Self {
@@ -848,9 +875,13 @@ impl ModelLoader {
     /// Without a variant, defaults to Q4_K_M for GGUF repos.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_huggingface_parsed("LiquidAI/LFM2.5-350M-GGUF:Q8_0");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_huggingface_parsed(input: &str) -> Self {
         let source = ModelSource::parse_huggingface(input);
@@ -897,10 +928,15 @@ impl ModelLoader {
     /// Only applies to registry-based loading (downloads from HuggingFace).
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// # let loader: ModelLoader = unimplemented!();
     /// let model = loader.load_with_progress(|progress| {
     ///     println!("Download: {:.1}%", progress * 100.0);
     /// })?;
+    /// # Ok(())
+    /// # }
     /// ```
     #[allow(deprecated)]
     pub fn load_with_progress<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
@@ -1407,11 +1443,17 @@ impl ModelLoader {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # use xybrid_sdk::{ModelLoader, StreamConfig};
+/// # use xybrid_sdk::ir::Envelope;
+/// # let loader: ModelLoader = unimplemented!();
+/// # let audio_envelope: Envelope = unimplemented!();
+/// # let samples: Vec<f32> = vec![];
 /// let model = loader.load()?;
 ///
 /// // Batch inference
-/// let result = model.run(&audio_envelope)?;
+/// let result = model.run(&audio_envelope, None)?;
 /// println!("Transcription: {}", result.unwrap_text());
 ///
 /// // Streaming inference (if supported)
@@ -1423,6 +1465,8 @@ impl ModelLoader {
 ///
 /// // Cleanup
 /// model.unload()?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct XybridModel {
     handle: Arc<RwLock<ModelHandle>>,
@@ -1465,13 +1509,18 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::{ModelLoader, ConversationContext};
+    /// # let loader: ModelLoader = unimplemented!();
     /// let model = loader.load()?;
     /// if model.is_llm() {
     ///     // Create conversation context for multi-turn chat
     ///     let mut ctx = ConversationContext::new();
     ///     // ... manage conversation history
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn is_llm(&self) -> bool {
         self.handle
@@ -1506,7 +1555,9 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use xybrid_sdk::XybridModel;
+    /// # let model: XybridModel = unimplemented!();
     /// if let Some(voices) = model.voices() {
     ///     for voice in voices {
     ///         println!("{}: {} ({})", voice.id, voice.name, voice.language.unwrap_or_default());
@@ -1559,12 +1610,19 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// # use xybrid_sdk::ir::Envelope;
+    /// # let loader: ModelLoader = unimplemented!();
+    /// # let envelope: Envelope = unimplemented!();
     /// let model = loader.load()?;
     /// model.warmup()?;  // Pre-load model
     ///
     /// // First inference is now fast
-    /// let result = model.run(&envelope)?;
+    /// let result = model.run(&envelope, None)?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn warmup(&self) -> SdkResult<()> {
         use xybrid_core::ir::EnvelopeKind;
@@ -1596,16 +1654,71 @@ impl XybridModel {
             },
         };
 
-        // Run inference (this loads the model)
+        // Warmup measures model-load + first-token latency, not full
+        // generation. Cap LLM decoding at 1 token so a 2048-token
+        // `GenerationConfig::default()` doesn't turn warmup into a real
+        // inference. `executor::execute_llm` reads this from envelope
+        // metadata when no explicit `GenerationConfig` is passed;
+        // non-LLM paths ignore it.
+        let mut warmup_input = warmup_input;
+        warmup_input
+            .metadata
+            .insert("max_tokens".to_string(), "1".to_string());
+
+        // Run the inference inline (rather than delegating to `self.run`)
+        // so the publish at the end is a `ModelWarmup` event rather than
+        // a `ModelComplete`. Warmups should be visible to billing /
+        // perf-debugging but distinguishable from real inferences on
+        // the Traces dashboard — `ModelWarmup` carries the same
+        // attribution fields (`stage_name`, `target`, `latency_ms`) but
+        // its own event_type so the platform can render with a `warmup`
+        // badge and default-filter it out of cost-attribution rollups.
         let start = Instant::now();
-        let _ = self.run(&warmup_input, None)?;
-        let elapsed = start.elapsed();
+        let resource_guard = crate::telemetry::begin_resource_run();
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
+        {
+            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            if !handle.loaded {
+                return Err(SdkError::NotLoaded);
+            }
+            let metadata = handle.metadata.clone();
+            handle
+                .executor
+                .execute(&metadata, &warmup_input, None)
+                .map_err(|e| SdkError::InferenceError(format!("Warmup execution failed: {}", e)))?;
+        }
+
+        let latency_ms = start.elapsed().as_millis() as u32;
+
+        let event = crate::telemetry::TelemetryEvent {
+            event_type: "ModelWarmup".to_string(),
+            stage_name: Some(self.model_id.clone()),
+            target: Some("local".to_string()),
+            latency_ms: Some(latency_ms),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": self.model_id,
+                    "version": self.version,
+                    "output_type": format!("{:?}", self.output_type),
+                })
+                .to_string(),
+            ),
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
+        crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
         log::info!(
             target: "xybrid_sdk",
-            "Model {} warmed up in {:?}",
+            "Model {} warmed up in {}ms",
             self.model_id,
-            elapsed
+            latency_ms
         );
 
         Ok(())
@@ -1617,7 +1730,10 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// # let loader: ModelLoader = unimplemented!();
     /// let model = loader.load()?;
     ///
     /// // Start warmup in background
@@ -1629,6 +1745,8 @@ impl XybridModel {
     ///
     /// // Wait for warmup if needed
     /// warmup_handle.await??;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn warmup_async(&self) -> SdkResult<()> {
         let handle = self.handle.clone();
@@ -1662,26 +1780,69 @@ impl XybridModel {
                 },
             };
 
-            let start = Instant::now();
+            // See sync `warmup()` for rationale — cap LLM decoding at
+            // 1 token so warmup doesn't run a full generation.
+            let mut warmup_input = warmup_input;
+            warmup_input
+                .metadata
+                .insert("max_tokens".to_string(), "1".to_string());
 
-            // Run inference
-            let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
-            if !guard.loaded {
-                return Err(SdkError::NotLoaded);
+            let start = Instant::now();
+            let resource_guard = crate::telemetry::begin_resource_run();
+            let trace_id = uuid::Uuid::new_v4();
+            let _telemetry_ctx =
+                crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
+            // Run inference inline and publish a `ModelWarmup` event —
+            // same shape as the sync `warmup()` above. Previously this
+            // path published nothing at all, so async warmups were
+            // silent on the wire (visible only via logs).
+            let version_for_event;
+            let output_type_str;
+            {
+                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                if !guard.loaded {
+                    return Err(SdkError::NotLoaded);
+                }
+
+                let metadata = guard.metadata.clone();
+                guard
+                    .executor
+                    .execute(&metadata, &warmup_input, None)
+                    .map_err(|e| SdkError::InferenceError(format!("Warmup failed: {}", e)))?;
+
+                version_for_event = metadata.version.clone();
+                output_type_str = format!("{:?}", output_type);
             }
 
-            let metadata = guard.metadata.clone();
-            let _ = guard
-                .executor
-                .execute(&metadata, &warmup_input, None)
-                .map_err(|e| SdkError::InferenceError(format!("Warmup failed: {}", e)))?;
+            let latency_ms = start.elapsed().as_millis() as u32;
 
-            let elapsed = start.elapsed();
+            let event = crate::telemetry::TelemetryEvent {
+                event_type: "ModelWarmup".to_string(),
+                stage_name: Some(model_id.clone()),
+                target: Some("local".to_string()),
+                latency_ms: Some(latency_ms),
+                error: None,
+                data: Some(
+                    serde_json::json!({
+                        "model_id": model_id,
+                        "version": version_for_event,
+                        "output_type": output_type_str,
+                    })
+                    .to_string(),
+                ),
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+            };
+            crate::telemetry::publish_with_resource_summary(event, resource_guard);
+
             log::info!(
                 target: "xybrid_sdk",
-                "Model {} warmed up (async) in {:?}",
+                "Model {} warmed up (async) in {}ms",
                 model_id,
-                elapsed
+                latency_ms
             );
 
             Ok(())
@@ -1830,10 +1991,12 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use xybrid_sdk::{ModelLoader, ConversationContext, Envelope, EnvelopeKind, MessageRole};
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_sdk::{ModelLoader, ConversationContext};
+    /// use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
     ///
-    /// let model = ModelLoader::from_registry("gemma-3-1b")?.load()?;
+    /// let model = ModelLoader::from_registry("gemma-3-1b").load()?;
     /// let mut ctx = ConversationContext::new();
     ///
     /// // Add user message to context
@@ -1842,12 +2005,14 @@ impl XybridModel {
     /// ctx.push(user_input.clone());
     ///
     /// // Run with context (model sees the full history)
-    /// let result = model.run_with_context(&user_input, &ctx)?;
+    /// let result = model.run_with_context(&user_input, &ctx, None)?;
     ///
     /// // Add assistant response to context
     /// ctx.push(result.envelope().clone());
     ///
     /// println!("{}", result.text().unwrap_or_default());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_with_context(
         &self,
@@ -1944,7 +2109,11 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::{XybridModel, ConversationContext};
+    /// # use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
+    /// # let model: XybridModel = unimplemented!();
     /// let mut ctx = ConversationContext::new();
     ///
     /// // Add user message and run with streaming
@@ -1952,7 +2121,7 @@ impl XybridModel {
     ///     .with_role(MessageRole::User);
     /// ctx.push(input.clone());
     ///
-    /// let result = model.run_streaming_with_context(&input, &ctx, |token| {
+    /// let result = model.run_streaming_with_context(&input, &ctx, None, |token| {
     ///     print!("{}", token.token);
     ///     std::io::Write::flush(&mut std::io::stdout())?;
     ///     Ok(())
@@ -1960,6 +2129,8 @@ impl XybridModel {
     ///
     /// // Add assistant response to context
     /// ctx.push(result.envelope().clone());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_streaming_with_context<F>(
         &self,
@@ -2122,13 +2293,20 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::XybridModel;
+    /// # use xybrid_sdk::ir::Envelope;
+    /// # let model: XybridModel = unimplemented!();
+    /// # let envelope: Envelope = unimplemented!();
     /// // Works for both LLM and non-LLM models
-    /// let result = model.run_streaming(&envelope, |token| {
+    /// let result = model.run_streaming(&envelope, None, |token| {
     ///     print!("{}", token.token);
     ///     std::io::Write::flush(&mut std::io::stdout())?;
     ///     Ok(())
     /// })?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_streaming<F>(
         &self,
@@ -2376,10 +2554,15 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _example() {
+    /// # use xybrid_sdk::{XybridModel, StreamEvent};
+    /// # use xybrid_sdk::ir::Envelope;
+    /// # let model: XybridModel = unimplemented!();
+    /// # let envelope: Envelope = unimplemented!();
     /// use tokio_stream::StreamExt;
     ///
-    /// let mut stream = model.run_stream(envelope);
+    /// let mut stream = model.run_stream(envelope, None);
     /// while let Some(event) = stream.next().await {
     ///     match event {
     ///         StreamEvent::Token(token) => print!("{}", token.token),
@@ -2387,6 +2570,7 @@ impl XybridModel {
     ///         StreamEvent::Error(e) => eprintln!("Error: {}", e),
     ///     }
     /// }
+    /// # }
     /// ```
     pub fn run_stream(
         &self,
@@ -2635,7 +2819,11 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::{XybridModel, StreamConfig};
+    /// # let model: XybridModel = unimplemented!();
+    /// # let audio_samples: Vec<f32> = vec![];
     /// let stream = model.stream(StreamConfig::with_vad())?;
     ///
     /// // Feed audio chunks
@@ -2648,6 +2836,8 @@ impl XybridModel {
     ///
     /// // Get final transcript
     /// let transcript = stream.flush()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn stream(&self, config: StreamConfig) -> SdkResult<XybridStream> {
         if !self.supports_streaming {

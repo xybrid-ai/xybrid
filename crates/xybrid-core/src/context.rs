@@ -169,6 +169,16 @@ impl StageDescriptor {
         self
     }
 
+    /// Derive whether this stage is currently runnable through the local executor.
+    pub fn is_locally_runnable(&self) -> bool {
+        let allows_local = self
+            .target
+            .as_ref()
+            .map(ExecutionTarget::allows_local)
+            .unwrap_or(true);
+        self.bundle_path.is_some() && allows_local
+    }
+
     /// Check if this stage is a cloud stage (uses third-party cloud API).
     pub fn is_cloud(&self) -> bool {
         matches!(self.target, Some(ExecutionTarget::Cloud)) || self.provider.is_some()
@@ -190,6 +200,31 @@ mod tests {
         let metrics = DeviceMetrics::default();
 
         assert_eq!(metrics.resource.memory_pressure, MemoryPressure::Unknown);
+    }
+
+    #[test]
+    fn stage_local_runnability_requires_bundle_path() {
+        let stage = StageDescriptor::new("test-model");
+
+        assert!(!stage.is_locally_runnable());
+    }
+
+    #[test]
+    fn stage_local_runnability_respects_network_target() {
+        let stage = StageDescriptor::new("test-model")
+            .with_bundle_path("/tmp/test-model")
+            .with_target(ExecutionTarget::Cloud);
+
+        assert!(!stage.is_locally_runnable());
+    }
+
+    #[test]
+    fn stage_local_runnability_allows_auto_with_bundle_path() {
+        let stage = StageDescriptor::new("test-model")
+            .with_bundle_path("/tmp/test-model")
+            .with_target(ExecutionTarget::Auto);
+
+        assert!(stage.is_locally_runnable());
     }
 
     #[test]

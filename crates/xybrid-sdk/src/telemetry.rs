@@ -940,6 +940,14 @@ fn convert_to_platform_event(
                 // `json:$.local_reliability_hint.*` without descending
                 // into the nested data object.
                 "local_reliability_hint",
+                // Streaming flag — `XybridModel::run_streaming` and the
+                // streaming-fast-path `ModelComplete` (Pipeline) both
+                // stamp `data.streaming = true`. Hoisting to the top
+                // level lets the Tinybird datasource pick it up as a
+                // typed column for a `streaming` badge / filter on the
+                // Traces dashboard, distinguishing chat-flow / REPL
+                // turns from batch-style inferences at a glance.
+                "streaming",
             ]
             .iter()
             {
@@ -992,16 +1000,18 @@ fn convert_to_platform_event(
     // Span-bearing event types: completion-family events publish a final
     // ModelComplete/PipelineComplete that drains the collector, AND the
     // cloud-fallback flow publishes LocalAborted/CloudRetry as terminal
-    // markers for each leg without ever firing a *Complete. Both kinds
-    // need their flamegraph attached at the wire layer or the dashboard
-    // sees an empty trace detail. Adding LocalAborted/CloudRetry here is
-    // the symmetric counterpart of the same addition in
-    // `snapshot_spans_into_event` — both gates must agree, otherwise the
-    // SDK attaches spans to event.data["spans"] but `convert_to_platform_event`
-    // strips them again before the wire.
+    // markers for each leg without ever firing a *Complete, AND
+    // ModelWarmup is its own completion category (XybridModel::warmup
+    // opens executor spans then publishes a single ModelWarmup —
+    // distinct from ModelComplete so the dashboard can filter warmups
+    // out of cost-attribution rollups). All four kinds need their
+    // flamegraph attached at the wire layer or the dashboard sees an
+    // empty trace detail. This list MUST match `snapshot_spans_into_event`
+    // above; otherwise the SDK attaches spans to event.data["spans"]
+    // but `convert_to_platform_event` strips them again before the wire.
     let stages = if matches!(
         event.event_type.as_str(),
-        "PipelineComplete" | "ModelComplete" | "LocalAborted" | "CloudRetry"
+        "PipelineComplete" | "ModelComplete" | "ModelWarmup" | "LocalAborted" | "CloudRetry"
     ) && core_tracing::is_tracing_enabled()
     {
         let embedded_spans: Option<serde_json::Value> = payload
@@ -1358,7 +1368,7 @@ static PLATFORM_EXPORTER: RwLock<Option<HttpTelemetryExporter>> = RwLock::new(No
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_sdk::telemetry::{init_platform_telemetry, TelemetryConfig};
 ///
 /// let config = TelemetryConfig::new("https://ingest.xybrid.dev", "your-api-key")
@@ -2257,9 +2267,18 @@ fn snapshot_spans_into_event(event: TelemetryEvent) -> TelemetryEvent {
     // so without these the cloud-leg `SpanGuard`s in
     // `runtime_adapter/cloud/mod.rs` get stranded in the global collector
     // and the dashboard's flamegraph stays empty.
+    //
+    // `ModelWarmup` follows the same shape: `XybridModel::warmup` opens
+    // `execute:<model>` + `llm_inference` spans via the executor before
+    // publishing. Without this entry those spans would (a) never reach
+    // the warmup event's payload — the dashboard falls back to a
+    // synthesized placeholder flamegraph — and (b) leak into the next
+    // event's snapshot (typically the first real inference of the
+    // session), giving that inference's trace two stray spans it
+    // didn't generate.
     let is_span_bearing = matches!(
         event.event_type.as_str(),
-        "PipelineComplete" | "ModelComplete" | "LocalAborted" | "CloudRetry"
+        "PipelineComplete" | "ModelComplete" | "ModelWarmup" | "LocalAborted" | "CloudRetry"
     );
     if !is_span_bearing || !core_tracing::is_tracing_enabled() {
         return event;
@@ -4297,6 +4316,79 @@ mod tests {
             parsed["quantization"].as_str(),
             Some("q4_k_m"),
             "quantization must be hoisted: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
+    fn streaming_field_hoists_to_payload_top_level() {
+        // `XybridModel::run_streaming` and the streaming-fast-path
+        // `ModelComplete` (Pipeline) both stamp `data.streaming = true`.
+        // The hoist must surface it on the wire payload's top level so
+        // the platform's Tinybird datasource can read it as a typed
+        // column for a `streaming` badge / filter on the Traces
+        // dashboard.
+        //
+        // Unlike `task` / `quantization` (which are sourced from spans),
+        // `streaming` is published directly on the event's `data` blob
+        // — no span involvement. Test exercises the convert path with a
+        // minimal `data` payload mirroring the production publish shape.
+        let data = serde_json::json!({
+            "model_id": "qwen2.5-0.5b-instruct",
+            "version": "1.0",
+            "output_type": "Text",
+            "streaming": true,
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b-instruct".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(1_200),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert_eq!(
+            parsed["streaming"].as_bool(),
+            Some(true),
+            "streaming must be hoisted to payload top level: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
+    fn streaming_field_omitted_when_data_does_not_carry_it() {
+        // Non-streaming inference events (`XybridModel::run`,
+        // non-streaming pipeline runs) don't stamp `data.streaming`.
+        // The hoist must leave the top-level key absent in that case so
+        // the platform-side column reads `NULL` (not `false`) for batch
+        // calls — preserves the three-valued logic the Tinybird
+        // datasource encodes via `Nullable(UInt8)`.
+        let data = serde_json::json!({
+            "model_id": "qwen2.5-0.5b-instruct",
+            "version": "1.0",
+            "output_type": "Text",
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b-instruct".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(1_200),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert!(
+            parsed.get("streaming").is_none(),
+            "streaming must be omitted from top-level payload when absent in data: {}",
             serde_json::to_string(&parsed).unwrap()
         );
     }

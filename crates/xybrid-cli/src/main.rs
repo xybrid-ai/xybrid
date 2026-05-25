@@ -232,7 +232,7 @@ enum Commands {
         #[arg(long, value_name = "VOICE")]
         voice: Option<String>,
 
-        /// Target format for model resolution (onnx, coreml, tflite)
+        /// Execution target for REPL inference (auto, local/device, cloud, server)
         #[arg(long, value_name = "TARGET")]
         target: Option<String>,
 

@@ -182,6 +182,7 @@ mod tests {
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: Some(crate::pipeline::ExecutionTarget::Device),
+            local_availability: None,
             device_class: None,
             device_class_schema_version: None,
         };

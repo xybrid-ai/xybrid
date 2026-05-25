@@ -109,8 +109,12 @@ impl std::fmt::Display for OutputType {
 ///
 /// # Example
 ///
-/// ```ignore
-/// let result = model.run(&envelope)?;
+/// ```no_run
+/// # use xybrid_sdk::{XybridModel, ir::Envelope, result::OutputType};
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # let model: XybridModel = unimplemented!();
+/// # let envelope: Envelope = unimplemented!();
+/// let result = model.run(&envelope, None)?;
 ///
 /// // Check output type
 /// match result.output_type() {
@@ -124,6 +128,8 @@ impl std::fmt::Display for OutputType {
 /// if let Some(text) = result.text() {
 ///     println!("Transcription: {}", text);
 /// }
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct InferenceResult {
