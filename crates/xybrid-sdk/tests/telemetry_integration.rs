@@ -731,9 +731,9 @@ fn execute_streaming_emits_no_outer_telemetry_events() {
 /// shows two empty cells.
 ///
 /// Skips gracefully when the GGUF fixture isn't downloaded so CI without
-/// `--features llm-llamacpp` and developers without the model on disk
+/// `--features llm-llamacpp-runtime` and developers without the model on disk
 /// don't see spurious failures.
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 #[test]
 fn chat_context_llm_call_carries_backend_and_quantization_on_spans() {
     use xybrid_core::conversation::ConversationContext;
@@ -821,7 +821,7 @@ fn chat_context_llm_call_carries_backend_and_quantization_on_spans() {
 /// Both the SDK telemetry channel and the inner `ExecutionEvent`
 /// listener are wired up here so any future regression that re-emits
 /// outer-span `Started` / `Completed` rows trips the assert immediately.
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 #[test]
 fn xybrid_model_run_streaming_emits_one_model_complete_event() {
     use xybrid_core::execution::listener;
@@ -975,7 +975,7 @@ fn xybrid_model_run_streaming_emits_one_model_complete_event() {
 /// metadata fired but no completion event ever published, so calls that
 /// took the streaming-fast-path branch were invisible to billing,
 /// cost-attribution, and the Traces dashboard's per-turn row.
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 #[test]
 fn pipeline_streaming_fast_path_emits_one_model_complete_event() {
     use xybrid_core::execution::listener;
@@ -1133,7 +1133,7 @@ fn pipeline_streaming_fast_path_emits_one_model_complete_event() {
 /// per-stage success-path events, leaving the wire shape at the same
 /// three events the streaming-fast-path branch produces: routing
 /// metadata + the SDK's single completion event.
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 #[test]
 fn pipeline_streaming_fallback_emits_bounded_event_shape() {
     use xybrid_core::execution::listener;
@@ -1272,7 +1272,7 @@ fn pipeline_streaming_fallback_emits_bounded_event_shape() {
 /// which emitted `ModelComplete` — making warmups indistinguishable
 /// from real inferences on the wire and inflating cost-attribution
 /// rollups with synthetic warmup runs.
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 #[test]
 fn xybrid_model_warmup_emits_one_model_warmup_event() {
     use xybrid_core::execution::listener;
@@ -1435,7 +1435,7 @@ fn xybrid_model_warmup_emits_one_model_warmup_event() {
 /// (and the matching gate in `convert_to_platform_event`). This test
 /// asserts the observable consequence: the global collector is empty
 /// after `model.warmup()` returns.
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 #[test]
 fn xybrid_model_warmup_drains_span_collector_to_avoid_leak_into_next_event() {
     use xybrid_core::tracing as core_tracing;

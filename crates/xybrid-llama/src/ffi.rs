@@ -9,7 +9,7 @@
 //! purpose-specific rather than re-exporting the whole binding set.
 
 use std::ffi::CString;
-use std::os::raw::{c_char, c_float, c_int, c_void};
+use std::os::raw::{c_char, c_int, c_void};
 
 use llama_cpp_sys::bindings as sys;
 
@@ -251,7 +251,11 @@ pub(crate) unsafe fn generate(
     n_input: usize,
     output_tokens: *mut i32,
     max_tokens: usize,
-    sampling: SamplingArgs,
+    temperature: f32,
+    top_p: f32,
+    min_p: f32,
+    top_k: usize,
+    repeat_penalty: f32,
     seed: u32,
     stop_seqs: *const i32,
     stop_lens: *const c_int,
@@ -264,11 +268,11 @@ pub(crate) unsafe fn generate(
         n_input as c_int,
         output_tokens,
         max_tokens as c_int,
-        sampling.temperature,
-        sampling.top_p,
-        sampling.min_p,
-        sampling.top_k as c_int,
-        sampling.repeat_penalty,
+        temperature,
+        top_p,
+        min_p,
+        top_k as c_int,
+        repeat_penalty,
         seed,
         stop_seqs,
         stop_lens,
@@ -291,7 +295,11 @@ pub(crate) unsafe fn generate_streaming(
     n_input: usize,
     output_tokens: *mut i32,
     max_tokens: usize,
-    sampling: SamplingArgs,
+    temperature: f32,
+    top_p: f32,
+    min_p: f32,
+    top_k: usize,
+    repeat_penalty: f32,
     seed: u32,
     stop_seqs: *const i32,
     stop_lens: *const c_int,
@@ -307,11 +315,11 @@ pub(crate) unsafe fn generate_streaming(
         n_input as c_int,
         output_tokens,
         max_tokens as c_int,
-        sampling.temperature,
-        sampling.top_p,
-        sampling.min_p,
-        sampling.top_k as c_int,
-        sampling.repeat_penalty,
+        temperature,
+        top_p,
+        min_p,
+        top_k as c_int,
+        repeat_penalty,
         seed,
         stop_seqs,
         stop_lens,
@@ -330,15 +338,4 @@ pub(crate) unsafe fn log_set_verbosity(level: i32) {
 /// # Safety: callable from any thread at any time.
 pub(crate) unsafe fn log_get_verbosity() -> i32 {
     sys::llama_log_get_verbosity_c() as i32
-}
-
-/// Packed sampling args for [`generate`] / [`generate_streaming`] so the
-/// FFI helpers don't carry six float parameters each.
-#[derive(Clone, Copy)]
-pub(crate) struct SamplingArgs {
-    pub(crate) temperature: c_float,
-    pub(crate) top_p: c_float,
-    pub(crate) min_p: c_float,
-    pub(crate) top_k: usize,
-    pub(crate) repeat_penalty: c_float,
 }

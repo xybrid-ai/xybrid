@@ -19,10 +19,23 @@
 #ifndef XYBRID_LLAMA_CPP_SYS_WRAPPER_H
 #define XYBRID_LLAMA_CPP_SYS_WRAPPER_H
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include "llama.h"
 
 #ifdef __cplusplus
 extern "C" {
+#define XYBRID_LLAMA_MODEL llama_model
+#define XYBRID_LLAMA_CONTEXT llama_context
+#define XYBRID_LLAMA_SAMPLER llama_sampler
+#define XYBRID_CONST_PTR
+#else
+#define XYBRID_LLAMA_MODEL void
+#define XYBRID_LLAMA_CONTEXT void
+#define XYBRID_LLAMA_SAMPLER void
+#define XYBRID_CONST_PTR const
 #endif
 
 /* ------------------------------------------------------------------------
@@ -44,109 +57,124 @@ void llama_log_set_verbosity_c(int level);
 int  llama_log_get_verbosity_c(void);
 
 /* Model lifecycle */
-void* llama_load_model_from_file_c(const char* path_model, int n_gpu_layers);
-void  llama_free_model_c(void* model);
+XYBRID_LLAMA_MODEL* llama_load_model_from_file_c(const char* path_model, int n_gpu_layers);
+void  llama_free_model_c(XYBRID_LLAMA_MODEL* model);
 
 /* Context lifecycle */
-void* llama_new_context_with_model_c(
-    void* model,
+XYBRID_LLAMA_CONTEXT* llama_new_context_with_model_c(
+    XYBRID_LLAMA_MODEL* model,
     int n_ctx,
     int n_threads,
     int n_batch,
     bool flash_attn);
-void  llama_free_c(void* ctx);
-void  llama_kv_cache_clear_c(void* ctx);
-int   llama_kv_cache_seq_rm_c(void* ctx, int seq_id, int p_keep);
+void  llama_free_c(XYBRID_LLAMA_CONTEXT* ctx);
+void  llama_kv_cache_clear_c(XYBRID_LLAMA_CONTEXT* ctx);
+int   llama_kv_cache_seq_rm_c(XYBRID_LLAMA_CONTEXT* ctx, int seq_id, int p_keep);
 
 /* Tokenization */
 int  llama_tokenize_c(
-    const void* model,
+    const XYBRID_LLAMA_MODEL* model,
     const char* text,
     int text_len,
-    int* tokens,
+    int32_t* tokens,
     int n_tokens_max,
     bool add_special,
     bool parse_special);
 
 int  llama_token_to_piece_c(
-    const void* model,
-    int token,
+    const XYBRID_LLAMA_MODEL* model,
+    int32_t token,
     char* buf,
     int length,
     int lstrip,
     bool special);
 
 /* Special tokens / vocabulary */
-int  llama_token_bos_c(const void* model);
-int  llama_token_eos_c(const void* model);
-bool llama_vocab_is_eog_c(const void* model, int token);
+int32_t llama_token_bos_c(const XYBRID_LLAMA_MODEL* model);
+int32_t llama_token_eos_c(const XYBRID_LLAMA_MODEL* model);
+int32_t llama_token_nl_c(const XYBRID_LLAMA_MODEL* model);
+bool llama_vocab_is_eog_c(const XYBRID_LLAMA_MODEL* model, int32_t token);
 
 /* Model metadata */
-const char* llama_model_chat_template_c(const void* model);
-int  llama_n_vocab_c(const void* model);
-int  llama_n_ctx_c(const void* ctx);
-bool llama_model_is_recurrent_c(const void* model);
-bool llama_model_has_recurrent_state_c(const void* model);
+const char* llama_model_chat_template_c(const XYBRID_LLAMA_MODEL* model);
+int  llama_n_vocab_c(const XYBRID_LLAMA_MODEL* model);
+int  llama_n_ctx_c(const XYBRID_LLAMA_CONTEXT* ctx);
+bool llama_model_is_recurrent_c(const XYBRID_LLAMA_MODEL* model);
+bool llama_model_has_recurrent_state_c(const XYBRID_LLAMA_MODEL* model);
 
 /* Low-level generation primitives (carried in wrapper.cpp's exports
    even though xybrid-llama drives generation via the higher-level
    `llama_generate*_c` entry points below). */
-int   llama_decode_c(void* ctx, const void* batch);
-float* llama_get_logits_c(void* ctx);
+int   llama_decode_c(XYBRID_LLAMA_CONTEXT* ctx, const llama_batch* batch);
+float* llama_get_logits_c(XYBRID_LLAMA_CONTEXT* ctx);
 
 /* Chat template formatting */
 int  llama_chat_apply_template_c(
     const char* tmpl,
-    const void* chat,
+    const llama_chat_message* chat,
     size_t n_msg,
     bool add_ass,
     char* buf,
     int length);
 
 int  llama_format_chat_with_model_c(
-    const void* model,
-    const char* const* roles,
-    const char* const* contents,
+    const XYBRID_LLAMA_MODEL* model,
+    const char* XYBRID_CONST_PTR* roles,
+    const char* XYBRID_CONST_PTR* contents,
     size_t n_msg,
     char* buf,
     int buf_size);
 
+/* Batch and sampler helpers exported by wrapper.cpp for low-level callers. */
+llama_batch llama_batch_init_c(int n_tokens, int embd, int n_seq_max);
+void llama_batch_free_c(llama_batch batch);
+
+XYBRID_LLAMA_SAMPLER* llama_sampler_chain_create_c(
+    float temperature,
+    float top_p,
+    float min_p,
+    int top_k,
+    float repeat_penalty,
+    int penalty_last_n,
+    uint32_t seed);
+void llama_sampler_free_c(XYBRID_LLAMA_SAMPLER* smpl);
+
 /* Streaming-callback token type (matches Rust's `TokenCallback`). */
-typedef int (*llama_token_callback_c)(int token_id, const char* token_text, void* user_data);
+typedef int (*llama_token_callback_c)(int32_t token_id, const char* token_text, void* user_data);
 
 /* Autoregressive generation with stop-sequence support */
 int  llama_generate_c(
-    void* ctx,
-    const void* model,
-    const int* input_tokens,
+    XYBRID_LLAMA_CONTEXT* ctx,
+    const XYBRID_LLAMA_MODEL* model,
+    const int32_t* input_tokens,
     int n_input,
-    int* output_tokens,
+    int32_t* output_tokens,
     int max_tokens,
     float temperature,
     float top_p,
     float min_p,
     int top_k,
     float repeat_penalty,
-    unsigned int seed,
-    const int* stop_seqs,
+    uint32_t seed,
+    const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs);
 
 /* Streaming variant with per-token callback + KV-cache prefix-reuse */
 int  llama_generate_streaming_c(
-    void* ctx,
-    const void* model,
-    const int* input_tokens,
+    XYBRID_LLAMA_CONTEXT* ctx,
+    const XYBRID_LLAMA_MODEL* model,
+    const int32_t* input_tokens,
     int n_input,
-    int* output_tokens,
+    int32_t* output_tokens,
     int max_tokens,
     float temperature,
     float top_p,
     float min_p,
     int top_k,
     float repeat_penalty,
-    unsigned int seed,
-    const int* stop_seqs,
+    uint32_t seed,
+    const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
     llama_token_callback_c callback,
@@ -154,7 +182,16 @@ int  llama_generate_streaming_c(
     int n_past_in);
 
 #ifdef __cplusplus
+#undef XYBRID_CONST_PTR
+#undef XYBRID_LLAMA_SAMPLER
+#undef XYBRID_LLAMA_CONTEXT
+#undef XYBRID_LLAMA_MODEL
 }
+#else
+#undef XYBRID_CONST_PTR
+#undef XYBRID_LLAMA_SAMPLER
+#undef XYBRID_LLAMA_CONTEXT
+#undef XYBRID_LLAMA_MODEL
 #endif
 
 #endif /* XYBRID_LLAMA_CPP_SYS_WRAPPER_H */

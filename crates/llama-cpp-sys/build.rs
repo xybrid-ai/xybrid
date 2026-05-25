@@ -60,6 +60,7 @@ fn main() {
         "CC_aarch64_linux_android",
         "TARGET_CC",
         "CC",
+        "LLAMA_CPP_SYS_WORKSPACE_ROOT",
     ] {
         println!("cargo:rerun-if-env-changed={var}");
     }
@@ -199,6 +200,49 @@ struct NdkDetectionResult {
     tried_paths: Vec<String>,
 }
 
+struct BuildContext {
+    manifest_dir: PathBuf,
+    out_dir: PathBuf,
+    workspace_root: PathBuf,
+    target: String,
+    target_os: String,
+    target_arch: String,
+    android_ndk: Option<NdkDetectionResult>,
+}
+
+impl BuildContext {
+    fn from_env() -> Self {
+        let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+        let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+        let target = env::var("TARGET").unwrap();
+        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+        let target_arch =
+            env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "aarch64".to_string());
+        let workspace_root = workspace_root(&manifest_dir);
+        let android_ndk = if target_os == "android" {
+            Some(find_android_ndk())
+        } else {
+            None
+        };
+
+        Self {
+            manifest_dir,
+            out_dir,
+            workspace_root,
+            target,
+            target_os,
+            target_arch,
+            android_ndk,
+        }
+    }
+
+    fn android_ndk_path(&self) -> Option<&str> {
+        self.android_ndk
+            .as_ref()
+            .and_then(|result| result.ndk_path.as_deref())
+    }
+}
+
 /// Find the Android NDK path from various sources
 fn find_android_ndk() -> NdkDetectionResult {
     let mut tried_paths = Vec::new();
@@ -336,17 +380,26 @@ fn find_android_ndk() -> NdkDetectionResult {
 
 /// Walk up from this crate's manifest dir to find the workspace root (the
 /// directory containing the top-level `Cargo.toml` with `[workspace]`).
+/// If `LLAMA_CPP_SYS_WORKSPACE_ROOT` is set, use it directly; this gives
+/// package managers and unusual workspace layouts an explicit escape hatch.
 /// Falls back to `..` if the marker can't be located — should never happen
 /// in normal cargo invocations but kept defensive so the build script
 /// errors loudly rather than panicking with a confusing path.
 fn workspace_root(manifest_dir: &Path) -> PathBuf {
+    if let Ok(root) = env::var("LLAMA_CPP_SYS_WORKSPACE_ROOT") {
+        let explicit = PathBuf::from(root);
+        if !explicit.as_os_str().is_empty() {
+            return explicit;
+        }
+    }
+
     let mut dir = manifest_dir.to_path_buf();
     for _ in 0..6 {
         if let Some(parent) = dir.parent() {
             let candidate = parent.join("Cargo.toml");
             if candidate.exists() {
                 if let Ok(content) = std::fs::read_to_string(&candidate) {
-                    if content.contains("[workspace]") {
+                    if content.lines().any(|line| line.trim() == "[workspace]") {
                         return parent.to_path_buf();
                     }
                 }
@@ -360,21 +413,18 @@ fn workspace_root(manifest_dir: &Path) -> PathBuf {
 }
 
 fn compile_llama_cpp() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let wrapper_path = manifest_dir.join("wrapper.cpp");
-
-    let workspace = workspace_root(&manifest_dir);
+    let ctx = BuildContext::from_env();
+    let wrapper_path = ctx.manifest_dir.join("wrapper.cpp");
 
     // Source-lookup order (see header comment for rationale):
     //   1. workspace/vendor/llama-cpp (canonical, declared in `.gitmodules`)
     //   2. $OUT_DIR/llama.cpp pinned-commit clone (consumer fallback)
-    let workspace_vendor = workspace.join("vendor").join("llama-cpp");
+    let workspace_vendor = ctx.workspace_root.join("vendor").join("llama-cpp");
 
     let llama_cpp_dir = if workspace_vendor.join("CMakeLists.txt").exists() {
         workspace_vendor
     } else {
-        clone_pinned_commit(&out_dir)
+        clone_pinned_commit(&ctx.out_dir)
     };
 
     // Phase 5: generate the FFI surface from wrapper.h before the cmake
@@ -382,13 +432,7 @@ fn compile_llama_cpp() {
     // so this lives after llama_cpp_dir is resolved. NDK detection
     // happens here too because Android cross-builds need libclang to
     // resolve `<stdio.h>` through the NDK sysroot.
-    let target_os_early = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let ndk_for_bindgen = if target_os_early == "android" {
-        find_android_ndk().ndk_path
-    } else {
-        None
-    };
-    generate_bindings(&llama_cpp_dir, &out_dir, ndk_for_bindgen.as_deref());
+    generate_bindings(&llama_cpp_dir, &ctx.out_dir, ctx.android_ndk_path());
 
     if !check_cmake_available() {
         println!("cargo:warning=================================================================");
@@ -403,9 +447,6 @@ fn compile_llama_cpp() {
         println!("cargo:warning=================================================================");
         process::exit(1);
     }
-
-    let target = env::var("TARGET").unwrap();
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
 
     let mut metal_enabled = false;
     let mut ndk_path_used: Option<String> = None;
@@ -422,88 +463,19 @@ fn compile_llama_cpp() {
         .define("LLAMA_CURL", "OFF")
         .define("GGML_OPENMP", "OFF");
 
-    if target_os == "android" {
-        cmake_config
-            .define("GGML_NATIVE", "OFF")
-            .define("GGML_METAL", "OFF")
-            .define("GGML_CUDA", "OFF")
-            .define("GGML_VULKAN", "OFF")
-            .define("GGML_CPU_HBM", "OFF")
-            // Disable llamafile SGEMM — its FP16 NEON intrinsics (vld1q_f16) require
-            // armv8.2-a+fp16 which the NDK doesn't enable by default
-            .define("GGML_LLAMAFILE", "OFF");
-
-        let ndk_result = find_android_ndk();
-
-        if let Some(ref ndk) = ndk_result.ndk_path {
-            println!("cargo:warning=Android NDK detected: {}", ndk);
-            ndk_path_used = Some(ndk.clone());
-
-            let toolchain_file = format!("{}/build/cmake/android.toolchain.cmake", ndk);
-            if Path::new(&toolchain_file).exists() {
-                cmake_config.define("CMAKE_TOOLCHAIN_FILE", &toolchain_file);
-            }
-
-            let target_arch =
-                env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "aarch64".to_string());
-            let android_abi = match target_arch.as_str() {
-                "aarch64" => "arm64-v8a",
-                "arm" => "armeabi-v7a",
-                "x86_64" => "x86_64",
-                "x86" => "x86",
-                _ => "arm64-v8a",
-            };
-            cmake_config.define("ANDROID_ABI", android_abi);
-
-            // Enable ARMv8.2-A dotprod for arm64 Android targets.
-            // The new llama.cpp (b541241+) relies on dotprod-optimized GEMM
-            // microkernels in repack.cpp. Without this, quantized models
-            // (Q4_K_M, Q5_K, etc.) fall back to generic NEON paths that are
-            // 3-5x slower. dotprod is available on all Cortex-A76+ cores
-            // (2019+): Snapdragon 855+, Tensor G1+, Dimensity 1000+.
-            if android_abi == "arm64-v8a" {
-                cmake_config.define("GGML_CPU_ARM_ARCH", "armv8.2-a+dotprod");
-            }
-
-            cmake_config.define("ANDROID_PLATFORM", "android-28");
-            cmake_config.define("ANDROID_STL", "c++_shared");
-            cmake_config.define("ANDROID_NDK", ndk);
-        } else {
-            println!(
-                "cargo:warning================================================================="
-            );
-            println!("cargo:warning=ERROR: Android NDK not found!");
-            println!(
-                "cargo:warning================================================================="
-            );
-            println!("cargo:warning=Paths tried:");
-            for path in &ndk_result.tried_paths {
-                println!("cargo:warning=  - {}", path);
-            }
-            println!("cargo:warning=");
-            println!("cargo:warning=To fix this, set one of these environment variables:");
-            println!("cargo:warning=  export ANDROID_NDK_HOME=/path/to/android-ndk");
-            println!("cargo:warning=  export ANDROID_HOME=/path/to/android-sdk  (with ndk/ subdirectory)");
-            println!("cargo:warning=");
-            println!(
-                "cargo:warning=Or install Android Studio which sets up the NDK automatically."
-            );
-            println!(
-                "cargo:warning================================================================="
-            );
-            process::exit(1);
-        }
-    } else if target_os == "macos" || target_os == "ios" {
+    if ctx.target_os == "android" {
+        ndk_path_used = configure_android(&mut cmake_config, &ctx);
+    } else if ctx.target_os == "macos" || ctx.target_os == "ios" {
         cmake_config
             .define("GGML_METAL", "ON")
             .define("GGML_ACCELERATE", "ON")
             .define("GGML_BLAS", "OFF");
         metal_enabled = true;
-    } else if target.contains("linux") {
+    } else if ctx.target.contains("linux") {
         cmake_config
             .define("GGML_METAL", "OFF")
             .define("GGML_CUDA", "OFF");
-    } else if target.contains("windows") {
+    } else if ctx.target.contains("windows") {
         cmake_config
             .define("GGML_METAL", "OFF")
             .define("GGML_CUDA", "OFF");
@@ -517,7 +489,7 @@ fn compile_llama_cpp() {
 
     println!(
         "cargo:warning=llama.cpp build: target={}, metal={}, ndk={}",
-        target,
+        ctx.target,
         if metal_enabled { "yes" } else { "no" },
         ndk_path_used.as_deref().unwrap_or("N/A")
     );
@@ -552,13 +524,13 @@ fn compile_llama_cpp() {
 
     wrapper_build.compile("llama_wrapper");
 
-    if target_os == "android" {
+    if ctx.target_os == "android" {
         println!("cargo:rustc-link-lib=c++_shared");
         println!("cargo:rustc-link-lib=log");
-    } else if target_os == "linux" {
+    } else if ctx.target_os == "linux" {
         println!("cargo:rustc-link-lib=stdc++");
         println!("cargo:rustc-link-lib=pthread");
-    } else if target_os == "macos" || target_os == "ios" {
+    } else if ctx.target_os == "macos" || ctx.target_os == "ios" {
         println!("cargo:rustc-link-lib=c++");
         println!("cargo:rustc-link-lib=framework=Accelerate");
 
@@ -566,8 +538,76 @@ fn compile_llama_cpp() {
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=MetalKit");
         println!("cargo:rustc-link-lib=static=ggml-metal");
-    } else if target.contains("windows") {
+    } else if ctx.target.contains("windows") {
         // Windows linking handled by CMake
+    }
+}
+
+fn configure_android(cmake_config: &mut cmake::Config, ctx: &BuildContext) -> Option<String> {
+    cmake_config
+        .define("GGML_NATIVE", "OFF")
+        .define("GGML_METAL", "OFF")
+        .define("GGML_CUDA", "OFF")
+        .define("GGML_VULKAN", "OFF")
+        .define("GGML_CPU_HBM", "OFF")
+        // Disable llamafile SGEMM — its FP16 NEON intrinsics (vld1q_f16) require
+        // armv8.2-a+fp16 which the NDK doesn't enable by default.
+        .define("GGML_LLAMAFILE", "OFF");
+
+    let ndk_result = ctx
+        .android_ndk
+        .as_ref()
+        .expect("android target should resolve NDK detection once");
+
+    if let Some(ref ndk) = ndk_result.ndk_path {
+        println!("cargo:warning=Android NDK detected: {}", ndk);
+
+        let toolchain_file = format!("{}/build/cmake/android.toolchain.cmake", ndk);
+        if Path::new(&toolchain_file).exists() {
+            cmake_config.define("CMAKE_TOOLCHAIN_FILE", &toolchain_file);
+        }
+
+        let android_abi = match ctx.target_arch.as_str() {
+            "aarch64" => "arm64-v8a",
+            "arm" => "armeabi-v7a",
+            "x86_64" => "x86_64",
+            "x86" => "x86",
+            _ => "arm64-v8a",
+        };
+        cmake_config.define("ANDROID_ABI", android_abi);
+
+        // Enable ARMv8.2-A dotprod for arm64 Android targets.
+        // The new llama.cpp (b541241+) relies on dotprod-optimized GEMM
+        // microkernels in repack.cpp. Without this, quantized models
+        // (Q4_K_M, Q5_K, etc.) fall back to generic NEON paths that are
+        // 3-5x slower. dotprod is available on all Cortex-A76+ cores
+        // (2019+): Snapdragon 855+, Tensor G1+, Dimensity 1000+.
+        if android_abi == "arm64-v8a" {
+            cmake_config.define("GGML_CPU_ARM_ARCH", "armv8.2-a+dotprod");
+        }
+
+        cmake_config.define("ANDROID_PLATFORM", "android-28");
+        cmake_config.define("ANDROID_STL", "c++_shared");
+        cmake_config.define("ANDROID_NDK", ndk);
+        Some(ndk.clone())
+    } else {
+        println!("cargo:warning=================================================================");
+        println!("cargo:warning=ERROR: Android NDK not found!");
+        println!("cargo:warning=================================================================");
+        println!("cargo:warning=Paths tried:");
+        for path in &ndk_result.tried_paths {
+            println!("cargo:warning=  - {}", path);
+        }
+        println!("cargo:warning=");
+        println!("cargo:warning=To fix this, set one of these environment variables:");
+        println!("cargo:warning=  export ANDROID_NDK_HOME=/path/to/android-ndk");
+        println!(
+            "cargo:warning=  export ANDROID_HOME=/path/to/android-sdk  (with ndk/ subdirectory)"
+        );
+        println!("cargo:warning=");
+        println!("cargo:warning=Or install Android Studio which sets up the NDK automatically.");
+        println!("cargo:warning=================================================================");
+        process::exit(1);
     }
 }
 

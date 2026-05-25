@@ -6,8 +6,7 @@
 //! pre-refactor home inside `xybrid-core::runtime_adapter::llama_cpp`.
 //! The `CloudFallbackAbort` round-trip path through this trampoline is
 //! the single most behavior-sensitive surface in the refactor; the
-//! regression test at `crates/xybrid-llama/tests/cloud_fallback_abort.rs`
-//! watches it.
+//! inline regression test below watches it without exposing public hooks.
 
 use std::error::Error as StdError;
 use std::ffi::{c_void, CStr, CString};
@@ -19,7 +18,7 @@ use llama_cpp_sys::bindings::TokenCallback;
 
 use crate::context::LlamaContext;
 use crate::error::{LlamaError, LlamaResult};
-use crate::ffi::{self, SamplingArgs};
+use crate::ffi;
 use crate::model::LlamaModel;
 
 /// Closure type alias for per-token callbacks. The signature deliberately
@@ -29,35 +28,18 @@ use crate::model::LlamaModel;
 pub type StreamingCallback<'a> =
     &'a mut dyn FnMut(i32, &str) -> Result<(), Box<dyn StdError + Send + Sync>>;
 
-/// Minimal chat-message view consumed by [`format_chat`].
-///
-/// Trait-based so callers can use their own `ChatMessage` type
-/// (`xybrid-core::runtime_adapter::types::ChatMessage`) without forcing
-/// `xybrid-llama` to take a dep on `xybrid-core`. The two getters return
-/// borrowed `&str` so callers pay zero allocations.
-pub trait ChatMessageView {
-    fn role(&self) -> &str;
-    fn content(&self) -> &str;
-}
-
 /// Heap-side state passed through the C callback to the Rust closure.
 ///
 /// Generic over `F` so the monomorphised trampoline knows the closure
 /// shape statically. The `error` slot captures any `Err(_)` the closure
 /// returned so the safe-wrapper caller can recover it after the C side
 /// returns.
-///
-/// Exposed as `pub` (rather than `pub(crate)`) only so the
-/// `__test_hooks` module in `crate::lib` can re-export it for integration
-/// tests; `#[doc(hidden)]` keeps it out of rustdoc and IDE autocomplete.
-/// Treat as crate-private — the shape is unstable.
-#[doc(hidden)]
-pub struct StreamingContext<'a, F>
+struct StreamingContext<'a, F>
 where
     F: FnMut(i32, &str) -> Result<(), Box<dyn StdError + Send + Sync>>,
 {
-    pub callback: &'a mut F,
-    pub error: Option<Box<dyn StdError + Send + Sync>>,
+    callback: &'a mut F,
+    error: Option<Box<dyn StdError + Send + Sync>>,
 }
 
 /// C-compatible trampoline that bridges llama.cpp's token callback into
@@ -74,13 +56,10 @@ where
 /// the `Option<TokenCallback>` parameter on
 /// `llama_generate_streaming_c` accept this function pointer.
 ///
-/// Exposed `pub` for `__test_hooks` re-export; `#[doc(hidden)]` keeps
-/// it out of public surface in rustdoc. After Phase 5's bindgen
-/// migration the trampoline must match the bindgen-emitted
-/// `llama_token_callback_c` typedef, which carries `unsafe extern "C"
-/// fn(...)` semantics.
-#[doc(hidden)]
-pub unsafe extern "C" fn streaming_trampoline<F>(
+/// After Phase 5's bindgen migration the trampoline must match the
+/// bindgen-emitted `llama_token_callback_c` typedef, which carries
+/// `unsafe extern "C" fn(...)` semantics.
+unsafe extern "C" fn streaming_trampoline<F>(
     token_id: i32,
     token_text: *const c_char,
     user_data: *mut c_void,
@@ -197,14 +176,6 @@ pub fn generate_with_stops(
         )
     };
 
-    let sampling = SamplingArgs {
-        temperature,
-        top_p,
-        min_p,
-        top_k,
-        repeat_penalty,
-    };
-
     // SAFETY: all pointers checked / sourced from owned buffers; sizes
     // honest; ctx + model live for the call.
     let result = unsafe {
@@ -215,7 +186,11 @@ pub fn generate_with_stops(
             input_tokens.len(),
             output_tokens.as_mut_ptr(),
             max_tokens,
-            sampling,
+            temperature,
+            top_p,
+            min_p,
+            top_k,
+            repeat_penalty,
             time_seed(),
             stop_seqs_ptr,
             stop_lens_ptr,
@@ -278,14 +253,6 @@ where
         error: None,
     };
 
-    let sampling = SamplingArgs {
-        temperature,
-        top_p,
-        min_p,
-        top_k,
-        repeat_penalty,
-    };
-
     let callback: Option<TokenCallback> = Some(streaming_trampoline::<F>);
 
     // SAFETY: all pointers checked / sourced from owned buffers; the
@@ -299,7 +266,11 @@ where
             input_tokens.len(),
             output_tokens.as_mut_ptr(),
             max_tokens,
-            sampling,
+            temperature,
+            top_p,
+            min_p,
+            top_k,
+            repeat_penalty,
             time_seed(),
             stop_seqs_ptr,
             stop_lens_ptr,
@@ -330,31 +301,47 @@ where
     Ok((output_tokens, stopped_by_callback))
 }
 
-/// Render `messages` through `model`'s built-in chat template, with a
-/// fallback to a minimal ChatML format if the C-side template invocation
-/// fails. Returns the formatted prompt string.
+/// Render role/content slices through `model`'s built-in chat template.
 ///
-/// Caller supplies `messages` as anything implementing
-/// [`ChatMessageView`], so `xybrid-llama` does not need to depend on
-/// `xybrid-core` for its `ChatMessage` type.
-pub fn format_chat<M: ChatMessageView>(model: &LlamaModel, messages: &[M]) -> LlamaResult<String> {
-    if messages.is_empty() {
+/// Returns `Ok(None)` only when the model has no embedded template, so the
+/// caller can apply its own model-family fallback policy. If a template exists
+/// but native rendering fails, this returns [`LlamaError::ChatTemplateFailed`]
+/// instead of silently switching prompt families.
+pub fn format_chat(
+    model: &LlamaModel,
+    roles: &[&str],
+    contents: &[&str],
+) -> LlamaResult<Option<String>> {
+    if roles.is_empty() {
         return Err(LlamaError::InvalidInput("empty messages".to_string()));
     }
+    if roles.len() != contents.len() {
+        return Err(LlamaError::InvalidInput(format!(
+            "chat roles/content length mismatch: roles={}, contents={}",
+            roles.len(),
+            contents.len()
+        )));
+    }
+    if model.chat_template().is_none() {
+        return Ok(None);
+    }
 
-    let roles: Vec<CString> = messages
+    let roles: Vec<CString> = roles
         .iter()
-        .map(|m| ffi::cstring(m.role(), "chat role"))
+        .map(|role| ffi::cstring(role, "chat role"))
         .collect::<Result<Vec<_>, _>>()?;
-    let contents: Vec<CString> = messages
+    let contents: Vec<CString> = contents
         .iter()
-        .map(|m| ffi::cstring(m.content(), "chat content"))
+        .map(|content| ffi::cstring(content, "chat content"))
         .collect::<Result<Vec<_>, _>>()?;
 
     let role_ptrs: Vec<*const c_char> = roles.iter().map(|s| s.as_ptr()).collect();
     let content_ptrs: Vec<*const c_char> = contents.iter().map(|s| s.as_ptr()).collect();
 
-    let mut buf = vec![0u8; 4096];
+    let input_bytes: usize = roles.iter().map(|s| s.as_bytes().len()).sum::<usize>()
+        + contents.iter().map(|s| s.as_bytes().len()).sum::<usize>();
+    let initial_cap = (input_bytes * 3).max(4096);
+    let mut buf = vec![0u8; initial_cap];
 
     // SAFETY: model.as_ptr is live; role_ptrs / content_ptrs are valid
     // for the call duration (the underlying CStrings live in
@@ -364,7 +351,7 @@ pub fn format_chat<M: ChatMessageView>(model: &LlamaModel, messages: &[M]) -> Ll
             model.as_ptr(),
             role_ptrs.as_ptr(),
             content_ptrs.as_ptr(),
-            messages.len(),
+            roles.len(),
             buf.as_mut_ptr() as *mut c_char,
             buf.len(),
         )
@@ -374,9 +361,9 @@ pub fn format_chat<M: ChatMessageView>(model: &LlamaModel, messages: &[M]) -> Ll
         tracing::warn!(
             target: "xybrid_llama",
             code = result,
-            "model chat template failed; falling back to ChatML format"
+            "model chat template failed"
         );
-        return Ok(format_chat_chatml(messages));
+        return Err(chat_template_render_failed(result, "initial render"));
     }
 
     let len = if result as usize >= buf.len() {
@@ -387,42 +374,142 @@ pub fn format_chat<M: ChatMessageView>(model: &LlamaModel, messages: &[M]) -> Ll
                 model.as_ptr(),
                 role_ptrs.as_ptr(),
                 content_ptrs.as_ptr(),
-                messages.len(),
+                roles.len(),
                 buf.as_mut_ptr() as *mut c_char,
                 buf.len(),
             )
         };
         if retry_result < 0 {
-            return Ok(format_chat_chatml(messages));
+            return Err(chat_template_render_failed(retry_result, "retry render"));
+        }
+        if retry_result as usize >= buf.len() {
+            return Err(LlamaError::ChatTemplateFailed {
+                detail: format!(
+                    "retry render still required {} bytes after resizing buffer to {} bytes",
+                    retry_result,
+                    buf.len()
+                ),
+            });
         }
         retry_result as usize
     } else {
         result as usize
     };
 
-    match std::str::from_utf8(&buf[..len]) {
-        Ok(s) => Ok(s.to_string()),
-        Err(_) => Ok(format_chat_chatml(messages)),
+    Ok(Some(prompt_from_template_bytes(&buf, len)?))
+}
+
+fn chat_template_render_failed(code: c_int, phase: &'static str) -> LlamaError {
+    LlamaError::ChatTemplateFailed {
+        detail: format!("native formatter {phase} returned error code {code}"),
     }
 }
 
-/// Minimal ChatML fallback for models without an embedded template.
-fn format_chat_chatml<M: ChatMessageView>(messages: &[M]) -> String {
-    let mut prompt = String::new();
-    for msg in messages {
-        match msg.role() {
-            "system" => prompt.push_str(&format!(
-                "<|im_start|>system\n{}<|im_end|>\n",
-                msg.content()
-            )),
-            "user" => prompt.push_str(&format!("<|im_start|>user\n{}<|im_end|>\n", msg.content())),
-            "assistant" => prompt.push_str(&format!(
-                "<|im_start|>assistant\n{}<|im_end|>\n",
-                msg.content()
-            )),
-            _ => prompt.push_str(&format!("<|im_start|>user\n{}<|im_end|>\n", msg.content())),
+fn prompt_from_template_bytes(buf: &[u8], len: usize) -> LlamaResult<String> {
+    if len > buf.len() {
+        return Err(LlamaError::ChatTemplateFailed {
+            detail: format!(
+                "native formatter reported {} bytes but buffer only has {} bytes",
+                len,
+                buf.len()
+            ),
+        });
+    }
+
+    std::str::from_utf8(&buf[..len])
+        .map(str::to_owned)
+        .map_err(|err| LlamaError::ChatTemplateFailed {
+            detail: format!("native formatter produced invalid UTF-8: {err}"),
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        chat_template_render_failed, prompt_from_template_bytes, streaming_trampoline, LlamaError,
+        StreamingContext,
+    };
+    use std::error::Error;
+    use std::ffi::CString;
+    use std::fmt;
+    use std::os::raw::c_void;
+    use std::time::{Duration, Instant};
+
+    #[derive(Debug)]
+    struct MarkerError(&'static str);
+
+    impl fmt::Display for MarkerError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.0)
         }
     }
-    prompt.push_str("<|im_start|>assistant\n");
-    prompt
+
+    impl Error for MarkerError {}
+
+    type Callback = fn(i32, &str) -> Result<(), Box<dyn Error + Send + Sync>>;
+
+    fn abort_callback(_token_id: i32, _text: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+        Err(Box::new(MarkerError("marker preserved through trampoline")))
+    }
+
+    #[test]
+    fn streaming_trampoline_preserves_boxed_error_marker() {
+        let mut callback: Callback = abort_callback;
+        let mut ctx = StreamingContext {
+            callback: &mut callback,
+            error: None,
+        };
+        let token_text = CString::new("token").unwrap();
+
+        let started = Instant::now();
+        // SAFETY: ctx is a valid `&mut StreamingContext<Callback>`, the
+        // token_text CString lives for the duration of the call, and the
+        // callback pointer in ctx is live.
+        let stop = unsafe {
+            streaming_trampoline::<Callback>(
+                42,
+                token_text.as_ptr(),
+                &mut ctx as *mut StreamingContext<Callback> as *mut c_void,
+            )
+        };
+        let elapsed = started.elapsed();
+
+        assert_eq!(stop, 1, "callback errors must stop the C stream");
+        assert!(
+            elapsed <= Duration::from_millis(50),
+            "llama.cpp trampoline abort exceeded M-series cancellation budget: {:?}",
+            elapsed
+        );
+        let err = ctx.error.take().expect("callback error must be stored");
+        let downcast: &MarkerError = err
+            .downcast_ref::<MarkerError>()
+            .expect("typed marker must survive the trampoline boundary");
+        assert_eq!(downcast.0, "marker preserved through trampoline");
+    }
+
+    #[test]
+    fn chat_template_render_error_is_not_fallback() {
+        let err = chat_template_render_failed(-1, "initial render");
+
+        match err {
+            LlamaError::ChatTemplateFailed { detail } => {
+                assert!(detail.contains("initial render"));
+                assert!(detail.contains("-1"));
+            }
+            other => panic!("expected ChatTemplateFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_chat_template_utf8_is_not_fallback() {
+        let err = prompt_from_template_bytes(&[0xff, 0xfe], 2)
+            .expect_err("invalid rendered prompt must be a template error");
+
+        match err {
+            LlamaError::ChatTemplateFailed { detail } => {
+                assert!(detail.contains("invalid UTF-8"));
+            }
+            other => panic!("expected ChatTemplateFailed, got {other:?}"),
+        }
+    }
 }

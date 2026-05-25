@@ -94,10 +94,8 @@ fn lfm2_350m_two_turns_does_not_fail_with_decode_error() {
         .expect("lfm2.5-350m context creation must succeed");
 
     // Apply chat template manually (the lfm2 GGUF embeds a chatml-like
-    // template); using format_chat would require the ChatMessageView
-    // trait, which is a thin layer. For a raw smoke test, prefilling
-    // text directly through tokenize() exercises the same `generate*`
-    // surface.
+    // template). For a raw smoke test, prefilling text directly through
+    // tokenize() exercises the same `generate*` surface.
     let turn1_prompt = "<|im_start|>user\nWhat is 2+2?<|im_end|>\n<|im_start|>assistant\n";
     let turn1_tokens = model
         .tokenize_special(turn1_prompt, true)
