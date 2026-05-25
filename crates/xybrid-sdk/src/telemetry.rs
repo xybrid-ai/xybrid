@@ -332,6 +332,15 @@ struct PlatformEvent {
     session_id: Uuid,
     event_type: String,
     payload: serde_json::Value,
+    // SDK self-identification. Always present so the backend can slice
+    // telemetry by SDK version (regression analysis) and by binding
+    // (adoption / per-platform performance). `sdk_version` is the
+    // `xybrid-sdk` crate version (compile-time `CARGO_PKG_VERSION`);
+    // `binding` is the process-global identifier set by the platform
+    // binding at init (`flutter`/`swift`/`kotlin`/`unity`), defaulting
+    // to `rust` when no binding has called `set_binding`.
+    sdk_version: String,
+    binding: String,
     // `device_id` honors the opt-out contract: when the SDK clears it
     // because the caller opted out of hardware detection without supplying
     // an explicit id, the wire event omits the field entirely rather than
@@ -1133,6 +1142,8 @@ fn convert_to_platform_event(
         session_id: config.session_id,
         event_type: event.event_type.clone(),
         payload,
+        sdk_version: crate::SDK_VERSION.to_string(),
+        binding: crate::get_binding().to_string(),
         device_id: config.device_id.clone(),
         device_label: config.device_label.clone(),
         platform: config.platform.clone(),
@@ -2734,6 +2745,50 @@ mod tests {
     }
 
     #[test]
+    fn platform_event_stamps_sdk_version_and_binding() {
+        // Invariant: every PlatformEvent that leaves the SDK carries
+        // `sdk_version` (= crate::SDK_VERSION) and `binding`
+        // (= crate::get_binding()). The assertion compares against the
+        // SDK's own view of itself rather than hardcoded strings so the
+        // test is hermetic regardless of `set_binding(...)` calls made by
+        // other tests sharing this process (BINDING is a OnceLock).
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("test_stage".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(10),
+            error: None,
+            data: None,
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+
+        assert_eq!(platform.sdk_version, crate::SDK_VERSION);
+        assert_eq!(platform.binding, crate::get_binding());
+        assert!(
+            !platform.sdk_version.is_empty(),
+            "sdk_version must not be empty"
+        );
+        assert!(!platform.binding.is_empty(), "binding must not be empty");
+
+        // Wire format: serialize and confirm the exact JSON keys land
+        // on the payload. Guards against an accidental `#[serde(rename)]`
+        // drift that would silently break the backend ingest contract.
+        let json = serde_json::to_value(&platform).unwrap();
+        assert_eq!(
+            json["sdk_version"].as_str(),
+            Some(crate::SDK_VERSION),
+            "wire key `sdk_version` missing or mismatched: {json}"
+        );
+        assert_eq!(
+            json["binding"].as_str(),
+            Some(crate::get_binding()),
+            "wire key `binding` missing or mismatched: {json}"
+        );
+    }
+
+    #[test]
     fn resource_summary_attaches_and_hoists_through_convert() {
         // End-to-end happy path: attach_resource_summary()
         // edits event.data, then convert_to_platform_event hoists
@@ -3768,6 +3823,8 @@ mod tests {
             session_id: Uuid::new_v4(),
             event_type: "Test".to_string(),
             payload: serde_json::json!({}),
+            sdk_version: crate::SDK_VERSION.to_string(),
+            binding: crate::get_binding().to_string(),
             device_id: None,
             device_label: None,
             platform: None,
