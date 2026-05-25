@@ -1,0 +1,193 @@
+crates/xybrid-core/src/execution/chat_template.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 13
+crates/xybrid-core/src/executor.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 148,195,418
+  s_a18a912543c207::t_b9b4999c7094fb 419,424,429
+  s_a18a912543c207::t_2b2625a169ecd9 196,201,206-208
+crates/xybrid-core/src/audio/envelope.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 29
+crates/xybrid-core/src/orchestrator.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 115,216
+crates/xybrid-core/src/testing/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 8,29
+  s_a18a912543c207::t_bd0b88503fec60 9,13,21-22
+  s_a18a912543c207::t_86c9b134c60961 30,45-46
+crates/xybrid-core/src/error.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 21
+crates/xybrid-core/src/orchestrator/authority/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 49,61
+crates/xybrid-core/src/orchestrator/authority/remote.rs
+  s_a18a912543c207::t_7cc227f3a9d1d9 50-53,55,58-59
+  s_550476cfca49a0::t_acb55f4bc2afcb 49
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 176
+crates/xybrid-core/src/cloud_llm/mod.rs
+  s_a18a912543c207::t_4850724e69169c 18-21
+  s_a18a912543c207::t_4f4e4ac8f40116 14-15,17
+crates/xybrid-core/src/orchestrator/bootstrap.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 9,97
+  s_a18a912543c207::t_7ff5f30dbf150f 98-99,106-109
+  s_a18a912543c207::t_00b399a501abae 10,14-16
+crates/xybrid-core/src/runtime_adapter/onnx/mobile.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 13
+crates/xybrid-core/src/audio/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 16
+crates/xybrid-core/src/audio/vad.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 16
+  s_a18a912543c207::t_3356c03f01596c 17,23,25-26,30-31
+crates/xybrid-core/src/runtime_adapter/onnx/adapter.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 9,75,116
+  s_a18a912543c207::t_9ecd13c4db9c43 10-11,18-21
+crates/xybrid-core/src/preprocessing/mel_spectrogram.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 12
+  s_a18a912543c207::t_286c00fc0fbb84 13-14,16,19-21
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_550476cfca49a0::t_52931e44200348 26,40-42
+  s_550476cfca49a0::t_c5df681276bf74 27-28
+  s_a18a912543c207::t_a48f0444469987 253-256,260,262-264
+  s_550476cfca49a0::t_acb55f4bc2afcb 25,252
+crates/xybrid-core/src/orchestrator/authority/local.rs
+  s_a18a912543c207::t_1e46dff30e6ef4 59,62,66
+  s_550476cfca49a0::t_acb55f4bc2afcb 58
+crates/xybrid-core/src/runtime_adapter/candle/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 22
+crates/xybrid-core/src/runtime_adapter/candle/adapter.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 24
+crates/xybrid-core/src/testing/model_fixtures.rs
+  s_a18a912543c207::t_b32bde299bae74 329-330,333,335-336
+  s_550476cfca49a0::t_acb55f4bc2afcb 15,98,139,165,209,238,278,294,312,328,353
+  s_a18a912543c207::t_57aa954510b064 279-280,284
+  s_a18a912543c207::t_a75a0e7f05ad5c 99-100,104
+  s_a18a912543c207::t_e34adf0d16b4f1 354-355,358,360-361
+  s_a18a912543c207::t_cb4267c6472e64 295-296,299,301-302
+  s_a18a912543c207::t_d07e3d45cf16a8 313-314,317-318
+  s_a18a912543c207::t_06387c366d824b 166-167,170-171
+  s_a18a912543c207::t_fc90b15c53cdae 140-141,147
+  s_a18a912543c207::t_5dc4da8be75416 239-240,244
+crates/xybrid-core/src/audio/mel/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 32
+  s_a18a912543c207::t_a449709b2d3942 33-34,36,48-50
+crates/xybrid-core/src/device/capabilities.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 22
+crates/xybrid-core/src/http/mod.rs
+  s_550476cfca49a0::t_61402a3a27eb48 37
+  s_550476cfca49a0::t_c88d6a0e12a19b 26
+  s_a18a912543c207::t_af2af9d62ac0a7 11-12,19,27
+  s_550476cfca49a0::t_acb55f4bc2afcb 10,34
+  s_550476cfca49a0::t_0481effb866c26 13-18,20
+crates/xybrid-core/src/execution/listener.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 10
+crates/xybrid-core/src/lib.rs
+  s_550476cfca49a0::t_28cb5ecb484dbf 25,28-29,32-36
+  s_550476cfca49a0::t_2ce24578f23510 178
+  s_550476cfca49a0::t_acb55f4bc2afcb 24,159,173
+crates/xybrid-core/src/runtime_adapter/metadata_driven.rs
+  s_a18a912543c207::t_767035b9d78030 55-56,59-60
+  s_550476cfca49a0::t_acb55f4bc2afcb 54
+crates/xybrid-core/src/execution/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 44
+  s_550476cfca49a0::t_b44bea322749aa 45,49-51,55-58
+crates/xybrid-core/src/tracing.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 8
+  s_a18a912543c207::t_a9211f61fa368a 9,18,20,23-24
+crates/xybrid-core/src/http/retry.rs
+  s_550476cfca49a0::t_fcdaad56dd6531 179-182,184-186
+  s_a18a912543c207::t_d801130ffd8924 175-176,183,196
+  s_550476cfca49a0::t_acb55f4bc2afcb 174
+crates/xybrid-core/src/bundler.rs
+  s_550476cfca49a0::t_a07f195d721fe5 446-448,451-452
+  s_550476cfca49a0::t_87851c585a2e77 565-566,571-572
+  s_550476cfca49a0::t_db0f2f704f9ea5 358-359,362-363
+  s_550476cfca49a0::t_00ad2cbc505296 99
+  s_550476cfca49a0::t_35e75f46037509 128-129,132-133
+  s_550476cfca49a0::t_07fcca890d929e 189-190,193-194
+  s_550476cfca49a0::t_3246b03d8042b9 530-531,534-535
+  s_550476cfca49a0::t_9fb9c1b75a2ac3 277-278,282-283
+  s_550476cfca49a0::t_e8f0821fc3d732 10,26-27
+  s_550476cfca49a0::t_acb55f4bc2afcb 9,95,127,188,276,357,445,529,564
+crates/xybrid-core/src/runtime_adapter/onnx/execution_provider.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 16
+  s_a18a912543c207::t_e0e03c8a227636 17-18,23-25
+crates/xybrid-core/src/tts/voice_embedding.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 10
+  s_a18a912543c207::t_1428be5090f18d 11-12,21-23
+crates/xybrid-core/src/runtime_adapter/mistral/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 219
+crates/xybrid-core/src/cloud/client.rs
+  s_a18a912543c207::t_72d25d028e720f 33,39-40
+  s_550476cfca49a0::t_acb55f4bc2afcb 32
+crates/xybrid-core/src/runtime_adapter/cloud/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 13
+crates/xybrid-core/src/prelude.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 8
+  s_550476cfca49a0::t_d3197055e3a031 9,12,14,16-19
+crates/xybrid-core/src/runtime_adapter/coreml/adapter.rs
+  s_a18a912543c207::t_324a81da0be443 12-13,18-19
+  s_550476cfca49a0::t_acb55f4bc2afcb 11
+crates/xybrid-core/src/cloud/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 31
+  s_a18a912543c207::t_d154df5bbc59bd 32,48-50
+crates/xybrid-core/src/runtime_adapter/onnx/session.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 19,168
+  s_a18a912543c207::t_d28a1a64d4928d 20-22,32,34,36-38
+  s_a18a912543c207::t_a191c69502c470 169,187-189
+  s_a18a912543c207::t_25f68d011d4892 180-181,185
+crates/xybrid-core/src/testing/mocks.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 11,39,229
+  s_a18a912543c207::t_26847b72c92e51 230,233,242
+  s_a18a912543c207::t_389fad202ea02a 40-42,46-47,49-51
+  s_a18a912543c207::t_4cda7f62bd9e06 12,20
+crates/xybrid-core/src/tts/mod.rs
+  s_a18a912543c207::t_5d604042a50a3f 26,36-39
+  s_550476cfca49a0::t_acb55f4bc2afcb 25
+crates/xybrid-core/src/ir/envelope.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 15
+crates/xybrid-core/src/execution/executor.rs
+  s_a18a912543c207::t_a76c48ed95f745 145-153,156,160,162-164
+  s_a18a912543c207::t_0c0a799d191535 23
+  s_550476cfca49a0::t_acb55f4bc2afcb 11,144,212,562,589,764,870
+  s_a18a912543c207::t_7872cf50332ab4 12-17,22,25
+  s_a18a912543c207::t_e7fa52ef3adfbb 563-569,573-574,579-582
+  s_a18a912543c207::t_cfc0fb5064da9a 213,215,217,221,223
+  s_a18a912543c207::t_3bf9fac98b9af5 765-771,774,776-778
+  s_a18a912543c207::t_85b2812915984d 590-591,595-596,611,617-618
+  s_a18a912543c207::t_81263de7f9fb68 871-878,884,886-888
+crates/xybrid-core/src/cache_provider.rs
+  s_550476cfca49a0::t_1bdfe38f26f610 19-21,23-25,29,31
+  s_550476cfca49a0::t_acb55f4bc2afcb 18
+crates/xybrid-core/src/device/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 20
+crates/xybrid-core/src/streaming/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 26
+  s_550476cfca49a0::t_48a844c02ed256 27,30-31,48-49
+crates/xybrid-core/src/streaming/session.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 223,280
+  s_a18a912543c207::t_a3c70a88e53228 281-284,286,290-292
+  s_a18a912543c207::t_e38e28b7923fee 224,231,235-237
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_550476cfca49a0::t_acb55f4bc2afcb 71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "3a516c27ba62ed9741f1422bce17aa521bb3a49d",
+  "prompts": {},
+  "sessions": {
+    "s_550476cfca49a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "674ee713-21e6-4202-8d89-5b31b6753d45",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_a18a912543c207": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6151f2d-3717-4da9-9a58-e6d6c3d6efeb",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
