@@ -1,0 +1,710 @@
+name: Release Prep
+
+# Release-branch flow, step 1 of 2. Companion: release-publish.yml.
+#
+# Trigger: push to a `release/v*` branch. The maintainer's local ritual is:
+#
+#     git switch -c release/v0.1.0-rc4 origin/master
+#     just bump-version 0.1.0-rc4          # bumps versions, scaffolds changelog
+#     /update-version-docs 0.1.0-rc4       # LLM-assisted changelog fill
+#     git add -A && git commit -m "bump: 0.1.0-rc4"
+#     git push -u origin release/v0.1.0-rc4
+#
+# Once the branch is pushed this workflow runs and:
+#
+#   1. Verifies the branch name maps to a version that matches every
+#      package manifest (Cargo workspace, pubspec.yaml, package.json,
+#      build.gradle.kts, Package.swift sdkVersion).
+#   2. Builds every release artifact on the release branch (xcframework,
+#      android .so, Flutter precompiled binaries, CLI binaries).
+#   3. Pulls the xcframework zip, computes its SHA-256, patches
+#      Package.swift's xybridFFIChecksum on the release branch, commits and
+#      pushes that patch back. Pushes by GITHUB_TOKEN do not re-trigger
+#      workflows, so this doesn't loop.
+#   4. Creates a DRAFT GitHub Release tagged v<version> with
+#      target_commitish pointing at the release branch, and uploads every
+#      artifact as a release asset. Draft asset URLs are not yet public —
+#      only repo collaborators can fetch them while the release is in draft.
+#   5. Opens a PR: release/v<version> → master.
+#
+# At this point a human reviews the PR. Nothing is published externally:
+# no public release, no crates.io / pub.dev / Maven Central publishes, no
+# git tag (drafts hold a target tag name but only materialize the tag at
+# publish time). Closing the PR without merging aborts cleanly; the draft
+# release lingers until the next release-prep run replaces it.
+#
+# Once the PR merges, release-publish.yml takes over.
+
+on:
+  push:
+    branches: ['release/v*']
+
+# Cancel in-flight runs when the maintainer pushes again to the same
+# release branch (e.g. a changelog fixup) — no point finishing a stale
+# build matrix.
+concurrency:
+  group: release-prep-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  NDK_VERSION: "26.1.10909125"
+  FLUTTER_VERSION: "3.35.7"
+  FRB_VERSION: "2.11.1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # =========================================================================
+  # Parse the branch name, verify every per-package version file matches.
+  # =========================================================================
+  check-release-branch:
+    name: Verify release branch
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.meta.outputs.branch }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Parse branch / version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          case "$BRANCH" in
+            release/v*) ;;
+            *) echo "::error::Expected release/v* branch, got $BRANCH"; exit 1 ;;
+          esac
+          TAG="${BRANCH#release/}"
+          VERSION="${TAG#v}"
+          echo "branch=$BRANCH"   >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "Release branch:  $BRANCH"
+          echo "Release version: $VERSION"
+
+      - name: Check versions match release branch
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          CARGO_VERSION=$(grep -A5 '\[workspace\.package\]' Cargo.toml | grep '^version' | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          FLUTTER_VERSION_PKG=$(grep '^version:' bindings/flutter/pubspec.yaml | sed 's/version: *//')
+          UNITY_VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
+          KOTLIN_VERSION=$(grep '^version = ' bindings/kotlin/build.gradle.kts | sed 's/version = "\(.*\)"/\1/')
+          SWIFT_VERSION=$(grep '^let sdkVersion = ' Package.swift | sed 's/let sdkVersion = "\(.*\)"/\1/')
+
+          echo "Cargo:   $CARGO_VERSION"
+          echo "Flutter: $FLUTTER_VERSION_PKG"
+          echo "Unity:   $UNITY_VERSION"
+          echo "Kotlin:  $KOTLIN_VERSION"
+          echo "Swift:   $SWIFT_VERSION"
+
+          FAILED=0
+          for V in "$CARGO_VERSION" "$FLUTTER_VERSION_PKG" "$UNITY_VERSION" "$KOTLIN_VERSION" "$SWIFT_VERSION"; do
+            if [ "$V" != "$VERSION" ]; then
+              echo "::error::Version mismatch — branch is $VERSION but found $V"
+              echo "Run 'just bump-version $VERSION' on the release branch and push the result."
+              FAILED=1
+            fi
+          done
+          [ "$FAILED" -eq 0 ] || exit 1
+
+  # =========================================================================
+  # Consolidated Apple build: XCFramework + Flutter darwin precompile +
+  # CLI macos-arm64. One macos-14 runner shares sccache across all three.
+  # =========================================================================
+  build-apple-all:
+    name: Build Apple (all)
+    needs: [check-release-branch]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            aarch64-apple-ios,
+            aarch64-apple-ios-sim,
+            aarch64-apple-darwin
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "apple-xcframework"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Install LLVM
+        run: brew install llvm
+
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
+
+      # --- Step 1: Build XCFramework (cold compile, ~18 min) ---
+      - name: Build XCFramework
+        run: cargo xtask build-xcframework --release
+
+      - name: Prepare XCFramework artifact
+        shell: bash
+        env:
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+        run: |
+          mkdir -p dist
+          cd bindings/apple/XCFrameworks
+          zip -r ../../../dist/XybridFFI-${TAG}.xcframework.zip XybridFFI.xcframework
+
+      - name: Upload XCFramework artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: xcframework
+          path: dist/XybridFFI-*.xcframework.zip
+          if-no-files-found: error
+
+      # --- Step 2: Precompile Flutter darwin (sccache warm, ~3-5 min) ---
+      - name: Install build tool dependencies
+        working-directory: bindings/flutter/cargokit/build_tool
+        run: dart pub get
+
+      - name: Precompile and upload Flutter darwin binaries
+        working-directory: bindings/flutter/cargokit/build_tool
+        shell: bash
+        env:
+          PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dart run bin/build_tool.dart precompile-binaries \
+            --repository ${{ github.repository }} \
+            --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
+            --verbose
+
+      # --- Step 3: Build CLI macos-arm64 (sccache warm, ~1-2 min) ---
+      - name: Build CLI (macos-arm64)
+        run: cargo build --release -p xybrid-cli --target aarch64-apple-darwin --features platform-macos
+
+      - name: Strip CLI binary
+        run: strip target/aarch64-apple-darwin/release/xybrid
+
+      - name: Prepare CLI artifact
+        shell: bash
+        env:
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+        run: |
+          mkdir -p dist-cli
+          cp target/aarch64-apple-darwin/release/xybrid dist-cli/xybrid-${TAG}-macos-arm64
+          chmod +x dist-cli/xybrid-${TAG}-macos-arm64
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-macos-arm64
+          path: dist-cli/*
+
+  # =========================================================================
+  # Android .so files build (Linux with NDK).
+  # =========================================================================
+  build-android:
+    name: Build Android
+    needs: [check-release-branch]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "android-ndk"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Setup Android NDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Install cargo-ndk
+        run: which cargo-ndk || cargo install cargo-ndk
+
+      - name: Build Android .so files
+        run: cargo xtask build-android --release
+
+      - name: Prepare artifact with version
+        shell: bash
+        env:
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+        run: |
+          mkdir -p dist
+          cd bindings/kotlin/libs
+          zip -r ../../../dist/xybrid-android-${TAG}.zip .
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-libs
+          path: dist/xybrid-android-*.zip
+          if-no-files-found: error
+
+  # =========================================================================
+  # Flutter precompiled binaries — Linux (waits for build-android sccache).
+  # =========================================================================
+  precompile-flutter-linux:
+    name: Precompile Flutter (linux)
+    needs: [check-release-branch, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            x86_64-unknown-linux-gnu,
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "flutter-linux"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
+
+      - name: Install LLVM
+        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Install cargo-ndk
+        run: which cargo-ndk || cargo install cargo-ndk
+
+      - name: Install build tool dependencies
+        working-directory: bindings/flutter/cargokit/build_tool
+        run: dart pub get
+
+      - name: Precompile and upload binaries
+        working-directory: bindings/flutter/cargokit/build_tool
+        shell: bash
+        env:
+          PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dart run bin/build_tool.dart precompile-binaries \
+            --repository ${{ github.repository }} \
+            --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
+            --verbose \
+            --android-sdk-location $ANDROID_HOME \
+            --android-ndk-version ${{ env.NDK_VERSION }} \
+            --android-min-sdk-version 28
+
+  # =========================================================================
+  # Flutter precompiled binaries — Windows.
+  # =========================================================================
+  precompile-flutter-windows:
+    name: Precompile Flutter (windows)
+    needs: [check-release-branch]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "flutter-windows"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
+
+      - name: Install LLVM and NASM
+        run: choco install llvm nasm
+
+      - name: Add NASM to PATH
+        shell: bash
+        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
+
+      - name: Install build tool dependencies
+        working-directory: bindings/flutter/cargokit/build_tool
+        run: dart pub get
+
+      - name: Force dynamic CRT (required for cdylib DLL linking)
+        shell: bash
+        run: |
+          echo "CFLAGS=-MD" >> $GITHUB_ENV
+          echo "CXXFLAGS=-MD" >> $GITHUB_ENV
+
+      - name: Precompile and upload binaries
+        working-directory: bindings/flutter/cargokit/build_tool
+        shell: bash
+        env:
+          PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MANIFEST_DIR="${GITHUB_WORKSPACE//\\//}/bindings/flutter/rust"
+          dart run bin/build_tool.dart precompile-binaries \
+            --repository ${{ github.repository }} \
+            --manifest-dir "$MANIFEST_DIR" \
+            --verbose
+
+  # =========================================================================
+  # CLI builds (Linux + Windows; macOS is built in build-apple-all).
+  # =========================================================================
+  build-cli:
+    name: Build CLI (${{ matrix.name }})
+    needs: [check-release-branch]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: xybrid
+            features: platform-desktop
+
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: xybrid.exe
+            features: platform-desktop
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "cli-${{ matrix.name }}"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Build CLI
+        run: cargo build --release -p xybrid-cli --target ${{ matrix.target }} --features ${{ matrix.features }}
+
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact }}
+
+      - name: Prepare artifact
+        shell: bash
+        env:
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+        run: |
+          mkdir -p dist
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp target/${{ matrix.target }}/release/${{ matrix.artifact }} dist/xybrid-${TAG}-${{ matrix.name }}.exe
+          else
+            cp target/${{ matrix.target }}/release/${{ matrix.artifact }} dist/xybrid-${TAG}-${{ matrix.name }}
+            chmod +x dist/xybrid-${TAG}-${{ matrix.name }}
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-${{ matrix.name }}
+          path: dist/*
+
+  # =========================================================================
+  # Patch Package.swift checksum and commit it back to the release branch.
+  #
+  # Pushes by GITHUB_TOKEN do not re-trigger workflow events
+  # (https://docs.github.com/en/actions/security-guides/automatic-token-authentication),
+  # so the checksum commit doesn't loop release-prep.
+  # =========================================================================
+  patch-spm-checksum:
+    name: Patch SPM checksum
+    needs: [check-release-branch, build-apple-all]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download xcframework artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: xcframework
+          path: dist
+
+      - name: Patch and push Package.swift checksum
+        shell: bash
+        env:
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+          BRANCH: ${{ needs.check-release-branch.outputs.branch }}
+        run: |
+          set -euo pipefail
+          ZIP="dist/XybridFFI-${TAG}.xcframework.zip"
+          ./bindings/apple/scripts/sync-spm-checksum.sh "$ZIP"
+
+          if git diff --quiet Package.swift; then
+            echo "::notice::Package.swift checksum already matches built zip — nothing to commit."
+            exit 0
+          fi
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Package.swift
+          git commit -m "chore(release): pin XybridFFI checksum for ${TAG}"
+          git push origin "HEAD:${BRANCH}"
+
+  # =========================================================================
+  # Create the DRAFT release with every artifact attached.
+  #
+  # target_commitish = release branch. The git tag is NOT created yet —
+  # drafts hold a tag name but only materialize the tag at publish time.
+  # release-publish.yml will retarget to the merge commit and publish.
+  # =========================================================================
+  create-draft-release:
+    name: Create draft release
+    needs:
+      - check-release-branch
+      - patch-spm-checksum
+      - build-android
+      - build-cli
+      - precompile-flutter-linux
+      - precompile-flutter-windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Generate changelog
+        env:
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+        run: |
+          set -euo pipefail
+          PREV_TAG=$(git describe --tags --abbrev=0 origin/master 2>/dev/null || echo "")
+          {
+            echo "## What's Changed"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              git log "${PREV_TAG}..HEAD" --pretty=format:"- %s"
+            else
+              git log --pretty=format:"- %s" -n 20
+            fi
+            echo
+            echo
+            echo "### Artifacts"
+            echo
+            echo "**Android**"
+            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for all ABIs"
+            echo
+            echo "**Flutter**"
+            echo "- Precompiled native libraries auto-downloaded by cargokit"
+            echo
+            echo "**Unity**"
+            echo "- \`xybrid-unity-sdk-${TAG}.tar.gz\` — Native plugins (uploaded by Build Unity workflow)"
+            echo
+            echo "**Swift (iOS/macOS)**"
+            echo "- SPM: \`.package(url: \"https://github.com/${{ github.repository }}\", from: \"${TAG#v}\")\`"
+            echo "- \`XybridFFI-${TAG}.xcframework.zip\` — Pre-built XCFramework"
+            echo
+            echo "**CLI**"
+            echo "- Cross-platform binaries for macOS (arm64, x86_64), Linux (x86_64), and Windows (x86_64)"
+            echo
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
+          } > CHANGELOG_RELEASE.md
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+          BRANCH: ${{ needs.check-release-branch.outputs.branch }}
+        run: |
+          set -euo pipefail
+          # If a release already exists for this tag, clean it up *only* if
+          # it's still a draft (e.g. a previous release-prep run that never
+          # got merged). Refuse to touch published releases — a fixup push
+          # to a stale release/v* branch must not silently wipe a real
+          # release and its git tag.
+          STATE=$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null || echo "missing")
+          case "$STATE" in
+            true)
+              echo "::notice::Deleting pre-existing DRAFT release for ${TAG} so this run can recreate it."
+              gh release delete "$TAG" --yes --cleanup-tag
+              ;;
+            false)
+              echo "::error::Release ${TAG} is already PUBLISHED. Refusing to delete. Bump the version on this branch (or pick a new branch name) and re-push."
+              exit 1
+              ;;
+            missing)
+              ;;
+          esac
+
+          PRERELEASE_FLAG=""
+          case "$TAG" in
+            *alpha*|*beta*|*rc*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
+
+          gh release create "$TAG" \
+            --draft \
+            $PRERELEASE_FLAG \
+            --target "$BRANCH" \
+            --title "$TAG" \
+            --notes-file CHANGELOG_RELEASE.md \
+            artifacts/*
+
+  # =========================================================================
+  # Open the release PR (if not already open).
+  # =========================================================================
+  open-release-pr:
+    name: Open release PR
+    needs: [check-release-branch, create-draft-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Open PR (if not already open)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+          BRANCH: ${{ needs.check-release-branch.outputs.branch }}
+        run: |
+          set -euo pipefail
+          EXISTING=$(gh pr list --head "$BRANCH" --base master --state open --json number -q '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "::notice::PR #${EXISTING} already open for ${BRANCH}."
+            exit 0
+          fi
+
+          BODY=$(cat <<EOF
+          Release **${TAG}**.
+
+          Artifacts are staged in a [draft release](https://github.com/${{ github.repository }}/releases/tag/${TAG}).
+
+          When this PR merges, the **Release Publish** workflow will:
+          - Tag the merge commit \`${TAG}\`
+          - Publish the draft release (asset URLs become public)
+          - Publish to crates.io, pub.dev, and Maven Central
+          - Update the \`swift\` branch
+
+          Close this PR (without merging) to abort. The draft release will
+          be cleaned up by the next \`release-prep\` run.
+          EOF
+          )
+
+          gh pr create \
+            --base master \
+            --head "$BRANCH" \
+            --title "Release ${TAG}" \
+            --body "$BODY" \
+            --label release
