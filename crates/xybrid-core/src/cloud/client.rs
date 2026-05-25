@@ -29,12 +29,15 @@ const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 10_000;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 /// use xybrid_core::cloud::Cloud;
 ///
 /// let cloud = Cloud::new()?;
 /// let response = cloud.prompt("Hello, world!")?;
 /// println!("Response: {}", response);
+/// # Ok(())
+/// # }
 /// ```
 pub struct Cloud {
     config: CloudConfig,

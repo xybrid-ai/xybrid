@@ -5,11 +5,12 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() {
 //! use xybrid_core::testing::{fixtures, mocks, model_fixtures};
 //!
 //! // Create a mock runtime that returns fixed outputs
-//! let mock_runtime = mocks::MockRuntime::with_output(vec![0.1, 0.2, 0.3]);
+//! let mock_runtime = mocks::MockRuntime::with_embedding(vec![0.1, 0.2, 0.3]);
 //!
 //! // Use test fixtures for common inputs
 //! let audio = fixtures::sample_audio_16khz(1.0); // 1 second of silence
@@ -17,13 +18,16 @@
 //!
 //! // Get path to downloaded test models
 //! let model_dir = model_fixtures::require_model("kokoro-82m");
+//! # let _ = (mock_runtime, audio, envelope, model_dir);
+//! # }
 //! ```
 //!
 //! ## Model Fixtures
 //!
 //! The `model_fixtures` module provides utilities for locating test models:
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() {
 //! use xybrid_core::testing::model_fixtures;
 //!
 //! // Get model path (panics if not found)
@@ -38,6 +42,8 @@
 //! let Some(model_dir) = model_fixtures::model_or_skip("kokoro-82m") else {
 //!     return; // Test skipped
 //! };
+//! # let _ = model_dir;
+//! # }
 //! ```
 
 pub mod fixtures;

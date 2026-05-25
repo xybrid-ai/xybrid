@@ -55,12 +55,15 @@ const MAX_RELIABILITY_KEYS: usize = 256;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() {
 /// use xybrid_core::orchestrator::authority::{LocalAuthority, OrchestrationAuthority, PolicyRequest};
 ///
+/// # let request: PolicyRequest = unimplemented!();
 /// let authority = LocalAuthority::new();
 /// let decision = authority.apply_policy(&request);
 /// println!("Decision: {:?} ({})", decision.result, decision.reason);
+/// # }
 /// ```
 pub struct LocalAuthority {
     policy_engine: DefaultPolicyEngine,

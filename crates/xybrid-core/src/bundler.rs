@@ -6,7 +6,8 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_core::bundler::XyBundle;
 //!
 //! // Create a new bundle
@@ -22,6 +23,8 @@
 //! // Load an existing bundle
 //! let loaded = XyBundle::load("my-model-1.0.0.xyb")?;
 //! println!("Model ID: {}", loaded.manifest().model_id);
+//! # Ok(())
+//! # }
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -89,10 +92,11 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
     /// use xybrid_core::bundler::XyBundle;
     ///
     /// let bundle = XyBundle::new("whisper-tiny", "1.2.0", "x86_64-linux");
+    /// # let _ = bundle;
     /// ```
     pub fn new(
         model_id: impl Into<String>,
@@ -120,9 +124,13 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_core::bundler::XyBundle;
     /// let mut bundle = XyBundle::new("my-model", "1.0.0", "x86_64-linux");
     /// bundle.add_file("model.onnx")?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn add_file(&mut self, path: impl AsRef<Path>) -> BundlerResult<()> {
         let path = path.as_ref();
@@ -177,9 +185,13 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_core::bundler::XyBundle;
     /// let mut bundle = XyBundle::new("my-model", "1.0.0", "x86_64-linux");
     /// bundle.add_file_with_relative_path("/full/path/to/misaki/us_gold.json", "misaki/us_gold.json")?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn add_file_with_relative_path(
         &mut self,
@@ -261,10 +273,14 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_core::bundler::XyBundle;
     /// let mut bundle = XyBundle::new("my-model", "1.0.0", "x86_64-linux");
     /// bundle.add_file("model.onnx")?;
     /// bundle.write("my-model-1.0.0.xyb")?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn write(&mut self, path: impl AsRef<Path>) -> BundlerResult<()> {
         let path = path.as_ref();
@@ -338,9 +354,13 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_core::bundler::XyBundle;
     /// let bundle = XyBundle::load("my-model-1.0.0.xyb")?;
     /// println!("Model: {}", bundle.manifest().model_id);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn load(path: impl AsRef<Path>) -> BundlerResult<Self> {
         let path = path.as_ref();
@@ -422,10 +442,14 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// let bytes = download_bundle_bytes("http://registry.example.com/bundle.xyb");
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_core::bundler::XyBundle;
+    /// # let bytes: Vec<u8> = vec![]; // e.g., fetched over HTTP
     /// let bundle = XyBundle::load_from_bytes(&bytes)?;
     /// println!("Model: {}", bundle.manifest().model_id);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn load_from_bytes(bytes: &[u8]) -> BundlerResult<Self> {
         use std::io::Cursor;
@@ -502,9 +526,13 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_core::bundler::XyBundle;
     /// let bundle = XyBundle::load("my-model-1.0.0.xyb")?;
     /// bundle.extract_to("/tmp/extracted")?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn extract_to(&self, output_dir: impl AsRef<Path>) -> BundlerResult<()> {
         let output_dir = output_dir.as_ref();
@@ -533,11 +561,15 @@ impl XyBundle {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_core::bundler::XyBundle;
     /// let bundle = XyBundle::load("my-model-1.0.0.xyb")?;
     /// if let Some(metadata_json) = bundle.get_metadata_json()? {
     ///     println!("Metadata: {}", metadata_json);
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn get_metadata_json(&self) -> BundlerResult<Option<String>> {
         if let Some(contents) = self.files.get("model_metadata.json") {

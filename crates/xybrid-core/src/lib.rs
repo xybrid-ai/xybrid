@@ -21,13 +21,19 @@
 //!
 //! Use the [`prelude`] module for common imports:
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_core::prelude::*;
 //!
+//! # let audio_bytes: Vec<u8> = vec![];
+//! # let metadata: xybrid_core::execution::ModelMetadata = unimplemented!();
 //! // Create an executor and run inference
 //! let mut executor = TemplateExecutor::with_base_path("models/whisper");
-//! let input = Envelope::from_audio(audio_bytes);
-//! let output = executor.execute(&metadata, &input)?;
+//! let input = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+//! let output = executor.execute(&metadata, &input, None)?;
+//! # let _ = output;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Module Organization
@@ -150,7 +156,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::prelude::*;
 /// ```
 pub mod prelude;
@@ -164,11 +170,12 @@ pub mod prelude;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::error::{XybridError, XybridResult};
 ///
 /// fn run_model() -> XybridResult<String> {
 ///     // ...
+///     # Err(XybridError::NotFound("stub".into()))
 /// }
 /// ```
 pub mod error;

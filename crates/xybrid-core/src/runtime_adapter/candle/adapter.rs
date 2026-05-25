@@ -21,7 +21,7 @@ use candle_core::Device;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::runtime_adapter::candle::CandleRuntimeAdapter;
 /// use xybrid_core::runtime_adapter::RuntimeAdapter;
 /// use xybrid_core::ir::{Envelope, EnvelopeKind};

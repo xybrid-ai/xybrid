@@ -26,7 +26,7 @@ use super::format::AudioFormat;
 ///
 /// ## Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::audio::AudioEnvelope;
 ///
 /// // Load from WAV file

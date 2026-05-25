@@ -8,7 +8,8 @@
 //! Use `MockRuntimeAdapter` when testing the `Executor` - it implements
 //! the `RuntimeAdapter` trait and doesn't require real ONNX files.
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() {
 //! use xybrid_core::testing::mocks::MockRuntimeAdapter;
 //! use xybrid_core::executor::Executor;
 //! use std::sync::Arc;
@@ -16,6 +17,7 @@
 //! let mut executor = Executor::new();
 //! let adapter = MockRuntimeAdapter::with_text_output("transcribed text");
 //! executor.register_adapter(Arc::new(adapter));
+//! # }
 //! ```
 
 use crate::ir::{Envelope, EnvelopeKind};
@@ -34,12 +36,19 @@ use std::sync::Mutex;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use xybrid_core::ir::{Envelope, EnvelopeKind};
+/// use xybrid_core::runtime_adapter::ModelRuntime;
 /// use xybrid_core::testing::mocks::MockRuntime;
 ///
 /// let mut runtime = MockRuntime::with_embedding(vec![0.1, 0.2, 0.3]);
-/// let output = runtime.execute(&input_envelope)?;
+/// let input = Envelope::new(EnvelopeKind::Text("probe".into()));
+/// let output = runtime.execute(&input)?;
 /// assert_eq!(runtime.call_count(), 1);
+/// # let _ = output;
+/// # Ok(())
+/// # }
 /// ```
 pub struct MockRuntime {
     /// Output to return from execute()
@@ -217,9 +226,11 @@ impl MockOnnxOutputs {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() {
 /// use xybrid_core::testing::mocks::MockRuntimeAdapter;
 /// use xybrid_core::executor::Executor;
+/// use xybrid_core::runtime_adapter::RuntimeAdapter;
 /// use std::sync::Arc;
 ///
 /// let mut executor = Executor::new();
@@ -228,6 +239,7 @@ impl MockOnnxOutputs {
 /// executor.register_adapter(Arc::new(adapter));
 ///
 /// // Now execute_stage will use the mock adapter
+/// # }
 /// ```
 pub struct MockRuntimeAdapter {
     /// The output to return from execute()

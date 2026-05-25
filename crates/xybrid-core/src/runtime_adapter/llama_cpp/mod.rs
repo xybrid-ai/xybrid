@@ -68,7 +68,7 @@ static BACKEND_INIT: Once = Once::new();
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::runtime_adapter::llama_cpp::LlamaCppBackend;
 /// use xybrid_core::runtime_adapter::llm::{LlmBackend, LlmConfig};
 ///

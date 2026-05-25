@@ -15,17 +15,20 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
-//! use xybrid_core::CacheProvider;
+//! ```no_run
+//! # fn _example() {
+//! # use std::sync::Arc;
+//! use xybrid_core::cache_provider::{CacheProvider, NoopCacheProvider};
 //!
-//! // SDK provides this at bootstrap time
-//! let provider: Arc<dyn CacheProvider> = Arc::new(SdkCacheProvider::new());
-//! let orchestrator = Orchestrator::with_cache_provider(provider);
+//! // SDK provides this at bootstrap time (NoopCacheProvider stands in for
+//! // the real SdkCacheProvider that lives in xybrid-sdk).
+//! let provider: Arc<dyn CacheProvider> = Arc::new(NoopCacheProvider);
 //!
 //! // Core uses it for routing decisions
 //! if provider.is_model_cached("kokoro-82m") {
-//!     route_to_device();
+//!     // route to local device
 //! }
+//! # }
 //! ```
 
 use std::path::{Path, PathBuf};

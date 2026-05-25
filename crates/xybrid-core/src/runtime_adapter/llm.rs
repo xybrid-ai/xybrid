@@ -173,7 +173,7 @@ pub trait LlmBackend: Send + Sync {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
     /// backend.generate_streaming(&messages, &config, Box::new(|token| {
     ///     print!("{}", token.token);
     ///     std::io::stdout().flush()?;
