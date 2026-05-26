@@ -6,11 +6,14 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_core::orchestrator::Orchestrator;
 //!
 //! let orchestrator = Orchestrator::bootstrap(None)?;
-//! // orchestrator is ready to execute pipelines
+//! # let _ = orchestrator;
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::context::DeviceMetrics;
@@ -91,14 +94,19 @@ impl Orchestrator {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use std::path::Path;
     /// use xybrid_core::orchestrator::Orchestrator;
     ///
     /// // Bootstrap with defaults
     /// let orchestrator = Orchestrator::bootstrap(None)?;
     ///
     /// // Bootstrap with configuration file
-    /// let orchestrator = Orchestrator::bootstrap(Some("config/hiiipe.yml"))?;
+    /// let orchestrator = Orchestrator::bootstrap(Some(Path::new("config/hiiipe.yml")))?;
+    /// # let _ = orchestrator;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn bootstrap(config_path: Option<&Path>) -> Result<Self, OrchestratorError> {
         // Emit bootstrap start event

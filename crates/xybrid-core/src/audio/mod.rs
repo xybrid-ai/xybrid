@@ -13,7 +13,7 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use xybrid_core::audio::{AudioEnvelope, AudioFormat};
 //!
 //! // Create from WAV bytes

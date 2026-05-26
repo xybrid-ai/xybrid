@@ -13,19 +13,22 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_core::audio::vad::{VadSession, VadConfig};
 //!
 //! let config = VadConfig::default();
 //! let mut vad = VadSession::new("/path/to/silero-vad", config)?;
 //!
-//! // Process audio frames
+//! # let audio_chunks: Vec<Vec<f32>> = Vec::new();
 //! for chunk in audio_chunks {
-//!     let prob = vad.process(&chunk)?;
-//!     if prob > 0.5 {
+//!     let frame = vad.process_frame(&chunk)?;
+//!     if frame.is_speech {
 //!         println!("Speech detected!");
 //!     }
 //! }
+//! # Ok(())
+//! # }
 //! ```
 
 use ort::session::{builder::GraphOptimizationLevel, Session};

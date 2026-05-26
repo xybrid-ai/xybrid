@@ -28,7 +28,8 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_core::cloud::{Cloud, CompletionRequest};
 //!
 //! // Create client (routes through gateway by default)
@@ -44,6 +45,9 @@
 //!         .with_system("You are a helpful programming tutor.")
 //!         .with_max_tokens(100)
 //! )?;
+//! # let _ = response;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Note

@@ -2,26 +2,45 @@ name: Release Publish
 
 # Release-branch flow, step 2 of 2. Companion: release-prep.yml.
 #
-# Trigger: a release PR (head branch `release/v*`) merges into master.
-# This workflow:
+# Triggers:
 #
-#   1. Extracts the version from the merged PR's head_ref.
+#   1. Automatic: a release PR (head branch `release/v*`) merges into master.
+#      The metadata (tag + merge commit) is derived from the PR event.
+#   2. Manual: `workflow_dispatch` with a `tag` input (e.g. `v0.1.0-rc4`).
+#      Used as a recovery hatch when the automatic trigger didn't fire —
+#      e.g. the PR was deleted before its `closed` event reached GitHub
+#      Actions, or the merge happened by a path that bypassed `pull_request`
+#      events. When dispatched, the tag must already exist (either created
+#      by an earlier partial run or by manually publishing the draft).
+#
+# Either way, the workflow:
+#
+#   1. Resolves the tag + version + commit SHA from whichever trigger fired.
 #   2. Retargets the draft release at the PR's merge commit and publishes
 #      it — GitHub atomically creates the git tag v<version> at the merge
 #      commit and flips the asset URLs from collaborator-only to public.
+#      (Skipped in workflow_dispatch mode if the release is already
+#      published, which is the typical recovery scenario.)
 #   3. Verifies the published tag's Package.swift checksum matches the
 #      now-public xcframework zip (sanity belt).
 #   4. Publishes the language packages: crates.io, pub.dev, Maven Central.
 #   5. Updates the legacy `swift` branch with the URL-based Package.swift
 #      (planned to be deprecated once consumers move to `from: "<version>"`).
 #
-# If a release PR is closed without merging, this workflow doesn't run. The
-# draft release lingers; the next release-prep run replaces it.
+# If a release PR is closed without merging, the pull_request trigger
+# doesn't run. The draft release lingers; the next release-prep run
+# replaces it.
 
 on:
   pull_request:
     types: [closed]
     branches: [master]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish/republish, e.g. v0.1.0-rc4 (must already exist on origin)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -36,14 +55,18 @@ jobs:
   # =========================================================================
   publish-release:
     name: Publish GitHub release
+    # Run on workflow_dispatch always; on pull_request only when the release
+    # PR actually merged.
     if: |
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'release/v')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'release/v'))
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
       merge_sha: ${{ steps.meta.outputs.merge_sha }}
+      already_published: ${{ steps.meta.outputs.already_published }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -53,33 +76,54 @@ jobs:
       - name: Extract release metadata
         id: meta
         env:
+          EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-        run: |
-          set -euo pipefail
-          TAG="${HEAD_REF#release/}"
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}"             >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}"     >> "$GITHUB_OUTPUT"
-          echo "merge_sha=${MERGE_SHA}" >> "$GITHUB_OUTPUT"
-          echo "Publishing ${TAG} at merge commit ${MERGE_SHA}"
-
-      - name: Verify draft release exists
-        env:
+          INPUT_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+            # In dispatch mode the tag should already exist (manual recovery
+            # path). Resolve the commit SHA the tag points at so downstream
+            # jobs that need merge_sha still have something meaningful.
+            MERGE_SHA=$(gh api "repos/${{ github.repository }}/git/refs/tags/${TAG}" --jq .object.sha 2>/dev/null || echo "")
+            if [ -z "$MERGE_SHA" ]; then
+              echo "::error::Tag ${TAG} not found on origin. Create it (or publish the draft release for ${TAG}) before dispatching."
+              exit 1
+            fi
+          else
+            TAG="${HEAD_REF#release/}"
+          fi
+          VERSION="${TAG#v}"
+
+          # Was the release already published? (true in the workflow_dispatch
+          # recovery path, false in the normal pull_request path.)
           STATE=$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null || echo "missing")
-          if [ "$STATE" = "missing" ]; then
-            echo "::error::No draft release found for ${TAG}. Did release-prep run?"
-            exit 1
-          fi
-          if [ "$STATE" = "false" ]; then
-            echo "::warning::Release ${TAG} is already published — skipping publish step."
-          fi
+          case "$STATE" in
+            true)    ALREADY_PUBLISHED=false ;;  # draft exists, not yet published
+            false)   ALREADY_PUBLISHED=true ;;   # already published — skip the publish step
+            missing)
+              if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+                echo "::error::No release found for ${TAG}. Create the draft (via release-prep) or publish it manually before dispatching."
+              else
+                echo "::error::No draft release found for ${TAG}. Did release-prep run?"
+              fi
+              exit 1
+              ;;
+          esac
+
+          echo "tag=${TAG}"                              >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}"                      >> "$GITHUB_OUTPUT"
+          echo "merge_sha=${MERGE_SHA}"                  >> "$GITHUB_OUTPUT"
+          echo "already_published=${ALREADY_PUBLISHED}"  >> "$GITHUB_OUTPUT"
+          echo "Tag: ${TAG} | Version: ${VERSION} | SHA: ${MERGE_SHA} | already_published: ${ALREADY_PUBLISHED}"
 
       - name: Retarget draft to merge commit and publish
+        # Only run when there's a draft to publish (i.e. not the recovery
+        # path where someone already published it manually).
+        if: steps.meta.outputs.already_published == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.meta.outputs.tag }}

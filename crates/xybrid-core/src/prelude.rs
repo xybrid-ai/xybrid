@@ -5,13 +5,18 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_core::prelude::*;
 //!
+//! # let metadata: xybrid_core::execution::ModelMetadata = unimplemented!();
 //! // Now you have access to common types
-//! let input = Envelope::from_text("Hello, world!");
+//! let input = Envelope::new(EnvelopeKind::Text("Hello, world!".into()));
 //! let mut executor = TemplateExecutor::with_base_path("models/tts");
-//! let output = executor.execute(&metadata, &input)?;
+//! let output = executor.execute(&metadata, &input, None)?;
+//! # let _ = output;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # What's Included

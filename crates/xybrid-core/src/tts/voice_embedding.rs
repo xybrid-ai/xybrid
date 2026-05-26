@@ -7,8 +7,9 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
-//! use xybrid_core::tts::voice_embedding::{VoiceEmbeddingLoader, VoiceFormat};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_core::tts::voice_embedding::VoiceEmbeddingLoader;
 //!
 //! // Auto-detect format and load
 //! let loader = VoiceEmbeddingLoader::new(256);
@@ -17,6 +18,9 @@
 //!
 //! // Or load all embeddings (raw format only)
 //! let all_embeddings = loader.load_all_raw("voices.bin")?;
+//! # let _ = (embedding, all_embeddings);
+//! # Ok(())
+//! # }
 //! ```
 
 use std::path::Path;

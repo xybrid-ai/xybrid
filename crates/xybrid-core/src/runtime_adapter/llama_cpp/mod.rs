@@ -68,12 +68,15 @@ static BACKEND_INIT: Once = Once::new();
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 /// use xybrid_core::runtime_adapter::llama_cpp::LlamaCppBackend;
 /// use xybrid_core::runtime_adapter::llm::{LlmBackend, LlmConfig};
 ///
 /// let mut backend = LlamaCppBackend::new()?;
 /// backend.load(&LlmConfig::new("model.gguf"))?;
+/// # Ok(())
+/// # }
 /// ```
 #[cfg(feature = "llm-llamacpp")]
 pub struct LlamaCppBackend {

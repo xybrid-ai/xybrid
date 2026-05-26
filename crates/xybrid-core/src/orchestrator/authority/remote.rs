@@ -46,12 +46,17 @@ const TARGET_ADVICE_CACHE_CAPACITY: usize = 256;
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// use xybrid_core::orchestrator::authority::{RemoteAuthority, OrchestrationAuthority};
+/// ```no_run
+/// # fn _example() {
+/// use xybrid_core::orchestrator::authority::{
+///     RemoteAuthority, OrchestrationAuthority, PolicyRequest,
+/// };
 ///
+/// # let request: PolicyRequest = unimplemented!();
 /// let authority = RemoteAuthority::new("https://api.xybrid.dev");
-/// // Falls back to local if network unavailable
 /// let decision = authority.apply_policy(&request);
+/// # let _ = decision;
+/// # }
 /// ```
 pub struct RemoteAuthority {
     /// Backend endpoint URL.
