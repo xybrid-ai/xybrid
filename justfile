@@ -81,6 +81,20 @@ version-sync:
     ./tools/scripts/version-sync.sh
     @./tools/scripts/version-sync.sh --check
 
+# Consumer-side resolution test for a published release. Generates minimal
+# consumer projects in a tmp dir for SPM / Cargo / Flutter / Maven and
+# verifies each registry resolves the requested version. Also runs
+# xcodebuild against examples/ios/XybridExample (iOS Simulator, no
+# codesign) for an end-to-end real-app SPM check.
+#
+# Examples:
+#   just verify-release                    # uses current workspace version
+#   just verify-release 0.1.0-rc4
+#   just verify-release 0.1.0-rc4 --skip-ios
+#   just verify-release 0.1.0-rc4 --only spm,cargo
+verify-release *args:
+    ./tools/scripts/verify-release.sh {{args}}
+
 # =============================================================================
 # Documentation
 # =============================================================================
