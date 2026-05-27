@@ -13,6 +13,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.0] - 2026-05-27
+
+Production release of the 0.1.0 line. No code changes since rc4 — this release closes the rc series and finalizes the release toolchain that was iterated through rc1 → rc4.
+
+### Release infrastructure (since rc4)
+
+- **SLSA build provenance attestations** (#178): Every release asset (XCFramework zip, Android `.so` zip, all CLI binaries) is now signed and recorded in GitHub's transparency log via Sigstore. Consumers verify with `gh attestation verify <file> --repo xybrid-ai/xybrid`.
+- **Consumer-side resolution verification** (#177): `just verify-release <version>` spins up minimal consumer projects in a tmp dir for each registry (SPM / Cargo / Flutter pub.dev / Maven Central) and runs end-to-end resolution against the published artifacts. Also exercises an iOS Simulator xcodebuild against `examples/ios/XybridExample`.
+- **pub.dev OIDC binding moved to GitHub Actions environment** (#176): The trusted-publisher binding now gates on a `pub-dev-publish` environment claim rather than a tag-pattern claim, decoupling pub.dev publishes from the workflow trigger type. (See [#179](https://github.com/xybrid-ai/xybrid/issues/179) follow-up — full automation of pub.dev publishes pending.)
+- **`workflow_dispatch` recovery path on `release-publish.yml`** (#175): If the `pull_request: closed` event doesn't reach Actions (race condition, deleted PR, etc.) the publish flow can be re-run manually with `gh workflow run release-publish.yml --field tag=v<version>`. The publish-release step is gated on `isDraft=true` so it's a no-op when the release is already live.
+
+### Cumulative highlights — what 0.1.0 ships (vs. 0.1.0-rc3)
+
+Everything that landed in rc4 is in 0.1.0:
+
+- **`InferenceMetrics` across every binding** (INF-15 series, #120, #131, #135, #138, #139, #142): typed per-inference CPU / memory / GPU / wall-clock metrics now visible from Rust SDK, Kotlin + Swift (UniFFI), Dart (`XybridResult`), and Unity (C FFI accessors). Surfaced in the bundled Flutter demos and Unity docs.
+- **Streaming-LLM cloud fallback uses live device signals** (#121): real CPU / memory / thermal pressure feeds the routing decision instead of static thresholds.
+- **`ModelWarmup` telemetry events** (#158 + #164): `XybridModel::warmup` emits dedicated `ModelWarmup` spans; warmup events drain on event boundaries so they don't bleed into subsequent inferences.
+- **`streaming` field hoisted to top-level `PlatformEvent`** (#162): downstream consumers no longer descend into metadata to filter streaming events.
+- **GGUF backend label defaults to `llamacpp`** (#119): unannotated GGUF bundles attribute correctly in telemetry instead of showing `unknown`.
+- **`Denormalize` postprocessing step** (#133): inverse of `Normalize`, useful for round-tripping model output back into input-space coordinates.
+- **Release-branch flow** (#169, #171, #173): replaces the tag-driven release. `release-prep.yml` + `release-publish.yml` keep master's SPM checksum in sync, eliminate force-moved tags, and stage every release through a reviewable PR + draft release.
+
+### Fixed
+
+- **SPM `branch: "master"` consumers** unblocked (#167, #169): the new release-branch flow keeps master's `Package.swift` `xybridFFIChecksum` in sync with the released xcframework. The recommended consumer line is now `from: "0.1.0"`, but `branch: "master"` works too.
+- Streaming fast-path `ModelComplete` events restored (#137), orchestrator pipeline-frame events filtered at SDK bridge (#146), CLI REPL routes cached models locally (#165), warmup span collector drains on event boundary (#164) — all from rc4.
+
+### Known issues — deferred to v0.1.1
+
+- **iOS Simulator slice missing from the published xcframework** ([#179](https://github.com/xybrid-ai/xybrid/issues/179)): Swift consumers cannot build against the iOS Simulator on Apple Silicon without a workaround. Pre-existed in rc1 through rc4. Workaround: build locally with `useLocalNatives = true` after vendoring the ORT iOS simulator slice.
+- **pub.dev publish requires one manual step**: `flutter pub publish -f` from a maintainer's machine after merging the release PR. Refactor tracked separately.
+
+### Consumer install lines
+
+```swift
+// Swift Package Manager
+.package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.0")
+```
+
+```yaml
+# Flutter / pub.dev
+xybrid_flutter: ^0.1.0
+```
+
+```toml
+# Rust / crates.io
+xybrid = "0.1.0"
+```
+
+```kotlin
+// Kotlin / Maven Central
+implementation("ai.xybrid:xybrid-kotlin:0.1.0")
+```
+
+```sh
+# Unity / UPM
+https://github.com/xybrid-ai/xybrid.git#upm
+```
+
+---
+
 ## [0.1.0-rc4] - 2026-05-26
 
 ### Added
