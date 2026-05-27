@@ -238,14 +238,23 @@ jobs:
   # Publish Flutter to pub.dev via OIDC.
   #
   # Inlines the dart-lang/setup-dart publish.yml steps (rather than calling
-  # the reusable workflow) to match pub.dev's trusted-publisher binding,
-  # which expects this workflow path. pub.dev's trusted-publisher config
-  # must be updated when this workflow file is renamed.
+  # the reusable workflow) so we control the OIDC token's claims directly.
+  #
+  # pub.dev's trusted-publisher binding for xybrid_flutter is gated on the
+  # `pub-dev-publish` GitHub Actions environment (set on
+  # https://pub.dev/packages/xybrid_flutter/admin) rather than on a tag
+  # pattern. The environment claim in the OIDC token is what pub.dev
+  # validates against, so this works regardless of how the workflow was
+  # triggered — pull_request: closed, workflow_dispatch, push: tags, etc.
+  # (The old release.yml relied on the tag-ref claim because it triggered
+  # on tag push; the release-branch flow can't satisfy that since it
+  # triggers on PR-merge / dispatch, hence the move to env-based binding.)
   # =========================================================================
   publish-flutter:
     name: Publish Flutter to pub.dev
     needs: [publish-release]
     runs-on: ubuntu-latest
+    environment: pub-dev-publish
     permissions:
       id-token: write
     steps:
