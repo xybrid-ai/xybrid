@@ -56,6 +56,11 @@ env:
 permissions:
   contents: write
   pull-requests: write
+  # SLSA build provenance attestations — `attest-build-provenance` writes
+  # signed attestations to GitHub's transparency log via Sigstore. Consumers
+  # verify with `gh attestation verify <file> --repo xybrid-ai/xybrid`.
+  id-token: write
+  attestations: write
 
 jobs:
   # =========================================================================
@@ -175,6 +180,11 @@ jobs:
           cd bindings/apple/XCFrameworks
           zip -r ../../../dist/XybridFFI-${TAG}.xcframework.zip XybridFFI.xcframework
 
+      - name: Attest XCFramework provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/XybridFFI-${{ needs.check-release-branch.outputs.tag }}.xcframework.zip
+
       - name: Upload XCFramework artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -214,6 +224,11 @@ jobs:
           mkdir -p dist-cli
           cp target/aarch64-apple-darwin/release/xybrid dist-cli/xybrid-${TAG}-macos-arm64
           chmod +x dist-cli/xybrid-${TAG}-macos-arm64
+
+      - name: Attest macOS CLI provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist-cli/xybrid-${{ needs.check-release-branch.outputs.tag }}-macos-arm64
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -283,6 +298,11 @@ jobs:
           mkdir -p dist
           cd bindings/kotlin/libs
           zip -r ../../../dist/xybrid-android-${TAG}.zip .
+
+      - name: Attest Android artifact provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/xybrid-android-${{ needs.check-release-branch.outputs.tag }}.zip
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -506,6 +526,11 @@ jobs:
             cp target/${{ matrix.target }}/release/${{ matrix.artifact }} dist/xybrid-${TAG}-${{ matrix.name }}
             chmod +x dist/xybrid-${TAG}-${{ matrix.name }}
           fi
+
+      - name: Attest CLI provenance (${{ matrix.name }})
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/xybrid-${{ needs.check-release-branch.outputs.tag }}-${{ matrix.name }}*
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
