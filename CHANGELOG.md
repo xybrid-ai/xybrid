@@ -13,6 +13,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.0-rc4] - 2026-05-26
+
+### Added
+
+- **`InferenceMetrics` on result types across every binding** (INF-15 — #120, #131, #135, #138): Typed per-inference metrics (CPU / memory / GPU / wall-clock) are now exposed on the SDK result type and threaded through to Kotlin + Swift (UniFFI), Dart (`XybridResult`), and Unity (C FFI accessors). Flutter demos and Unity docs now surface them end-to-end (#139, #142).
+- **Live-signal routing for streaming cloud fallback** (#121): The streaming-LLM fallback policy now consumes real-time device pressure signals (CPU / memory / thermal) instead of static thresholds when deciding whether to spill to cloud.
+- **`ModelWarmup` telemetry event** (#158): `XybridModel::warmup` now emits a dedicated `ModelWarmup` span; the CLI REPL routes its warmup through this event so first-token latency is attributable to warmup vs. inference.
+- **`streaming` field hoisted to `PlatformEvent` top-level payload** (#162): Previously nested under metadata, now a top-level field so downstream consumers don't have to descend into the payload to filter streaming events.
+- **GGUF backend label defaults to `llamacpp` on unannotated bundles** (#119): Telemetry events from bundles that don't carry an explicit backend tag now default to `llamacpp` rather than `unknown`, so dashboards correctly attribute GGUF traffic.
+- **`Denormalize` postprocessing step in core** (#133): New core postprocessing primitive that inverts a `Normalize` step, useful for round-tripping model output back into input-space coordinates.
+
+### Fixed
+
+- **`ModelComplete` events on streaming fast-path inference** (#137): The streaming fast-path was skipping the `ModelComplete` emission, leaving downstream consumers waiting on a terminal event that never arrived. Now emitted on every path.
+- **Orchestrator pipeline-frame events filtered at SDK bridge** (#146): Internal `PipelineFrame` events from the orchestrator no longer leak to binding consumers as opaque payloads.
+- **REPL routes cached models locally** (#165): The CLI REPL was occasionally re-resolving cached models through the cloud router; it now short-circuits to the local cache when the model is present on disk.
+- **`ModelWarmup` span collector drained on event boundary** (#164): Warmup spans were leaking into the subsequent event's batch; the span collector is now drained when `ModelWarmup` is published.
+- **SPM consumers on `branch: "master"` no longer hit checksum mismatch** (#167, #169): The new release-branch flow keeps master's `Package.swift` `xybridFFIChecksum` in sync with the released xcframework asset. Tag-pinned (`exact:` / `from:`) and `branch: "swift"` consumers were unaffected; this fixes the `branch: "master"` case that had been silently broken since rc1.
+
+### Build / CI
+
+- **Release-branch flow** (#169, #171): New `release-prep.yml` + `release-publish.yml` workflows. A maintainer cuts `release/v<version>`, runs `just bump-version`, and pushes — CI builds every artifact, patches the SPM checksum back to the branch, creates a draft GitHub Release with all assets, and opens a PR to master. Merging the PR publishes the draft (tag created at merge commit) and publishes to crates.io / pub.dev / Maven Central. The legacy `release.yml` is kept as a `workflow_dispatch`-only break-glass.
+- **`version-sync.sh` now bumps `bindings/flutter/rust/Cargo.toml`** (#173): `just bump-version` was silently leaving the Flutter rust crate behind because the crate hardcodes its version (cargokit hashes the file). The bump script now keeps it in sync; master's previously-stale rc1 version is brought up too.
+- **`publish-crates` job pushes the four crates to crates.io** (#143, #145): `xybrid-macros`, `xybrid-core`, `xybrid-sdk`, and the `xybrid` umbrella now publish from the release workflow.
+- **Discord notifications + contributor welcome workflow** (#147, #148): Release publish notifies the project Discord; new contributors get a welcome message on their first PR.
+
+### Docs
+
+- **Vision envelopes + multi-part user messages** (#123): SDK docs now cover the input shape for vision payloads and the multi-part message format.
+- **`XYBRID_LLAMACPP_VERBOSITY` env var documented** (#156).
+- **Doctest examples compile under `no_run`** (#168): All public-API doctests now compile cleanly even without runtime dependencies present, so `cargo test --doc` runs green in CI.
+- **README install snippets bumped to 0.1.0-rc4** (this release, see also #157 for the rc3 equivalent).
+- **New-contributor pointers** (#130): READMEs now point first-time contributors at the `good-first-issue` and area labels.
+
+---
+
 ## [0.1.0-rc3] - 2026-05-16
 
 ### Added

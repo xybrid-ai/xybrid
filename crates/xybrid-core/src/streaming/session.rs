@@ -220,18 +220,21 @@ impl TranscriptAccumulator {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 /// use xybrid_core::streaming::{StreamSession, StreamConfig};
 ///
 /// // Create session from model directory (backend auto-detected)
 /// let config = StreamConfig::default();
 /// let mut session = StreamSession::new("/path/to/whisper-model", config)?;
 ///
-/// // Feed audio chunks
+/// # let audio_samples: Vec<f32> = Vec::new();
 /// session.feed(&audio_samples)?;
 ///
-/// // Get final transcript
 /// let transcript = session.flush()?;
+/// # let _ = transcript;
+/// # Ok(())
+/// # }
 /// ```
 pub struct StreamSession {
     /// Model directory path
@@ -274,12 +277,19 @@ impl StreamSession {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_core::streaming::{StreamSession, StreamConfig};
+    ///
+    /// let config = StreamConfig::default();
     /// // Whisper model (Candle backend, auto-detected)
-    /// let session = StreamSession::new("/path/to/whisper-model", config)?;
+    /// let session = StreamSession::new("/path/to/whisper-model", config.clone())?;
     ///
     /// // Wav2Vec2 model (ONNX backend, auto-detected)
     /// let session = StreamSession::new("/path/to/wav2vec2-model", config)?;
+    /// # let _ = session;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn new<P: AsRef<Path>>(model_dir: P, config: StreamConfig) -> StreamResult<Self> {
         let model_dir = model_dir.as_ref().to_path_buf();

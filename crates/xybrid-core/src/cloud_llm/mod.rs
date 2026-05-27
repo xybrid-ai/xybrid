@@ -11,10 +11,14 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
-//! use xybrid_core::cloud_llm::{LlmClient, LlmRequest, LlmProvider};
+//! This module is crate-private (`pub(crate)`) — the snippet below is for
+//! internal reference only and is not compiled as a doctest.
 //!
-//! let client = LlmClient::new(LlmProvider::OpenAI)?;
+//! ```text
+//! use xybrid_core::cloud_llm::{LlmClient, LlmRequest};
+//! use xybrid_core::pipeline::IntegrationProvider;
+//!
+//! let client = LlmClient::new(IntegrationProvider::OpenAI)?;
 //! let response = client.complete(LlmRequest {
 //!     prompt: "Hello, world!".to_string(),
 //!     system: Some("You are a helpful assistant.".to_string()),

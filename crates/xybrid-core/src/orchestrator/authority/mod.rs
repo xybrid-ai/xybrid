@@ -46,7 +46,7 @@ pub use types::*;
 /// Works completely offline. Uses device metrics and simple heuristics.
 /// You can inspect the source - no magic, no phone-home.
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::orchestrator::authority::{LocalAuthority, OrchestrationAuthority};
 ///
 /// let authority = LocalAuthority::new();
@@ -58,7 +58,7 @@ pub use types::*;
 /// Delegates to xybrid backend for smarter decisions based on fleet data.
 /// Returns the same explainable decisions, just with more intelligence.
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::orchestrator::authority::{RemoteAuthority, OrchestrationAuthority};
 ///
 /// let authority = RemoteAuthority::new("https://api.xybrid.dev");

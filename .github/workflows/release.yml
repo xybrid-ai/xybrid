@@ -1,9 +1,21 @@
-name: Release
+name: Release (legacy tag-driven)
+
+# Break-glass for the old tag-driven release flow. The push: tags trigger
+# was removed in PR #170 because the new release-branch flow
+# (release-prep.yml + release-publish.yml) creates the v<version> tag via
+# the Releases API as part of publishing — leaving this workflow armed on
+# tag pushes would double-fire it against every new-flow release.
+#
+# To run this workflow manually (e.g. if the new flow breaks and you need
+# to ship from a tag): Actions -> Release (legacy tag-driven) -> Run
+# workflow -> choose the v<version> tag in the "Use workflow from" picker.
+# Every step below reads GITHUB_REF so the tag must already exist before
+# dispatching.
+#
+# Planned for deletion once one or two releases have shipped cleanly
+# through the new flow.
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 env:

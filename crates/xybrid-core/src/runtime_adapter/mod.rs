@@ -22,8 +22,10 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use xybrid_core::runtime_adapter::{RuntimeAdapter, OnnxRuntimeAdapter};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_core::runtime_adapter::RuntimeAdapter;
+//! use xybrid_core::runtime_adapter::onnx::OnnxRuntimeAdapter;
 //! use xybrid_core::ir::{Envelope, EnvelopeKind};
 //!
 //! // Create adapter
@@ -35,6 +37,9 @@
 //! // Run inference
 //! let input = Envelope::new(EnvelopeKind::Text("hello world".to_string()));
 //! let output = adapter.execute(&input)?;
+//! # let _ = output;
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::ir::Envelope;
@@ -244,11 +249,19 @@ pub trait RuntimeAdapter: Send + Sync {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_core::ir::{Envelope, EnvelopeKind};
+    /// use xybrid_core::runtime_adapter::{OnnxRuntimeAdapter, RuntimeAdapter};
+    ///
     /// let mut adapter = OnnxRuntimeAdapter::new();
     /// adapter.load_model("model.onnx")?;
     /// adapter.warmup()?;  // Optional: trigger GPU initialization
+    /// # let input = Envelope::new(EnvelopeKind::Text("probe".into()));
     /// let output = adapter.execute(&input)?;  // First inference is now fast
+    /// # let _ = output;
+    /// # Ok(())
+    /// # }
     /// ```
     fn warmup(&mut self) -> AdapterResult<()> {
         Ok(())

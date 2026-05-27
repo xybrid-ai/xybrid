@@ -112,7 +112,7 @@ pub enum ExecutionMode {
 /// For smarter decisions based on fleet-wide data, configure a `RemoteAuthority` which
 /// will automatically fall back to `LocalAuthority` when the backend is unavailable.
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::orchestrator::{Orchestrator, RemoteAuthority};
 ///
 /// // Default: LocalAuthority (fully offline)
@@ -213,7 +213,7 @@ impl Orchestrator {
     ///
     /// Use this to configure smart routing via `RemoteAuthority`:
     ///
-    /// ```rust,ignore
+    /// ```no_run
     /// use xybrid_core::orchestrator::{Orchestrator, RemoteAuthority};
     ///
     /// // RemoteAuthority automatically falls back to LocalAuthority

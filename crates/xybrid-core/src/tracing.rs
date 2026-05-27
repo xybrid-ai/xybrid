@@ -5,7 +5,8 @@
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```no_run
+//! # fn _example() {
 //! use xybrid_core::tracing::{SpanCollector, SpanGuard};
 //!
 //! let mut collector = SpanCollector::new();
@@ -14,11 +15,13 @@
 //! // ... do work ...
 //! collector.end_span();
 //!
-//! // Or use RAII guard:
+//! // Or use RAII guard against the global collector:
 //! {
-//!     let _guard = SpanGuard::new(&mut collector, "inference");
+//!     let _guard = SpanGuard::new("inference");
 //!     // span automatically ends when guard drops
 //! }
+//! # let _ = span_id;
+//! # }
 //! ```
 
 use serde::{Deserialize, Serialize};

@@ -15,6 +15,12 @@ CARGO_WORKSPACE="$REPO_ROOT/Cargo.toml"
 FLUTTER_PUBSPEC="$REPO_ROOT/bindings/flutter/pubspec.yaml"
 UNITY_PACKAGE="$REPO_ROOT/bindings/unity/package.json"
 KOTLIN_GRADLE="$REPO_ROOT/bindings/kotlin/build.gradle.kts"
+# bindings/flutter/rust hardcodes `version = "..."` instead of inheriting
+# `version.workspace = true` because cargokit hashes this file's bytes to
+# decide whether the precompiled Flutter binaries need rebuilding. Without
+# a hardcoded version, every workspace bump would leave the precompiled
+# cache pointing at an out-of-date hash.
+FLUTTER_RUST_CARGO="$REPO_ROOT/bindings/flutter/rust/Cargo.toml"
 # Root SPM manifest. `let sdkVersion = "..."` drives the GitHub release-asset
 # URL for SPM consumers in remote mode and MUST match the cargo workspace
 # version.
@@ -41,6 +47,12 @@ get_unity_version() {
 # Extract version from Kotlin build.gradle.kts
 get_kotlin_version() {
     grep '^version = ' "$KOTLIN_GRADLE" | sed 's/version = "\(.*\)"/\1/'
+}
+
+# Extract version from bindings/flutter/rust/Cargo.toml (the hardcoded line —
+# strip any trailing inline comment).
+get_flutter_rust_version() {
+    grep '^version = ' "$FLUTTER_RUST_CARGO" | head -1 | sed 's/version = "\(.*\)".*/\1/'
 }
 
 # Extract sdkVersion from root Package.swift
@@ -83,6 +95,17 @@ set_kotlin_version() {
     rm -f "$KOTLIN_GRADLE.bak"
 }
 
+# Set version in bindings/flutter/rust/Cargo.toml. The `^version = "..."`
+# anchor matches only the line under [package] (dependency entries in
+# [dependencies] use `name = { version = "..." }` syntax and start with a
+# crate name, not "version"). The trailing inline comment is preserved
+# because the `".*"` capture stops at the closing quote.
+set_flutter_rust_version() {
+    local version="$1"
+    sed -i.bak "s/^version = \".*\"/version = \"$version\"/" "$FLUTTER_RUST_CARGO"
+    rm -f "$FLUTTER_RUST_CARGO.bak"
+}
+
 # Set sdkVersion in root Package.swift. Leaves useLocalNatives and
 # xybridFFIChecksum untouched — those are managed independently
 # (set-natives-mode.sh / sync-spm-checksum.sh).
@@ -101,7 +124,7 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version"; do
+    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version
@@ -134,6 +157,7 @@ case "${1:-}" in
         VERSION="$(get_cargo_version)"
         echo "Syncing all packages to version: $VERSION"
         set_flutter_version "$VERSION"
+        set_flutter_rust_version "$VERSION"
         set_unity_version "$VERSION"
         set_kotlin_version "$VERSION"
         set_swift_version "$VERSION"
@@ -153,6 +177,7 @@ case "${1:-}" in
         echo "Setting all packages to version: $VERSION"
         set_cargo_version "$VERSION"
         set_flutter_version "$VERSION"
+        set_flutter_rust_version "$VERSION"
         set_unity_version "$VERSION"
         set_kotlin_version "$VERSION"
         set_swift_version "$VERSION"

@@ -23,9 +23,12 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_core::streaming::{StreamSession, StreamConfig};
 //!
+//! # let audio_chunk_1: Vec<f32> = vec![];
+//! # let audio_chunk_2: Vec<f32> = vec![];
 //! // Create session - backend auto-detected from model_metadata.json
 //! let config = StreamConfig::default();
 //! let mut session = StreamSession::new("/path/to/whisper-model", config)?;
@@ -42,6 +45,8 @@
 //! // Flush to get final transcription
 //! let final_result = session.flush()?;
 //! println!("Final: {}", final_result);
+//! # Ok(())
+//! # }
 //! ```
 
 mod audio_buffer;

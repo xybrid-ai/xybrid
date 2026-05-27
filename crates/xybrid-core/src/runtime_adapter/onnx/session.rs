@@ -16,7 +16,10 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use std::collections::HashMap;
+//! use ndarray::ArrayD;
 //! use xybrid_core::runtime_adapter::onnx::{ONNXSession, ExecutionProviderKind, SessionOptions};
 //!
 //! // CPU execution, no profiling overhead
@@ -26,16 +29,13 @@
 //!     SessionOptions::default(),
 //! )?;
 //!
-//! // CoreML execution with resolved-EP capture (requires ort-coreml feature)
-//! #[cfg(feature = "ort-coreml")]
-//! let session = ONNXSession::build(
-//!     "/path/to/model.onnx",
-//!     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine()),
-//!     SessionOptions { capture_resolved_ep: true },
-//! )?;
+//! // CoreML execution with resolved-EP capture is gated by the `ort-coreml` cfg.
 //!
-//! let inputs = /* prepare inputs */;
+//! let inputs: HashMap<String, ArrayD<f32>> = HashMap::new();
 //! let outputs = session.run(inputs)?;
+//! # let _ = outputs;
+//! # Ok(())
+//! # }
 //! ```
 
 use super::execution_provider::ExecutionProviderKind;
@@ -165,7 +165,8 @@ impl ONNXSession {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
     /// use xybrid_core::runtime_adapter::onnx::{ONNXSession, ExecutionProviderKind, SessionOptions};
     ///
     /// // Cheap path — no profiling overhead, no tempdir
@@ -176,11 +177,16 @@ impl ONNXSession {
     /// )?;
     ///
     /// // Opt in to resolved-EP capture for telemetry callers
+    /// let mut opts = SessionOptions::default();
+    /// opts.capture_resolved_ep = true;
     /// let session = ONNXSession::build(
     ///     "model.onnx",
     ///     ExecutionProviderKind::Cpu,
-    ///     SessionOptions { capture_resolved_ep: true },
+    ///     opts,
     /// )?;
+    /// # let _ = session;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn build(
         model_path: &str,

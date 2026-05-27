@@ -29,9 +29,11 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
-//! use xybrid_core::audio::mel::{compute_mel_spectrogram, MelConfig};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_core::audio::mel::{compute_mel_spectrogram, MelConfig, MelScale};
 //!
+//! # let samples: Vec<f32> = Vec::new();
 //! // Using preset for Whisper
 //! let config = MelConfig::whisper();
 //! let mel = compute_mel_spectrogram(&samples, &config)?;
@@ -43,6 +45,9 @@
 //!     ..Default::default()
 //! };
 //! let mel = compute_mel_spectrogram(&samples, &config)?;
+//! # let _ = mel;
+//! # Ok(())
+//! # }
 //! ```
 //!
 pub mod common;
