@@ -631,14 +631,15 @@ fn inference_result_to_data(result: &xybrid_sdk::InferenceResult) -> ResultData 
     let mut data = ResultData {
         success: true,
         error: None,
-        output_type: if result.text().is_some() {
-            XybridOutputType::Text
-        } else if result.audio_bytes().is_some() {
-            XybridOutputType::Audio
-        } else if result.embedding().is_some() {
-            XybridOutputType::Embedding
-        } else {
-            XybridOutputType::Unknown
+        // Mirror the SDK's own classification rather than re-deriving
+        // it from `is_some()` checks — keeps the FFI layer in lockstep
+        // with `InferenceResult::output_type()` (its stored, authoritative
+        // kind) instead of guessing a priority order that could diverge.
+        output_type: match result.output_type() {
+            xybrid_sdk::OutputType::Text => XybridOutputType::Text,
+            xybrid_sdk::OutputType::Audio => XybridOutputType::Audio,
+            xybrid_sdk::OutputType::Embedding => XybridOutputType::Embedding,
+            xybrid_sdk::OutputType::Unknown => XybridOutputType::Unknown,
         },
         text: result.text().map(|s| s.to_string()),
         embedding: result.embedding().map(|e| e.to_vec()),
