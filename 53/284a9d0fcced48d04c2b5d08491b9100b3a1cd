@@ -1,0 +1,23 @@
+bindings/flutter/lib/src/xybrid.dart
+  s_2d821c1355f300::t_253984ef9e8269 253-257
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_2d821c1355f300::t_091272d89a52f6 35-46
+  s_2d821c1355f300::t_d1ff789f2d992c 195-226
+  s_2d821c1355f300::t_223f9cde1d4a72 116-123,133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "53284a9d0fcced48d04c2b5d08491b9100b3a1cd",
+  "prompts": {},
+  "sessions": {
+    "s_2d821c1355f300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc1ef534-2425-40ad-92b2-e88e48c8f0af",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
