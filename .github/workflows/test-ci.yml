@@ -321,6 +321,12 @@ jobs:
     name: Publish Kotlin SDK (dry-run)
     if: inputs.platform == 'publish-kotlin'
     runs-on: ubuntu-latest
+    # The bolt Android build needs NDK r27 (build-android-bolt.sh resolves
+    # its API-suffixed clang). Override the workflow-level NDK_VERSION
+    # (r26b) just for this job so the flutter precompile-linux job stays
+    # on its validated r26b.
+    env:
+      NDK_VERSION: "27.0.12077973"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -336,10 +342,13 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
+          # All four ABIs the bolt config builds (the AAR ships the first
+          # three; i686/x86 is built but not packaged).
           targets: >-
             aarch64-linux-android,
             armv7-linux-androideabi,
-            x86_64-linux-android
+            x86_64-linux-android,
+            i686-linux-android
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -357,6 +366,9 @@ jobs:
         with:
           key: test-publish-kotlin
 
+      - name: Install patchelf
+        run: sudo apt-get update && sudo apt-get install -y patchelf
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
@@ -365,8 +377,8 @@ jobs:
           sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
-      - name: Install cargo-ndk
-        run: which cargo-ndk || cargo install cargo-ndk
+      - name: Install boltffi CLI
+        run: which boltffi || cargo install boltffi_cli --version 0.25.0
 
       - name: Build Android .so files
         run: cargo xtask build-android --release
