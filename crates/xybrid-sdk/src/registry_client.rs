@@ -40,7 +40,7 @@ use crate::model::SdkError;
 use crate::platform::current_platform;
 use crate::source::detect_platform;
 use crate::telemetry_optout::is_telemetry_opted_out;
-use crate::{get_binding, DEFAULT_BINDING};
+use crate::{get_binding, DEFAULT_BINDING, SDK_VERSION};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -97,7 +97,7 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
     Some(format!(
         "binding={}; sdk_version={}; core_version={}; platform={}; backends={}",
         safe_binding,
-        env!("CARGO_PKG_VERSION"),
+        SDK_VERSION,
         xybrid_core::VERSION,
         current_platform(),
         backends,

@@ -57,12 +57,12 @@ permissions:
   contents: write
   pull-requests: write
   # SLSA build provenance attestations (id-token + attestations) are
-  # scoped per-job on build-apple-all, build-android, and build-cli only —
-  # the jobs that actually call `attest-build-provenance`. Keeping these
-  # out of the workflow-level permissions means patch-spm-checksum,
-  # create-draft-release, open-release-pr, and the Flutter precompile
-  # jobs don't get unnecessary OIDC-issuance or attestation-write
-  # privileges.
+  # scoped per-job on build-xcframework, build-cli-macos, build-android,
+  # and build-cli only — the jobs that actually call
+  # `attest-build-provenance`. Keeping these out of the workflow-level
+  # permissions means patch-spm-checksum, create-draft-release,
+  # open-release-pr, and the Flutter precompile jobs don't get
+  # unnecessary OIDC-issuance or attestation-write privileges.
 
 jobs:
   # =========================================================================
@@ -124,11 +124,21 @@ jobs:
           [ "$FAILED" -eq 0 ] || exit 1
 
   # =========================================================================
-  # Consolidated Apple build: XCFramework + Flutter darwin precompile +
-  # CLI macos-arm64. One macos-14 runner shares sccache across all three.
+  # Apple builds split into three parallel macos-14 jobs.
+  #
+  # Previously these ran sequentially on one runner to amortize sccache /
+  # toolchain setup. The bundled job was the critical-path long pole
+  # (~25 min). Splitting them puts xcframework + flutter-darwin + CLI on
+  # the wall-clock floor of just the slowest (xcframework cold compile).
+  # Each job pays its own ~2-min toolchain/sccache setup, paid in parallel.
+  #
+  # sccache itself is GH-Actions-cache backed and shared across jobs, so
+  # the second-run wall clock benefits from the shared cache regardless.
   # =========================================================================
-  build-apple-all:
-    name: Build Apple (all)
+
+  # ----- Apple job 1/3: XCFramework (critical path; gates patch-spm-checksum)
+  build-xcframework:
+    name: Build XCFramework
     needs: [check-release-branch]
     runs-on: macos-14
     permissions:
@@ -168,12 +178,6 @@ jobs:
           cache-all-crates: "true"
           save-if: "true"
 
-      - name: Install LLVM
-        run: brew install llvm
-
-      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
-
-      # --- Step 1: Build XCFramework (cold compile, ~18 min) ---
       - name: Build XCFramework
         run: cargo xtask build-xcframework --release
 
@@ -198,7 +202,52 @@ jobs:
           path: dist/XybridFFI-*.xcframework.zip
           if-no-files-found: error
 
-      # --- Step 2: Precompile Flutter darwin (sccache warm, ~3-5 min) ---
+  # ----- Apple job 2/3: Flutter darwin precompile (parallel; not on SPM path)
+  precompile-flutter-darwin:
+    name: Precompile Flutter (darwin)
+    needs: [check-release-branch]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            aarch64-apple-ios,
+            aarch64-apple-ios-sim,
+            aarch64-apple-darwin
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "flutter-darwin"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      # Matches the LLVM install on the Linux/Windows Flutter precompile
+      # jobs. Conservative: cargokit may invoke clang somewhere; verifying
+      # whether macOS strictly needs this is a follow-up.
+      - name: Install LLVM
+        run: brew install llvm
+
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
+
       - name: Install build tool dependencies
         working-directory: bindings/flutter/cargokit/build_tool
         run: dart pub get
@@ -215,7 +264,45 @@ jobs:
             --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
             --verbose
 
-      # --- Step 3: Build CLI macos-arm64 (sccache warm, ~1-2 min) ---
+  # ----- Apple job 3/3: CLI macos-arm64 (parallel)
+  build-cli-macos:
+    name: Build CLI (macos-arm64)
+    needs: [check-release-branch]
+    runs-on: macos-14
+    permissions:
+      contents: read       # actions/checkout
+      id-token: write      # Sigstore OIDC for attest-build-provenance
+      attestations: write  # GitHub attestations API
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "cli-macos-arm64"
+          cache-all-crates: "true"
+          save-if: "true"
+
       - name: Build CLI (macos-arm64)
         run: cargo build --release -p xybrid-cli --target aarch64-apple-darwin --features platform-macos
 
@@ -289,10 +376,23 @@ jobs:
       - name: Setup Android NDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
+      - name: Resolve NDK install path
+        shell: bash
+        run: echo "NDK_DIR=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.NDK_DIR }}
+          key: ndk-${{ runner.os }}-${{ env.NDK_VERSION }}
+
       - name: Install NDK
-        run: |
-          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Set ANDROID_NDK_HOME
+        run: echo "ANDROID_NDK_HOME=${{ env.NDK_DIR }}" >> $GITHUB_ENV
 
       - name: Install cargo-ndk
         run: which cargo-ndk || cargo install cargo-ndk
@@ -370,10 +470,23 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
+      - name: Resolve NDK install path
+        shell: bash
+        run: echo "NDK_DIR=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.NDK_DIR }}
+          key: ndk-${{ runner.os }}-${{ env.NDK_VERSION }}
+
       - name: Install Android NDK
-        run: |
-          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Set ANDROID_NDK_HOME
+        run: echo "ANDROID_NDK_HOME=${{ env.NDK_DIR }}" >> $GITHUB_ENV
 
       - name: Install cargo-ndk
         run: which cargo-ndk || cargo install cargo-ndk
@@ -564,7 +677,7 @@ jobs:
   # =========================================================================
   patch-spm-checksum:
     name: Patch SPM checksum
-    needs: [check-release-branch, build-apple-all]
+    needs: [check-release-branch, build-xcframework]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -610,6 +723,8 @@ jobs:
     needs:
       - check-release-branch
       - patch-spm-checksum
+      - build-cli-macos
+      - precompile-flutter-darwin
       - build-android
       - build-cli
       - precompile-flutter-linux
