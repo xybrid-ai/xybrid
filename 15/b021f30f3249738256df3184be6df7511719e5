@@ -1,0 +1,19 @@
+vercel.json
+  s_963a91db5a1a61::t_ff78aa3076eea5 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "15b021f30f3249738256df3184be6df7511719e5",
+  "prompts": {},
+  "sessions": {
+    "s_963a91db5a1a61": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a144b6d7-5a88-4072-a62a-f5ad33028eb1",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
