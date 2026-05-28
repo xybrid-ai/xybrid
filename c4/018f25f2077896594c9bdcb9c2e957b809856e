@@ -1,0 +1,22 @@
+crates/xybrid-ffi/src/lib.rs
+  s_323a65fe865faa::t_7cb596d7f1f05e 4938-4942,4944-4951,4953
+  s_323a65fe865faa::t_e5d32cf543ad07 4943,4952,4954-4957
+  s_323a65fe865faa::t_dacf43a11b1ffb 238-247,253-275
+  s_323a65fe865faa::t_256670c92d9262 3090-3091,3246-3247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c4018f25f2077896594c9bdcb9c2e957b809856e",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
