@@ -81,7 +81,17 @@ public enum Xybrid {
         if initialized { return }
         setBinding(binding: "swift")
         configureRuntime(apiKey: apiKey, gatewayUrl: gatewayUrl, ingestUrl: ingestUrl)
-        registerPlatformObservers()
+        // `registerPlatformObservers()` touches UIKit (`UIDevice.current`,
+        // `isBatteryMonitoringEnabled`) on iOS, which is main-thread-only.
+        // `initialize()` is documented as callable from any thread (apps
+        // commonly call it inside a `Task`), so hop to main when needed.
+        // The `initialized` guard ensures only one caller ever reaches here,
+        // so the deferred registration runs exactly once.
+        if Thread.isMainThread {
+            registerPlatformObservers()
+        } else {
+            DispatchQueue.main.async { registerPlatformObservers() }
+        }
         initialized = true
     }
 
