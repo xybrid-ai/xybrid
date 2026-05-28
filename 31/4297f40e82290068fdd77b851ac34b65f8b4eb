@@ -1,0 +1,19 @@
+crates/xybrid-core/src/runtime_adapter/llama_cpp/sys.rs
+  s_323a65fe865faa::t_a91b48caeed58b 891-899,911-946,948-956
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "314297f40e82290068fdd77b851ac34b65f8b4eb",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
