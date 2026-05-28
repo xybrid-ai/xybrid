@@ -1,0 +1,20 @@
+tools/scripts/verify-release.sh
+  s_25b32f3dc12c03::t_6d2a153697f8be 224-240,265-268,272-274
+  s_25b32f3dc12c03::t_2adbc4354680cf 152-154,156-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "80307d14f2e36433839853619d459684f85222b0",
+  "prompts": {},
+  "sessions": {
+    "s_25b32f3dc12c03": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "42c57ab9-ee27-4dec-91e2-2a6d1952500e",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
