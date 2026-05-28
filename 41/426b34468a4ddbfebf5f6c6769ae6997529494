@@ -1,0 +1,50 @@
+crates/xybrid-ffi/src/lib.rs
+  s_323a65fe865faa::t_ce1ccb27978fc9 3950-3965
+  s_323a65fe865faa::t_34702c9a480e2e 4267-4268,4272-4274
+  s_323a65fe865faa::t_6d0848e87ae227 4281-4282,4286-4288
+  s_323a65fe865faa::t_e84bdc43033f69 5135,5144-5150
+  s_323a65fe865faa::t_57676d5da7cd48 3528-3530
+  s_323a65fe865faa::t_61b29f64300288 1896-1898
+  s_323a65fe865faa::t_6a9978df894196 440,458-464
+  s_323a65fe865faa::t_38829739b7bea4 238-246
+  s_323a65fe865faa::t_4dadcef40e19ed 2602-2605,2618-2621
+  s_323a65fe865faa::t_6a5bbed0b9cf6b 3308-3311,3323-3326
+  s_323a65fe865faa::t_f057db92c37a9c 3481-3484
+  s_323a65fe865faa::t_76395f6b83bec4 168-204
+  s_323a65fe865faa::t_455aa64bcdd995 2740-2743,2759-2762
+  s_323a65fe865faa::t_ed2e633082d99e 3166-3169,3181-3184
+  s_323a65fe865faa::t_a1d1acace0614b 205-231
+  s_323a65fe865faa::t_e880a23eb734c9 2158-2161,2169-2171,2180-2183
+  s_323a65fe865faa::t_bb111aad5b3678 4229-4231,4239,4244-4246
+  s_323a65fe865faa::t_31f87f9fe3fdd7 3881-3886
+  s_323a65fe865faa::t_5cb743c1c435a5 3436-3439
+  s_323a65fe865faa::t_ccc552317a5dc4 4049-4066
+  s_323a65fe865faa::t_b2feca5d3a5d93 3897-3900
+  s_323a65fe865faa::t_c491a566046908 4253-4254,4258-4260
+  s_323a65fe865faa::t_c942aa18bc13a3 4334-4336,4345-4346,4353-4358
+  s_323a65fe865faa::t_a25efe3f6b2b5e 3561-3564
+  s_323a65fe865faa::t_7cb10d22e4734a 1855-1857
+  s_323a65fe865faa::t_abb4c93c309881 4885-4967
+  s_323a65fe865faa::t_223e442aa68743 4968-5020
+  s_323a65fe865faa::t_6e5e6c7a9e83b2 5170
+crates/xybrid-ffi/include/xybrid.h
+  s_323a65fe865faa::t_90cb02f6f70175 1359-1361
+  s_323a65fe865faa::t_6816436d4980a5 737-740,748-750
+  s_323a65fe865faa::t_6fc57392665261 1559-1564,1661-1663,1671,1678-1679,1686-1687,1694-1695,1721-1723,1732-1733
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "41426b34468a4ddbfebf5f6c6769ae6997529494",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
