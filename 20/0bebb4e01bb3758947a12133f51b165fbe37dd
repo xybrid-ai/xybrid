@@ -1,0 +1,19 @@
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_2d821c1355f300::t_557d4f1b69ea47 25-27,33,35-37,54-62,76-78,81-87,94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "200bebb4e01bb3758947a12133f51b165fbe37dd",
+  "prompts": {},
+  "sessions": {
+    "s_2d821c1355f300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc1ef534-2425-40ad-92b2-e88e48c8f0af",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
