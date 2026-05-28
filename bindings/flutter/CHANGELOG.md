@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.0
+
+Production release of the 0.1.0 line. No Flutter-binding code changes since rc4 — closes the rc series.
+
+Cumulative since the last published-to-pub.dev release (rc3):
+
+* `XybridResult` now exposes typed `InferenceMetrics` (CPU / memory / GPU / wall-clock per inference); the underlying telemetry is also surfaced in the bundled Flutter demos
+* Streaming-LLM cloud fallback now routes off live device pressure signals (CPU / memory / thermal) instead of static thresholds
+* `ModelWarmup` events emit from `XybridModel.warmup` and arrive in the binding's telemetry stream, so first-token latency is attributable to warmup vs. inference
+* `streaming` is now a top-level field on `PlatformEvent` payloads instead of nested under metadata
+* GGUF bundles without an explicit backend annotation now report `llamacpp` in telemetry instead of `unknown`
+* New `Denormalize` postprocessing step in the SDK core (mirror of `Normalize`), useful for round-tripping model output back into input-space coordinates
+* Fixed: `ModelComplete` events were dropped on streaming fast-path inference; now emitted on every code path
+* Fixed: internal orchestrator pipeline-frame events no longer leak to the binding as opaque payloads
+
 ## 0.1.0-rc4
 
 * `XybridResult` now exposes typed `InferenceMetrics` (CPU / memory / GPU / wall-clock per inference); the underlying telemetry is also surfaced in the bundled Flutter demos

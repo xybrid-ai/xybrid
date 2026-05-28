@@ -275,6 +275,15 @@ static BINDING: OnceLock<&'static str> = OnceLock::new();
 /// so registry calls can be attributed correctly.
 pub const DEFAULT_BINDING: &str = "rust";
 
+/// SDK crate version, stamped onto every telemetry event as `sdk_version` and
+/// used in the `X-Xybrid-Client` registry header.
+///
+/// Sourced from `CARGO_PKG_VERSION` at compile time so the value tracks the
+/// `xybrid-sdk` crate's own `Cargo.toml` without manual sync. The `xybrid-core`
+/// version is exposed separately as [`xybrid_core::VERSION`]; the two can
+/// diverge across releases.
+pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Register the binding identifier for this process.
 ///
 /// Each platform binding (Flutter, Kotlin, Swift, Unity) calls this once at
