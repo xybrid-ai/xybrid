@@ -99,6 +99,10 @@ dependencies {
 ```kotlin
 import ai.xybrid.*
 
+// Runs locally as-is. Add a free key from dashboard.xybrid.dev to see
+// your inference traces: Xybrid.init(context, apiKey = "...")
+Xybrid.init(context)
+
 // Load a model from the registry
 val loader = XybridModelLoader.fromRegistry("kokoro-82m")
 val model = loader.load()

@@ -98,6 +98,10 @@ dependencies {
 import ai.xybrid.XybridModelLoader
 import ai.xybrid.XybridEnvelope
 
+// 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
+// 推理轨迹：Xybrid.init(context, apiKey = "...")
+Xybrid.init(context)
+
 // 从注册表加载模型
 val loader = XybridModelLoader.fromRegistry("kokoro-82m")
 val model = loader.load()
