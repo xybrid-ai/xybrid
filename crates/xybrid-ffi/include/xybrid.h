@@ -63,6 +63,43 @@
 #define XYBRID_ROLE_ASSISTANT 2
 
 /*
+ The kind of payload an inference result carries.
+
+ Typed replacement for the previous stringly-typed `output_type`
+ (`"text"` / `"audio"` / `"embedding"` / `"unknown"`) that C
+ consumers had to `strcmp` against (audit theme 6,
+ `type-no-stringly`). Returned by
+ [`xybrid_result_output_type_enum`]; the legacy string accessor
+ [`xybrid_result_output_type`] is kept as a convenience and derives
+ its value from this enum via [`XybridOutputType::as_str`].
+
+ `#[repr(C)]` with explicit discriminants so the wire values are
+ stable across header regenerations — appending a future variant
+ must not renumber the existing four. `Unknown` is `0` so a
+ zero-initialised C struct reads as "no/unknown output" rather than
+ mis-decoding as `Text`.
+ */
+typedef enum XybridOutputType {
+  /*
+   No recognised payload (error results, or a successful run that
+   produced none of text / audio / embedding).
+   */
+  XybridOutputType_Unknown = 0,
+  /*
+   Text output (ASR transcription, LLM completion).
+   */
+  XybridOutputType_Text = 1,
+  /*
+   Audio bytes (TTS synthesis).
+   */
+  XybridOutputType_Audio = 2,
+  /*
+   Embedding vector.
+   */
+  XybridOutputType_Embedding = 3,
+} XybridOutputType;
+
+/*
  Opaque handle to a model loader.
 
  Created by `xybrid_model_loader_from_registry`,
@@ -1353,13 +1390,56 @@ const char *xybrid_result_text(struct XybridResultHandle *result);
 uint32_t xybrid_result_latency_ms(struct XybridResultHandle *result);
 
 /*
- Get the output type from an inference result.
+ Get the output type of an inference result as a typed enum.
+
+ Prefer this over the string accessor [`xybrid_result_output_type`]
+ — it lets C consumers `switch` on a stable `#[repr(C)]` value
+ instead of `strcmp`-ing against magic strings.
+
+ # Parameters
+
+ - `result`: A handle to the inference result.
+
+ # Returns
+
+ The [`XybridOutputType`] variant. Returns `XybridOutputType::Unknown`
+ (== `0`) if the handle is null/invalid, which is indistinguishable
+ from a genuine "no recognised output" result — callers that need to
+ tell those apart should null-check the handle before calling.
+
+ # Example (C)
+
+ ```c
+ switch (xybrid_result_output_type_enum(result)) {
+     case XybridOutputType_Audio: {
+         const uint8_t* data = xybrid_result_audio_data(result);
+         size_t len = xybrid_result_audio_len(result);
+         // Process audio bytes...
+         break;
+     }
+     case XybridOutputType_Text:
+         printf("%s\n", xybrid_result_text(result));
+         break;
+     default:
+         break;
+ }
+ ```
+ */
+enum XybridOutputType xybrid_result_output_type_enum(struct XybridResultHandle *result);
+
+/*
+ Get the output type from an inference result as a string.
 
  Returns a pointer to a null-terminated string containing the output type:
  `"text"`, `"audio"`, `"embedding"`, or `"unknown"`.
  The returned pointer is valid for the lifetime of the result handle —
  backed by per-handle storage populated when the result was constructed.
  Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
+
+ **Prefer [`xybrid_result_output_type_enum`]** for new code — it
+ returns a typed `#[repr(C)]` enum instead of a string that has to
+ be `strcmp`'d. This accessor is retained as a convenience and
+ derives its value from the same typed source.
 
  # Parameters
 

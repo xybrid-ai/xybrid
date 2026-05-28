@@ -299,14 +299,60 @@ pub(crate) enum EnvelopeData {
     },
 }
 
+/// The kind of payload an inference result carries.
+///
+/// Typed replacement for the previous stringly-typed `output_type`
+/// (`"text"` / `"audio"` / `"embedding"` / `"unknown"`) that C
+/// consumers had to `strcmp` against (audit theme 6,
+/// `type-no-stringly`). Returned by
+/// [`xybrid_result_output_type_enum`]; the legacy string accessor
+/// [`xybrid_result_output_type`] is kept as a convenience and derives
+/// its value from this enum via [`XybridOutputType::as_str`].
+///
+/// `#[repr(C)]` with explicit discriminants so the wire values are
+/// stable across header regenerations — appending a future variant
+/// must not renumber the existing four. `Unknown` is `0` so a
+/// zero-initialised C struct reads as "no/unknown output" rather than
+/// mis-decoding as `Text`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XybridOutputType {
+    /// No recognised payload (error results, or a successful run that
+    /// produced none of text / audio / embedding).
+    Unknown = 0,
+    /// Text output (ASR transcription, LLM completion).
+    Text = 1,
+    /// Audio bytes (TTS synthesis).
+    Audio = 2,
+    /// Embedding vector.
+    Embedding = 3,
+}
+
+impl XybridOutputType {
+    /// The legacy string tag for this variant, matching the values the
+    /// pre-theme-6 `xybrid_result_output_type` accessor returned
+    /// (`"text"` / `"audio"` / `"embedding"` / `"unknown"`). Used to
+    /// back the string accessor's handle-lifetime `CString` cache.
+    fn as_str(self) -> &'static str {
+        match self {
+            XybridOutputType::Unknown => "unknown",
+            XybridOutputType::Text => "text",
+            XybridOutputType::Audio => "audio",
+            XybridOutputType::Embedding => "embedding",
+        }
+    }
+}
+
 /// Internal inference result.
 pub(crate) struct ResultData {
     /// Whether inference succeeded.
     pub success: bool,
     /// Error message if failed.
     pub error: Option<String>,
-    /// Type of output produced.
-    pub output_type: String,
+    /// Type of output produced. Typed source of truth — the legacy
+    /// `xybrid_result_output_type` string accessor derives its value
+    /// from this via [`XybridOutputType::as_str`].
+    pub output_type: XybridOutputType,
     /// Text output (for ASR/LLM).
     pub text: Option<String>,
     /// Embedding output.
@@ -348,6 +394,9 @@ impl ResultData {
     fn populate_caches(&mut self) {
         self.text_cache = self.text.as_deref().map(cstring_lossy);
         self.error_cache = self.error.as_deref().map(cstring_lossy);
+        // `output_type.as_str()` is a `&'static str` with no interior
+        // NULs, so `cstring_lossy` is just `CString::new(...).unwrap()`
+        // on the fast path here.
         self.output_type_cache = cstring_lossy(self.output_type.as_str());
         self.stage_id_cache = self
             .metrics
@@ -369,7 +418,7 @@ impl ResultData {
         let mut data = ResultData {
             success: false,
             error: Some(error),
-            output_type: String::new(),
+            output_type: XybridOutputType::Unknown,
             text: None,
             embedding: None,
             audio_bytes: None,
@@ -582,15 +631,14 @@ fn inference_result_to_data(result: &xybrid_sdk::InferenceResult) -> ResultData 
     let mut data = ResultData {
         success: true,
         error: None,
-        output_type: match result.text() {
-            Some(_) => "text".to_string(),
-            None => match result.audio_bytes() {
-                Some(_) => "audio".to_string(),
-                None => match result.embedding() {
-                    Some(_) => "embedding".to_string(),
-                    None => "unknown".to_string(),
-                },
-            },
+        output_type: if result.text().is_some() {
+            XybridOutputType::Text
+        } else if result.audio_bytes().is_some() {
+            XybridOutputType::Audio
+        } else if result.embedding().is_some() {
+            XybridOutputType::Embedding
+        } else {
+            XybridOutputType::Unknown
         },
         text: result.text().map(|s| s.to_string()),
         embedding: result.embedding().map(|e| e.to_vec()),
@@ -3398,13 +3446,73 @@ pub unsafe extern "C" fn xybrid_result_latency_ms(result: *mut XybridResultHandl
     })
 }
 
-/// Get the output type from an inference result.
+/// Get the output type of an inference result as a typed enum.
+///
+/// Prefer this over the string accessor [`xybrid_result_output_type`]
+/// — it lets C consumers `switch` on a stable `#[repr(C)]` value
+/// instead of `strcmp`-ing against magic strings.
+///
+/// # Parameters
+///
+/// - `result`: A handle to the inference result.
+///
+/// # Returns
+///
+/// The [`XybridOutputType`] variant. Returns `XybridOutputType::Unknown`
+/// (== `0`) if the handle is null/invalid, which is indistinguishable
+/// from a genuine "no recognised output" result — callers that need to
+/// tell those apart should null-check the handle before calling.
+///
+/// # Example (C)
+///
+/// ```c
+/// switch (xybrid_result_output_type_enum(result)) {
+///     case XybridOutputType_Audio: {
+///         const uint8_t* data = xybrid_result_audio_data(result);
+///         size_t len = xybrid_result_audio_len(result);
+///         // Process audio bytes...
+///         break;
+///     }
+///     case XybridOutputType_Text:
+///         printf("%s\n", xybrid_result_text(result));
+///         break;
+///     default:
+///         break;
+/// }
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_output_type_enum(
+    result: *mut XybridResultHandle,
+) -> XybridOutputType {
+    // Don't clear last error - this is a read-only accessor.
+    if result.is_null() {
+        return XybridOutputType::Unknown;
+    }
+
+    ffi_guard!(
+        "xybrid_result_output_type_enum",
+        XybridOutputType::Unknown,
+        {
+            match XybridResultHandle::as_ref(result) {
+                Some(data) => data.output_type,
+                None => XybridOutputType::Unknown,
+            }
+        }
+    )
+}
+
+/// Get the output type from an inference result as a string.
 ///
 /// Returns a pointer to a null-terminated string containing the output type:
 /// `"text"`, `"audio"`, `"embedding"`, or `"unknown"`.
 /// The returned pointer is valid for the lifetime of the result handle —
 /// backed by per-handle storage populated when the result was constructed.
 /// Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
+///
+/// **Prefer [`xybrid_result_output_type_enum`]** for new code — it
+/// returns a typed `#[repr(C)]` enum instead of a string that has to
+/// be `strcmp`'d. This accessor is retained as a convenience and
+/// derives its value from the same typed source.
 ///
 /// # Parameters
 ///
@@ -4697,7 +4805,7 @@ mod tests {
         let mut data_a = ResultData {
             success: true,
             error: None,
-            output_type: "text".to_string(),
+            output_type: XybridOutputType::Text,
             text: Some("hello from result A".to_string()),
             embedding: None,
             audio_bytes: None,
@@ -4712,7 +4820,7 @@ mod tests {
         let mut data_b = ResultData {
             success: true,
             error: None,
-            output_type: "text".to_string(),
+            output_type: XybridOutputType::Text,
             text: Some("hello from result B".to_string()),
             embedding: None,
             audio_bytes: None,
@@ -4935,7 +5043,7 @@ mod tests {
         let mut data = ResultData {
             success: true,
             error: None,
-            output_type: "text".to_string(),
+            output_type: XybridOutputType::Text,
             text: Some("Transcribed text".to_string()),
             embedding: None,
             audio_bytes: None,
@@ -4956,7 +5064,7 @@ mod tests {
             let data = XybridResultHandle::as_ref(handle).expect("should have data");
             assert!(data.success);
             assert!(data.error.is_none());
-            assert_eq!(data.output_type, "text");
+            assert_eq!(data.output_type, XybridOutputType::Text);
             assert_eq!(data.text.as_deref(), Some("Transcribed text"));
             assert_eq!(data.latency_ms, 100);
 
@@ -5639,7 +5747,7 @@ mod tests {
 
             let result_data = XybridResultHandle::as_ref(result).unwrap();
             if result_data.success {
-                assert_eq!(result_data.output_type, "audio");
+                assert_eq!(result_data.output_type, XybridOutputType::Audio);
                 assert!(result_data.audio_bytes.is_some());
             }
 
@@ -6054,7 +6162,7 @@ mod tests {
     }
 
     // ================================================================
-    // Tests for xybrid_result_output_type
+    // Tests for xybrid_result_output_type / _enum
     // ================================================================
 
     #[test]
@@ -6063,6 +6171,81 @@ mod tests {
             let ptr = xybrid_result_output_type(std::ptr::null_mut());
             assert!(ptr.is_null());
         }
+    }
+
+    #[test]
+    fn test_result_output_type_enum_null_handle() {
+        unsafe {
+            // Null handle reads as Unknown (the zero discriminant), not UB.
+            assert_eq!(
+                xybrid_result_output_type_enum(std::ptr::null_mut()),
+                XybridOutputType::Unknown
+            );
+        }
+    }
+
+    /// The typed accessor and the legacy string accessor must agree:
+    /// the string is derived from the enum via `as_str()`, so for every
+    /// variant the C consumer sees a consistent pair.
+    #[test]
+    fn output_type_enum_and_string_accessors_agree() {
+        // One fixture per variant. `Unknown` uses the `failure` path;
+        // the other three are built as success results carrying the
+        // matching payload so `inference_result_to_data`'s classifier
+        // would produce the same variant.
+        let cases = [
+            (XybridOutputType::Text, "text"),
+            (XybridOutputType::Audio, "audio"),
+            (XybridOutputType::Embedding, "embedding"),
+            (XybridOutputType::Unknown, "unknown"),
+        ];
+
+        for (variant, expected_str) in cases {
+            let mut data = ResultData {
+                success: !matches!(variant, XybridOutputType::Unknown),
+                error: None,
+                output_type: variant,
+                text: None,
+                embedding: None,
+                audio_bytes: None,
+                latency_ms: 0,
+                metrics: xybrid_sdk::InferenceMetrics::default(),
+                text_cache: None,
+                error_cache: None,
+                output_type_cache: CString::default(),
+                stage_id_cache: Vec::new(),
+            };
+            data.populate_caches();
+            let handle = XybridResultHandle::from_boxed(Box::new(data));
+            assert!(!handle.is_null());
+
+            unsafe {
+                // Typed accessor returns the variant verbatim.
+                assert_eq!(xybrid_result_output_type_enum(handle), variant);
+
+                // String accessor returns the derived tag.
+                let ptr = xybrid_result_output_type(handle);
+                assert!(!ptr.is_null());
+                assert_eq!(
+                    CStr::from_ptr(ptr).to_bytes(),
+                    expected_str.as_bytes(),
+                    "string accessor must match as_str() for {variant:?}"
+                );
+
+                xybrid_result_free(handle);
+            }
+        }
+    }
+
+    /// Lock the wire discriminants so a future variant insertion can't
+    /// silently renumber the existing four (which would break every
+    /// compiled C consumer).
+    #[test]
+    fn output_type_discriminants_are_stable() {
+        assert_eq!(XybridOutputType::Unknown as i32, 0);
+        assert_eq!(XybridOutputType::Text as i32, 1);
+        assert_eq!(XybridOutputType::Audio as i32, 2);
+        assert_eq!(XybridOutputType::Embedding as i32, 3);
     }
 
     #[test]
