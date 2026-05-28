@@ -97,6 +97,28 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      # Free ~30GB of disk on the ubuntu-latest runner by removing
+      # preinstalled toolchains the build doesn't use (.NET, Haskell,
+      # Android Studio extras, etc.). Required because `build-react-native`
+      # runs build-android sequentially for all three ABIs on a single
+      # runner — each ABI's target/ tree is 3-5 GB, and the default
+      # ~14 GB free disk fills up partway through the third build with
+      # "No space left on device" (see PR #93 CI history).
+      #
+      # The upstream build-android.yml avoids this by sharding per-ABI
+      # across runners via matrix. Doing the same here is the proper
+      # long-term fix but requires xtask refactoring to split bindgen,
+      # per-ABI build, and combine into separate invocations.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: false
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
