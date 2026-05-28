@@ -1,0 +1,19 @@
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_2d821c1355f300::t_61d91b569e2116 84-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7cf6593cc94cbf7248a6a6fa24c2706e9dc01515",
+  "prompts": {},
+  "sessions": {
+    "s_2d821c1355f300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc1ef534-2425-40ad-92b2-e88e48c8f0af",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
