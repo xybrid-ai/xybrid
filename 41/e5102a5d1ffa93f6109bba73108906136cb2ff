@@ -1,0 +1,21 @@
+bindings/kotlin/src/main/kotlin/ai/xybrid/xybrid_uniffi.kt
+  s_2d821c1355f300::t_d97099ddc3d8ec 418-419,546-547,599-601,632,1221,2368-2371
+bindings/kotlin/src/main/kotlin/ai/xybrid/uniffi/xybrid_uniffi/xybrid_uniffi.kt
+  s_2d821c1355f300::t_d97099ddc3d8ec 418-419,546-547,599-601,632,1221,2368-2371
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "41e5102a5d1ffa93f6109bba73108906136cb2ff",
+  "prompts": {},
+  "sessions": {
+    "s_2d821c1355f300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc1ef534-2425-40ad-92b2-e88e48c8f0af",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
