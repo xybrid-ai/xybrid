@@ -16,9 +16,82 @@ rustflags = ["-C", "link-args=/NODEFAULTLIB:LIBCMT"]
 # uses is_aarch64_feature_detected!("fp16") at runtime and falls back to scalar.
 # Also align ELF LOAD segments to 16KB pages — required by Android 15+ (API 35+).
 # See: https://developer.android.com/16kb-page-size
+#
+# `-lc++_shared` adds a DT_NEEDED entry on the C++ shared runtime. CMake builds
+# llama.cpp / cpp-httplib / candle native deps with `-DANDROID_STL=c++_shared`,
+# which leaves undefined C++ ABI symbols (e.g. `_ZTISt13runtime_error`) in the
+# resulting cdylib. Android's dynamic linker resolves DT_NEEDED at dlopen time,
+# but `System.loadLibrary` uses RTLD_LOCAL so a sibling .so loaded just before
+# can't satisfy those symbols — they need to be declared as a direct dep.
+# Without this flag dlopen fails with:
+#   cannot locate symbol "_ZTISt13runtime_error" referenced by libxybrid-bolt.so
 [target.aarch64-linux-android]
-rustflags = ["-C", "target-feature=+fp16", "-C", "link-arg=-Wl,-z,max-page-size=16384"]
+rustflags = [
+    "-C", "target-feature=+fp16",
+    "-C", "link-arg=-Wl,-z,max-page-size=16384",
+    # `--no-as-needed` is mandatory: rustc puts link-args BEFORE the
+    # object files, so the default `--as-needed` linker mode drops
+    # `-lc++_shared` (no symbols undefined yet at that point in the link
+    # line). Splitting the args so `-lc++_shared` is passed to clang
+    # (which knows the NDK sysroot `-L` search paths) and the
+    # --no-as-needed / --pop-state are forwarded to ld via `-Wl,`.
+    # Bundling -lc++_shared inside the same `-Wl,…` clause bypasses
+    # clang's library-search-path logic and ld can't find the .so on
+    # its own.
+    "-C", "link-arg=-Wl,--push-state,--no-as-needed",
+    "-C", "link-arg=-lc++_shared",
+    "-C", "link-arg=-Wl,--pop-state",
+]
 
 # Android x86_64: align ELF LOAD segments to 16KB pages for Android 15+ compatibility.
+# See aarch64 block above for why `-lc++_shared` is added.
 [target.x86_64-linux-android]
-rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+rustflags = [
+    "-C", "link-arg=-Wl,-z,max-page-size=16384",
+    # `--no-as-needed` is mandatory: rustc puts link-args BEFORE the
+    # object files, so the default `--as-needed` linker mode drops
+    # `-lc++_shared` (no symbols undefined yet at that point in the link
+    # line). Splitting the args so `-lc++_shared` is passed to clang
+    # (which knows the NDK sysroot `-L` search paths) and the
+    # --no-as-needed / --pop-state are forwarded to ld via `-Wl,`.
+    # Bundling -lc++_shared inside the same `-Wl,…` clause bypasses
+    # clang's library-search-path logic and ld can't find the .so on
+    # its own.
+    "-C", "link-arg=-Wl,--push-state,--no-as-needed",
+    "-C", "link-arg=-lc++_shared",
+    "-C", "link-arg=-Wl,--pop-state",
+]
+
+# Android armv7 and i686: same C++ runtime dep story as the 64-bit ABIs.
+# No 16KB-page link arg here — armv7 / i686 aren't Android-15-or-up targets.
+[target.armv7-linux-androideabi]
+rustflags = [
+    # `--no-as-needed` is mandatory: rustc puts link-args BEFORE the
+    # object files, so the default `--as-needed` linker mode drops
+    # `-lc++_shared` (no symbols undefined yet at that point in the link
+    # line). Splitting the args so `-lc++_shared` is passed to clang
+    # (which knows the NDK sysroot `-L` search paths) and the
+    # --no-as-needed / --pop-state are forwarded to ld via `-Wl,`.
+    # Bundling -lc++_shared inside the same `-Wl,…` clause bypasses
+    # clang's library-search-path logic and ld can't find the .so on
+    # its own.
+    "-C", "link-arg=-Wl,--push-state,--no-as-needed",
+    "-C", "link-arg=-lc++_shared",
+    "-C", "link-arg=-Wl,--pop-state",
+]
+
+[target.i686-linux-android]
+rustflags = [
+    # `--no-as-needed` is mandatory: rustc puts link-args BEFORE the
+    # object files, so the default `--as-needed` linker mode drops
+    # `-lc++_shared` (no symbols undefined yet at that point in the link
+    # line). Splitting the args so `-lc++_shared` is passed to clang
+    # (which knows the NDK sysroot `-L` search paths) and the
+    # --no-as-needed / --pop-state are forwarded to ld via `-Wl,`.
+    # Bundling -lc++_shared inside the same `-Wl,…` clause bypasses
+    # clang's library-search-path logic and ld can't find the .so on
+    # its own.
+    "-C", "link-arg=-Wl,--push-state,--no-as-needed",
+    "-C", "link-arg=-lc++_shared",
+    "-C", "link-arg=-Wl,--pop-state",
+]
