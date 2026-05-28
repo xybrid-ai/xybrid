@@ -573,12 +573,12 @@ impl XybridModelLoader {
     ///
     /// # Returns
     ///
-    /// A new `XybridModelLoader` instance configured to load from the bundle.
+    /// A new `XybridModelLoader` instance, or an `XybridError` if the bundle
+    /// cannot be opened (missing path, malformed archive, etc.).
     #[uniffi::constructor]
-    pub fn from_bundle(path: String) -> Arc<Self> {
-        Arc::new(Self {
-            inner: CoreModelLoader::from_bundle(&path).unwrap(),
-        })
+    pub fn from_bundle(path: String) -> Result<Arc<Self>, XybridError> {
+        let inner = CoreModelLoader::from_bundle(&path)?;
+        Ok(Arc::new(Self { inner }))
     }
 
     /// Create a model loader that will load from a local directory containing

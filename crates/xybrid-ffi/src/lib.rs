@@ -251,12 +251,12 @@ unsafe impl Sync for StreamCallbackCtx {}
 
 impl StreamCallbackCtx {
     unsafe fn invoke(&self, token: &PartialToken) {
-        let c_token = CString::new(token.token.as_str()).unwrap_or_default();
-        let c_cumulative = CString::new(token.cumulative_text.as_str()).unwrap_or_default();
+        let c_token = cstring_lossy(token.token.as_str());
+        let c_cumulative = cstring_lossy(token.cumulative_text.as_str());
         let c_finish = token
             .finish_reason
             .as_ref()
-            .map(|r| CString::new(r.as_str()).unwrap_or_default());
+            .map(|r| cstring_lossy(r.as_str()));
 
         (self.callback)(
             c_token.as_ptr(),
@@ -267,6 +267,32 @@ impl StreamCallbackCtx {
             self.user_data,
         );
     }
+}
+
+/// Convert a UTF-8 string to a `CString`, replacing any interior NUL bytes
+/// with U+FFFD (REPLACEMENT CHARACTER) so token text containing U+0000 is
+/// preserved across the C ABI instead of silently truncated.
+///
+/// `CString::new` rejects interior NULs because they would terminate the C
+/// string early. The previous `unwrap_or_default()` shape dropped the whole
+/// token on a NUL — silent data loss at the boundary. U+FFFD is the
+/// standard "this byte was invalid" marker; substituting preserves the
+/// rest of the token text.
+fn cstring_lossy(s: &str) -> CString {
+    let bytes = s.as_bytes();
+    if !bytes.contains(&0) {
+        // Fast path: no interior NULs, no allocation beyond `CString`'s own.
+        return CString::new(bytes).expect("no interior NULs verified above");
+    }
+    let mut out = Vec::with_capacity(bytes.len());
+    for &b in bytes {
+        if b == 0 {
+            out.extend_from_slice(&[0xEF, 0xBF, 0xBD]); // U+FFFD in UTF-8
+        } else {
+            out.push(b);
+        }
+    }
+    CString::new(out).expect("interior NULs replaced above")
 }
 
 /// Convert EnvelopeData to SDK Envelope.
@@ -645,6 +671,34 @@ fn panic_payload_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+/// Wrap an `extern "C"` body in `catch_unwind` so Rust panics never unwind
+/// across the C ABI (UB on every platform we ship).
+///
+/// On panic: records a diagnostic via `set_last_error` (`"Internal panic in
+/// <fn>: <payload>"`) and returns `$sentinel`. Choose the sentinel that
+/// matches the function's "this call failed" convention — usually
+/// `std::ptr::null_mut()`, `std::ptr::null()`, `-1`, `0`, `f32::NAN`, or
+/// `()` for void.
+///
+/// Mirrors the inline pattern already used by `xybrid_model_run` and the
+/// telemetry lifecycle entry points; this macro is the canonical form going
+/// forward.
+macro_rules! ffi_guard {
+    ($name:literal, $sentinel:expr, $body:block) => {
+        match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| $body)) {
+            Ok(value) => value,
+            Err(payload) => {
+                set_last_error(&format!(
+                    "Internal panic in {}: {}",
+                    $name,
+                    panic_payload_to_string(&payload)
+                ));
+                $sentinel
+            }
+        }
+    };
+}
+
 // ============================================================================
 // Thread-Local Error Storage (US-010)
 // ============================================================================
@@ -708,9 +762,11 @@ pub extern "C" fn xybrid_init() -> i32 {
     // Clear any previous error
     clear_last_error();
 
-    // Future: Initialize logging, runtime, etc.
-    // For now, just return success.
-    0
+    ffi_guard!("xybrid_init", -1, {
+        // Future: Initialize logging, runtime, etc.
+        // For now, just return success.
+        0
+    })
 }
 
 /// Set the platform binding identifier reported in registry call telemetry.
@@ -755,16 +811,18 @@ pub unsafe extern "C" fn xybrid_set_binding(binding: *const c_char) -> i32 {
         return -1;
     }
 
-    let binding_str = match CStr::from_ptr(binding).to_str() {
-        Ok(s) => s,
-        Err(_) => {
-            set_last_error("binding is not valid UTF-8");
-            return -1;
-        }
-    };
+    ffi_guard!("xybrid_set_binding", -1, {
+        let binding_str = match CStr::from_ptr(binding).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                set_last_error("binding is not valid UTF-8");
+                return -1;
+            }
+        };
 
-    xybrid_sdk::set_binding(resolve_binding(binding_str));
-    0
+        xybrid_sdk::set_binding(resolve_binding(binding_str));
+        0
+    })
 }
 
 /// Map a runtime binding string to a `'static str` literal.
@@ -802,9 +860,11 @@ pub extern "C" fn xybrid_version() -> *const c_char {
     // This is safe because VERSION is a compile-time constant.
     static VERSION_CSTRING: std::sync::OnceLock<CString> = std::sync::OnceLock::new();
 
-    VERSION_CSTRING
-        .get_or_init(|| CString::new(VERSION).expect("VERSION contains no null bytes"))
-        .as_ptr()
+    ffi_guard!("xybrid_version", std::ptr::null(), {
+        VERSION_CSTRING
+            .get_or_init(|| CString::new(VERSION).expect("VERSION contains no null bytes"))
+            .as_ptr()
+    })
 }
 
 /// Get the last error message.
@@ -828,9 +888,11 @@ pub extern "C" fn xybrid_version() -> *const c_char {
 /// ```
 #[no_mangle]
 pub extern "C" fn xybrid_last_error() -> *const c_char {
-    LAST_ERROR.with(|e| match e.borrow().as_ref() {
-        Some(cstr) => cstr.as_ptr(),
-        None => std::ptr::null(),
+    ffi_guard!("xybrid_last_error", std::ptr::null(), {
+        LAST_ERROR.with(|e| match e.borrow().as_ref() {
+            Some(cstr) => cstr.as_ptr(),
+            None => std::ptr::null(),
+        })
     })
 }
 
@@ -854,10 +916,13 @@ pub extern "C" fn xybrid_last_error() -> *const c_char {
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_free_string(s: *mut c_char) {
-    if !s.is_null() {
+    if s.is_null() {
+        return;
+    }
+    ffi_guard!("xybrid_free_string", (), {
         // Reconstruct the CString and let it drop to free the memory
         let _ = CString::from_raw(s);
-    }
+    })
 }
 
 // ============================================================================
@@ -904,30 +969,32 @@ pub unsafe extern "C" fn xybrid_model_loader_from_registry(
         return std::ptr::null_mut();
     }
 
-    // Convert C string to Rust string
-    let model_id_str = match CStr::from_ptr(model_id).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("model_id is not valid UTF-8");
+    ffi_guard!("xybrid_model_loader_from_registry", std::ptr::null_mut(), {
+        // Convert C string to Rust string
+        let model_id_str = match CStr::from_ptr(model_id).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("model_id is not valid UTF-8");
+                return std::ptr::null_mut();
+            }
+        };
+
+        if model_id_str.is_empty() {
+            set_last_error("model_id is empty");
             return std::ptr::null_mut();
         }
-    };
 
-    if model_id_str.is_empty() {
-        set_last_error("model_id is empty");
-        return std::ptr::null_mut();
-    }
+        // Create SDK ModelLoader
+        let sdk_loader = ModelLoader::from_registry(&model_id_str);
 
-    // Create SDK ModelLoader
-    let sdk_loader = ModelLoader::from_registry(&model_id_str);
+        // Create loader state
+        let loader = Box::new(LoaderState {
+            loader: sdk_loader,
+            model_id: model_id_str,
+        });
 
-    // Create loader state
-    let loader = Box::new(LoaderState {
-        loader: sdk_loader,
-        model_id: model_id_str,
-    });
-
-    XybridModelLoaderHandle::from_boxed(loader)
+        XybridModelLoaderHandle::from_boxed(loader)
+    })
 }
 
 /// Create a model loader from a local bundle path.
@@ -967,43 +1034,45 @@ pub unsafe extern "C" fn xybrid_model_loader_from_bundle(
         return std::ptr::null_mut();
     }
 
-    // Convert C string to Rust string
-    let path_str = match CStr::from_ptr(path).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("path is not valid UTF-8");
+    ffi_guard!("xybrid_model_loader_from_bundle", std::ptr::null_mut(), {
+        // Convert C string to Rust string
+        let path_str = match CStr::from_ptr(path).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("path is not valid UTF-8");
+                return std::ptr::null_mut();
+            }
+        };
+
+        if path_str.is_empty() {
+            set_last_error("path is empty");
             return std::ptr::null_mut();
         }
-    };
 
-    if path_str.is_empty() {
-        set_last_error("path is empty");
-        return std::ptr::null_mut();
-    }
+        // Extract model ID from path (use the last path component)
+        let model_id = std::path::Path::new(&path_str)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&path_str)
+            .to_string();
 
-    // Extract model ID from path (use the last path component)
-    let model_id = std::path::Path::new(&path_str)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&path_str)
-        .to_string();
+        // Create SDK ModelLoader from bundle
+        let sdk_loader = match ModelLoader::from_bundle(&path_str) {
+            Ok(loader) => loader,
+            Err(e) => {
+                set_last_error(&format!("Failed to create loader from bundle: {}", e));
+                return std::ptr::null_mut();
+            }
+        };
 
-    // Create SDK ModelLoader from bundle
-    let sdk_loader = match ModelLoader::from_bundle(&path_str) {
-        Ok(loader) => loader,
-        Err(e) => {
-            set_last_error(&format!("Failed to create loader from bundle: {}", e));
-            return std::ptr::null_mut();
-        }
-    };
+        // Create loader state
+        let loader = Box::new(LoaderState {
+            loader: sdk_loader,
+            model_id,
+        });
 
-    // Create loader state
-    let loader = Box::new(LoaderState {
-        loader: sdk_loader,
-        model_id,
-    });
-
-    XybridModelLoaderHandle::from_boxed(loader)
+        XybridModelLoaderHandle::from_boxed(loader)
+    })
 }
 
 /// Create a model loader from a local directory containing model files
@@ -1044,43 +1113,49 @@ pub unsafe extern "C" fn xybrid_model_loader_from_directory(
         return std::ptr::null_mut();
     }
 
-    // Convert C string to Rust string
-    let path_str = match CStr::from_ptr(path).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("path is not valid UTF-8");
-            return std::ptr::null_mut();
+    ffi_guard!(
+        "xybrid_model_loader_from_directory",
+        std::ptr::null_mut(),
+        {
+            // Convert C string to Rust string
+            let path_str = match CStr::from_ptr(path).to_str() {
+                Ok(s) => s.to_string(),
+                Err(_) => {
+                    set_last_error("path is not valid UTF-8");
+                    return std::ptr::null_mut();
+                }
+            };
+
+            if path_str.is_empty() {
+                set_last_error("path is empty");
+                return std::ptr::null_mut();
+            }
+
+            // Extract model ID from path (use the last path component)
+            let model_id = std::path::Path::new(&path_str)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&path_str)
+                .to_string();
+
+            // Create SDK ModelLoader from directory
+            let sdk_loader = match ModelLoader::from_directory(&path_str) {
+                Ok(loader) => loader,
+                Err(e) => {
+                    set_last_error(&format!("Failed to create loader from directory: {}", e));
+                    return std::ptr::null_mut();
+                }
+            };
+
+            // Create loader state
+            let loader = Box::new(LoaderState {
+                loader: sdk_loader,
+                model_id,
+            });
+
+            XybridModelLoaderHandle::from_boxed(loader)
         }
-    };
-
-    if path_str.is_empty() {
-        set_last_error("path is empty");
-        return std::ptr::null_mut();
-    }
-
-    // Extract model ID from path (use the last path component)
-    let model_id = std::path::Path::new(&path_str)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&path_str)
-        .to_string();
-
-    // Create SDK ModelLoader from directory
-    let sdk_loader = match ModelLoader::from_directory(&path_str) {
-        Ok(loader) => loader,
-        Err(e) => {
-            set_last_error(&format!("Failed to create loader from directory: {}", e));
-            return std::ptr::null_mut();
-        }
-    };
-
-    // Create loader state
-    let loader = Box::new(LoaderState {
-        loader: sdk_loader,
-        model_id,
-    });
-
-    XybridModelLoaderHandle::from_boxed(loader)
+    )
 }
 
 /// Create a model loader from a raw GGUF model file.
@@ -1121,77 +1196,87 @@ pub unsafe extern "C" fn xybrid_model_loader_from_model_file(
         return std::ptr::null_mut();
     }
 
-    let path_str = match CStr::from_ptr(path).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("path is not valid UTF-8");
-            return std::ptr::null_mut();
-        }
-    };
+    ffi_guard!(
+        "xybrid_model_loader_from_model_file",
+        std::ptr::null_mut(),
+        {
+            let path_str = match CStr::from_ptr(path).to_str() {
+                Ok(s) => s.to_string(),
+                Err(_) => {
+                    set_last_error("path is not valid UTF-8");
+                    return std::ptr::null_mut();
+                }
+            };
 
-    if path_str.is_empty() {
-        set_last_error("path is empty");
-        return std::ptr::null_mut();
-    }
-
-    let gguf_path = std::path::Path::new(&path_str);
-
-    if !gguf_path.exists() {
-        set_last_error(&format!("GGUF file not found: {}", path_str));
-        return std::ptr::null_mut();
-    }
-
-    // Auto-generate metadata from GGUF headers
-    let metadata = match xybrid_sdk::metadata_gen::generate_metadata_for_gguf_file(gguf_path) {
-        Ok(m) => m,
-        Err(e) => {
-            set_last_error(&format!("Failed to generate metadata for GGUF file: {}", e));
-            return std::ptr::null_mut();
-        }
-    };
-
-    let model_id = metadata.model_id.clone();
-
-    // Write metadata to parent directory if not present
-    let parent_dir = match gguf_path.parent() {
-        Some(p) => p,
-        None => {
-            set_last_error("Cannot determine parent directory of GGUF file");
-            return std::ptr::null_mut();
-        }
-    };
-
-    let metadata_path = parent_dir.join("model_metadata.json");
-    if !metadata_path.exists() {
-        let json = match serde_json::to_string_pretty(&metadata) {
-            Ok(j) => j,
-            Err(e) => {
-                set_last_error(&format!("Failed to serialize metadata: {}", e));
+            if path_str.is_empty() {
+                set_last_error("path is empty");
                 return std::ptr::null_mut();
             }
-        };
-        if let Err(e) = std::fs::write(&metadata_path, &json) {
-            set_last_error(&format!("Failed to write model_metadata.json: {}", e));
-            return std::ptr::null_mut();
+
+            let gguf_path = std::path::Path::new(&path_str);
+
+            if !gguf_path.exists() {
+                set_last_error(&format!("GGUF file not found: {}", path_str));
+                return std::ptr::null_mut();
+            }
+
+            // Auto-generate metadata from GGUF headers
+            let metadata =
+                match xybrid_sdk::metadata_gen::generate_metadata_for_gguf_file(gguf_path) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        set_last_error(&format!(
+                            "Failed to generate metadata for GGUF file: {}",
+                            e
+                        ));
+                        return std::ptr::null_mut();
+                    }
+                };
+
+            let model_id = metadata.model_id.clone();
+
+            // Write metadata to parent directory if not present
+            let parent_dir = match gguf_path.parent() {
+                Some(p) => p,
+                None => {
+                    set_last_error("Cannot determine parent directory of GGUF file");
+                    return std::ptr::null_mut();
+                }
+            };
+
+            let metadata_path = parent_dir.join("model_metadata.json");
+            if !metadata_path.exists() {
+                let json = match serde_json::to_string_pretty(&metadata) {
+                    Ok(j) => j,
+                    Err(e) => {
+                        set_last_error(&format!("Failed to serialize metadata: {}", e));
+                        return std::ptr::null_mut();
+                    }
+                };
+                if let Err(e) = std::fs::write(&metadata_path, &json) {
+                    set_last_error(&format!("Failed to write model_metadata.json: {}", e));
+                    return std::ptr::null_mut();
+                }
+            }
+
+            // Load from the parent directory (which now has model_metadata.json + GGUF file)
+            let parent_str = parent_dir.to_string_lossy().to_string();
+            let sdk_loader = match ModelLoader::from_directory(&parent_str) {
+                Ok(loader) => loader,
+                Err(e) => {
+                    set_last_error(&format!("Failed to create loader from directory: {}", e));
+                    return std::ptr::null_mut();
+                }
+            };
+
+            let loader = Box::new(LoaderState {
+                loader: sdk_loader,
+                model_id,
+            });
+
+            XybridModelLoaderHandle::from_boxed(loader)
         }
-    }
-
-    // Load from the parent directory (which now has model_metadata.json + GGUF file)
-    let parent_str = parent_dir.to_string_lossy().to_string();
-    let sdk_loader = match ModelLoader::from_directory(&parent_str) {
-        Ok(loader) => loader,
-        Err(e) => {
-            set_last_error(&format!("Failed to create loader from directory: {}", e));
-            return std::ptr::null_mut();
-        }
-    };
-
-    let loader = Box::new(LoaderState {
-        loader: sdk_loader,
-        model_id,
-    });
-
-    XybridModelLoaderHandle::from_boxed(loader)
+    )
 }
 
 /// Create a model loader from a HuggingFace Hub repository.
@@ -1234,30 +1319,36 @@ pub unsafe extern "C" fn xybrid_model_loader_from_huggingface(
         return std::ptr::null_mut();
     }
 
-    // Convert C string to Rust string
-    let repo_str = match CStr::from_ptr(repo).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("repo is not valid UTF-8");
-            return std::ptr::null_mut();
+    ffi_guard!(
+        "xybrid_model_loader_from_huggingface",
+        std::ptr::null_mut(),
+        {
+            // Convert C string to Rust string
+            let repo_str = match CStr::from_ptr(repo).to_str() {
+                Ok(s) => s.to_string(),
+                Err(_) => {
+                    set_last_error("repo is not valid UTF-8");
+                    return std::ptr::null_mut();
+                }
+            };
+
+            if repo_str.is_empty() {
+                set_last_error("repo is empty");
+                return std::ptr::null_mut();
+            }
+
+            // Create SDK ModelLoader from HuggingFace
+            let sdk_loader = ModelLoader::from_huggingface(&repo_str);
+
+            // Create loader state
+            let loader = Box::new(LoaderState {
+                loader: sdk_loader,
+                model_id: repo_str,
+            });
+
+            XybridModelLoaderHandle::from_boxed(loader)
         }
-    };
-
-    if repo_str.is_empty() {
-        set_last_error("repo is empty");
-        return std::ptr::null_mut();
-    }
-
-    // Create SDK ModelLoader from HuggingFace
-    let sdk_loader = ModelLoader::from_huggingface(&repo_str);
-
-    // Create loader state
-    let loader = Box::new(LoaderState {
-        loader: sdk_loader,
-        model_id: repo_str,
-    });
-
-    XybridModelLoaderHandle::from_boxed(loader)
+    )
 }
 
 /// Load a model using the loader.
@@ -1300,59 +1391,61 @@ pub unsafe extern "C" fn xybrid_model_loader_load(
         return std::ptr::null_mut();
     }
 
-    // Borrow the loader state
-    let loader_state = match XybridModelLoaderHandle::as_ref(handle) {
-        Some(state) => state,
-        None => {
-            set_last_error("invalid loader handle");
-            return std::ptr::null_mut();
-        }
-    };
+    ffi_guard!("xybrid_model_loader_load", std::ptr::null_mut(), {
+        // Borrow the loader state
+        let loader_state = match XybridModelLoaderHandle::as_ref(handle) {
+            Some(state) => state,
+            None => {
+                set_last_error("invalid loader handle");
+                return std::ptr::null_mut();
+            }
+        };
 
-    // Load the model using the SDK
-    let xybrid_model = match loader_state.loader.load() {
-        Ok(model) => model,
-        Err(e) => {
-            set_last_error(&format!("Failed to load model: {}", e));
-            return std::ptr::null_mut();
-        }
-    };
+        // Load the model using the SDK
+        let xybrid_model = match loader_state.loader.load() {
+            Ok(model) => model,
+            Err(e) => {
+                set_last_error(&format!("Failed to load model: {}", e));
+                return std::ptr::null_mut();
+            }
+        };
 
-    let model_id = loader_state.model_id.clone();
+        let model_id = loader_state.model_id.clone();
 
-    // Cache voice data for FFI access
-    let voices = xybrid_model.voices();
-    let default_voice_id = xybrid_model
-        .voice_config()
-        .and_then(|vc| CString::new(vc.default).ok());
-    let voice_id_cache = voices
-        .as_ref()
-        .map(|vs| {
-            vs.iter()
-                .map(|v| CString::new(v.id.as_str()).unwrap_or_default())
-                .collect()
-        })
-        .unwrap_or_default();
-    let voice_name_cache = voices
-        .as_ref()
-        .map(|vs| {
-            vs.iter()
-                .map(|v| CString::new(v.name.as_str()).unwrap_or_default())
-                .collect()
-        })
-        .unwrap_or_default();
+        // Cache voice data for FFI access
+        let voices = xybrid_model.voices();
+        let default_voice_id = xybrid_model
+            .voice_config()
+            .and_then(|vc| CString::new(vc.default).ok());
+        let voice_id_cache = voices
+            .as_ref()
+            .map(|vs| {
+                vs.iter()
+                    .map(|v| CString::new(v.id.as_str()).unwrap_or_default())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let voice_name_cache = voices
+            .as_ref()
+            .map(|vs| {
+                vs.iter()
+                    .map(|v| CString::new(v.name.as_str()).unwrap_or_default())
+                    .collect()
+            })
+            .unwrap_or_default();
 
-    // Create model state
-    let model = Box::new(ModelState {
-        model: Arc::new(xybrid_model),
-        model_id,
-        voices,
-        default_voice_id,
-        voice_id_cache,
-        voice_name_cache,
-    });
+        // Create model state
+        let model = Box::new(ModelState {
+            model: Arc::new(xybrid_model),
+            model_id,
+            voices,
+            default_voice_id,
+            voice_id_cache,
+            voice_name_cache,
+        });
 
-    XybridModelHandle::from_boxed(model)
+        XybridModelHandle::from_boxed(model)
+    })
 }
 
 /// Free a model loader handle.
@@ -1372,10 +1465,13 @@ pub unsafe extern "C" fn xybrid_model_loader_load(
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_model_loader_free(handle: *mut XybridModelLoaderHandle) {
-    if !handle.is_null() {
+    if handle.is_null() {
+        return;
+    }
+    ffi_guard!("xybrid_model_loader_free", (), {
         // Take ownership and let it drop to free memory
         let _ = XybridModelLoaderHandle::into_boxed(handle);
-    }
+    })
 }
 
 // ============================================================================
@@ -1424,36 +1520,38 @@ pub unsafe extern "C" fn xybrid_envelope_audio(
 ) -> *mut XybridEnvelopeHandle {
     clear_last_error();
 
-    // Handle the case where len is 0 (empty audio is valid)
-    let audio_bytes = if len == 0 {
-        Vec::new()
-    } else if bytes.is_null() {
-        set_last_error("bytes is null but len is non-zero");
-        return std::ptr::null_mut();
-    } else {
-        // Copy the audio bytes into a Rust Vec
-        std::slice::from_raw_parts(bytes, len).to_vec()
-    };
+    ffi_guard!("xybrid_envelope_audio", std::ptr::null_mut(), {
+        // Handle the case where len is 0 (empty audio is valid)
+        let audio_bytes = if len == 0 {
+            Vec::new()
+        } else if bytes.is_null() {
+            set_last_error("bytes is null but len is non-zero");
+            return std::ptr::null_mut();
+        } else {
+            // Copy the audio bytes into a Rust Vec
+            std::slice::from_raw_parts(bytes, len).to_vec()
+        };
 
-    // Validate sample rate and channels
-    if sample_rate == 0 {
-        set_last_error("sample_rate must be non-zero");
-        return std::ptr::null_mut();
-    }
+        // Validate sample rate and channels
+        if sample_rate == 0 {
+            set_last_error("sample_rate must be non-zero");
+            return std::ptr::null_mut();
+        }
 
-    if channels == 0 {
-        set_last_error("channels must be non-zero");
-        return std::ptr::null_mut();
-    }
+        if channels == 0 {
+            set_last_error("channels must be non-zero");
+            return std::ptr::null_mut();
+        }
 
-    // Create envelope
-    let envelope = Box::new(EnvelopeData::Audio {
-        bytes: audio_bytes,
-        sample_rate,
-        channels,
-    });
+        // Create envelope
+        let envelope = Box::new(EnvelopeData::Audio {
+            bytes: audio_bytes,
+            sample_rate,
+            channels,
+        });
 
-    XybridEnvelopeHandle::from_boxed(envelope)
+        XybridEnvelopeHandle::from_boxed(envelope)
+    })
 }
 
 /// Create an envelope containing text data.
@@ -1490,26 +1588,28 @@ pub unsafe extern "C" fn xybrid_envelope_text(text: *const c_char) -> *mut Xybri
         return std::ptr::null_mut();
     }
 
-    // Convert C string to Rust string
-    let text_str = match CStr::from_ptr(text).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("text is not valid UTF-8");
-            return std::ptr::null_mut();
-        }
-    };
+    ffi_guard!("xybrid_envelope_text", std::ptr::null_mut(), {
+        // Convert C string to Rust string
+        let text_str = match CStr::from_ptr(text).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("text is not valid UTF-8");
+                return std::ptr::null_mut();
+            }
+        };
 
-    // Note: Empty text is allowed (for edge cases)
+        // Note: Empty text is allowed (for edge cases)
 
-    // Create envelope with no voice_id, speed, or role
-    let envelope = Box::new(EnvelopeData::Text {
-        text: text_str,
-        voice_id: None,
-        speed: None,
-        role: None,
-    });
+        // Create envelope with no voice_id, speed, or role
+        let envelope = Box::new(EnvelopeData::Text {
+            text: text_str,
+            voice_id: None,
+            speed: None,
+            role: None,
+        });
 
-    XybridEnvelopeHandle::from_boxed(envelope)
+        XybridEnvelopeHandle::from_boxed(envelope)
+    })
 }
 
 /// Create an envelope containing text data with voice and speed options.
@@ -1548,36 +1648,38 @@ pub unsafe extern "C" fn xybrid_envelope_text_with_voice(
         return std::ptr::null_mut();
     }
 
-    let text_str = match CStr::from_ptr(text).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("text is not valid UTF-8");
-            return std::ptr::null_mut();
-        }
-    };
-
-    let voice = if voice_id.is_null() {
-        None
-    } else {
-        match CStr::from_ptr(voice_id).to_str() {
-            Ok(s) => Some(s.to_string()),
+    ffi_guard!("xybrid_envelope_text_with_voice", std::ptr::null_mut(), {
+        let text_str = match CStr::from_ptr(text).to_str() {
+            Ok(s) => s.to_string(),
             Err(_) => {
-                set_last_error("voice_id is not valid UTF-8");
+                set_last_error("text is not valid UTF-8");
                 return std::ptr::null_mut();
             }
-        }
-    };
+        };
 
-    let spd = if speed > 0.0 { Some(speed) } else { None };
+        let voice = if voice_id.is_null() {
+            None
+        } else {
+            match CStr::from_ptr(voice_id).to_str() {
+                Ok(s) => Some(s.to_string()),
+                Err(_) => {
+                    set_last_error("voice_id is not valid UTF-8");
+                    return std::ptr::null_mut();
+                }
+            }
+        };
 
-    let envelope = Box::new(EnvelopeData::Text {
-        text: text_str,
-        voice_id: voice,
-        speed: spd,
-        role: None,
-    });
+        let spd = if speed > 0.0 { Some(speed) } else { None };
 
-    XybridEnvelopeHandle::from_boxed(envelope)
+        let envelope = Box::new(EnvelopeData::Text {
+            text: text_str,
+            voice_id: voice,
+            speed: spd,
+            role: None,
+        });
+
+        XybridEnvelopeHandle::from_boxed(envelope)
+    })
 }
 
 /// Free an envelope handle.
@@ -1597,10 +1699,13 @@ pub unsafe extern "C" fn xybrid_envelope_text_with_voice(
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_envelope_free(handle: *mut XybridEnvelopeHandle) {
-    if !handle.is_null() {
+    if handle.is_null() {
+        return;
+    }
+    ffi_guard!("xybrid_envelope_free", (), {
         // Take ownership and let it drop to free memory
         let _ = XybridEnvelopeHandle::into_boxed(handle);
-    }
+    })
 }
 
 // ============================================================================
@@ -1641,11 +1746,13 @@ pub const XYBRID_ROLE_ASSISTANT: i32 = 2;
 pub extern "C" fn xybrid_context_new() -> *mut XybridContextHandle {
     clear_last_error();
 
-    let context = Box::new(ContextData {
-        context: ConversationContext::new(),
-    });
+    ffi_guard!("xybrid_context_new", std::ptr::null_mut(), {
+        let context = Box::new(ContextData {
+            context: ConversationContext::new(),
+        });
 
-    XybridContextHandle::from_boxed(context)
+        XybridContextHandle::from_boxed(context)
+    })
 }
 
 /// Create a new conversation context with a specific ID.
@@ -1672,19 +1779,21 @@ pub unsafe extern "C" fn xybrid_context_with_id(id: *const c_char) -> *mut Xybri
         return std::ptr::null_mut();
     }
 
-    let id_str = match CStr::from_ptr(id).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("id is not valid UTF-8");
-            return std::ptr::null_mut();
-        }
-    };
+    ffi_guard!("xybrid_context_with_id", std::ptr::null_mut(), {
+        let id_str = match CStr::from_ptr(id).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("id is not valid UTF-8");
+                return std::ptr::null_mut();
+            }
+        };
 
-    let context = Box::new(ContextData {
-        context: ConversationContext::with_id(id_str),
-    });
+        let context = Box::new(ContextData {
+            context: ConversationContext::with_id(id_str),
+        });
 
-    XybridContextHandle::from_boxed(context)
+        XybridContextHandle::from_boxed(context)
+    })
 }
 
 /// Set the system prompt for a conversation context.
@@ -1724,41 +1833,43 @@ pub unsafe extern "C" fn xybrid_context_set_system(
         return -1;
     }
 
-    let text_str = match CStr::from_ptr(text).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("text is not valid UTF-8");
-            return -1;
+    ffi_guard!("xybrid_context_set_system", -1, {
+        let text_str = match CStr::from_ptr(text).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("text is not valid UTF-8");
+                return -1;
+            }
+        };
+
+        let ctx_data = match XybridContextHandle::as_mut(handle) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid context handle");
+                return -1;
+            }
+        };
+
+        // Create system envelope
+        let system_envelope =
+            Envelope::new(EnvelopeKind::Text(text_str)).with_role(MessageRole::System);
+
+        // Rebuild context with system (preserving ID and max_history_len)
+        let id = ctx_data.context.id().to_string();
+        let max_len = ctx_data.context.max_history_len();
+        let history: Vec<_> = ctx_data.context.history().to_vec();
+
+        let mut new_ctx = ConversationContext::with_id(id)
+            .with_max_history_len(max_len)
+            .with_system(system_envelope);
+
+        for envelope in history {
+            new_ctx.push(envelope);
         }
-    };
 
-    let ctx_data = match XybridContextHandle::as_mut(handle) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid context handle");
-            return -1;
-        }
-    };
-
-    // Create system envelope
-    let system_envelope =
-        Envelope::new(EnvelopeKind::Text(text_str)).with_role(MessageRole::System);
-
-    // Rebuild context with system (preserving ID and max_history_len)
-    let id = ctx_data.context.id().to_string();
-    let max_len = ctx_data.context.max_history_len();
-    let history: Vec<_> = ctx_data.context.history().to_vec();
-
-    let mut new_ctx = ConversationContext::with_id(id)
-        .with_max_history_len(max_len)
-        .with_system(system_envelope);
-
-    for envelope in history {
-        new_ctx.push(envelope);
-    }
-
-    ctx_data.context = new_ctx;
-    0
+        ctx_data.context = new_ctx;
+        0
+    })
 }
 
 /// Set the maximum history length for a conversation context.
@@ -1787,31 +1898,33 @@ pub unsafe extern "C" fn xybrid_context_set_max_history_len(
         return -1;
     }
 
-    let ctx_data = match XybridContextHandle::as_mut(handle) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid context handle");
-            return -1;
+    ffi_guard!("xybrid_context_set_max_history_len", -1, {
+        let ctx_data = match XybridContextHandle::as_mut(handle) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid context handle");
+                return -1;
+            }
+        };
+
+        // Rebuild context with new max_history_len
+        let id = ctx_data.context.id().to_string();
+        let system = ctx_data.context.system_envelope().cloned();
+        let history: Vec<_> = ctx_data.context.history().to_vec();
+
+        let mut new_ctx = ConversationContext::with_id(id).with_max_history_len(max_len as usize);
+
+        if let Some(sys) = system {
+            new_ctx = new_ctx.with_system(sys);
         }
-    };
 
-    // Rebuild context with new max_history_len
-    let id = ctx_data.context.id().to_string();
-    let system = ctx_data.context.system_envelope().cloned();
-    let history: Vec<_> = ctx_data.context.history().to_vec();
+        for envelope in history {
+            new_ctx.push(envelope);
+        }
 
-    let mut new_ctx = ConversationContext::with_id(id).with_max_history_len(max_len as usize);
-
-    if let Some(sys) = system {
-        new_ctx = new_ctx.with_system(sys);
-    }
-
-    for envelope in history {
-        new_ctx.push(envelope);
-    }
-
-    ctx_data.context = new_ctx;
-    0
+        ctx_data.context = new_ctx;
+        0
+    })
 }
 
 /// Push an envelope to the conversation history.
@@ -1852,50 +1965,53 @@ pub unsafe extern "C" fn xybrid_context_push(
         return -1;
     }
 
-    let ctx_data = match XybridContextHandle::as_mut(handle) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid context handle");
-            return -1;
-        }
-    };
-
-    let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid envelope handle");
-            return -1;
-        }
-    };
-
-    // Convert to SDK envelope and push
-    let sdk_envelope = match envelope_data {
-        EnvelopeData::Text {
-            text,
-            voice_id,
-            speed,
-            role,
-        } => {
-            let mut metadata = HashMap::new();
-            if let Some(v) = voice_id {
-                metadata.insert("voice_id".to_string(), v.clone());
+    ffi_guard!("xybrid_context_push", -1, {
+        let ctx_data = match XybridContextHandle::as_mut(handle) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid context handle");
+                return -1;
             }
-            if let Some(s) = speed {
-                metadata.insert("speed".to_string(), s.to_string());
+        };
+
+        let envelope_data = match XybridEnvelopeHandle::as_ref(envelope) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid envelope handle");
+                return -1;
             }
-            // Use the role from envelope, default to User
-            let msg_role = role.unwrap_or(MessageRole::User);
+        };
 
-            Envelope::with_metadata(EnvelopeKind::Text(text.clone()), metadata).with_role(msg_role)
-        }
-        EnvelopeData::Audio { .. } => {
-            set_last_error("audio envelopes cannot be pushed to context");
-            return -1;
-        }
-    };
+        // Convert to SDK envelope and push
+        let sdk_envelope = match envelope_data {
+            EnvelopeData::Text {
+                text,
+                voice_id,
+                speed,
+                role,
+            } => {
+                let mut metadata = HashMap::new();
+                if let Some(v) = voice_id {
+                    metadata.insert("voice_id".to_string(), v.clone());
+                }
+                if let Some(s) = speed {
+                    metadata.insert("speed".to_string(), s.to_string());
+                }
+                // Use the role from envelope, default to User
+                let msg_role = role.unwrap_or(MessageRole::User);
 
-    ctx_data.context.push(sdk_envelope);
-    0
+                Envelope::with_metadata(EnvelopeKind::Text(text.clone()), metadata)
+                    .with_role(msg_role)
+            }
+            EnvelopeData::Audio { .. } => {
+                set_last_error("audio envelopes cannot be pushed to context");
+                return -1;
+            }
+        };
+
+        ctx_data.context.push(sdk_envelope);
+        0
+    })
 }
 
 /// Clear the conversation history but preserve the system prompt and ID.
@@ -1917,16 +2033,18 @@ pub unsafe extern "C" fn xybrid_context_clear(handle: *mut XybridContextHandle) 
         return -1;
     }
 
-    let ctx_data = match XybridContextHandle::as_mut(handle) {
-        Some(data) => data,
-        None => {
-            set_last_error("invalid context handle");
-            return -1;
-        }
-    };
+    ffi_guard!("xybrid_context_clear", -1, {
+        let ctx_data = match XybridContextHandle::as_mut(handle) {
+            Some(data) => data,
+            None => {
+                set_last_error("invalid context handle");
+                return -1;
+            }
+        };
 
-    ctx_data.context.clear();
-    0
+        ctx_data.context.clear();
+        0
+    })
 }
 
 /// Get the conversation context ID.
@@ -1948,21 +2066,23 @@ pub unsafe extern "C" fn xybrid_context_id(handle: *mut XybridContextHandle) -> 
         return std::ptr::null();
     }
 
-    match XybridContextHandle::as_ref(handle) {
-        Some(data) => {
-            thread_local! {
-                static CONTEXT_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
-            }
-            CONTEXT_ID.with(|e| {
-                *e.borrow_mut() = CString::new(data.context.id()).ok();
-                match e.borrow().as_ref() {
-                    Some(cstr) => cstr.as_ptr(),
-                    None => std::ptr::null(),
+    ffi_guard!("xybrid_context_id", std::ptr::null(), {
+        match XybridContextHandle::as_ref(handle) {
+            Some(data) => {
+                thread_local! {
+                    static CONTEXT_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
                 }
-            })
+                CONTEXT_ID.with(|e| {
+                    *e.borrow_mut() = CString::new(data.context.id()).ok();
+                    match e.borrow().as_ref() {
+                        Some(cstr) => cstr.as_ptr(),
+                        None => std::ptr::null(),
+                    }
+                })
+            }
+            None => std::ptr::null(),
         }
-        None => std::ptr::null(),
-    }
+    })
 }
 
 /// Get the current history length (excluding system prompt).
@@ -1980,10 +2100,12 @@ pub unsafe extern "C" fn xybrid_context_history_len(handle: *mut XybridContextHa
         return 0;
     }
 
-    match XybridContextHandle::as_ref(handle) {
-        Some(data) => data.context.history().len() as u32,
-        None => 0,
-    }
+    ffi_guard!("xybrid_context_history_len", 0, {
+        match XybridContextHandle::as_ref(handle) {
+            Some(data) => data.context.history().len() as u32,
+            None => 0,
+        }
+    })
 }
 
 /// Check if a system prompt is set.
@@ -2002,10 +2124,12 @@ pub unsafe extern "C" fn xybrid_context_has_system(handle: *mut XybridContextHan
         return 0;
     }
 
-    match XybridContextHandle::as_ref(handle) {
-        Some(data) if data.context.system_envelope().is_some() => 1,
-        _ => 0,
-    }
+    ffi_guard!("xybrid_context_has_system", 0, {
+        match XybridContextHandle::as_ref(handle) {
+            Some(data) if data.context.system_envelope().is_some() => 1,
+            _ => 0,
+        }
+    })
 }
 
 /// Free a conversation context handle.
@@ -2018,9 +2142,12 @@ pub unsafe extern "C" fn xybrid_context_has_system(handle: *mut XybridContextHan
 /// - `handle`: A handle to the context to free. May be null (no-op).
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_context_free(handle: *mut XybridContextHandle) {
-    if !handle.is_null() {
-        let _ = XybridContextHandle::into_boxed(handle);
+    if handle.is_null() {
+        return;
     }
+    ffi_guard!("xybrid_context_free", (), {
+        let _ = XybridContextHandle::into_boxed(handle);
+    })
 }
 
 /// Create an envelope containing text data with a message role.
@@ -2055,32 +2182,34 @@ pub unsafe extern "C" fn xybrid_envelope_text_with_role(
         return std::ptr::null_mut();
     }
 
-    let text_str = match CStr::from_ptr(text).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("text is not valid UTF-8");
-            return std::ptr::null_mut();
-        }
-    };
+    ffi_guard!("xybrid_envelope_text_with_role", std::ptr::null_mut(), {
+        let text_str = match CStr::from_ptr(text).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("text is not valid UTF-8");
+                return std::ptr::null_mut();
+            }
+        };
 
-    let msg_role = match role {
-        XYBRID_ROLE_SYSTEM => MessageRole::System,
-        XYBRID_ROLE_USER => MessageRole::User,
-        XYBRID_ROLE_ASSISTANT => MessageRole::Assistant,
-        _ => {
-            set_last_error("invalid role value (use 0=System, 1=User, 2=Assistant)");
-            return std::ptr::null_mut();
-        }
-    };
+        let msg_role = match role {
+            XYBRID_ROLE_SYSTEM => MessageRole::System,
+            XYBRID_ROLE_USER => MessageRole::User,
+            XYBRID_ROLE_ASSISTANT => MessageRole::Assistant,
+            _ => {
+                set_last_error("invalid role value (use 0=System, 1=User, 2=Assistant)");
+                return std::ptr::null_mut();
+            }
+        };
 
-    let envelope = Box::new(EnvelopeData::Text {
-        text: text_str,
-        voice_id: None,
-        speed: None,
-        role: Some(msg_role),
-    });
+        let envelope = Box::new(EnvelopeData::Text {
+            text: text_str,
+            voice_id: None,
+            speed: None,
+            role: Some(msg_role),
+        });
 
-    XybridEnvelopeHandle::from_boxed(envelope)
+        XybridEnvelopeHandle::from_boxed(envelope)
+    })
 }
 
 // ============================================================================
@@ -2100,16 +2229,18 @@ pub unsafe extern "C" fn xybrid_envelope_text_with_role(
 /// A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
 #[no_mangle]
 pub extern "C" fn xybrid_generation_config_new() -> *mut XybridGenerationConfigHandle {
-    let config = Box::new(GenerationConfigData {
-        max_tokens: None,
-        temperature: None,
-        top_p: None,
-        min_p: None,
-        top_k: None,
-        repetition_penalty: None,
-        stop_sequences: Vec::new(),
-    });
-    XybridGenerationConfigHandle::from_boxed(config)
+    ffi_guard!("xybrid_generation_config_new", std::ptr::null_mut(), {
+        let config = Box::new(GenerationConfigData {
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            min_p: None,
+            top_k: None,
+            repetition_penalty: None,
+            stop_sequences: Vec::new(),
+        });
+        XybridGenerationConfigHandle::from_boxed(config)
+    })
 }
 
 /// Create a greedy decoding config (deterministic, temperature=0).
@@ -2119,16 +2250,18 @@ pub extern "C" fn xybrid_generation_config_new() -> *mut XybridGenerationConfigH
 /// A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
 #[no_mangle]
 pub extern "C" fn xybrid_generation_config_greedy() -> *mut XybridGenerationConfigHandle {
-    let config = Box::new(GenerationConfigData {
-        max_tokens: None,
-        temperature: Some(0.0),
-        top_p: Some(1.0),
-        min_p: None,
-        top_k: Some(0),
-        repetition_penalty: None,
-        stop_sequences: Vec::new(),
-    });
-    XybridGenerationConfigHandle::from_boxed(config)
+    ffi_guard!("xybrid_generation_config_greedy", std::ptr::null_mut(), {
+        let config = Box::new(GenerationConfigData {
+            max_tokens: None,
+            temperature: Some(0.0),
+            top_p: Some(1.0),
+            min_p: None,
+            top_k: Some(0),
+            repetition_penalty: None,
+            stop_sequences: Vec::new(),
+        });
+        XybridGenerationConfigHandle::from_boxed(config)
+    })
 }
 
 /// Create a creative generation config (higher temperature).
@@ -2138,16 +2271,18 @@ pub extern "C" fn xybrid_generation_config_greedy() -> *mut XybridGenerationConf
 /// A handle to the generation config. Must be freed with `xybrid_generation_config_free`.
 #[no_mangle]
 pub extern "C" fn xybrid_generation_config_creative() -> *mut XybridGenerationConfigHandle {
-    let config = Box::new(GenerationConfigData {
-        max_tokens: None,
-        temperature: Some(0.9),
-        top_p: Some(0.95),
-        min_p: None,
-        top_k: Some(50),
-        repetition_penalty: None,
-        stop_sequences: Vec::new(),
-    });
-    XybridGenerationConfigHandle::from_boxed(config)
+    ffi_guard!("xybrid_generation_config_creative", std::ptr::null_mut(), {
+        let config = Box::new(GenerationConfigData {
+            max_tokens: None,
+            temperature: Some(0.9),
+            top_p: Some(0.95),
+            min_p: None,
+            top_k: Some(50),
+            repetition_penalty: None,
+            stop_sequences: Vec::new(),
+        });
+        XybridGenerationConfigHandle::from_boxed(config)
+    })
 }
 
 /// Set the maximum number of tokens to generate.
@@ -2156,9 +2291,11 @@ pub unsafe extern "C" fn xybrid_generation_config_set_max_tokens(
     config: *mut XybridGenerationConfigHandle,
     max_tokens: u32,
 ) {
-    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
-        data.max_tokens = Some(max_tokens as usize);
-    }
+    ffi_guard!("xybrid_generation_config_set_max_tokens", (), {
+        if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+            data.max_tokens = Some(max_tokens as usize);
+        }
+    })
 }
 
 /// Set the sampling temperature (0.0 = deterministic, higher = more random).
@@ -2167,9 +2304,11 @@ pub unsafe extern "C" fn xybrid_generation_config_set_temperature(
     config: *mut XybridGenerationConfigHandle,
     temperature: f32,
 ) {
-    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
-        data.temperature = Some(temperature);
-    }
+    ffi_guard!("xybrid_generation_config_set_temperature", (), {
+        if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+            data.temperature = Some(temperature);
+        }
+    })
 }
 
 /// Set the top-p (nucleus) sampling threshold.
@@ -2178,9 +2317,11 @@ pub unsafe extern "C" fn xybrid_generation_config_set_top_p(
     config: *mut XybridGenerationConfigHandle,
     top_p: f32,
 ) {
-    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
-        data.top_p = Some(top_p);
-    }
+    ffi_guard!("xybrid_generation_config_set_top_p", (), {
+        if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+            data.top_p = Some(top_p);
+        }
+    })
 }
 
 /// Set the min-p sampling threshold.
@@ -2189,9 +2330,11 @@ pub unsafe extern "C" fn xybrid_generation_config_set_min_p(
     config: *mut XybridGenerationConfigHandle,
     min_p: f32,
 ) {
-    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
-        data.min_p = Some(min_p);
-    }
+    ffi_guard!("xybrid_generation_config_set_min_p", (), {
+        if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+            data.min_p = Some(min_p);
+        }
+    })
 }
 
 /// Set top-k sampling (0 = disabled).
@@ -2200,9 +2343,11 @@ pub unsafe extern "C" fn xybrid_generation_config_set_top_k(
     config: *mut XybridGenerationConfigHandle,
     top_k: u32,
 ) {
-    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
-        data.top_k = Some(top_k as usize);
-    }
+    ffi_guard!("xybrid_generation_config_set_top_k", (), {
+        if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+            data.top_k = Some(top_k as usize);
+        }
+    })
 }
 
 /// Set the repetition penalty (1.0 = disabled).
@@ -2211,9 +2356,11 @@ pub unsafe extern "C" fn xybrid_generation_config_set_repetition_penalty(
     config: *mut XybridGenerationConfigHandle,
     repetition_penalty: f32,
 ) {
-    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
-        data.repetition_penalty = Some(repetition_penalty);
-    }
+    ffi_guard!("xybrid_generation_config_set_repetition_penalty", (), {
+        if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+            data.repetition_penalty = Some(repetition_penalty);
+        }
+    })
 }
 
 /// Add a stop sequence.
@@ -2232,11 +2379,13 @@ pub unsafe extern "C" fn xybrid_generation_config_add_stop(
     if stop.is_null() {
         return;
     }
-    if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
-        if let Ok(s) = CStr::from_ptr(stop).to_str() {
-            data.stop_sequences.push(s.to_string());
+    ffi_guard!("xybrid_generation_config_add_stop", (), {
+        if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+            if let Ok(s) = CStr::from_ptr(stop).to_str() {
+                data.stop_sequences.push(s.to_string());
+            }
         }
-    }
+    })
 }
 
 /// Free a generation config handle.
@@ -2245,9 +2394,12 @@ pub unsafe extern "C" fn xybrid_generation_config_add_stop(
 /// Passing null is a safe no-op.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_generation_config_free(config: *mut XybridGenerationConfigHandle) {
-    if !config.is_null() {
-        let _ = XybridGenerationConfigHandle::into_boxed(config);
+    if config.is_null() {
+        return;
     }
+    ffi_guard!("xybrid_generation_config_free", (), {
+        let _ = XybridGenerationConfigHandle::into_boxed(config);
+    })
 }
 
 // ============================================================================
@@ -2573,24 +2725,26 @@ pub unsafe extern "C" fn xybrid_model_id(model: *mut XybridModelHandle) -> *mut 
         return std::ptr::null_mut();
     }
 
-    // Borrow the model state
-    let model_state = match XybridModelHandle::as_ref(model) {
-        Some(state) => state,
-        None => {
-            set_last_error("invalid model handle");
-            return std::ptr::null_mut();
-        }
-    };
+    ffi_guard!("xybrid_model_id", std::ptr::null_mut(), {
+        // Borrow the model state
+        let model_state = match XybridModelHandle::as_ref(model) {
+            Some(state) => state,
+            None => {
+                set_last_error("invalid model handle");
+                return std::ptr::null_mut();
+            }
+        };
 
-    // Create a CString from the model ID and return it
-    // The caller is responsible for freeing this with xybrid_free_string()
-    match CString::new(model_state.model_id.clone()) {
-        Ok(cstr) => cstr.into_raw(),
-        Err(_) => {
-            set_last_error("model_id contains null bytes");
-            std::ptr::null_mut()
+        // Create a CString from the model ID and return it
+        // The caller is responsible for freeing this with xybrid_free_string()
+        match CString::new(model_state.model_id.clone()) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => {
+                set_last_error("model_id contains null bytes");
+                std::ptr::null_mut()
+            }
         }
-    }
+    })
 }
 
 /// Check if a model supports token-by-token streaming.
@@ -2628,10 +2782,12 @@ pub unsafe extern "C" fn xybrid_model_supports_token_streaming(
         return 0;
     }
 
-    match XybridModelHandle::as_ref(model) {
-        Some(state) if state.model.supports_token_streaming() => 1,
-        _ => 0,
-    }
+    ffi_guard!("xybrid_model_supports_token_streaming", 0, {
+        match XybridModelHandle::as_ref(model) {
+            Some(state) if state.model.supports_token_streaming() => 1,
+            _ => 0,
+        }
+    })
 }
 
 // ============================================================================
@@ -2656,10 +2812,12 @@ pub unsafe extern "C" fn xybrid_model_has_voices(model: *mut XybridModelHandle) 
     if model.is_null() {
         return 0;
     }
-    match XybridModelHandle::as_ref(model) {
-        Some(state) if state.voices.is_some() => 1,
-        _ => 0,
-    }
+    ffi_guard!("xybrid_model_has_voices", 0, {
+        match XybridModelHandle::as_ref(model) {
+            Some(state) if state.voices.is_some() => 1,
+            _ => 0,
+        }
+    })
 }
 
 /// Get the number of voices available for this model.
@@ -2676,10 +2834,12 @@ pub unsafe extern "C" fn xybrid_model_voice_count(model: *mut XybridModelHandle)
     if model.is_null() {
         return 0;
     }
-    match XybridModelHandle::as_ref(model) {
-        Some(state) => state.voices.as_ref().map(|v| v.len() as u32).unwrap_or(0),
-        None => 0,
-    }
+    ffi_guard!("xybrid_model_voice_count", 0, {
+        match XybridModelHandle::as_ref(model) {
+            Some(state) => state.voices.as_ref().map(|v| v.len() as u32).unwrap_or(0),
+            None => 0,
+        }
+    })
 }
 
 /// Get the default voice ID for this model.
@@ -2700,14 +2860,16 @@ pub unsafe extern "C" fn xybrid_model_default_voice_id(
     if model.is_null() {
         return std::ptr::null();
     }
-    match XybridModelHandle::as_ref(model) {
-        Some(state) => state
-            .default_voice_id
-            .as_ref()
-            .map(|s| s.as_ptr())
-            .unwrap_or(std::ptr::null()),
-        None => std::ptr::null(),
-    }
+    ffi_guard!("xybrid_model_default_voice_id", std::ptr::null(), {
+        match XybridModelHandle::as_ref(model) {
+            Some(state) => state
+                .default_voice_id
+                .as_ref()
+                .map(|s| s.as_ptr())
+                .unwrap_or(std::ptr::null()),
+            None => std::ptr::null(),
+        }
+    })
 }
 
 /// Get the voice ID at the given index.
@@ -2730,14 +2892,16 @@ pub unsafe extern "C" fn xybrid_model_voice_id(
     if model.is_null() {
         return std::ptr::null();
     }
-    match XybridModelHandle::as_ref(model) {
-        Some(state) => state
-            .voice_id_cache
-            .get(index as usize)
-            .map(|s| s.as_ptr())
-            .unwrap_or(std::ptr::null()),
-        None => std::ptr::null(),
-    }
+    ffi_guard!("xybrid_model_voice_id", std::ptr::null(), {
+        match XybridModelHandle::as_ref(model) {
+            Some(state) => state
+                .voice_id_cache
+                .get(index as usize)
+                .map(|s| s.as_ptr())
+                .unwrap_or(std::ptr::null()),
+            None => std::ptr::null(),
+        }
+    })
 }
 
 /// Get the voice display name at the given index.
@@ -2760,14 +2924,16 @@ pub unsafe extern "C" fn xybrid_model_voice_name(
     if model.is_null() {
         return std::ptr::null();
     }
-    match XybridModelHandle::as_ref(model) {
-        Some(state) => state
-            .voice_name_cache
-            .get(index as usize)
-            .map(|s| s.as_ptr())
-            .unwrap_or(std::ptr::null()),
-        None => std::ptr::null(),
-    }
+    ffi_guard!("xybrid_model_voice_name", std::ptr::null(), {
+        match XybridModelHandle::as_ref(model) {
+            Some(state) => state
+                .voice_name_cache
+                .get(index as usize)
+                .map(|s| s.as_ptr())
+                .unwrap_or(std::ptr::null()),
+            None => std::ptr::null(),
+        }
+    })
 }
 
 /// Get the full voice metadata at the given index as a JSON string.
@@ -2792,22 +2958,24 @@ pub unsafe extern "C" fn xybrid_model_voice_json(
     if model.is_null() {
         return std::ptr::null_mut();
     }
-    match XybridModelHandle::as_ref(model) {
-        Some(state) => {
-            let voice = match state.voices.as_ref().and_then(|vs| vs.get(index as usize)) {
-                Some(v) => v,
-                None => return std::ptr::null_mut(),
-            };
-            match serde_json::to_string(voice) {
-                Ok(json) => match CString::new(json) {
-                    Ok(cs) => cs.into_raw(),
+    ffi_guard!("xybrid_model_voice_json", std::ptr::null_mut(), {
+        match XybridModelHandle::as_ref(model) {
+            Some(state) => {
+                let voice = match state.voices.as_ref().and_then(|vs| vs.get(index as usize)) {
+                    Some(v) => v,
+                    None => return std::ptr::null_mut(),
+                };
+                match serde_json::to_string(voice) {
+                    Ok(json) => match CString::new(json) {
+                        Ok(cs) => cs.into_raw(),
+                        Err(_) => std::ptr::null_mut(),
+                    },
                     Err(_) => std::ptr::null_mut(),
-                },
-                Err(_) => std::ptr::null_mut(),
+                }
             }
+            None => std::ptr::null_mut(),
         }
-        None => std::ptr::null_mut(),
-    }
+    })
 }
 
 /// Run streaming inference on a model with the given input envelope.
@@ -3134,10 +3302,13 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_model_free(handle: *mut XybridModelHandle) {
-    if !handle.is_null() {
+    if handle.is_null() {
+        return;
+    }
+    ffi_guard!("xybrid_model_free", (), {
         // Take ownership and let it drop to free memory
         let _ = XybridModelHandle::into_boxed(handle);
-    }
+    })
 }
 
 // ============================================================================
@@ -3179,10 +3350,12 @@ pub unsafe extern "C" fn xybrid_result_success(result: *mut XybridResultHandle) 
         return 0;
     }
 
-    match XybridResultHandle::as_ref(result) {
-        Some(data) if data.success => 1,
-        _ => 0,
-    }
+    ffi_guard!("xybrid_result_success", 0, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) if data.success => 1,
+            _ => 0,
+        }
+    })
 }
 
 /// Get the error message from a failed inference.
@@ -3215,29 +3388,31 @@ pub unsafe extern "C" fn xybrid_result_error(result: *mut XybridResultHandle) ->
         return std::ptr::null();
     }
 
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => {
-            match &data.error {
-                Some(error_str) => {
-                    // Store the CString in thread-local storage so the pointer remains valid
-                    // until the next call to this function on the same thread.
-                    // This is a trade-off between simplicity and thread-safety.
-                    thread_local! {
-                        static RESULT_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
-                    }
-                    RESULT_ERROR.with(|e| {
-                        *e.borrow_mut() = CString::new(error_str.as_str()).ok();
-                        match e.borrow().as_ref() {
-                            Some(cstr) => cstr.as_ptr(),
-                            None => std::ptr::null(),
+    ffi_guard!("xybrid_result_error", std::ptr::null(), {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => {
+                match &data.error {
+                    Some(error_str) => {
+                        // Store the CString in thread-local storage so the pointer remains valid
+                        // until the next call to this function on the same thread.
+                        // This is a trade-off between simplicity and thread-safety.
+                        thread_local! {
+                            static RESULT_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
                         }
-                    })
+                        RESULT_ERROR.with(|e| {
+                            *e.borrow_mut() = CString::new(error_str.as_str()).ok();
+                            match e.borrow().as_ref() {
+                                Some(cstr) => cstr.as_ptr(),
+                                None => std::ptr::null(),
+                            }
+                        })
+                    }
+                    None => std::ptr::null(),
                 }
-                None => std::ptr::null(),
             }
+            None => std::ptr::null(),
         }
-        None => std::ptr::null(),
-    }
+    })
 }
 
 /// Get the text output from an inference result.
@@ -3274,28 +3449,30 @@ pub unsafe extern "C" fn xybrid_result_text(result: *mut XybridResultHandle) -> 
         return std::ptr::null();
     }
 
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => {
-            match &data.text {
-                Some(text_str) => {
-                    // Store the CString in thread-local storage so the pointer remains valid
-                    // until the next call to this function on the same thread.
-                    thread_local! {
-                        static RESULT_TEXT: RefCell<Option<CString>> = const { RefCell::new(None) };
-                    }
-                    RESULT_TEXT.with(|e| {
-                        *e.borrow_mut() = CString::new(text_str.as_str()).ok();
-                        match e.borrow().as_ref() {
-                            Some(cstr) => cstr.as_ptr(),
-                            None => std::ptr::null(),
+    ffi_guard!("xybrid_result_text", std::ptr::null(), {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => {
+                match &data.text {
+                    Some(text_str) => {
+                        // Store the CString in thread-local storage so the pointer remains valid
+                        // until the next call to this function on the same thread.
+                        thread_local! {
+                            static RESULT_TEXT: RefCell<Option<CString>> = const { RefCell::new(None) };
                         }
-                    })
+                        RESULT_TEXT.with(|e| {
+                            *e.borrow_mut() = CString::new(text_str.as_str()).ok();
+                            match e.borrow().as_ref() {
+                                Some(cstr) => cstr.as_ptr(),
+                                None => std::ptr::null(),
+                            }
+                        })
+                    }
+                    None => std::ptr::null(),
                 }
-                None => std::ptr::null(),
             }
+            None => std::ptr::null(),
         }
-        None => std::ptr::null(),
-    }
+    })
 }
 
 /// Get the latency in milliseconds from an inference result.
@@ -3324,10 +3501,12 @@ pub unsafe extern "C" fn xybrid_result_latency_ms(result: *mut XybridResultHandl
         return 0;
     }
 
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => data.latency_ms,
-        None => 0,
-    }
+    ffi_guard!("xybrid_result_latency_ms", 0, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => data.latency_ms,
+            None => 0,
+        }
+    })
 }
 
 /// Get the output type from an inference result.
@@ -3364,21 +3543,23 @@ pub unsafe extern "C" fn xybrid_result_output_type(
         return std::ptr::null();
     }
 
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => {
-            thread_local! {
-                static RESULT_OUTPUT_TYPE: RefCell<Option<CString>> = const { RefCell::new(None) };
-            }
-            RESULT_OUTPUT_TYPE.with(|e| {
-                *e.borrow_mut() = CString::new(data.output_type.as_str()).ok();
-                match e.borrow().as_ref() {
-                    Some(cstr) => cstr.as_ptr(),
-                    None => std::ptr::null(),
+    ffi_guard!("xybrid_result_output_type", std::ptr::null(), {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => {
+                thread_local! {
+                    static RESULT_OUTPUT_TYPE: RefCell<Option<CString>> = const { RefCell::new(None) };
                 }
-            })
+                RESULT_OUTPUT_TYPE.with(|e| {
+                    *e.borrow_mut() = CString::new(data.output_type.as_str()).ok();
+                    match e.borrow().as_ref() {
+                        Some(cstr) => cstr.as_ptr(),
+                        None => std::ptr::null(),
+                    }
+                })
+            }
+            None => std::ptr::null(),
         }
-        None => std::ptr::null(),
-    }
+    })
 }
 
 /// Get the audio data pointer from an inference result.
@@ -3414,13 +3595,15 @@ pub unsafe extern "C" fn xybrid_result_audio_data(result: *mut XybridResultHandl
         return std::ptr::null();
     }
 
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => match &data.audio_bytes {
-            Some(bytes) => bytes.as_ptr(),
+    ffi_guard!("xybrid_result_audio_data", std::ptr::null(), {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => match &data.audio_bytes {
+                Some(bytes) => bytes.as_ptr(),
+                None => std::ptr::null(),
+            },
             None => std::ptr::null(),
-        },
-        None => std::ptr::null(),
-    }
+        }
+    })
 }
 
 /// Get the length of audio data from an inference result.
@@ -3448,13 +3631,15 @@ pub unsafe extern "C" fn xybrid_result_audio_len(result: *mut XybridResultHandle
         return 0;
     }
 
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => match &data.audio_bytes {
-            Some(bytes) => bytes.len(),
+    ffi_guard!("xybrid_result_audio_len", 0, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => match &data.audio_bytes {
+                Some(bytes) => bytes.len(),
+                None => 0,
+            },
             None => 0,
-        },
-        None => 0,
-    }
+        }
+    })
 }
 
 /// Get the embedding data pointer from an inference result.
@@ -3492,13 +3677,15 @@ pub unsafe extern "C" fn xybrid_result_embedding_data(
         return std::ptr::null();
     }
 
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => match &data.embedding {
-            Some(emb) => emb.as_ptr(),
+    ffi_guard!("xybrid_result_embedding_data", std::ptr::null(), {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => match &data.embedding {
+                Some(emb) => emb.as_ptr(),
+                None => std::ptr::null(),
+            },
             None => std::ptr::null(),
-        },
-        None => std::ptr::null(),
-    }
+        }
+    })
 }
 
 /// Get the number of elements in the embedding from an inference result.
@@ -3527,13 +3714,15 @@ pub unsafe extern "C" fn xybrid_result_embedding_len(result: *mut XybridResultHa
         return 0;
     }
 
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => match &data.embedding {
-            Some(emb) => emb.len(),
+    ffi_guard!("xybrid_result_embedding_len", 0, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => match &data.embedding {
+                Some(emb) => emb.len(),
+                None => 0,
+            },
             None => 0,
-        },
-        None => 0,
-    }
+        }
+    })
 }
 
 /// Free an inference result handle.
@@ -3555,10 +3744,13 @@ pub unsafe extern "C" fn xybrid_result_embedding_len(result: *mut XybridResultHa
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_result_free(handle: *mut XybridResultHandle) {
-    if !handle.is_null() {
+    if handle.is_null() {
+        return;
+    }
+    ffi_guard!("xybrid_result_free", (), {
         // Take ownership and let it drop to free memory
         let _ = XybridResultHandle::into_boxed(handle);
-    }
+    })
 }
 
 // ============================================================================
@@ -3582,13 +3774,15 @@ pub unsafe extern "C" fn xybrid_result_ttft_ms(result: *mut XybridResultHandle) 
     if result.is_null() {
         return -1;
     }
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => match data.metrics.ttft_ms {
-            Some(v) => v as i64,
+    ffi_guard!("xybrid_result_ttft_ms", -1, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => match data.metrics.ttft_ms {
+                Some(v) => v as i64,
+                None => -1,
+            },
             None => -1,
-        },
-        None => -1,
-    }
+        }
+    })
 }
 
 /// Get generation throughput in tokens/sec (LLM only).
@@ -3601,10 +3795,12 @@ pub unsafe extern "C" fn xybrid_result_tokens_per_second(result: *mut XybridResu
     if result.is_null() {
         return f32::NAN;
     }
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => data.metrics.tokens_per_second.unwrap_or(f32::NAN),
-        None => f32::NAN,
-    }
+    ffi_guard!("xybrid_result_tokens_per_second", f32::NAN, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => data.metrics.tokens_per_second.unwrap_or(f32::NAN),
+            None => f32::NAN,
+        }
+    })
 }
 
 /// Get prefill-phase throughput in tokens/sec (LLM only).
@@ -3615,10 +3811,12 @@ pub unsafe extern "C" fn xybrid_result_prefill_tps(result: *mut XybridResultHand
     if result.is_null() {
         return f32::NAN;
     }
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => data.metrics.prefill_tps.unwrap_or(f32::NAN),
-        None => f32::NAN,
-    }
+    ffi_guard!("xybrid_result_prefill_tps", f32::NAN, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => data.metrics.prefill_tps.unwrap_or(f32::NAN),
+            None => f32::NAN,
+        }
+    })
 }
 
 /// Get decode-phase throughput in tokens/sec (LLM only).
@@ -3629,10 +3827,12 @@ pub unsafe extern "C" fn xybrid_result_decode_tps(result: *mut XybridResultHandl
     if result.is_null() {
         return f32::NAN;
     }
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => data.metrics.decode_tps.unwrap_or(f32::NAN),
-        None => f32::NAN,
-    }
+    ffi_guard!("xybrid_result_decode_tps", f32::NAN, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => data.metrics.decode_tps.unwrap_or(f32::NAN),
+            None => f32::NAN,
+        }
+    })
 }
 
 /// Get completion token count (LLM only).
@@ -3643,13 +3843,15 @@ pub unsafe extern "C" fn xybrid_result_tokens_out(result: *mut XybridResultHandl
     if result.is_null() {
         return -1;
     }
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => match data.metrics.tokens_out {
-            Some(v) => v as i64,
+    ffi_guard!("xybrid_result_tokens_out", -1, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => match data.metrics.tokens_out {
+                Some(v) => v as i64,
+                None => -1,
+            },
             None => -1,
-        },
-        None => -1,
-    }
+        }
+    })
 }
 
 /// Get the number of per-stage latency entries.
@@ -3661,10 +3863,12 @@ pub unsafe extern "C" fn xybrid_result_stage_count(result: *mut XybridResultHand
     if result.is_null() {
         return 0;
     }
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => data.metrics.stage_latencies_ms.len(),
-        None => 0,
-    }
+    ffi_guard!("xybrid_result_stage_count", 0, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => data.metrics.stage_latencies_ms.len(),
+            None => 0,
+        }
+    })
 }
 
 /// Get the stage_id string for the entry at `index`.
@@ -3681,24 +3885,26 @@ pub unsafe extern "C" fn xybrid_result_stage_id(
     if result.is_null() {
         return std::ptr::null();
     }
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => match data.metrics.stage_latencies_ms.get(index) {
-            Some(stage) => {
-                thread_local! {
-                    static RESULT_STAGE_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
-                }
-                RESULT_STAGE_ID.with(|e| {
-                    *e.borrow_mut() = CString::new(stage.stage_id.as_str()).ok();
-                    match e.borrow().as_ref() {
-                        Some(cstr) => cstr.as_ptr(),
-                        None => std::ptr::null(),
+    ffi_guard!("xybrid_result_stage_id", std::ptr::null(), {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => match data.metrics.stage_latencies_ms.get(index) {
+                Some(stage) => {
+                    thread_local! {
+                        static RESULT_STAGE_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
                     }
-                })
-            }
+                    RESULT_STAGE_ID.with(|e| {
+                        *e.borrow_mut() = CString::new(stage.stage_id.as_str()).ok();
+                        match e.borrow().as_ref() {
+                            Some(cstr) => cstr.as_ptr(),
+                            None => std::ptr::null(),
+                        }
+                    })
+                }
+                None => std::ptr::null(),
+            },
             None => std::ptr::null(),
-        },
-        None => std::ptr::null(),
-    }
+        }
+    })
 }
 
 /// Get the latency_ms value for the stage at `index`.
@@ -3714,15 +3920,17 @@ pub unsafe extern "C" fn xybrid_result_stage_latency_ms(
     if result.is_null() {
         return 0;
     }
-    match XybridResultHandle::as_ref(result) {
-        Some(data) => data
-            .metrics
-            .stage_latencies_ms
-            .get(index)
-            .map(|s| s.latency_ms)
-            .unwrap_or(0),
-        None => 0,
-    }
+    ffi_guard!("xybrid_result_stage_latency_ms", 0, {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => data
+                .metrics
+                .stage_latencies_ms
+                .get(index)
+                .map(|s| s.latency_ms)
+                .unwrap_or(0),
+            None => 0,
+        }
+    })
 }
 
 // ============================================================================
@@ -3810,29 +4018,31 @@ pub unsafe extern "C" fn xybrid_bundle_open(path: *const c_char) -> *mut XybridB
         return std::ptr::null_mut();
     }
 
-    let path_str = match CStr::from_ptr(path).to_str() {
-        Ok(s) => s,
-        Err(_) => {
-            set_last_error("path is not valid UTF-8");
+    ffi_guard!("xybrid_bundle_open", std::ptr::null_mut(), {
+        let path_str = match CStr::from_ptr(path).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                set_last_error("path is not valid UTF-8");
+                return std::ptr::null_mut();
+            }
+        };
+
+        if path_str.is_empty() {
+            set_last_error("path is empty");
             return std::ptr::null_mut();
         }
-    };
 
-    if path_str.is_empty() {
-        set_last_error("path is empty");
-        return std::ptr::null_mut();
-    }
-
-    match xybrid_sdk::bundler::XyBundle::load(path_str) {
-        Ok(bundle) => {
-            let state = Box::new(BundleState { bundle });
-            XybridBundleHandle::from_boxed(state)
+        match xybrid_sdk::bundler::XyBundle::load(path_str) {
+            Ok(bundle) => {
+                let state = Box::new(BundleState { bundle });
+                XybridBundleHandle::from_boxed(state)
+            }
+            Err(e) => {
+                set_last_error(&format!("Failed to open bundle: {}", e));
+                std::ptr::null_mut()
+            }
         }
-        Err(e) => {
-            set_last_error(&format!("Failed to open bundle: {}", e));
-            std::ptr::null_mut()
-        }
-    }
+    })
 }
 
 /// Get the manifest JSON from an opened bundle.
@@ -3856,28 +4066,30 @@ pub unsafe extern "C" fn xybrid_bundle_manifest_json(
 ) -> *mut c_char {
     clear_last_error();
 
-    let state = match XybridBundleHandle::as_ref(handle) {
-        Some(s) => s,
-        None => {
-            set_last_error("bundle handle is null or invalid");
-            return std::ptr::null_mut();
-        }
-    };
+    ffi_guard!("xybrid_bundle_manifest_json", std::ptr::null_mut(), {
+        let state = match XybridBundleHandle::as_ref(handle) {
+            Some(s) => s,
+            None => {
+                set_last_error("bundle handle is null or invalid");
+                return std::ptr::null_mut();
+            }
+        };
 
-    let manifest = state.bundle.manifest();
-    match serde_json::to_string(manifest) {
-        Ok(json) => match CString::new(json) {
-            Ok(cstr) => cstr.into_raw(),
-            Err(_) => {
-                set_last_error("manifest JSON contains null bytes");
+        let manifest = state.bundle.manifest();
+        match serde_json::to_string(manifest) {
+            Ok(json) => match CString::new(json) {
+                Ok(cstr) => cstr.into_raw(),
+                Err(_) => {
+                    set_last_error("manifest JSON contains null bytes");
+                    std::ptr::null_mut()
+                }
+            },
+            Err(e) => {
+                set_last_error(&format!("Failed to serialize manifest: {}", e));
                 std::ptr::null_mut()
             }
-        },
-        Err(e) => {
-            set_last_error(&format!("Failed to serialize manifest: {}", e));
-            std::ptr::null_mut()
         }
-    }
+    })
 }
 
 /// Get the model_metadata.json content from an opened bundle.
@@ -3901,31 +4113,33 @@ pub unsafe extern "C" fn xybrid_bundle_metadata_json(
 ) -> *mut c_char {
     clear_last_error();
 
-    let state = match XybridBundleHandle::as_ref(handle) {
-        Some(s) => s,
-        None => {
-            set_last_error("bundle handle is null or invalid");
-            return std::ptr::null_mut();
-        }
-    };
+    ffi_guard!("xybrid_bundle_metadata_json", std::ptr::null_mut(), {
+        let state = match XybridBundleHandle::as_ref(handle) {
+            Some(s) => s,
+            None => {
+                set_last_error("bundle handle is null or invalid");
+                return std::ptr::null_mut();
+            }
+        };
 
-    match state.bundle.get_metadata_json() {
-        Ok(Some(json)) => match CString::new(json) {
-            Ok(cstr) => cstr.into_raw(),
-            Err(_) => {
-                set_last_error("metadata JSON contains null bytes");
+        match state.bundle.get_metadata_json() {
+            Ok(Some(json)) => match CString::new(json) {
+                Ok(cstr) => cstr.into_raw(),
+                Err(_) => {
+                    set_last_error("metadata JSON contains null bytes");
+                    std::ptr::null_mut()
+                }
+            },
+            Ok(None) => {
+                // Not an error — bundle just doesn't have model_metadata.json
                 std::ptr::null_mut()
             }
-        },
-        Ok(None) => {
-            // Not an error — bundle just doesn't have model_metadata.json
-            std::ptr::null_mut()
+            Err(e) => {
+                set_last_error(&format!("Failed to read metadata: {}", e));
+                std::ptr::null_mut()
+            }
         }
-        Err(e) => {
-            set_last_error(&format!("Failed to read metadata: {}", e));
-            std::ptr::null_mut()
-        }
-    }
+    })
 }
 
 /// Extract all files from a bundle to a directory.
@@ -3949,34 +4163,36 @@ pub unsafe extern "C" fn xybrid_bundle_extract(
 ) -> i32 {
     clear_last_error();
 
-    let state = match XybridBundleHandle::as_ref(handle) {
-        Some(s) => s,
-        None => {
-            set_last_error("bundle handle is null or invalid");
+    ffi_guard!("xybrid_bundle_extract", -1, {
+        let state = match XybridBundleHandle::as_ref(handle) {
+            Some(s) => s,
+            None => {
+                set_last_error("bundle handle is null or invalid");
+                return -1;
+            }
+        };
+
+        if output_dir.is_null() {
+            set_last_error("output_dir is null");
             return -1;
         }
-    };
 
-    if output_dir.is_null() {
-        set_last_error("output_dir is null");
-        return -1;
-    }
+        let dir_str = match CStr::from_ptr(output_dir).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                set_last_error("output_dir is not valid UTF-8");
+                return -1;
+            }
+        };
 
-    let dir_str = match CStr::from_ptr(output_dir).to_str() {
-        Ok(s) => s,
-        Err(_) => {
-            set_last_error("output_dir is not valid UTF-8");
-            return -1;
+        match state.bundle.extract_to(dir_str) {
+            Ok(()) => 0,
+            Err(e) => {
+                set_last_error(&format!("Failed to extract bundle: {}", e));
+                -1
+            }
         }
-    };
-
-    match state.bundle.extract_to(dir_str) {
-        Ok(()) => 0,
-        Err(e) => {
-            set_last_error(&format!("Failed to extract bundle: {}", e));
-            -1
-        }
-    }
+    })
 }
 
 /// Get the model ID from an opened bundle's manifest.
@@ -3994,20 +4210,22 @@ pub unsafe extern "C" fn xybrid_bundle_extract(
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_model_id(handle: *mut XybridBundleHandle) -> *const c_char {
     // Read-only accessor — don't clear last error
-    let state = match XybridBundleHandle::as_ref(handle) {
-        Some(s) => s,
-        None => return std::ptr::null(),
-    };
+    ffi_guard!("xybrid_bundle_model_id", std::ptr::null(), {
+        let state = match XybridBundleHandle::as_ref(handle) {
+            Some(s) => s,
+            None => return std::ptr::null(),
+        };
 
-    thread_local! {
-        static BUNDLE_MODEL_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
-    }
-    BUNDLE_MODEL_ID.with(|e| {
-        *e.borrow_mut() = CString::new(state.bundle.manifest().model_id.as_str()).ok();
-        match e.borrow().as_ref() {
-            Some(cstr) => cstr.as_ptr(),
-            None => std::ptr::null(),
+        thread_local! {
+            static BUNDLE_MODEL_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
         }
+        BUNDLE_MODEL_ID.with(|e| {
+            *e.borrow_mut() = CString::new(state.bundle.manifest().model_id.as_str()).ok();
+            match e.borrow().as_ref() {
+                Some(cstr) => cstr.as_ptr(),
+                None => std::ptr::null(),
+            }
+        })
     })
 }
 
@@ -4017,20 +4235,22 @@ pub unsafe extern "C" fn xybrid_bundle_model_id(handle: *mut XybridBundleHandle)
 /// call to this function on the same thread. Do NOT free it.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_version(handle: *mut XybridBundleHandle) -> *const c_char {
-    let state = match XybridBundleHandle::as_ref(handle) {
-        Some(s) => s,
-        None => return std::ptr::null(),
-    };
+    ffi_guard!("xybrid_bundle_version", std::ptr::null(), {
+        let state = match XybridBundleHandle::as_ref(handle) {
+            Some(s) => s,
+            None => return std::ptr::null(),
+        };
 
-    thread_local! {
-        static BUNDLE_VERSION: RefCell<Option<CString>> = const { RefCell::new(None) };
-    }
-    BUNDLE_VERSION.with(|e| {
-        *e.borrow_mut() = CString::new(state.bundle.manifest().version.as_str()).ok();
-        match e.borrow().as_ref() {
-            Some(cstr) => cstr.as_ptr(),
-            None => std::ptr::null(),
+        thread_local! {
+            static BUNDLE_VERSION: RefCell<Option<CString>> = const { RefCell::new(None) };
         }
+        BUNDLE_VERSION.with(|e| {
+            *e.borrow_mut() = CString::new(state.bundle.manifest().version.as_str()).ok();
+            match e.borrow().as_ref() {
+                Some(cstr) => cstr.as_ptr(),
+                None => std::ptr::null(),
+            }
+        })
     })
 }
 
@@ -4040,20 +4260,22 @@ pub unsafe extern "C" fn xybrid_bundle_version(handle: *mut XybridBundleHandle) 
 /// call to this function on the same thread. Do NOT free it.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_target(handle: *mut XybridBundleHandle) -> *const c_char {
-    let state = match XybridBundleHandle::as_ref(handle) {
-        Some(s) => s,
-        None => return std::ptr::null(),
-    };
+    ffi_guard!("xybrid_bundle_target", std::ptr::null(), {
+        let state = match XybridBundleHandle::as_ref(handle) {
+            Some(s) => s,
+            None => return std::ptr::null(),
+        };
 
-    thread_local! {
-        static BUNDLE_TARGET: RefCell<Option<CString>> = const { RefCell::new(None) };
-    }
-    BUNDLE_TARGET.with(|e| {
-        *e.borrow_mut() = CString::new(state.bundle.manifest().target.as_str()).ok();
-        match e.borrow().as_ref() {
-            Some(cstr) => cstr.as_ptr(),
-            None => std::ptr::null(),
+        thread_local! {
+            static BUNDLE_TARGET: RefCell<Option<CString>> = const { RefCell::new(None) };
         }
+        BUNDLE_TARGET.with(|e| {
+            *e.borrow_mut() = CString::new(state.bundle.manifest().target.as_str()).ok();
+            match e.borrow().as_ref() {
+                Some(cstr) => cstr.as_ptr(),
+                None => std::ptr::null(),
+            }
+        })
     })
 }
 
@@ -4063,20 +4285,22 @@ pub unsafe extern "C" fn xybrid_bundle_target(handle: *mut XybridBundleHandle) -
 /// call to this function on the same thread. Do NOT free it.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_hash(handle: *mut XybridBundleHandle) -> *const c_char {
-    let state = match XybridBundleHandle::as_ref(handle) {
-        Some(s) => s,
-        None => return std::ptr::null(),
-    };
+    ffi_guard!("xybrid_bundle_hash", std::ptr::null(), {
+        let state = match XybridBundleHandle::as_ref(handle) {
+            Some(s) => s,
+            None => return std::ptr::null(),
+        };
 
-    thread_local! {
-        static BUNDLE_HASH: RefCell<Option<CString>> = const { RefCell::new(None) };
-    }
-    BUNDLE_HASH.with(|e| {
-        *e.borrow_mut() = CString::new(state.bundle.manifest().hash.as_str()).ok();
-        match e.borrow().as_ref() {
-            Some(cstr) => cstr.as_ptr(),
-            None => std::ptr::null(),
+        thread_local! {
+            static BUNDLE_HASH: RefCell<Option<CString>> = const { RefCell::new(None) };
         }
+        BUNDLE_HASH.with(|e| {
+            *e.borrow_mut() = CString::new(state.bundle.manifest().hash.as_str()).ok();
+            match e.borrow().as_ref() {
+                Some(cstr) => cstr.as_ptr(),
+                None => std::ptr::null(),
+            }
+        })
     })
 }
 
@@ -4088,16 +4312,18 @@ pub unsafe extern "C" fn xybrid_bundle_hash(handle: *mut XybridBundleHandle) -> 
 /// - `0` if not, or if the handle is null/invalid
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_has_metadata(handle: *mut XybridBundleHandle) -> i32 {
-    let state = match XybridBundleHandle::as_ref(handle) {
-        Some(s) => s,
-        None => return 0,
-    };
+    ffi_guard!("xybrid_bundle_has_metadata", 0, {
+        let state = match XybridBundleHandle::as_ref(handle) {
+            Some(s) => s,
+            None => return 0,
+        };
 
-    if state.bundle.manifest().has_metadata {
-        1
-    } else {
-        0
-    }
+        if state.bundle.manifest().has_metadata {
+            1
+        } else {
+            0
+        }
+    })
 }
 
 /// Get the number of files in the bundle.
@@ -4107,12 +4333,14 @@ pub unsafe extern "C" fn xybrid_bundle_has_metadata(handle: *mut XybridBundleHan
 /// The file count, or 0 if the handle is null/invalid.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_file_count(handle: *mut XybridBundleHandle) -> u32 {
-    let state = match XybridBundleHandle::as_ref(handle) {
-        Some(s) => s,
-        None => return 0,
-    };
+    ffi_guard!("xybrid_bundle_file_count", 0, {
+        let state = match XybridBundleHandle::as_ref(handle) {
+            Some(s) => s,
+            None => return 0,
+        };
 
-    state.bundle.manifest().files.len() as u32
+        state.bundle.manifest().files.len() as u32
+    })
 }
 
 /// Get the filename at a given index in the bundle's file list.
@@ -4133,25 +4361,27 @@ pub unsafe extern "C" fn xybrid_bundle_file_name(
     handle: *mut XybridBundleHandle,
     index: u32,
 ) -> *const c_char {
-    let state = match XybridBundleHandle::as_ref(handle) {
-        Some(s) => s,
-        None => return std::ptr::null(),
-    };
+    ffi_guard!("xybrid_bundle_file_name", std::ptr::null(), {
+        let state = match XybridBundleHandle::as_ref(handle) {
+            Some(s) => s,
+            None => return std::ptr::null(),
+        };
 
-    let files = &state.bundle.manifest().files;
-    if (index as usize) >= files.len() {
-        return std::ptr::null();
-    }
-
-    thread_local! {
-        static BUNDLE_FILE_NAME: RefCell<Option<CString>> = const { RefCell::new(None) };
-    }
-    BUNDLE_FILE_NAME.with(|e| {
-        *e.borrow_mut() = CString::new(files[index as usize].as_str()).ok();
-        match e.borrow().as_ref() {
-            Some(cstr) => cstr.as_ptr(),
-            None => std::ptr::null(),
+        let files = &state.bundle.manifest().files;
+        if (index as usize) >= files.len() {
+            return std::ptr::null();
         }
+
+        thread_local! {
+            static BUNDLE_FILE_NAME: RefCell<Option<CString>> = const { RefCell::new(None) };
+        }
+        BUNDLE_FILE_NAME.with(|e| {
+            *e.borrow_mut() = CString::new(files[index as usize].as_str()).ok();
+            match e.borrow().as_ref() {
+                Some(cstr) => cstr.as_ptr(),
+                None => std::ptr::null(),
+            }
+        })
     })
 }
 
@@ -4164,9 +4394,12 @@ pub unsafe extern "C" fn xybrid_bundle_file_name(
 /// - `handle`: A handle to the bundle to free. May be null (no-op).
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_free(handle: *mut XybridBundleHandle) {
-    if !handle.is_null() {
-        let _ = XybridBundleHandle::into_boxed(handle);
+    if handle.is_null() {
+        return;
     }
+    ffi_guard!("xybrid_bundle_free", (), {
+        let _ = XybridBundleHandle::into_boxed(handle);
+    })
 }
 
 // ============================================================================
@@ -4256,19 +4489,21 @@ pub unsafe extern "C" fn xybrid_telemetry_config_new(
         return std::ptr::null_mut();
     }
 
-    let api_key_str = match CStr::from_ptr(api_key).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("api_key is not valid UTF-8");
-            return std::ptr::null_mut();
-        }
-    };
+    ffi_guard!("xybrid_telemetry_config_new", std::ptr::null_mut(), {
+        let api_key_str = match CStr::from_ptr(api_key).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("api_key is not valid UTF-8");
+                return std::ptr::null_mut();
+            }
+        };
 
-    let config = Box::new(xybrid_sdk::telemetry::TelemetryConfig::new(
-        xybrid_sdk::telemetry::DEFAULT_INGEST_URL,
-        api_key_str,
-    ));
-    XybridTelemetryConfigHandle::from_boxed(config)
+        let config = Box::new(xybrid_sdk::telemetry::TelemetryConfig::new(
+            xybrid_sdk::telemetry::DEFAULT_INGEST_URL,
+            api_key_str,
+        ));
+        XybridTelemetryConfigHandle::from_boxed(config)
+    })
 }
 
 /// Get a static pointer to the SDK's default telemetry ingest URL.
@@ -4280,12 +4515,14 @@ pub unsafe extern "C" fn xybrid_telemetry_config_new(
 #[no_mangle]
 pub extern "C" fn xybrid_telemetry_default_endpoint() -> *const c_char {
     static DEFAULT_ENDPOINT_CSTRING: std::sync::OnceLock<CString> = std::sync::OnceLock::new();
-    DEFAULT_ENDPOINT_CSTRING
-        .get_or_init(|| {
-            CString::new(xybrid_sdk::telemetry::DEFAULT_INGEST_URL)
-                .expect("DEFAULT_INGEST_URL contains no null bytes")
-        })
-        .as_ptr()
+    ffi_guard!("xybrid_telemetry_default_endpoint", std::ptr::null(), {
+        DEFAULT_ENDPOINT_CSTRING
+            .get_or_init(|| {
+                CString::new(xybrid_sdk::telemetry::DEFAULT_INGEST_URL)
+                    .expect("DEFAULT_INGEST_URL contains no null bytes")
+            })
+            .as_ptr()
+    })
 }
 
 /// Free a telemetry config handle.
@@ -4299,9 +4536,12 @@ pub extern "C" fn xybrid_telemetry_default_endpoint() -> *const c_char {
 /// - `handle`: Handle to free. May be null (no-op).
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_telemetry_config_free(handle: *mut XybridTelemetryConfigHandle) {
-    if !handle.is_null() {
-        let _ = XybridTelemetryConfigHandle::into_boxed(handle);
+    if handle.is_null() {
+        return;
     }
+    ffi_guard!("xybrid_telemetry_config_free", (), {
+        let _ = XybridTelemetryConfigHandle::into_boxed(handle);
+    })
 }
 
 /// Set the app version on a telemetry config.
@@ -4317,26 +4557,28 @@ pub unsafe extern "C" fn xybrid_telemetry_config_set_app_version(
 ) -> i32 {
     clear_last_error();
 
-    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
-        Some(c) => c,
-        None => {
-            set_last_error("telemetry config handle is null");
-            return -1;
+    ffi_guard!("xybrid_telemetry_config_set_app_version", -1, {
+        let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+            Some(c) => c,
+            None => {
+                set_last_error("telemetry config handle is null");
+                return -1;
+            }
+        };
+        if version.is_null() {
+            set_last_error("version is null");
+            return -2;
         }
-    };
-    if version.is_null() {
-        set_last_error("version is null");
-        return -2;
-    }
-    let version_str = match CStr::from_ptr(version).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("version is not valid UTF-8");
-            return -3;
-        }
-    };
-    config.app_version = Some(version_str);
-    0
+        let version_str = match CStr::from_ptr(version).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("version is not valid UTF-8");
+                return -3;
+            }
+        };
+        config.app_version = Some(version_str);
+        0
+    })
 }
 
 /// Override the ingest endpoint on a telemetry config.
@@ -4357,26 +4599,28 @@ pub unsafe extern "C" fn xybrid_telemetry_config_set_endpoint(
 ) -> i32 {
     clear_last_error();
 
-    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
-        Some(c) => c,
-        None => {
-            set_last_error("telemetry config handle is null");
-            return -1;
+    ffi_guard!("xybrid_telemetry_config_set_endpoint", -1, {
+        let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+            Some(c) => c,
+            None => {
+                set_last_error("telemetry config handle is null");
+                return -1;
+            }
+        };
+        if endpoint.is_null() {
+            set_last_error("endpoint is null");
+            return -2;
         }
-    };
-    if endpoint.is_null() {
-        set_last_error("endpoint is null");
-        return -2;
-    }
-    let endpoint_str = match CStr::from_ptr(endpoint).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("endpoint is not valid UTF-8");
-            return -3;
-        }
-    };
-    config.endpoint = endpoint_str;
-    0
+        let endpoint_str = match CStr::from_ptr(endpoint).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("endpoint is not valid UTF-8");
+                return -3;
+            }
+        };
+        config.endpoint = endpoint_str;
+        0
+    })
 }
 
 /// Set the human-friendly device label on a telemetry config.
@@ -4391,26 +4635,28 @@ pub unsafe extern "C" fn xybrid_telemetry_config_set_device_label(
 ) -> i32 {
     clear_last_error();
 
-    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
-        Some(c) => c,
-        None => {
-            set_last_error("telemetry config handle is null");
-            return -1;
+    ffi_guard!("xybrid_telemetry_config_set_device_label", -1, {
+        let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+            Some(c) => c,
+            None => {
+                set_last_error("telemetry config handle is null");
+                return -1;
+            }
+        };
+        if label.is_null() {
+            set_last_error("label is null");
+            return -2;
         }
-    };
-    if label.is_null() {
-        set_last_error("label is null");
-        return -2;
-    }
-    let label_str = match CStr::from_ptr(label).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("label is not valid UTF-8");
-            return -3;
-        }
-    };
-    config.device_label = Some(label_str);
-    0
+        let label_str = match CStr::from_ptr(label).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("label is not valid UTF-8");
+                return -3;
+            }
+        };
+        config.device_label = Some(label_str);
+        0
+    })
 }
 
 /// Attach an arbitrary app-provided device attribute (key/value string pair).
@@ -4428,40 +4674,42 @@ pub unsafe extern "C" fn xybrid_telemetry_config_set_device_attribute(
 ) -> i32 {
     clear_last_error();
 
-    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
-        Some(c) => c,
-        None => {
-            set_last_error("telemetry config handle is null");
-            return -1;
+    ffi_guard!("xybrid_telemetry_config_set_device_attribute", -1, {
+        let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+            Some(c) => c,
+            None => {
+                set_last_error("telemetry config handle is null");
+                return -1;
+            }
+        };
+        if key.is_null() {
+            set_last_error("key is null");
+            return -2;
         }
-    };
-    if key.is_null() {
-        set_last_error("key is null");
-        return -2;
-    }
-    if value.is_null() {
-        set_last_error("value is null");
-        return -3;
-    }
-    let key_str = match CStr::from_ptr(key).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("key is not valid UTF-8");
-            return -4;
+        if value.is_null() {
+            set_last_error("value is null");
+            return -3;
         }
-    };
-    let value_str = match CStr::from_ptr(value).to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            set_last_error("value is not valid UTF-8");
-            return -5;
-        }
-    };
-    config
-        .device_profile_patch
-        .custom
-        .insert(key_str, value_str);
-    0
+        let key_str = match CStr::from_ptr(key).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("key is not valid UTF-8");
+                return -4;
+            }
+        };
+        let value_str = match CStr::from_ptr(value).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                set_last_error("value is not valid UTF-8");
+                return -5;
+            }
+        };
+        config
+            .device_profile_patch
+            .custom
+            .insert(key_str, value_str);
+        0
+    })
 }
 
 /// Set the batch size (events buffered before a flush).
@@ -4476,15 +4724,17 @@ pub unsafe extern "C" fn xybrid_telemetry_config_set_batch_size(
 ) -> i32 {
     clear_last_error();
 
-    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
-        Some(c) => c,
-        None => {
-            set_last_error("telemetry config handle is null");
-            return -1;
-        }
-    };
-    config.batch_size = batch_size as usize;
-    0
+    ffi_guard!("xybrid_telemetry_config_set_batch_size", -1, {
+        let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+            Some(c) => c,
+            None => {
+                set_last_error("telemetry config handle is null");
+                return -1;
+            }
+        };
+        config.batch_size = batch_size as usize;
+        0
+    })
 }
 
 /// Set the flush interval in seconds.
@@ -4499,15 +4749,17 @@ pub unsafe extern "C" fn xybrid_telemetry_config_set_flush_interval_secs(
 ) -> i32 {
     clear_last_error();
 
-    let config = match XybridTelemetryConfigHandle::as_mut(handle) {
-        Some(c) => c,
-        None => {
-            set_last_error("telemetry config handle is null");
-            return -1;
-        }
-    };
-    config.flush_interval_secs = secs as u64;
-    0
+    ffi_guard!("xybrid_telemetry_config_set_flush_interval_secs", -1, {
+        let config = match XybridTelemetryConfigHandle::as_mut(handle) {
+            Some(c) => c,
+            None => {
+                set_last_error("telemetry config handle is null");
+                return -1;
+            }
+        };
+        config.flush_interval_secs = secs as u64;
+        0
+    })
 }
 
 // ============================================================================
@@ -4654,6 +4906,33 @@ mod tests {
     // Note: LoaderState and ModelState hold SDK objects (ModelLoader, XybridModel)
     // which require actual model paths or registry access to construct.
     // Handle roundtrip is tested implicitly through the integration tests below.
+
+    #[test]
+    fn cstring_lossy_passes_through_clean_utf8() {
+        let cs = cstring_lossy("hello world");
+        assert_eq!(cs.as_bytes(), b"hello world");
+    }
+
+    #[test]
+    fn cstring_lossy_replaces_interior_nul_with_utf8_replacement_char() {
+        // Streaming token containing an interior NUL used to be silently
+        // dropped by `unwrap_or_default()`. After the fix the NUL becomes
+        // U+FFFD (REPLACEMENT CHARACTER) and the surrounding text survives.
+        let cs = cstring_lossy("ab\0cd");
+        assert_eq!(cs.as_bytes(), b"ab\xEF\xBF\xBDcd");
+    }
+
+    #[test]
+    fn cstring_lossy_handles_multiple_interior_nuls() {
+        let cs = cstring_lossy("\0a\0b\0");
+        assert_eq!(cs.as_bytes(), b"\xEF\xBF\xBDa\xEF\xBF\xBDb\xEF\xBF\xBD");
+    }
+
+    #[test]
+    fn cstring_lossy_empty_string_yields_empty_cstring() {
+        let cs = cstring_lossy("");
+        assert_eq!(cs.as_bytes(), b"");
+    }
 
     #[test]
     fn test_envelope_handle_audio() {
