@@ -77,9 +77,15 @@ jobs:
           ls -la "$XCFW_PATH"
           echo ""
           echo "Verifying architectures..."
-          file "$XCFW_PATH/ios-arm64/libxybrid_uniffi.a" || true
-          file "$XCFW_PATH/ios-arm64-simulator/libxybrid_uniffi.a" || true
-          file "$XCFW_PATH/macos-arm64/libxybrid_uniffi.a" || true
+          # boltffi emits libxybrid-bolt.a per slice (ios-arm64,
+          # ios-arm64-simulator; macOS excluded). Glob rather than
+          # hard-code the slice/lib names.
+          found=$(find "$XCFW_PATH" -name '*.a')
+          if [ -z "$found" ]; then
+            echo "Error: no static libraries found inside the XCFramework"
+            exit 1
+          fi
+          echo "$found" | while read -r lib; do file "$lib"; done
 
   #
   # Precompile Flutter (darwin)
@@ -369,7 +375,7 @@ jobs:
         run: |
           SO_BASE_PATH="bindings/kotlin/libs"
           for abi in armeabi-v7a arm64-v8a x86_64; do
-            SO_PATH="$SO_BASE_PATH/$abi/libxybrid_uniffi.so"
+            SO_PATH="$SO_BASE_PATH/$abi/libxybrid-bolt.so"
             if [ ! -f "$SO_PATH" ]; then
               echo "Error: .so file not found at $SO_PATH"
               exit 1
