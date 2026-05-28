@@ -116,8 +116,23 @@ pub enum SdkError {
 /// Result type for SDK operations.
 pub type SdkResult<T> = Result<T, SdkError>;
 
-impl xybrid_core::http::RetryableError for SdkError {
-    fn is_retryable(&self) -> bool {
+impl SdkError {
+    /// Whether retrying the operation that produced this error could
+    /// succeed without the caller changing anything.
+    ///
+    /// Transient failures (`NetworkError`, `RateLimited`, `Timeout`,
+    /// `Offline`) are retryable; everything else — including
+    /// `CircuitOpen`, `ConfigError`, `ModelNotFound`, `LoadError`,
+    /// `InferenceError`, and `AbortedForCloudFallback` — is not. `Offline`
+    /// is retryable only across *different* registry URLs (a fallback
+    /// registry may be reachable when the primary isn't); within a single
+    /// URL the retry loop short-circuits (see `registry_client`).
+    ///
+    /// This is the inherent form of the [`xybrid_core::http::RetryableError`]
+    /// trait method, exposed directly on `SdkError` so callers (and the
+    /// FFI / UniFFI layers) can query retryability without importing the
+    /// trait. The trait impl forwards here.
+    pub fn is_retryable(&self) -> bool {
         match self {
             // Retryable errors (transient failures)
             SdkError::NetworkError(_) => true,
@@ -148,13 +163,30 @@ impl xybrid_core::http::RetryableError for SdkError {
         }
     }
 
-    fn retry_after(&self) -> Option<std::time::Duration> {
+    /// The minimum delay a caller should wait before retrying, when the
+    /// error itself dictates one. Only `RateLimited` carries a
+    /// server-specified backoff; every other variant returns `None`
+    /// (the caller picks its own backoff if [`Self::is_retryable`]).
+    ///
+    /// Inherent form of [`xybrid_core::http::RetryableError::retry_after`];
+    /// the trait impl forwards here.
+    pub fn retry_after(&self) -> Option<std::time::Duration> {
         match self {
             SdkError::RateLimited { retry_after_secs } => {
                 Some(std::time::Duration::from_secs(*retry_after_secs))
             }
             _ => None,
         }
+    }
+}
+
+impl xybrid_core::http::RetryableError for SdkError {
+    fn is_retryable(&self) -> bool {
+        SdkError::is_retryable(self)
+    }
+
+    fn retry_after(&self) -> Option<std::time::Duration> {
+        SdkError::retry_after(self)
     }
 }
 
@@ -2899,6 +2931,47 @@ impl Clone for XybridModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The inherent `SdkError::is_retryable` / `retry_after` accessors and
+    /// the `RetryableError` trait impl must agree for every variant — the
+    /// trait forwards to the inherent methods, so a divergence would be a
+    /// refactor slip. Covers the four retryable variants, a representative
+    /// non-retryable one, and the `RateLimited` retry-after passthrough.
+    #[test]
+    fn inherent_and_trait_retryability_agree() {
+        use xybrid_core::http::RetryableError;
+
+        let cases = [
+            (SdkError::NetworkError("x".into()), true),
+            (
+                SdkError::RateLimited {
+                    retry_after_secs: 5,
+                },
+                true,
+            ),
+            (SdkError::Timeout { timeout_ms: 100 }, true),
+            (SdkError::Offline("x".into()), true),
+            (SdkError::CircuitOpen("x".into()), false),
+            (SdkError::NotLoaded, false),
+            (SdkError::ConfigError("x".into()), false),
+        ];
+        for (err, expected) in &cases {
+            assert_eq!(err.is_retryable(), *expected, "inherent for {err:?}");
+            assert_eq!(
+                RetryableError::is_retryable(err),
+                *expected,
+                "trait for {err:?}"
+            );
+        }
+
+        // Only RateLimited carries a server-specified backoff.
+        let rl = SdkError::RateLimited {
+            retry_after_secs: 7,
+        };
+        assert_eq!(rl.retry_after(), Some(std::time::Duration::from_secs(7)));
+        assert_eq!(rl.retry_after(), RetryableError::retry_after(&rl));
+        assert_eq!(SdkError::NotLoaded.retry_after(), None);
+    }
 
     #[test]
     fn streaming_execution_error_preserves_typed_cloud_fallback_abort() {

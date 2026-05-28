@@ -50,7 +50,7 @@ use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryableError};
+use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 
 pub const DEFAULT_REGISTRY_URL: &str = "https://registry.xybrid.dev";
 pub const FALLBACK_REGISTRY_URL: &str = "https://r2.xybrid.dev";

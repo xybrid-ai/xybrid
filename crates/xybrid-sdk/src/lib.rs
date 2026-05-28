@@ -211,6 +211,11 @@ pub use model::{
 pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
 pub use run_options::{AbortPolicy, AbortReason, AbortSignal, CancellationToken, RunOptions};
+// Re-exported so callers can use the trait form of `SdkError::is_retryable`
+// / `retry_after` (e.g. in generic retry helpers) without naming
+// `xybrid_core`. The inherent methods on `SdkError` cover the common case
+// without any import.
+pub use xybrid_core::http::RetryableError;
 // Pipeline API (PipelineRef → Pipeline)
 pub use pipeline::{
     // Config types for FFI bindings (Flutter, Kotlin, Swift)
