@@ -1,0 +1,26 @@
+.github/workflows/release-publish.yml
+  s_93e9e173c209bc::t_918b9859831e17 428-429
+.github/workflows/release.yml
+  s_93e9e173c209bc::t_175a67fe523640 855
+xtask/src/main.rs
+  s_93e9e173c209bc::t_868a39488c95a9 1-7
+  s_93e9e173c209bc::t_ee8892ebac8ba1 1511-1515
+  s_93e9e173c209bc::t_a2c64650efb947 1534-1561,1564-1576,1579,1583-1588,1590-1595,1601
+  s_93e9e173c209bc::t_9b50143bc557a0 1386-1413,1421,1425-1433,1435-1436,1438,1440-1442,1445-1451,1453-1459,1463-1469,1472-1476,1479-1492,1494-1499,1502-1506
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "abb784c812eb2b795ee063d7f3ce4096fd4f787d",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
