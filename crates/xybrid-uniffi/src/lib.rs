@@ -195,6 +195,77 @@ pub enum XybridError {
     Timeout { timeout_ms: u64 },
 }
 
+impl XybridError {
+    /// Whether retrying the operation that produced this error could
+    /// succeed without the caller changing anything.
+    ///
+    /// Mirrors the Rust SDK's `SdkError::is_retryable` contract across
+    /// the UniFFI boundary: `NetworkError`, `RateLimited`, and `Timeout`
+    /// are retryable; everything else is not. (`SdkError::Offline`, also
+    /// retryable on the Rust side, is collapsed into `NetworkError` by
+    /// the `From` impl below, so its retryability is preserved.) Swift /
+    /// Kotlin callers reach this via the exported
+    /// [`xybrid_error_is_retryable`] free function rather than
+    /// pattern-matching on variants that may shift between releases.
+    fn is_retryable(&self) -> bool {
+        match self {
+            XybridError::NetworkError { .. }
+            | XybridError::RateLimited { .. }
+            | XybridError::Timeout { .. } => true,
+
+            XybridError::ModelNotFound { .. }
+            | XybridError::DirectoryNotFound { .. }
+            | XybridError::MetadataNotFound { .. }
+            | XybridError::MetadataInvalid { .. }
+            | XybridError::LoadError { .. }
+            | XybridError::InferenceError { .. }
+            | XybridError::StreamingNotSupported
+            | XybridError::NotLoaded
+            | XybridError::ConfigError { .. }
+            | XybridError::IoError { .. }
+            | XybridError::CacheError { .. }
+            | XybridError::PipelineError { .. }
+            | XybridError::CircuitOpen { .. } => false,
+        }
+    }
+
+    /// The minimum delay (in seconds) a caller should wait before
+    /// retrying, when the error itself dictates one. Only `RateLimited`
+    /// carries a server-specified backoff; every other variant returns
+    /// `None`. Exposed to Swift / Kotlin via
+    /// [`xybrid_error_retry_after_secs`].
+    fn retry_after_secs(&self) -> Option<u64> {
+        match self {
+            XybridError::RateLimited { retry_after_secs } => Some(*retry_after_secs),
+            _ => None,
+        }
+    }
+}
+
+/// Whether the given error is worth retrying without changes.
+///
+/// The UniFFI-exported mirror of the Rust SDK's retryability contract.
+/// Swift / Kotlin callers should branch on this instead of switching on
+/// `XybridError` variants directly, so retry logic survives variant
+/// additions/renames between releases.
+///
+/// In Swift: `if xybridErrorIsRetryable(error: caught) { … }`
+/// In Kotlin: `if (xybridErrorIsRetryable(caught)) { … }`
+#[uniffi::export]
+fn xybrid_error_is_retryable(error: &XybridError) -> bool {
+    error.is_retryable()
+}
+
+/// Server-specified retry delay in seconds, if the error carries one.
+///
+/// Returns the `RateLimited` backoff when present; `None` for every
+/// other error (the caller picks its own backoff if
+/// [`xybrid_error_is_retryable`] returned true).
+#[uniffi::export]
+fn xybrid_error_retry_after_secs(error: &XybridError) -> Option<u64> {
+    error.retry_after_secs()
+}
+
 impl From<SdkError> for XybridError {
     fn from(e: SdkError) -> Self {
         match e {
@@ -666,6 +737,68 @@ impl XybridModelLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `XybridError` retryability must mirror the Rust SDK's
+    /// `SdkError::is_retryable` contract across the boundary, and the
+    /// `From<SdkError>` collapse of `Offline → NetworkError` must
+    /// preserve retryability (both are retryable). The match is
+    /// exhaustive so a new variant forces a decision here too.
+    #[test]
+    fn error_retryability_mirrors_sdk_contract() {
+        // Retryable variants.
+        assert!(XybridError::NetworkError {
+            message: "x".into()
+        }
+        .is_retryable());
+        assert!(XybridError::RateLimited {
+            retry_after_secs: 5
+        }
+        .is_retryable());
+        assert!(XybridError::Timeout { timeout_ms: 100 }.is_retryable());
+
+        // Representative non-retryable variants.
+        assert!(!XybridError::NotLoaded.is_retryable());
+        assert!(!XybridError::CircuitOpen {
+            message: "x".into()
+        }
+        .is_retryable());
+        assert!(!XybridError::InferenceError {
+            message: "x".into()
+        }
+        .is_retryable());
+
+        // SdkError::Offline collapses to NetworkError, which is retryable —
+        // so the Rust-side Offline retryability survives the boundary. This
+        // is the load-bearing cross-boundary assertion: the `From` impl
+        // must not silently demote a retryable error to a non-retryable
+        // variant.
+        let from_offline: XybridError = SdkError::Offline("down".into()).into();
+        assert!(matches!(from_offline, XybridError::NetworkError { .. }));
+        assert!(from_offline.is_retryable());
+    }
+
+    #[test]
+    fn retry_after_secs_only_on_rate_limited() {
+        assert_eq!(
+            XybridError::RateLimited {
+                retry_after_secs: 7
+            }
+            .retry_after_secs(),
+            Some(7)
+        );
+        assert_eq!(
+            XybridError::Timeout { timeout_ms: 100 }.retry_after_secs(),
+            None
+        );
+        assert_eq!(XybridError::NotLoaded.retry_after_secs(), None);
+
+        // The exported free functions delegate to the inherent methods.
+        let rl = XybridError::RateLimited {
+            retry_after_secs: 9,
+        };
+        assert!(xybrid_error_is_retryable(&rl));
+        assert_eq!(xybrid_error_retry_after_secs(&rl), Some(9));
+    }
 
     // Pure-helper tests: exercise every accepted platform without touching
     // the process-global OnceLock in xybrid-sdk. This is the only way to
