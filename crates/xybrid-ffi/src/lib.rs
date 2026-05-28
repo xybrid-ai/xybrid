@@ -165,12 +165,85 @@ pub(crate) struct ResultData {
     /// All LLM-specific fields are `None` on error paths and for
     /// non-LLM models; `stage_latencies_ms` is empty for `model.run()`.
     pub metrics: xybrid_sdk::InferenceMetrics,
+
+    // --- Caches for FFI accessors (audit theme 2) ---
+    //
+    // Each `xybrid_result_{text,error,output_type,stage_id}` returns a
+    // `*const c_char` documented as "valid until the result handle is
+    // freed." The prior thread-local pattern invalidated those pointers
+    // on every accessor call, so a C caller that followed the docs would
+    // UAF. These caches own a `CString` per accessor and back the
+    // returned pointer with handle-lifetime storage. Populated once at
+    // construction via [`ResultData::populate_caches`]; never mutated
+    // afterward.
+    pub text_cache: Option<CString>,
+    pub error_cache: Option<CString>,
+    pub output_type_cache: Option<CString>,
+    /// Parallel to `metrics.stage_latencies_ms` — same length, same order.
+    pub stage_id_cache: Vec<CString>,
+}
+
+impl ResultData {
+    /// Build the FFI-facing `CString` caches from the current owned
+    /// string fields. Idempotent — call at the end of every
+    /// `ResultData` construction site so the four `xybrid_result_*`
+    /// accessors can hand out handle-lifetime pointers. Uses
+    /// [`cstring_lossy`] to substitute U+FFFD for any interior NUL
+    /// bytes, matching the convention the streaming callback already
+    /// uses for token text.
+    fn populate_caches(&mut self) {
+        self.text_cache = self.text.as_deref().map(cstring_lossy);
+        self.error_cache = self.error.as_deref().map(cstring_lossy);
+        self.output_type_cache = Some(cstring_lossy(self.output_type.as_str()));
+        self.stage_id_cache = self
+            .metrics
+            .stage_latencies_ms
+            .iter()
+            .map(|s| cstring_lossy(s.stage_id.as_str()))
+            .collect();
+    }
+
+    /// Build a fully-cached `ResultData` for a failed inference.
+    ///
+    /// Used by every SDK-error and panic-fallback branch in the
+    /// `xybrid_model_run*` family — they all want the same shape
+    /// (`success: false`, empty output, zero latency, default metrics)
+    /// with only the error message varying. Centralising the
+    /// construction also guarantees the audit-fix caches are populated
+    /// on every error path, including the panic-fallback handlers.
+    fn failure(error: String) -> Self {
+        let mut data = ResultData {
+            success: false,
+            error: Some(error),
+            output_type: String::new(),
+            text: None,
+            embedding: None,
+            audio_bytes: None,
+            latency_ms: 0,
+            metrics: xybrid_sdk::InferenceMetrics::default(),
+            text_cache: None,
+            error_cache: None,
+            output_type_cache: None,
+            stage_id_cache: Vec::new(),
+        };
+        data.populate_caches();
+        data
+    }
 }
 
 /// Internal conversation context.
 pub(crate) struct ContextData {
     /// The conversation context instance.
     pub context: ConversationContext,
+    /// `CString` mirror of `context.id()` cached at handle construction so
+    /// `xybrid_context_id` can hand C callers a pointer whose lifetime is
+    /// genuinely tied to the handle, not to "until the next call on this
+    /// thread" (the prior thread-local pattern was an audit-flagged UAF —
+    /// see `.context/audit-ffi.md` theme 2). `None` only on the impossible
+    /// path where the conversation id contained an interior NUL byte;
+    /// UUID-generated ids never trigger that, and FFI-provided ids come
+    /// through `CStr::to_str` which already excludes NULs.
+    pub id_cache: Option<CString>,
 }
 
 /// Internal generation config data.
@@ -364,7 +437,7 @@ fn envelope_data_to_sdk(data: &EnvelopeData) -> Envelope {
 
 /// Convert SDK InferenceResult to FFI ResultData.
 fn inference_result_to_data(result: &xybrid_sdk::InferenceResult) -> ResultData {
-    ResultData {
+    let mut data = ResultData {
         success: true,
         error: None,
         output_type: match result.text() {
@@ -382,7 +455,13 @@ fn inference_result_to_data(result: &xybrid_sdk::InferenceResult) -> ResultData 
         audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
         latency_ms: result.latency_ms(),
         metrics: result.metrics().clone(),
-    }
+        text_cache: None,
+        error_cache: None,
+        output_type_cache: None,
+        stage_id_cache: Vec::new(),
+    };
+    data.populate_caches();
+    data
 }
 
 // ============================================================================
@@ -1773,9 +1852,9 @@ pub extern "C" fn xybrid_context_new() -> *mut XybridContextHandle {
     clear_last_error();
 
     ffi_guard!("xybrid_context_new", std::ptr::null_mut(), {
-        let context = Box::new(ContextData {
-            context: ConversationContext::new(),
-        });
+        let context = ConversationContext::new();
+        let id_cache = CString::new(context.id()).ok();
+        let context = Box::new(ContextData { context, id_cache });
 
         XybridContextHandle::from_boxed(context)
     })
@@ -1814,9 +1893,9 @@ pub unsafe extern "C" fn xybrid_context_with_id(id: *const c_char) -> *mut Xybri
             }
         };
 
-        let context = Box::new(ContextData {
-            context: ConversationContext::with_id(id_str),
-        });
+        let context = ConversationContext::with_id(id_str);
+        let id_cache = CString::new(context.id()).ok();
+        let context = Box::new(ContextData { context, id_cache });
 
         XybridContextHandle::from_boxed(context)
     })
@@ -2076,8 +2155,10 @@ pub unsafe extern "C" fn xybrid_context_clear(handle: *mut XybridContextHandle) 
 /// Get the conversation context ID.
 ///
 /// Returns a pointer to a null-terminated string containing the context ID.
-/// The returned pointer is valid until the context handle is freed.
-/// Do NOT free the returned string.
+/// The returned pointer is valid for the lifetime of the context handle —
+/// it shares storage with the handle and is invalidated only by
+/// `xybrid_context_free`. Safe to hold across other `xybrid_*` calls on
+/// any thread. Do NOT free the returned string.
 ///
 /// # Parameters
 ///
@@ -2085,7 +2166,9 @@ pub unsafe extern "C" fn xybrid_context_clear(handle: *mut XybridContextHandle) 
 ///
 /// # Returns
 ///
-/// A pointer to the context ID string, or null on failure.
+/// A pointer to the context ID string, or null if the handle is null or
+/// invalid (or, in the impossible defensive case, if the id contained an
+/// interior NUL byte at construction).
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_context_id(handle: *mut XybridContextHandle) -> *const c_char {
     if handle.is_null() {
@@ -2094,18 +2177,10 @@ pub unsafe extern "C" fn xybrid_context_id(handle: *mut XybridContextHandle) -> 
 
     ffi_guard!("xybrid_context_id", std::ptr::null(), {
         match XybridContextHandle::as_ref(handle) {
-            Some(data) => {
-                thread_local! {
-                    static CONTEXT_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
-                }
-                CONTEXT_ID.with(|e| {
-                    *e.borrow_mut() = CString::new(data.context.id()).ok();
-                    match e.borrow().as_ref() {
-                        Some(cstr) => cstr.as_ptr(),
-                        None => std::ptr::null(),
-                    }
-                })
-            }
+            Some(data) => data
+                .id_cache
+                .as_ref()
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
             None => std::ptr::null(),
         }
     })
@@ -2524,17 +2599,10 @@ pub unsafe extern "C" fn xybrid_model_run(
             Ok(result) => result,
             Err(e) => {
                 // Return error result
-                let result = ResultData {
-                    success: false,
-                    error: Some(format!("Inference failed: {}", e)),
-                    output_type: "".to_string(),
-                    text: None,
-                    embedding: None,
-                    audio_bytes: None,
-                    latency_ms: 0,
-                    metrics: xybrid_sdk::InferenceMetrics::default(),
-                };
-                return XybridResultHandle::from_boxed(Box::new(result));
+                return XybridResultHandle::from_boxed(Box::new(ResultData::failure(format!(
+                    "Inference failed: {}",
+                    e
+                ))));
             }
         };
 
@@ -2547,17 +2615,10 @@ pub unsafe extern "C" fn xybrid_model_run(
         Err(panic_info) => {
             let msg = panic_payload_to_string(&panic_info);
             set_last_error(&format!("Internal panic in xybrid_model_run: {}", msg));
-            let result = ResultData {
-                success: false,
-                error: Some(format!("Internal panic: {}", msg)),
-                output_type: "".to_string(),
-                text: None,
-                embedding: None,
-                audio_bytes: None,
-                latency_ms: 0,
-                metrics: xybrid_sdk::InferenceMetrics::default(),
-            };
-            XybridResultHandle::from_boxed(Box::new(result))
+            XybridResultHandle::from_boxed(Box::new(ResultData::failure(format!(
+                "Internal panic: {}",
+                msg
+            ))))
         }
     }
 }
@@ -2676,17 +2737,10 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
             Ok(result) => result,
             Err(e) => {
                 // Return error result
-                let result = ResultData {
-                    success: false,
-                    error: Some(format!("Inference failed: {}", e)),
-                    output_type: "".to_string(),
-                    text: None,
-                    embedding: None,
-                    audio_bytes: None,
-                    latency_ms: 0,
-                    metrics: xybrid_sdk::InferenceMetrics::default(),
-                };
-                return XybridResultHandle::from_boxed(Box::new(result));
+                return XybridResultHandle::from_boxed(Box::new(ResultData::failure(format!(
+                    "Inference failed: {}",
+                    e
+                ))));
             }
         };
 
@@ -2702,17 +2756,10 @@ pub unsafe extern "C" fn xybrid_model_run_with_context(
                 "Internal panic in xybrid_model_run_with_context: {}",
                 msg
             ));
-            let result = ResultData {
-                success: false,
-                error: Some(format!("Internal panic: {}", msg)),
-                output_type: "".to_string(),
-                text: None,
-                embedding: None,
-                audio_bytes: None,
-                latency_ms: 0,
-                metrics: xybrid_sdk::InferenceMetrics::default(),
-            };
-            XybridResultHandle::from_boxed(Box::new(result))
+            XybridResultHandle::from_boxed(Box::new(ResultData::failure(format!(
+                "Internal panic: {}",
+                msg
+            ))))
         }
     }
 }
@@ -3116,19 +3163,10 @@ pub unsafe extern "C" fn xybrid_model_run_streaming(
             Ok(result) => {
                 XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&result)))
             }
-            Err(e) => {
-                let result = ResultData {
-                    success: false,
-                    error: Some(format!("Streaming inference failed: {}", e)),
-                    output_type: "".to_string(),
-                    text: None,
-                    embedding: None,
-                    audio_bytes: None,
-                    latency_ms: 0,
-                    metrics: xybrid_sdk::InferenceMetrics::default(),
-                };
-                XybridResultHandle::from_boxed(Box::new(result))
-            }
+            Err(e) => XybridResultHandle::from_boxed(Box::new(ResultData::failure(format!(
+                "Streaming inference failed: {}",
+                e
+            )))),
         }
     }));
 
@@ -3140,17 +3178,10 @@ pub unsafe extern "C" fn xybrid_model_run_streaming(
                 "Internal panic in xybrid_model_run_streaming: {}",
                 msg
             ));
-            let result = ResultData {
-                success: false,
-                error: Some(format!("Internal panic: {}", msg)),
-                output_type: "".to_string(),
-                text: None,
-                embedding: None,
-                audio_bytes: None,
-                latency_ms: 0,
-                metrics: xybrid_sdk::InferenceMetrics::default(),
-            };
-            XybridResultHandle::from_boxed(Box::new(result))
+            XybridResultHandle::from_boxed(Box::new(ResultData::failure(format!(
+                "Internal panic: {}",
+                msg
+            ))))
         }
     }
 }
@@ -3274,19 +3305,10 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
             Ok(result) => {
                 XybridResultHandle::from_boxed(Box::new(inference_result_to_data(&result)))
             }
-            Err(e) => {
-                let result = ResultData {
-                    success: false,
-                    error: Some(format!("Streaming inference with context failed: {}", e)),
-                    output_type: "".to_string(),
-                    text: None,
-                    embedding: None,
-                    audio_bytes: None,
-                    latency_ms: 0,
-                    metrics: xybrid_sdk::InferenceMetrics::default(),
-                };
-                XybridResultHandle::from_boxed(Box::new(result))
-            }
+            Err(e) => XybridResultHandle::from_boxed(Box::new(ResultData::failure(format!(
+                "Streaming inference with context failed: {}",
+                e
+            )))),
         }
     }));
 
@@ -3298,17 +3320,10 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
                 "Internal panic in xybrid_model_run_streaming_with_context: {}",
                 msg
             ));
-            let result = ResultData {
-                success: false,
-                error: Some(format!("Internal panic: {}", msg)),
-                output_type: "".to_string(),
-                text: None,
-                embedding: None,
-                audio_bytes: None,
-                latency_ms: 0,
-                metrics: xybrid_sdk::InferenceMetrics::default(),
-            };
-            XybridResultHandle::from_boxed(Box::new(result))
+            XybridResultHandle::from_boxed(Box::new(ResultData::failure(format!(
+                "Internal panic: {}",
+                msg
+            ))))
         }
     }
 }
@@ -3418,26 +3433,10 @@ pub unsafe extern "C" fn xybrid_result_error(result: *mut XybridResultHandle) ->
 
     ffi_guard!("xybrid_result_error", std::ptr::null(), {
         match XybridResultHandle::as_ref(result) {
-            Some(data) => {
-                match &data.error {
-                    Some(error_str) => {
-                        // Store the CString in thread-local storage so the pointer remains valid
-                        // until the next call to this function on the same thread.
-                        // This is a trade-off between simplicity and thread-safety.
-                        thread_local! {
-                            static RESULT_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
-                        }
-                        RESULT_ERROR.with(|e| {
-                            *e.borrow_mut() = CString::new(error_str.as_str()).ok();
-                            match e.borrow().as_ref() {
-                                Some(cstr) => cstr.as_ptr(),
-                                None => std::ptr::null(),
-                            }
-                        })
-                    }
-                    None => std::ptr::null(),
-                }
-            }
+            Some(data) => data
+                .error_cache
+                .as_ref()
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
             None => std::ptr::null(),
         }
     })
@@ -3479,25 +3478,10 @@ pub unsafe extern "C" fn xybrid_result_text(result: *mut XybridResultHandle) -> 
 
     ffi_guard!("xybrid_result_text", std::ptr::null(), {
         match XybridResultHandle::as_ref(result) {
-            Some(data) => {
-                match &data.text {
-                    Some(text_str) => {
-                        // Store the CString in thread-local storage so the pointer remains valid
-                        // until the next call to this function on the same thread.
-                        thread_local! {
-                            static RESULT_TEXT: RefCell<Option<CString>> = const { RefCell::new(None) };
-                        }
-                        RESULT_TEXT.with(|e| {
-                            *e.borrow_mut() = CString::new(text_str.as_str()).ok();
-                            match e.borrow().as_ref() {
-                                Some(cstr) => cstr.as_ptr(),
-                                None => std::ptr::null(),
-                            }
-                        })
-                    }
-                    None => std::ptr::null(),
-                }
-            }
+            Some(data) => data
+                .text_cache
+                .as_ref()
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
             None => std::ptr::null(),
         }
     })
@@ -3541,8 +3525,9 @@ pub unsafe extern "C" fn xybrid_result_latency_ms(result: *mut XybridResultHandl
 ///
 /// Returns a pointer to a null-terminated string containing the output type:
 /// `"text"`, `"audio"`, `"embedding"`, or `"unknown"`.
-/// The returned pointer uses thread-local storage and is valid until the next
-/// call to this function on the same thread. Do NOT free it.
+/// The returned pointer is valid for the lifetime of the result handle —
+/// backed by per-handle storage populated when the result was constructed.
+/// Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
 ///
 /// # Parameters
 ///
@@ -3573,18 +3558,10 @@ pub unsafe extern "C" fn xybrid_result_output_type(
 
     ffi_guard!("xybrid_result_output_type", std::ptr::null(), {
         match XybridResultHandle::as_ref(result) {
-            Some(data) => {
-                thread_local! {
-                    static RESULT_OUTPUT_TYPE: RefCell<Option<CString>> = const { RefCell::new(None) };
-                }
-                RESULT_OUTPUT_TYPE.with(|e| {
-                    *e.borrow_mut() = CString::new(data.output_type.as_str()).ok();
-                    match e.borrow().as_ref() {
-                        Some(cstr) => cstr.as_ptr(),
-                        None => std::ptr::null(),
-                    }
-                })
-            }
+            Some(data) => data
+                .output_type_cache
+                .as_ref()
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
             None => std::ptr::null(),
         }
     })
@@ -3901,10 +3878,12 @@ pub unsafe extern "C" fn xybrid_result_stage_count(result: *mut XybridResultHand
 
 /// Get the stage_id string for the entry at `index`.
 ///
-/// Returns a thread-local pointer valid until the next call to this
-/// function on the same thread. Do NOT free. Returns null if `index`
-/// is out of bounds or the handle is null/invalid. Callers should
-/// check `xybrid_result_stage_count` first.
+/// Returns a pointer to the stage_id string, valid for the lifetime of
+/// the result handle — backed by per-handle storage populated when the
+/// result was constructed. Safe to hold across other `xybrid_*` calls
+/// on any thread. Do NOT free. Returns null if `index` is out of bounds
+/// or the handle is null/invalid; callers should check
+/// `xybrid_result_stage_count` first.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_result_stage_id(
     result: *mut XybridResultHandle,
@@ -3915,21 +3894,10 @@ pub unsafe extern "C" fn xybrid_result_stage_id(
     }
     ffi_guard!("xybrid_result_stage_id", std::ptr::null(), {
         match XybridResultHandle::as_ref(result) {
-            Some(data) => match data.metrics.stage_latencies_ms.get(index) {
-                Some(stage) => {
-                    thread_local! {
-                        static RESULT_STAGE_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
-                    }
-                    RESULT_STAGE_ID.with(|e| {
-                        *e.borrow_mut() = CString::new(stage.stage_id.as_str()).ok();
-                        match e.borrow().as_ref() {
-                            Some(cstr) => cstr.as_ptr(),
-                            None => std::ptr::null(),
-                        }
-                    })
-                }
-                None => std::ptr::null(),
-            },
+            Some(data) => data
+                .stage_id_cache
+                .get(index)
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
             None => std::ptr::null(),
         }
     })
@@ -3979,6 +3947,22 @@ pub struct XybridBundleHandle(*mut c_void);
 /// Internal bundle state.
 pub(crate) struct BundleState {
     pub bundle: xybrid_sdk::bundler::XyBundle,
+
+    // --- Caches for FFI accessors (audit theme 2) ---
+    //
+    // Each `xybrid_bundle_{model_id,version,target,hash,file_name}`
+    // returns a `*const c_char` documented as "valid until the bundle
+    // handle is freed." The prior thread-local pattern invalidated
+    // those pointers on every accessor call. These caches own a
+    // `CString` per scalar field plus a `Vec<CString>` parallel to
+    // `manifest.files` so the returned pointers are backed by
+    // handle-lifetime storage. Populated once at `xybrid_bundle_open`;
+    // never mutated afterward (manifests are immutable post-load).
+    pub model_id_cache: CString,
+    pub version_cache: CString,
+    pub target_cache: CString,
+    pub hash_cache: CString,
+    pub file_name_cache: Vec<CString>,
 }
 
 /// Type alias for a boxed bundle.
@@ -4062,7 +4046,24 @@ pub unsafe extern "C" fn xybrid_bundle_open(path: *const c_char) -> *mut XybridB
 
         match xybrid_sdk::bundler::XyBundle::load(path_str) {
             Ok(bundle) => {
-                let state = Box::new(BundleState { bundle });
+                let manifest = bundle.manifest();
+                let model_id_cache = cstring_lossy(manifest.model_id.as_str());
+                let version_cache = cstring_lossy(manifest.version.as_str());
+                let target_cache = cstring_lossy(manifest.target.as_str());
+                let hash_cache = cstring_lossy(manifest.hash.as_str());
+                let file_name_cache: Vec<CString> = manifest
+                    .files
+                    .iter()
+                    .map(|f| cstring_lossy(f.as_str()))
+                    .collect();
+                let state = Box::new(BundleState {
+                    bundle,
+                    model_id_cache,
+                    version_cache,
+                    target_cache,
+                    hash_cache,
+                    file_name_cache,
+                });
                 XybridBundleHandle::from_boxed(state)
             }
             Err(e) => {
@@ -4225,8 +4226,9 @@ pub unsafe extern "C" fn xybrid_bundle_extract(
 
 /// Get the model ID from an opened bundle's manifest.
 ///
-/// The returned pointer uses thread-local storage and is valid until the next
-/// call to this function on the same thread. Do NOT free it.
+/// The returned pointer is valid for the lifetime of the bundle handle —
+/// backed by per-handle storage populated at `xybrid_bundle_open`. Safe to
+/// hold across other `xybrid_*` calls on any thread. Do NOT free it.
 ///
 /// # Parameters
 ///
@@ -4234,101 +4236,57 @@ pub unsafe extern "C" fn xybrid_bundle_extract(
 ///
 /// # Returns
 ///
-/// A pointer to the model ID string, or null on error.
+/// A pointer to the model ID string, or null if the handle is null/invalid.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_model_id(handle: *mut XybridBundleHandle) -> *const c_char {
     // Read-only accessor — don't clear last error
     ffi_guard!("xybrid_bundle_model_id", std::ptr::null(), {
-        let state = match XybridBundleHandle::as_ref(handle) {
-            Some(s) => s,
-            None => return std::ptr::null(),
-        };
-
-        thread_local! {
-            static BUNDLE_MODEL_ID: RefCell<Option<CString>> = const { RefCell::new(None) };
+        match XybridBundleHandle::as_ref(handle) {
+            Some(state) => state.model_id_cache.as_ptr(),
+            None => std::ptr::null(),
         }
-        BUNDLE_MODEL_ID.with(|e| {
-            *e.borrow_mut() = CString::new(state.bundle.manifest().model_id.as_str()).ok();
-            match e.borrow().as_ref() {
-                Some(cstr) => cstr.as_ptr(),
-                None => std::ptr::null(),
-            }
-        })
     })
 }
 
 /// Get the version from an opened bundle's manifest.
 ///
-/// The returned pointer uses thread-local storage and is valid until the next
-/// call to this function on the same thread. Do NOT free it.
+/// The returned pointer is valid for the lifetime of the bundle handle.
+/// Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_version(handle: *mut XybridBundleHandle) -> *const c_char {
     ffi_guard!("xybrid_bundle_version", std::ptr::null(), {
-        let state = match XybridBundleHandle::as_ref(handle) {
-            Some(s) => s,
-            None => return std::ptr::null(),
-        };
-
-        thread_local! {
-            static BUNDLE_VERSION: RefCell<Option<CString>> = const { RefCell::new(None) };
+        match XybridBundleHandle::as_ref(handle) {
+            Some(state) => state.version_cache.as_ptr(),
+            None => std::ptr::null(),
         }
-        BUNDLE_VERSION.with(|e| {
-            *e.borrow_mut() = CString::new(state.bundle.manifest().version.as_str()).ok();
-            match e.borrow().as_ref() {
-                Some(cstr) => cstr.as_ptr(),
-                None => std::ptr::null(),
-            }
-        })
     })
 }
 
 /// Get the target platform from an opened bundle's manifest.
 ///
-/// The returned pointer uses thread-local storage and is valid until the next
-/// call to this function on the same thread. Do NOT free it.
+/// The returned pointer is valid for the lifetime of the bundle handle.
+/// Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_target(handle: *mut XybridBundleHandle) -> *const c_char {
     ffi_guard!("xybrid_bundle_target", std::ptr::null(), {
-        let state = match XybridBundleHandle::as_ref(handle) {
-            Some(s) => s,
-            None => return std::ptr::null(),
-        };
-
-        thread_local! {
-            static BUNDLE_TARGET: RefCell<Option<CString>> = const { RefCell::new(None) };
+        match XybridBundleHandle::as_ref(handle) {
+            Some(state) => state.target_cache.as_ptr(),
+            None => std::ptr::null(),
         }
-        BUNDLE_TARGET.with(|e| {
-            *e.borrow_mut() = CString::new(state.bundle.manifest().target.as_str()).ok();
-            match e.borrow().as_ref() {
-                Some(cstr) => cstr.as_ptr(),
-                None => std::ptr::null(),
-            }
-        })
     })
 }
 
 /// Get the SHA-256 hash from an opened bundle's manifest.
 ///
-/// The returned pointer uses thread-local storage and is valid until the next
-/// call to this function on the same thread. Do NOT free it.
+/// The returned pointer is valid for the lifetime of the bundle handle.
+/// Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_hash(handle: *mut XybridBundleHandle) -> *const c_char {
     ffi_guard!("xybrid_bundle_hash", std::ptr::null(), {
-        let state = match XybridBundleHandle::as_ref(handle) {
-            Some(s) => s,
-            None => return std::ptr::null(),
-        };
-
-        thread_local! {
-            static BUNDLE_HASH: RefCell<Option<CString>> = const { RefCell::new(None) };
+        match XybridBundleHandle::as_ref(handle) {
+            Some(state) => state.hash_cache.as_ptr(),
+            None => std::ptr::null(),
         }
-        BUNDLE_HASH.with(|e| {
-            *e.borrow_mut() = CString::new(state.bundle.manifest().hash.as_str()).ok();
-            match e.borrow().as_ref() {
-                Some(cstr) => cstr.as_ptr(),
-                None => std::ptr::null(),
-            }
-        })
     })
 }
 
@@ -4373,8 +4331,9 @@ pub unsafe extern "C" fn xybrid_bundle_file_count(handle: *mut XybridBundleHandl
 
 /// Get the filename at a given index in the bundle's file list.
 ///
-/// The returned pointer uses thread-local storage and is valid until the next
-/// call to this function on the same thread. Do NOT free it.
+/// The returned pointer is valid for the lifetime of the bundle handle —
+/// backed by per-handle storage populated at `xybrid_bundle_open`. Safe to
+/// hold across other `xybrid_*` calls on any thread. Do NOT free it.
 ///
 /// # Parameters
 ///
@@ -4383,33 +4342,21 @@ pub unsafe extern "C" fn xybrid_bundle_file_count(handle: *mut XybridBundleHandl
 ///
 /// # Returns
 ///
-/// A pointer to the filename string, or null if index is out of bounds.
+/// A pointer to the filename string, or null if index is out of bounds
+/// or the handle is null/invalid.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_bundle_file_name(
     handle: *mut XybridBundleHandle,
     index: u32,
 ) -> *const c_char {
     ffi_guard!("xybrid_bundle_file_name", std::ptr::null(), {
-        let state = match XybridBundleHandle::as_ref(handle) {
-            Some(s) => s,
-            None => return std::ptr::null(),
-        };
-
-        let files = &state.bundle.manifest().files;
-        if (index as usize) >= files.len() {
-            return std::ptr::null();
+        match XybridBundleHandle::as_ref(handle) {
+            Some(state) => state
+                .file_name_cache
+                .get(index as usize)
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
+            None => std::ptr::null(),
         }
-
-        thread_local! {
-            static BUNDLE_FILE_NAME: RefCell<Option<CString>> = const { RefCell::new(None) };
-        }
-        BUNDLE_FILE_NAME.with(|e| {
-            *e.borrow_mut() = CString::new(files[index as usize].as_str()).ok();
-            match e.borrow().as_ref() {
-                Some(cstr) => cstr.as_ptr(),
-                None => std::ptr::null(),
-            }
-        })
     })
 }
 
@@ -4935,6 +4882,142 @@ mod tests {
     // which require actual model paths or registry access to construct.
     // Handle roundtrip is tested implicitly through the integration tests below.
 
+    /// Regression test for audit theme 2 — the prior `xybrid_result_text`
+    /// implementation stored the returned `CString` in a single per-function
+    /// thread-local slot, so reading result A's text, then result B's text,
+    /// then re-reading A's pointer would observe B's bytes (UAF in C
+    /// consumers that followed the docs and held the pointer across other
+    /// xybrid calls). The `ResultData::text_cache` fix gives each handle
+    /// its own storage. This covers the success branch — the failure
+    /// branch goes through `ResultData::failure` which also calls
+    /// `populate_caches`.
+    #[test]
+    fn result_text_pointer_is_stable_across_other_handle_calls() {
+        // Build two ResultData success fixtures with distinct text fields.
+        let mut data_a = ResultData {
+            success: true,
+            error: None,
+            output_type: "text".to_string(),
+            text: Some("hello from result A".to_string()),
+            embedding: None,
+            audio_bytes: None,
+            latency_ms: 10,
+            metrics: xybrid_sdk::InferenceMetrics::default(),
+            text_cache: None,
+            error_cache: None,
+            output_type_cache: None,
+            stage_id_cache: Vec::new(),
+        };
+        data_a.populate_caches();
+        let mut data_b = ResultData {
+            success: true,
+            error: None,
+            output_type: "text".to_string(),
+            text: Some("hello from result B".to_string()),
+            embedding: None,
+            audio_bytes: None,
+            latency_ms: 20,
+            metrics: xybrid_sdk::InferenceMetrics::default(),
+            text_cache: None,
+            error_cache: None,
+            output_type_cache: None,
+            stage_id_cache: Vec::new(),
+        };
+        data_b.populate_caches();
+
+        let result_a = XybridResultHandle::from_boxed(Box::new(data_a));
+        let result_b = XybridResultHandle::from_boxed(Box::new(data_b));
+        assert!(!result_a.is_null());
+        assert!(!result_b.is_null());
+
+        unsafe {
+            let ptr_a = xybrid_result_text(result_a);
+            let ptr_b = xybrid_result_text(result_b);
+            assert!(!ptr_a.is_null());
+            assert!(!ptr_b.is_null());
+
+            // Distinct handles must hand out distinct storage.
+            assert_ne!(ptr_a, ptr_b, "result texts must not share storage");
+
+            // Re-reading ptr_a after touching result_b must still see A's
+            // bytes (the audit-flagged UAF would alias them).
+            assert_eq!(
+                CStr::from_ptr(ptr_a).to_bytes(),
+                b"hello from result A",
+                "ptr_a must still observe result A"
+            );
+            assert_eq!(
+                CStr::from_ptr(ptr_b).to_bytes(),
+                b"hello from result B",
+                "ptr_b must observe result B"
+            );
+
+            // Repeated accessor calls on one handle must return the same
+            // pointer (genuine handle-lifetime contract).
+            let ptr_a_again = xybrid_result_text(result_a);
+            assert_eq!(
+                ptr_a, ptr_a_again,
+                "repeated calls on one handle must return the same pointer"
+            );
+
+            xybrid_result_free(result_a);
+            xybrid_result_free(result_b);
+        }
+    }
+
+    /// Regression test for audit theme 2 — the prior `xybrid_context_id`
+    /// implementation stored the returned `CString` in a single
+    /// per-function thread-local slot, so reading `ctx_a`'s id, then
+    /// reading `ctx_b`'s id, then re-reading the original `ctx_a`
+    /// pointer would yield `ctx_b`'s bytes (UAF in C consumers that
+    /// followed the docs and held the pointer across other xybrid
+    /// calls). The cache-in-handle-state fix means each handle owns
+    /// its own `CString`, so the two pointers must be distinct *and*
+    /// remain stable across the interleaving.
+    #[test]
+    fn context_id_pointer_is_stable_across_other_handle_calls() {
+        unsafe {
+            let id_a = CString::new("session-aaa").unwrap();
+            let id_b = CString::new("session-bbb").unwrap();
+            let ctx_a = xybrid_context_with_id(id_a.as_ptr());
+            let ctx_b = xybrid_context_with_id(id_b.as_ptr());
+            assert!(!ctx_a.is_null());
+            assert!(!ctx_b.is_null());
+
+            let ptr_a = xybrid_context_id(ctx_a);
+            let ptr_b = xybrid_context_id(ctx_b);
+            assert!(!ptr_a.is_null());
+            assert!(!ptr_b.is_null());
+
+            // Distinct handles must hand out distinct storage — the
+            // shared-thread-local bug would alias these to the same
+            // CString cell.
+            assert_ne!(ptr_a, ptr_b, "context ids must not share storage");
+
+            // Re-reading `ptr_a` after touching `ctx_b` must still see
+            // `ctx_a`'s bytes. This is the failure mode the audit
+            // flagged: prior code overwrote the thread-local on every
+            // call, so ptr_a would dangle / point at ctx_b's bytes.
+            let bytes_a = CStr::from_ptr(ptr_a).to_bytes();
+            assert_eq!(bytes_a, b"session-aaa", "ptr_a must still observe ctx_a");
+
+            let bytes_b = CStr::from_ptr(ptr_b).to_bytes();
+            assert_eq!(bytes_b, b"session-bbb", "ptr_b must observe ctx_b");
+
+            // Re-reading the accessor on the same handle must return the
+            // *same* pointer (genuine handle-lifetime contract, not just
+            // "happens to contain the same bytes").
+            let ptr_a_again = xybrid_context_id(ctx_a);
+            assert_eq!(
+                ptr_a, ptr_a_again,
+                "repeated accessor calls on one handle must return the same pointer"
+            );
+
+            xybrid_context_free(ctx_a);
+            xybrid_context_free(ctx_b);
+        }
+    }
+
     /// Lock the audited `Send` requirement on `StreamCallbackCtx` in
     /// place. The SDK streaming entry points bound the callback closure
     /// as `F: FnMut(...) + Send`, so `StreamCallbackCtx: Send` is
@@ -5049,7 +5132,7 @@ mod tests {
 
     #[test]
     fn test_result_handle_success() {
-        let result = Box::new(ResultData {
+        let mut data = ResultData {
             success: true,
             error: None,
             output_type: "text".to_string(),
@@ -5058,7 +5141,13 @@ mod tests {
             audio_bytes: None,
             latency_ms: 100,
             metrics: xybrid_sdk::InferenceMetrics::default(),
-        });
+            text_cache: None,
+            error_cache: None,
+            output_type_cache: None,
+            stage_id_cache: Vec::new(),
+        };
+        data.populate_caches();
+        let result = Box::new(data);
 
         let handle = XybridResultHandle::from_boxed(result);
         assert!(!handle.is_null());
@@ -5078,16 +5167,7 @@ mod tests {
 
     #[test]
     fn test_result_handle_error() {
-        let result = Box::new(ResultData {
-            success: false,
-            error: Some("Model not found".to_string()),
-            output_type: "".to_string(),
-            text: None,
-            embedding: None,
-            audio_bytes: None,
-            latency_ms: 0,
-            metrics: xybrid_sdk::InferenceMetrics::default(),
-        });
+        let result = Box::new(ResultData::failure("Model not found".to_string()));
 
         let handle = XybridResultHandle::from_boxed(result);
         assert!(!handle.is_null());

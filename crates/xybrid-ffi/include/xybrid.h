@@ -734,8 +734,10 @@ int32_t xybrid_context_clear(struct XybridContextHandle *handle);
  Get the conversation context ID.
 
  Returns a pointer to a null-terminated string containing the context ID.
- The returned pointer is valid until the context handle is freed.
- Do NOT free the returned string.
+ The returned pointer is valid for the lifetime of the context handle —
+ it shares storage with the handle and is invalidated only by
+ `xybrid_context_free`. Safe to hold across other `xybrid_*` calls on
+ any thread. Do NOT free the returned string.
 
  # Parameters
 
@@ -743,7 +745,9 @@ int32_t xybrid_context_clear(struct XybridContextHandle *handle);
 
  # Returns
 
- A pointer to the context ID string, or null on failure.
+ A pointer to the context ID string, or null if the handle is null or
+ invalid (or, in the impossible defensive case, if the id contained an
+ interior NUL byte at construction).
  */
 const char *xybrid_context_id(struct XybridContextHandle *handle);
 
@@ -1352,8 +1356,9 @@ uint32_t xybrid_result_latency_ms(struct XybridResultHandle *result);
 
  Returns a pointer to a null-terminated string containing the output type:
  `"text"`, `"audio"`, `"embedding"`, or `"unknown"`.
- The returned pointer uses thread-local storage and is valid until the next
- call to this function on the same thread. Do NOT free it.
+ The returned pointer is valid for the lifetime of the result handle —
+ backed by per-handle storage populated when the result was constructed.
+ Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
 
  # Parameters
 
@@ -1551,10 +1556,12 @@ uintptr_t xybrid_result_stage_count(struct XybridResultHandle *result);
 /*
  Get the stage_id string for the entry at `index`.
 
- Returns a thread-local pointer valid until the next call to this
- function on the same thread. Do NOT free. Returns null if `index`
- is out of bounds or the handle is null/invalid. Callers should
- check `xybrid_result_stage_count` first.
+ Returns a pointer to the stage_id string, valid for the lifetime of
+ the result handle — backed by per-handle storage populated when the
+ result was constructed. Safe to hold across other `xybrid_*` calls
+ on any thread. Do NOT free. Returns null if `index` is out of bounds
+ or the handle is null/invalid; callers should check
+ `xybrid_result_stage_count` first.
  */
 const char *xybrid_result_stage_id(struct XybridResultHandle *result, uintptr_t index);
 
@@ -1651,8 +1658,9 @@ int32_t xybrid_bundle_extract(struct XybridBundleHandle *handle, const char *out
 /*
  Get the model ID from an opened bundle's manifest.
 
- The returned pointer uses thread-local storage and is valid until the next
- call to this function on the same thread. Do NOT free it.
+ The returned pointer is valid for the lifetime of the bundle handle —
+ backed by per-handle storage populated at `xybrid_bundle_open`. Safe to
+ hold across other `xybrid_*` calls on any thread. Do NOT free it.
 
  # Parameters
 
@@ -1660,31 +1668,31 @@ int32_t xybrid_bundle_extract(struct XybridBundleHandle *handle, const char *out
 
  # Returns
 
- A pointer to the model ID string, or null on error.
+ A pointer to the model ID string, or null if the handle is null/invalid.
  */
 const char *xybrid_bundle_model_id(struct XybridBundleHandle *handle);
 
 /*
  Get the version from an opened bundle's manifest.
 
- The returned pointer uses thread-local storage and is valid until the next
- call to this function on the same thread. Do NOT free it.
+ The returned pointer is valid for the lifetime of the bundle handle.
+ Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
  */
 const char *xybrid_bundle_version(struct XybridBundleHandle *handle);
 
 /*
  Get the target platform from an opened bundle's manifest.
 
- The returned pointer uses thread-local storage and is valid until the next
- call to this function on the same thread. Do NOT free it.
+ The returned pointer is valid for the lifetime of the bundle handle.
+ Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
  */
 const char *xybrid_bundle_target(struct XybridBundleHandle *handle);
 
 /*
  Get the SHA-256 hash from an opened bundle's manifest.
 
- The returned pointer uses thread-local storage and is valid until the next
- call to this function on the same thread. Do NOT free it.
+ The returned pointer is valid for the lifetime of the bundle handle.
+ Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
  */
 const char *xybrid_bundle_hash(struct XybridBundleHandle *handle);
 
@@ -1710,8 +1718,9 @@ uint32_t xybrid_bundle_file_count(struct XybridBundleHandle *handle);
 /*
  Get the filename at a given index in the bundle's file list.
 
- The returned pointer uses thread-local storage and is valid until the next
- call to this function on the same thread. Do NOT free it.
+ The returned pointer is valid for the lifetime of the bundle handle —
+ backed by per-handle storage populated at `xybrid_bundle_open`. Safe to
+ hold across other `xybrid_*` calls on any thread. Do NOT free it.
 
  # Parameters
 
@@ -1720,7 +1729,8 @@ uint32_t xybrid_bundle_file_count(struct XybridBundleHandle *handle);
 
  # Returns
 
- A pointer to the filename string, or null if index is out of bounds.
+ A pointer to the filename string, or null if index is out of bounds
+ or the handle is null/invalid.
  */
 const char *xybrid_bundle_file_name(struct XybridBundleHandle *handle, uint32_t index);
 
