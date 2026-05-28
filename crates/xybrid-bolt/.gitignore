@@ -2,3 +2,6 @@
 # `boltffi pack` from `src/lib.rs` + `boltffi.toml`; nothing here is
 # hand-authored, so we don't track it.
 dist/
+
+# Cargo / boltffi build artifacts.
+target/

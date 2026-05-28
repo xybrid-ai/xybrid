@@ -5,7 +5,8 @@ on:
     branches: [master]
     paths:
       - 'bindings/kotlin/**'
-      - 'crates/xybrid-uniffi/**'
+      - 'crates/xybrid-bolt/**'
+      - 'crates/xybrid-ffi-facade/**'
       - 'xtask/**'
       - '.github/workflows/build-android.yml'
   workflow_dispatch:
@@ -115,7 +116,7 @@ jobs:
 
       - name: Verify .so file
         run: |
-          SO_PATH="bindings/kotlin/libs/${{ matrix.abi }}/libxybrid_uniffi.so"
+          SO_PATH="bindings/kotlin/libs/${{ matrix.abi }}/libxybrid-bolt.so"
           if [ ! -f "$SO_PATH" ]; then
             echo "Error: .so file not found at $SO_PATH"
             exit 1

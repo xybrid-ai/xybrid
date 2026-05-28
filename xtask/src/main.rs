@@ -1,10 +1,3 @@
-// The uniffi-based `build_xcframework` / `build_android` implementations
-// were rewritten to delegate to boltffi. Their helpers (ORT path probes,
-// per-ABI `cargo build` wrappers, etc.) are temporarily dead and survive
-// only because they're shared with other xtask commands the migration
-// hasn't touched yet. The `xybrid-uniffi` deletion PR cleans them up.
-#![allow(dead_code)]
-
 mod setup_env;
 
 use anyhow::{Context, Result};
@@ -230,22 +223,6 @@ enum Commands {
         registry: Option<String>,
     },
 
-    /// Build the xybrid-uniffi library (Swift/Kotlin FFI via UniFFI)
-    BuildUniffi {
-        /// Target triple (e.g., aarch64-apple-darwin, aarch64-linux-android)
-        #[arg(long)]
-        target: Option<String>,
-
-        /// Build in release mode
-        #[arg(long)]
-        release: bool,
-
-        /// Override the platform preset (e.g., platform-macos, platform-ios, platform-android, platform-desktop)
-        /// If not specified, auto-detected from target or host
-        #[arg(long)]
-        platform_preset: Option<String>,
-    },
-
     /// Build the xybrid-ffi library (C ABI for Unity/C++)
     BuildFfi {
         /// Target triple (e.g., aarch64-apple-darwin, x86_64-unknown-linux-gnu)
@@ -268,17 +245,6 @@ enum Commands {
         /// Copy built library to Unity bindings directory
         #[arg(long)]
         deploy_unity: bool,
-    },
-
-    /// Generate Swift/Kotlin bindings from xybrid-uniffi
-    GenerateBindings {
-        /// Language to generate bindings for
-        #[arg(long, value_enum, default_value = "all")]
-        language: BindingsLanguage,
-
-        /// Output directory for generated bindings
-        #[arg(long)]
-        out_dir: Option<PathBuf>,
     },
 
     /// Build Apple XCFramework for iOS and macOS platforms
@@ -313,10 +279,6 @@ enum Commands {
         /// Override the version (defaults to Cargo.toml version or git tag)
         #[arg(long)]
         version: Option<String>,
-
-        /// Generate Kotlin bindings before cross-compiling (builds host dylib, runs uniffi-bindgen, applies fixes)
-        #[arg(long)]
-        bindgen: bool,
     },
 
     /// Build Flutter native libraries for a specific platform
@@ -414,13 +376,6 @@ enum Commands {
     },
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-enum BindingsLanguage {
-    Swift,
-    Kotlin,
-    All,
-}
-
 #[derive(Clone, Copy, ValueEnum, Debug, PartialEq, Eq)]
 enum AndroidAbi {
     /// ARM 32-bit (armeabi-v7a)
@@ -435,28 +390,15 @@ enum AndroidAbi {
 }
 
 impl AndroidAbi {
-    fn rust_target(&self) -> &'static str {
-        match self {
-            AndroidAbi::ArmeabiV7a => "armv7-linux-androideabi",
-            AndroidAbi::Arm64V8a => "aarch64-linux-android",
-            AndroidAbi::X86_64 => "x86_64-linux-android",
-        }
-    }
-
+    /// ABI directory name under `bindings/kotlin/libs/`. Used for the
+    /// `--abi` warning in `build_android` (the bolt wrapper always builds
+    /// the full set, so the filter is informational).
     fn ndk_arch(&self) -> &'static str {
         match self {
             AndroidAbi::ArmeabiV7a => "armeabi-v7a",
             AndroidAbi::Arm64V8a => "arm64-v8a",
             AndroidAbi::X86_64 => "x86_64",
         }
-    }
-
-    fn all() -> Vec<AndroidAbi> {
-        vec![
-            AndroidAbi::ArmeabiV7a,
-            AndroidAbi::Arm64V8a,
-            AndroidAbi::X86_64,
-        ]
     }
 }
 
@@ -546,13 +488,6 @@ fn main() -> Result<()> {
         Commands::SetupTestEnv { registry } => {
             setup_env::run(registry)?;
         }
-        Commands::BuildUniffi {
-            target,
-            release,
-            platform_preset,
-        } => {
-            build_uniffi(target, release, platform_preset)?;
-        }
         Commands::BuildFfi {
             target,
             release,
@@ -561,9 +496,6 @@ fn main() -> Result<()> {
             deploy_unity,
         } => {
             build_ffi(target, release, platform_preset, csharp, deploy_unity)?;
-        }
-        Commands::GenerateBindings { language, out_dir } => {
-            generate_bindings(language, out_dir)?;
         }
         Commands::BuildXcframework {
             release,
@@ -579,13 +511,9 @@ fn main() -> Result<()> {
             debug,
             abi,
             version,
-            bindgen,
         } => {
             let is_release = !debug && release;
             let ver = get_version(version.as_deref());
-            if bindgen {
-                generate_kotlin_bindings()?;
-            }
             build_android(is_release, abi, &ver)?;
         }
         Commands::BuildFlutter {
@@ -633,80 +561,6 @@ fn main() -> Result<()> {
             package_artifacts(&ver, &output_dir, skip_apple, skip_android, skip_flutter)?;
         }
     }
-
-    Ok(())
-}
-
-/// Build the xybrid-uniffi library
-fn build_uniffi(
-    target: Option<String>,
-    release: bool,
-    platform_preset: Option<String>,
-) -> Result<()> {
-    // Resolve the platform preset: use override if provided, otherwise auto-detect
-    let preset = if let Some(ref p) = platform_preset {
-        p.clone()
-    } else if let Some(ref t) = target {
-        platform_preset_for_target(t).to_string()
-    } else {
-        host_platform_preset().to_string()
-    };
-
-    println!("Building xybrid-uniffi with features: {}", preset);
-
-    let mut cmd = Command::new("cargo");
-    cmd.arg("build").arg("-p").arg("xybrid-uniffi");
-
-    // Pass the platform preset as a feature
-    cmd.arg("--features").arg(&preset);
-
-    if release {
-        cmd.arg("--release");
-    }
-
-    if let Some(ref t) = target {
-        cmd.arg("--target").arg(t);
-
-        // For iOS targets, resolve and set ORT_LIB_LOCATION + fp16 rustflags
-        if is_ios_target(t) {
-            if let Some(ort_path) = resolve_ort_lib_location(t) {
-                cmd.env("ORT_LIB_LOCATION", &ort_path);
-            } else {
-                anyhow::bail!(
-                    "ORT iOS library not found. To build for iOS, either:\n\
-                     1. Place the ORT iOS xcframework at vendor/ort-ios/onnxruntime.xcframework/\n\
-                     2. Set ORT_LIB_LOCATION env var to a directory containing libonnxruntime.a\n\n\
-                     Download from: https://huggingface.co/csukuangfj/ios-onnxruntime"
-                );
-            }
-            set_ios_rustflags(&mut cmd, t);
-        }
-    }
-
-    let status = cmd.status().context("Failed to run cargo build")?;
-
-    if !status.success() {
-        anyhow::bail!("cargo build failed");
-    }
-
-    // Print output location
-    let profile = if release { "release" } else { "debug" };
-    let lib_name = if cfg!(target_os = "macos") {
-        "libxybrid_uniffi.dylib"
-    } else if cfg!(target_os = "windows") {
-        "xybrid_uniffi.dll"
-    } else {
-        "libxybrid_uniffi.so"
-    };
-
-    let output_path = if let Some(ref t) = target {
-        format!("target/{}/{}/{}", t, profile, lib_name)
-    } else {
-        format!("target/{}/{}", profile, lib_name)
-    };
-
-    println!("\n✓ Build successful!");
-    println!("  Output: {}", output_path);
 
     Ok(())
 }
@@ -1162,227 +1016,6 @@ fn generate_android_plugin_meta(guid: &str, cpu: &str) -> String {
     )
 }
 
-/// Generate Swift/Kotlin bindings using uniffi-bindgen
-fn generate_bindings(language: BindingsLanguage, out_dir: Option<PathBuf>) -> Result<()> {
-    // First, ensure the library is built with host platform preset
-    println!("Building xybrid-uniffi (release)...");
-    build_uniffi(None, true, None)?;
-
-    let lib_path = if cfg!(target_os = "macos") {
-        "target/release/libxybrid_uniffi.dylib"
-    } else if cfg!(target_os = "windows") {
-        "target/release/xybrid_uniffi.dll"
-    } else {
-        "target/release/libxybrid_uniffi.so"
-    };
-
-    // Check if the library exists
-    if !std::path::Path::new(lib_path).exists() {
-        anyhow::bail!("Library not found at {}. Build may have failed.", lib_path);
-    }
-
-    let languages = match language {
-        BindingsLanguage::Swift => vec!["swift"],
-        BindingsLanguage::Kotlin => vec!["kotlin"],
-        BindingsLanguage::All => vec!["swift", "kotlin"],
-    };
-
-    for lang in languages {
-        // Default output directories for platform-specific bindings
-        let default_out = match lang {
-            "swift" => PathBuf::from("bindings/apple/Sources/Xybrid"),
-            "kotlin" => PathBuf::from("bindings/kotlin/src/main/kotlin/ai/xybrid"),
-            _ => PathBuf::from(format!("bindings/{}", lang)),
-        };
-        let output = out_dir.clone().unwrap_or(default_out);
-
-        // Create output directory
-        std::fs::create_dir_all(&output)
-            .with_context(|| format!("Failed to create output directory: {:?}", output))?;
-
-        println!("\nGenerating {} bindings to {:?}...", lang, output);
-
-        let status = Command::new("cargo")
-            .arg("run")
-            .arg("-p")
-            .arg("xybrid-uniffi")
-            .arg("--bin")
-            .arg("uniffi-bindgen")
-            .arg("--")
-            .arg("generate")
-            .arg("--library")
-            .arg(lib_path)
-            .arg("--language")
-            .arg(lang)
-            .arg("--out-dir")
-            .arg(&output)
-            .status()
-            .context("Failed to run uniffi-bindgen")?;
-
-        if !status.success() {
-            anyhow::bail!("uniffi-bindgen failed for {}", lang);
-        }
-
-        // For Swift, move FFI files to XybridFFI target directory
-        if lang == "swift" && out_dir.is_none() {
-            let ffi_include_dir = PathBuf::from("bindings/apple/Sources/xybrid_uniffiFFI/include");
-            let ffi_dir = PathBuf::from("bindings/apple/Sources/xybrid_uniffiFFI");
-
-            std::fs::create_dir_all(&ffi_include_dir)
-                .context("Failed to create XybridFFI include directory")?;
-
-            // Move header to include directory
-            let header_src = output.join("xybrid_uniffiFFI.h");
-            let header_dst = ffi_include_dir.join("xybrid_uniffiFFI.h");
-            if header_src.exists() {
-                std::fs::rename(&header_src, &header_dst).with_context(|| {
-                    format!("Failed to move {:?} to {:?}", header_src, header_dst)
-                })?;
-                println!("  Moved header to {:?}", header_dst);
-            }
-
-            // Move modulemap to FFI directory
-            let modulemap_src = output.join("xybrid_uniffiFFI.modulemap");
-            let modulemap_dst = ffi_dir.join("xybrid_uniffiFFI.modulemap");
-            if modulemap_src.exists() {
-                std::fs::rename(&modulemap_src, &modulemap_dst).with_context(|| {
-                    format!("Failed to move {:?} to {:?}", modulemap_src, modulemap_dst)
-                })?;
-                println!("  Moved modulemap to {:?}", modulemap_dst);
-            }
-        }
-
-        // For Kotlin, apply compatibility fixes and copy to ai.xybrid package
-        if lang == "kotlin" && out_dir.is_none() {
-            let generated_file = output
-                .join("uniffi")
-                .join("xybrid_uniffi")
-                .join("xybrid_uniffi.kt");
-            if generated_file.exists() {
-                fix_kotlin_bindings(&generated_file)?;
-                copy_kotlin_binding_to_package()?;
-                fix_kotlin_bindings(&PathBuf::from(KOTLIN_PACKAGE_BINDING))?;
-            }
-        }
-
-        println!("✓ {} bindings generated to {:?}", lang, output);
-    }
-
-    Ok(())
-}
-
-/// Apply post-generation fixes to UniFFI-generated Kotlin bindings.
-///
-/// UniFFI generates code with known Kotlin compatibility issues:
-/// 1. Exception subclasses with `message` constructor params conflict with
-///    `Exception.message` — rename to `msg` and update all references.
-/// 2. `@JvmOverloads` on functions with UInt/ULong params causes compiler errors.
-///
-/// This function is idempotent — applying it to already-fixed files is safe.
-fn fix_kotlin_bindings(file_path: &Path) -> Result<()> {
-    println!("  Applying Kotlin binding fixes to {:?}...", file_path);
-
-    let content = std::fs::read_to_string(file_path)
-        .with_context(|| format!("Failed to read {:?}", file_path))?;
-
-    let mut fixed = content.clone();
-
-    // Fix 1: Rename `message` constructor params to `msg` in exception subclasses.
-    // This avoids conflict with Exception.message property.
-    fixed = fixed.replace("val `message`: String", "val `msg`: String");
-
-    // Fix references in FfiConverter allocationSize() and write()
-    fixed = fixed.replace("value.`message`", "value.`msg`");
-
-    // Fix the override val message getter
-    fixed = fixed.replace("\"message=${ `message` }\"", "\"message=${ `msg` }\"");
-
-    // Fix 2: Remove @JvmOverloads from generated code (UInt/ULong incompatibility).
-    // The hand-written Xybrid.kt has its own @JvmOverloads where appropriate.
-    fixed = fixed.replace("@JvmOverloads\n", "");
-
-    if fixed != content {
-        std::fs::write(file_path, &fixed)
-            .with_context(|| format!("Failed to write fixed bindings to {:?}", file_path))?;
-        println!("  ✓ Kotlin binding fixes applied");
-    } else {
-        println!("  ✓ No fixes needed (already clean)");
-    }
-
-    Ok(())
-}
-
-/// Copy the UniFFI-generated Kotlin binding to the ai.xybrid package location.
-///
-/// UniFFI generates to `uniffi/xybrid_uniffi/xybrid_uniffi.kt` (package `uniffi.xybrid_uniffi`).
-/// The Android build also needs a copy at `xybrid_uniffi.kt` (package `ai.xybrid`).
-fn copy_kotlin_binding_to_package() -> Result<()> {
-    let src = PathBuf::from(KOTLIN_UNIFFI_BINDING);
-    let dst = PathBuf::from(KOTLIN_PACKAGE_BINDING);
-
-    if !src.exists() {
-        anyhow::bail!(
-            "UniFFI-generated Kotlin binding not found at {:?}.\n\
-             Run `cargo xtask generate-bindings --language kotlin` first.",
-            src
-        );
-    }
-
-    println!("  Copying Kotlin binding to ai.xybrid package...");
-
-    let content =
-        std::fs::read_to_string(&src).with_context(|| format!("Failed to read {:?}", src))?;
-
-    // Replace the package declaration for the ai.xybrid copy
-    let repackaged = content.replacen("package uniffi.xybrid_uniffi", "package ai.xybrid", 1);
-
-    if let Some(parent) = dst.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {:?}", parent))?;
-    }
-
-    std::fs::write(&dst, &repackaged).with_context(|| format!("Failed to write {:?}", dst))?;
-
-    println!("  ✓ Copied to {:?}", dst);
-    Ok(())
-}
-
-/// Generate Kotlin bindings, apply fixes, and copy to both package locations.
-///
-/// This is the complete Kotlin bindgen pipeline:
-/// 1. Build host dylib (xybrid-uniffi with host platform preset)
-/// 2. Run uniffi-bindgen to generate Kotlin code
-/// 3. Apply conflict fixes (message→msg, @JvmOverloads removal)
-/// 4. Copy to the ai.xybrid package location with rewritten package declaration
-fn generate_kotlin_bindings() -> Result<()> {
-    println!("=== Generating Kotlin Bindings ===");
-    println!();
-
-    // Steps 1 + 2: Build host dylib and run uniffi-bindgen
-    // generate_bindings() now handles Kotlin post-processing internally
-    generate_bindings(BindingsLanguage::Kotlin, None)?;
-
-    println!();
-    println!("✓ Kotlin bindings ready!");
-    println!("  UniFFI package: {}", KOTLIN_UNIFFI_BINDING);
-    println!("  App package:    {}", KOTLIN_PACKAGE_BINDING);
-    println!();
-
-    Ok(())
-}
-
-/// Kotlin binding file paths (UniFFI generates to the first, second is a repackaged copy)
-const KOTLIN_UNIFFI_BINDING: &str =
-    "bindings/kotlin/src/main/kotlin/ai/xybrid/uniffi/xybrid_uniffi/xybrid_uniffi.kt";
-const KOTLIN_PACKAGE_BINDING: &str = "bindings/kotlin/src/main/kotlin/ai/xybrid/xybrid_uniffi.kt";
-
-/// Apple target architectures for XCFramework
-const IOS_ARM64: &str = "aarch64-apple-ios";
-const IOS_SIM_ARM64: &str = "aarch64-apple-ios-sim";
-const MACOS_ARM64: &str = "aarch64-apple-darwin";
-// x86_64 Apple targets dropped — ort-sys v2.0.0-rc.11 has no prebuilt binaries for Intel Mac/iOS Simulator
-
-/// Build Apple XCFramework for iOS and macOS platforms
 /// Build the Apple XCFramework via boltffi.
 ///
 /// Delegates the actual build to `boltffi pack apple --release`, which
@@ -1644,126 +1277,6 @@ fn build_ffi_android(target: &str, release: bool, features: &str) -> Result<()> 
     let status = cmd.status().context("Failed to run cargo ndk build")?;
     if !status.success() {
         anyhow::bail!("cargo ndk build failed for {}", target);
-    }
-
-    Ok(())
-}
-
-/// Build using cargo-ndk
-fn build_android_with_cargo_ndk(target: &str, release: bool) -> Result<()> {
-    println!("  Building with features: platform-android");
-
-    let mut cmd = Command::new("cargo");
-    cmd.arg("ndk")
-        .arg("--target")
-        .arg(target)
-        // Use API level 28 for Android builds
-        // Required because:
-        // - POSIX_MADV_* constants (used by llama.cpp) require API 23+
-        // - aws-lc-sys (used for TLS) requires API 28+ for getentropy()
-        // This doesn't affect app minSdkVersion - only the NDK headers used during compilation
-        .arg("--platform")
-        .arg("28")
-        .arg("build")
-        .arg("-p")
-        .arg("xybrid-uniffi")
-        .arg("--features")
-        .arg("platform-android");
-
-    if release {
-        cmd.arg("--release");
-    }
-
-    let status = cmd.status().context("Failed to run cargo ndk build")?;
-
-    if !status.success() {
-        anyhow::bail!("cargo ndk build failed");
-    }
-
-    Ok(())
-}
-
-/// Build using ANDROID_NDK_HOME for cross-compilation
-fn build_android_with_ndk(target: &str, release: bool) -> Result<()> {
-    println!("  Building with features: platform-android");
-
-    let ndk_home = std::env::var("ANDROID_NDK_HOME").context("ANDROID_NDK_HOME not set")?;
-
-    // Determine the linker name based on target
-    // Use API level 28 for all targets because:
-    // - POSIX_MADV_* constants (used by llama.cpp) require API 23+
-    // - aws-lc-sys (used for TLS) requires API 28+ for getentropy()
-    let (clang_target, api_level) = match target {
-        "armv7-linux-androideabi" => ("armv7a-linux-androideabi", "28"),
-        "aarch64-linux-android" => ("aarch64-linux-android", "28"),
-        "x86_64-linux-android" => ("x86_64-linux-android", "28"),
-        _ => anyhow::bail!("Unsupported Android target: {}", target),
-    };
-
-    // Find the NDK toolchain bin directory
-    let toolchain_bin = PathBuf::from(&ndk_home)
-        .join("toolchains/llvm/prebuilt")
-        .join(if cfg!(target_os = "macos") {
-            "darwin-x86_64"
-        } else if cfg!(target_os = "linux") {
-            "linux-x86_64"
-        } else {
-            "windows-x86_64"
-        })
-        .join("bin");
-
-    let clang_path = toolchain_bin.join(format!("{}{}-clang", clang_target, api_level));
-
-    // Set up environment for cross-compilation
-    let linker_env = format!(
-        "CARGO_TARGET_{}_LINKER",
-        target.to_uppercase().replace('-', "_")
-    );
-
-    let mut cmd = Command::new("cargo");
-    cmd.arg("build")
-        .arg("-p")
-        .arg("xybrid-uniffi")
-        .arg("--target")
-        .arg(target)
-        .arg("--features")
-        .arg("platform-android")
-        .env(&linker_env, &clang_path);
-
-    if release {
-        cmd.arg("--release");
-    }
-
-    let status = cmd.status().context("Failed to run cargo build with NDK")?;
-
-    if !status.success() {
-        anyhow::bail!("cargo build with NDK failed");
-    }
-
-    Ok(())
-}
-
-/// Attempt plain cargo build (requires manual toolchain setup)
-fn build_android_plain(target: &str, release: bool) -> Result<()> {
-    println!("  Building with features: platform-android");
-
-    let mut cmd = Command::new("cargo");
-    cmd.arg("build")
-        .arg("-p")
-        .arg("xybrid-uniffi")
-        .arg("--target")
-        .arg(target)
-        .arg("--features")
-        .arg("platform-android");
-
-    if release {
-        cmd.arg("--release");
-    }
-
-    let status = cmd.status().context("Failed to run cargo build")?;
-
-    if !status.success() {
-        anyhow::bail!("cargo build failed for target {}", target);
     }
 
     Ok(())
@@ -2773,13 +2286,25 @@ fn package_android(version: &str, output_dir: &Path) -> Result<Option<PackageInf
         return Ok(None);
     }
 
-    // Check for at least one ABI directory with .so files
+    // Check for at least one ABI directory containing any .so. The bolt
+    // build drops `libxybrid-bolt.so` plus the bundled ORT runtime
+    // (`libonnxruntime.so`, `libc++_shared.so`); match on "directory has
+    // ≥1 .so" rather than a hard-coded filename so the packaged set stays
+    // correct as those names evolve.
     let abis = ["arm64-v8a", "armeabi-v7a", "x86_64"];
     let mut found_abis = Vec::new();
 
     for abi in &abis {
-        let so_path = libs_dir.join(abi).join("libxybrid_uniffi.so");
-        if so_path.exists() {
+        let abi_dir = libs_dir.join(abi);
+        let has_so = std::fs::read_dir(&abi_dir)
+            .map(|entries| {
+                entries.flatten().any(|e| {
+                    let p = e.path();
+                    p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("so")
+                })
+            })
+            .unwrap_or(false);
+        if has_so {
             found_abis.push(abi.to_string());
         }
     }
@@ -2807,15 +2332,20 @@ fn package_android(version: &str, output_dir: &Path) -> Result<Option<PackageInf
     }
     std::fs::create_dir_all(&temp_dir)?;
 
-    // Copy .so files to temp directory
+    // Copy every .so in each ABI dir (libxybrid-bolt.so + the bundled
+    // ORT runtime) to the temp directory.
     for abi in &found_abis {
         let src_dir = libs_dir.join(abi);
         let dst_dir = temp_dir.join(abi);
         std::fs::create_dir_all(&dst_dir)?;
 
-        let so_src = src_dir.join("libxybrid_uniffi.so");
-        let so_dst = dst_dir.join("libxybrid_uniffi.so");
-        std::fs::copy(&so_src, &so_dst)?;
+        for entry in std::fs::read_dir(&src_dir)? {
+            let path = entry?.path();
+            if path.is_file() && path.extension().and_then(|x| x.to_str()) == Some("so") {
+                let name = path.file_name().expect("dir entry has a filename");
+                std::fs::copy(&path, dst_dir.join(name))?;
+            }
+        }
     }
 
     // Create zip

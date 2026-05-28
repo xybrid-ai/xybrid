@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "FFI-agnostic facade over xybrid-sdk (consumed by xybrid-uniffi, xybrid-ffi, and the Flutter bindings)"
+description = "FFI-agnostic facade over xybrid-sdk (consumed by xybrid-bolt, xybrid-ffi, and the Flutter bindings)"
 publish = false
 
 [lib]
@@ -13,7 +13,7 @@ path = "src/lib.rs"
 
 # No `cdylib` / `staticlib` here — this crate is consumed by other Rust
 # crates, not loaded directly by foreign runtimes. The generator crates
-# (`xybrid-uniffi`, `xybrid-ffi`, `bindings/flutter/rust`) own the artifact
+# (`xybrid-bolt`, `xybrid-ffi`, `bindings/flutter/rust`) own the artifact
 # emission.
 
 [dependencies]
