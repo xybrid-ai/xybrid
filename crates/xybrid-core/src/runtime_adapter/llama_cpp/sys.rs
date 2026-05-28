@@ -888,12 +888,15 @@ pub fn llama_detokenize(model: &LlamaModel, tokens: &[i32]) -> Result<String, Ad
 
     for &token in tokens {
         // SAFETY: `model.ptr` non-null per invariant; `token` is an
-        // arbitrary i32 (out-of-range values yield a negative return,
-        // not UB, per the C contract). `buf` is a `Vec<u8>` owned by
-        // this frame; `buf.as_mut_ptr()` is valid for `buf.len()`
-        // bytes for the call duration. The C function writes at most
-        // `buf.len()` bytes (negative return on a too-small buffer)
-        // and returns the bytes written / required.
+        // arbitrary i32 (invalid token ids yield `0` per the C
+        // contract, not UB). `buf` is a `Vec<u8>` owned by this frame;
+        // `buf.as_mut_ptr()` is valid for `buf.len()` bytes for the
+        // call duration. Return-value contract from llama.cpp's
+        // `llama_token_to_piece`:
+        //   * `> 0`  — bytes written into `buf` (≤ `buf.len()`).
+        //   * `< 0`  — `-required_size`; nothing was written because
+        //              `buf.len()` was too small.
+        //   * `== 0` — invalid / empty token; skip.
         let len = unsafe {
             llama_token_to_piece_c(
                 model.ptr,
@@ -905,33 +908,52 @@ pub fn llama_detokenize(model: &LlamaModel, tokens: &[i32]) -> Result<String, Ad
             )
         };
 
-        if len > 0 {
-            let len_usize = len as usize;
-            if len_usize >= buf.len() {
-                // Token didn't fit — resize and retry
-                buf.resize(len_usize + 1, 0);
-                // SAFETY: same invariants as the first call above.
-                // `buf` was just resized to `len_usize + 1` bytes;
-                // `buf.as_mut_ptr()` / `buf.len()` reflect the new
-                // allocation.
-                let retry_len = unsafe {
-                    llama_token_to_piece_c(
-                        model.ptr,
-                        token,
-                        buf.as_mut_ptr() as *mut c_char,
-                        buf.len() as c_int,
-                        0,
-                        true,
-                    )
-                };
-                if retry_len > 0 {
-                    if let Ok(piece) = std::str::from_utf8(&buf[..retry_len as usize]) {
-                        result.push_str(piece);
-                    }
-                }
-            } else if let Ok(piece) = std::str::from_utf8(&buf[..len_usize]) {
-                result.push_str(piece);
+        let len_usize = if len < 0 {
+            // Buffer was too small — required size is `-len`. Resize
+            // to fit (plus one byte of headroom for the next retry
+            // attempt in case the same token reappears later) and
+            // re-decode. The C function never returns positive
+            // `len > buf.len()`, so positive returns are always safe
+            // to consume directly — we only enter this branch on
+            // negative returns. (Audit theme 4 surfaced this: the
+            // previous `if len > 0 && len_usize >= buf.len()` retry
+            // path was unreachable, so tokens whose detokenized form
+            // exceeded 256 bytes were silently dropped.)
+            let required = (-len) as usize;
+            buf.resize(required + 1, 0);
+            // SAFETY: same invariants as the first call above. `buf`
+            // was just resized to `required + 1` bytes; the new
+            // allocation is reflected in `buf.as_mut_ptr()` /
+            // `buf.len()`. The retry asks the C side for the same
+            // `(model, token, …)` pair, which by the function's
+            // determinism produces the same required size.
+            let retry_len = unsafe {
+                llama_token_to_piece_c(
+                    model.ptr,
+                    token,
+                    buf.as_mut_ptr() as *mut c_char,
+                    buf.len() as c_int,
+                    0,
+                    true,
+                )
+            };
+            if retry_len <= 0 {
+                // Either the token genuinely produces no piece on
+                // re-try (unexpected, but possible if `special=true`
+                // changes behaviour mid-call on some llama.cpp build),
+                // or the resize was somehow still insufficient. Skip
+                // rather than panic.
+                continue;
             }
+            retry_len as usize
+        } else if len == 0 {
+            continue;
+        } else {
+            len as usize
+        };
+
+        if let Ok(piece) = std::str::from_utf8(&buf[..len_usize]) {
+            result.push_str(piece);
         }
     }
 
