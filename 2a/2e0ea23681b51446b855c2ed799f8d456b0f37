@@ -1,0 +1,27 @@
+docs/content/docs/quickstart.mdx
+  s_2d821c1355f300::t_06d3b797859226 70-73
+examples/ios/XybridExample/ContentView.swift
+  s_2d821c1355f300::t_7b6539f0dc52a5 63-68
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_2d821c1355f300::t_db1c72f91037dd 51-62
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_2d821c1355f300::t_093743c0451b0a 59-70
+docs/content/docs/quickstart.zh.mdx
+  s_2d821c1355f300::t_dda4d7b9b775c4 68-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2a2e0ea23681b51446b855c2ed799f8d456b0f37",
+  "prompts": {},
+  "sessions": {
+    "s_2d821c1355f300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc1ef534-2425-40ad-92b2-e88e48c8f0af",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
