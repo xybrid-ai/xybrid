@@ -1897,6 +1897,7 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
+        crate::telemetry::maybe_emit_dev_nudge();
         let start = Instant::now();
         // Begin a resource-telemetry scope for this run. When
         // `resource_telemetry_mode()` is `Off` the guard is a no-op; otherwise
@@ -2747,6 +2748,7 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
+        crate::telemetry::maybe_emit_dev_nudge();
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
         let version = self.version.clone();
