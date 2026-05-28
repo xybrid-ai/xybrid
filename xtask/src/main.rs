@@ -2298,9 +2298,10 @@ fn package_android(version: &str, output_dir: &Path) -> Result<Option<PackageInf
         let abi_dir = libs_dir.join(abi);
         let has_so = std::fs::read_dir(&abi_dir)
             .map(|entries| {
-                entries
-                    .flatten()
-                    .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("so"))
+                entries.flatten().any(|e| {
+                    let p = e.path();
+                    p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("so")
+                })
             })
             .unwrap_or(false);
         if has_so {
@@ -2340,7 +2341,7 @@ fn package_android(version: &str, output_dir: &Path) -> Result<Option<PackageInf
 
         for entry in std::fs::read_dir(&src_dir)? {
             let path = entry?.path();
-            if path.extension().and_then(|x| x.to_str()) == Some("so") {
+            if path.is_file() && path.extension().and_then(|x| x.to_str()) == Some("so") {
                 let name = path.file_name().expect("dir entry has a filename");
                 std::fs::copy(&path, dst_dir.join(name))?;
             }
