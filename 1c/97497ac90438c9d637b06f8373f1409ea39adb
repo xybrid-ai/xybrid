@@ -1,0 +1,33 @@
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_2d821c1355f300::t_7ca6b708719d44 31-40
+  s_2d821c1355f300::t_35ca9bc3b8654a 122-127
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_2d821c1355f300::t_8b9e1ebddb5772 31-40
+  s_2d821c1355f300::t_1339cad791b627 120-125
+docs/content/docs/quickstart.zh.mdx
+  s_2d821c1355f300::t_d4fe64b0ffe478 27-28
+docs/sdk/API_REFERENCE.md
+  s_2d821c1355f300::t_74f55059a2e5fa 1253-1260
+docs/content/docs/quickstart.mdx
+  s_2d821c1355f300::t_3ccfdc4fa840f0 27-28
+bindings/flutter/lib/src/xybrid.dart
+  s_2d821c1355f300::t_8535901441e571 65-72,75,77-81,85
+  s_2d821c1355f300::t_b92d5aaeb5f997 189-191,193-198,202-203
+  s_2d821c1355f300::t_47a66c07dce4f4 24-26,30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1c97497ac90438c9d637b06f8373f1409ea39adb",
+  "prompts": {},
+  "sessions": {
+    "s_2d821c1355f300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc1ef534-2425-40ad-92b2-e88e48c8f0af",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
