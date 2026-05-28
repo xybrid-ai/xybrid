@@ -1,0 +1,26 @@
+crates/xybrid-uniffi/src/lib.rs
+  s_2d821c1355f300::t_6939a2db57fcbb 62-105
+bindings/apple/Sources/Xybrid/xybrid_uniffi.swift
+  s_2d821c1355f300::t_784e15bc04ae3c 594-595,1798-1808,1866-1868,1899
+bindings/apple/Sources/xybrid_uniffiFFI/include/xybrid_uniffiFFI.h
+  s_2d821c1355f300::t_784e15bc04ae3c 96,225-226
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_2d821c1355f300::t_674008b08e1ae5 22-25,27,29-31
+  s_2d821c1355f300::t_e813a3ad12936e 50-60,69-78,83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e8205a06937e42f3713c622760b22179c356e575",
+  "prompts": {},
+  "sessions": {
+    "s_2d821c1355f300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc1ef534-2425-40ad-92b2-e88e48c8f0af",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
