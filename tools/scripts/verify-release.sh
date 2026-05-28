@@ -149,8 +149,14 @@ print("ok")
 EOF
     (cd "$dir" && swift package resolve 2>&1) || { DETAIL[spm]="swift package resolve failed"; return 1; }
     # Sanity: did we actually pin to the requested version?
+    # `-A 8` because in current Swift SPM Package.resolved formatting the
+    # `"version"` key is up to 6 lines below the `"identity"` line (state
+    # block with revision sits between them). -A 4 was too tight.
     local pinned
-    pinned=$(grep -A4 '"identity" : "xybrid"' "$dir/Package.resolved" | grep '"version"' | head -1 | sed 's/.*: *"\(.*\)".*/\1/')
+    pinned=$(grep -A 8 '"identity" : "xybrid"' "$dir/Package.resolved" | grep '"version"' | head -1 | sed 's/.*: *"\(.*\)".*/\1/')
+    if [ -z "$pinned" ]; then
+        DETAIL[spm]="Package.resolved parse failed — couldn't find version under identity 'xybrid'"; return 1
+    fi
     if [ "$pinned" != "$VERSION" ]; then
         DETAIL[spm]="resolved to '$pinned', expected '$VERSION'"; return 1
     fi
@@ -215,6 +221,23 @@ EOF
 # Flutter — flutter pub get against pub.dev
 # =============================================================================
 test_flutter() {
+    # Fast pre-check: does pub.dev have this version of xybrid_flutter? If
+    # not, give a clear diagnostic (pub.dev mirror sync, or the manual
+    # `flutter pub publish -f` hasn't been done yet) rather than letting
+    # the failure surface as an opaque pubspec.lock-not-found parse error.
+    local pub_version
+    pub_version=$(curl -sf "https://pub.dev/api/packages/xybrid_flutter" 2>/dev/null \
+                  | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["latest"]["version"])' 2>/dev/null \
+                  || echo "")
+    if [ -n "$pub_version" ] && [ "$pub_version" != "$VERSION" ]; then
+        # Check whether the requested version exists at all (not just as latest).
+        if ! curl -sf "https://pub.dev/api/packages/xybrid_flutter" 2>/dev/null \
+             | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if any(v['version']=='$VERSION' for v in d.get('versions',[])) else 1)" 2>/dev/null; then
+            DETAIL[flutter]="xybrid_flutter ${VERSION} not on pub.dev yet (latest = ${pub_version}); awaiting manual \`flutter pub publish -f\` or pub.dev mirror sync"
+            return 1
+        fi
+    fi
+
     local dir="$WORK/flutter"
     mkdir -p "$dir"
     flutter create --template=app --org com.xybrid.verify --suppress-analytics "$dir/app" \
@@ -239,9 +262,16 @@ flutter:
 EOF
     (cd "$dir/app" && flutter pub get --suppress-analytics 2>&1) \
         | tee "$WORK/flutter-get.log" | tail -5
+    if [ ! -f "$dir/app/pubspec.lock" ]; then
+        DETAIL[flutter]="flutter pub get did not produce pubspec.lock — see $WORK/flutter-get.log"
+        return 1
+    fi
     local pinned
     pinned=$(awk '/^  xybrid_flutter:/{p=1; next} p && /^    version:/{print; exit}' "$dir/app/pubspec.lock" \
               | sed 's/.*"\(.*\)".*/\1/')
+    if [ -z "$pinned" ]; then
+        DETAIL[flutter]="pubspec.lock parse failed — couldn't find xybrid_flutter version"; return 1
+    fi
     if [ "$pinned" != "$VERSION" ]; then
         DETAIL[flutter]="resolved to '$pinned', expected '$VERSION'"; return 1
     fi
