@@ -250,7 +250,11 @@ class Xybrid {
     if (gateway != null) {
       setGatewayUrl(gateway);
     }
-    if (key != null && ingest != null) {
+    // An API key alone starts the exporter; the Rust layer defaults the
+    // ingest URL to the production endpoint when `ingest` is null, so
+    // `Xybrid.init(apiKey: ...)` lights up the dashboard without the caller
+    // needing to know the ingest URL.
+    if (key != null) {
       XybridSdkClient.configurePlatformTelemetry(
         apiKey: key,
         ingestUrl: ingest,
