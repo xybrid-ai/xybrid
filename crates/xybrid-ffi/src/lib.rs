@@ -178,7 +178,7 @@ pub(crate) struct ResultData {
     // afterward.
     pub text_cache: Option<CString>,
     pub error_cache: Option<CString>,
-    pub output_type_cache: Option<CString>,
+    pub output_type_cache: CString,
     /// Parallel to `metrics.stage_latencies_ms` — same length, same order.
     pub stage_id_cache: Vec<CString>,
 }
@@ -194,7 +194,7 @@ impl ResultData {
     fn populate_caches(&mut self) {
         self.text_cache = self.text.as_deref().map(cstring_lossy);
         self.error_cache = self.error.as_deref().map(cstring_lossy);
-        self.output_type_cache = Some(cstring_lossy(self.output_type.as_str()));
+        self.output_type_cache = cstring_lossy(self.output_type.as_str());
         self.stage_id_cache = self
             .metrics
             .stage_latencies_ms
@@ -223,7 +223,7 @@ impl ResultData {
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
             error_cache: None,
-            output_type_cache: None,
+            output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
         };
         data.populate_caches();
@@ -239,11 +239,11 @@ pub(crate) struct ContextData {
     /// `xybrid_context_id` can hand C callers a pointer whose lifetime is
     /// genuinely tied to the handle, not to "until the next call on this
     /// thread" (the prior thread-local pattern was an audit-flagged UAF —
-    /// see `.context/audit-ffi.md` theme 2). `None` only on the impossible
-    /// path where the conversation id contained an interior NUL byte;
-    /// UUID-generated ids never trigger that, and FFI-provided ids come
-    /// through `CStr::to_str` which already excludes NULs.
-    pub id_cache: Option<CString>,
+    /// see `.context/audit-ffi.md` theme 2). Built via [`cstring_lossy`]
+    /// so interior NUL bytes substitute U+FFFD rather than dropping the
+    /// id — UUID-generated ids and FFI-provided ids (which come through
+    /// `CStr::to_str`) never contain NULs in practice.
+    pub id_cache: CString,
 }
 
 /// Internal generation config data.
@@ -457,7 +457,7 @@ fn inference_result_to_data(result: &xybrid_sdk::InferenceResult) -> ResultData 
         metrics: result.metrics().clone(),
         text_cache: None,
         error_cache: None,
-        output_type_cache: None,
+        output_type_cache: CString::default(),
         stage_id_cache: Vec::new(),
     };
     data.populate_caches();
@@ -1853,7 +1853,7 @@ pub extern "C" fn xybrid_context_new() -> *mut XybridContextHandle {
 
     ffi_guard!("xybrid_context_new", std::ptr::null_mut(), {
         let context = ConversationContext::new();
-        let id_cache = CString::new(context.id()).ok();
+        let id_cache = cstring_lossy(context.id());
         let context = Box::new(ContextData { context, id_cache });
 
         XybridContextHandle::from_boxed(context)
@@ -1894,7 +1894,7 @@ pub unsafe extern "C" fn xybrid_context_with_id(id: *const c_char) -> *mut Xybri
         };
 
         let context = ConversationContext::with_id(id_str);
-        let id_cache = CString::new(context.id()).ok();
+        let id_cache = cstring_lossy(context.id());
         let context = Box::new(ContextData { context, id_cache });
 
         XybridContextHandle::from_boxed(context)
@@ -2167,8 +2167,7 @@ pub unsafe extern "C" fn xybrid_context_clear(handle: *mut XybridContextHandle) 
 /// # Returns
 ///
 /// A pointer to the context ID string, or null if the handle is null or
-/// invalid (or, in the impossible defensive case, if the id contained an
-/// interior NUL byte at construction).
+/// invalid.
 #[no_mangle]
 pub unsafe extern "C" fn xybrid_context_id(handle: *mut XybridContextHandle) -> *const c_char {
     if handle.is_null() {
@@ -2177,10 +2176,7 @@ pub unsafe extern "C" fn xybrid_context_id(handle: *mut XybridContextHandle) -> 
 
     ffi_guard!("xybrid_context_id", std::ptr::null(), {
         match XybridContextHandle::as_ref(handle) {
-            Some(data) => data
-                .id_cache
-                .as_ref()
-                .map_or(std::ptr::null(), |c| c.as_ptr()),
+            Some(data) => data.id_cache.as_ptr(),
             None => std::ptr::null(),
         }
     })
@@ -3558,10 +3554,7 @@ pub unsafe extern "C" fn xybrid_result_output_type(
 
     ffi_guard!("xybrid_result_output_type", std::ptr::null(), {
         match XybridResultHandle::as_ref(result) {
-            Some(data) => data
-                .output_type_cache
-                .as_ref()
-                .map_or(std::ptr::null(), |c| c.as_ptr()),
+            Some(data) => data.output_type_cache.as_ptr(),
             None => std::ptr::null(),
         }
     })
@@ -4905,7 +4898,7 @@ mod tests {
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
             error_cache: None,
-            output_type_cache: None,
+            output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
         };
         data_a.populate_caches();
@@ -4920,7 +4913,7 @@ mod tests {
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
             error_cache: None,
-            output_type_cache: None,
+            output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
         };
         data_b.populate_caches();
@@ -5143,7 +5136,7 @@ mod tests {
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
             error_cache: None,
-            output_type_cache: None,
+            output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
         };
         data.populate_caches();

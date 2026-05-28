@@ -746,8 +746,7 @@ int32_t xybrid_context_clear(struct XybridContextHandle *handle);
  # Returns
 
  A pointer to the context ID string, or null if the handle is null or
- invalid (or, in the impossible defensive case, if the id contained an
- interior NUL byte at construction).
+ invalid.
  */
 const char *xybrid_context_id(struct XybridContextHandle *handle);
 
