@@ -65,9 +65,10 @@
 /*
  Opaque handle to a model loader.
 
- This handle is created by `xybrid_model_loader_from_registry`,
- `xybrid_model_loader_from_bundle`, or `xybrid_model_loader_from_directory`
- and must be freed with `xybrid_model_loader_free`.
+ Created by `xybrid_model_loader_from_registry`,
+ `xybrid_model_loader_from_bundle`, or
+ `xybrid_model_loader_from_directory` (and the HuggingFace /
+ model-file siblings). Freed via `xybrid_model_loader_free`.
  */
 typedef struct XybridModelLoaderHandle {
   void *_0;
@@ -76,8 +77,8 @@ typedef struct XybridModelLoaderHandle {
 /*
  Opaque handle to a loaded model.
 
- This handle is created by `xybrid_model_loader_load` and must be
- freed with `xybrid_model_free`.
+ Created by `xybrid_model_loader_load`. Freed via
+ `xybrid_model_free`.
  */
 typedef struct XybridModelHandle {
   void *_0;
@@ -86,8 +87,10 @@ typedef struct XybridModelHandle {
 /*
  Opaque handle to an envelope (input data).
 
- This handle is created by `xybrid_envelope_audio` or `xybrid_envelope_text`
- and must be freed with `xybrid_envelope_free`.
+ Created by `xybrid_envelope_audio` / `xybrid_envelope_text` /
+ `xybrid_envelope_text_with_voice` /
+ `xybrid_envelope_text_with_role`. Freed via
+ `xybrid_envelope_free`.
  */
 typedef struct XybridEnvelopeHandle {
   void *_0;
@@ -96,8 +99,8 @@ typedef struct XybridEnvelopeHandle {
 /*
  Opaque handle to a conversation context.
 
- This handle is created by `xybrid_context_new` and must be freed with
- `xybrid_context_free`.
+ Created by `xybrid_context_new` / `xybrid_context_with_id`. Freed
+ via `xybrid_context_free`.
  */
 typedef struct XybridContextHandle {
   void *_0;
@@ -106,8 +109,8 @@ typedef struct XybridContextHandle {
 /*
  Opaque handle to a generation config.
 
- This handle is created by `xybrid_generation_config_new` (or a preset
- like `xybrid_generation_config_greedy`) and must be freed with
+ Created by `xybrid_generation_config_new` (or a preset like
+ `xybrid_generation_config_greedy` / `_creative`). Freed via
  `xybrid_generation_config_free`.
  */
 typedef struct XybridGenerationConfigHandle {
@@ -117,8 +120,8 @@ typedef struct XybridGenerationConfigHandle {
 /*
  Opaque handle to an inference result.
 
- This handle is created by `xybrid_model_run` and must be freed with
- `xybrid_result_free`.
+ Created by `xybrid_model_run` (and the streaming / context
+ variants). Freed via `xybrid_result_free`.
  */
 typedef struct XybridResultHandle {
   void *_0;
@@ -150,8 +153,7 @@ typedef void (*XybridStreamCallback)(const char *token,
 /*
  Opaque handle to a loaded bundle.
 
- This handle is created by `xybrid_bundle_open` and must be freed with
- `xybrid_bundle_free`.
+ Created by `xybrid_bundle_open`. Freed via `xybrid_bundle_free`.
  */
 typedef struct XybridBundleHandle {
   void *_0;
@@ -161,8 +163,8 @@ typedef struct XybridBundleHandle {
  Opaque handle to a telemetry configuration.
 
  Create with `xybrid_telemetry_config_new`. Free with
- `xybrid_telemetry_config_free` unless the handle has been consumed by
- `xybrid_telemetry_init` (which always takes ownership).
+ `xybrid_telemetry_config_free` unless the handle has been consumed
+ by `xybrid_telemetry_init` (which always takes ownership).
  */
 typedef struct XybridTelemetryConfigHandle {
   void *_0;
