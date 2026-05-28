@@ -93,6 +93,8 @@ void uniffi_xybrid_uniffi_fn_func_clear_battery_level(RustCallStatus *_Nonnull o
 void uniffi_xybrid_uniffi_fn_func_clear_thermal_state(RustCallStatus *_Nonnull out_status
     
 );
+void uniffi_xybrid_uniffi_fn_func_configure_runtime(RustBuffer api_key, RustBuffer gateway_url, RustBuffer ingest_url, RustCallStatus *_Nonnull out_status
+);
 void uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(RustBuffer cache_dir, RustCallStatus *_Nonnull out_status
 );
 void uniffi_xybrid_uniffi_fn_func_set_battery_level(uint8_t percent, RustCallStatus *_Nonnull out_status
@@ -219,6 +221,9 @@ uint16_t uniffi_xybrid_uniffi_checksum_func_clear_battery_level(void
     
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_clear_thermal_state(void
+    
+);
+uint16_t uniffi_xybrid_uniffi_checksum_func_configure_runtime(void
     
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir(void

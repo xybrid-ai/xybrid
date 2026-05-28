@@ -59,6 +59,50 @@ fn resolve_binding(binding: &str) -> &'static str {
     }
 }
 
+/// Apply optional runtime configuration during host SDK initialization.
+///
+/// The Swift `Xybrid.initialize(...)` and Kotlin `Xybrid.init(...)` wrappers
+/// call this once, after [`set_binding`], to thread through whatever the host
+/// app passed. Every argument is optional:
+///
+/// - `api_key` — when present and non-blank, starts the platform telemetry
+///   exporter so inference traces reach the dashboard. Omit it to run
+///   anonymously (local inference only); the first inference then logs a
+///   one-shot hint pointing at the dashboard.
+/// - `gateway_url` — overrides the LLM gateway URL.
+/// - `ingest_url` — overrides the telemetry ingest endpoint (self-hosted
+///   dashboards). When omitted, the exporter targets the production default.
+///
+/// Delegates entirely to the [`xybrid_sdk::init`] builder, so the
+/// API-key-gating and ingest-URL defaulting rules match every other binding.
+/// Blank strings are treated as absent so hosts can pass empty
+/// `String.fromEnvironment`-style values without accidentally configuring
+/// anything.
+#[uniffi::export]
+fn configure_runtime(
+    api_key: Option<String>,
+    gateway_url: Option<String>,
+    ingest_url: Option<String>,
+) {
+    let non_blank = |value: Option<String>| {
+        value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+
+    let mut builder = xybrid_sdk::init();
+    if let Some(key) = non_blank(api_key) {
+        builder = builder.api_key(key);
+    }
+    if let Some(gateway) = non_blank(gateway_url) {
+        builder = builder.gateway_url(gateway);
+    }
+    if let Some(ingest) = non_blank(ingest_url) {
+        builder = builder.ingest_url(ingest);
+    }
+    builder.run();
+}
+
 // -- Platform-state push API --
 //
 // Mobile telemetry APIs (`UIDevice.batteryLevel` on iOS,
