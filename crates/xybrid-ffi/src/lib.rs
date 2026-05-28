@@ -235,19 +235,45 @@ pub type XybridStreamCallback = Option<
 // Internal Helpers
 // ============================================================================
 
-/// Send-safe wrapper for streaming callback context.
+/// Trampoline state that bridges a C streaming callback into the SDK's
+/// `FnMut(PartialToken) -> Result<…> + Send` closure shape.
 ///
-/// # Safety
-/// The caller must ensure that `user_data` is valid for the duration of
-/// the streaming call and that no data races occur. Function pointers are
-/// inherently thread-safe (just addresses).
+/// Held by the move-closure handed to
+/// `XybridModel::run_streaming{,_with_context}`, which the SDK then moves
+/// onto whichever worker thread the active backend dispatches tokens from
+/// (Tokio runtime, llama.cpp generation thread, etc.). The closure is
+/// **never aliased**: the SDK invokes it through `&mut F`, so even if the
+/// worker thread differs from the FFI entry thread, there is only ever
+/// one `&mut StreamCallbackCtx` at a time.
 struct StreamCallbackCtx {
     callback:
         unsafe extern "C" fn(*const c_char, i64, u32, *const c_char, *const c_char, *mut c_void),
     user_data: *mut c_void,
 }
+
+// SAFETY: `StreamCallbackCtx` is `Send` because the SDK streaming entry
+// points (see `xybrid_sdk::XybridModel::run_streaming*`) bound the
+// caller-supplied closure as `F: FnMut(...) + Send` and move it onto the
+// backend's worker thread (Tokio, llama.cpp). Sending the ctx is sound
+// under the FFI contract documented on `xybrid_model_run_streaming`:
+//
+//   1. `callback` is a `extern "C" fn` (raw function pointer), which is
+//      trivially `Send` / `Sync` — sending the address to another thread
+//      doesn't mutate or alias anything.
+//   2. `user_data` is opaque to Rust; the C caller MUST ensure (a) it
+//      remains valid for the duration of the streaming call, AND (b) it
+//      is not accessed concurrently from any other C-side thread while
+//      the streaming call is in flight. The same invariant the C ABI
+//      already places on any callback context pointer.
+//
+// `Sync` is intentionally NOT implemented. The audit (.context/audit-ffi.md
+// theme 5) flagged the prior `unsafe impl Sync` as unsound — `Sync` would
+// claim two `&StreamCallbackCtx` may exist on different threads at once,
+// which is not a promise the C ABI can keep for `user_data`. `Sync` is
+// also not required: the SDK invokes the closure through `&mut F`
+// (FnMut's exclusivity), so concurrent re-entry is structurally
+// impossible regardless of which thread the worker lives on.
 unsafe impl Send for StreamCallbackCtx {}
-unsafe impl Sync for StreamCallbackCtx {}
 
 impl StreamCallbackCtx {
     unsafe fn invoke(&self, token: &PartialToken) {
@@ -3061,7 +3087,8 @@ pub unsafe extern "C" fn xybrid_model_run_streaming(
 
         let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
-        // Wrap callback + user_data in a Send-safe context
+        // Wrap callback + user_data in a Send (but not Sync) trampoline.
+        // See the SAFETY comment on `StreamCallbackCtx`'s Send impl above.
         let ctx = StreamCallbackCtx {
             callback: callback_fn,
             user_data,
@@ -3216,7 +3243,8 @@ pub unsafe extern "C" fn xybrid_model_run_streaming_with_context(
 
         let sdk_envelope = envelope_data_to_sdk(envelope_data);
 
-        // Wrap callback + user_data in a Send-safe context
+        // Wrap callback + user_data in a Send (but not Sync) trampoline.
+        // See the SAFETY comment on `StreamCallbackCtx`'s Send impl above.
         let cb_ctx = StreamCallbackCtx {
             callback: callback_fn,
             user_data,
@@ -4906,6 +4934,26 @@ mod tests {
     // Note: LoaderState and ModelState hold SDK objects (ModelLoader, XybridModel)
     // which require actual model paths or registry access to construct.
     // Handle roundtrip is tested implicitly through the integration tests below.
+
+    /// Lock the audited `Send` requirement on `StreamCallbackCtx` in
+    /// place. The SDK streaming entry points bound the callback closure
+    /// as `F: FnMut(...) + Send`, so `StreamCallbackCtx: Send` is
+    /// load-bearing — removing it would silently break every C consumer
+    /// of `xybrid_model_run_streaming{,_with_context}` at compile time.
+    ///
+    /// `Sync` is intentionally NOT implemented (audit theme 5 in
+    /// `.context/audit-ffi.md`) — `Sync` on a `*mut c_void` user_data
+    /// would be unsound, and `FnMut` exclusivity makes it unnecessary
+    /// regardless. Asserting `!Sync` cleanly in stable Rust requires the
+    /// `static_assertions` crate (not in tree); the absence of
+    /// `unsafe impl Sync for StreamCallbackCtx` in the production code +
+    /// the SAFETY comment on the `Send` impl are the audit-pointed
+    /// guarantees, enforced by review.
+    #[test]
+    fn stream_callback_ctx_is_send() {
+        const fn assert_send<T: Send>() {}
+        assert_send::<StreamCallbackCtx>();
+    }
 
     #[test]
     fn cstring_lossy_passes_through_clean_utf8() {
