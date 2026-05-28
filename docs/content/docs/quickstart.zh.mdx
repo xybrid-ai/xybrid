@@ -65,6 +65,10 @@ dependencies: [
 ```swift
 import Xybrid
 
+// 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
+// 推理轨迹：Xybrid.initialize(apiKey: "...")
+Xybrid.initialize()
+
 // 从注册表加载模型
 let loader = XybridModelLoader.fromRegistry(modelId: "kokoro-82m")
 let model = try loader.load()

@@ -60,6 +60,12 @@ struct ContentView: View {
             let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
                 .first!.appendingPathComponent("xybrid").path
             initSdkCacheDir(cacheDir: cacheDir)
+
+            // Initialize the runtime. Runs locally as-is; add a free key from
+            // dashboard.xybrid.dev to see inference traces:
+            //   Xybrid.initialize(apiKey: "xy_live_...")
+            Xybrid.initialize()
+
             await MainActor.run {
                 appState = .ready
             }

@@ -67,6 +67,10 @@ dependencies: [
 ```swift
 import Xybrid
 
+// Runs locally as-is. Add a free key from dashboard.xybrid.dev to see
+// your inference traces: Xybrid.initialize(apiKey: "...")
+Xybrid.initialize()
+
 // Load a model from the registry
 let loader = ModelLoader.fromRegistry(modelId: "kokoro-82m")
 let model = try loader.load()
