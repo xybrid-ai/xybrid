@@ -2,6 +2,9 @@
 
 #![allow(clippy::too_many_arguments)]
 
+mod targeting;
+mod warmup;
+
 use anyhow::{Context, Result};
 use std::fs;
 #[cfg(feature = "vision")]
@@ -12,11 +15,18 @@ use xybrid_core::conversation::ConversationContext;
 use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 use xybrid_core::orchestrator::Orchestrator;
+use xybrid_core::pipeline::ExecutionTarget;
 use xybrid_core::pipeline_config::PipelineConfig;
 use xybrid_sdk::model::ModelLoader;
 use xybrid_sdk::registry_client::RegistryClient;
 
 use colored::Colorize;
+
+use targeting::{
+    parse_repl_target, parse_stage_config_target, stage_config_allows_local_cache,
+    stage_is_locally_available, target_allows_local,
+};
+use warmup::warmup_models;
 
 use crate::ui;
 
@@ -27,7 +37,7 @@ pub(crate) fn handle_repl_command(
     model_file: Option<PathBuf>,
     huggingface: Option<String>,
     voice: Option<String>,
-    _target: Option<String>,
+    target: Option<String>,
     stream: bool,
     system_prompt: Option<String>,
     verbose: u8,
@@ -40,6 +50,10 @@ pub(crate) fn handle_repl_command(
     ui::hint("Type 'quit' or 'exit' to exit. Type 'help' for commands.");
 
     print_streaming_status(stream);
+    let execution_target = parse_repl_target(target.as_deref())?;
+    if let Some(target) = &execution_target {
+        ui::kv("Target", target.as_str());
+    }
     println!();
 
     // --huggingface: load from HuggingFace repo
@@ -64,6 +78,7 @@ pub(crate) fn handle_repl_command(
 
         let mut stage = StageDescriptor::new(_model.model_id());
         stage.bundle_path = Some(cache_dir.to_string_lossy().to_string());
+        stage.target = execution_target.clone();
         vec![stage]
     } else if let Some(ref gguf_path) = model_file {
         // --model-file: load a bare GGUF file with auto-generated metadata
@@ -104,6 +119,7 @@ pub(crate) fn handle_repl_command(
 
         let mut stage = StageDescriptor::new(metadata.model_id.clone());
         stage.bundle_path = Some(parent_dir.to_string_lossy().to_string());
+        stage.target = execution_target.clone();
         vec![stage]
     } else {
         let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
@@ -126,14 +142,19 @@ pub(crate) fn handle_repl_command(
             None
         };
 
-        load_stages(&client, &pipeline_config, &model_id)?
+        load_stages(
+            &client,
+            &pipeline_config,
+            &model_id,
+            execution_target.as_ref(),
+        )?
     };
 
     let mut conversation_context: Option<ConversationContext> = None;
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     let mut loaded_model: Option<xybrid_sdk::model::XybridModel> = None;
 
-    if stages.len() == 1 && stages[0].bundle_path.is_some() {
+    if stages.len() == 1 && stage_is_locally_available(&stages[0]) {
         let bundle_path = PathBuf::from(stages[0].bundle_path.as_ref().unwrap());
         let model_result = if bundle_path.extension().is_some_and(|ext| ext == "xyb") {
             ModelLoader::from_bundle(&bundle_path).and_then(|loader| loader.load())
@@ -168,7 +189,7 @@ pub(crate) fn handle_repl_command(
 
     let stage_bundle_paths: std::collections::HashMap<String, bool> = stages
         .iter()
-        .map(|s| (s.name.clone(), s.bundle_path.is_some()))
+        .map(|s| (s.name.clone(), stage_is_locally_available(s)))
         .collect();
     let availability_fn = move |stage: &str| -> LocalAvailability {
         LocalAvailability::new(stage_bundle_paths.get(stage).copied().unwrap_or(false))
@@ -177,7 +198,7 @@ pub(crate) fn handle_repl_command(
     let mut orchestrator = Orchestrator::new();
     let bridge = xybrid_sdk::bridge_orchestrator_events(&orchestrator);
 
-    warmup_models(&mut orchestrator, &stages, &metrics, &availability_fn);
+    warmup_models(&stages);
 
     println!();
     ui::hint("Enter text and press Enter to run inference");
@@ -239,7 +260,7 @@ pub(crate) fn handle_repl_command(
         // Try streaming execution
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         let use_streaming = {
-            let can_stream = stream && stages.len() == 1 && stages[0].bundle_path.is_some();
+            let can_stream = stream && stages.len() == 1 && stage_is_locally_available(&stages[0]);
             if stream && !can_stream {
                 ui::warning("Streaming conditions not met");
                 if verbose > 0 {
@@ -257,7 +278,7 @@ pub(crate) fn handle_repl_command(
         let use_streaming = {
             if stream {
                 ui::warning("Streaming requested but LLM features not enabled");
-                ui::hint("Build with: --features llm-llamacpp (or llm-mistral)");
+                ui::hint("Build with: --features llm-llamacpp-runtime (or llm-mistral)");
             }
             false
         };
@@ -315,6 +336,7 @@ fn load_stages(
     client: &RegistryClient,
     pipeline_config: &Option<PipelineConfig>,
     model_id: &Option<String>,
+    execution_target: Option<&ExecutionTarget>,
 ) -> Result<Vec<StageDescriptor>> {
     let mut stages = Vec::new();
 
@@ -324,8 +346,10 @@ fn load_stages(
         for stage_config in &config.stages {
             let model_id = stage_config.model_id();
             let mut desc = StageDescriptor::new(&model_id);
+            let configured_target = parse_stage_config_target(stage_config);
+            desc.target = execution_target.cloned().or(configured_target);
 
-            if !stage_config.is_cloud_stage() {
+            if stage_config_allows_local_cache(stage_config, desc.target.as_ref()) {
                 ensure_model_cached(&mut desc, &model_id, client)?;
             }
             stages.push(desc);
@@ -333,7 +357,10 @@ fn load_stages(
     } else if let Some(ref model_id) = model_id {
         ui::kv("Model", model_id);
         let mut desc = StageDescriptor::new(model_id);
-        ensure_model_cached(&mut desc, model_id, client)?;
+        desc.target = execution_target.cloned();
+        if target_allows_local(desc.target.as_ref()) {
+            ensure_model_cached(&mut desc, model_id, client)?;
+        }
         stages.push(desc);
     }
 
@@ -367,29 +394,6 @@ fn ensure_model_cached(
         desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
     }
     Ok(())
-}
-
-fn warmup_models(
-    orchestrator: &mut Orchestrator,
-    stages: &[StageDescriptor],
-    metrics: &xybrid_core::context::DeviceMetrics,
-    availability_fn: &dyn Fn(&str) -> LocalAvailability,
-) {
-    let sp = ui::spinner("Warming up models...");
-    let warmup_input = Envelope {
-        kind: EnvelopeKind::Text("Hi".to_string()),
-        metadata: std::collections::HashMap::new(),
-    };
-    match orchestrator.execute_pipeline(stages, &warmup_input, metrics, availability_fn) {
-        Ok(_) => {
-            sp.finish_and_clear();
-            ui::ok("Models loaded and warm. Ready for input!");
-        }
-        Err(e) => {
-            sp.finish_and_clear();
-            ui::warning(&format!("Warmup failed ({}), first query may be slow", e));
-        }
-    }
 }
 
 enum SpecialCommandResult {
@@ -843,7 +847,7 @@ fn execute_batch(
     }
 }
 
-#[cfg(all(test, feature = "vision"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -911,6 +915,47 @@ mod tests {
         assert!(message.contains("invalid or corrupt jpeg image bytes"));
         assert!(!message.contains("[42"));
         assert!(!message.contains("42, 42"));
+    }
+
+    #[test]
+    fn direct_model_network_target_skips_registry_cache_lookup() {
+        for target in [ExecutionTarget::Cloud, ExecutionTarget::Server] {
+            let client = RegistryClient::with_url("http://127.0.0.1:9").unwrap();
+
+            let stages = load_stages(
+                &client,
+                &None,
+                &Some("test-model".to_string()),
+                Some(&target),
+            )
+            .unwrap();
+
+            assert_eq!(stages.len(), 1);
+            assert_eq!(stages[0].target.as_ref(), Some(&target));
+            assert!(stages[0].bundle_path.is_none());
+        }
+    }
+
+    #[test]
+    fn invalid_yaml_target_is_ignored_without_hard_failure() {
+        let config = PipelineConfig::from_yaml(
+            r#"
+name: test
+stages:
+  - id: llm
+    model: test-model
+    target: clod
+    provider: openai
+"#,
+        )
+        .unwrap();
+        let client = RegistryClient::with_url("http://127.0.0.1:9").unwrap();
+
+        let stages = load_stages(&client, &Some(config), &None, None).unwrap();
+
+        assert_eq!(stages.len(), 1);
+        assert_eq!(stages[0].target, None);
+        assert!(stages[0].bundle_path.is_none());
     }
 
     #[cfg(feature = "vision")]

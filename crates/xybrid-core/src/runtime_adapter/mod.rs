@@ -122,8 +122,9 @@ pub use mistral::MistralBackend;
 #[cfg(feature = "llm-llamacpp")]
 pub use llama_cpp::LlamaCppBackend;
 
-// llama.cpp log control exports
-#[cfg(feature = "llm-llamacpp")]
+// llama.cpp log control exports — only meaningful at the runtime tier
+// since the skeleton tier doesn't link a llama.cpp logger to talk to.
+#[cfg(feature = "llm-llamacpp-runtime")]
 pub use llama_cpp::{llama_log_get_verbosity, llama_log_set_verbosity};
 
 // Re-export inference backend types
@@ -175,6 +176,12 @@ pub enum AdapterError {
     RuntimeError(String),
     #[error("Aborted for cloud fallback: {reason}")]
     AbortedForCloudFallback { reason: crate::abort::AbortReason },
+    /// The backend's type surface compiled but the actual link to its
+    /// runtime was not enabled (e.g., `llm-llamacpp` skeleton tier
+    /// without `llm-llamacpp-runtime`). Carries the backend name so
+    /// callers can produce a "rebuild with `<feature>`" hint.
+    #[error("Backend `{backend}` is not linked into this build — rebuild with the corresponding runtime feature flag")]
+    BackendNotLinked { backend: &'static str },
 }
 
 impl AdapterError {
@@ -189,6 +196,58 @@ impl AdapterError {
         match self {
             Self::AbortedForCloudFallback { reason } => Some(*reason),
             _ => None,
+        }
+    }
+}
+
+/// 1:1 mapping from `xybrid-llama`'s typed error surface to the runtime
+/// adapter error. Added in Phase 2 of the `llamacpp-crate-split` epic so
+/// the safe wrappers in `xybrid-llama` can return [`xybrid_llama::LlamaError`]
+/// and the call sites in `runtime_adapter::llama_cpp` keep their
+/// `Result<..., AdapterError>` shape unchanged via `?`.
+///
+/// Gated on `llm-llamacpp-runtime` because `xybrid-llama` (the crate
+/// providing `LlamaError`) is only in the dep graph at that tier. The
+/// skeleton tier (`llm-llamacpp` only) has no real backend to convert
+/// errors from.
+///
+/// The `StreamingCallbackAborted` arm forwards through
+/// [`AdapterError::from_streaming_callback_error`] so that
+/// `xybrid-core::abort::CloudFallbackAbort` is downcast back to
+/// `AdapterError::AbortedForCloudFallback` exactly as it did before the
+/// refactor.
+#[cfg(feature = "llm-llamacpp-runtime")]
+impl From<xybrid_llama::LlamaError> for AdapterError {
+    fn from(err: xybrid_llama::LlamaError) -> Self {
+        use xybrid_llama::LlamaError;
+        match err {
+            LlamaError::InvalidInput(msg) => Self::InvalidInput(msg),
+            LlamaError::LoadFailed(path) => {
+                Self::RuntimeError(format!("Failed to load model from {path}"))
+            }
+            LlamaError::ContextCreationFailed(msg) => {
+                Self::RuntimeError(format!("Failed to create context: {msg}"))
+            }
+            LlamaError::TokenizationFailed => Self::RuntimeError("Tokenization failed".to_string()),
+            LlamaError::DecodeFailed {
+                code,
+                n_past_in,
+                detail,
+            } => Self::RuntimeError(format!(
+                "Generation failed with error code {code} ({detail}; n_past_in={n_past_in})"
+            )),
+            LlamaError::StreamingCallbackAborted(boxed) => {
+                Self::from_streaming_callback_error(boxed)
+            }
+            LlamaError::ChatTemplateFailed { detail } => {
+                Self::RuntimeError(format!("Chat template render failed: {detail}"))
+            }
+            LlamaError::Internal(msg) => Self::RuntimeError(msg),
+            // Forward-compatibility for `#[non_exhaustive]` LlamaError —
+            // any variant added in xybrid-llama after this match was
+            // written falls through to a generic RuntimeError until the
+            // mapping above is updated.
+            other => Self::RuntimeError(format!("llama error: {other}")),
         }
     }
 }

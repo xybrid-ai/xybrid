@@ -22,7 +22,7 @@ This document provides a comprehensive reference for all feature flags, platform
 
 | Feature | Description | Enables |
 |---------|-------------|---------|
-| **default** | Default features | `ort-download` |
+| **default** | Default features | `ort-download` (llama.cpp opted into via `llm-llamacpp-runtime` or platform preset) |
 | **ort-download** | Download prebuilt ONNX Runtime binaries | `ort/download-binaries`, `ort/tls-native` |
 | **ort-dynamic** | Load ONNX Runtime .so at runtime | `ort/load-dynamic` |
 | **ort-coreml** | Apple Neural Engine acceleration | `ort/coreml` |
@@ -33,19 +33,32 @@ This document provides a comprehensive reference for all feature flags, platform
 | **llm-mistral** | mistral.rs LLM backend (CPU) | `mistralrs` |
 | **llm-mistral-metal** | mistral.rs with Metal acceleration | `llm-mistral`, `mistralrs/metal` |
 | **llm-mistral-cuda** | mistral.rs with CUDA acceleration | `llm-mistral`, `mistralrs/cuda` |
-| **llm-llamacpp** | llama.cpp backend (Android-compatible) | *(marker feature - triggers build.rs)* |
+| **llm-llamacpp** | llama.cpp backend — **skeleton tier** (types compile, no link) | *(no native deps)* |
+| **llm-llamacpp-runtime** | llama.cpp backend — **runtime tier** (real cmake build + link) | `llama-cpp-sys/bindings`, `xybrid-llama/bindings` |
 | **vision** | Image envelope primitives and image preprocessing | *(no additional dependencies; uses the always-present `image` crate)* |
-| **llm-llamacpp-vision** | llama.cpp VLM path with `mmproj` / `mtmd` support | `llm-llamacpp`, `vision` |
+| **llm-llamacpp-vision** | llama.cpp VLM path with `mmproj` / `mtmd` support | `vision`, `llm-llamacpp-runtime`, `llama-cpp-sys/vision`, `xybrid-llama/vision` |
 
 ### Notes
 
-- `llm-llamacpp` is a **marker feature** - it doesn't enable external crate dependencies but instead:
-  1. Triggers `build.rs` to compile vendored llama.cpp via CMake
-  2. Gates source code with `#[cfg(feature = "llm-llamacpp")]` blocks
-  3. Requires `vendor/llama.cpp` directory with cloned llama.cpp source
-- `vision` alone enables image envelopes and image preprocessing. Local llama.cpp
-  VLM generation requires `llm-llamacpp-vision`, which composes `vision` with
-  the llama.cpp backend and links the vendored `mtmd` helpers.
+- The llama.cpp backend is split into two tiers, mirroring MLX's `llm-mlx`
+  vs `llm-mlx-runtime` pattern (PR xybrid#124):
+  - **`llm-llamacpp`** (skeleton): exposes `LlamaCppBackend` types on every
+    target without cmake / a C++ toolchain / a llama.cpp source clone.
+    `LlamaCppBackend::new()` constructs a type-only backend; runtime methods
+    return `AdapterError::BackendNotLinked { backend: "llamacpp" }` with a
+    "rebuild with `llm-llamacpp-runtime`" hint. For Linux CI runners and
+    downstreams that want type access only.
+  - **`llm-llamacpp-runtime`** (runtime): activates `llama-cpp-sys/bindings`
+    (the cmake build of llama.cpp + the `wrapper.cpp` shim) and
+    `xybrid-llama/bindings` (safe RAII wrappers). All four `platform-*`
+    presets on `xybrid-sdk` depend on this tier.
+- The 3-layer crate shape mirrors MLX precedent:
+  `llama-cpp-sys` (raw FFI + cmake build) → `xybrid-llama` (safe wrappers,
+  typed errors) → `xybrid-core::runtime_adapter::llama_cpp` (thin adapter).
+- `vision` alone enables image envelopes and image preprocessing. Local
+  llama.cpp VLM generation requires `llm-llamacpp-vision`, which composes the
+  vision primitives with the linked runtime tier and the vendored `mtmd`
+  helpers.
 
 ---
 
@@ -54,10 +67,10 @@ This document provides a comprehensive reference for all feature flags, platform
 | Feature | Description | Forwards to xybrid-core |
 |---------|-------------|-------------------------|
 | **default** | No default features | *(none)* |
-| **platform-android** | Android preset | `ort-dynamic`, `candle`, `llm-llamacpp` |
-| **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` |
-| **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` |
-| **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-llamacpp` |
+| **platform-android** | Android preset | `ort-dynamic`, `candle`, `llm-llamacpp-runtime` |
+| **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp-runtime` |
+| **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp-runtime` |
+| **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-llamacpp-runtime` |
 | **ort-download** | Forward to core | `xybrid-core/ort-download` |
 | **ort-dynamic** | Forward to core | `xybrid-core/ort-dynamic` |
 | **ort-coreml** | Forward to core | `xybrid-core/ort-coreml` |
@@ -68,9 +81,15 @@ This document provides a comprehensive reference for all feature flags, platform
 | **llm-mistral** | Forward to core | `xybrid-core/llm-mistral` |
 | **llm-mistral-metal** | Forward to core | `xybrid-core/llm-mistral-metal` |
 | **llm-mistral-cuda** | Forward to core | `xybrid-core/llm-mistral-cuda` |
-| **llm-llamacpp** | Forward to core | `xybrid-core/llm-llamacpp` |
-| **vision** | Forward to core | `xybrid-core/vision` |
-| **llm-llamacpp-vision** | Forward to core VLM path | `xybrid-core/llm-llamacpp-vision`, `llm-llamacpp`, `vision` |
+| **llm-llamacpp** | Skeleton tier — forward to core | `xybrid-core/llm-llamacpp` |
+| **llm-llamacpp-runtime** | Runtime tier — activates local skeleton + forwards runtime | `llm-llamacpp`, `xybrid-core/llm-llamacpp-runtime` |
+| **vision** | Forward to core image envelope primitives | `xybrid-core/vision` |
+| **llm-llamacpp-vision** | Forward to core VLM path | `vision`, `llm-llamacpp-runtime`, `xybrid-core/llm-llamacpp-vision` |
+
+> The runtime tier **must** activate its own crate's skeleton tier so
+> `#[cfg(feature = "llm-llamacpp")]` source gates in this crate fire
+> alongside the runtime link. Otherwise platform presets would link
+> llama.cpp while the SDK API surface that consumes it stays gated off.
 
 ---
 
@@ -120,14 +139,14 @@ This document provides a comprehensive reference for all feature flags, platform
 
 Platform presets are the **single source of truth** for platform-specific feature combinations. They are defined in `xybrid-sdk/Cargo.toml` and forwarded through the crate hierarchy.
 
-All current platform presets default to **text-only** llama.cpp support. Vision-language builds must compose the platform preset with `llm-llamacpp-vision`; use `vision` alone only when a crate needs image envelope/preprocessing types without the llama.cpp VLM runtime.
+All current platform presets default to **text-only** linked llama.cpp runtime support. Vision-language builds must compose the platform preset with `llm-llamacpp-vision`; use `vision` alone only when a crate needs image envelope/preprocessing types without the llama.cpp VLM runtime.
 
-| Preset | Target Platform | Core Features Enabled | VLM Default | Rationale |
-|--------|-----------------|----------------------|-------------|-----------|
-| **platform-android** | Android (all ABIs) | `ort-dynamic`, `candle`, `llm-llamacpp` | Off; add `llm-llamacpp-vision` | Dynamic ORT loading for AAR distribution; Candle (CPU) for Whisper ASR; llama.cpp has runtime SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
-| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` | Off; add `llm-llamacpp-vision` | Static ORT linking; CoreML for ANE acceleration; Metal for GPU |
-| **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` | Off; add `llm-llamacpp-vision` | Same as iOS - unified Apple platform features |
-| **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp` | Off; add `llm-llamacpp-vision` | Static ORT linking; llama.cpp for LLM inference (unified across all platforms) |
+| Preset | Target Platform | Core Features Enabled | Rationale |
+|--------|-----------------|----------------------|-----------|
+| **platform-android** | Android (all ABIs) | `ort-dynamic`, `candle`, `llm-llamacpp-runtime` | Dynamic ORT loading for AAR distribution; Candle (CPU) for Whisper ASR; llama.cpp runtime tier has SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
+| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `candle-metal`, `llm-llamacpp-runtime` | Static ORT linking; CoreML for ANE acceleration; Metal for GPU; llama.cpp runtime tier linked |
+| **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `candle-metal`, `llm-llamacpp-runtime` | Same as iOS — unified Apple platform features; llama.cpp runtime tier linked |
+| **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp-runtime` | Static ORT linking; llama.cpp runtime tier linked for LLM inference (unified across all platforms) |
 
 > **Note**: The CLI (`xybrid-cli`) adds `huggingface` to all its platform presets so `xybrid run --huggingface` works in release builds. SDK/FFI presets do not include `huggingface` by default — add it individually if needed.
 
@@ -184,7 +203,7 @@ The following types and modules are conditionally compiled based on feature flag
 | `ChatMessage`, `GenerationConfig`, `GenerationOutput`, `LlmBackend`, `LlmConfig`, `LlmResult`, `LlmRuntimeAdapter` | `feature = "llm-mistral" OR feature = "llm-llamacpp"` |
 | `MistralBackend` | `feature = "llm-mistral"` |
 | `LlamaCppBackend` | `feature = "llm-llamacpp"` |
-| `llama_log_get_verbosity`, `llama_log_set_verbosity` | `feature = "llm-llamacpp"` |
+| `llama_log_get_verbosity`, `llama_log_set_verbosity` | `feature = "llm-llamacpp-runtime"` |
 
 ---
 
@@ -194,7 +213,7 @@ The following feature combinations are invalid and should produce compile-time e
 
 | Combination | Reason | Recommended Alternative |
 |-------------|--------|------------------------|
-| `llm-mistral` on `target_os = "android"` | SIGILL crash on devices without ARMv8.2-A FP16 | Use `llm-llamacpp` instead |
+| `llm-mistral` on `target_os = "android"` | SIGILL crash on devices without ARMv8.2-A FP16 | Use `llm-llamacpp-runtime` or a platform preset instead |
 | `ort-download` AND `ort-dynamic` | Mutually exclusive ORT loading strategies | Choose one based on platform |
 | `candle-metal` on non-Apple targets | Metal is Apple-only | Use `candle` (CPU) or `candle-cuda` |
 | `candle-cuda` on Apple targets | CUDA not available on Apple | Use `candle-metal` |
@@ -339,9 +358,9 @@ Xybrid uses a **two-layer build architecture**:
 - Linker configuration
 - CMake invocation
 
-### Layer 2: build.rs (Compilation)
+### Layer 2: llama-cpp-sys build.rs (Compilation)
 
-**Location**: `crates/xybrid-core/build.rs`
+**Location**: `crates/llama-cpp-sys/build.rs`
 
 **Responsibilities**:
 - Compiling vendored llama.cpp via CMake
@@ -350,8 +369,8 @@ Xybrid uses a **two-layer build architecture**:
 - Setting `cargo:rustc-link-lib` and `cargo:rustc-link-search`
 
 **Triggered by**:
-- `#[cfg(feature = "llm-llamacpp")]` in the build script
-- Cargo's build process when xybrid-core is compiled
+- The `llama-cpp-sys/bindings` feature, reached through `xybrid-core/llm-llamacpp-runtime`
+- Cargo's build process when the runtime tier is compiled
 
 ### NDK Detection Duplication
 
@@ -360,7 +379,7 @@ Both xtask and build.rs need to detect the Android NDK:
 | Component | Purpose | Environment Variables Checked |
 |-----------|---------|------------------------------|
 | **xtask** | Locate NDK for `cargo-ndk` invocation | `ANDROID_NDK_HOME`, checks for `cargo ndk --version` |
-| **build.rs** | Locate NDK for CMake toolchain file | `ANDROID_NDK_HOME`, `NDK_HOME`, `CC_*`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, common paths |
+| **llama-cpp-sys build.rs** | Locate NDK for CMake toolchain file | `ANDROID_NDK_HOME`, `NDK_HOME`, `CC_*`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, common paths |
 
 This duplication exists because:
 1. xtask runs **before** cargo builds the crate
@@ -386,14 +405,14 @@ User runs: cargo xtask build-android --release
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ build.rs (Compilation) - runs for each target               │
+│ llama-cpp-sys build.rs (Compilation) - runs for each target │
 ├─────────────────────────────────────────────────────────────┤
-│ 1. Check #[cfg(feature = "llm-llamacpp")]                   │
+│ 1. Runs when llama-cpp-sys/bindings is enabled              │
 │ 2. If enabled:                                              │
 │    a. Find Android NDK (from CC env var or ANDROID_NDK_HOME)│
 │    b. Configure CMake with NDK toolchain file               │
 │    c. Build llama.cpp static libraries                      │
-│    d. Build llama_wrapper.cpp                               │
+│    d. Build wrapper.cpp                                     │
 │    e. Output cargo:rustc-link-lib directives                │
 │ 3. Cargo links everything together                          │
 └─────────────────────────────────────────────────────────────┘
@@ -412,7 +431,7 @@ cargo check -p xybrid-core --no-default-features --features ort-download
 ### macOS Development
 
 ```bash
-cargo build -p xybrid-core --features "ort-download,ort-coreml,llm-llamacpp"
+cargo build -p xybrid-core --features "ort-download,ort-coreml,llm-llamacpp-runtime"
 ```
 
 ### macOS Vision-Language Development
@@ -432,5 +451,5 @@ cargo xtask build-android --release
 
 ```bash
 # macOS only (includes Metal features)
-cargo check -p xybrid-core --features "ort-download,ort-coreml,candle-metal,llm-llamacpp"
+cargo check -p xybrid-core --features "ort-download,ort-coreml,candle-metal,llm-llamacpp-runtime"
 ```

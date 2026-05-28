@@ -36,14 +36,21 @@ llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
 vision = ["xybrid-core/vision", "xybrid-sdk/vision"]
-llm-llamacpp-vision = ["llm-llamacpp", "vision", "xybrid-sdk/llm-llamacpp-vision"]
+# Runtime tier MUST also activate the local skeleton tier so the CLI's
+# own `#[cfg(feature = "llm-llamacpp")]` source gates (e.g. in
+# `commands/repl.rs`) fire. Otherwise platform presets link llama.cpp
+# while the CLI's LLM dispatch paths stay gated off.
+llm-llamacpp-runtime = ["llm-llamacpp", "xybrid-sdk/llm-llamacpp-runtime"]
+llm-llamacpp-vision = ["vision", "llm-llamacpp-runtime", "xybrid-sdk/llm-llamacpp-vision"]
 
 # PLATFORM PRESETS (composed from individual features above)
-# This ensures #[cfg(feature = "...")] checks work correctly in this crate
-platform-android = ["ort-dynamic", "llm-llamacpp", "candle", "huggingface"]
-platform-ios = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp", "huggingface"]
-platform-macos = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp", "huggingface"]
-platform-desktop = ["ort-download", "llm-llamacpp", "huggingface"]
+# This ensures #[cfg(feature = "...")] checks work correctly in this crate.
+# Platform presets activate the llama.cpp **runtime tier** so the CLI
+# actually links against llama.cpp on a platform build.
+platform-android = ["ort-dynamic", "llm-llamacpp-runtime", "candle", "huggingface"]
+platform-ios = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp-runtime", "huggingface"]
+platform-macos = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp-runtime", "huggingface"]
+platform-desktop = ["ort-download", "llm-llamacpp-runtime", "huggingface"]
 
 
 [dependencies]

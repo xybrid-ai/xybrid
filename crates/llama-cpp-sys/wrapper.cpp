@@ -33,8 +33,7 @@
  * - llama_generate_from_current_logits_c
  */
 
-#include "llama.h"
-#include "ggml.h"
+#include "wrapper.h"
 #ifdef XYBRID_LLAMA_VISION
 #include "mtmd.h"
 #include "mtmd-helper.h"
@@ -265,13 +264,18 @@ int32_t mtmd_image_tokens_get_n_pos_c(const mtmd_image_tokens* image_tokens) {
     return image_tokens ? mtmd_image_tokens_get_n_pos(image_tokens) : 0;
 }
 
-mtmd_decoder_pos mtmd_image_tokens_get_decoder_pos_c(
+xybrid_mtmd_decoder_pos mtmd_image_tokens_get_decoder_pos_c(
     const mtmd_image_tokens* image_tokens,
     int32_t pos_0,
     size_t i
 ) {
-    mtmd_decoder_pos empty{};
-    return image_tokens ? mtmd_image_tokens_get_decoder_pos(image_tokens, pos_0, i) : empty;
+    xybrid_mtmd_decoder_pos empty{};
+    if (!image_tokens) {
+        return empty;
+    }
+
+    mtmd_decoder_pos pos = mtmd_image_tokens_get_decoder_pos(image_tokens, pos_0, i);
+    return xybrid_mtmd_decoder_pos{pos.t, pos.x, pos.y, pos.z};
 }
 
 size_t mtmd_helper_get_n_tokens_c(const mtmd_input_chunks* chunks) {
@@ -586,12 +590,16 @@ int llama_format_chat_with_model_c(
     // Extract the model's chat template from GGUF metadata.
     // This returns the template embedded by the model author (e.g., Gemma uses
     // <start_of_turn>/<end_of_turn>, Qwen uses ChatML <|im_start|>/<|im_end|>).
-    // If the model has no template, tmpl is nullptr and llama_chat_apply_template
-    // falls back to ChatML.
+    // Do not pass nullptr through to llama_chat_apply_template: llama.cpp treats
+    // that as "use its built-in ChatML fallback", but xybrid-core owns fallback
+    // prompt policy.
     const char* tmpl = llama_model_chat_template(model, nullptr);
+    if (tmpl == nullptr || tmpl[0] == '\0') {
+        return -1;
+    }
 
     int result = llama_chat_apply_template(
-        tmpl,     // Use model's template (nullptr = fallback to ChatML)
+        tmpl,
         messages.data(),
         n_msg,
         true,     // add_ass: add assistant start tag
@@ -911,8 +919,6 @@ int llama_generate_c(
  * @param user_data  User-provided context pointer
  * @return 0 to continue, non-zero to stop generation
  */
-typedef int (*token_callback_t)(int32_t token_id, const char* token_text, void* user_data);
-
 /**
  * Generate tokens from logits already present in the llama context.
  *
@@ -937,7 +943,7 @@ int llama_generate_from_current_logits_c(
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
-    token_callback_t callback,
+    llama_token_callback_c callback,
     void* user_data,
     int n_past
 ) {
@@ -1104,7 +1110,7 @@ int llama_generate_streaming_c(
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
-    token_callback_t callback,
+    llama_token_callback_c callback,
     void* user_data,
     // Position in the KV cache where input_tokens should be prefilled.
     // Pass 0 for the legacy "fresh prefill from scratch" behaviour. Positive

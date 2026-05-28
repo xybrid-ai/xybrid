@@ -3190,7 +3190,7 @@ mod tests {
 
     #[cfg(all(
         feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
+        any(feature = "llm-mistral", feature = "llm-llamacpp-vision")
     ))]
     #[test]
     fn vision_language_does_not_reuse_text_only_cache_for_same_model_path() {
@@ -3427,7 +3427,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(feature = "vision", feature = "llm-llamacpp"))]
+    #[cfg(all(feature = "vision", feature = "llm-llamacpp-vision"))]
     #[test]
     fn vision_language_missing_mmproj_reports_missing_artifact_before_model_parse() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -3556,6 +3556,7 @@ mod tests {
     #[test]
     fn vision_language_streaming_uses_multimodal_streaming_span() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
+        let _trace_lock = crate::tracing::test_lock();
 
         let metadata = ModelMetadata {
             model_id: "gemma-3n-e2b".to_string(),
@@ -3635,6 +3636,7 @@ mod tests {
         };
         use ndarray::{ArrayD, IxDyn};
         use std::sync::{Arc, Mutex};
+        let _trace_lock = crate::tracing::test_lock();
 
         struct SpyVisionEncoder {
             events: Arc<Mutex<Vec<&'static str>>>,
@@ -4539,9 +4541,6 @@ mod tests {
     mod stamp_llm_span {
         use super::*;
         use crate::tracing;
-        use std::sync::Mutex;
-
-        static GLOBAL_TRACE_LOCK: Mutex<()> = Mutex::new(());
 
         fn gguf_metadata(backend_hint: Option<&str>) -> ModelMetadata {
             let mut bundle_metadata = HashMap::new();
@@ -4599,7 +4598,7 @@ mod tests {
 
         #[test]
         fn unannotated_gguf_stamps_llamacpp_default() {
-            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            let _lock = tracing::test_lock();
             let captured = capture_span_metadata("execute:test", &gguf_metadata(None));
             assert_eq!(
                 captured.get("backend").map(String::as_str),
@@ -4610,7 +4609,7 @@ mod tests {
 
         #[test]
         fn mistralrs_hint_wins_on_gguf() {
-            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            let _lock = tracing::test_lock();
             let captured = capture_span_metadata("execute:test", &gguf_metadata(Some("mistralrs")));
             assert_eq!(
                 captured.get("backend").map(String::as_str),
@@ -4620,7 +4619,7 @@ mod tests {
 
         #[test]
         fn legacy_mistral_alias_normalises_to_mistralrs() {
-            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            let _lock = tracing::test_lock();
             let captured = capture_span_metadata("execute:test", &gguf_metadata(Some("mistral")));
             assert_eq!(
                 captured.get("backend").map(String::as_str),
@@ -4631,7 +4630,7 @@ mod tests {
 
         #[test]
         fn quantization_stamped_from_gguf_filename() {
-            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            let _lock = tracing::test_lock();
             let mut metadata = gguf_metadata(None);
             metadata.execution_template = ExecutionTemplate::Gguf {
                 model_file: "tinyllama-1.1b-chat-q4_k_m.gguf".into(),
@@ -4733,7 +4732,7 @@ mod tests {
 
         #[test]
         fn runtime_wire_label_overwrites_template_default() {
-            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            let _lock = tracing::test_lock();
             // Template default for unannotated GGUF is `llamacpp`, but
             // the runtime selected by cargo feature is mistral.rs. The
             // overwrite must flip the stamp to ground truth so the
@@ -4748,7 +4747,7 @@ mod tests {
 
         #[test]
         fn runtime_overwrite_preserves_template_default_when_label_absent() {
-            let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+            let _lock = tracing::test_lock();
             // Mock/test backends return None from wire_label so the
             // template-derived stamp survives — anything else would
             // erase ground truth that the template *did* carry.

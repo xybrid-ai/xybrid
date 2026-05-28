@@ -73,9 +73,10 @@ The prebuilt binaries from the install script already include the correct featur
 | `candle` | Candle ML backend (Whisper models) |
 | `candle-metal` | Metal GPU acceleration for Candle |
 | `candle-cuda` | CUDA GPU acceleration for Candle |
-| `llm-llamacpp` | llama.cpp LLM backend (recommended) |
 | `vision` | Image envelope and preprocessing support |
 | `llm-llamacpp-vision` | llama.cpp vision-language support (`mmproj` / `mtmd`) |
+| `llm-llamacpp` | llama.cpp skeleton tier (types only, no native link) |
+| `llm-llamacpp-runtime` | llama.cpp LLM runtime backend (recommended) |
 | `llm-mistral` | mistral.rs LLM backend (alternative) |
 
 </details>

@@ -229,6 +229,16 @@ lazy_static::lazy_static! {
     static ref GLOBAL_COLLECTOR: Arc<Mutex<SpanCollector>> = Arc::new(Mutex::new(SpanCollector::with_enabled(false)));
 }
 
+#[cfg(test)]
+static GLOBAL_TRACE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    GLOBAL_TRACE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 thread_local! {
     static THREAD_SPAN_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }

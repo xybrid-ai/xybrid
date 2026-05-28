@@ -4,12 +4,12 @@
 //! Useful for verifying the generation loop works correctly.
 //!
 //! Run with:
-//!   cargo run --example llama_cpp_test -p xybrid-core --features llm-llamacpp
+//!   cargo run --example llama_cpp_test -p xybrid-core --features llm-llamacpp-runtime
 //!
 //! Requires a GGUF model:
 //!   ./integration-tests/download.sh qwen2.5-0.5b-instruct
 
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(feature = "llm-llamacpp-runtime")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use xybrid_core::runtime_adapter::llama_cpp::LlamaCppBackend;
     use xybrid_core::runtime_adapter::llm::{ChatMessage, GenerationConfig, LlmBackend, LlmConfig};
@@ -92,10 +92,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[cfg(not(feature = "llm-llamacpp"))]
+#[cfg(not(feature = "llm-llamacpp-runtime"))]
 fn main() {
-    eprintln!("This example requires the `llm-llamacpp` feature.");
+    eprintln!("This example requires the `llm-llamacpp-runtime` feature.");
     eprintln!(
-        "Run with: cargo run --example llama_cpp_test -p xybrid-core --features llm-llamacpp"
+        "Run with: cargo run --example llama_cpp_test -p xybrid-core --features llm-llamacpp-runtime"
     );
 }

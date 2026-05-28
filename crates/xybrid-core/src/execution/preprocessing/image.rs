@@ -1154,9 +1154,6 @@ mod tests {
     };
 
     #[cfg(feature = "vision")]
-    static TRACE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    #[cfg(feature = "vision")]
     fn rgb_encoded_2x1(format: image::ImageFormat) -> Vec<u8> {
         let mut image = image::RgbImage::new(2, 1);
         image.put_pixel(0, 0, image::Rgb([255, 0, 0]));
@@ -1666,7 +1663,7 @@ mod tests {
     #[cfg(feature = "vision")]
     #[test]
     fn raw_image_ingress_trace_preserves_one_pixel_buffer_copy() {
-        let _trace_lock = TRACE_TEST_LOCK.lock().unwrap();
+        let _trace_lock = crate::tracing::test_lock();
         let (raw_pixels, raw_planes) = gradient_rgba_raw(4, 4);
         let raw =
             Envelope::image_raw(raw_pixels, PixelFormat::Rgba8, 4, 4, raw_planes, None).unwrap();
@@ -1707,7 +1704,7 @@ mod tests {
     #[cfg(feature = "vision")]
     #[test]
     fn raw_yuv_image_ingress_trace_reports_conversion_buffer_allocation() {
-        let _trace_lock = TRACE_TEST_LOCK.lock().unwrap();
+        let _trace_lock = crate::tracing::test_lock();
         for format in [PixelFormat::Nv12, PixelFormat::Nv21, PixelFormat::I420] {
             let raw = yuv420_envelope(format);
 
