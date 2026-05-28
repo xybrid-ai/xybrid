@@ -415,6 +415,8 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_xybrid_uniffi_fn_func_clear_thermal_state(_uniffi_out_err: RustCallStatus, 
     ): Unit
+    fun uniffi_xybrid_uniffi_fn_func_configure_runtime(`apiKey`: RustBuffer.ByValue,`gatewayUrl`: RustBuffer.ByValue,`ingestUrl`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Unit
     fun uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(`cacheDir`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_xybrid_uniffi_fn_func_set_battery_level(`percent`: Byte,_uniffi_out_err: RustCallStatus, 
@@ -541,6 +543,8 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_xybrid_uniffi_checksum_func_clear_thermal_state(
     ): Short
+    fun uniffi_xybrid_uniffi_checksum_func_configure_runtime(
+    ): Short
     fun uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir(
     ): Short
     fun uniffi_xybrid_uniffi_checksum_func_set_battery_level(
@@ -592,6 +596,9 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_xybrid_uniffi_checksum_func_clear_thermal_state() != 36495.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_xybrid_uniffi_checksum_func_configure_runtime() != 13785.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir() != 59754.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -622,7 +629,7 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_xybrid_uniffi_checksum_method_xybridmodelloader_load() != 43654.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle() != 7105.toShort()) {
+    if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle() != 38159.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_directory() != 8635.toShort()) {
@@ -1211,7 +1218,7 @@ class XybridModelLoader(
     companion object {
         fun `fromBundle`(`path`: String): XybridModelLoader =
             XybridModelLoader(
-    rustCall() { _status ->
+    rustCallWithError(XybridException) { _status ->
     _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_bundle(FfiConverterString.lower(`path`),_status)
 })
         fun `fromDirectory`(`path`: String): XybridModelLoader =
@@ -2354,6 +2361,14 @@ fun `clearThermalState`() =
     
     rustCall() { _status ->
     _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_clear_thermal_state(_status)
+}
+
+
+
+fun `configureRuntime`(`apiKey`: String?, `gatewayUrl`: String?, `ingestUrl`: String?) =
+    
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_configure_runtime(FfiConverterOptionalString.lower(`apiKey`),FfiConverterOptionalString.lower(`gatewayUrl`),FfiConverterOptionalString.lower(`ingestUrl`),_status)
 }
 
 
