@@ -323,10 +323,15 @@ struct InferenceView: View {
     private func loadModel() {
         inferenceState = .loading
 
-        Task {
-            // Bolt's constructor is `throws` (synchronous). We still run
-            // it inside `Task` because model resolve + download can take
-            // a while; we want the UI thread unblocked.
+        // Capture the @State input on the main actor before detaching.
+        let modelId = self.modelId
+
+        // `Task.detached`, NOT `Task {}`: this method runs on the main
+        // actor (SwiftUI View), and a plain `Task` inherits that
+        // executor — the synchronous, blocking `XybridModel(fromRegistry:)`
+        // (model resolve + download + load) would run on the main thread
+        // and freeze the UI. Detaching runs it on a background executor.
+        Task.detached {
             do {
                 let loadedModel = try XybridModel(fromRegistry: modelId)
                 let modelVoices = loadedModel.voices()
@@ -349,20 +354,26 @@ struct InferenceView: View {
     }
 
     private func runInference() {
-        guard model != nil else { return }
+        guard let model = model else { return }
 
         inferenceState = .running
 
-        Task {
+        // Capture the @State inputs on the main actor before detaching.
+        let inputText = self.inputText
+        let voiceId = self.voiceId
+
+        // `Task.detached` for the same reason as `loadModel`: bolt's
+        // `run` is synchronous + blocking, and a plain `Task` from this
+        // main-actor method would run it on the main thread and freeze
+        // the UI for the duration of inference.
+        Task.detached {
             do {
                 let envelope = XybridEnvelope.text(
                     text: inputText,
                     voiceId: voiceId,
                     speed: 1.0
                 )
-                // Bolt's `run` is `throws` (synchronous). `Task` keeps
-                // the UI thread free while inference runs.
-                let result = try model!.run(envelope: envelope)
+                let result = try model.run(envelope: envelope)
 
                 await MainActor.run {
                     inferenceState = .completed(result)
