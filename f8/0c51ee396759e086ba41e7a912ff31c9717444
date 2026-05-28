@@ -1,0 +1,24 @@
+.github/workflows/release-prep.yml
+  s_573e57722e8369::t_dbc924f78c560b 473-483,485-489
+  s_573e57722e8369::t_3a34a213dd5927 127-136,138-141,205-250,267-304
+  s_573e57722e8369::t_37e7ed51c6cd1f 379-389,391-395
+  s_573e57722e8369::t_18f3123f6d7006 60-65
+  s_573e57722e8369::t_a23de24bf6e013 680
+  s_573e57722e8369::t_741560cb71c02a 726-727
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f80c51ee396759e086ba41e7a912ff31c9717444",
+  "prompts": {},
+  "sessions": {
+    "s_573e57722e8369": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7dc2c63-bee4-407e-ba4a-d0eb6eec2b33",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
