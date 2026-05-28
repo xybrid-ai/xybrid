@@ -28,6 +28,16 @@ void main() async {
 }
 ```
 
+Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.run()` / `pipeline.run()` calls automatically emit execution traces:
+
+```dart
+await Xybrid.init(
+  apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+);
+```
+
+Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`; for CPU/memory sampling, pass `resourceTelemetry`.
+
 `Xybrid.init()` also subscribes to OS battery state on iOS and Android via `battery_plus` and forwards each reading to the routing engine. See [Host Integration](/docs/internals/host-integration) for what's wired automatically and the override surface.
 
 ## Core Pattern: Load → Run
@@ -109,7 +119,12 @@ Main entry point for the SDK.
 
 ```dart
 class Xybrid {
-  static Future<void> init();
+  static Future<void> init({
+    String? apiKey,            // authenticates telemetry; omit to run anonymously
+    String? gatewayUrl,        // override the LLM gateway URL
+    String? ingestUrl,         // override the telemetry ingest URL (self-hosting)
+    String? resourceTelemetry, // enable CPU/memory sampling
+  });
   static bool get isInitialized;
   static void setApiKey(String apiKey);
 
