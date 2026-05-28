@@ -56,6 +56,13 @@ env:
 permissions:
   contents: write
   pull-requests: write
+  # SLSA build provenance attestations (id-token + attestations) are
+  # scoped per-job on build-apple-all, build-android, and build-cli only —
+  # the jobs that actually call `attest-build-provenance`. Keeping these
+  # out of the workflow-level permissions means patch-spm-checksum,
+  # create-draft-release, open-release-pr, and the Flutter precompile
+  # jobs don't get unnecessary OIDC-issuance or attestation-write
+  # privileges.
 
 jobs:
   # =========================================================================
@@ -124,6 +131,10 @@ jobs:
     name: Build Apple (all)
     needs: [check-release-branch]
     runs-on: macos-14
+    permissions:
+      contents: read       # actions/checkout
+      id-token: write      # Sigstore OIDC for attest-build-provenance
+      attestations: write  # GitHub attestations API
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -175,6 +186,11 @@ jobs:
           cd bindings/apple/XCFrameworks
           zip -r ../../../dist/XybridFFI-${TAG}.xcframework.zip XybridFFI.xcframework
 
+      - name: Attest XCFramework provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/XybridFFI-${{ needs.check-release-branch.outputs.tag }}.xcframework.zip
+
       - name: Upload XCFramework artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -215,6 +231,11 @@ jobs:
           cp target/aarch64-apple-darwin/release/xybrid dist-cli/xybrid-${TAG}-macos-arm64
           chmod +x dist-cli/xybrid-${TAG}-macos-arm64
 
+      - name: Attest macOS CLI provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist-cli/xybrid-${{ needs.check-release-branch.outputs.tag }}-macos-arm64
+
       - name: Upload CLI artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -228,6 +249,10 @@ jobs:
     name: Build Android
     needs: [check-release-branch]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read       # actions/checkout
+      id-token: write      # Sigstore OIDC for attest-build-provenance
+      attestations: write  # GitHub attestations API
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -283,6 +308,11 @@ jobs:
           mkdir -p dist
           cd bindings/kotlin/libs
           zip -r ../../../dist/xybrid-android-${TAG}.zip .
+
+      - name: Attest Android artifact provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/xybrid-android-${{ needs.check-release-branch.outputs.tag }}.zip
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -443,6 +473,10 @@ jobs:
     name: Build CLI (${{ matrix.name }})
     needs: [check-release-branch]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read       # actions/checkout
+      id-token: write      # Sigstore OIDC for attest-build-provenance
+      attestations: write  # GitHub attestations API
     strategy:
       fail-fast: false
       matrix:
@@ -495,17 +529,25 @@ jobs:
         run: strip target/${{ matrix.target }}/release/${{ matrix.artifact }}
 
       - name: Prepare artifact
+        id: prepare
         shell: bash
         env:
           TAG: ${{ needs.check-release-branch.outputs.tag }}
         run: |
           mkdir -p dist
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp target/${{ matrix.target }}/release/${{ matrix.artifact }} dist/xybrid-${TAG}-${{ matrix.name }}.exe
+            ARTIFACT="dist/xybrid-${TAG}-${{ matrix.name }}.exe"
           else
-            cp target/${{ matrix.target }}/release/${{ matrix.artifact }} dist/xybrid-${TAG}-${{ matrix.name }}
-            chmod +x dist/xybrid-${TAG}-${{ matrix.name }}
+            ARTIFACT="dist/xybrid-${TAG}-${{ matrix.name }}"
           fi
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact }} "$ARTIFACT"
+          [ "${{ runner.os }}" != "Windows" ] && chmod +x "$ARTIFACT" || true
+          echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
+
+      - name: Attest CLI provenance (${{ matrix.name }})
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: ${{ steps.prepare.outputs.artifact_path }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
