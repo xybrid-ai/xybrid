@@ -1,0 +1,41 @@
+crates/xybrid-core/src/runtime_adapter/llama_cpp/sys.rs
+  s_323a65fe865faa::t_3653f6d053bced 470-474
+  s_323a65fe865faa::t_9d0d6c70364c29 81-90,104-109,112-119,125-131
+  s_323a65fe865faa::t_4d735975635f21 834-838,858-860
+  s_323a65fe865faa::t_89af701879d5a8 34-45,51-56,66-72
+  s_323a65fe865faa::t_a94c42fdc64ce6 1274-1289
+  s_323a65fe865faa::t_0a5f7ffaabf736 890-896,913-916
+  s_323a65fe865faa::t_9927a82b1a4970 455-461
+  s_323a65fe865faa::t_3da90647377a82 589-592,597-601
+  s_323a65fe865faa::t_3055f393ab6fc1 508-510,517-518
+  s_323a65fe865faa::t_003a98560477ee 530-532,539-541,548-550
+  s_323a65fe865faa::t_d4a0e63272647d 653-661
+  s_323a65fe865faa::t_a548869065ecf3 393-399
+  s_323a65fe865faa::t_a8fd0f4912addc 686-690
+  s_323a65fe865faa::t_12a0de28a6ce00 1147-1159,1166-1171
+  s_323a65fe865faa::t_8abef2818b6dce 421-427
+  s_323a65fe865faa::t_fd8a1dacc00848 488-499
+  s_323a65fe865faa::t_5c564520eedf13 577-578
+  s_323a65fe865faa::t_76a40ee05345e7 789-793
+  s_323a65fe865faa::t_bedb7d01756747 365-372
+  s_323a65fe865faa::t_d3ae92c3de1fad 759-767
+  s_323a65fe865faa::t_b62ab5a0598cda 560-561
+  s_323a65fe865faa::t_fb4be48da42a8f 305-308,317-322,338-341,350-352
+  s_323a65fe865faa::t_165c71bb31b688 1046-1056
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "32afcda349c6cd791e485ec4f559aa3ce4c0c6d5",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
