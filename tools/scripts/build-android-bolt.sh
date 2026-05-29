@@ -60,9 +60,18 @@ if [ -z "$ANDROID_NDK_HOME" ] || [ ! -d "$ANDROID_NDK_HOME" ]; then
     exit 1
 fi
 
-# Host platform inside the NDK. Apple Silicon Macs still install the
-# `darwin-x86_64` toolchain (NDK doesn't ship a separate arm64 toolchain).
-HOST=darwin-x86_64
+# Host platform inside the NDK. Detect it from the OS rather than pinning
+# to a single value: macOS (incl. Apple Silicon, which still installs the
+# `darwin-x86_64` toolchain) builds locally, but CI runs this script on
+# Linux (`linux-x86_64`) via `cargo xtask build-android`.
+case "$(uname -s)" in
+    Darwin) HOST=darwin-x86_64 ;;
+    Linux)  HOST=linux-x86_64 ;;
+    *)
+        echo "error: unsupported host OS '$(uname -s)'; expected Darwin or Linux" >&2
+        exit 1
+        ;;
+esac
 BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST/bin"
 if [ ! -d "$BIN" ]; then
     echo "error: NDK toolchain bin not found at $BIN" >&2
@@ -167,15 +176,17 @@ echo "==> Bundling libc++_shared.so from NDK for every ABI"
 #       referenced by "libxybrid-bolt.so"
 # Source the .so from the NDK sysroot — same lib the toolchain linked
 # the .so against, so versions match exactly.
-declare -A SYSROOT_ABI=(
-    [arm64-v8a]=aarch64-linux-android
-    [armeabi-v7a]=arm-linux-androideabi
-    [x86]=i686-linux-android
-    [x86_64]=x86_64-linux-android
-)
+#
+# A `case` map (not an associative array) keeps this working on the stock
+# macOS /bin/bash 3.2 that local dev may pick up, where `declare -A` errors.
 NDK_SYSROOT_LIB="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST/sysroot/usr/lib"
 for abi in arm64-v8a armeabi-v7a x86 x86_64; do
-    triple="${SYSROOT_ABI[$abi]}"
+    case "$abi" in
+        arm64-v8a)   triple=aarch64-linux-android ;;
+        armeabi-v7a) triple=arm-linux-androideabi ;;
+        x86)         triple=i686-linux-android ;;
+        x86_64)      triple=x86_64-linux-android ;;
+    esac
     src="$NDK_SYSROOT_LIB/$triple/libc++_shared.so"
     dst_dir="$KOTLIN_LIBS/$abi"
     if [ -f "$src" ] && [ -d "$dst_dir" ]; then

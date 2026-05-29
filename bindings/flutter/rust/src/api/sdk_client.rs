@@ -33,6 +33,18 @@ fn initialize_telemetry_once(config: xybrid_sdk::TelemetryConfig) {
     xybrid_sdk::telemetry::init_platform_telemetry(config);
 }
 
+/// Resolve the telemetry ingest endpoint for the bundled init path: use the
+/// caller-supplied URL when present and non-blank, otherwise fall back to
+/// [`xybrid_sdk::telemetry::DEFAULT_INGEST_URL`]. Keeping this a pure free
+/// function lets the defaulting rule be unit-tested without touching the
+/// process-wide telemetry once-guard.
+fn resolve_ingest_endpoint(ingest_url: Option<&str>) -> &str {
+    ingest_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(xybrid_sdk::telemetry::DEFAULT_INGEST_URL)
+}
+
 fn parse_resource_telemetry_mode(value: Option<&str>) -> Option<ResourceTelemetryMode> {
     let raw = value?.trim().to_ascii_lowercase();
     if raw.is_empty() {
@@ -115,14 +127,10 @@ impl XybridSdkClient {
         facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_api_key(api_key.clone());
 
-        let Some(endpoint) = ingest_url
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            return;
-        };
-
+        // Default a missing/blank ingest URL to DEFAULT_INGEST_URL so that
+        // providing only an API key is enough to start telemetry (matches
+        // the documented behavior of this entry point).
+        let endpoint = resolve_ingest_endpoint(ingest_url.as_deref());
         let mut config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
         if let Some(mode) = parse_resource_telemetry_mode(resource_telemetry.as_deref()) {
             config = config.with_resource_telemetry(mode);
