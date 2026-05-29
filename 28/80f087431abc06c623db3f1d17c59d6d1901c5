@@ -1,0 +1,20 @@
+crates/xybrid-uniffi/src/lib.rs
+  s_323a65fe865faa::t_b9c5430037a874 237-241,244-259
+  s_323a65fe865faa::t_14bbbda2697aec 210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2880f087431abc06c623db3f1d17c59d6d1901c5",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
