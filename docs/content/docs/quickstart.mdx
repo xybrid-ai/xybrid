@@ -24,6 +24,8 @@ flutter pub get
 ```dart
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
+// Runs locally as-is. Add a free key from dashboard.xybrid.dev to see
+// your inference traces: Xybrid.init(apiKey: '...')
 await Xybrid.init();
 
 // Load a model and run text-to-speech
@@ -65,6 +67,10 @@ dependencies: [
 ```swift
 import Xybrid
 
+// Runs locally as-is. Add a free key from dashboard.xybrid.dev to see
+// your inference traces: Xybrid.initialize(apiKey: "...")
+Xybrid.initialize()
+
 // Load a model from the registry
 let loader = ModelLoader.fromRegistry(modelId: "kokoro-82m")
 let model = try loader.load()
@@ -92,6 +98,10 @@ dependencies {
 
 ```kotlin
 import ai.xybrid.*
+
+// Runs locally as-is. Add a free key from dashboard.xybrid.dev to see
+// your inference traces: Xybrid.init(context, apiKey = "...")
+Xybrid.init(context)
 
 // Load a model from the registry
 val loader = XybridModelLoader.fromRegistry("kokoro-82m")

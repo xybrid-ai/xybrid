@@ -22,6 +22,8 @@ import ai.xybrid.example.ui.theme.XybridExampleTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Runs locally as-is. Add a free key from dashboard.xybrid.dev to see
+        // your inference traces: Xybrid.init(this, apiKey = "xy_live_...")
         Xybrid.init(this)
         setContent {
             XybridExampleTheme {

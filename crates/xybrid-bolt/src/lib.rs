@@ -490,6 +490,20 @@ pub fn clear_battery_level() {
 // Process-global init
 // ============================================================================
 
+/// One-stop SDK initialization: API key + gateway/ingest URL overrides in
+/// one call. Delegates to [`facade::configure_runtime`]; blank strings are
+/// treated as absent. This is the canonical init the Swift
+/// `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
+/// `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+#[export]
+pub fn configure_runtime(
+    api_key: Option<String>,
+    gateway_url: Option<String>,
+    ingest_url: Option<String>,
+) {
+    facade::configure_runtime(api_key, gateway_url, ingest_url);
+}
+
 #[export]
 pub fn init_sdk_cache_dir(cache_dir: String) {
     // Param name pinned to `cache_dir` (not `path`) so the emitted Swift

@@ -1211,6 +1211,39 @@ fun clearBatteryLevel() {
     Native.boltffi_clear_battery_level()
 }
 
+/**
+ * One-stop SDK initialization: API key + gateway/ingest URL overrides in
+ * one call. Delegates to [`facade::configure_runtime`]; blank strings are
+ * treated as absent. This is the canonical init the Swift
+ * `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
+ * `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+ */
+
+fun configureRuntime(apiKey: String?, gatewayUrl: String?, ingestUrl: String?) {
+    val wire_writer_api_key = WireWriterPool.acquire((apiKey?.let { v -> 1 + (4 + Utf8Codec.maxBytes(v)) } ?: 1.toInt()))
+        kotlin.run {
+            val wire = wire_writer_api_key.writer
+            apiKey?.let { v -> wire.writeU8(1u); wire.writeString(v) } ?: wire.writeU8(0u)
+        }
+    val wire_writer_gateway_url = WireWriterPool.acquire((gatewayUrl?.let { v -> 1 + (4 + Utf8Codec.maxBytes(v)) } ?: 1.toInt()))
+        kotlin.run {
+            val wire = wire_writer_gateway_url.writer
+            gatewayUrl?.let { v -> wire.writeU8(1u); wire.writeString(v) } ?: wire.writeU8(0u)
+        }
+    val wire_writer_ingest_url = WireWriterPool.acquire((ingestUrl?.let { v -> 1 + (4 + Utf8Codec.maxBytes(v)) } ?: 1.toInt()))
+        kotlin.run {
+            val wire = wire_writer_ingest_url.writer
+            ingestUrl?.let { v -> wire.writeU8(1u); wire.writeString(v) } ?: wire.writeU8(0u)
+        }
+    try {
+        Native.boltffi_configure_runtime(wire_writer_api_key.buffer, wire_writer_gateway_url.buffer, wire_writer_ingest_url.buffer)
+    } finally {
+        wire_writer_api_key.close()
+        wire_writer_gateway_url.close()
+        wire_writer_ingest_url.close()
+    }
+}
+
 fun initSdkCacheDir(cacheDir: String) {
     Native.boltffi_init_sdk_cache_dir(cacheDir.toByteArray(Charsets.UTF_8))
 }
@@ -1376,10 +1409,6 @@ private object Native {
             vmName.contains("dalvik", ignoreCase = true) ||
             vmName.contains("art", ignoreCase = true)
         if (isAndroidRuntime) {
-            // `libxybrid-bolt.so` has libc++_shared as a DT_NEEDED entry
-            // (see .cargo/config.toml's `-Clink-arg=-lc++_shared` for each
-            // Android target), so Android's dynamic linker pulls c++_shared
-            // in automatically — no explicit pre-load needed.
             System.loadLibrary(androidLibrary)
         } else {
             loadDesktopLibraries(desktopPreferredLibrary, desktopFallbackLibrary)
@@ -1508,6 +1537,7 @@ private object Native {
     @JvmStatic external fun boltffi_clear_thermal_state(): Unit
     @JvmStatic external fun boltffi_set_battery_level(percent: Byte): Unit
     @JvmStatic external fun boltffi_clear_battery_level(): Unit
+    @JvmStatic external fun boltffi_configure_runtime(api_key: ByteBuffer, gateway_url: ByteBuffer, ingest_url: ByteBuffer): Unit
     @JvmStatic external fun boltffi_init_sdk_cache_dir(cache_dir: ByteArray): Unit
     @JvmStatic external fun boltffi_set_binding(binding: ByteArray): Unit
     @JvmStatic external fun boltffi_set_api_key(api_key: ByteArray): Unit

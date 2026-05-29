@@ -23,9 +23,16 @@ import UIKit
 /// It registers the binding identifier so registry calls are attributed to the
 /// Swift SDK, and is safe to call multiple times — subsequent calls are no-ops.
 ///
+/// Inference runs on-device whether or not you authenticate. Pass an `apiKey`
+/// to start the telemetry exporter and see your runs on the dashboard — get a
+/// free key at https://dashboard.xybrid.dev.
+///
 /// ```swift
-/// // Application entry point
+/// // Anonymous — local inference, telemetry disabled
 /// Xybrid.initialize()
+///
+/// // Authenticated — telemetry flows to the dashboard
+/// Xybrid.initialize(apiKey: ProcessInfo.processInfo.environment["XYBRID_API_KEY"])
 /// ```
 public enum Xybrid {
     private static let initLock = NSLock()
@@ -43,12 +50,52 @@ public enum Xybrid {
     /// Registers the Swift binding identifier with the SDK so that the
     /// `X-Xybrid-Client` header on registry HTTP calls reports
     /// `binding=swift`. Idempotent and thread-safe.
-    public static func initialize() {
+    ///
+    /// All parameters are optional. Without an `apiKey`, the SDK runs fully
+    /// on-device and telemetry is disabled — the first inference logs a
+    /// one-shot hint pointing at the dashboard (suppress with the
+    /// `XYBRID_QUIET=1` environment variable). Pass `apiKey` to start the
+    /// platform telemetry exporter; `ingestUrl` overrides the destination
+    /// for a self-hosted dashboard, and `gatewayUrl` overrides the LLM
+    /// gateway. Get a free key at https://dashboard.xybrid.dev.
+    ///
+    /// Configuration is applied on the first call; because `initialize()` is
+    /// idempotent, a later call with different arguments is a no-op.
+    ///
+    /// On iOS, also enables `UIDevice` battery monitoring and subscribes
+    /// to `UIDevice.batteryLevelDidChangeNotification`, forwarding each
+    /// reading through the SDK's push-state surface so the routing
+    /// engine has live battery telemetry. Thermal state on Apple
+    /// platforms is sourced from `NSProcessInfo.thermalState` directly
+    /// in `xybrid-core` (no host wiring needed). On macOS, both
+    /// battery (IOKit) and thermal (NSProcessInfo) are in-Rust, so
+    /// nothing extra is registered here.
+    ///
+    /// - Parameters:
+    ///   - apiKey: Xybrid API key. When set, starts the telemetry exporter.
+    ///   - gatewayUrl: Optional override for the LLM gateway URL.
+    ///   - ingestUrl: Optional override for the telemetry ingest URL.
+    public static func initialize(
+        apiKey: String? = nil,
+        gatewayUrl: String? = nil,
+        ingestUrl: String? = nil
+    ) {
         initLock.lock()
         defer { initLock.unlock() }
         if initialized { return }
         setBinding(binding: "swift")
-        registerPlatformObservers()
+        configureRuntime(apiKey: apiKey, gatewayUrl: gatewayUrl, ingestUrl: ingestUrl)
+        // `registerPlatformObservers()` touches UIKit (`UIDevice.current`,
+        // `isBatteryMonitoringEnabled`) on iOS, which is main-thread-only.
+        // `initialize()` is documented as callable from any thread (apps
+        // commonly call it inside a `Task`), so hop to main when needed.
+        // The `initialized` guard ensures only one caller ever reaches here,
+        // so the deferred registration runs exactly once.
+        if Thread.isMainThread {
+            registerPlatformObservers()
+        } else {
+            DispatchQueue.main.async { registerPlatformObservers() }
+        }
         initialized = true
     }
 

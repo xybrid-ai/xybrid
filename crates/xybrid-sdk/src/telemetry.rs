@@ -1872,6 +1872,91 @@ pub fn init_platform_telemetry_from_env() -> bool {
     }
 }
 
+// ============================================================================
+// First-inference dev nudge
+// ============================================================================
+
+/// URL printed in the dev-nudge log. Hard-coded rather than wired through
+/// config because the nudge fires when no config has been provided.
+const DASHBOARD_URL: &str = "https://dashboard.xybrid.dev";
+
+/// Once-guard for [`maybe_emit_dev_nudge`].
+static DEV_NUDGE: std::sync::Once = std::sync::Once::new();
+
+/// Emit a one-shot info-level hint when the host app runs inference
+/// without configuring an API key. Subsequent calls are no-ops via
+/// [`std::sync::Once`].
+///
+/// Hooked into [`crate::model::XybridModel::run`] and
+/// [`crate::model::XybridModel::run_async`] so the nudge surfaces on first
+/// use rather than at init time — a host app that initializes the SDK far
+/// from where it runs inference still sees the hint.
+///
+/// Suppressed when `XYBRID_QUIET=1`.
+pub(crate) fn maybe_emit_dev_nudge() {
+    DEV_NUDGE.call_once(|| {
+        let api_key = std::env::var("XYBRID_API_KEY").ok();
+        let quiet = std::env::var("XYBRID_QUIET").ok();
+        if !should_emit_dev_nudge(api_key.as_deref(), quiet.as_deref()) {
+            return;
+        }
+        log::info!(
+            target: "xybrid_sdk",
+            "telemetry disabled (no XYBRID_API_KEY set). Get a free key at {} to see your inference traces.",
+            DASHBOARD_URL,
+        );
+    });
+}
+
+/// Pure predicate that decides whether the dev-nudge should print. Split
+/// out so unit tests can exercise the rule without poking process
+/// environment variables.
+fn should_emit_dev_nudge(api_key: Option<&str>, quiet: Option<&str>) -> bool {
+    if quiet == Some("1") {
+        return false;
+    }
+    let has_key = api_key.map(|k| !k.is_empty()).unwrap_or(false);
+    !has_key
+}
+
+#[cfg(test)]
+mod dev_nudge_tests {
+    use super::should_emit_dev_nudge;
+
+    #[test]
+    fn emits_when_no_api_key_and_not_quiet() {
+        assert!(should_emit_dev_nudge(None, None));
+    }
+
+    #[test]
+    fn suppressed_when_quiet_flag_set() {
+        assert!(!should_emit_dev_nudge(None, Some("1")));
+    }
+
+    #[test]
+    fn suppressed_when_api_key_present() {
+        assert!(!should_emit_dev_nudge(Some("xy_live_abc"), None));
+    }
+
+    #[test]
+    fn empty_api_key_treated_as_unset() {
+        assert!(should_emit_dev_nudge(Some(""), None));
+    }
+
+    #[test]
+    fn quiet_takes_priority_over_missing_key() {
+        assert!(!should_emit_dev_nudge(None, Some("1")));
+    }
+
+    #[test]
+    fn quiet_other_value_not_suppressive() {
+        // Only "1" suppresses. "true" / "yes" don't — keeps the env-flag
+        // contract narrow.
+        assert!(should_emit_dev_nudge(None, Some("true")));
+        assert!(should_emit_dev_nudge(None, Some("0")));
+    }
+}
+
 /// Set pipeline context for event enrichment
 pub fn set_telemetry_pipeline_context(pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) {
     let mut event_context = xybrid_core::event_bus::EventContext::current();

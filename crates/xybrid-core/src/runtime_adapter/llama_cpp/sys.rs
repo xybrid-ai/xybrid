@@ -31,12 +31,29 @@ use crate::runtime_adapter::AdapterError;
 // Opaque Types
 // =============================================================================
 
-/// Opaque handle to a loaded llama model
+/// Opaque handle to a loaded llama model.
+///
+/// # Invariants
+///
+/// - `ptr` is non-null for the entire lifetime of the value: set by
+///   [`llama_load_model_from_file`] (which returns `Err` if the C side
+///   handed back null), and nulled only by [`llama_free_model`] /
+///   `Drop::drop` immediately before the value is destroyed. Code that
+///   dereferences `ptr` while the value is owned can therefore rely on
+///   non-nullity without re-checking.
+/// - `ptr` is exclusive: no other `LlamaModel` aliases the same
+///   underlying handle. Cloning is intentionally not implemented.
 #[cfg(feature = "llm-llamacpp")]
 pub struct LlamaModel {
     ptr: *mut c_void,
 }
 
+// SAFETY: `LlamaModel` wraps an opaque llama.cpp model handle whose
+// loaded state (vocab, weights, GGUF metadata) is read-only once
+// initialised — llama.cpp's API contract documents the model as safe
+// to share across threads and across multiple `llama_context_t`s. The
+// raw pointer is the only field; transferring or sharing it across
+// threads is sound under the read-only contract.
 #[cfg(feature = "llm-llamacpp")]
 unsafe impl Send for LlamaModel {}
 #[cfg(feature = "llm-llamacpp")]
@@ -46,6 +63,13 @@ unsafe impl Sync for LlamaModel {}
 impl Drop for LlamaModel {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
+            // SAFETY: `self.ptr` is non-null (checked immediately above).
+            // Per the struct's exclusivity invariant, no other handle
+            // aliases this model, so freeing here cannot leave a
+            // dangling reference elsewhere. `Drop::drop` runs at most
+            // once per value; nulling `self.ptr` afterward is for
+            // defence in depth in case the explicit-free path
+            // (`llama_free_model`) ever races with `Drop`.
             unsafe { llama_free_model_c(self.ptr) };
             self.ptr = std::ptr::null_mut();
         }
@@ -53,6 +77,16 @@ impl Drop for LlamaModel {
 }
 
 /// Opaque handle to a llama context.
+///
+/// # Invariants
+///
+/// - `ptr` is non-null for the entire lifetime of the value: set by
+///   [`llama_new_context_with_model`] (which returns `Err` on null) and
+///   nulled only by [`llama_free`] / `Drop::drop` immediately before
+///   destruction. Code that dereferences `ptr` while the value is owned
+///   can rely on non-nullity without re-checking.
+/// - `ptr` is exclusive: no other `LlamaContext` aliases the same
+///   underlying handle. Cloning is intentionally not implemented.
 ///
 /// # Safety
 ///
@@ -67,15 +101,34 @@ pub struct LlamaContext {
     ptr: *mut c_void,
 }
 
+// SAFETY: `LlamaContext` wraps an opaque llama.cpp context handle. The
+// raw pointer is the only field. Per llama.cpp's API contract a context
+// can be safely *moved* between threads — what it cannot do is be
+// *aliased* across threads (see the `Sync` discussion below). Sending
+// the owning value across a thread boundary while no other reference
+// exists is sound.
 #[cfg(feature = "llm-llamacpp")]
 unsafe impl Send for LlamaContext {}
-// NOTE: Sync intentionally NOT implemented. llama_decode() mutates internal
-// state and is not thread-safe. Use Mutex for shared access.
+
+// NOTE: `Sync` is intentionally NOT implemented. `llama_decode()` and
+// related entry points mutate internal context state (KV cache, scratch
+// buffers, sampler chain). Concurrent access from multiple threads —
+// even through `&LlamaContext` accessors that look read-only — is
+// undefined behavior under llama.cpp's threading model. Callers that
+// need shared access must wrap `LlamaContext` in a `Mutex` so each
+// `llama_*` call holds exclusive access.
 
 #[cfg(feature = "llm-llamacpp")]
 impl Drop for LlamaContext {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
+            // SAFETY: `self.ptr` is non-null (checked immediately above).
+            // Per the struct's exclusivity invariant, no other handle
+            // aliases this context, so freeing here cannot leave a
+            // dangling reference elsewhere. `Drop::drop` runs at most
+            // once per value; nulling `self.ptr` afterward is defence
+            // in depth against the explicit-free path racing with
+            // `Drop` (impossible by Rust's ownership rules, but cheap).
             unsafe { llama_free_c(self.ptr) };
             self.ptr = std::ptr::null_mut();
         }
@@ -249,6 +302,10 @@ pub type TokenCallback =
 /// Initialize the llama.cpp backend (call once at startup)
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_backend_init() {
+    // SAFETY: `llama_backend_init` takes no arguments and has no
+    // caller-side preconditions per llama.h — it's the documented
+    // process-startup hook. Repeated calls are no-ops on the llama.cpp
+    // side, so re-invocation is sound.
     unsafe {
         llama_backend_init_c();
     }
@@ -257,6 +314,12 @@ pub fn llama_backend_init() {
 /// Free the llama.cpp backend (call once at shutdown)
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_backend_free() {
+    // SAFETY: `llama_backend_free` takes no arguments and has no
+    // caller-side preconditions per llama.h — it's the documented
+    // process-shutdown hook. All models and contexts must have been
+    // dropped before this call; that's the caller's responsibility
+    // (Rust ownership enforces it for handles created through this
+    // module).
     unsafe {
         llama_backend_free_c();
     }
@@ -272,6 +335,10 @@ pub fn llama_backend_free() {
 /// - 4: All logs including Debug
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_log_set_verbosity(level: i32) {
+    // SAFETY: `llama_log_set_verbosity_c` takes a single integer and
+    // has no caller-side preconditions. Values outside the documented
+    // 0..=4 range are clamped internally by the C wrapper, so the cast
+    // to `c_int` cannot trigger UB.
     unsafe {
         llama_log_set_verbosity_c(level as c_int);
     }
@@ -280,6 +347,9 @@ pub fn llama_log_set_verbosity(level: i32) {
 /// Get the current verbosity level for llama.cpp/ggml logging.
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_log_get_verbosity() -> i32 {
+    // SAFETY: `llama_log_get_verbosity_c` takes no arguments, returns
+    // an integer in the documented 0..=4 range, and has no caller-side
+    // preconditions.
     unsafe { llama_log_get_verbosity_c() as i32 }
 }
 
@@ -292,6 +362,14 @@ pub fn llama_load_model_from_file(
     let c_path = CString::new(path)
         .map_err(|_| AdapterError::InvalidInput("Invalid path encoding".to_string()))?;
 
+    // SAFETY: `c_path` is a `CString` owned by this stack frame for
+    // the duration of the call — `as_ptr()` therefore yields a valid,
+    // NUL-terminated UTF-8 pointer that lives long enough for
+    // `llama_load_model_from_file_c` to copy or stat. `n_gpu_layers`
+    // is an unconstrained integer per the C contract (negative values
+    // are documented as "use defaults"). The returned pointer may be
+    // null on failure; the null-check below is the only correctness
+    // gate before we hand the pointer to a `LlamaModel`.
     let ptr = unsafe { llama_load_model_from_file_c(c_path.as_ptr(), n_gpu_layers as c_int) };
 
     if ptr.is_null() {
@@ -312,6 +390,13 @@ pub fn llama_load_model_from_file(
 pub fn llama_free_model(mut model: LlamaModel) {
     // Mark as null so Drop doesn't double-free.
     if !model.ptr.is_null() {
+        // SAFETY: `model.ptr` is non-null (checked immediately above)
+        // and points to a llama.cpp model previously returned by
+        // `llama_load_model_from_file_c`. We own `model` by value, so
+        // no other handle aliases this pointer (per the `LlamaModel`
+        // exclusivity invariant). Nulling `model.ptr` after the call
+        // prevents `LlamaModel::drop` from re-freeing when `model`
+        // goes out of scope at the end of this function.
         unsafe { llama_free_model_c(model.ptr) };
         model.ptr = std::ptr::null_mut();
     }
@@ -333,6 +418,13 @@ pub fn llama_new_context_with_model(
     n_batch: usize,
     flash_attn: bool,
 ) -> Result<LlamaContext, AdapterError> {
+    // SAFETY: `model.ptr` is non-null for the lifetime of `&model`
+    // (per the `LlamaModel` ptr invariant) and points to a model
+    // produced by `llama_load_model_from_file_c`. Numeric arguments
+    // are unconstrained per the C contract (0 selects defaults for
+    // `n_threads` / `n_batch`). The returned pointer may be null on
+    // allocation failure; the null-check below gates promotion to a
+    // `LlamaContext`.
     let ptr = unsafe {
         llama_new_context_with_model_c(
             model.ptr,
@@ -360,6 +452,13 @@ pub fn llama_new_context_with_model(
 pub fn llama_free(mut ctx: LlamaContext) {
     // Mark as null so Drop doesn't double-free.
     if !ctx.ptr.is_null() {
+        // SAFETY: `ctx.ptr` is non-null (checked immediately above)
+        // and points to a context previously returned by
+        // `llama_new_context_with_model_c`. We own `ctx` by value, so
+        // no other handle aliases this pointer (per the `LlamaContext`
+        // exclusivity invariant). Nulling `ctx.ptr` after the call
+        // prevents `LlamaContext::drop` from re-freeing at end of
+        // scope.
         unsafe { llama_free_c(ctx.ptr) };
         ctx.ptr = std::ptr::null_mut();
     }
@@ -368,6 +467,11 @@ pub fn llama_free(mut ctx: LlamaContext) {
 /// Clear the KV cache (reset context state for new conversation)
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_kv_cache_clear(ctx: &LlamaContext) {
+    // SAFETY: `ctx.ptr` is non-null for the lifetime of `&ctx` (per
+    // the `LlamaContext` ptr invariant). `&LlamaContext` rules out
+    // concurrent aliasing — `LlamaContext: !Sync` makes shared
+    // references across threads a compile error, so the implicit
+    // serialisation llama.cpp requires is upheld by the type system.
     unsafe {
         llama_kv_cache_clear_c(ctx.ptr);
     }
@@ -381,12 +485,19 @@ pub fn llama_kv_cache_clear(ctx: &LlamaContext) {
 /// Pairs with `n_past_in` on [`llama_generate_streaming`].
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_kv_cache_seq_rm(ctx: &LlamaContext, seq_id: i32, p_keep: usize) {
+    // Caller-side bounds check: `p_keep` is unsigned in our API but
+    // the C signature is `c_int`. Saturate at `i32::MAX` to keep the
+    // FFI call total — the legitimate range is `[0, n_ctx)` which is
+    // always well below `i32::MAX` in practice.
+    let p_keep_c = p_keep.min(c_int::MAX as usize) as c_int;
+    // SAFETY: `ctx.ptr` is non-null per the `LlamaContext` ptr
+    // invariant; `&LlamaContext` rules out concurrent aliasing. The
+    // `p_keep_c` cast above guarantees `0 <= p_keep_c <= i32::MAX`,
+    // which is the documented range for the C function. Recurrent /
+    // hybrid models silently produce a `llama_decode` error on the
+    // diverging tail rather than UB here (see
+    // `llama_model_has_recurrent_state` for the documented gate).
     unsafe {
-        // Caller-side bounds check: p_keep is unsigned in our API but
-        // the C signature is c_int. Saturate at i32::MAX to keep the
-        // FFI call total — the legitimate range is [0, n_ctx) which is
-        // always well below i32::MAX in practice.
-        let p_keep_c = p_keep.min(c_int::MAX as usize) as c_int;
         let _ = llama_kv_cache_seq_rm_c(ctx.ptr, seq_id, p_keep_c);
     }
 }
@@ -394,12 +505,17 @@ pub fn llama_kv_cache_seq_rm(ctx: &LlamaContext, seq_id: i32, p_keep: usize) {
 /// Get the BOS (beginning of sequence) token
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_token_bos(model: &LlamaModel) -> i32 {
+    // SAFETY: `model.ptr` is non-null per the `LlamaModel` ptr
+    // invariant. The C function reads immutable vocab metadata; safe
+    // to call concurrently from multiple threads (`LlamaModel: Sync`).
     unsafe { llama_token_bos_c(model.ptr) }
 }
 
 /// Get the EOS (end of sequence) token
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_token_eos(model: &LlamaModel) -> i32 {
+    // SAFETY: `model.ptr` is non-null per the `LlamaModel` ptr
+    // invariant; vocab read is immutable.
     unsafe { llama_token_eos_c(model.ptr) }
 }
 
@@ -411,18 +527,27 @@ pub fn llama_token_eos(model: &LlamaModel) -> i32 {
 /// Gemma: `<end_of_turn>`, Qwen: `<|im_end|>` + `<|endoftext|>`).
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_vocab_is_eog(model: &LlamaModel, token: i32) -> bool {
+    // SAFETY: `model.ptr` is non-null per the `LlamaModel` ptr
+    // invariant. `token` is an arbitrary i32; out-of-range values
+    // return false per the C contract (no UB).
     unsafe { llama_vocab_is_eog_c(model.ptr, token) }
 }
 
 /// Get vocabulary size
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_n_vocab(model: &LlamaModel) -> usize {
+    // SAFETY: `model.ptr` is non-null per the `LlamaModel` ptr
+    // invariant; vocab size read is immutable. Return value is
+    // non-negative per the C contract; `as usize` is total.
     unsafe { llama_n_vocab_c(model.ptr) as usize }
 }
 
 /// Get context length
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_n_ctx(ctx: &LlamaContext) -> usize {
+    // SAFETY: `ctx.ptr` is non-null per the `LlamaContext` ptr
+    // invariant; `&LlamaContext` rules out concurrent aliasing.
+    // Return value is non-negative per the C contract.
     unsafe { llama_n_ctx_c(ctx.ptr) as usize }
 }
 
@@ -432,6 +557,8 @@ pub fn llama_n_ctx(ctx: &LlamaContext) -> usize {
 /// — they have the same cache-truncation hazard.
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_model_is_recurrent(model: &LlamaModel) -> bool {
+    // SAFETY: `model.ptr` is non-null per the `LlamaModel` ptr
+    // invariant; architecture probe reads immutable metadata.
     unsafe { llama_model_is_recurrent_c(model.ptr) }
 }
 
@@ -447,6 +574,8 @@ pub fn llama_model_is_recurrent(model: &LlamaModel) -> bool {
 /// code -3).
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_model_has_recurrent_state(model: &LlamaModel) -> bool {
+    // SAFETY: `model.ptr` is non-null per the `LlamaModel` ptr
+    // invariant; architecture probe reads immutable metadata.
     unsafe { llama_model_has_recurrent_state_c(model.ptr) }
 }
 
@@ -457,10 +586,19 @@ pub fn llama_model_has_recurrent_state(model: &LlamaModel) -> bool {
 /// format for each model architecture.
 #[cfg(feature = "llm-llamacpp")]
 pub fn llama_model_chat_template(model: &LlamaModel) -> Option<String> {
+    // SAFETY: `model.ptr` is non-null per the `LlamaModel` ptr
+    // invariant. The C function returns either a pointer into the
+    // model's GGUF metadata (valid for the model's lifetime) or null
+    // (no template embedded). We null-check immediately below.
     let ptr = unsafe { llama_model_chat_template_c(model.ptr) };
     if ptr.is_null() {
         return None;
     }
+    // SAFETY: `ptr` is non-null (checked above) and points to a
+    // NUL-terminated UTF-8 string embedded in the model's GGUF
+    // metadata. That storage lives as long as `model` does, which
+    // outlives this borrow — we only hand back an owned `String`
+    // (allocated by `to_string`), so no `&str` borrow escapes.
     unsafe { std::ffi::CStr::from_ptr(ptr) }
         .to_str()
         .ok()
@@ -512,6 +650,15 @@ pub fn llama_format_chat(
     // Allocate output buffer (start with 4KB, should be enough for most prompts)
     let mut buf = vec![0u8; 4096];
 
+    // SAFETY: `model.ptr` non-null per invariant. `role_ptrs` /
+    // `content_ptrs` are `Vec<*const c_char>` whose elements borrow
+    // from `roles` / `contents` (`Vec<CString>`) — both source vecs
+    // outlive this call. `buf` is a `Vec<u8>` owned by this frame;
+    // `buf.as_mut_ptr()` is valid for `buf.len()` bytes for the
+    // duration of the call. The C function reads `messages.len()`
+    // role+content pointer pairs and writes at most `buf.len()` bytes
+    // into `buf`, returning the bytes written or a negative error
+    // code.
     let result = unsafe {
         llama_format_chat_with_model_c(
             model.ptr,
@@ -536,6 +683,11 @@ pub fn llama_format_chat(
     // If buffer was too small, resize and retry
     let len = if result as usize >= buf.len() {
         buf.resize((result as usize) + 1, 0);
+        // SAFETY: same invariants as the first call above. `buf` was
+        // just resized to `result + 1` bytes; `buf.as_mut_ptr()` /
+        // `buf.len()` reflect the new allocation. `role_ptrs` /
+        // `content_ptrs` still borrow from the un-touched `roles` /
+        // `contents`.
         let retry_result = unsafe {
             llama_format_chat_with_model_c(
                 model.ptr,
@@ -604,7 +756,15 @@ pub fn llama_tokenize(
     let c_text = CString::new(text)
         .map_err(|_| AdapterError::InvalidInput("Invalid text encoding".to_string()))?;
 
-    // First call to get required size (returns negative count)
+    // First call to get required size (returns negative count).
+    //
+    // SAFETY: `model.ptr` non-null per invariant. `c_text` is a
+    // CString owned by this frame; `c_text.as_ptr()` is valid for
+    // `text.len()` bytes for the duration of the call (CString
+    // appends a NUL but the length param tells C to stop earlier).
+    // The output pointer is `ptr::null_mut()` with `n_tokens_max=0`,
+    // which the C contract documents as "do not write, just compute
+    // and return the required size as a negative number."
     let n_tokens = unsafe {
         llama_tokenize_c(
             model.ptr,
@@ -626,6 +786,11 @@ pub fn llama_tokenize(
 
     // Allocate and tokenize
     let mut tokens = vec![0i32; required_size as usize + 16]; // Extra padding for safety
+                                                              // SAFETY: same invariants as the size-query call above. `tokens`
+                                                              // was just allocated to `required_size + 16` slots, so
+                                                              // `tokens.as_mut_ptr()` is valid for `tokens.len()` i32 writes.
+                                                              // The C function writes at most `n_tokens_max` (= `tokens.len()`)
+                                                              // i32s and returns the count actually written.
     let result = unsafe {
         llama_tokenize_c(
             model.ptr,
@@ -666,7 +831,11 @@ pub fn llama_tokenize_special(
     let c_text = CString::new(text)
         .map_err(|_| AdapterError::InvalidInput("Invalid text encoding".to_string()))?;
 
-    // First call to get required size
+    // First call to get required size.
+    //
+    // SAFETY: same invariants as the size-query in `llama_tokenize`
+    // above — `parse_special = true` only changes how the C tokeniser
+    // interprets the input, not the pointer/length contract.
     let n_tokens = unsafe {
         llama_tokenize_c(
             model.ptr,
@@ -686,6 +855,9 @@ pub fn llama_tokenize_special(
     }
 
     let mut tokens = vec![0i32; required_size as usize + 16];
+    // SAFETY: same invariants as the actual-tokenise call in
+    // `llama_tokenize` above. `tokens` was just allocated to
+    // `required_size + 16` i32 slots.
     let result = unsafe {
         llama_tokenize_c(
             model.ptr,
@@ -715,6 +887,16 @@ pub fn llama_detokenize(model: &LlamaModel, tokens: &[i32]) -> Result<String, Ad
     let mut buf = vec![0u8; 256];
 
     for &token in tokens {
+        // SAFETY: `model.ptr` non-null per invariant; `token` is an
+        // arbitrary i32 (invalid token ids yield `0` per the C
+        // contract, not UB). `buf` is a `Vec<u8>` owned by this frame;
+        // `buf.as_mut_ptr()` is valid for `buf.len()` bytes for the
+        // call duration. Return-value contract from llama.cpp's
+        // `llama_token_to_piece`:
+        //   * `> 0`  — bytes written into `buf` (≤ `buf.len()`).
+        //   * `< 0`  — `-required_size`; nothing was written because
+        //              `buf.len()` was too small.
+        //   * `== 0` — invalid / empty token; skip.
         let len = unsafe {
             llama_token_to_piece_c(
                 model.ptr,
@@ -726,29 +908,52 @@ pub fn llama_detokenize(model: &LlamaModel, tokens: &[i32]) -> Result<String, Ad
             )
         };
 
-        if len > 0 {
-            let len_usize = len as usize;
-            if len_usize >= buf.len() {
-                // Token didn't fit — resize and retry
-                buf.resize(len_usize + 1, 0);
-                let retry_len = unsafe {
-                    llama_token_to_piece_c(
-                        model.ptr,
-                        token,
-                        buf.as_mut_ptr() as *mut c_char,
-                        buf.len() as c_int,
-                        0,
-                        true,
-                    )
-                };
-                if retry_len > 0 {
-                    if let Ok(piece) = std::str::from_utf8(&buf[..retry_len as usize]) {
-                        result.push_str(piece);
-                    }
-                }
-            } else if let Ok(piece) = std::str::from_utf8(&buf[..len_usize]) {
-                result.push_str(piece);
+        let len_usize = if len < 0 {
+            // Buffer was too small — required size is `-len`. Resize
+            // to fit (plus one byte of headroom for the next retry
+            // attempt in case the same token reappears later) and
+            // re-decode. The C function never returns positive
+            // `len > buf.len()`, so positive returns are always safe
+            // to consume directly — we only enter this branch on
+            // negative returns. (Audit theme 4 surfaced this: the
+            // previous `if len > 0 && len_usize >= buf.len()` retry
+            // path was unreachable, so tokens whose detokenized form
+            // exceeded 256 bytes were silently dropped.)
+            let required = (-len) as usize;
+            buf.resize(required + 1, 0);
+            // SAFETY: same invariants as the first call above. `buf`
+            // was just resized to `required + 1` bytes; the new
+            // allocation is reflected in `buf.as_mut_ptr()` /
+            // `buf.len()`. The retry asks the C side for the same
+            // `(model, token, …)` pair, which by the function's
+            // determinism produces the same required size.
+            let retry_len = unsafe {
+                llama_token_to_piece_c(
+                    model.ptr,
+                    token,
+                    buf.as_mut_ptr() as *mut c_char,
+                    buf.len() as c_int,
+                    0,
+                    true,
+                )
+            };
+            if retry_len <= 0 {
+                // Either the token genuinely produces no piece on
+                // re-try (unexpected, but possible if `special=true`
+                // changes behaviour mid-call on some llama.cpp build),
+                // or the resize was somehow still insufficient. Skip
+                // rather than panic.
+                continue;
             }
+            retry_len as usize
+        } else if len == 0 {
+            continue;
+        } else {
+            len as usize
+        };
+
+        if let Ok(piece) = std::str::from_utf8(&buf[..len_usize]) {
+            result.push_str(piece);
         }
     }
 
@@ -860,6 +1065,17 @@ pub fn llama_generate_with_stops(
         )
     };
 
+    // SAFETY: `ctx.ptr` / `model.ptr` non-null per invariants;
+    // `&LlamaContext` rules out concurrent aliasing on the context.
+    // `input_tokens` is a borrowed slice — `as_ptr()` is valid for
+    // `input_tokens.len()` i32 reads for the call duration.
+    // `output_tokens` is a `Vec<i32>` owned by this frame; the C
+    // function writes at most `max_tokens` i32s into it.
+    // `stop_seqs_ptr` / `stop_lens_ptr` are either both null (when
+    // `n_stop_seqs == 0`) or borrowed from the `stop_tokens` /
+    // `stop_lens` vecs above — both live for the call duration, and
+    // `n_stop_seqs` matches `stop_lens.len()` (the filtered count,
+    // not the original `stop_sequences.len()` — see comment above).
     let result = unsafe {
         llama_generate_c(
             ctx.ptr,
@@ -950,12 +1166,31 @@ extern "C" fn streaming_trampoline<F>(
 where
     F: FnMut(i32, &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
 {
+    // SAFETY: `user_data` is the same `*mut c_void` we passed into
+    // `llama_generate_streaming_c` below — it is `&mut streaming_ctx`
+    // cast to `*mut c_void`, where `streaming_ctx` is a
+    // `StreamingContext<F>` owned by the calling frame of
+    // `llama_generate_streaming`. The C side stores the pointer and
+    // synchronously invokes this trampoline; it never escapes the
+    // call. The matching `F` type parameter is enforced statically
+    // because the trampoline is only registered with
+    // `Some(streaming_trampoline::<F>)` for the same `F` that owns
+    // `streaming_ctx`. We are the only thread that ever observes
+    // this pointer (llama.cpp invokes the callback on its decode
+    // thread, but never concurrently with itself), so taking
+    // `&mut StreamingContext<F>` is sound.
     let ctx = unsafe { &mut *(user_data as *mut StreamingContext<F>) };
 
     // Convert C string to Rust string
     let text = if token_text.is_null() {
         ""
     } else {
+        // SAFETY: `token_text` is non-null (checked above) and points
+        // to a NUL-terminated UTF-8 piece owned by llama.cpp's
+        // internal scratch buffer. That buffer is valid for the
+        // duration of this callback invocation — we copy out the
+        // `&str` into the closure body via `to_str()`, and the
+        // closure doesn't retain the slice past return.
         unsafe { std::ffi::CStr::from_ptr(token_text) }
             .to_str()
             .unwrap_or("")
@@ -1058,6 +1293,22 @@ where
         error: None,
     };
 
+    // SAFETY: Same `ctx.ptr` / `model.ptr` / `input_tokens` /
+    // `output_tokens` / `stop_seqs_ptr` invariants as `llama_generate_c`
+    // above. The callback wiring adds two more obligations:
+    //
+    //   * `Some(streaming_trampoline::<F>)` is a function-pointer
+    //     constant; its `F` matches the type held by `streaming_ctx`
+    //     so the trampoline's `&mut *(... as *mut StreamingContext<F>)`
+    //     cast is sound (see SAFETY note inside `streaming_trampoline`).
+    //   * `&mut streaming_ctx as *mut StreamingContext<F> as *mut c_void`
+    //     hands the C function a pointer that lives in this stack
+    //     frame; the call is synchronous, so the pointer is dropped
+    //     before this frame returns.
+    //
+    // The `n_past_in.min(c_int::MAX as usize) as c_int` saturation
+    // keeps the cast total — legitimate values are well below
+    // `i32::MAX`.
     let result = unsafe {
         llama_generate_streaming_c(
             ctx.ptr,

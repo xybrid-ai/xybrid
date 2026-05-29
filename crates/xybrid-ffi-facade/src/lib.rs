@@ -966,6 +966,43 @@ impl XybridModel {
 // Process-global init
 // ============================================================================
 
+/// One-stop SDK initialization for platform bindings.
+///
+/// Wraps [`sdk::init()`]'s builder so every foreign-language SDK gets the
+/// same unified setup: pass an API key to start the telemetry exporter,
+/// override the LLM gateway and/or telemetry ingest URL, and `.run()` the
+/// configuration. Omitting `api_key` runs anonymously (local inference,
+/// no exporter) — the same semantics as the Rust builder.
+///
+/// Blank strings are treated as absent so hosts can forward empty
+/// `String.fromEnvironment` / `BuildConfig` values without accidentally
+/// configuring anything. This is the canonical init path the Swift
+/// `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
+/// `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+pub fn configure_runtime(
+    api_key: Option<String>,
+    gateway_url: Option<String>,
+    ingest_url: Option<String>,
+) {
+    let non_blank = |value: Option<String>| {
+        value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+
+    let mut builder = sdk::init();
+    if let Some(key) = non_blank(api_key) {
+        builder = builder.api_key(key);
+    }
+    if let Some(gateway) = non_blank(gateway_url) {
+        builder = builder.gateway_url(gateway);
+    }
+    if let Some(ingest) = non_blank(ingest_url) {
+        builder = builder.ingest_url(ingest);
+    }
+    builder.run();
+}
+
 /// Register the platform cache directory used for model bundles.
 ///
 /// Mandatory on Android (the SDK uses it to seed `HOME`, `HF_HOME`, and

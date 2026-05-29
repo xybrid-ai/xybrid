@@ -118,18 +118,27 @@ impl XybridSdkClient {
         initialize_telemetry_once(config);
     }
 
+    /// Start the platform telemetry exporter from the bundled
+    /// `Xybrid.init(apiKey: ...)` path.
+    ///
+    /// When `ingest_url` is absent or blank the exporter targets
+    /// [`xybrid_sdk::telemetry::DEFAULT_INGEST_URL`], so providing only an
+    /// API key is enough to light up the dashboard — the caller does not
+    /// need to know the ingest endpoint. Shares the process-wide once-guard
+    /// with [`Self::init_telemetry`]; whichever path runs first wins.
     #[frb(sync)]
     pub fn configure_platform_telemetry(
         api_key: String,
         ingest_url: Option<String>,
         resource_telemetry: Option<String>,
     ) {
+        // Route binding + api-key through the facade (bolt migration);
+        // master's DEFAULT_INGEST_URL defaulting lives in
+        // resolve_ingest_endpoint below. Clone the key because it's moved
+        // into TelemetryConfig::new on the next line.
         facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_api_key(api_key.clone());
 
-        // Default a missing/blank ingest URL to DEFAULT_INGEST_URL so that
-        // providing only an API key is enough to start telemetry (matches
-        // the documented behavior of this entry point).
         let endpoint = resolve_ingest_endpoint(ingest_url.as_deref());
         let mut config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
         if let Some(mode) = parse_resource_telemetry_mode(resource_telemetry.as_deref()) {
@@ -191,5 +200,37 @@ mod tests {
         let client = xybrid_sdk::RegistryClient::default_client()
             .expect("default_client should succeed in tests");
         assert_eq!(client.binding(), FLUTTER_BINDING);
+    }
+
+    #[test]
+    fn ingest_endpoint_defaults_when_absent() {
+        assert_eq!(
+            resolve_ingest_endpoint(None),
+            xybrid_sdk::telemetry::DEFAULT_INGEST_URL
+        );
+    }
+
+    #[test]
+    fn ingest_endpoint_defaults_when_blank() {
+        assert_eq!(
+            resolve_ingest_endpoint(Some("   ")),
+            xybrid_sdk::telemetry::DEFAULT_INGEST_URL
+        );
+    }
+
+    #[test]
+    fn ingest_endpoint_uses_supplied_value() {
+        assert_eq!(
+            resolve_ingest_endpoint(Some("http://192.168.1.78:8081")),
+            "http://192.168.1.78:8081"
+        );
+    }
+
+    #[test]
+    fn ingest_endpoint_trims_surrounding_whitespace() {
+        assert_eq!(
+            resolve_ingest_endpoint(Some("  https://ingest.example  ")),
+            "https://ingest.example"
+        );
     }
 }

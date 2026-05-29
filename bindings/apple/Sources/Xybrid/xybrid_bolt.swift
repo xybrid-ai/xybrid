@@ -566,6 +566,24 @@ public func clearBatteryLevel() {
     boltffi_clear_battery_level()
 }
 
+/// One-stop SDK initialization: API key + gateway/ingest URL overrides in
+/// one call. Delegates to [`facade::configure_runtime`]; blank strings are
+/// treated as absent. This is the canonical init the Swift
+/// `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
+/// `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+public func configureRuntime(apiKey: String?, gatewayUrl: String?, ingestUrl: String?) {
+    let apiKeyBytes = boltffiEncode { writer in writer.writeOptional(apiKey) { writer, v in writer.writeString(v) } }
+    let gatewayUrlBytes = boltffiEncode { writer in writer.writeOptional(gatewayUrl) { writer, v in writer.writeString(v) } }
+    let ingestUrlBytes = boltffiEncode { writer in writer.writeOptional(ingestUrl) { writer, v in writer.writeString(v) } }
+    apiKeyBytes.withUnsafeBufferPointer { apiKeyBuf in
+        gatewayUrlBytes.withUnsafeBufferPointer { gatewayUrlBuf in
+            ingestUrlBytes.withUnsafeBufferPointer { ingestUrlBuf in
+                boltffi_configure_runtime(apiKeyBuf.baseAddress, UInt(apiKeyBuf.count), gatewayUrlBuf.baseAddress, UInt(gatewayUrlBuf.count), ingestUrlBuf.baseAddress, UInt(ingestUrlBuf.count))
+            }
+        }
+    }
+}
+
 public func initSdkCacheDir(cacheDir: String) {
     var cacheDir = cacheDir
     cacheDir.withUTF8 { cacheDirBuf in

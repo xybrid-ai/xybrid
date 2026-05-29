@@ -25,6 +25,25 @@
 //!
 //! # Quick Start
 //!
+//! ## Initialization
+//!
+//! Anonymous use works out of the box — every inference path runs locally.
+//! Provide an API key to light up the platform dashboard:
+//!
+//! ```no_run
+//! // Anonymous — local inference, telemetry disabled
+//! xybrid_sdk::init().run();
+//!
+//! // Authenticated — telemetry exporter starts automatically
+//! xybrid_sdk::init()
+//!     .api_key("xy_live_...")
+//!     .run();
+//! ```
+//!
+//! Get a free key at <https://dashboard.xybrid.dev>. The first inference
+//! call without a key emits a one-shot info log nudging the developer
+//! toward the dashboard; set `XYBRID_QUIET=1` to suppress it.
+//!
 //! ## Batch Inference
 //!
 //! ```no_run
@@ -192,6 +211,11 @@ pub use model::{
 pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
 pub use run_options::{AbortPolicy, AbortReason, AbortSignal, CancellationToken, RunOptions};
+// Re-exported so callers can use the trait form of `SdkError::is_retryable`
+// / `retry_after` (e.g. in generic retry helpers) without naming
+// `xybrid_core`. The inherent methods on `SdkError` cover the common case
+// without any import.
+pub use xybrid_core::http::RetryableError;
 // Pipeline API (PipelineRef → Pipeline)
 pub use pipeline::{
     // Config types for FFI bindings (Flutter, Kotlin, Swift)
@@ -486,6 +510,156 @@ pub fn get_api_key() -> Option<String> {
 /// Check if the Xybrid API key is configured.
 pub fn has_api_key() -> bool {
     std::env::var("XYBRID_API_KEY").is_ok()
+}
+
+// ============================================================================
+// XybridInit — one-stop builder for SDK initialization
+// ============================================================================
+
+/// Start configuring the SDK. Call `.run()` to apply.
+///
+/// See [`XybridInit`] for the full builder surface.
+pub fn init() -> XybridInit {
+    XybridInit::default()
+}
+
+/// Builder that bundles SDK initialization into a single call.
+///
+/// Replaces the older multi-step setup (`init_sdk_cache_dir` →
+/// `set_api_key` → `init_platform_telemetry`) for host apps that want one
+/// entry point. The legacy free functions stay public for callers that
+/// need finer control.
+///
+/// # Anonymous use
+///
+/// Omitting [`api_key`](Self::api_key) is supported: every inference path
+/// still runs locally. The platform telemetry exporter is not started, and
+/// the first inference logs a one-shot info-level hint pointing at the
+/// dashboard. Set `XYBRID_QUIET=1` to suppress the hint.
+///
+/// # Examples
+///
+/// Anonymous, default cache directory:
+///
+/// ```no_run
+/// xybrid_sdk::init().run();
+/// ```
+///
+/// Authenticated; telemetry defaults to the production ingest URL:
+///
+/// ```no_run
+/// xybrid_sdk::init()
+///     .api_key("xy_live_...")
+///     .run();
+/// ```
+///
+/// Full configuration — self-hosted dashboard with resource sampling on:
+///
+/// ```no_run
+/// use xybrid_sdk::ResourceTelemetryMode;
+///
+/// xybrid_sdk::init()
+///     .api_key("xy_live_...")
+///     .ingest_url("http://192.168.1.78:8081")
+///     .resource_telemetry(ResourceTelemetryMode::Summary { interval_ms: 5000 })
+///     .run();
+/// ```
+#[derive(Debug, Clone, Default)]
+#[must_use = "call .run() to apply the configuration"]
+pub struct XybridInit {
+    api_key: Option<String>,
+    cache_dir: Option<std::path::PathBuf>,
+    gateway_url: Option<String>,
+    ingest_url: Option<String>,
+    resource_telemetry: Option<xybrid_core::device::ResourceTelemetryMode>,
+    binding: Option<&'static str>,
+}
+
+impl XybridInit {
+    /// Set the Xybrid API key. With a key, the platform telemetry exporter
+    /// starts on `.run()` and inference traces flow to the dashboard.
+    ///
+    /// Skip this call to run anonymously.
+    pub fn api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(key.into());
+        self
+    }
+
+    /// Override the model cache directory. Required on Android (where
+    /// `dirs::cache_dir()` returns `None`); optional elsewhere.
+    pub fn cache_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.cache_dir = Some(dir.into());
+        self
+    }
+
+    /// Override the LLM gateway URL. Defaults to the production gateway
+    /// or to `XYBRID_GATEWAY_URL` / `XYBRID_PLATFORM_URL` if set.
+    pub fn gateway_url(mut self, url: impl Into<String>) -> Self {
+        self.gateway_url = Some(url.into());
+        self
+    }
+
+    /// Override the telemetry ingest URL. Defaults to
+    /// [`telemetry::DEFAULT_INGEST_URL`] when an API key is set. Use this
+    /// for self-hosted dashboards or on-device dev consoles.
+    pub fn ingest_url(mut self, url: impl Into<String>) -> Self {
+        self.ingest_url = Some(url.into());
+        self
+    }
+
+    /// Configure resource-telemetry sampling. Defaults to `Off`.
+    pub fn resource_telemetry(mut self, mode: xybrid_core::device::ResourceTelemetryMode) -> Self {
+        self.resource_telemetry = Some(mode);
+        self
+    }
+
+    /// Register the binding identifier for this process (e.g. `"flutter"`,
+    /// `"kotlin"`, `"swift"`, `"unity"`). Bindings call this; host apps
+    /// rarely need to.
+    pub fn binding(mut self, binding: &'static str) -> Self {
+        self.binding = Some(binding);
+        self
+    }
+
+    /// Apply the configuration. Cache dir, gateway URL, API key, and
+    /// telemetry exporter are wired up in the order other code in the SDK
+    /// expects them.
+    ///
+    /// Idempotent for the cache dir and binding (first-set-wins via
+    /// `OnceLock`). The telemetry exporter has its own process-wide
+    /// once-guard at the binding layer; a second `.run()` does not spawn a
+    /// second exporter.
+    pub fn run(self) {
+        if let Some(binding) = self.binding {
+            set_binding(binding);
+        }
+        if let Some(dir) = self.cache_dir {
+            init_sdk_cache_dir(dir);
+        }
+        if let Some(url) = self.gateway_url.as_deref() {
+            set_gateway_url(url);
+        }
+        if let Some(key) = self.api_key.as_deref() {
+            set_api_key(key);
+        }
+
+        if let Some(key) = self.api_key.as_deref() {
+            let endpoint = self
+                .ingest_url
+                .as_deref()
+                .unwrap_or(telemetry::DEFAULT_INGEST_URL);
+            let mut config = telemetry::TelemetryConfig::new(endpoint, key);
+            if let Some(mode) = self.resource_telemetry {
+                config = config.with_resource_telemetry(mode);
+            }
+            telemetry::init_platform_telemetry(config);
+        } else if self.ingest_url.is_some() {
+            log::warn!(
+                target: "xybrid_sdk",
+                "ingest_url set without api_key; telemetry exporter not started"
+            );
+        }
+    }
 }
 
 /// Re-export common types for convenience
@@ -895,5 +1069,69 @@ mod sdk_config_tests {
             cfg.cache_dir.as_deref(),
             Some(std::path::Path::new("/tmp/xybrid-cache"))
         );
+    }
+}
+
+#[cfg(test)]
+mod xybrid_init_tests {
+    use super::{init, XybridInit};
+    use xybrid_core::device::ResourceTelemetryMode;
+
+    #[test]
+    fn init_returns_default_anonymous_builder() {
+        let builder = init();
+        let default = XybridInit::default();
+        // Default builder carries no configuration — the anonymous path.
+        assert_eq!(format!("{:?}", builder), format!("{:?}", default));
+    }
+
+    #[test]
+    fn api_key_setter_stores_value() {
+        let builder = init().api_key("xy_test_123");
+        let dbg = format!("{:?}", builder);
+        assert!(dbg.contains("xy_test_123"), "debug = {}", dbg);
+    }
+
+    #[test]
+    fn cache_dir_setter_stores_path() {
+        let builder = init().cache_dir("/tmp/xybrid-test-cache");
+        let dbg = format!("{:?}", builder);
+        assert!(
+            dbg.contains("xybrid-test-cache"),
+            "cache_dir not stored, debug = {}",
+            dbg
+        );
+    }
+
+    #[test]
+    fn ingest_url_setter_stores_value() {
+        let builder = init().ingest_url("http://192.168.1.78:8081");
+        let dbg = format!("{:?}", builder);
+        assert!(dbg.contains("192.168.1.78"), "debug = {}", dbg);
+    }
+
+    #[test]
+    fn gateway_url_setter_stores_value() {
+        let builder = init().gateway_url("https://gateway.example/v1");
+        let dbg = format!("{:?}", builder);
+        assert!(dbg.contains("gateway.example"), "debug = {}", dbg);
+    }
+
+    #[test]
+    fn resource_telemetry_setter_stores_mode() {
+        let builder = init().resource_telemetry(ResourceTelemetryMode::Boundary);
+        let dbg = format!("{:?}", builder);
+        assert!(dbg.contains("Boundary"), "debug = {}", dbg);
+    }
+
+    #[test]
+    fn builder_is_chainable() {
+        let _builder = init()
+            .api_key("xy_test")
+            .cache_dir("/tmp/x")
+            .gateway_url("https://gateway")
+            .ingest_url("https://ingest")
+            .resource_telemetry(ResourceTelemetryMode::Off)
+            .binding("rust");
     }
 }

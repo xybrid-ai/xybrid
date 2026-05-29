@@ -26,12 +26,19 @@ import java.io.File
  * Main entry point for the Xybrid SDK.
  *
  * Call [Xybrid.init] once before using any other Xybrid functionality.
+ * Inference runs on-device whether or not you authenticate; pass an
+ * `apiKey` to start the telemetry exporter and see your runs on the
+ * dashboard. Get a free key at https://dashboard.xybrid.dev.
  *
  * ```kotlin
  * class MyApplication : Application() {
  *     override fun onCreate() {
  *         super.onCreate()
+ *         // Anonymous — local inference, telemetry disabled
  *         Xybrid.init(this)
+ *
+ *         // Authenticated — telemetry flows to the dashboard
+ *         Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
  *     }
  * }
  * ```
@@ -46,20 +53,49 @@ object Xybrid {
      * Idempotent and thread-safe — subsequent calls after a successful
      * initialization are no-ops.
      *
-     * Subscribes to OS-level battery (`ACTION_BATTERY_CHANGED` sticky
-     * broadcast) and thermal (`PowerManager.OnThermalStatusChangedListener`,
-     * API 29+) notifications so the routing engine has live telemetry
-     * without consumer apps writing boilerplate. Receivers register
-     * against the application context so they survive Activity rotation.
+     * Typically called from `Application.onCreate()` or `Activity.onCreate()`.
+     *
+     * All parameters except [context] are optional. Without an [apiKey], the
+     * SDK runs fully on-device and telemetry is disabled — the first
+     * inference logs a one-shot hint pointing at the dashboard (suppress
+     * with the `XYBRID_QUIET=1` environment variable). Pass [apiKey] to
+     * start the platform telemetry exporter; [ingestUrl] overrides the
+     * destination for a self-hosted dashboard, and [gatewayUrl] overrides
+     * the LLM gateway. Configuration is applied on the first call; because
+     * `init` is idempotent, a later call with different arguments is a no-op.
+     *
+     * Also subscribes to OS-level battery and thermal notifications and
+     * forwards each value through the SDK's push-state surface so the
+     * routing engine has live telemetry without consumer apps writing
+     * boilerplate. Receivers/listeners are registered against the
+     * application context so they survive Activity rotation. Battery
+     * monitoring uses the sticky `ACTION_BATTERY_CHANGED` broadcast,
+     * which delivers the current value immediately on registration —
+     * no separate seed call is needed. Thermal monitoring requires
+     * API 29+ ([`PowerManager.OnThermalStatusChangedListener`]); on
+     * older devices the routing engine sees `thermal_state = None`
+     * (treated as "no signal" rather than an optimistic default).
+     *
+     * @param context Android context (application or activity).
+     * @param apiKey Xybrid API key. When set, starts the telemetry exporter.
+     * @param gatewayUrl Optional override for the LLM gateway URL.
+     * @param ingestUrl Optional override for the telemetry ingest URL.
      */
     @JvmStatic
-    fun init(context: Context) {
+    @JvmOverloads
+    fun init(
+        context: Context,
+        apiKey: String? = null,
+        gatewayUrl: String? = null,
+        ingestUrl: String? = null,
+    ) {
         if (initialized) return
         synchronized(this) {
             if (initialized) return
             setBinding("kotlin")
             val cacheDir = File(context.filesDir, "xybrid/models")
             initSdkCacheDir(cacheDir.absolutePath)
+            configureRuntime(apiKey = apiKey, gatewayUrl = gatewayUrl, ingestUrl = ingestUrl)
             registerPlatformObservers(context.applicationContext)
             initialized = true
         }
