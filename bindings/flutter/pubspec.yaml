@@ -17,7 +17,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_rust_bridge: ^2.11.1
+  # Pinned exactly: must equal the Rust `flutter_rust_bridge = "=2.11.1"`
+  # crate and the codegen version, or the generated bindings throw a
+  # codegen/runtime version-mismatch at startup. `^2.11.1` floats up to
+  # 2.12.x and breaks consumers.
+  flutter_rust_bridge: 2.11.1
   plugin_platform_interface: ^2.0.2
   freezed_annotation: ^2.0.0
   path_provider: ^2.1.5
