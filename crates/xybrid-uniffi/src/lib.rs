@@ -207,7 +207,7 @@ impl XybridError {
     /// Kotlin callers reach this via the exported
     /// [`xybrid_error_is_retryable`] free function rather than
     /// pattern-matching on variants that may shift between releases.
-    fn is_retryable(&self) -> bool {
+    pub fn is_retryable(&self) -> bool {
         match self {
             XybridError::NetworkError { .. }
             | XybridError::RateLimited { .. }
@@ -234,10 +234,29 @@ impl XybridError {
     /// carries a server-specified backoff; every other variant returns
     /// `None`. Exposed to Swift / Kotlin via
     /// [`xybrid_error_retry_after_secs`].
-    fn retry_after_secs(&self) -> Option<u64> {
+    ///
+    /// Matched exhaustively (rather than `_ => None`) so a future variant
+    /// that should carry a retry delay is compile-forced to be handled
+    /// here — same discipline as [`Self::is_retryable`].
+    pub fn retry_after_secs(&self) -> Option<u64> {
         match self {
             XybridError::RateLimited { retry_after_secs } => Some(*retry_after_secs),
-            _ => None,
+
+            XybridError::ModelNotFound { .. }
+            | XybridError::DirectoryNotFound { .. }
+            | XybridError::MetadataNotFound { .. }
+            | XybridError::MetadataInvalid { .. }
+            | XybridError::LoadError { .. }
+            | XybridError::InferenceError { .. }
+            | XybridError::StreamingNotSupported
+            | XybridError::NotLoaded
+            | XybridError::ConfigError { .. }
+            | XybridError::NetworkError { .. }
+            | XybridError::IoError { .. }
+            | XybridError::CacheError { .. }
+            | XybridError::PipelineError { .. }
+            | XybridError::CircuitOpen { .. }
+            | XybridError::Timeout { .. } => None,
         }
     }
 }
