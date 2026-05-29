@@ -1700,6 +1700,10 @@ fn redact_secret_like_token(token: &str) -> String {
         || trimmed.starts_with("gho_")
         || trimmed.starts_with("xoxb-")
         || trimmed.starts_with("xoxp-")
+        // Xybrid's own key prefix (`xy_live_`, `xy_test_`, …) — the secret
+        // most likely to appear in a *xybrid* error / gateway-auth failure
+        // string, and previously the one provider key this redactor missed.
+        || trimmed.starts_with("xy_")
     {
         token.replacen(trimmed, "[REDACTED]", 1)
     } else {
@@ -3279,6 +3283,25 @@ mod tests {
         assert!(redacted.contains("api_key=[REDACTED]"));
         assert!(!redacted.contains("sk_test_abc123"));
         assert!(!redacted.contains("hf_secret_xyz"));
+    }
+
+    #[test]
+    fn telemetry_error_redaction_removes_xybrid_own_key() {
+        // The Xybrid key is the secret most likely to appear in a xybrid
+        // gateway-auth error; the redactor must catch its `xy_` prefix just
+        // like every other provider's.
+        let redacted = redact_error_for_telemetry(
+            "Gateway auth failed for key xy_live_abc123def and xy_test_secret456",
+        );
+        assert!(
+            !redacted.contains("xy_live_abc123def"),
+            "redacted = {redacted}"
+        );
+        assert!(
+            !redacted.contains("xy_test_secret456"),
+            "redacted = {redacted}"
+        );
+        assert!(redacted.contains("[REDACTED]"));
     }
 
     #[test]
