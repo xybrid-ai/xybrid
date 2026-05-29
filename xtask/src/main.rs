@@ -1194,12 +1194,6 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
 /// flag.
 fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<()> {
     let profile = if release { "release" } else { "debug" };
-    if !release {
-        eprintln!(
-            "warning: build-android-bolt.sh always runs `boltffi pack android --release`. \
-             Ignoring --debug for this build."
-        );
-    }
     if !abis.is_empty() {
         eprintln!(
             "warning: --abi filter ignored; build-android-bolt.sh always builds every ABI \
@@ -1220,8 +1214,15 @@ fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<
             script.display()
         );
     }
-    let status = Command::new("bash")
-        .arg(&script)
+    let mut cmd = Command::new("bash");
+    cmd.arg(&script);
+    // The wrapper defaults to a `--release` pack; `DEBUG=1` switches it to an
+    // unoptimized debug build (faster compile, symbols/asserts for native
+    // Android debugging).
+    if !release {
+        cmd.env("DEBUG", "1");
+    }
+    let status = cmd
         .status()
         .with_context(|| format!("Failed to invoke {}", script.display()))?;
     if !status.success() {

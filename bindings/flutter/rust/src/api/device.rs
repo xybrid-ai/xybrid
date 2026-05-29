@@ -31,8 +31,6 @@ use flutter_rust_bridge::frb;
 use xybrid_ffi_facade as facade;
 use xybrid_sdk::{MemoryPressure, ResourceSnapshot};
 
-use super::FLUTTER_BINDING;
-
 const DEBUG_MEMORY_PRESSURE_READS: u8 = 2;
 
 static DEBUG_MEMORY_PRESSURE_REMAINING: AtomicU8 = AtomicU8::new(0);
@@ -168,7 +166,6 @@ impl XybridDevice {
     /// side, so the SDK has the freshest possible signal.
     #[frb(sync)]
     pub fn set_battery_level(percent: u8) {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_battery_level(percent);
     }
 
@@ -180,21 +177,18 @@ impl XybridDevice {
     /// than substituting an optimistic default.
     #[frb(sync)]
     pub fn clear_battery_level() {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         facade::clear_battery_level();
     }
 
     /// Forward a thermal pressure reading from the host.
     #[frb(sync)]
     pub fn set_thermal_state(state: FfiThermalState) {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_thermal_state(state.into());
     }
 
     /// Mark the thermal state as unknown.
     #[frb(sync)]
     pub fn clear_thermal_state() {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         facade::clear_thermal_state();
     }
 
@@ -214,7 +208,6 @@ impl XybridDevice {
     /// decision.
     #[frb(sync)]
     pub fn current_snapshot() -> FfiResourceSnapshot {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         current_snapshot_with_debug_memory_pressure(Duration::ZERO).into()
     }
 
@@ -225,14 +218,12 @@ impl XybridDevice {
     /// demo deterministic without leaving the process permanently poisoned.
     #[frb(sync)]
     pub fn apply_debug_memory_pressure() {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         DEBUG_MEMORY_PRESSURE_REMAINING.store(DEBUG_MEMORY_PRESSURE_READS, Ordering::Release);
     }
 
     /// Clear any pending debug memory-pressure override.
     #[frb(sync)]
     pub fn clear_debug_memory_pressure() {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         DEBUG_MEMORY_PRESSURE_REMAINING.store(0, Ordering::Release);
     }
 }

@@ -116,7 +116,15 @@ echo "    Features: platform-android"
 
 cd "$BOLT_CRATE"
 rm -rf dist/android
-boltffi pack android --release \
+# Release by default; set DEBUG=1 for a faster, unoptimized build when
+# debugging native Android issues (symbols, asserts, quicker compile).
+PROFILE_FLAG="--release"
+if [ "${DEBUG:-0}" = "1" ]; then
+    PROFILE_FLAG=""
+    echo "    Profile:  debug (DEBUG=1)"
+fi
+# shellcheck disable=SC2086  # deliberate word-split: empty PROFILE_FLAG = debug
+boltffi pack android $PROFILE_FLAG \
     --cargo-arg=--features --cargo-arg=platform-android
 
 echo "==> Copying libxybrid-bolt.so into bindings/kotlin/libs/"
