@@ -1,0 +1,28 @@
+docs/content/docs/(integration)/sdks/unity.zh.mdx
+  s_2d821c1355f300::t_d607f4a807fad8 35-42
+docs/content/docs/(integration)/sdks/unity.mdx
+  s_2d821c1355f300::t_a3256318fc1dca 35-40,42
+  s_2d821c1355f300::t_52c448fd12aac7 41
+docs/content/docs/quickstart.zh.mdx
+  s_2d821c1355f300::t_d4863852ba97b3 139-140
+examples/unity/Telemetry/README.md
+  s_2d821c1355f300::t_9c8121b279b095 7-12
+docs/content/docs/quickstart.mdx
+  s_2d821c1355f300::t_4868faa314148c 140-141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "758c7b350dcf81275b28824da918fc5ca030d14e",
+  "prompts": {},
+  "sessions": {
+    "s_2d821c1355f300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc1ef534-2425-40ad-92b2-e88e48c8f0af",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
