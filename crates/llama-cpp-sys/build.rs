@@ -212,10 +212,13 @@ struct BuildContext {
 
 impl BuildContext {
     fn from_env() -> Self {
-        let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-        let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-        let target = env::var("TARGET").unwrap();
-        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+        let manifest_dir = PathBuf::from(
+            env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is always set by cargo"),
+        );
+        let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is always set by cargo"));
+        let target = env::var("TARGET").expect("TARGET is always set by cargo");
+        let target_os =
+            env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS is always set by cargo");
         let target_arch =
             env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "aarch64".to_string());
         let workspace_root = workspace_root(&manifest_dir);
@@ -241,6 +244,52 @@ impl BuildContext {
             .as_ref()
             .and_then(|result| result.ndk_path.as_deref())
     }
+}
+
+/// The framing rule shared by every build-failure banner.
+const ERROR_RULE: &str = "=================================================================";
+
+/// Print a framed `cargo:warning=` error banner and abort the build.
+///
+/// Centralizes the three build-failure surfaces (missing CMake, missing
+/// NDK, clone failure) so the framing and the single `process::exit(1)`
+/// policy live in one place instead of being hand-rolled at each site.
+fn fatal(title: &str, body: &[String]) -> ! {
+    println!("cargo:warning={ERROR_RULE}");
+    println!("cargo:warning=ERROR: {title}");
+    println!("cargo:warning={ERROR_RULE}");
+    for line in body {
+        println!("cargo:warning={line}");
+    }
+    println!("cargo:warning={ERROR_RULE}");
+    process::exit(1);
+}
+
+/// Highest-versioned subdirectory of `dir` — used to pick the newest
+/// installed NDK under `<sdk>/ndk`. Version components are compared
+/// numerically (so `9.0` < `21.0`), not lexicographically. Returns `None`
+/// when `dir` is absent or has no subdirectories.
+fn latest_versioned_subdir(dir: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .max_by(|a, b| version_key(a).cmp(&version_key(b)))
+}
+
+/// Numeric version key for a path's final component, e.g.
+/// `"21.4.7075529"` → `[21, 4, 7075529]`. Non-numeric components map to
+/// `0`, so directories that aren't version-shaped sort lowest.
+fn version_key(path: &Path) -> Vec<u64> {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|name| {
+            name.split('.')
+                .map(|c| c.parse::<u64>().unwrap_or(0))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Find the Android NDK path from various sources
@@ -304,22 +353,11 @@ fn find_android_ndk() -> NdkDetectionResult {
             let ndk_dir = Path::new(&sdk_expanded).join("ndk");
             let ndk_path_str = ndk_dir.to_string_lossy().to_string();
             tried_paths.push(format!("${}/ndk = {}", sdk_var, ndk_path_str));
-            if ndk_dir.exists() {
-                // Find the latest NDK version
-                if let Ok(entries) = std::fs::read_dir(&ndk_dir) {
-                    let mut versions: Vec<_> = entries
-                        .filter_map(|e| e.ok())
-                        .filter(|e| e.path().is_dir())
-                        .map(|e| e.path())
-                        .collect();
-                    versions.sort();
-                    if let Some(latest) = versions.last() {
-                        return NdkDetectionResult {
-                            ndk_path: Some(latest.to_string_lossy().to_string()),
-                            tried_paths,
-                        };
-                    }
-                }
+            if let Some(latest) = latest_versioned_subdir(&ndk_dir) {
+                return NdkDetectionResult {
+                    ndk_path: Some(latest.to_string_lossy().to_string()),
+                    tried_paths,
+                };
             }
         }
     }
@@ -354,21 +392,11 @@ fn find_android_ndk() -> NdkDetectionResult {
     for location in &common_locations {
         tried_paths.push(format!("common: {}", location));
         let ndk_dir = Path::new(location);
-        if ndk_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(ndk_dir) {
-                let mut versions: Vec<_> = entries
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.path().is_dir())
-                    .map(|e| e.path())
-                    .collect();
-                versions.sort();
-                if let Some(latest) = versions.last() {
-                    return NdkDetectionResult {
-                        ndk_path: Some(latest.to_string_lossy().to_string()),
-                        tried_paths,
-                    };
-                }
-            }
+        if let Some(latest) = latest_versioned_subdir(ndk_dir) {
+            return NdkDetectionResult {
+                ndk_path: Some(latest.to_string_lossy().to_string()),
+                tried_paths,
+            };
         }
     }
 
@@ -435,17 +463,17 @@ fn compile_llama_cpp() {
     generate_bindings(&llama_cpp_dir, &ctx.out_dir, ctx.android_ndk_path());
 
     if !check_cmake_available() {
-        println!("cargo:warning=================================================================");
-        println!("cargo:warning=ERROR: CMake not found!");
-        println!("cargo:warning=================================================================");
-        println!("cargo:warning=llama.cpp requires CMake to build.");
-        println!("cargo:warning=");
-        println!("cargo:warning={}", cmake_install_instructions());
-        println!("cargo:warning=");
-        println!("cargo:warning=Or disable the llm-llamacpp feature:");
-        println!("cargo:warning=  cargo build --no-default-features");
-        println!("cargo:warning=================================================================");
-        process::exit(1);
+        fatal(
+            "CMake not found!",
+            &[
+                "llama.cpp requires CMake to build.".to_string(),
+                String::new(),
+                cmake_install_instructions().to_string(),
+                String::new(),
+                "Or disable the llm-llamacpp feature:".to_string(),
+                "  cargo build --no-default-features".to_string(),
+            ],
+        );
     }
 
     let mut metal_enabled = false;
@@ -471,11 +499,11 @@ fn compile_llama_cpp() {
             .define("GGML_ACCELERATE", "ON")
             .define("GGML_BLAS", "OFF");
         metal_enabled = true;
-    } else if ctx.target.contains("linux") {
+    } else if ctx.target_os == "linux" {
         cmake_config
             .define("GGML_METAL", "OFF")
             .define("GGML_CUDA", "OFF");
-    } else if ctx.target.contains("windows") {
+    } else if ctx.target_os == "windows" {
         cmake_config
             .define("GGML_METAL", "OFF")
             .define("GGML_CUDA", "OFF");
@@ -538,7 +566,7 @@ fn compile_llama_cpp() {
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=MetalKit");
         println!("cargo:rustc-link-lib=static=ggml-metal");
-    } else if ctx.target.contains("windows") {
+    } else if ctx.target_os == "windows" {
         // Windows linking handled by CMake
     }
 }
@@ -591,23 +619,19 @@ fn configure_android(cmake_config: &mut cmake::Config, ctx: &BuildContext) -> Op
         cmake_config.define("ANDROID_NDK", ndk);
         Some(ndk.clone())
     } else {
-        println!("cargo:warning=================================================================");
-        println!("cargo:warning=ERROR: Android NDK not found!");
-        println!("cargo:warning=================================================================");
-        println!("cargo:warning=Paths tried:");
+        let mut body = vec!["Paths tried:".to_string()];
         for path in &ndk_result.tried_paths {
-            println!("cargo:warning=  - {}", path);
+            body.push(format!("  - {}", path));
         }
-        println!("cargo:warning=");
-        println!("cargo:warning=To fix this, set one of these environment variables:");
-        println!("cargo:warning=  export ANDROID_NDK_HOME=/path/to/android-ndk");
-        println!(
-            "cargo:warning=  export ANDROID_HOME=/path/to/android-sdk  (with ndk/ subdirectory)"
-        );
-        println!("cargo:warning=");
-        println!("cargo:warning=Or install Android Studio which sets up the NDK automatically.");
-        println!("cargo:warning=================================================================");
-        process::exit(1);
+        body.extend([
+            String::new(),
+            "To fix this, set one of these environment variables:".to_string(),
+            "  export ANDROID_NDK_HOME=/path/to/android-ndk".to_string(),
+            "  export ANDROID_HOME=/path/to/android-sdk  (with ndk/ subdirectory)".to_string(),
+            String::new(),
+            "Or install Android Studio which sets up the NDK automatically.".to_string(),
+        ]);
+        fatal("Android NDK not found!", &body);
     }
 }
 
@@ -665,26 +689,22 @@ fn clone_pinned_commit(out_dir: &Path) -> PathBuf {
         );
         cloned
     } else {
-        println!("cargo:warning=================================================================");
-        println!("cargo:warning=ERROR: Failed to clone llama.cpp!");
-        println!("cargo:warning=================================================================");
-        println!("cargo:warning=Expected location: {}", cloned.display());
-        println!("cargo:warning=");
-        println!("cargo:warning=To fix this manually, run:");
-        println!(
-            "cargo:warning=  git clone {} {} && \\",
-            LLAMA_CPP_REPO,
-            cloned.display()
+        fatal(
+            "Failed to clone llama.cpp!",
+            &[
+                format!("Expected location: {}", cloned.display()),
+                String::new(),
+                "To fix this manually, run:".to_string(),
+                format!("  git clone {} {} && \\", LLAMA_CPP_REPO, cloned.display()),
+                format!(
+                    "    git -C {} checkout {}",
+                    cloned.display(),
+                    LLAMA_CPP_COMMIT
+                ),
+                String::new(),
+                "Or disable the llm-llamacpp feature:".to_string(),
+                "  cargo build --no-default-features".to_string(),
+            ],
         );
-        println!(
-            "cargo:warning=    git -C {} checkout {}",
-            cloned.display(),
-            LLAMA_CPP_COMMIT
-        );
-        println!("cargo:warning=");
-        println!("cargo:warning=Or disable the llm-llamacpp feature:");
-        println!("cargo:warning=  cargo build --no-default-features");
-        println!("cargo:warning=================================================================");
-        process::exit(1);
     }
 }

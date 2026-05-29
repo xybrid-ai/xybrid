@@ -394,6 +394,28 @@ fn output_from_fields(
     }
 }
 
+/// Assemble the final-cleanup stop patterns for a chat turn: the caller's
+/// configured stops plus the built-in [`CHAT_STOP_PATTERNS`] and their
+/// `_BROKEN` variants. Shared by `generate` and `generate_streaming` so the
+/// pattern set cannot drift between the streaming and non-streaming paths.
+fn chat_stop_patterns(config: &GenerationConfig) -> Vec<String> {
+    let mut extras: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
+    extras.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
+    merge_stop_patterns(&config.stop_sequences, &extras)
+}
+
+/// Observation-only streaming chunk handler for the non-streaming
+/// `generate` / `generate_raw` paths: records per-chunk telemetry and emits
+/// nothing to the caller. Shared so the two call sites can't drift.
+fn record_only(
+    _token_id: i32,
+    _token_text: &str,
+    tel: &mut StreamingTelemetry,
+) -> Result<(), crate::runtime_adapter::llm::StreamingError> {
+    tel.record_chunk();
+    Ok(())
+}
+
 /// Longest-common-prefix length between the cached tokens and the new
 /// prompt tokens, capped at `new_tokens.len() - 1` so the post-prefill
 /// batch always has at least one token to feed the C decoder.
@@ -538,10 +560,7 @@ impl LlmBackend for LlamaCppBackend {
                 &prepared,
                 config,
                 &config.stop_sequences,
-                |_token_id, _token_text, tel| {
-                    tel.record_chunk();
-                    Ok(())
-                },
+                record_only,
             );
             let (output_tokens, stopped_by_callback, fields) = match stream_result {
                 Ok(result) => result,
@@ -570,11 +589,7 @@ impl LlmBackend for LlamaCppBackend {
             // `streaming_postprocess`. The `*_BROKEN` patterns cover
             // tokenizers that split the leading `<` off a chat-template
             // marker — safe only for final-text cleanup, not streaming.
-            let final_stop_patterns = {
-                let mut extras: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
-                extras.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
-                merge_stop_patterns(&config.stop_sequences, &extras)
-            };
+            let final_stop_patterns = chat_stop_patterns(config);
             log::debug!(target: "xybrid_core", "Searching for stop patterns: {:?}", final_stop_patterns);
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let text = strip_thinking_tags(&text).trim().to_string();
@@ -632,10 +647,7 @@ impl LlmBackend for LlamaCppBackend {
                 &prepared,
                 config,
                 &config.stop_sequences,
-                |_token_id, _token_text, tel| {
-                    tel.record_chunk();
-                    Ok(())
-                },
+                record_only,
             )?;
 
             let text = model.detokenize(&output_tokens)?;
@@ -726,11 +738,7 @@ impl LlmBackend for LlamaCppBackend {
             // non-streaming path. The `_BROKEN` fallback patterns are
             // included here because this is final-text only — no streaming
             // false-positive risk.
-            let final_patterns = {
-                let mut extras: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
-                extras.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
-                merge_stop_patterns(&config.stop_sequences, &extras)
-            };
+            let final_patterns = chat_stop_patterns(config);
             let mut text = model.detokenize(&output_tokens)?;
             let stopped_full = truncate_at_first_stop(&mut text, &final_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_patterns);
@@ -790,6 +798,28 @@ impl LlmBackend for LlamaCppBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_stop_patterns_includes_user_stops_and_broken_variants() {
+        let config = GenerationConfig {
+            stop_sequences: vec!["<<END>>".to_string()],
+            ..Default::default()
+        };
+        let patterns = chat_stop_patterns(&config);
+        assert!(
+            patterns.iter().any(|p| p == "<<END>>"),
+            "user-supplied stop must survive the merge"
+        );
+        // The `_BROKEN` variants are the drift-prone set the review flagged:
+        // `generate` and `generate_streaming` must both include them for
+        // final-text cleanup. Guards against the two paths diverging.
+        for broken in CHAT_STOP_PATTERNS_BROKEN {
+            assert!(
+                patterns.iter().any(|p| p == broken),
+                "broken chat-marker variant {broken:?} must be present"
+            );
+        }
+    }
 
     #[test]
     fn backend_reports_true_streaming_for_sdk_cancellation_gate() {

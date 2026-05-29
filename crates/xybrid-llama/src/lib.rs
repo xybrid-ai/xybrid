@@ -17,7 +17,6 @@
 //! - [`LlamaModel`] — owning handle to a loaded GGUF model
 //! - [`LlamaContext`] — owning handle to a llama context, with KV-cache
 //!   manipulation methods
-//! - [`SamplingParams`] — data-only sampling configuration
 //! - [`StreamingCallback`] — closure type alias for streaming generation
 //! - [`generate_streaming`] / [`generate_with_stops`] — the autoregressive
 //!   loops, including the prefix-reuse `n_past_in` knob
@@ -67,8 +66,6 @@ mod generation;
 mod log_control;
 #[cfg(feature = "bindings")]
 mod model;
-#[cfg(feature = "bindings")]
-mod sampling;
 
 #[cfg(feature = "bindings")]
 pub use context::LlamaContext;
@@ -78,18 +75,14 @@ pub use generation::{format_chat, generate_streaming, generate_with_stops, Strea
 pub use log_control::{get_verbosity, set_verbosity};
 #[cfg(feature = "bindings")]
 pub use model::LlamaModel;
-#[cfg(feature = "bindings")]
-pub use sampling::SamplingParams;
 
 // =========================================================================
 // No-bindings stubs
 // =========================================================================
 //
-// These let xybrid-core's `mod sys` re-export `xybrid_llama::*` and still
-// compile on a default build (no `llm-llamacpp` feature). Calls bubble up
-// `LlamaError::Internal` so the runtime adapter can map them to the
-// pre-refactor `AdapterError::RuntimeError("llm-llamacpp feature not
-// enabled")`.
+// These keep the crate's public type surface present on a default build
+// (no `bindings` feature), so `cargo build -p xybrid-llama` and
+// `cargo clippy --workspace` stay green on toolchain-free CI runners.
 
 /// Stub returned when the `bindings` feature is disabled.
 #[cfg(not(feature = "bindings"))]
@@ -98,16 +91,6 @@ pub struct LlamaModel;
 /// Stub returned when the `bindings` feature is disabled.
 #[cfg(not(feature = "bindings"))]
 pub struct LlamaContext;
-
-/// Stub sampling params for no-bindings builds.
-#[cfg(not(feature = "bindings"))]
-#[derive(Clone, Default)]
-pub struct SamplingParams {
-    pub temperature: f32,
-    pub top_p: f32,
-    pub top_k: usize,
-    pub repeat_penalty: f32,
-}
 
 #[cfg(not(feature = "bindings"))]
 pub fn set_verbosity(_level: i32) {}
