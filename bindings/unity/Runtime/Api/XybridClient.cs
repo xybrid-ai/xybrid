@@ -87,23 +87,31 @@ namespace Xybrid
                 }
 
                 _initialized = true;
-            }
 
-            // Fold telemetry into init: a non-blank API key starts the exporter,
-            // mirroring the Swift initialize(apiKey:) / Kotlin init(apiKey =)
-            // surfaces. The standalone InitializeTelemetry(TelemetryConfig) path
-            // remains available for advanced configuration (batch size, device
-            // attributes, flush interval). TelemetryConfig defaults the endpoint
-            // to the production ingest URL, so apiKey alone is enough.
-            if (!string.IsNullOrWhiteSpace(apiKey) && !_telemetryInitialized)
-            {
-                var config = new TelemetryConfig(apiKey);
-                if (!string.IsNullOrWhiteSpace(ingestUrl))
+                // Fold telemetry into init: a non-blank API key starts the
+                // exporter, mirroring the Swift initialize(apiKey:) / Kotlin
+                // init(apiKey =) surfaces. The standalone
+                // InitializeTelemetry(TelemetryConfig) path remains available for
+                // advanced configuration (batch size, device attributes, flush
+                // interval). TelemetryConfig defaults the endpoint to the
+                // production ingest URL, so apiKey alone is enough.
+                //
+                // Kept inside the lock so a concurrent caller that observes
+                // _initialized == true (and returns) is guaranteed the exporter
+                // is already running — and so the _telemetryInitialized read
+                // here has the same visibility as InitializeTelemetry's write.
+                // C# locks are reentrant, so InitializeTelemetry re-taking _lock
+                // is safe.
+                if (!string.IsNullOrWhiteSpace(apiKey) && !_telemetryInitialized)
                 {
-                    config.WithEndpoint(ingestUrl);
-                }
+                    var config = new TelemetryConfig(apiKey);
+                    if (!string.IsNullOrWhiteSpace(ingestUrl))
+                    {
+                        config.WithEndpoint(ingestUrl);
+                    }
 
-                InitializeTelemetry(config);
+                    InitializeTelemetry(config);
+                }
             }
         }
 
