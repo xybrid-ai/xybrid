@@ -1,0 +1,23 @@
+tools/scripts/build-android-bolt.sh
+  s_769feccabb148e::t_2d92eeab011bed 63-74
+  s_769feccabb148e::t_d5521cc3e85526 179-181,184-189
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_769feccabb148e::t_bba0742a0753f4 36-47
+  s_769feccabb148e::t_23eaff1cab6dfa 130-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ad86fc70510b1c712d2579950e58e5cb1f98282e",
+  "prompts": {},
+  "sessions": {
+    "s_769feccabb148e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "56c30818-edd5-4ac1-b29c-58320859cf3a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
