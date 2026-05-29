@@ -19,7 +19,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # Raw FFI bindings + cmake build for llama.cpp. Gated entirely behind the
-# `llm-llamacpp-runtime` feature (which activates both `llama-cpp-sys/bindings`
+# `llm-llamacpp` feature (which activates both `llama-cpp-sys/bindings`
 # and `xybrid-llama/bindings`) so default builds — and any consumer not
 # opting into llama.cpp — pay zero compile cost. The 3-layer shape:
 #   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
@@ -99,9 +99,9 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 # mistralrs = { version = "0.8", optional = true }
 
 [features]
-# `llm-llamacpp-runtime` is NOT enabled by default — it requires cmake + a C++
+# `llm-llamacpp` is NOT enabled by default — it requires cmake + a C++
 # toolchain and clones ~180MB of llama.cpp source during build. Downstream
-# users opt in via `cargo add xybrid-core --features llm-llamacpp-runtime`
+# users opt in via `cargo add xybrid-core --features llm-llamacpp`
 # or one of the `platform-*` presets on xybrid-sdk.
 default = ["ort-download"]
 
@@ -129,28 +129,15 @@ llm-mistral = []
 llm-mistral-metal = ["llm-mistral"]
 llm-mistral-cuda = ["llm-mistral"]
 
-# llama.cpp backend — TWO TIERS, matching the MLX precedent in
-# `xybrid-core/Cargo.toml`.
-#
-# Tier 1 (skeleton): `llm-llamacpp`
-#   - Compiles types (`LlamaCppBackend` constructor + adapter glue) on
-#     any target without cmake, without a C++ toolchain, without git
-#     access to fetch llama.cpp source.
-#   - `LlamaCppBackend::new()` constructs a type-only backend; runtime
-#     methods return `AdapterError::BackendNotLinked` with a "rebuild
-#     with `llm-llamacpp-runtime`" message.
-#   - For downstreams that want type access only (e.g., Linux CI
-#     runners) or that intend to link a custom llama.cpp build out of
-#     tree.
-llm-llamacpp = []
-
-# Tier 2 (runtime): `llm-llamacpp-runtime`
-#   - Activates both `llama-cpp-sys/bindings` (cmake build of llama.cpp +
-#     wrapper.cpp shim) and `xybrid-llama/bindings` (safe wrappers).
-#   - All four `platform-*` presets on `xybrid-sdk` depend on this tier
-#     since they ship runtime inference.
-llm-llamacpp-runtime = [
-    "llm-llamacpp",
+# llama.cpp backend. Enabling `llm-llamacpp` links the llama.cpp runtime:
+# it activates both `llama-cpp-sys/bindings` (cmake build of llama.cpp +
+# wrapper.cpp shim) and `xybrid-llama/bindings` (safe RAII wrappers).
+# All four `platform-*` presets on `xybrid-sdk` depend on it since they
+# ship runtime inference. The 3-layer crate split underneath:
+#   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
+#   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
+#   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
+llm-llamacpp = [
     "dep:llama-cpp-sys",
     "llama-cpp-sys/bindings",
     "dep:xybrid-llama",
@@ -180,10 +167,8 @@ criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarking fra
 
 [[example]]
 name = "neutts_tts"
-# Real inference — needs the runtime tier, not the skeleton.
-# Pre-Phase-4 `llm-llamacpp` meant runtime; the split made `llm-llamacpp`
-# skeleton-only, so this required-features value moves to `-runtime`.
-required-features = ["llm-llamacpp-runtime"]
+# Real inference — needs llama.cpp linked.
+required-features = ["llm-llamacpp"]
 
 [[bench]]
 name = "inference_backends"

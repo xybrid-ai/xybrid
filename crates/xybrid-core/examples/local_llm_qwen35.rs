@@ -5,7 +5,7 @@
 //! from the Qwen 3.5 family (text-only mode).
 //!
 //! Run with:
-//!   cargo run --example local_llm_qwen35 -p xybrid-core --features llm-llamacpp-runtime
+//!   cargo run --example local_llm_qwen35 -p xybrid-core --features llm-llamacpp
 //!
 //! Requires model to be downloaded:
 //!   ./integration-tests/download.sh qwen3.5-0.8b

@@ -1,7 +1,7 @@
 //! Local LLM Inference - Ministral 3 3B (GGUF)
 //!
 //! Run with:
-//!   cargo run --example local_llm_ministral -p xybrid-core --features llm-llamacpp-runtime
+//!   cargo run --example local_llm_ministral -p xybrid-core --features llm-llamacpp
 
 use std::collections::HashMap;
 use std::path::PathBuf;

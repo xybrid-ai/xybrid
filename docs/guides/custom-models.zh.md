@@ -462,7 +462,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### GGUF 模型无法加载
 
-- 确保 xybrid 在构建时包含 `llm-llamacpp-runtime` feature（所有平台预设均已包含）
+- 确保 xybrid 在构建时包含 `llm-llamacpp` feature（所有平台预设均已包含）
 - GGUF 模型需要在执行模板中使用 `"type": "Gguf"`，而非 `"Onnx"`
 - 在执行模板中设置 `context_length` 以控制内存用量
 

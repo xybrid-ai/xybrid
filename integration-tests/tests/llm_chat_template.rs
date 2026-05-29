@@ -5,12 +5,12 @@
 //! <end_of_turn>) appearing in generated text.
 //!
 //! Run with:
-//!   cargo test -p integration-tests --features llm-llamacpp-runtime -- llm_chat_template --nocapture
+//!   cargo test -p integration-tests --features llm-llamacpp -- llm_chat_template --nocapture
 //!
 //! Requires gemma-3-1b model:
 //!   ./integration-tests/download.sh gemma-3-1b
 
-#![cfg(feature = "llm-llamacpp-runtime")]
+#![cfg(feature = "llm-llamacpp")]
 
 use integration_tests::fixtures;
 use std::collections::HashMap;

@@ -25,21 +25,21 @@
       "source": "registry",
       "size_mb": 468,
       "task": "text-generation",
-      "feature_gate": "llm-llamacpp-runtime"
+      "feature_gate": "llm-llamacpp"
     },
     "neutts-nano-q4": {
       "description": "NeuTTS Nano Q4 - Codec-based TTS (120M GGUF + NeuCodec ONNX + OpenPhonemizer). Voice cloning, no system deps.",
       "source": "registry",
       "size_mb": 577,
       "task": "text-to-speech",
-      "feature_gate": "llm-llamacpp-runtime"
+      "feature_gate": "llm-llamacpp"
     },
     "neutts-air-q4": {
       "description": "NeuTTS Air Q4 - Higher-quality codec TTS (~500M GGUF + NeuCodec ONNX + OpenPhonemizer).",
       "source": "registry",
       "size_mb": 909,
       "task": "text-to-speech",
-      "feature_gate": "llm-llamacpp-runtime"
+      "feature_gate": "llm-llamacpp"
     },
     "mnist": {
       "description": "Handwritten digit classification (28x28 grayscale, 10 classes)",
@@ -330,7 +330,7 @@
       "source": "url",
       "size_mb": 2150,
       "task": "text-generation",
-      "feature_gate": "llm-llamacpp-runtime",
+      "feature_gate": "llm-llamacpp",
       "files": [
         {
           "url": "https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF/resolve/main/Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
@@ -343,7 +343,7 @@
       "source": "url",
       "size_mb": 533,
       "task": "text-generation",
-      "feature_gate": "llm-llamacpp-runtime",
+      "feature_gate": "llm-llamacpp",
       "files": [
         {
           "url": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf",
@@ -382,7 +382,7 @@
       "source": "url",
       "size_mb": 1280,
       "task": "text-generation",
-      "feature_gate": "llm-llamacpp-runtime",
+      "feature_gate": "llm-llamacpp",
       "files": [
         {
           "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf",

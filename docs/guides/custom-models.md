@@ -462,7 +462,7 @@ The model loads but fails when trying to read a vocabulary or tokenizer file.
 
 ### GGUF model not loading
 
-- Ensure xybrid was built with the `llm-llamacpp-runtime` feature (included in all platform presets)
+- Ensure xybrid was built with the `llm-llamacpp` feature (included in all platform presets)
 - GGUF models require `"type": "Gguf"` in the execution template — not `"Onnx"`
 - Set `context_length` in the execution template to control memory usage
 

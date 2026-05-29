@@ -1,8 +1,8 @@
 //! LlamaCppBackend - LLM inference using llama.cpp
 //!
 //! This module provides llama.cpp bindings for LLM inference.
-//! The skeleton tier is feature-gated behind `llm-llamacpp`; the
-//! linked runtime is feature-gated behind `llm-llamacpp-runtime`.
+//! The whole module is feature-gated behind `llm-llamacpp`, which links
+//! the llama.cpp runtime via `llama-cpp-sys` + `xybrid-llama`.
 //!
 //! # Why llama.cpp?
 //!
@@ -27,9 +27,7 @@
 // alias back to the historical `llama_log_*` names here so
 // `crate::telemetry::events` and the `runtime_adapter::mod` re-export
 // keep their existing identifiers.
-#[cfg(feature = "llm-llamacpp-runtime")]
 mod chat;
-#[cfg(feature = "llm-llamacpp-runtime")]
 pub use xybrid_llama::{
     get_verbosity as llama_log_get_verbosity, set_verbosity as llama_log_set_verbosity,
 };
@@ -37,17 +35,13 @@ pub use xybrid_llama::{
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult,
 };
-#[cfg(feature = "llm-llamacpp-runtime")]
 use crate::runtime_adapter::llm_telemetry::{StreamingTelemetry, StreamingTelemetryFields};
-#[cfg(feature = "llm-llamacpp-runtime")]
 use crate::runtime_adapter::streaming_postprocess::{
     merge_stop_patterns, strip_thinking_tags, trim_partial_stop_suffix, truncate_at_first_stop,
     StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
 };
 use crate::runtime_adapter::AdapterError;
-#[cfg(feature = "llm-llamacpp-runtime")]
 use crate::tracing as xybrid_trace;
-#[cfg(feature = "llm-llamacpp-runtime")]
 use std::sync::Mutex;
 
 // Backend init is idempotent through `xybrid_llama::backend_init`; the OS
@@ -77,7 +71,6 @@ use std::sync::Mutex;
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(feature = "llm-llamacpp-runtime")]
 pub struct LlamaCppBackend {
     /// Pointer to loaded model (llama_model*)
     model: Option<xybrid_llama::LlamaModel>,
@@ -107,7 +100,6 @@ pub struct LlamaCppBackend {
 /// to reuse — the source of truth for the future `prompt_cached_tokens`
 /// telemetry field. Read it post-`generate*` to learn how many tokens were
 /// served from cache.
-#[cfg(feature = "llm-llamacpp-runtime")]
 #[derive(Default)]
 struct KvCacheState {
     /// The exact token sequence currently sitting in the KV cache. Empty
@@ -120,7 +112,6 @@ struct KvCacheState {
     last_prefix_hit: Option<usize>,
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
 impl LlamaCppBackend {
     /// Create a new LlamaCppBackend.
     pub fn new() -> LlmResult<Self> {
@@ -138,7 +129,6 @@ impl LlamaCppBackend {
     }
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
 impl Drop for LlamaCppBackend {
     fn drop(&mut self) {
         // Drop context first, then model (order matters: context references model).
@@ -152,14 +142,12 @@ impl Drop for LlamaCppBackend {
     }
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
 impl Default for LlamaCppBackend {
     fn default() -> Self {
         Self::new().expect("Failed to create LlamaCppBackend")
     }
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
 impl LlamaCppBackend {
     /// Acquire the model + context under the context mutex and hand both
     /// to `f`. Replaces three copies of the same five-line dance across
@@ -357,20 +345,17 @@ impl LlamaCppBackend {
     }
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
 struct PreparedGeneration {
     prompt_token_count: usize,
     tail: Vec<i32>,
     n_past: usize,
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
 enum PromptKind {
     Chat,
     Raw,
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
 impl PromptKind {
     fn input_too_long_message(&self, tokens_len: usize, n_ctx: usize) -> String {
         match self {
@@ -387,7 +372,6 @@ impl PromptKind {
     }
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
 fn output_from_fields(
     text: String,
     tokens_generated: usize,
@@ -420,7 +404,6 @@ fn output_from_fields(
 /// - empty `cached` ⇒ 0 (first call)
 /// - identical sequences ⇒ `new_tokens.len() - 1` (keep last token for the C decoder)
 /// - common prefix shorter than either ⇒ that prefix length
-#[cfg(feature = "llm-llamacpp-runtime")]
 fn compute_reusable_prefix_len(cached: &[i32], new_tokens: &[i32]) -> usize {
     let max_reuse = new_tokens.len().saturating_sub(1);
     cached
@@ -431,7 +414,6 @@ fn compute_reusable_prefix_len(cached: &[i32], new_tokens: &[i32]) -> usize {
         .count()
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
 impl LlmBackend for LlamaCppBackend {
     fn name(&self) -> &str {
         "llama-cpp"
@@ -805,7 +787,7 @@ impl LlmBackend for LlamaCppBackend {
     }
 }
 
-#[cfg(all(test, feature = "llm-llamacpp-runtime"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -896,107 +878,4 @@ mod tests {
         // think test fixtures). max_reuse = 0 ⇒ we always re-prefill.
         assert_eq!(compute_reusable_prefix_len(&[1, 2, 3], &[1]), 0);
     }
-}
-
-// =============================================================================
-// Non-runtime backend
-// =============================================================================
-//
-// Active whenever the linked llama.cpp runtime is absent. With
-// `llm-llamacpp` enabled this is the constructible skeleton tier:
-// type-level access works, while fallible runtime paths return
-// `AdapterError::BackendNotLinked`. With neither feature enabled, the
-// same unit shape preserves the historical no-feature diagnostics while
-// pointing at the real runtime feature.
-
-#[cfg(not(feature = "llm-llamacpp-runtime"))]
-pub struct LlamaCppBackend;
-
-#[cfg(not(feature = "llm-llamacpp-runtime"))]
-impl LlamaCppBackend {
-    pub fn new() -> LlmResult<Self> {
-        #[cfg(feature = "llm-llamacpp")]
-        {
-            Ok(Self)
-        }
-        #[cfg(not(feature = "llm-llamacpp"))]
-        {
-            Err(llamacpp_runtime_unavailable())
-        }
-    }
-}
-
-#[cfg(not(feature = "llm-llamacpp-runtime"))]
-impl Default for LlamaCppBackend {
-    fn default() -> Self {
-        Self
-    }
-}
-
-#[cfg(not(feature = "llm-llamacpp-runtime"))]
-impl LlmBackend for LlamaCppBackend {
-    fn name(&self) -> &str {
-        "llama-cpp"
-    }
-
-    fn wire_label(&self) -> Option<&'static str> {
-        llamacpp_non_runtime_wire_label()
-    }
-
-    fn supported_formats(&self) -> Vec<&'static str> {
-        vec!["gguf"]
-    }
-
-    fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
-        Err(llamacpp_runtime_unavailable())
-    }
-
-    fn is_loaded(&self) -> bool {
-        false
-    }
-
-    fn unload(&mut self) -> LlmResult<()> {
-        Ok(())
-    }
-
-    fn generate(
-        &self,
-        _messages: &[ChatMessage],
-        _config: &GenerationConfig,
-    ) -> LlmResult<GenerationOutput> {
-        Err(llamacpp_runtime_unavailable())
-    }
-
-    fn generate_raw(
-        &self,
-        _prompt: &str,
-        _config: &GenerationConfig,
-    ) -> LlmResult<GenerationOutput> {
-        Err(llamacpp_runtime_unavailable())
-    }
-}
-
-#[cfg(all(feature = "llm-llamacpp", not(feature = "llm-llamacpp-runtime")))]
-fn llamacpp_runtime_unavailable() -> AdapterError {
-    AdapterError::BackendNotLinked {
-        backend: "llamacpp",
-    }
-}
-
-#[cfg(all(feature = "llm-llamacpp", not(feature = "llm-llamacpp-runtime")))]
-fn llamacpp_non_runtime_wire_label() -> Option<&'static str> {
-    Some("llamacpp")
-}
-
-#[cfg(not(feature = "llm-llamacpp"))]
-fn llamacpp_runtime_unavailable() -> AdapterError {
-    AdapterError::RuntimeError(
-        "llm-llamacpp-runtime feature not enabled. Build with --features llm-llamacpp-runtime"
-            .to_string(),
-    )
-}
-
-#[cfg(not(feature = "llm-llamacpp"))]
-fn llamacpp_non_runtime_wire_label() -> Option<&'static str> {
-    None
 }

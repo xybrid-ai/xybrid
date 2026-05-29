@@ -3,39 +3,39 @@
 //! This example demonstrates token streaming for LLM inference.
 //!
 //! Run with:
-//!   cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp-runtime
+//!   cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp
 
-#[cfg(feature = "llm-llamacpp-runtime")]
+#[cfg(feature = "llm-llamacpp")]
 use std::collections::HashMap;
-#[cfg(feature = "llm-llamacpp-runtime")]
+#[cfg(feature = "llm-llamacpp")]
 use std::io::{self, Write};
-#[cfg(feature = "llm-llamacpp-runtime")]
+#[cfg(feature = "llm-llamacpp")]
 use std::path::PathBuf;
 
-#[cfg(feature = "llm-llamacpp-runtime")]
+#[cfg(feature = "llm-llamacpp")]
 use xybrid_core::execution::ModelMetadata;
-#[cfg(feature = "llm-llamacpp-runtime")]
+#[cfg(feature = "llm-llamacpp")]
 use xybrid_core::execution::TemplateExecutor;
-#[cfg(feature = "llm-llamacpp-runtime")]
+#[cfg(feature = "llm-llamacpp")]
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(not(feature = "llm-llamacpp-runtime"))]
+    #[cfg(not(feature = "llm-llamacpp"))]
     {
-        eprintln!("This example requires the llm-llamacpp-runtime feature.");
+        eprintln!("This example requires the llm-llamacpp feature.");
         eprintln!(
-            "Run with: cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp-runtime"
+            "Run with: cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp"
         );
         return Ok(());
     }
 
-    #[cfg(feature = "llm-llamacpp-runtime")]
+    #[cfg(feature = "llm-llamacpp")]
     {
         run_streaming_example()
     }
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
+#[cfg(feature = "llm-llamacpp")]
 fn run_streaming_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
     println!("  Streaming LLM - Gemma 3 1B Instruct (GGUF)");
@@ -58,7 +58,7 @@ fn run_streaming_example() -> Result<(), Box<dyn std::error::Error>> {
     run_with_model_dir(&model_dir)
 }
 
-#[cfg(feature = "llm-llamacpp-runtime")]
+#[cfg(feature = "llm-llamacpp")]
 fn run_with_model_dir(model_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     // Load metadata
     let metadata_path = model_dir.join("model_metadata.json");

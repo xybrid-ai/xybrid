@@ -5,7 +5,7 @@
 //! requested range. Non-destructive — the original dump is untouched.
 //!
 //! Usage:
-//!   cargo run --example neutts_decode_tokens -p xybrid-core --features llm-llamacpp-runtime -- \
+//!   cargo run --example neutts_decode_tokens -p xybrid-core --features llm-llamacpp -- \
 //!     --dump-dir /tmp/neutts-debug --last-ms 300 --output /tmp/tail.wav
 //!
 //! Flags: --first-ms MS | --last-ms MS | --range-ms A:B | --all (default)
