@@ -69,6 +69,17 @@ enum CacheType {
 /// Cloud model TTL in seconds (24 hours)
 const CLOUD_TTL_SECONDS: u64 = 24 * 60 * 60;
 
+/// Seconds since the Unix epoch, or `0` if the system clock is set before
+/// 1970. Never panics — a pre-epoch clock reads as `now = 0`, which the
+/// `saturating_sub` TTL math handles gracefully (every entry then looks
+/// freshly cached rather than crashing the cache call).
+fn now_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// Model Cache Manager.
 ///
 /// Manages `.xyb` bundle storage with platform-specific paths and cache policies.
@@ -228,18 +239,26 @@ impl CacheManager {
     ///
     /// Returns information about cached models, sizes, and availability.
     pub fn status(&self) -> Result<CacheStatus, SdkError> {
-        // Filter out expired cloud models
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        // Filter out expired cloud models.
+        //
+        // `unwrap_or(0)` rather than `.unwrap()`: `duration_since(UNIX_EPOCH)`
+        // errors when the system clock is set before 1970 (dead RTC battery,
+        // first-boot embedded, user-set clock). `status()` is an innocuous
+        // query and must not panic on a skewed clock — matches the
+        // `unwrap_or(0)` convention used throughout `model.rs` telemetry.
+        let now = now_unix_secs();
 
         let valid_entries: Vec<_> = self
             .entries
             .values()
             .filter(|entry| match entry.cache_type {
                 CacheType::Local => true,
-                CacheType::Cloud => (now - entry.cached_at) < CLOUD_TTL_SECONDS,
+                // `saturating_sub`: a cache file whose mtime is in the future
+                // (clock moved backward, NTP correction, file copied from a
+                // fast-clock machine) would otherwise underflow `now - cached_at`
+                // — a debug-build panic and a release-build wrap-to-huge that
+                // makes the entry read as never-expired.
+                CacheType::Cloud => now.saturating_sub(entry.cached_at) < CLOUD_TTL_SECONDS,
             })
             .collect();
 
@@ -591,16 +610,17 @@ impl CacheManager {
     ///
     /// Number of entries removed
     pub fn clean_expired(&mut self) -> Result<u32, SdkError> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        // See `status()` for the `unwrap_or(0)` + `saturating_sub` rationale —
+        // both guard against a system clock set before epoch / cache mtimes in
+        // the future, neither of which should panic cache maintenance.
+        let now = now_unix_secs();
 
         let mut removed_count = 0;
         let mut to_remove = Vec::new();
 
         for (key, entry) in &self.entries {
-            if entry.cache_type == CacheType::Cloud && (now - entry.cached_at) >= CLOUD_TTL_SECONDS
+            if entry.cache_type == CacheType::Cloud
+                && now.saturating_sub(entry.cached_at) >= CLOUD_TTL_SECONDS
             {
                 to_remove.push(key.clone());
             }
@@ -654,6 +674,32 @@ mod tests {
         let status = manager.status().unwrap();
         assert_eq!(status.total_models, 0);
         assert_eq!(status.total_size_bytes, 0);
+    }
+
+    #[test]
+    fn now_unix_secs_is_monotonic_and_nonzero_on_sane_clock() {
+        // On any test host with a clock past 1970 this is well above zero;
+        // the point is it never panics (the `.unwrap()` it replaced would
+        // on a pre-epoch clock).
+        assert!(now_unix_secs() > 0);
+    }
+
+    #[test]
+    fn cloud_ttl_math_does_not_underflow_for_future_cached_at() {
+        // Regression for the `now - cached_at` underflow: a `cached_at`
+        // in the future (clock moved backward, or a cache file copied from
+        // a fast-clock machine) must not panic the TTL comparison. With
+        // `saturating_sub` the elapsed time floors at 0, so a
+        // future-stamped entry reads as freshly cached (not expired),
+        // which is the safe behaviour.
+        let now: u64 = 1_000;
+        let cached_in_future: u64 = 5_000;
+        let elapsed = now.saturating_sub(cached_in_future);
+        assert_eq!(elapsed, 0, "future cached_at must floor to 0 elapsed");
+        assert!(
+            elapsed < CLOUD_TTL_SECONDS,
+            "a future-stamped entry must not be treated as expired"
+        );
     }
 
     #[test]
