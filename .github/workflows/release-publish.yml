@@ -42,8 +42,7 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
+permissions: read-all
 
 env:
   CARGO_TERM_COLOR: always
@@ -55,6 +54,8 @@ jobs:
   # =========================================================================
   publish-release:
     name: Publish GitHub release
+    permissions:
+      contents: write   # gh release edit --draft=false to publish the release
     # Run on workflow_dispatch always; on pull_request only when the release
     # PR actually merged.
     if: |
@@ -338,6 +339,8 @@ jobs:
   # =========================================================================
   publish-swift-branch:
     name: Update swift branch
+    permissions:
+      contents: write   # force-pushes the swift distribution branch
     needs: [publish-release]
     runs-on: ubuntu-latest
     steps:

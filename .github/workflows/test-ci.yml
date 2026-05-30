@@ -22,8 +22,7 @@ env:
   FLUTTER_VERSION: "3.35.7"
   FRB_VERSION: "2.11.1"
 
-permissions:
-  contents: write
+permissions: read-all
 
 jobs:
   #
