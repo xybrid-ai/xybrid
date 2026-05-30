@@ -433,6 +433,8 @@ jobs:
   #
   precompile-flutter-linux:
     name: Precompile Flutter (linux)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-version, build-android]
     runs-on: ubuntu-latest
     steps:
@@ -509,6 +511,8 @@ jobs:
   #
   precompile-flutter-windows:
     name: Precompile Flutter (windows)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-version]
     runs-on: windows-latest
     steps:

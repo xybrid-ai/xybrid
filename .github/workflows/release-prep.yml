@@ -54,11 +54,13 @@ env:
   FRB_VERSION: "2.11.1"
 
 # Read-only by default. Write scopes are granted per-job only where needed:
-#   - contents: write   -> patch-spm-checksum, create-draft-release
+#   - contents: write   -> patch-spm-checksum, create-draft-release, and the
+#     precompile-flutter-{darwin,linux,windows} jobs (cargokit
+#     precompile-binaries creates/uploads release assets)
 #   - contents + pull-requests: write -> open-release-pr
 #   - id-token + attestations: write  -> build-xcframework, build-cli-macos,
 #     build-android, build-cli (the jobs that call `attest-build-provenance`)
-# Keeping these off the workflow level means the precompile jobs don't get
+# Keeping these off the workflow level means the remaining jobs don't get
 # unnecessary OIDC-issuance, release-write, or attestation-write privileges.
 permissions: read-all
 
@@ -203,6 +205,8 @@ jobs:
   # ----- Apple job 2/3: Flutter darwin precompile (parallel; not on SPM path)
   precompile-flutter-darwin:
     name: Precompile Flutter (darwin)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
     runs-on: macos-14
     steps:
@@ -424,6 +428,8 @@ jobs:
   # =========================================================================
   precompile-flutter-linux:
     name: Precompile Flutter (linux)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch, build-android]
     runs-on: ubuntu-latest
     steps:
@@ -513,6 +519,8 @@ jobs:
   # =========================================================================
   precompile-flutter-windows:
     name: Precompile Flutter (windows)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
     runs-on: windows-latest
     steps:
