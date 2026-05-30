@@ -114,6 +114,10 @@ public class XybridDemo : MonoBehaviour
 {
     async void Start()
     {
+        // Runs locally with no key. Pass an apiKey to light up the
+        // dashboard: XybridClient.Initialize(apiKey: "xy_live_...")
+        XybridClient.Initialize();
+
         // Load a model from the registry
         var loader = ModelLoader.FromRegistry("kokoro-82m");
         var model = loader.Load();

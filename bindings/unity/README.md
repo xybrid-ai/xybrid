@@ -90,7 +90,8 @@ public class XybridExample : MonoBehaviour
 
     void Start()
     {
-        // Initialize the SDK
+        // Runs locally with no key. Pass an apiKey to light up the
+        // dashboard: XybridClient.Initialize(apiKey: "xy_live_...")
         XybridClient.Initialize();
 
         // Load a model from the registry

@@ -65,7 +65,12 @@ class _SdkInitializationScreenState extends State<SdkInitializationScreen> {
   /// Initialize the Xybrid SDK.
   Future<void> _initializeSdk() async {
     try {
-      await Xybrid.init();
+      // Pass the key at compile time with
+      //   flutter run --dart-define=XYBRID_API_KEY=xy_live_...
+      // Unset resolves to "", which the SDK treats as anonymous (local only).
+      await Xybrid.init(
+        apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+      );
       if (mounted) {
         setState(() {
           _initState = _InitState.ready;

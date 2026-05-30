@@ -41,6 +41,9 @@ import 'package:xybrid_flutter/xybrid_flutter.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Runs locally with no key. Pass an apiKey to light up the dashboard:
+  //   await Xybrid.init(apiKey: const String.fromEnvironment('XYBRID_API_KEY'));
   await Xybrid.init();
 
   // Load a TTS model from the registry
@@ -51,6 +54,11 @@ Future<void> main() async {
   print('Audio: ${result.audioBytes?.length} bytes');
 }
 ```
+
+Inference runs entirely on-device whether or not you authenticate. Without an
+`apiKey`, telemetry is disabled and the first inference logs a one-shot hint
+pointing at the dashboard (suppress with `XYBRID_QUIET=1`). Get a free key at
+[dashboard.xybrid.dev](https://dashboard.xybrid.dev).
 
 ## Features
 

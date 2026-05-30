@@ -304,42 +304,18 @@ impl ModelSource {
 }
 
 /// Detect the current platform for registry downloads.
+///
+/// Delegates to [`crate::platform::current_platform`] — the single source of
+/// truth for the `(target_os, target_arch)` → platform-string mapping.
+/// Previously this carried its own duplicate `#[cfg]` ladder, which risked
+/// drifting from `platform.rs`: this function feeds the registry download
+/// path (`RegistryClient::resolve`, `ModelLoader::load_from_legacy_registry`)
+/// while `platform::current_platform` feeds device telemetry, so a platform
+/// added to one ladder but not the other would make the registry request a
+/// different platform's bundle than the device reports — with no compile
+/// error. One ladder, no drift (audit slice 3c).
 pub fn detect_platform() -> String {
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    return "macos-arm64".to_string();
-
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    return "macos-x86_64".to_string();
-
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    return "linux-x86_64".to_string();
-
-    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    return "linux-arm64".to_string();
-
-    #[cfg(all(target_os = "ios", target_arch = "aarch64"))]
-    return "ios-arm64".to_string();
-
-    #[cfg(all(target_os = "android", target_arch = "aarch64"))]
-    return "android-arm64".to_string();
-
-    #[cfg(all(target_os = "android", target_arch = "arm"))]
-    return "android-arm".to_string();
-
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    return "windows-x86_64".to_string();
-
-    #[cfg(not(any(
-        all(target_os = "macos", target_arch = "aarch64"),
-        all(target_os = "macos", target_arch = "x86_64"),
-        all(target_os = "linux", target_arch = "x86_64"),
-        all(target_os = "linux", target_arch = "aarch64"),
-        all(target_os = "ios", target_arch = "aarch64"),
-        all(target_os = "android", target_arch = "aarch64"),
-        all(target_os = "android", target_arch = "arm"),
-        all(target_os = "windows", target_arch = "x86_64"),
-    )))]
-    return "unknown".to_string();
+    crate::platform::current_platform().to_string()
 }
 
 #[cfg(test)]

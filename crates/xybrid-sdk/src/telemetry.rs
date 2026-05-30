@@ -1700,6 +1700,15 @@ fn redact_secret_like_token(token: &str) -> String {
         || trimmed.starts_with("gho_")
         || trimmed.starts_with("xoxb-")
         || trimmed.starts_with("xoxp-")
+        // Xybrid's own key prefixes — the secret most likely to appear in a
+        // *xybrid* error / gateway-auth failure string, and previously the one
+        // provider key this redactor missed. Matched specifically (`xy_live_`
+        // / `xy_test_`, the only two formats used across the SDK docs and
+        // bindings) rather than a bare `xy_`, which would over-redact common
+        // identifiers like `xy_coords` / `xy_axis` and corrupt legitimate
+        // error messages.
+        || trimmed.starts_with("xy_live_")
+        || trimmed.starts_with("xy_test_")
     {
         token.replacen(trimmed, "[REDACTED]", 1)
     } else {
@@ -3279,6 +3288,38 @@ mod tests {
         assert!(redacted.contains("api_key=[REDACTED]"));
         assert!(!redacted.contains("sk_test_abc123"));
         assert!(!redacted.contains("hf_secret_xyz"));
+    }
+
+    #[test]
+    fn telemetry_error_redaction_removes_xybrid_own_key() {
+        // The Xybrid key is the secret most likely to appear in a xybrid
+        // gateway-auth error; the redactor must catch its `xy_live_` /
+        // `xy_test_` prefixes just like every other provider's.
+        let redacted = redact_error_for_telemetry(
+            "Gateway auth failed for key xy_live_abc123def and xy_test_secret456",
+        );
+        assert!(
+            !redacted.contains("xy_live_abc123def"),
+            "redacted = {redacted}"
+        );
+        assert!(
+            !redacted.contains("xy_test_secret456"),
+            "redacted = {redacted}"
+        );
+        assert!(redacted.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn telemetry_error_redaction_does_not_over_redact_xy_identifiers() {
+        // The Xybrid-key match is intentionally specific (`xy_live_` /
+        // `xy_test_`), not a bare `xy_` — common identifiers like
+        // `xy_coords` must survive so error messages stay debuggable.
+        let msg = "decode failed at xy_coords=(3,4), xy_axis=z, xy_plane unset";
+        let redacted = redact_error_for_telemetry(msg);
+        assert_eq!(
+            redacted, msg,
+            "non-key xy_ identifiers must not be redacted"
+        );
     }
 
     #[test]

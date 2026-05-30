@@ -4,7 +4,7 @@ A native iOS example app demonstrating Xybrid SDK integration using SwiftUI.
 
 ## Features
 
-- **SDK Initialization**: Cache directory setup via `initSdkCacheDir()`
+- **SDK Initialization**: Cache directory setup plus `Xybrid.initialize()` (pass an `apiKey` to enable dashboard telemetry)
 - **Model Loading**: Downloads models from the xybrid registry with async/await
 - **Text-to-Speech**: Run TTS inference with voice selection
 - **Audio Playback**: Play generated audio via AVAudioPlayer
@@ -80,6 +80,10 @@ import Xybrid
 let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
     .first!.appendingPathComponent("xybrid").path
 initSdkCacheDir(cacheDir: cacheDir)
+
+// Runs locally with no key. Pass an apiKey to light up the dashboard:
+//   Xybrid.initialize(apiKey: ProcessInfo.processInfo.environment["XYBRID_API_KEY"])
+Xybrid.initialize()
 ```
 
 ### Load Model

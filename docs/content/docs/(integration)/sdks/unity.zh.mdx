@@ -32,6 +32,14 @@ void Awake()
 
 `Initialize()` 是线程安全且幂等的——多次调用无副作用。
 
+无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.Run(...)` 调用便会自动上报执行轨迹：
+
+```csharp
+XybridClient.Initialize(apiKey: "xy_live_...");
+```
+
+未提供密钥时，遥测处于禁用状态，首次推理会打印一条一次性提示指向控制台（可通过环境变量 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。若使用自托管控制台，请额外传入 `ingestUrl`。如需高级遥测设置（批大小、刷新间隔、设备属性），请构建 `TelemetryConfig` 并改用 `XybridClient.InitializeTelemetry`。
+
 ## 快速开始
 
 ```csharp
