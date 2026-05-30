@@ -1,0 +1,33 @@
+Package.swift
+  s_9bcf1cbb84fe73::t_bb35093b48363b 39
+bindings/flutter/rust/Cargo.toml
+  s_9bcf1cbb84fe73::t_bb35093b48363b 3
+Cargo.toml
+  s_9bcf1cbb84fe73::t_bb35093b48363b 17
+bindings/kotlin/build.gradle.kts
+  s_9bcf1cbb84fe73::t_bb35093b48363b 8
+bindings/unity/package.json
+  s_9bcf1cbb84fe73::t_bb35093b48363b 3
+CHANGELOG.md
+  s_9bcf1cbb84fe73::t_81dea461355fda 16-79
+bindings/flutter/CHANGELOG.md
+  s_9bcf1cbb84fe73::t_5fc9ceac3ef5cd 3-10
+bindings/flutter/pubspec.yaml
+  s_9bcf1cbb84fe73::t_bb35093b48363b 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3287104ddb9e6b2410d6e3efd598e03275b4ce4f",
+  "prompts": {},
+  "sessions": {
+    "s_9bcf1cbb84fe73": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7521c6f3-07c9-43d6-9c32-c71361ad9749",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
