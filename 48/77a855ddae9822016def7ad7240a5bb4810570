@@ -1,0 +1,29 @@
+.github/workflows/test-ci.yml
+  s_b8aab199534436::t_b2f73b73c546ce 214-215
+  s_b8aab199534436::t_0885cf6b8439c1 88-89
+  s_b8aab199534436::t_b55be54ead0c4b 145-146
+.github/workflows/release.yml
+  s_b8aab199534436::t_91bb2e1130e4bc 436-437
+  s_b8aab199534436::t_3dd92fff7cfa36 514-515
+.github/workflows/release-prep.yml
+  s_b8aab199534436::t_f3d39a370f2abc 208-209
+  s_b8aab199534436::t_3decd3018cd03d 431-432
+  s_b8aab199534436::t_102283a27e2c2c 57-59,63
+  s_b8aab199534436::t_488a39fe3557e8 522-523
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4877a855ddae9822016def7ad7240a5bb4810570",
+  "prompts": {},
+  "sessions": {
+    "s_b8aab199534436": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e3d1eb8-b32d-47ba-aaf9-eeefda9f2c39",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
