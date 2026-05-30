@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+* New bundled `init()` entry point starts anonymous-by-default telemetry from an API key; the standalone `initTelemetry` is now legacy (xybrid-ai/xybrid#188, #195)
+* `PlatformEvent` payloads now carry `sdk_version` and `binding`, so telemetry is attributable to the SDK build and the Flutter binding that emitted it (xybrid-ai/xybrid#183)
+* Fixed: the SDK no longer leaks the leading bytes of its own API key into emitted telemetry (xybrid-ai/xybrid#209)
+* Fixed: cache TTL handling is panic-safe — a backwards system clock no longer panics the cache layer (xybrid-ai/xybrid#203)
+* Example app now reads `XYBRID_API_KEY` from the environment at init (xybrid-ai/xybrid#207)
+
 ## 0.1.0
 
 Production release of the 0.1.0 line. No Flutter-binding code changes since rc4 — closes the rc series.
