@@ -1186,7 +1186,7 @@ impl Pipeline {
             }
             let (stage_descriptors, availability_map) = pipeline.resolve_run_inputs();
             execute_blocking(
-                pipeline.name.clone(),
+                pipeline.name,
                 stage_descriptors,
                 availability_map,
                 &envelope,
@@ -1270,11 +1270,14 @@ fn execute_blocking(
     let execution_result =
         orchestrator.execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn);
     drop(orchestrator);
-    bridge
-        .join()
-        .map_err(|e| SdkError::PipelineError(format!("Orchestrator event bridge failed: {}", e)))?;
+    // Join the event bridge unconditionally so its thread never leaks, but
+    // surface the *execution* error first when both fail — the pipeline
+    // failure is the root cause; a bridge-join failure is secondary noise.
+    let bridge_res = bridge.join();
     let results: Vec<StageExecutionResult> = execution_result
         .map_err(|e| SdkError::PipelineError(format!("Pipeline execution failed: {}", e)))?;
+    bridge_res
+        .map_err(|e| SdkError::PipelineError(format!("Orchestrator event bridge failed: {}", e)))?;
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
     let stages: Vec<StageTiming> = results
