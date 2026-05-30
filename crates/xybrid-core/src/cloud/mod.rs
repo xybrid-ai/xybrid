@@ -63,5 +63,5 @@ mod error;
 pub(crate) use client::parse_gateway_usage;
 pub use client::Cloud;
 pub use completion::{CompletionRequest, CompletionResponse, Message, Role, Usage};
-pub use config::{CloudBackend, CloudConfig};
+pub use config::{set_xybrid_api_key, xybrid_api_key, CloudBackend, CloudConfig};
 pub use error::CloudError;

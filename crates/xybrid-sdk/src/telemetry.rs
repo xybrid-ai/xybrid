@@ -1904,7 +1904,9 @@ static DEV_NUDGE: std::sync::Once = std::sync::Once::new();
 /// Suppressed when `XYBRID_QUIET=1`.
 pub(crate) fn maybe_emit_dev_nudge() {
     DEV_NUDGE.call_once(|| {
-        let api_key = std::env::var("XYBRID_API_KEY").ok();
+        // Resolve via the SDK accessor so a programmatically-set key (held in
+        // memory, not the env) also suppresses the "no key" nudge.
+        let api_key = crate::get_api_key();
         let quiet = std::env::var("XYBRID_QUIET").ok();
         if !should_emit_dev_nudge(api_key.as_deref(), quiet.as_deref()) {
             return;
