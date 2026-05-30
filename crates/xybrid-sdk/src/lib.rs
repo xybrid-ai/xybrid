@@ -514,8 +514,11 @@ pub fn get_api_key() -> Option<String> {
 }
 
 /// Check if the Xybrid API key is configured.
+///
+/// Avoids cloning the key (unlike [`get_api_key`]) — checks the in-memory cell
+/// then the `XYBRID_API_KEY` environment variable for presence only.
 pub fn has_api_key() -> bool {
-    get_api_key().is_some()
+    xybrid_core::cloud::has_xybrid_api_key() || std::env::var("XYBRID_API_KEY").is_ok()
 }
 
 // ============================================================================

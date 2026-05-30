@@ -34,6 +34,17 @@ pub fn xybrid_api_key() -> Option<String> {
         .clone()
 }
 
+/// Report whether an in-memory Xybrid gateway API key has been set.
+///
+/// Cheaper than [`xybrid_api_key`] for presence checks — it never clones the
+/// secret string.
+pub fn has_xybrid_api_key() -> bool {
+    XYBRID_API_KEY
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
+}
+
 /// Cloud execution backend.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -237,8 +248,14 @@ mod tests {
         std::env::remove_var("TEST_CLOUD_KEY");
     }
 
+    // Serializes tests that mutate process-global state (the `XYBRID_API_KEY`
+    // env var and the in-memory cell) so the parallel test runner can't race
+    // them.
+    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_resolve_api_key_in_memory_precedence() {
+        let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         // No explicit field: the in-memory cell is consulted before the env.
         std::env::set_var("XYBRID_API_KEY", "env-key");
         set_xybrid_api_key(Some("mem-key".to_string()));
