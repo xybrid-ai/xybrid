@@ -1,0 +1,36 @@
+# Companion to ci.yml for docs-only changes.
+#
+# ci.yml skips itself when a change touches *only* the paths below
+# (paths-ignore), so its "CI Success" gate never reports and a required-
+# status-check rule on `master` would wait forever. This workflow runs on
+# exactly those paths and reports the same "CI Success" check immediately,
+# so docs-only PRs stay mergeable without running the full Rust matrix.
+#
+# Keep the `paths` list here in sync with the `paths-ignore` list in ci.yml,
+# and keep the job name identical to ci.yml's gate ("CI Success").
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [master]
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'LICENSE'
+
+permissions: read-all
+
+jobs:
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — full CI not required. Reporting success."
