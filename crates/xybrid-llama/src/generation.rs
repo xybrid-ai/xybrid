@@ -312,10 +312,12 @@ where
 
 /// Render role/content slices through `model`'s built-in chat template.
 ///
-/// Returns `Ok(None)` only when the model has no embedded template, so the
-/// caller can apply its own model-family fallback policy. If a template exists
-/// but native rendering fails, this returns [`LlamaError::ChatTemplateFailed`]
-/// instead of silently switching prompt families.
+/// Returns `Ok(None)` only when the model has no usable embedded template —
+/// either the GGUF metadata key is absent or its value is empty/whitespace
+/// (which the native wrapper rejects anyway) — so the caller can apply its own
+/// model-family fallback policy. If a non-empty template exists but native
+/// rendering fails, this returns [`LlamaError::ChatTemplateFailed`] instead of
+/// silently switching prompt families.
 pub fn format_chat(
     model: &LlamaModel,
     roles: &[&str],
@@ -331,7 +333,11 @@ pub fn format_chat(
             contents.len()
         )));
     }
-    if model.chat_template().is_none() {
+    if model
+        .chat_template()
+        .filter(|t| !t.trim().is_empty())
+        .is_none()
+    {
         return Ok(None);
     }
 
