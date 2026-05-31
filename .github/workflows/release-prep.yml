@@ -53,16 +53,16 @@ env:
   FLUTTER_VERSION: "3.35.7"
   FRB_VERSION: "2.11.1"
 
-permissions:
-  contents: write
-  pull-requests: write
-  # SLSA build provenance attestations (id-token + attestations) are
-  # scoped per-job on build-xcframework, build-cli-macos, build-android,
-  # and build-cli only — the jobs that actually call
-  # `attest-build-provenance`. Keeping these out of the workflow-level
-  # permissions means patch-spm-checksum, create-draft-release,
-  # open-release-pr, and the Flutter precompile jobs don't get
-  # unnecessary OIDC-issuance or attestation-write privileges.
+# Read-only by default. Write scopes are granted per-job only where needed:
+#   - contents: write   -> patch-spm-checksum, create-draft-release, and the
+#     precompile-flutter-{darwin,linux,windows} jobs (cargokit
+#     precompile-binaries creates/uploads release assets)
+#   - contents + pull-requests: write -> open-release-pr
+#   - id-token + attestations: write  -> build-xcframework, build-cli-macos,
+#     build-android, build-cli (the jobs that call `attest-build-provenance`)
+# Keeping these off the workflow level means the remaining jobs don't get
+# unnecessary OIDC-issuance, release-write, or attestation-write privileges.
+permissions: read-all
 
 jobs:
   # =========================================================================
@@ -205,6 +205,8 @@ jobs:
   # ----- Apple job 2/3: Flutter darwin precompile (parallel; not on SPM path)
   precompile-flutter-darwin:
     name: Precompile Flutter (darwin)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
     runs-on: macos-14
     steps:
@@ -426,6 +428,8 @@ jobs:
   # =========================================================================
   precompile-flutter-linux:
     name: Precompile Flutter (linux)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch, build-android]
     runs-on: ubuntu-latest
     steps:
@@ -515,6 +519,8 @@ jobs:
   # =========================================================================
   precompile-flutter-windows:
     name: Precompile Flutter (windows)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
     runs-on: windows-latest
     steps:
@@ -677,6 +683,8 @@ jobs:
   # =========================================================================
   patch-spm-checksum:
     name: Patch SPM checksum
+    permissions:
+      contents: write   # commits the pinned SPM checksum and pushes the branch
     needs: [check-release-branch, build-xcframework]
     runs-on: ubuntu-latest
     steps:
@@ -720,6 +728,8 @@ jobs:
   # =========================================================================
   create-draft-release:
     name: Create draft release
+    permissions:
+      contents: write   # gh release create/delete of the draft release
     needs:
       - check-release-branch
       - patch-spm-checksum
@@ -825,6 +835,9 @@ jobs:
   # =========================================================================
   open-release-pr:
     name: Open release PR
+    permissions:
+      contents: read
+      pull-requests: write   # gh pr create for the release PR
     needs: [check-release-branch, create-draft-release]
     runs-on: ubuntu-latest
     steps:
