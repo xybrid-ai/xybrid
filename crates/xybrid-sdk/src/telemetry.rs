@@ -25,7 +25,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -78,6 +78,13 @@ const CONNECT_TIMEOUT_MS: u64 = 5000;
 
 /// Request timeout for telemetry requests (10 seconds)
 const REQUEST_TIMEOUT_MS: u64 = 10000;
+
+/// Bounded timeout for the eager `ExecutionStarted` flush on the execution
+/// hot path. Long enough for a healthy ingest round-trip, short enough that
+/// a slow or unreachable endpoint can't stall inference startup — unlike the
+/// retry+backoff `flush()`, which can block for
+/// `max_retries × (backoff + REQUEST_TIMEOUT_MS)`.
+const STARTED_EVENT_FLUSH_TIMEOUT_MS: u64 = 750;
 
 /// Configuration for the HTTP telemetry exporter
 #[derive(Debug, Clone)]
@@ -402,6 +409,12 @@ pub struct HttpTelemetryExporter {
     failed_queue: Arc<Mutex<VecDeque<PlatformEvent>>>,
     /// Counter for dropped events (when queue is full)
     dropped_count: Arc<AtomicU32>,
+    /// Monotonic count of events ever moved into `buffer` (via the channel
+    /// handoff or a direct `push`). Never decremented on drain/flush, so the
+    /// `ExecutionStarted` fast path can wait for *its* event's handoff by
+    /// observing this counter grow past a pre-publish baseline rather than
+    /// trusting a non-empty buffer (which a stale event would already satisfy).
+    ingested: Arc<AtomicU64>,
 }
 
 impl HttpTelemetryExporter {
@@ -449,7 +462,17 @@ impl HttpTelemetryExporter {
             retry_policy,
             failed_queue: Arc::new(Mutex::new(VecDeque::new())),
             dropped_count: Arc::new(AtomicU32::new(0)),
+            ingested: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Monotonic count of events that have entered the batch buffer.
+    ///
+    /// Used by the `ExecutionStarted` fast path to detect that a
+    /// just-published event has completed the async channel→buffer handoff
+    /// before triggering the eager flush.
+    pub fn ingested_count(&self) -> u64 {
+        self.ingested.load(Ordering::Acquire)
     }
 
     /// Create from environment variables
@@ -566,6 +589,7 @@ impl HttpTelemetryExporter {
     pub fn push(&self, event: TelemetryEvent) {
         let mut buffer = self.buffer.lock().unwrap();
         buffer.push(event);
+        self.ingested.fetch_add(1, Ordering::Release);
 
         // Flush if buffer is full
         if buffer.len() >= self.config.batch_size {
@@ -602,6 +626,69 @@ impl HttpTelemetryExporter {
         );
     }
 
+    /// Best-effort synchronous flush bounded by `timeout`.
+    ///
+    /// Designed for shutdown / panic / signal-handler paths where the
+    /// normal retry+backoff loop in [`flush`] would block too long. Drains
+    /// the buffer once, builds a single batch, and sends it with HTTP
+    /// timeouts capped at `timeout`. No retries, no circuit-breaker block,
+    /// no failed-queue requeue — if the call fails the events are dropped.
+    ///
+    /// Safe to call from a panic hook: holds the buffer mutex only long
+    /// enough to drain it, uses a dedicated short-timeout agent so we don't
+    /// stall the unwinding thread, and never re-enters
+    /// `publish_telemetry_event` (which would risk recursive panics).
+    pub fn flush_blocking(&self, timeout: Duration) {
+        if self.config.endpoint.is_empty() || self.config.api_key.is_empty() {
+            return;
+        }
+
+        // Drain the buffer under a short lock. Recover from poison so a
+        // panic in another component doesn't permanently block shutdown
+        // telemetry.
+        let events: Vec<TelemetryEvent> = match self.buffer.lock() {
+            Ok(mut buf) => buf.drain(..).collect(),
+            Err(poisoned) => poisoned.into_inner().drain(..).collect(),
+        };
+
+        if events.is_empty() {
+            return;
+        }
+
+        let pid = self.pipeline_id.read().ok().and_then(|g| *g);
+        let tid = self.trace_id.read().ok().and_then(|g| *g);
+
+        let platform_events: Vec<PlatformEvent> = events
+            .iter()
+            .map(|e| {
+                convert_to_platform_event(e, &self.config, self.device_profile.as_ref(), pid, tid)
+            })
+            .collect();
+
+        let batch = PlatformEventBatch {
+            events: platform_events,
+        };
+
+        let url = format!(
+            "{}/v1/events/batch",
+            self.config.endpoint.trim_end_matches('/')
+        );
+
+        // Dedicated agent with the caller's timeout so we never wait
+        // longer than the deadline. The default exporter agent has a
+        // 10-second request timeout that would defeat the purpose here.
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(timeout)
+            .timeout(timeout)
+            .build();
+
+        let _ = agent
+            .post(&url)
+            .set("Authorization", &format!("Bearer {}", self.config.api_key))
+            .set("Content-Type", "application/json")
+            .send_json(&batch);
+    }
+
     /// Create a telemetry sender that feeds into this exporter
     pub fn create_sender(&self) -> TelemetrySender {
         let (tx, rx) = mpsc::channel::<TelemetryEvent>();
@@ -616,11 +703,13 @@ impl HttpTelemetryExporter {
         let retry_policy = self.retry_policy.clone();
         let failed_queue = Arc::clone(&self.failed_queue);
         let dropped_count = Arc::clone(&self.dropped_count);
+        let ingested = Arc::clone(&self.ingested);
 
         thread::spawn(move || {
             for event in rx {
                 let mut buf = buffer.lock().unwrap();
                 buf.push(event);
+                ingested.fetch_add(1, Ordering::Release);
 
                 if buf.len() >= batch_size {
                     let events: Vec<TelemetryEvent> = buf.drain(..).collect();
@@ -1413,6 +1502,11 @@ pub fn init_platform_telemetry(mut config: TelemetryConfig) {
     if let Ok(mut global) = PLATFORM_EXPORTER.write() {
         *global = Some(exporter);
     }
+
+    // Install a panic hook that flushes telemetry before the process
+    // dies. Without this, a panic during inference loses the entire
+    // buffered batch (Started / Failed pair included).
+    install_telemetry_panic_hook();
 }
 
 // -- Process-wide resource-telemetry mode ----------------------------------
@@ -1875,6 +1969,11 @@ pub fn init_platform_telemetry_from_env() -> bool {
         if let Ok(mut global) = PLATFORM_EXPORTER.write() {
             *global = Some(exporter);
         }
+
+        // Mirror `init_platform_telemetry`: install a panic hook so a
+        // crash during inference still ships its buffered Started/Failed
+        // events instead of dying silently.
+        install_telemetry_panic_hook();
         true
     } else {
         false
@@ -2035,6 +2134,13 @@ fn register_execution_listener() {
             .unwrap()
             .as_millis() as u64;
 
+        // `Started` events are eagerly flushed after publish so a crash
+        // mid-inference (e.g. Metal SIGABRT, OOM kill) still leaves a
+        // breadcrumb on the backend. Without this, the event sits in the
+        // 10-event / 5-second batch buffer and dies with the process,
+        // which is exactly the bug this code is patching.
+        let is_started = matches!(event, ExecutionEvent::Started { .. });
+
         let telemetry_event = match event {
             ExecutionEvent::Started { model_id, method } => TelemetryEvent {
                 event_type: "ExecutionStarted".to_string(),
@@ -2085,7 +2191,52 @@ fn register_execution_listener() {
             },
         };
 
+        // Started-event fast path: ensure the event reaches the wire even
+        // if the process dies before the matching Completed/Failed.
+        //
+        // `publish_telemetry_event` enqueues onto an mpsc channel; a
+        // background thread moves the event into the exporter's batch
+        // buffer. That handoff takes microseconds, but the eager flush runs
+        // on *this* thread and would race the bg thread if called
+        // immediately. Snapshot the exporter's monotonic ingest counter
+        // *before* publishing so we can wait for THIS event's handoff —
+        // waiting on a merely non-empty buffer would let a stale, already-
+        // buffered event trip the flush before our Started event lands,
+        // leaving the breadcrumb stuck in the channel until the periodic
+        // flush (defeating the crash-before-completion guarantee).
+        let started_ingest_baseline = if is_started {
+            PLATFORM_EXPORTER
+                .read()
+                .ok()
+                .and_then(|g| g.as_ref().map(|exp| exp.ingested_count()))
+        } else {
+            None
+        };
+
         publish_telemetry_event(telemetry_event);
+
+        if let Some(baseline) = started_ingest_baseline {
+            if let Ok(exporter) = PLATFORM_EXPORTER.read() {
+                if let Some(exp) = exporter.as_ref() {
+                    // Spin briefly (≤10ms total, 100µs per attempt) until the
+                    // bg thread has moved our event into the buffer. If the
+                    // handoff never registers (bg thread stalled, sender
+                    // gone), fall through and flush anyway — a no-op when the
+                    // buffer is empty.
+                    for _ in 0..100 {
+                        if exp.ingested_count() > baseline {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_micros(100));
+                    }
+                    // Bounded, no-retry flush: a slow or unreachable endpoint
+                    // must not stall inference startup the way the
+                    // retry+backoff `flush()` would (it can block for many
+                    // seconds on this hot path).
+                    exp.flush_blocking(Duration::from_millis(STARTED_EVENT_FLUSH_TIMEOUT_MS));
+                }
+            }
+        }
     });
 }
 
@@ -2096,6 +2247,55 @@ pub fn flush_platform_telemetry() {
             exp.flush();
         }
     }
+}
+
+/// Synchronous, deadline-bounded flush for shutdown / panic paths.
+///
+/// Drains the buffer and sends one HTTP batch with the supplied timeout
+/// applied to both connect and request. Skips retry/backoff/circuit-breaker
+/// logic so the call returns within roughly `timeout`. Best-effort: failed
+/// events are dropped, not requeued. See
+/// [`HttpTelemetryExporter::flush_blocking`] for the safety contract this
+/// upholds for panic-handler use.
+pub fn flush_platform_telemetry_blocking(timeout: Duration) {
+    if let Ok(exporter) = PLATFORM_EXPORTER.read() {
+        if let Some(exp) = exporter.as_ref() {
+            exp.flush_blocking(timeout);
+        }
+    }
+}
+
+// Guards against double-installing the panic hook. The hook chains to the
+// previous one so we play nicely with frameworks that install their own
+// (test harnesses, color-eyre, etc.).
+static PANIC_HOOK_INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+/// Install a panic hook that synchronously flushes telemetry before
+/// re-raising. Idempotent — subsequent calls are no-ops.
+///
+/// Bounded at 500ms so a wedged HTTP endpoint cannot hang the unwinding
+/// thread indefinitely. The hook chains to whatever hook was previously
+/// installed so external frameworks (e.g. test harnesses) keep their
+/// behavior.
+///
+/// Does NOT cover async aborts (SIGABRT, SIGKILL, OS-level termination):
+/// those bypass Rust panic infrastructure entirely. For those paths,
+/// rely on `ExecutionStarted` being eagerly flushed so the backend at
+/// minimum sees that the run began before the process died.
+pub fn install_telemetry_panic_hook() {
+    if PANIC_HOOK_INSTALLED.set(()).is_err() {
+        return;
+    }
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Bound at 500ms — long enough for a healthy local network round
+        // trip, short enough that a wedged endpoint doesn't hang the
+        // dying process. `flush_platform_telemetry_blocking` reads the
+        // global exporter via a `try`-style lock recovery so a poisoned
+        // RwLock here will not double-panic.
+        flush_platform_telemetry_blocking(Duration::from_millis(500));
+        previous(info);
+    }));
 }
 
 /// Shutdown platform telemetry exporter
@@ -3938,6 +4138,53 @@ mod tests {
         let exporter = HttpTelemetryExporter::new(config);
         assert_eq!(exporter.failed_queue_size(), 0);
         assert_eq!(exporter.dropped_count(), 0);
+    }
+
+    #[test]
+    fn ingest_counter_advances_on_channel_handoff() {
+        // The ExecutionStarted fast path waits for `ingested_count()` to grow
+        // past a pre-publish baseline so it observes THIS event's
+        // channel→buffer handoff rather than a merely non-empty buffer (which
+        // a stale, already-buffered event would satisfy immediately). Verify
+        // the counter advances exactly when an event crosses the sender
+        // channel into the buffer.
+        //
+        // batch_size is large so the handoff never auto-flushes (which would
+        // drain the buffer and attempt a network send to the invalid host).
+        let config = TelemetryConfig::new("http://example.invalid", "k").with_batch_size(1000);
+        let exporter = HttpTelemetryExporter::new(config);
+        let tx = exporter.create_sender();
+
+        assert_eq!(exporter.ingested_count(), 0, "counter starts at zero");
+
+        let baseline = exporter.ingested_count();
+        tx.send(TelemetryEvent {
+            event_type: "ExecutionStarted".to_string(),
+            stage_name: Some("chat".to_string()),
+            target: Some("device".to_string()),
+            latency_ms: None,
+            error: None,
+            data: None,
+            timestamp_ms: 1,
+        })
+        .expect("send to live handoff thread");
+
+        // Bounded wait for the background handoff thread to move it across.
+        let mut waited = Duration::ZERO;
+        while exporter.ingested_count() <= baseline && waited < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(5));
+            waited += Duration::from_millis(5);
+        }
+
+        assert!(
+            exporter.ingested_count() > baseline,
+            "ingest counter must advance once the event crosses into the buffer"
+        );
+        assert_eq!(
+            exporter.buffer.lock().unwrap().len(),
+            1,
+            "event must be buffered (large batch_size, no flush)"
+        );
     }
 
     #[test]
