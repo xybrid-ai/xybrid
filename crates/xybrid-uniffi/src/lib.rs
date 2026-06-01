@@ -329,6 +329,21 @@ fn xybrid_error_retry_after_secs(error: &XybridError) -> Option<u64> {
     error.retry_after_secs()
 }
 
+/// Flattens an `SdkError`'s message and its optional `#[source]` cause into a
+/// single string for the UniFFI boundary, where `XybridError` variants carry
+/// only a `message: String`. The structured cause stays available on the Rust
+/// side; here we fold it back into the message (`"<message>: <cause>"`) so
+/// Swift/Kotlin callers don't lose the underlying error detail.
+fn flatten_cause(
+    message: String,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+) -> String {
+    match source {
+        Some(cause) => format!("{message}: {cause}"),
+        None => message,
+    }
+}
+
 impl From<SdkError> for XybridError {
     fn from(e: SdkError) -> Self {
         match e {
@@ -336,27 +351,39 @@ impl From<SdkError> for XybridError {
             SdkError::DirectoryNotFound(s) => XybridError::DirectoryNotFound { message: s },
             SdkError::MetadataNotFound(s) => XybridError::MetadataNotFound { message: s },
             SdkError::MetadataInvalid(s) => XybridError::MetadataInvalid { message: s },
-            SdkError::LoadError(s) => XybridError::LoadError { message: s },
-            SdkError::InferenceError(s) => XybridError::InferenceError { message: s },
+            SdkError::LoadError { message, source } => XybridError::LoadError {
+                message: flatten_cause(message, source),
+            },
+            SdkError::InferenceError { message, source } => XybridError::InferenceError {
+                message: flatten_cause(message, source),
+            },
             SdkError::AbortedForCloudFallback { reason } => XybridError::InferenceError {
                 message: format!("Aborted for cloud fallback: {reason}"),
             },
             SdkError::StreamingNotSupported => XybridError::StreamingNotSupported,
             SdkError::NotLoaded => XybridError::NotLoaded,
             SdkError::ConfigError(s) => XybridError::ConfigError { message: s },
-            SdkError::NetworkError(s) => XybridError::NetworkError { message: s },
+            SdkError::NetworkError { message, source } => XybridError::NetworkError {
+                message: flatten_cause(message, source),
+            },
             // `SdkError::Offline` is a Rust-side refinement of NetworkError
             // (see xybrid-sdk). We collapse it back to `NetworkError` at the
             // UniFFI boundary so the Swift/Kotlin public API stays stable —
             // adding a new variant here would be a breaking change to the
             // generated sealed/enum hierarchies and needs to go through the
             // spec-first API contract update in docs/sdk/api-surface.yaml.
-            SdkError::Offline(s) => XybridError::NetworkError { message: s },
+            SdkError::Offline { message, source } => XybridError::NetworkError {
+                message: flatten_cause(message, source),
+            },
             SdkError::IoError(e) => XybridError::IoError {
                 message: e.to_string(),
             },
-            SdkError::CacheError(s) => XybridError::CacheError { message: s },
-            SdkError::PipelineError(s) => XybridError::PipelineError { message: s },
+            SdkError::CacheError { message, source } => XybridError::CacheError {
+                message: flatten_cause(message, source),
+            },
+            SdkError::PipelineError { message, source } => XybridError::PipelineError {
+                message: flatten_cause(message, source),
+            },
             SdkError::CircuitOpen(s) => XybridError::CircuitOpen { message: s },
             SdkError::RateLimited { retry_after_secs } => {
                 XybridError::RateLimited { retry_after_secs }
@@ -835,7 +862,11 @@ mod tests {
         // is the load-bearing cross-boundary assertion: the `From` impl
         // must not silently demote a retryable error to a non-retryable
         // variant.
-        let from_offline: XybridError = SdkError::Offline("down".into()).into();
+        let from_offline: XybridError = SdkError::Offline {
+            message: "down".into(),
+            source: None,
+        }
+        .into();
         assert!(matches!(from_offline, XybridError::NetworkError { .. }));
         assert!(from_offline.is_retryable());
     }
