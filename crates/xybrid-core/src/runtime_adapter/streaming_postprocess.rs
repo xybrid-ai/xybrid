@@ -29,6 +29,10 @@
 ///   `vendor/llama.cpp/src/llama-vocab.cpp` lists `<turn|>` as a
 ///   `gemma4` EOG marker. Without this entry the marker leaks as the
 ///   trailing tail of caption text.
+/// - `<end_of_utterance>`: SmolVLM / Idefics-style VLM chat templates
+///   use this marker for user and assistant message boundaries. llama.cpp
+///   detects SmolVLM templates from this marker and also treats it as an
+///   EOT token, so Xybrid must filter the decoded literal as well.
 ///
 /// Always check for these in addition to user-supplied stop sequences —
 /// they're emitted by the chat template, not by the user.
@@ -39,6 +43,7 @@ pub(crate) const CHAT_STOP_PATTERNS: &[&str] = &[
     "</s>",
     "<end_of_turn>",
     "<turn|>",
+    "<end_of_utterance>",
 ];
 
 /// Fallback variants without the leading `<`, for models whose
@@ -446,6 +451,55 @@ mod tests {
         assert_eq!(f.push("|>"), None);
         assert!(f.is_stopped());
         assert_eq!(f.cumulative_emitted(), "Three colors. ");
+    }
+
+    /// Vision-model catalog regression: each Studio VLM family has a
+    /// chat-template stop marker that must be removed in final text and
+    /// withheld from streaming callbacks.
+    #[test]
+    fn vision_chat_stop_patterns_do_not_leak() {
+        let cases = [
+            ("lfm2-vl-450m", "<|im_end|>"),
+            ("qwen3-vl-2b-instruct", "<|im_end|>"),
+            ("qwen3-vl-4b-instruct", "<|im_end|>"),
+            ("qwen3.5-2b", "<|im_end|>"),
+            ("qwen2.5-vl-3b-instruct", "<|im_end|>"),
+            ("internvl3-2b-instruct", "<|im_end|>"),
+            ("gemma-4-e2b", "<turn|>"),
+            ("gemma-4-e4b", "<turn|>"),
+            ("smolvlm-500m-instruct", "<end_of_utterance>"),
+            ("smolvlm-instruct", "<end_of_utterance>"),
+        ];
+
+        for (model_id, marker) in cases {
+            assert!(
+                CHAT_STOP_PATTERNS.contains(&marker),
+                "{model_id} stop marker {marker:?} must be registered"
+            );
+
+            let mut text = format!("A concise image description.{marker} trailing");
+            assert!(
+                truncate_at_first_stop(&mut text, CHAT_STOP_PATTERNS),
+                "{model_id} final output should stop at {marker:?}"
+            );
+            assert_eq!(text, "A concise image description.");
+
+            let split_at = marker.len() / 2;
+            let mut f = StreamingTextFilter::new(
+                CHAT_STOP_PATTERNS.iter().map(|s| s.to_string()).collect(),
+            );
+            assert_eq!(
+                f.push("A concise image description."),
+                Some("A concise image description.".to_string())
+            );
+            assert_eq!(&f.push(&marker[..split_at]), &None);
+            assert_eq!(&f.push(&marker[split_at..]), &None);
+            assert!(
+                f.is_stopped(),
+                "{model_id} streaming output should stop at {marker:?}"
+            );
+            assert_eq!(f.cumulative_emitted(), "A concise image description.");
+        }
     }
 
     /// Regression guard: `CHAT_STOP_PATTERNS_BROKEN` must NOT contain
