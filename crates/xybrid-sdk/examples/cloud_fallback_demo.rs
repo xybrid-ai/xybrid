@@ -53,9 +53,8 @@
 //!
 //! On Linux/Windows replace `platform-macos` with `platform-desktop`. On
 //! Android the demo is not supported (the streaming abort uses Metal-bound
-//! types). The `llm-llamacpp` feature is required at the SDK level so the
-//! example block's `required-features` resolves; the platform preset already
-//! enables it transitively.
+//! types). The `llm-llamacpp` feature is required for local llama.cpp
+//! execution; the platform preset already enables it transitively.
 //!
 //! # What the demo proves
 //!

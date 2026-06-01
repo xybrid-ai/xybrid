@@ -8,17 +8,25 @@ homepage.workspace = true
 documentation.workspace = true
 description = "Core runtime for hybrid cloud-edge AI inference: model execution, pipeline orchestration, and routing primitives."
 readme = "README.md"
-# vendor/llama.cpp (~180MB) is cloned on-demand by build.rs when the
-# llm-llamacpp feature is enabled, so we exclude it from the published
-# tarball to stay under crates.io's size limit. Other files under
-# vendor/ (e.g. llama_wrapper.cpp) are first-party and must ship.
-exclude = ["vendor/llama.cpp/**"]
+# Upstream llama backend source lives at workspace `vendor/llama-cpp/`
+# (see `.gitmodules`), consumed by the `llama-cpp-sys` crate's build
+# script. No tarball-exclude needed here — the source is not under this
+# crate's manifest dir.
 
 [lib]
 name = "xybrid_core"
 path = "src/lib.rs"
 
 [dependencies]
+# Raw FFI bindings + cmake build for llama.cpp. Gated entirely behind the
+# `llm-llamacpp` feature (which activates both `llama-cpp-sys/bindings`
+# and `xybrid-llama/bindings`) so default builds — and any consumer not
+# opting into llama.cpp — pay zero compile cost. The 3-layer shape:
+#   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
+#   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
+#   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
+llama-cpp-sys = { path = "../llama-cpp-sys", optional = true }
+xybrid-llama = { path = "../xybrid-llama", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
@@ -93,8 +101,8 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 [features]
 # `llm-llamacpp` is NOT enabled by default — it requires cmake + a C++
 # toolchain and clones ~180MB of llama.cpp source during build. Downstream
-# users opt in via `cargo add xybrid-core --features llm-llamacpp` or one
-# of the `platform-*` presets on xybrid-sdk.
+# users opt in via `cargo add xybrid-core --features llm-llamacpp`
+# or one of the `platform-*` presets on xybrid-sdk.
 default = ["ort-download"]
 
 # JSON Schema generation for model_metadata.json
@@ -121,11 +129,20 @@ llm-mistral = []
 llm-mistral-metal = ["llm-mistral"]
 llm-mistral-cuda = ["llm-mistral"]
 
-# llama.cpp backend (Android-compatible, runtime SIMD detection)
-# Note: This is a marker feature - it gates build.rs (compiles llama.cpp via cmake)
-# and source code (#[cfg(feature = "llm-llamacpp")] blocks), not external dependencies.
-# Requires: vendor/llama.cpp directory with cloned llama.cpp source.
-llm-llamacpp = []
+# llama.cpp backend. Enabling `llm-llamacpp` links the llama.cpp runtime:
+# it activates both `llama-cpp-sys/bindings` (cmake build of llama.cpp +
+# wrapper.cpp shim) and `xybrid-llama/bindings` (safe RAII wrappers).
+# All four `platform-*` presets on `xybrid-sdk` depend on it since they
+# ship runtime inference. The 3-layer crate split underneath:
+#   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
+#   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
+#   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
+llm-llamacpp = [
+    "dep:llama-cpp-sys",
+    "llama-cpp-sys/bindings",
+    "dep:xybrid-llama",
+    "xybrid-llama/bindings",
+]
 
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
 # downstream demos, integration tests, and benchmarks. Off by default.
@@ -134,9 +151,9 @@ llm-llamacpp = []
 dev-tools = []
 
 [build-dependencies]
-# For compiling llama.cpp C/C++ source (used by build.rs when llm-llamacpp is enabled)
-cc = "1.0"
-cmake = "0.1"
+# No build-time native dependencies in xybrid-core: the llama.cpp cmake
+# build was relocated to `crates/llama-cpp-sys/build.rs` as Phase 1 of the
+# `llamacpp-crate-split` epic, and `xybrid-core/build.rs` was removed.
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -150,6 +167,7 @@ criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarking fra
 
 [[example]]
 name = "neutts_tts"
+# Real inference — needs llama.cpp linked.
 required-features = ["llm-llamacpp"]
 
 [[bench]]
