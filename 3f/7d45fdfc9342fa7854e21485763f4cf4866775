@@ -1,0 +1,28 @@
+examples/ios/README.md
+  s_21444584ff3f63::t_49ec2b93d74510 120-121
+examples/android/app/build.gradle.kts
+  s_21444584ff3f63::t_e12f46c223ea77 19
+examples/ios/XybridExample/ContentView.swift
+  s_21444584ff3f63::t_72f7f7a7e45fc5 74-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3f7d45fdfc9342fa7854e21485763f4cf4866775",
+  "prompts": {},
+  "humans": {
+    "h_92edd19a2533f1": {
+      "author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_21444584ff3f63": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c5c476fc-e348-489e-99cf-075a2c3fa7f5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
