@@ -1,9 +1,21 @@
-name: Release
+name: Release (legacy tag-driven)
+
+# Break-glass for the old tag-driven release flow. The push: tags trigger
+# was removed in PR #170 because the new release-branch flow
+# (release-prep.yml + release-publish.yml) creates the v<version> tag via
+# the Releases API as part of publishing — leaving this workflow armed on
+# tag pushes would double-fire it against every new-flow release.
+#
+# To run this workflow manually (e.g. if the new flow breaks and you need
+# to ship from a tag): Actions -> Release (legacy tag-driven) -> Run
+# workflow -> choose the v<version> tag in the "Use workflow from" picker.
+# Every step below reads GITHUB_REF so the tag must already exist before
+# dispatching.
+#
+# Planned for deletion once one or two releases have shipped cleanly
+# through the new flow.
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 env:
@@ -14,8 +26,7 @@ env:
   FLUTTER_VERSION: "3.35.7"
   FRB_VERSION: "2.11.1"
 
-permissions:
-  contents: write
+permissions: read-all
 
 jobs:
   #
@@ -158,6 +169,8 @@ jobs:
   #
   build-apple-all:
     name: Build Apple (all)
+    permissions:
+      contents: write   # pins the XybridFFI checksum and force-pushes the tag
     needs: [check-version]
     runs-on: macos-14
     steps:
@@ -420,6 +433,8 @@ jobs:
   #
   precompile-flutter-linux:
     name: Precompile Flutter (linux)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-version, build-android]
     runs-on: ubuntu-latest
     steps:
@@ -496,6 +511,8 @@ jobs:
   #
   precompile-flutter-windows:
     name: Precompile Flutter (windows)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-version]
     runs-on: windows-latest
     steps:
@@ -681,6 +698,8 @@ jobs:
   #
   release:
     name: Create Release
+    permissions:
+      contents: write   # creates the GitHub release (softprops/action-gh-release)
     runs-on: ubuntu-latest
     needs: [build-apple-all, build-android, build-cli]
     steps:
@@ -754,6 +773,8 @@ jobs:
   #
   publish-swift:
     name: Publish Swift Package
+    permissions:
+      contents: write   # force-pushes the swift distribution branch
     needs: [release]
     runs-on: ubuntu-latest
     steps:

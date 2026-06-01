@@ -1,6 +1,49 @@
 //! Cloud client configuration types.
 
 use serde::{Deserialize, Serialize};
+use std::sync::RwLock;
+
+/// Programmatically-set Xybrid gateway API key, held in process memory.
+///
+/// Set via [`set_xybrid_api_key`] — the `xybrid_sdk::set_api_key` entry point
+/// routes here. Kept out of the process environment so the secret is not
+/// inherited by child processes the host app spawns.
+///
+/// Transitional: see issue #213 (invert the cloud composition root). Once the
+/// SDK injects the cloud adapter with the key by value, this becomes a
+/// last-resort fallback ahead of the `XYBRID_API_KEY` env var rather than the
+/// primary programmatic channel.
+static XYBRID_API_KEY: RwLock<Option<String>> = RwLock::new(None);
+
+/// Store (or clear, with `None`) the in-memory Xybrid gateway API key.
+///
+/// Consulted by [`CloudConfig::resolve_api_key`] ahead of the `XYBRID_API_KEY`
+/// environment variable.
+pub fn set_xybrid_api_key(key: Option<String>) {
+    // The lock guards a single `Option<String>`; recover a poisoned guard
+    // rather than panic so credential setup can never be wedged.
+    let mut guard = XYBRID_API_KEY.write().unwrap_or_else(|e| e.into_inner());
+    *guard = key;
+}
+
+/// Read the in-memory Xybrid gateway API key, if one has been set.
+pub fn xybrid_api_key() -> Option<String> {
+    XYBRID_API_KEY
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// Report whether an in-memory Xybrid gateway API key has been set.
+///
+/// Cheaper than [`xybrid_api_key`] for presence checks — it never clones the
+/// secret string.
+pub fn has_xybrid_api_key() -> bool {
+    XYBRID_API_KEY
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
+}
 
 /// Cloud execution backend.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,8 +190,11 @@ impl CloudConfig {
             return Some(key.clone());
         }
 
-        // Fall back to XYBRID_API_KEY
-        std::env::var("XYBRID_API_KEY").ok()
+        // Programmatic key (set via the SDK, held in memory — not the
+        // environment) takes precedence over the ambient `XYBRID_API_KEY` env
+        // var, which remains the fallback for externally-configured keys
+        // (CLI `--env`, Flutter `--dart-define`, iOS `ProcessInfo`).
+        xybrid_api_key().or_else(|| std::env::var("XYBRID_API_KEY").ok())
     }
 }
 
@@ -200,5 +246,31 @@ mod tests {
         assert_eq!(config.resolve_api_key(), Some("secret123".to_string()));
 
         std::env::remove_var("TEST_CLOUD_KEY");
+    }
+
+    // Serializes tests that mutate process-global state (the `XYBRID_API_KEY`
+    // env var and the in-memory cell) so the parallel test runner can't race
+    // them.
+    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_resolve_api_key_in_memory_precedence() {
+        let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        // No explicit field: the in-memory cell is consulted before the env.
+        std::env::set_var("XYBRID_API_KEY", "env-key");
+        set_xybrid_api_key(Some("mem-key".to_string()));
+
+        let config = CloudConfig::default();
+        assert_eq!(config.resolve_api_key(), Some("mem-key".to_string()));
+
+        // Clearing the cell falls back to the env var.
+        set_xybrid_api_key(None);
+        assert_eq!(config.resolve_api_key(), Some("env-key".to_string()));
+
+        // An explicit config field still wins over both.
+        let explicit = CloudConfig::default().with_api_key("field-key");
+        assert_eq!(explicit.resolve_api_key(), Some("field-key".to_string()));
+
+        std::env::remove_var("XYBRID_API_KEY");
     }
 }

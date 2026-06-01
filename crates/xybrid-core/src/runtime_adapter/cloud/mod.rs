@@ -10,7 +10,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
 //!
 //! let adapter = CloudRuntimeAdapter::new();

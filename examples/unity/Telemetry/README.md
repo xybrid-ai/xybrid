@@ -4,6 +4,12 @@ A minimal Unity project demonstrating end-to-end Xybrid telemetry wiring,
 including the safe mobile pause/quit lifecycle required for production
 iOS and Android integrations.
 
+> For the common case you don't need any of this — just pass your key to
+> init: `XybridClient.Initialize(apiKey: "xy_live_...")`. This example covers
+> the **advanced** path (`TelemetryConfig` + `InitializeTelemetry`) for when
+> you need batch size, flush interval, or device attributes, plus explicit
+> flush/shutdown on the mobile lifecycle.
+
 ## What this example shows
 
 The scene has **one GameObject** with a single MonoBehaviour

@@ -35,6 +35,16 @@ if (result.success) {
 }
 ```
 
+## 初始化
+
+无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.run(...)` 调用便会自动上报执行轨迹：
+
+```kotlin
+Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
+```
+
+未提供密钥时，遥测处于禁用状态，首次推理会打印一条一次性提示指向控制台（可通过环境变量 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。若使用自托管控制台，请额外传入 `ingestUrl`。
+
 ---
 
 ## 模型加载

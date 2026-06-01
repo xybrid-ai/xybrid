@@ -44,6 +44,16 @@ if (result.success) {
 
 `Xybrid.init(context)` also registers `BatteryManager` and (on API 29+) `PowerManager.OnThermalStatusChangedListener` observers, forwarding readings to the routing engine. See [Host Integration](/docs/internals/host-integration) for what's wired automatically and the override surface.
 
+## Initialization
+
+Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.run(...)` calls automatically emit execution traces:
+
+```kotlin
+Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
+```
+
+Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`.
+
 ---
 
 ## Model Loading

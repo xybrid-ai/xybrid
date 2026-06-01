@@ -21,13 +21,19 @@
 //!
 //! Use the [`prelude`] module for common imports:
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_core::prelude::*;
 //!
+//! # let audio_bytes: Vec<u8> = vec![];
+//! # let metadata: xybrid_core::execution::ModelMetadata = unimplemented!();
 //! // Create an executor and run inference
 //! let mut executor = TemplateExecutor::with_base_path("models/whisper");
-//! let input = Envelope::from_audio(audio_bytes);
-//! let output = executor.execute(&metadata, &input)?;
+//! let input = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+//! let output = executor.execute(&metadata, &input, None)?;
+//! # let _ = output;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Module Organization
@@ -70,15 +76,15 @@
 
 // llm-mistral uses x86 AVX2/FP16 intrinsics that cause SIGILL on Android ARM devices
 // without ARMv8.2-A FP16 extensions (which most devices lack).
-// Use llm-llamacpp-runtime instead - it has runtime SIMD detection.
+// Use llm-llamacpp instead - it has runtime SIMD detection.
 #[cfg(all(feature = "llm-mistral", target_os = "android"))]
 compile_error!(
     "Invalid feature combination: `llm-mistral` is not supported on Android.\n\n\
     Reason: mistral.rs uses x86 AVX2/FP16 intrinsics that cause SIGILL on ARM devices \
     without ARMv8.2-A FP16 extensions (most Android devices lack this).\n\n\
-    Solution: Use `llm-llamacpp-runtime` instead. It performs runtime SIMD detection and works \
+    Solution: Use `llm-llamacpp` instead. It performs runtime SIMD detection and works \
     on all Android devices.\n\n\
-    Change: --features llm-mistral -> --features llm-llamacpp-runtime"
+    Change: --features llm-mistral -> --features llm-llamacpp"
 );
 
 // ort-download and ort-dynamic are mutually exclusive ORT loading strategies.
@@ -150,7 +156,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::prelude::*;
 /// ```
 pub mod prelude;
@@ -164,11 +170,12 @@ pub mod prelude;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::error::{XybridError, XybridResult};
 ///
 /// fn run_model() -> XybridResult<String> {
 ///     // ...
+///     # Err(XybridError::NotFound("stub".into()))
 /// }
 /// ```
 pub mod error;

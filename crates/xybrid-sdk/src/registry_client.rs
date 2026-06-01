@@ -11,7 +11,8 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_sdk::registry_client::RegistryClient;
 //!
 //! let client = RegistryClient::default_client()?;
@@ -30,6 +31,8 @@
 //! let bundle_path = client.fetch("kokoro-82m", None, |progress| {
 //!     println!("Downloaded: {:.1}%", progress * 100.0);
 //! })?;
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::cache::CacheManager;
@@ -37,7 +40,7 @@ use crate::model::SdkError;
 use crate::platform::current_platform;
 use crate::source::detect_platform;
 use crate::telemetry_optout::is_telemetry_opted_out;
-use crate::{get_binding, DEFAULT_BINDING};
+use crate::{get_binding, DEFAULT_BINDING, SDK_VERSION};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -47,7 +50,7 @@ use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryableError};
+use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 
 pub const DEFAULT_REGISTRY_URL: &str = "https://registry.xybrid.dev";
 pub const FALLBACK_REGISTRY_URL: &str = "https://r2.xybrid.dev";
@@ -94,7 +97,7 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
     Some(format!(
         "binding={}; sdk_version={}; core_version={}; platform={}; backends={}",
         safe_binding,
-        env!("CARGO_PKG_VERSION"),
+        SDK_VERSION,
         xybrid_core::VERSION,
         current_platform(),
         backends,
@@ -758,7 +761,9 @@ impl RegistryClient {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::RegistryClient;
     /// let client = RegistryClient::default_client()?;
     /// let model_dir = client.fetch_extracted("kokoro-82m", None, |p| {
     ///     println!("Downloaded: {:.1}%", p * 100.0);
@@ -766,6 +771,8 @@ impl RegistryClient {
     ///
     /// // model_dir now contains model_metadata.json and all model files
     /// let metadata_path = model_dir.join("model_metadata.json");
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn fetch_extracted<F>(
         &self,

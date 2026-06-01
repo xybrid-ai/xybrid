@@ -24,15 +24,9 @@
 #include <stdint.h>
 
 #include "llama.h"
-
 #ifdef XYBRID_LLAMA_VISION
-#ifdef __cplusplus
-struct mtmd_context;
-struct mtmd_bitmap;
-struct mtmd_input_chunk;
-struct mtmd_input_chunks;
-struct mtmd_image_tokens;
-#endif
+#include "mtmd.h"
+#include "mtmd-helper.h"
 #endif
 
 #ifdef __cplusplus
@@ -40,35 +34,12 @@ extern "C" {
 #define XYBRID_LLAMA_MODEL llama_model
 #define XYBRID_LLAMA_CONTEXT llama_context
 #define XYBRID_LLAMA_SAMPLER llama_sampler
-#ifdef XYBRID_LLAMA_VISION
-#define XYBRID_MTMD_CONTEXT mtmd_context
-#define XYBRID_MTMD_BITMAP mtmd_bitmap
-#define XYBRID_MTMD_INPUT_CHUNK mtmd_input_chunk
-#define XYBRID_MTMD_INPUT_CHUNKS mtmd_input_chunks
-#define XYBRID_MTMD_IMAGE_TOKENS mtmd_image_tokens
-#endif
 #define XYBRID_CONST_PTR
 #else
 #define XYBRID_LLAMA_MODEL void
 #define XYBRID_LLAMA_CONTEXT void
 #define XYBRID_LLAMA_SAMPLER void
-#ifdef XYBRID_LLAMA_VISION
-#define XYBRID_MTMD_CONTEXT void
-#define XYBRID_MTMD_BITMAP void
-#define XYBRID_MTMD_INPUT_CHUNK void
-#define XYBRID_MTMD_INPUT_CHUNKS void
-#define XYBRID_MTMD_IMAGE_TOKENS void
-#endif
 #define XYBRID_CONST_PTR const
-#endif
-
-#ifdef XYBRID_LLAMA_VISION
-typedef struct xybrid_mtmd_decoder_pos {
-    uint32_t t;
-    uint32_t x;
-    uint32_t y;
-    uint32_t z;
-} xybrid_mtmd_decoder_pos;
 #endif
 
 /* ------------------------------------------------------------------------
@@ -92,72 +63,6 @@ int  llama_log_get_verbosity_c(void);
 /* Model lifecycle */
 XYBRID_LLAMA_MODEL* llama_load_model_from_file_c(const char* path_model, int n_gpu_layers);
 void  llama_free_model_c(XYBRID_LLAMA_MODEL* model);
-
-#ifdef XYBRID_LLAMA_VISION
-/* Multimodal projector lifecycle and bitmap helpers */
-XYBRID_MTMD_CONTEXT* mtmd_init_from_file_c(
-    const char* mmproj_fname,
-    const XYBRID_LLAMA_MODEL* text_model,
-    bool use_gpu,
-    bool warmup,
-    int n_threads,
-    bool flash_attn);
-void mtmd_free_c(XYBRID_MTMD_CONTEXT* ctx);
-
-XYBRID_MTMD_BITMAP* mtmd_bitmap_init_from_buf_c(
-    XYBRID_MTMD_CONTEXT* ctx,
-    const unsigned char* buf,
-    size_t len);
-void mtmd_bitmap_free_c(XYBRID_MTMD_BITMAP* bitmap);
-uint32_t mtmd_bitmap_get_nx_c(const XYBRID_MTMD_BITMAP* bitmap);
-uint32_t mtmd_bitmap_get_ny_c(const XYBRID_MTMD_BITMAP* bitmap);
-size_t mtmd_bitmap_get_n_bytes_c(const XYBRID_MTMD_BITMAP* bitmap);
-const char* mtmd_bitmap_get_id_c(const XYBRID_MTMD_BITMAP* bitmap);
-void mtmd_bitmap_set_id_c(XYBRID_MTMD_BITMAP* bitmap, const char* id);
-
-/* mtmd tokenized chunk inspection */
-XYBRID_MTMD_INPUT_CHUNKS* mtmd_input_chunks_init_c(void);
-size_t mtmd_input_chunks_size_c(const XYBRID_MTMD_INPUT_CHUNKS* chunks);
-const XYBRID_MTMD_INPUT_CHUNK* mtmd_input_chunks_get_c(
-    const XYBRID_MTMD_INPUT_CHUNKS* chunks,
-    size_t idx);
-void mtmd_input_chunks_free_c(XYBRID_MTMD_INPUT_CHUNKS* chunks);
-int mtmd_input_chunk_get_type_c(const XYBRID_MTMD_INPUT_CHUNK* chunk);
-const int32_t* mtmd_input_chunk_get_tokens_text_c(
-    const XYBRID_MTMD_INPUT_CHUNK* chunk,
-    size_t* n_tokens_output);
-const XYBRID_MTMD_IMAGE_TOKENS* mtmd_input_chunk_get_tokens_image_c(
-    const XYBRID_MTMD_INPUT_CHUNK* chunk);
-size_t mtmd_input_chunk_get_n_tokens_c(const XYBRID_MTMD_INPUT_CHUNK* chunk);
-int32_t mtmd_input_chunk_get_n_pos_c(const XYBRID_MTMD_INPUT_CHUNK* chunk);
-size_t mtmd_image_tokens_get_n_tokens_c(const XYBRID_MTMD_IMAGE_TOKENS* image_tokens);
-int32_t mtmd_image_tokens_get_n_pos_c(const XYBRID_MTMD_IMAGE_TOKENS* image_tokens);
-xybrid_mtmd_decoder_pos mtmd_image_tokens_get_decoder_pos_c(
-    const XYBRID_MTMD_IMAGE_TOKENS* image_tokens,
-    int32_t pos_0,
-    size_t i);
-size_t mtmd_helper_get_n_tokens_c(const XYBRID_MTMD_INPUT_CHUNKS* chunks);
-int32_t mtmd_helper_get_n_pos_c(const XYBRID_MTMD_INPUT_CHUNKS* chunks);
-
-int32_t mtmd_tokenize_c(
-    XYBRID_MTMD_CONTEXT* ctx,
-    XYBRID_MTMD_INPUT_CHUNKS* output,
-    const char* text,
-    bool add_special,
-    bool parse_special,
-    const XYBRID_MTMD_BITMAP** bitmaps,
-    size_t n_bitmaps);
-
-int32_t mtmd_helper_eval_chunks_c(
-    XYBRID_MTMD_CONTEXT* ctx,
-    XYBRID_LLAMA_CONTEXT* lctx,
-    const XYBRID_MTMD_INPUT_CHUNKS* chunks,
-    int32_t n_past,
-    int32_t seq_id,
-    int32_t n_batch,
-    bool logits_last,
-    int32_t* new_n_past);
-#endif
 
 /* Context lifecycle */
 XYBRID_LLAMA_CONTEXT* llama_new_context_with_model_c(
@@ -280,9 +185,9 @@ int  llama_generate_streaming_c(
     void* user_data,
     int n_past_in);
 
-#ifdef XYBRID_LLAMA_VISION
-/* Continue sampling from logits left in the context by mtmd helper eval. */
-int llama_generate_from_current_logits_c(
+/* Continue generation from logits already present in the context. Used
+   after mtmd helper eval prefills text/image chunks. */
+int  llama_generate_from_current_logits_c(
     XYBRID_LLAMA_CONTEXT* ctx,
     const XYBRID_LLAMA_MODEL* model,
     int32_t* output_tokens,
@@ -299,29 +204,79 @@ int llama_generate_from_current_logits_c(
     llama_token_callback_c callback,
     void* user_data,
     int n_past);
+
+#ifdef XYBRID_LLAMA_VISION
+/* mtmd vision-language projector lifecycle */
+mtmd_context* mtmd_init_from_file_c(
+    const char* mmproj_fname,
+    const XYBRID_LLAMA_MODEL* text_model,
+    bool use_gpu,
+    bool warmup,
+    int n_threads,
+    bool flash_attn);
+void mtmd_free_c(mtmd_context* ctx);
+
+/* mtmd bitmap helpers */
+mtmd_bitmap* mtmd_bitmap_init_from_buf_c(
+    mtmd_context* ctx,
+    const unsigned char* buf,
+    size_t len);
+void mtmd_bitmap_free_c(mtmd_bitmap* bitmap);
+uint32_t mtmd_bitmap_get_nx_c(const mtmd_bitmap* bitmap);
+uint32_t mtmd_bitmap_get_ny_c(const mtmd_bitmap* bitmap);
+size_t mtmd_bitmap_get_n_bytes_c(const mtmd_bitmap* bitmap);
+const char* mtmd_bitmap_get_id_c(const mtmd_bitmap* bitmap);
+void mtmd_bitmap_set_id_c(mtmd_bitmap* bitmap, const char* id);
+
+/* mtmd chunk helpers */
+mtmd_input_chunks* mtmd_input_chunks_init_c(void);
+size_t mtmd_input_chunks_size_c(const mtmd_input_chunks* chunks);
+const mtmd_input_chunk* mtmd_input_chunks_get_c(
+    const mtmd_input_chunks* chunks,
+    size_t idx);
+void mtmd_input_chunks_free_c(mtmd_input_chunks* chunks);
+int mtmd_input_chunk_get_type_c(const mtmd_input_chunk* chunk);
+const int32_t* mtmd_input_chunk_get_tokens_text_c(
+    const mtmd_input_chunk* chunk,
+    size_t* n_tokens_output);
+const mtmd_image_tokens* mtmd_input_chunk_get_tokens_image_c(
+    const mtmd_input_chunk* chunk);
+size_t mtmd_input_chunk_get_n_tokens_c(const mtmd_input_chunk* chunk);
+int32_t mtmd_input_chunk_get_n_pos_c(const mtmd_input_chunk* chunk);
+size_t mtmd_image_tokens_get_n_tokens_c(const mtmd_image_tokens* image_tokens);
+int32_t mtmd_image_tokens_get_n_pos_c(const mtmd_image_tokens* image_tokens);
+struct mtmd_decoder_pos mtmd_image_tokens_get_decoder_pos_c(
+    const mtmd_image_tokens* image_tokens,
+    int32_t pos_0,
+    size_t i);
+size_t mtmd_helper_get_n_tokens_c(const mtmd_input_chunks* chunks);
+int32_t mtmd_helper_get_n_pos_c(const mtmd_input_chunks* chunks);
+int32_t mtmd_tokenize_c(
+    mtmd_context* ctx,
+    mtmd_input_chunks* output,
+    const char* text,
+    bool add_special,
+    bool parse_special,
+    const mtmd_bitmap** bitmaps,
+    size_t n_bitmaps);
+int32_t mtmd_helper_eval_chunks_c(
+    mtmd_context* ctx,
+    XYBRID_LLAMA_CONTEXT* lctx,
+    const mtmd_input_chunks* chunks,
+    int32_t n_past,
+    int32_t seq_id,
+    int32_t n_batch,
+    bool logits_last,
+    int32_t* new_n_past);
 #endif
 
 #ifdef __cplusplus
-#ifdef XYBRID_LLAMA_VISION
-#undef XYBRID_MTMD_IMAGE_TOKENS
-#undef XYBRID_MTMD_INPUT_CHUNKS
-#undef XYBRID_MTMD_INPUT_CHUNK
-#undef XYBRID_MTMD_BITMAP
-#undef XYBRID_MTMD_CONTEXT
-#endif
 #undef XYBRID_CONST_PTR
 #undef XYBRID_LLAMA_SAMPLER
 #undef XYBRID_LLAMA_CONTEXT
 #undef XYBRID_LLAMA_MODEL
 }
 #else
-#ifdef XYBRID_LLAMA_VISION
-#undef XYBRID_MTMD_IMAGE_TOKENS
-#undef XYBRID_MTMD_INPUT_CHUNKS
-#undef XYBRID_MTMD_INPUT_CHUNK
-#undef XYBRID_MTMD_BITMAP
-#undef XYBRID_MTMD_CONTEXT
-#endif
 #undef XYBRID_CONST_PTR
 #undef XYBRID_LLAMA_SAMPLER
 #undef XYBRID_LLAMA_CONTEXT

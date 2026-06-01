@@ -114,8 +114,12 @@ impl std::fmt::Display for OutputType {
 ///
 /// # Example
 ///
-/// ```ignore
-/// let result = model.run(&envelope)?;
+/// ```no_run
+/// # use xybrid_sdk::{XybridModel, ir::Envelope, result::OutputType};
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # let model: XybridModel = unimplemented!();
+/// # let envelope: Envelope = unimplemented!();
+/// let result = model.run(&envelope, None)?;
 ///
 /// // Check output type
 /// match result.output_type() {
@@ -129,6 +133,8 @@ impl std::fmt::Display for OutputType {
 /// if let Some(text) = result.text() {
 ///     println!("Transcription: {}", text);
 /// }
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct InferenceResult {
@@ -147,13 +153,7 @@ pub struct InferenceResult {
 impl InferenceResult {
     /// Create a new inference result from an envelope.
     pub fn new(envelope: Envelope, model_id: impl Into<String>, latency_ms: u32) -> Self {
-        let output_type = match &envelope.kind {
-            EnvelopeKind::Text(_) => OutputType::Text,
-            EnvelopeKind::Audio(_) => OutputType::Audio,
-            EnvelopeKind::Embedding(_) => OutputType::Embedding,
-            #[cfg(feature = "vision")]
-            EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => OutputType::Unknown,
-        };
+        let output_type = output_type_for_envelope(&envelope);
         let metrics = InferenceMetrics::from_metadata(&envelope.metadata, latency_ms);
 
         Self {
@@ -310,6 +310,16 @@ impl InferenceResult {
     /// Get all metadata.
     pub fn all_metadata(&self) -> &std::collections::HashMap<String, String> {
         &self.envelope.metadata
+    }
+}
+
+pub(crate) fn output_type_for_envelope(envelope: &Envelope) -> OutputType {
+    match &envelope.kind {
+        EnvelopeKind::Text(_) => OutputType::Text,
+        EnvelopeKind::Audio(_) => OutputType::Audio,
+        EnvelopeKind::Embedding(_) => OutputType::Embedding,
+        #[cfg(feature = "vision")]
+        EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => OutputType::Unknown,
     }
 }
 

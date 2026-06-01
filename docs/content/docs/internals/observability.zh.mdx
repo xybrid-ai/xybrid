@@ -294,11 +294,13 @@ let telemetry = Telemetry::with_enabled(false);
 
 ### 尽早初始化
 
+在启动时将 `apiKey` 传给 `Xybrid.init()`——这一次调用即可启动平台遥测导出器。
+匿名使用（不传密钥）则在本地运行且遥测处于禁用状态。
+
 ```dart
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await RustLib.init();
-  initTelemetryStream();
+  await Xybrid.init(apiKey: const String.fromEnvironment('XYBRID_API_KEY'));
   runApp(MyApp());
 }
 ```

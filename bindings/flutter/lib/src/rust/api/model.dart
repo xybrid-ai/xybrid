@@ -25,10 +25,8 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
-  Future<FfiResult> run({
-    required FfiEnvelope envelope,
-    FfiGenerationConfig? config,
-  });
+  Future<FfiResult> run(
+      {required FfiEnvelope envelope, FfiGenerationConfig? config});
 
   /// Run inference with streaming output.
   ///
@@ -41,10 +39,8 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
-  Stream<FfiStreamEvent> runStream({
-    required FfiEnvelope envelope,
-    FfiGenerationConfig? config,
-  });
+  Stream<FfiStreamEvent> runStream(
+      {required FfiEnvelope envelope, FfiGenerationConfig? config});
 
   /// Run inference with streaming output and conversation context.
   ///
@@ -58,11 +54,10 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
-  Stream<FfiStreamEvent> runStreamWithContext({
-    required FfiEnvelope envelope,
-    required FfiConversationContext context,
-    FfiGenerationConfig? config,
-  });
+  Stream<FfiStreamEvent> runStreamWithContext(
+      {required FfiEnvelope envelope,
+      required FfiConversationContext context,
+      FfiGenerationConfig? config});
 
   /// Run streaming inference with local abort and Xybrid cloud fallback.
   ///
@@ -70,11 +65,10 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// pressure, re-check cloud policy, retry the original prompt through the
   /// authenticated gateway, and emit local/cloud telemetry under one
   /// correlation id.
-  Stream<FfiStreamEvent> runStreamWithFallback({
-    required FfiEnvelope envelope,
-    required FfiRunOptions options,
-    FfiGenerationConfig? config,
-  });
+  Stream<FfiStreamEvent> runStreamWithFallback(
+      {required FfiEnvelope envelope,
+      required FfiRunOptions options,
+      FfiGenerationConfig? config});
 
   /// Run inference with conversation context.
   ///
@@ -86,38 +80,33 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
-  Future<FfiResult> runWithContext({
-    required FfiEnvelope envelope,
-    required FfiConversationContext context,
-    FfiGenerationConfig? config,
-  });
+  Future<FfiResult> runWithContext(
+      {required FfiEnvelope envelope,
+      required FfiConversationContext context,
+      FfiGenerationConfig? config});
 }
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>>
 abstract class FfiModelLoader implements RustOpaqueInterface {
-  static FfiModelLoader fromBundle({required String path}) => XybridRustLib
-      .instance
-      .api
-      .crateApiModelFfiModelLoaderFromBundle(path: path);
+  static FfiModelLoader fromBundle({required String path}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromBundle(path: path);
 
-  static FfiModelLoader fromDirectory({required String path}) => XybridRustLib
-      .instance
-      .api
-      .crateApiModelFfiModelLoaderFromDirectory(path: path);
+  static FfiModelLoader fromDirectory({required String path}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromDirectory(path: path);
 
   /// Create a loader for a model from a HuggingFace Hub repository.
   ///
   /// Downloads model files from HuggingFace and caches them locally.
   /// Requires the `huggingface` feature flag to be enabled.
-  static FfiModelLoader fromHuggingface({required String repo}) => XybridRustLib
-      .instance
-      .api
-      .crateApiModelFfiModelLoaderFromHuggingface(repo: repo);
+  static FfiModelLoader fromHuggingface({required String repo}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromHuggingface(repo: repo);
 
-  static FfiModelLoader fromRegistry({required String modelId}) => XybridRustLib
-      .instance
-      .api
-      .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);
+  static FfiModelLoader fromRegistry({required String modelId}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);
 
   /// Load the model without progress updates.
   Future<FfiModel> load();
@@ -206,13 +195,17 @@ sealed class FfiLoadEvent with _$FfiLoadEvent {
   const FfiLoadEvent._();
 
   /// Download progress update (0.0 to 1.0)
-  const factory FfiLoadEvent.progress(double field0) = FfiLoadEvent_Progress;
+  const factory FfiLoadEvent.progress(
+    double field0,
+  ) = FfiLoadEvent_Progress;
 
   /// Model loaded successfully - contains the model handle ID
   const factory FfiLoadEvent.complete() = FfiLoadEvent_Complete;
 
   /// An error occurred during loading
-  const factory FfiLoadEvent.error(String field0) = FfiLoadEvent_Error;
+  const factory FfiLoadEvent.error(
+    String field0,
+  ) = FfiLoadEvent_Error;
 }
 
 /// Cloud fallback controls exposed to Flutter callers.
@@ -272,15 +265,19 @@ sealed class FfiStreamEvent with _$FfiStreamEvent {
   const FfiStreamEvent._();
 
   /// A token was generated
-  const factory FfiStreamEvent.token(FfiStreamToken field0) =
-      FfiStreamEvent_Token;
+  const factory FfiStreamEvent.token(
+    FfiStreamToken field0,
+  ) = FfiStreamEvent_Token;
 
   /// Inference completed with final result
-  const factory FfiStreamEvent.complete(FfiResult field0) =
-      FfiStreamEvent_Complete;
+  const factory FfiStreamEvent.complete(
+    FfiResult field0,
+  ) = FfiStreamEvent_Complete;
 
   /// An error occurred
-  const factory FfiStreamEvent.error(String field0) = FfiStreamEvent_Error;
+  const factory FfiStreamEvent.error(
+    String field0,
+  ) = FfiStreamEvent_Error;
 }
 
 /// Token received during streaming inference.

@@ -11,7 +11,7 @@
 //! 2. **End-to-end (manual)** (`cloud_fallback_demo_runs_end_to_end` —
 //!    `#[ignore]`'d): drives `run_streaming_with_fallback` through a real
 //!    cached `qwen2.5-0.5b-instruct` and a mock cloud target. Run with
-//!    `cargo test --features platform-macos,dev-tools,llm-llamacpp-runtime \
+//!    `cargo test --features platform-macos,dev-tools,llm-llamacpp \
 //!     --test cloud_fallback_e2e -- --ignored`.
 
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
@@ -179,7 +179,7 @@ fn cloud_fallback_dispatch_with_fake_adapter() {
 ///
 /// ```bash
 /// xybrid run --model qwen2.5-0.5b-instruct --input-text "warmup"
-/// cargo test --features platform-macos,dev-tools,llm-llamacpp-runtime \
+/// cargo test --features platform-macos,dev-tools,llm-llamacpp \
 ///   --test cloud_fallback_e2e -- --ignored
 /// ```
 #[test]

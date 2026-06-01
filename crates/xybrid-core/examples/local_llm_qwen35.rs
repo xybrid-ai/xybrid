@@ -5,7 +5,7 @@
 //! from the Qwen 3.5 family (text-only mode).
 //!
 //! Run with:
-//!   cargo run --example local_llm_qwen35 -p xybrid-core --features llm-llamacpp-runtime
+//!   cargo run --example local_llm_qwen35 -p xybrid-core --features llm-llamacpp
 //!
 //! Requires model to be downloaded:
 //!   ./integration-tests/download.sh qwen3.5-0.8b
@@ -105,10 +105,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         EnvelopeKind::Audio(_) => {
             println!("Unexpected: Got audio output instead of text");
-        }
-        #[cfg(feature = "vision")]
-        EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
-            println!("Unexpected: Got vision output instead of text");
         }
     }
 

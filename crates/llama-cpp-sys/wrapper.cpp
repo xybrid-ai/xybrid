@@ -34,6 +34,7 @@
  */
 
 #include "wrapper.h"
+#include "ggml.h"
 #ifdef XYBRID_LLAMA_VISION
 #include "mtmd.h"
 #include "mtmd-helper.h"
@@ -264,18 +265,13 @@ int32_t mtmd_image_tokens_get_n_pos_c(const mtmd_image_tokens* image_tokens) {
     return image_tokens ? mtmd_image_tokens_get_n_pos(image_tokens) : 0;
 }
 
-xybrid_mtmd_decoder_pos mtmd_image_tokens_get_decoder_pos_c(
+mtmd_decoder_pos mtmd_image_tokens_get_decoder_pos_c(
     const mtmd_image_tokens* image_tokens,
     int32_t pos_0,
     size_t i
 ) {
-    xybrid_mtmd_decoder_pos empty{};
-    if (!image_tokens) {
-        return empty;
-    }
-
-    mtmd_decoder_pos pos = mtmd_image_tokens_get_decoder_pos(image_tokens, pos_0, i);
-    return xybrid_mtmd_decoder_pos{pos.t, pos.x, pos.y, pos.z};
+    mtmd_decoder_pos empty{};
+    return image_tokens ? mtmd_image_tokens_get_decoder_pos(image_tokens, pos_0, i) : empty;
 }
 
 size_t mtmd_helper_get_n_tokens_c(const mtmd_input_chunks* chunks) {

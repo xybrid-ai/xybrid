@@ -41,15 +41,21 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_core::execution::{TemplateExecutor, template::ModelMetadata};
 //! use xybrid_core::ir::{Envelope, EnvelopeKind};
 //!
-//! let metadata: ModelMetadata = serde_json::from_str(&config_json)?;
+//! # let config_json = "{}";
+//! # let audio_bytes: Vec<u8> = vec![];
+//! let metadata: ModelMetadata = serde_json::from_str(config_json)?;
 //! let mut executor = TemplateExecutor::with_base_path("/path/to/model-dir");
 //!
 //! let input = Envelope::new(EnvelopeKind::Audio(audio_bytes));
-//! let output = executor.execute(&metadata, &input)?;
+//! let output = executor.execute(&metadata, &input, None)?;
+//! # let _ = output;
+//! # Ok(())
+//! # }
 //! ```
 
 // Template types (model_metadata.json schema)

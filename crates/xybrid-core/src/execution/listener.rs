@@ -7,7 +7,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use xybrid_core::execution::listener::{set_execution_listener, ExecutionEvent};
 //!
 //! set_execution_listener(|event| {

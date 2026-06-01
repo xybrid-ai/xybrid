@@ -1,9 +1,10 @@
-//! Safe ownership wrappers for llama.cpp's experimental mtmd multimodal API.
+//! Safe mtmd wrappers for llama.cpp vision-language models.
 //!
-//! The raw C ABI remains in `llama-cpp-sys`. This module owns mtmd lifetimes
-//! and error mapping so downstream crates can stay on a safe surface.
+//! This module owns the mtmd FFI boundary after the llama.cpp crate split.
+//! `xybrid-core` should only orchestrate prompts/images and call these safe
+//! handles; it must not reach into `llama-cpp-sys` directly.
 
-use std::ffi::{c_void, CStr};
+use std::ffi::CStr;
 use std::ptr;
 
 use crate::context::LlamaContext;
@@ -17,15 +18,24 @@ const MTMD_INPUT_CHUNK_TYPE_AUDIO: i32 = 2;
 
 /// Opaque handle to an mtmd multimodal projector context.
 ///
-/// The projector references the loaded llama text model, so it must be
-/// dropped before the corresponding [`LlamaModel`].
+/// The context owns projector-side state that references the loaded llama
+/// model, so callers must drop it before dropping the text model.
 pub struct MtmdContext {
-    ptr: *mut c_void,
+    ptr: *mut ffi::MtmdContextRaw,
 }
 
 impl MtmdContext {
-    /// Load an mtmd projector (`mmproj`) for a loaded llama text model.
-    pub fn load(
+    /// Test-only null handle for wrapper-state tests that never cross FFI.
+    #[cfg(any(test, debug_assertions))]
+    #[doc(hidden)]
+    pub fn test_stub() -> Self {
+        Self {
+            ptr: ptr::null_mut(),
+        }
+    }
+
+    /// Load an mtmd projector for `model` from `path`.
+    pub fn from_file(
         path: &str,
         model: &LlamaModel,
         use_gpu: bool,
@@ -34,7 +44,8 @@ impl MtmdContext {
         flash_attn: bool,
     ) -> LlamaResult<Self> {
         let c_path = ffi::cstring(path, "mtmd projector path")?;
-        // SAFETY: c_path outlives the call; model.as_ptr is live.
+        // SAFETY: c_path lives for the call; model.as_ptr() is a live
+        // llama_model handle. Null return is mapped below.
         let ptr = unsafe {
             ffi::mtmd_init_from_file(
                 &c_path,
@@ -54,7 +65,7 @@ impl MtmdContext {
     }
 
     #[inline]
-    pub(crate) fn as_ptr(&self) -> *mut c_void {
+    pub(crate) fn as_ptr(&self) -> *mut ffi::MtmdContextRaw {
         self.ptr
     }
 }
@@ -62,7 +73,7 @@ impl MtmdContext {
 impl Drop for MtmdContext {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
-            // SAFETY: pointer came from mtmd_init_from_file and is owned here.
+            // SAFETY: ptr came from mtmd_init_from_file and Drop runs once.
             unsafe { ffi::mtmd_free(self.ptr) };
             self.ptr = ptr::null_mut();
         }
@@ -73,62 +84,68 @@ unsafe impl Send for MtmdContext {}
 
 /// Opaque handle to an mtmd decoded bitmap.
 pub struct MtmdBitmap {
-    ptr: *mut c_void,
+    ptr: *mut ffi::MtmdBitmapRaw,
 }
 
 impl MtmdBitmap {
-    /// Decode encoded image bytes into an mtmd bitmap using the projector
-    /// context for model-specific decoding policy.
+    /// Decode encoded image bytes into an mtmd bitmap.
     pub fn from_encoded_bytes(ctx: &MtmdContext, bytes: &[u8]) -> LlamaResult<Self> {
         Self::from_encoded_bytes_with_context(ctx.as_ptr(), bytes)
     }
 
     /// Decode encoded image bytes without an mtmd context.
     ///
-    /// This is valid for image bytes; audio inputs need a context so mtmd can
+    /// Valid only for image bytes; audio inputs need a context so mtmd can
     /// read the model's expected sample rate.
     pub fn from_encoded_image_bytes(bytes: &[u8]) -> LlamaResult<Self> {
         Self::from_encoded_bytes_with_context(ptr::null_mut(), bytes)
     }
 
-    fn from_encoded_bytes_with_context(ctx: *mut c_void, bytes: &[u8]) -> LlamaResult<Self> {
+    fn from_encoded_bytes_with_context(
+        ctx: *mut ffi::MtmdContextRaw,
+        bytes: &[u8],
+    ) -> LlamaResult<Self> {
         if bytes.is_empty() {
             return Err(LlamaError::InvalidInput(
                 "encoded image bytes must not be empty".to_string(),
             ));
         }
-        // SAFETY: bytes points to bytes.len() readable bytes for the call.
+
+        // SAFETY: bytes pointer is valid for bytes.len(); ctx is either a
+        // live mtmd context or null for image-only decode.
         let ptr = unsafe { ffi::mtmd_bitmap_init_from_buf(ctx, bytes.as_ptr(), bytes.len()) };
         if ptr.is_null() {
             return Err(LlamaError::InvalidInput(
                 "mtmd failed to decode encoded image bytes".to_string(),
             ));
         }
+
         Ok(Self { ptr })
     }
 
     pub fn width(&self) -> u32 {
-        // SAFETY: ptr is a live bitmap handle.
-        unsafe { ffi::mtmd_bitmap_width(self.ptr) }
+        // SAFETY: self.ptr is live.
+        unsafe { ffi::mtmd_bitmap_get_nx(self.ptr) }
     }
 
     pub fn height(&self) -> u32 {
-        // SAFETY: ptr is a live bitmap handle.
-        unsafe { ffi::mtmd_bitmap_height(self.ptr) }
+        // SAFETY: self.ptr is live.
+        unsafe { ffi::mtmd_bitmap_get_ny(self.ptr) }
     }
 
     pub fn n_bytes(&self) -> usize {
-        // SAFETY: ptr is a live bitmap handle.
-        unsafe { ffi::mtmd_bitmap_n_bytes(self.ptr) }
+        // SAFETY: self.ptr is live.
+        unsafe { ffi::mtmd_bitmap_get_n_bytes(self.ptr) }
     }
 
     pub fn id(&self) -> Option<String> {
-        // SAFETY: ptr is a live bitmap handle; C string is copied.
-        let ptr = unsafe { ffi::mtmd_bitmap_id(self.ptr) };
+        // SAFETY: self.ptr is live; C string is owned by mtmd.
+        let ptr = unsafe { ffi::mtmd_bitmap_get_id(self.ptr) };
         if ptr.is_null() {
             return None;
         }
-        // SAFETY: mtmd returns a non-null NUL-terminated C string.
+        // SAFETY: mtmd returned a null-terminated string pointer valid for
+        // the bitmap lifetime.
         unsafe { CStr::from_ptr(ptr) }
             .to_str()
             .ok()
@@ -137,13 +154,13 @@ impl MtmdBitmap {
 
     pub fn set_id(&mut self, id: &str) -> LlamaResult<()> {
         let c_id = ffi::cstring(id, "image id")?;
-        // SAFETY: ptr is a live bitmap handle; c_id lives for the call.
+        // SAFETY: self.ptr is live; c_id lives for the call.
         unsafe { ffi::mtmd_bitmap_set_id(self.ptr, &c_id) };
         Ok(())
     }
 
     #[inline]
-    fn as_ptr(&self) -> *const c_void {
+    pub(crate) fn as_ptr(&self) -> *const ffi::MtmdBitmapRaw {
         self.ptr
     }
 }
@@ -151,7 +168,7 @@ impl MtmdBitmap {
 impl Drop for MtmdBitmap {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
-            // SAFETY: pointer came from mtmd_bitmap_init_from_buf and is owned here.
+            // SAFETY: ptr came from mtmd_bitmap_init_from_buf and Drop runs once.
             unsafe { ffi::mtmd_bitmap_free(self.ptr) };
             self.ptr = ptr::null_mut();
         }
@@ -160,7 +177,7 @@ impl Drop for MtmdBitmap {
 
 unsafe impl Send for MtmdBitmap {}
 
-/// Ordered summary of tokenized mtmd chunks.
+/// Summary of the mtmd chunk list produced for a multimodal prompt.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MtmdChunksSummary {
     pub total_chunks: usize,
@@ -174,14 +191,14 @@ pub struct MtmdChunksSummary {
     pub helper_total_n_pos: i32,
 }
 
-/// Owned mtmd input chunks produced by `mtmd_tokenize`.
+/// Owned mtmd input chunks.
 pub struct MtmdInputChunks {
-    ptr: *mut c_void,
+    ptr: *mut ffi::MtmdInputChunksRaw,
 }
 
 impl MtmdInputChunks {
     pub fn empty() -> LlamaResult<Self> {
-        // SAFETY: returns an owned pointer or null.
+        // SAFETY: allocates an owned chunk container.
         let ptr = unsafe { ffi::mtmd_input_chunks_init() };
         if ptr.is_null() {
             return Err(LlamaError::Internal(
@@ -202,7 +219,8 @@ impl MtmdInputChunks {
         let c_text = ffi::cstring(text, "mtmd prompt text")?;
         let mut bitmap_ptrs = bitmaps.iter().map(MtmdBitmap::as_ptr).collect::<Vec<_>>();
 
-        // SAFETY: all pointers are live for the call; chunks owns output.
+        // SAFETY: ctx/chunks are live; c_text and bitmap_ptrs live for
+        // the call; n_bitmaps matches bitmap_ptrs.len().
         let result = unsafe {
             ffi::mtmd_tokenize(
                 ctx.as_ptr(),
@@ -214,6 +232,7 @@ impl MtmdInputChunks {
                 bitmap_ptrs.len(),
             )
         };
+
         if result != 0 {
             let detail = match result {
                 -1 => "invalid arguments",
@@ -230,19 +249,19 @@ impl MtmdInputChunks {
     }
 
     pub fn summary(&self) -> LlamaResult<MtmdChunksSummary> {
-        // SAFETY: ptr is a live chunk list.
+        // SAFETY: self.ptr is live.
         let total_chunks = unsafe { ffi::mtmd_input_chunks_size(self.ptr) };
         let mut summary = MtmdChunksSummary {
             total_chunks,
-            // SAFETY: ptr is a live chunk list.
-            helper_total_tokens: unsafe { ffi::mtmd_helper_n_tokens(self.ptr) },
-            // SAFETY: ptr is a live chunk list.
-            helper_total_n_pos: unsafe { ffi::mtmd_helper_n_pos(self.ptr) },
+            // SAFETY: self.ptr is live.
+            helper_total_tokens: unsafe { ffi::mtmd_helper_get_n_tokens(self.ptr) },
+            // SAFETY: self.ptr is live.
+            helper_total_n_pos: unsafe { ffi::mtmd_helper_get_n_pos(self.ptr) },
             ..MtmdChunksSummary::default()
         };
 
         for idx in 0..total_chunks {
-            // SAFETY: idx is in range of the reported chunk count.
+            // SAFETY: self.ptr is live and idx < total_chunks.
             let chunk = unsafe { ffi::mtmd_input_chunks_get(self.ptr, idx) };
             if chunk.is_null() {
                 return Err(LlamaError::Internal(format!(
@@ -250,27 +269,66 @@ impl MtmdInputChunks {
                 )));
             }
 
-            // SAFETY: chunk is non-null and live.
-            match unsafe { ffi::mtmd_input_chunk_type(chunk) } {
+            // SAFETY: chunk is non-null and live for self's lifetime.
+            match unsafe { ffi::mtmd_input_chunk_get_type(chunk) } {
                 MTMD_INPUT_CHUNK_TYPE_TEXT => {
                     let mut n_tokens = 0usize;
-                    // SAFETY: n_tokens is writable; chunk is a live text chunk.
-                    let _ = unsafe { ffi::mtmd_input_chunk_tokens_text(chunk, &mut n_tokens) };
+                    // SAFETY: chunk is a text chunk; n_tokens pointer is writable.
+                    let tokens =
+                        unsafe { ffi::mtmd_input_chunk_get_tokens_text(chunk, &mut n_tokens) };
+                    if tokens.is_null() || n_tokens == 0 {
+                        return Err(LlamaError::Internal(format!(
+                            "mtmd text chunk at index {idx} has no tokens"
+                        )));
+                    }
                     summary.text_chunks += 1;
                     summary.text_tokens += n_tokens;
                 }
                 MTMD_INPUT_CHUNK_TYPE_IMAGE => {
-                    summary.image_chunks += 1;
-                    // SAFETY: chunk is a live image chunk.
-                    let image_tokens = unsafe { ffi::mtmd_input_chunk_tokens_image(chunk) };
-                    if !image_tokens.is_null() {
-                        // SAFETY: image_tokens is a live image-token handle.
-                        let image_tokens_count =
-                            unsafe { ffi::mtmd_image_tokens_n_tokens(image_tokens) };
-                        let image_n_pos = unsafe { ffi::mtmd_image_tokens_n_pos(image_tokens) };
-                        summary.image_tokens += image_tokens_count;
-                        summary.image_n_pos += image_n_pos.max(0) as usize;
+                    // SAFETY: chunk is an image chunk.
+                    let image_tokens = unsafe { ffi::mtmd_input_chunk_get_tokens_image(chunk) };
+                    if image_tokens.is_null() {
+                        return Err(LlamaError::Internal(format!(
+                            "mtmd image chunk at index {idx} has no image tokens"
+                        )));
                     }
+
+                    // SAFETY: chunk/image_tokens are live.
+                    let chunk_tokens = unsafe { ffi::mtmd_input_chunk_get_n_tokens(chunk) };
+                    let image_tokens_count =
+                        unsafe { ffi::mtmd_image_tokens_get_n_tokens(image_tokens) };
+                    if chunk_tokens == 0 || image_tokens_count == 0 {
+                        return Err(LlamaError::Internal(format!(
+                            "mtmd image chunk at index {idx} has zero tokens"
+                        )));
+                    }
+
+                    // SAFETY: chunk/image_tokens are live.
+                    let chunk_n_pos = unsafe { ffi::mtmd_input_chunk_get_n_pos(chunk) };
+                    let image_n_pos = unsafe { ffi::mtmd_image_tokens_get_n_pos(image_tokens) };
+                    if chunk_n_pos <= 0 || image_n_pos <= 0 {
+                        return Err(LlamaError::Internal(format!(
+                            "mtmd image chunk at index {idx} has no decoder positions"
+                        )));
+                    }
+
+                    // SAFETY: image_tokens_count > 0, so last index is valid.
+                    let last_pos = unsafe {
+                        ffi::mtmd_image_tokens_get_decoder_pos(
+                            image_tokens,
+                            0,
+                            image_tokens_count - 1,
+                        )
+                    };
+                    if last_pos.x == 0 && last_pos.y == 0 && image_tokens_count > 1 {
+                        return Err(LlamaError::Internal(format!(
+                            "mtmd image chunk at index {idx} lacks spatial decoder metadata"
+                        )));
+                    }
+
+                    summary.image_chunks += 1;
+                    summary.image_tokens += image_tokens_count;
+                    summary.image_n_pos += image_n_pos as usize;
                 }
                 MTMD_INPUT_CHUNK_TYPE_AUDIO => {
                     summary.audio_chunks += 1;
@@ -286,30 +344,8 @@ impl MtmdInputChunks {
         Ok(summary)
     }
 
-    pub fn validate_for_generation(&self) -> LlamaResult<MtmdChunksSummary> {
-        let summary = self.summary()?;
-
-        if summary.total_chunks == 0 {
-            return Err(LlamaError::Internal(
-                "mtmd produced no prompt chunks for generation".to_string(),
-            ));
-        }
-        if summary.helper_total_tokens == 0 {
-            return Err(LlamaError::Internal(
-                "mtmd prompt chunks contain no tokens for generation".to_string(),
-            ));
-        }
-        if summary.image_chunks > 0 && (summary.image_tokens == 0 || summary.image_n_pos == 0) {
-            return Err(LlamaError::Internal(
-                "mtmd image chunks contain no image token positions for generation".to_string(),
-            ));
-        }
-
-        Ok(summary)
-    }
-
     #[inline]
-    fn as_ptr(&self) -> *const c_void {
+    pub(crate) fn as_ptr(&self) -> *const ffi::MtmdInputChunksRaw {
         self.ptr
     }
 }
@@ -317,7 +353,7 @@ impl MtmdInputChunks {
 impl Drop for MtmdInputChunks {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
-            // SAFETY: pointer came from mtmd_input_chunks_init and is owned here.
+            // SAFETY: ptr came from mtmd_input_chunks_init and Drop runs once.
             unsafe { ffi::mtmd_input_chunks_free(self.ptr) };
             self.ptr = ptr::null_mut();
         }
@@ -326,8 +362,12 @@ impl Drop for MtmdInputChunks {
 
 unsafe impl Send for MtmdInputChunks {}
 
-/// Prefill mtmd text/image chunks into the llama context.
-pub fn helper_eval_chunks(
+/// Evaluate mtmd text/image chunks into `lctx`, returning the new `n_past`.
+///
+/// Upstream documents `mtmd_helper_eval_chunks()` as not thread-safe, so
+/// callers must hold the serialized llama context lock around this call.
+#[allow(clippy::too_many_arguments)]
+pub fn mtmd_helper_eval_chunks(
     ctx: &MtmdContext,
     lctx: &LlamaContext,
     chunks: &MtmdInputChunks,
@@ -337,7 +377,7 @@ pub fn helper_eval_chunks(
     logits_last: bool,
 ) -> LlamaResult<i32> {
     let mut new_n_past = n_past;
-    // SAFETY: caller serializes access to lctx; all handles are live.
+    // SAFETY: handles are live; new_n_past is writable for the call.
     let result = unsafe {
         ffi::mtmd_helper_eval_chunks(
             ctx.as_ptr(),

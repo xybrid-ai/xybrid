@@ -10,28 +10,34 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `initialize_telemetry_once`, `parse_resource_telemetry_mode`
+// These functions are ignored because they are not marked as `pub`: `initialize_telemetry_once`, `parse_resource_telemetry_mode`, `resolve_ingest_endpoint`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridSdkClient>>
 abstract class XybridSdkClient implements RustOpaqueInterface {
-  static void configurePlatformTelemetry({
-    required String apiKey,
-    String? ingestUrl,
-    String? resourceTelemetry,
-  }) => XybridRustLib.instance.api
-      .crateApiSdkClientXybridSdkClientConfigurePlatformTelemetry(
-        apiKey: apiKey,
-        ingestUrl: ingestUrl,
-        resourceTelemetry: resourceTelemetry,
-      );
+  /// Start the platform telemetry exporter from the bundled
+  /// `Xybrid.init(apiKey: ...)` path.
+  ///
+  /// When `ingest_url` is absent or blank the exporter targets
+  /// [`xybrid_sdk::telemetry::DEFAULT_INGEST_URL`], so providing only an
+  /// API key is enough to light up the dashboard — the caller does not
+  /// need to know the ingest endpoint. Shares the process-wide once-guard
+  /// with [`Self::init_telemetry`]; whichever path runs first wins.
+  static void configurePlatformTelemetry(
+          {required String apiKey,
+          String? ingestUrl,
+          String? resourceTelemetry}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientConfigurePlatformTelemetry(
+              apiKey: apiKey,
+              ingestUrl: ingestUrl,
+              resourceTelemetry: resourceTelemetry);
 
   static void flushPlatformTelemetry() => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientFlushPlatformTelemetry();
 
-  static void initSdkCacheDir({required String cacheDir}) => XybridRustLib
-      .instance
-      .api
-      .crateApiSdkClientXybridSdkClientInitSdkCacheDir(cacheDir: cacheDir);
+  static void initSdkCacheDir({required String cacheDir}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientInitSdkCacheDir(cacheDir: cacheDir);
 
   /// Initialize the platform telemetry exporter for this process.
   ///
@@ -51,24 +57,19 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   ///
   /// Sync because `init_platform_telemetry` is sync; the HTTP exporter
   /// spins up its own background thread for batched sends.
-  static void initTelemetry({
-    required String endpoint,
-    required String apiKey,
-  }) =>
+  static void initTelemetry(
+          {required String endpoint, required String apiKey}) =>
       XybridRustLib.instance.api.crateApiSdkClientXybridSdkClientInitTelemetry(
-        endpoint: endpoint,
-        apiKey: apiKey,
-      );
+          endpoint: endpoint, apiKey: apiKey);
 
   /// Check if a model is cached locally (extracted and ready to use).
   ///
   /// This is a pure filesystem check — no network access required.
   /// Returns `true` if the model has been downloaded and extracted
   /// at `~/.xybrid/cache/extracted/{model_id}/model_metadata.json`.
-  static bool isModelCached({required String modelId}) => XybridRustLib
-      .instance
-      .api
-      .crateApiSdkClientXybridSdkClientIsModelCached(modelId: modelId);
+  static bool isModelCached({required String modelId}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientIsModelCached(modelId: modelId);
 
   /// Whether [`Self::init_telemetry`] has run at least once in this
   /// process. Reflects the authoritative process-wide state, not any
@@ -76,11 +77,18 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   static bool isTelemetryInitialized() => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientIsTelemetryInitialized();
 
+  /// Return the xybrid runtime features compiled into this native library.
+  ///
+  /// Studio uses this to decide whether image upload should be enabled for
+  /// VisionLanguage models. Keeping the answer in Rust avoids stale Dart-side
+  /// assumptions about Cargo features.
+  static List<String> runtimeFeatures() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientRuntimeFeatures();
+
   static void setApiKey({required String apiKey}) => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientSetApiKey(apiKey: apiKey);
 
   static void setGatewayUrl({required String gatewayUrl}) => XybridRustLib
-      .instance
-      .api
+      .instance.api
       .crateApiSdkClientXybridSdkClientSetGatewayUrl(gatewayUrl: gatewayUrl);
 }

@@ -139,6 +139,58 @@ fn decode_hard_error(code: i32, n_past_in: usize) -> LlamaError {
     }
 }
 
+#[cfg(feature = "vision")]
+fn decode_current_logits_error(code: i32, n_past: usize) -> LlamaError {
+    let detail = match code {
+        -1 => "invalid arguments (null context/model/output, non-positive max_tokens, or negative n_past)",
+        -2 => "sampler chain creation failed",
+        -3 => "llama_decode failed while continuing generation from current logits",
+        -4 => "prefilled context or generated continuation exceeds context window",
+        -5 => "no current logits available; caller must prefill with logits_last=true first",
+        _ => "unknown",
+    };
+    LlamaError::DecodeFailed {
+        code,
+        n_past_in: n_past,
+        detail: detail.to_string(),
+    }
+}
+
+/// Shared prelude for the generation entry points: rejects empty input,
+/// tokenises the stop sequences, and allocates the output buffer. Returns
+/// the owned `(stop_tokens, stop_lens, output_tokens)` triple; the caller
+/// keeps them alive for the FFI call and derives raw pointers via
+/// [`stop_array_ptrs`].
+fn prepare_generation(
+    model: &LlamaModel,
+    input_tokens: &[i32],
+    max_tokens: usize,
+    stop_sequences: &[String],
+) -> LlamaResult<(Vec<i32>, Vec<c_int>, Vec<i32>)> {
+    if input_tokens.is_empty() {
+        return Err(LlamaError::InvalidInput("empty input tokens".to_string()));
+    }
+    let (stop_tokens, stop_lens) = build_stop_token_arrays(model, stop_sequences)?;
+    let output_tokens = vec![0i32; max_tokens];
+    Ok((stop_tokens, stop_lens, output_tokens))
+}
+
+/// Raw `(seqs, lens, count)` the C generate functions expect for the
+/// stop-sequence arrays. An empty stop list passes `null / null / 0` (the
+/// wrapper reads that as "no stop sequences"); a populated list passes the
+/// owned buffers' pointers and the *filtered* count.
+fn stop_array_ptrs(stop_tokens: &[i32], stop_lens: &[c_int]) -> (*const i32, *const c_int, c_int) {
+    if stop_lens.is_empty() {
+        (ptr::null(), ptr::null(), 0)
+    } else {
+        (
+            stop_tokens.as_ptr(),
+            stop_lens.as_ptr(),
+            stop_lens.len() as c_int,
+        )
+    }
+}
+
 /// Autoregressive generation without streaming. Returns the generated
 /// token IDs.
 ///
@@ -159,22 +211,9 @@ pub fn generate_with_stops(
     repeat_penalty: f32,
     stop_sequences: &[String],
 ) -> LlamaResult<Vec<i32>> {
-    if input_tokens.is_empty() {
-        return Err(LlamaError::InvalidInput("empty input tokens".to_string()));
-    }
-
-    let (stop_tokens, stop_lens) = build_stop_token_arrays(model, stop_sequences)?;
-    let mut output_tokens = vec![0i32; max_tokens];
-
-    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = if stop_lens.is_empty() {
-        (ptr::null(), ptr::null(), 0)
-    } else {
-        (
-            stop_tokens.as_ptr(),
-            stop_lens.as_ptr(),
-            stop_lens.len() as c_int,
-        )
-    };
+    let (stop_tokens, stop_lens, mut output_tokens) =
+        prepare_generation(model, input_tokens, max_tokens, stop_sequences)?;
+    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
 
     // SAFETY: all pointers checked / sourced from owned buffers; sizes
     // honest; ctx + model live for the call.
@@ -231,22 +270,9 @@ pub fn generate_streaming<F>(
 where
     F: FnMut(i32, &str) -> Result<(), Box<dyn StdError + Send + Sync>>,
 {
-    if input_tokens.is_empty() {
-        return Err(LlamaError::InvalidInput("empty input tokens".to_string()));
-    }
-
-    let (stop_tokens, stop_lens) = build_stop_token_arrays(model, stop_sequences)?;
-    let mut output_tokens = vec![0i32; max_tokens];
-
-    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = if stop_lens.is_empty() {
-        (ptr::null(), ptr::null(), 0)
-    } else {
-        (
-            stop_tokens.as_ptr(),
-            stop_lens.as_ptr(),
-            stop_lens.len() as c_int,
-        )
-    };
+    let (stop_tokens, stop_lens, mut output_tokens) =
+        prepare_generation(model, input_tokens, max_tokens, stop_sequences)?;
+    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
 
     let mut streaming_ctx = StreamingContext {
         callback: &mut on_token,
@@ -303,12 +329,12 @@ where
 
 /// Continue generation from logits already present in the llama context.
 ///
-/// Multimodal llama.cpp prefills prompt/image chunks through mtmd helper eval,
-/// not through a flat text-token array. After helper eval leaves logits for
-/// the last prompt position, this samples from those logits and continues
-/// regular autoregressive decoding.
-#[cfg(feature = "vision")]
+/// Multimodal llama.cpp prefills prompt/image chunks through mtmd helper
+/// eval, not through a flat text-token array. After helper eval leaves
+/// logits for the last prompt position, this samples from those logits and
+/// continues regular autoregressive decoding.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "vision")]
 pub fn generate_from_current_logits_streaming<F>(
     ctx: &LlamaContext,
     model: &LlamaModel,
@@ -332,27 +358,19 @@ where
     }
 
     let (stop_tokens, stop_lens) = build_stop_token_arrays(model, stop_sequences)?;
+    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
     let mut output_tokens = vec![0i32; max_tokens];
-
-    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = if stop_lens.is_empty() {
-        (ptr::null(), ptr::null(), 0)
-    } else {
-        (
-            stop_tokens.as_ptr(),
-            stop_lens.as_ptr(),
-            stop_lens.len() as c_int,
-        )
-    };
 
     let mut streaming_ctx = StreamingContext {
         callback: &mut on_token,
         error: None,
     };
+
     let callback: Option<TokenCallback> = Some(streaming_trampoline::<F>);
 
-    // SAFETY: ctx + model are live; output buffer is writable; stop arrays
-    // and callback state live for the duration of the C call. The caller
-    // prepared current logits through mtmd helper eval.
+    // SAFETY: ctx/model are live; output buffer and stop arrays are owned
+    // by this frame; user_data points to a stack-pinned StreamingContext
+    // that outlives the C call.
     let result = unsafe {
         ffi::generate_from_current_logits(
             ctx.as_ptr(),
@@ -375,19 +393,7 @@ where
     };
 
     if (-5..=-1).contains(&result) {
-        let detail = match result {
-            -1 => "invalid arguments (null context/model/output, non-positive max_tokens, or negative n_past)",
-            -2 => "sampler chain creation failed",
-            -3 => "llama_decode failed while continuing generation from current logits",
-            -4 => "prefilled context or generated continuation exceeds context window",
-            -5 => "no current logits available; caller must prefill with logits_last=true first",
-            _ => "unknown",
-        };
-        return Err(LlamaError::DecodeFailed {
-            code: result,
-            n_past_in: n_past,
-            detail: detail.to_string(),
-        });
+        return Err(decode_current_logits_error(result, n_past));
     }
 
     if let Some(err) = streaming_ctx.error.take() {
@@ -402,37 +408,6 @@ where
 
     output_tokens.truncate(n_generated);
     Ok((output_tokens, stopped_by_callback))
-}
-
-/// Continue generation from current logits without observing streaming chunks.
-#[cfg(feature = "vision")]
-#[allow(clippy::too_many_arguments)]
-pub fn generate_from_current_logits(
-    ctx: &LlamaContext,
-    model: &LlamaModel,
-    max_tokens: usize,
-    temperature: f32,
-    top_p: f32,
-    min_p: f32,
-    top_k: usize,
-    repeat_penalty: f32,
-    stop_sequences: &[String],
-    n_past: usize,
-) -> LlamaResult<Vec<i32>> {
-    let (tokens, _stopped_by_callback) = generate_from_current_logits_streaming(
-        ctx,
-        model,
-        max_tokens,
-        temperature,
-        top_p,
-        min_p,
-        top_k,
-        repeat_penalty,
-        stop_sequences,
-        n_past,
-        |_token_id, _token_text| Ok(()),
-    )?;
-    Ok(tokens)
 }
 
 /// Render role/content slices through `model`'s built-in chat template.
@@ -584,6 +559,27 @@ mod tests {
 
     fn abort_callback(_token_id: i32, _text: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
         Err(Box::new(MarkerError("marker preserved through trampoline")))
+    }
+
+    #[test]
+    fn stop_array_ptrs_null_when_empty_and_filtered_count_otherwise() {
+        // Empty stop list -> null/null/0; the wrapper reads that as "no
+        // stop sequences". Shared by both generate paths after the prelude
+        // extraction, so this guards the null sentinel for both.
+        let (seqs, lens, count) = super::stop_array_ptrs(&[], &[]);
+        assert!(seqs.is_null());
+        assert!(lens.is_null());
+        assert_eq!(count, 0);
+
+        // Populated -> pointers into the owned buffers + the *filtered*
+        // count (number of stop sequences that tokenised to >0 tokens),
+        // not the flattened token count.
+        let stop_tokens = vec![1i32, 2, 3];
+        let stop_lens = vec![2 as std::os::raw::c_int, 1];
+        let (seqs, lens, count) = super::stop_array_ptrs(&stop_tokens, &stop_lens);
+        assert_eq!(seqs, stop_tokens.as_ptr());
+        assert_eq!(lens, stop_lens.as_ptr());
+        assert_eq!(count, 2);
     }
 
     #[test]

@@ -28,6 +28,16 @@ void main() async {
 }
 ```
 
+无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.run()` / `pipeline.run()` 调用便会自动上报执行轨迹：
+
+```dart
+await Xybrid.init(
+  apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+);
+```
+
+未提供密钥时，遥测处于禁用状态，首次推理会打印一条一次性提示指向控制台（可通过环境变量 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。若使用自托管控制台，请额外传入 `ingestUrl`；若需 CPU/内存采样，请传入 `resourceTelemetry`。
+
 ## 核心模式：加载 → 运行
 
 所有推理遵循相同模式：
@@ -107,7 +117,12 @@ SDK 的主入口。
 
 ```dart
 class Xybrid {
-  static Future<void> init();
+  static Future<void> init({
+    String? apiKey,            // 鉴权遥测；省略则匿名运行
+    String? gatewayUrl,        // 覆盖 LLM 网关 URL
+    String? ingestUrl,         // 覆盖遥测上报 URL（自托管）
+    String? resourceTelemetry, // 启用 CPU/内存采样
+  });
   static bool get isInitialized;
   static void setApiKey(String apiKey);
 

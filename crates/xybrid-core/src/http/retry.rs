@@ -171,9 +171,19 @@ pub trait RetryableError {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() {
+/// use std::time::Duration;
 /// use xybrid_core::http::{RetryPolicy, with_retry, RetryableError};
 ///
+/// #[derive(Debug)]
+/// struct MyError;
+/// impl RetryableError for MyError {
+///     fn is_retryable(&self) -> bool { true }
+///     fn retry_after(&self) -> Option<Duration> { None }
+/// }
+///
+/// # fn make_http_request() -> Result<String, MyError> { Ok("ok".into()) }
 /// let policy = RetryPolicy::default();
 /// let result = with_retry(&policy, None, || {
 ///     make_http_request()
@@ -183,6 +193,7 @@ pub trait RetryableError {
 ///     Ok(response) => println!("Success: {:?}", response),
 ///     Err(e) => eprintln!("Failed: {:?}", e),
 /// }
+/// # }
 /// ```
 pub fn with_retry<T, E, F>(
     policy: &RetryPolicy,

@@ -133,8 +133,23 @@ pub enum SdkError {
 /// Result type for SDK operations.
 pub type SdkResult<T> = Result<T, SdkError>;
 
-impl xybrid_core::http::RetryableError for SdkError {
-    fn is_retryable(&self) -> bool {
+impl SdkError {
+    /// Whether retrying the operation that produced this error could
+    /// succeed without the caller changing anything.
+    ///
+    /// Transient failures (`NetworkError`, `RateLimited`, `Timeout`,
+    /// `Offline`) are retryable; everything else — including
+    /// `CircuitOpen`, `ConfigError`, `ModelNotFound`, `LoadError`,
+    /// `InferenceError`, and `AbortedForCloudFallback` — is not. `Offline`
+    /// is retryable only across *different* registry URLs (a fallback
+    /// registry may be reachable when the primary isn't); within a single
+    /// URL the retry loop short-circuits (see `registry_client`).
+    ///
+    /// This is the inherent form of the [`xybrid_core::http::RetryableError`]
+    /// trait method, exposed directly on `SdkError` so callers (and the
+    /// FFI / UniFFI layers) can query retryability without importing the
+    /// trait. The trait impl forwards here.
+    pub fn is_retryable(&self) -> bool {
         match self {
             // Retryable errors (transient failures)
             SdkError::NetworkError(_) => true,
@@ -168,7 +183,14 @@ impl xybrid_core::http::RetryableError for SdkError {
         }
     }
 
-    fn retry_after(&self) -> Option<std::time::Duration> {
+    /// The minimum delay a caller should wait before retrying, when the
+    /// error itself dictates one. Only `RateLimited` carries a
+    /// server-specified backoff; every other variant returns `None`
+    /// (the caller picks its own backoff if [`Self::is_retryable`]).
+    ///
+    /// Inherent form of [`xybrid_core::http::RetryableError::retry_after`];
+    /// the trait impl forwards here.
+    pub fn retry_after(&self) -> Option<std::time::Duration> {
         match self {
             SdkError::RateLimited { retry_after_secs } => {
                 Some(std::time::Duration::from_secs(*retry_after_secs))
@@ -208,6 +230,16 @@ where
             hint,
         },
         other => SdkError::InferenceError(format!("{context}: {other}")),
+    }
+}
+
+impl xybrid_core::http::RetryableError for SdkError {
+    fn is_retryable(&self) -> bool {
+        SdkError::is_retryable(self)
+    }
+
+    fn retry_after(&self) -> Option<std::time::Duration> {
+        SdkError::retry_after(self)
     }
 }
 
@@ -674,20 +706,30 @@ struct ModelHandle {
 ///
 /// # Example (Recommended - Registry-based)
 ///
-/// ```ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # use xybrid_sdk::ModelLoader;
+/// # use xybrid_sdk::ir::Envelope;
+/// # let envelope: Envelope = unimplemented!();
 /// // Load using registry (recommended - auto-resolves to best variant)
 /// let loader = ModelLoader::from_registry("kokoro-82m");
 /// let model = loader.load()?;
-/// let result = model.run(&envelope)?;
+/// let result = model.run(&envelope, None)?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Example (With progress callback)
 ///
-/// ```ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # use xybrid_sdk::ModelLoader;
 /// let loader = ModelLoader::from_registry("kokoro-82m");
 /// let model = loader.load_with_progress(|progress| {
 ///     println!("Download: {:.1}%", progress * 100.0);
 /// })?;
+/// # Ok(())
+/// # }
 /// ```
 /// GGUF quantization preference order for automatic selection.
 /// Q4_K_M is the default — best quality/size tradeoff for edge devices.
@@ -745,9 +787,13 @@ impl ModelLoader {
     /// caching and SHA256 verification.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_registry("kokoro-82m");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_registry(id: &str) -> Self {
         Self {
@@ -760,9 +806,13 @@ impl ModelLoader {
     /// Create loader from registry with explicit platform.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_registry_with_platform("kokoro-82m", "macos-arm64");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_registry_with_platform(id: &str, platform: &str) -> Self {
         Self {
@@ -869,9 +919,13 @@ impl ModelLoader {
     /// `SdkError::ConfigError` if the feature is not enabled.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_huggingface("xybrid-ai/kokoro-82m");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_huggingface(repo: &str) -> Self {
         Self {
@@ -884,9 +938,13 @@ impl ModelLoader {
     /// Create loader from a HuggingFace Hub repository with explicit revision.
     ///
     /// # Example
-    /// ```ignore
-    /// let loader = ModelLoader::from_huggingface_with_revision("xybrid-ai/kokoro-82m", "v1.0")?;
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// let loader = ModelLoader::from_huggingface_with_revision("xybrid-ai/kokoro-82m", "v1.0");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_huggingface_with_revision(repo: &str, revision: &str) -> Self {
         Self {
@@ -902,9 +960,13 @@ impl ModelLoader {
     /// Without a variant, defaults to Q4_K_M for GGUF repos.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_huggingface_parsed("LiquidAI/LFM2.5-350M-GGUF:Q8_0");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_huggingface_parsed(input: &str) -> Self {
         let source = ModelSource::parse_huggingface(input);
@@ -951,10 +1013,15 @@ impl ModelLoader {
     /// Only applies to registry-based loading (downloads from HuggingFace).
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// # let loader: ModelLoader = unimplemented!();
     /// let model = loader.load_with_progress(|progress| {
     ///     println!("Download: {:.1}%", progress * 100.0);
     /// })?;
+    /// # Ok(())
+    /// # }
     /// ```
     #[allow(deprecated)]
     pub fn load_with_progress<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
@@ -1461,11 +1528,17 @@ impl ModelLoader {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # use xybrid_sdk::{ModelLoader, StreamConfig};
+/// # use xybrid_sdk::ir::Envelope;
+/// # let loader: ModelLoader = unimplemented!();
+/// # let audio_envelope: Envelope = unimplemented!();
+/// # let samples: Vec<f32> = vec![];
 /// let model = loader.load()?;
 ///
 /// // Batch inference
-/// let result = model.run(&audio_envelope)?;
+/// let result = model.run(&audio_envelope, None)?;
 /// println!("Transcription: {}", result.unwrap_text());
 ///
 /// // Streaming inference (if supported)
@@ -1477,6 +1550,8 @@ impl ModelLoader {
 ///
 /// // Cleanup
 /// model.unload()?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct XybridModel {
     handle: Arc<RwLock<ModelHandle>>,
@@ -1559,13 +1634,18 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::{ModelLoader, ConversationContext};
+    /// # let loader: ModelLoader = unimplemented!();
     /// let model = loader.load()?;
     /// if model.is_llm() {
     ///     // Create conversation context for multi-turn chat
     ///     let mut ctx = ConversationContext::new();
     ///     // ... manage conversation history
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn is_llm(&self) -> bool {
         self.handle
@@ -1600,7 +1680,9 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use xybrid_sdk::XybridModel;
+    /// # let model: XybridModel = unimplemented!();
     /// if let Some(voices) = model.voices() {
     ///     for voice in voices {
     ///         println!("{}: {} ({})", voice.id, voice.name, voice.language.unwrap_or_default());
@@ -1653,12 +1735,19 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// # use xybrid_sdk::ir::Envelope;
+    /// # let loader: ModelLoader = unimplemented!();
+    /// # let envelope: Envelope = unimplemented!();
     /// let model = loader.load()?;
     /// model.warmup()?;  // Pre-load model
     ///
     /// // First inference is now fast
-    /// let result = model.run(&envelope)?;
+    /// let result = model.run(&envelope, None)?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn warmup(&self) -> SdkResult<()> {
         use xybrid_core::ir::EnvelopeKind;
@@ -1749,7 +1838,10 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// # let loader: ModelLoader = unimplemented!();
     /// let model = loader.load()?;
     ///
     /// // Start warmup in background
@@ -1761,6 +1853,8 @@ impl XybridModel {
     ///
     /// // Wait for warmup if needed
     /// warmup_handle.await??;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn warmup_async(&self) -> SdkResult<()> {
         let handle = self.handle.clone();
@@ -1889,6 +1983,7 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
+        crate::telemetry::maybe_emit_dev_nudge();
         let start = Instant::now();
         // Begin a resource-telemetry scope for this run. When
         // `resource_telemetry_mode()` is `Off` the guard is a no-op; otherwise
@@ -1983,10 +2078,12 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use xybrid_sdk::{ModelLoader, ConversationContext, Envelope, EnvelopeKind, MessageRole};
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_sdk::{ModelLoader, ConversationContext};
+    /// use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
     ///
-    /// let model = ModelLoader::from_registry("gemma-3-1b")?.load()?;
+    /// let model = ModelLoader::from_registry("gemma-3-1b").load()?;
     /// let mut ctx = ConversationContext::new();
     ///
     /// // Add user message to context
@@ -1995,12 +2092,14 @@ impl XybridModel {
     /// ctx.push(user_input.clone());
     ///
     /// // Run with context (model sees the full history)
-    /// let result = model.run_with_context(&user_input, &ctx)?;
+    /// let result = model.run_with_context(&user_input, &ctx, None)?;
     ///
     /// // Add assistant response to context
     /// ctx.push(result.envelope().clone());
     ///
     /// println!("{}", result.text().unwrap_or_default());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_with_context(
         &self,
@@ -2097,7 +2196,11 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::{XybridModel, ConversationContext};
+    /// # use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
+    /// # let model: XybridModel = unimplemented!();
     /// let mut ctx = ConversationContext::new();
     ///
     /// // Add user message and run with streaming
@@ -2105,7 +2208,7 @@ impl XybridModel {
     ///     .with_role(MessageRole::User);
     /// ctx.push(input.clone());
     ///
-    /// let result = model.run_streaming_with_context(&input, &ctx, |token| {
+    /// let result = model.run_streaming_with_context(&input, &ctx, None, |token| {
     ///     print!("{}", token.token);
     ///     std::io::Write::flush(&mut std::io::stdout())?;
     ///     Ok(())
@@ -2113,6 +2216,8 @@ impl XybridModel {
     ///
     /// // Add assistant response to context
     /// ctx.push(result.envelope().clone());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_streaming_with_context<F>(
         &self,
@@ -2275,13 +2380,20 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::XybridModel;
+    /// # use xybrid_sdk::ir::Envelope;
+    /// # let model: XybridModel = unimplemented!();
+    /// # let envelope: Envelope = unimplemented!();
     /// // Works for both LLM and non-LLM models
-    /// let result = model.run_streaming(&envelope, |token| {
+    /// let result = model.run_streaming(&envelope, None, |token| {
     ///     print!("{}", token.token);
     ///     std::io::Write::flush(&mut std::io::stdout())?;
     ///     Ok(())
     /// })?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_streaming<F>(
         &self,
@@ -2529,10 +2641,15 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _example() {
+    /// # use xybrid_sdk::{XybridModel, StreamEvent};
+    /// # use xybrid_sdk::ir::Envelope;
+    /// # let model: XybridModel = unimplemented!();
+    /// # let envelope: Envelope = unimplemented!();
     /// use tokio_stream::StreamExt;
     ///
-    /// let mut stream = model.run_stream(envelope);
+    /// let mut stream = model.run_stream(envelope, None);
     /// while let Some(event) = stream.next().await {
     ///     match event {
     ///         StreamEvent::Token(token) => print!("{}", token.token),
@@ -2540,6 +2657,7 @@ impl XybridModel {
     ///         StreamEvent::Error(e) => eprintln!("Error: {}", e),
     ///     }
     /// }
+    /// # }
     /// ```
     pub fn run_stream(
         &self,
@@ -2714,6 +2832,7 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
+        crate::telemetry::maybe_emit_dev_nudge();
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
         let version = self.version.clone();
@@ -2786,7 +2905,11 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::{XybridModel, StreamConfig};
+    /// # let model: XybridModel = unimplemented!();
+    /// # let audio_samples: Vec<f32> = vec![];
     /// let stream = model.stream(StreamConfig::with_vad())?;
     ///
     /// // Feed audio chunks
@@ -2799,6 +2922,8 @@ impl XybridModel {
     ///
     /// // Get final transcript
     /// let transcript = stream.flush()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn stream(&self, config: StreamConfig) -> SdkResult<XybridStream> {
         if !self.supports_streaming {
@@ -2858,6 +2983,47 @@ impl Clone for XybridModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The inherent `SdkError::is_retryable` / `retry_after` accessors and
+    /// the `RetryableError` trait impl must agree for every variant — the
+    /// trait forwards to the inherent methods, so a divergence would be a
+    /// refactor slip. Covers the four retryable variants, a representative
+    /// non-retryable one, and the `RateLimited` retry-after passthrough.
+    #[test]
+    fn inherent_and_trait_retryability_agree() {
+        use xybrid_core::http::RetryableError;
+
+        let cases = [
+            (SdkError::NetworkError("x".into()), true),
+            (
+                SdkError::RateLimited {
+                    retry_after_secs: 5,
+                },
+                true,
+            ),
+            (SdkError::Timeout { timeout_ms: 100 }, true),
+            (SdkError::Offline("x".into()), true),
+            (SdkError::CircuitOpen("x".into()), false),
+            (SdkError::NotLoaded, false),
+            (SdkError::ConfigError("x".into()), false),
+        ];
+        for (err, expected) in &cases {
+            assert_eq!(err.is_retryable(), *expected, "inherent for {err:?}");
+            assert_eq!(
+                RetryableError::is_retryable(err),
+                *expected,
+                "trait for {err:?}"
+            );
+        }
+
+        // Only RateLimited carries a server-specified backoff.
+        let rl = SdkError::RateLimited {
+            retry_after_secs: 7,
+        };
+        assert_eq!(rl.retry_after(), Some(std::time::Duration::from_secs(7)));
+        assert_eq!(rl.retry_after(), RetryableError::retry_after(&rl));
+        assert_eq!(SdkError::NotLoaded.retry_after(), None);
+    }
 
     #[test]
     fn streaming_execution_error_preserves_typed_cloud_fallback_abort() {

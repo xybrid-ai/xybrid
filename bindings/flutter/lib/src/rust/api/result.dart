@@ -114,7 +114,10 @@ class FfiStageLatency {
   final String stageId;
   final int latencyMs;
 
-  const FfiStageLatency({required this.stageId, required this.latencyMs});
+  const FfiStageLatency({
+    required this.stageId,
+    required this.latencyMs,
+  });
 
   @override
   int get hashCode => stageId.hashCode ^ latencyMs.hashCode;

@@ -130,58 +130,8 @@ jobs:
       - name: Check vision build without model artifacts
         run: cargo check -p xybrid-sdk --features ${{ matrix.features }}
 
-  # Skeleton-tier verification (Phase 4 of the `llamacpp-crate-split` epic).
-  # Confirms that `llm-llamacpp` without `-runtime` compiles on a runner
-  # without cmake, without the llama.cpp submodule, without a C++ toolchain.
-  # Brief §4.6 pass criterion: completes in < 30 s.
-  #
-  # NOTE on scope: this job is intentionally **package-scoped to xybrid-core**.
-  # `cargo check --workspace --features xybrid-core/llm-llamacpp` would
-  # cascade through `bindings/flutter/rust`'s target-specific deps (which
-  # unconditionally activate `xybrid-sdk/platform-*` on each host) and pull
-  # in the runtime tier on macOS/Linux Flutter cross-builds. The brief gate
-  # is about whether `llm-llamacpp` itself is a true skeleton feature on
-  # the layer that owns it — `xybrid-core`. Adding a per-runtime workspace
-  # skeleton gate would require restructuring Flutter's target deps and is
-  # out of scope for this refactor.
-  check-llamacpp-skeleton:
-    name: check (llm-llamacpp skeleton, ubuntu-latest, no toolchain)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        # No `submodules: true` — the skeleton tier must compile without
-        # the llama.cpp source.
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: ubuntu-check-llamacpp-skeleton
-      - name: Check xybrid-core --features llm-llamacpp (skeleton) — must not invoke cmake
-        run: |
-          set -euo pipefail
-          START=$(date +%s)
-          # 2>&1 capture lets us assert build-script output absence below.
-          OUT=$(cargo check -p xybrid-core --features llm-llamacpp --no-default-features 2>&1)
-          END=$(date +%s)
-          ELAPSED=$((END - START))
-          echo "$OUT"
-          echo "Skeleton-tier check elapsed: ${ELAPSED}s (target < 30s)"
-          # Negative assertion: the build script must NOT have run cmake or
-          # cloned llama.cpp. If either warning string appears, the skeleton
-          # gate is broken — fail loudly.
-          if echo "$OUT" | grep -qE "llama\\.cpp build:|llama\\.cpp ready at|cloning https://github\\.com/ggml-org/llama\\.cpp"; then
-            echo "::error::llama-cpp-sys build script ran during skeleton-tier check — skeleton invariant broken"
-            exit 1
-          fi
-          if [ "$ELAPSED" -gt 30 ]; then
-            echo "::warning::Skeleton-tier build exceeded 30s budget (${ELAPSED}s)"
-          fi
-      - name: Skeleton-tier integration test (BackendNotLinked surfaces)
-        run: cargo test -p xybrid-core --features llm-llamacpp --no-default-features --test skeleton_tier_backend_not_linked
-
   clippy-llm:
-    name: clippy (llm-llamacpp-runtime, ubuntu-latest)
+    name: clippy (llm-llamacpp, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -194,11 +144,11 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ubuntu-clippy-llm
-      - name: Clippy with llm-llamacpp-runtime
-        run: cargo clippy -p xybrid-core --features "ort-download,llm-llamacpp-runtime" -- -D warnings
+      - name: Clippy with llm-llamacpp
+        run: cargo clippy -p xybrid-core --features "ort-download,llm-llamacpp" -- -D warnings
 
   test-llm:
-    name: test (llm-llamacpp-runtime, ubuntu-latest)
+    name: test (llm-llamacpp, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -210,8 +160,8 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ubuntu-test-llm
-      - name: Test with llm-llamacpp-runtime
-        run: cargo test -p xybrid-core --features "ort-download,llm-llamacpp-runtime" --lib
+      - name: Test with llm-llamacpp
+        run: cargo test -p xybrid-core --features "ort-download,llm-llamacpp" --lib
 
   # Linux-only on push/PR. macOS + Windows validation runs in release.yml at
   # release time, and check-platform-macos / build-apple.yml cover Apple-specific

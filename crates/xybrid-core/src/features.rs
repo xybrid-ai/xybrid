@@ -15,11 +15,8 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("candle-cuda", cfg!(feature = "candle-cuda")),
     ("candle-metal", cfg!(feature = "candle-metal")),
     ("espeak", cfg!(feature = "espeak")),
+    ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),
-    (
-        "llm-llamacpp-runtime",
-        cfg!(feature = "llm-llamacpp-runtime"),
-    ),
     ("llm-mistral", cfg!(feature = "llm-mistral")),
     ("ort-coreml", cfg!(feature = "ort-coreml")),
     ("ort-cuda", cfg!(feature = "ort-cuda")),
@@ -63,7 +60,7 @@ mod tests {
         let items: &[(&'static str, bool)] = &[
             ("candle-metal", false),
             ("ort-coreml", false),
-            ("llm-llamacpp-runtime", false),
+            ("llm-llamacpp", false),
         ];
         assert!(filter_enabled(items).is_empty());
     }
@@ -73,11 +70,11 @@ mod tests {
         let items: &[(&'static str, bool)] = &[
             ("ort-download", true),
             ("candle-metal", true),
-            ("llm-llamacpp-runtime", true),
+            ("llm-llamacpp", true),
         ];
         assert_eq!(
             filter_enabled(items),
-            vec!["candle-metal", "llm-llamacpp-runtime", "ort-download"]
+            vec!["candle-metal", "llm-llamacpp", "ort-download"]
         );
     }
 
@@ -122,17 +119,9 @@ mod tests {
         assert!(enabled().contains(&"llm-llamacpp-vision"));
     }
 
-    #[cfg(feature = "llm-llamacpp-runtime")]
+    #[cfg(feature = "llm-llamacpp")]
     #[test]
-    fn llamacpp_runtime_reports_runtime_tier() {
-        assert!(enabled().contains(&"llm-llamacpp-runtime"));
-        assert!(!enabled().contains(&"llm-llamacpp"));
-    }
-
-    #[cfg(all(feature = "llm-llamacpp", not(feature = "llm-llamacpp-runtime")))]
-    #[test]
-    fn llamacpp_skeleton_does_not_report_runtime_backend() {
-        assert!(!enabled().contains(&"llm-llamacpp-runtime"));
-        assert!(!enabled().contains(&"llm-llamacpp"));
+    fn llamacpp_reports_enabled() {
+        assert!(enabled().contains(&"llm-llamacpp"));
     }
 }

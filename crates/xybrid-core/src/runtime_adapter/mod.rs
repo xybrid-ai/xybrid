@@ -22,8 +22,10 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use xybrid_core::runtime_adapter::{RuntimeAdapter, OnnxRuntimeAdapter};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_core::runtime_adapter::RuntimeAdapter;
+//! use xybrid_core::runtime_adapter::onnx::OnnxRuntimeAdapter;
 //! use xybrid_core::ir::{Envelope, EnvelopeKind};
 //!
 //! // Create adapter
@@ -35,6 +37,9 @@
 //! // Run inference
 //! let input = Envelope::new(EnvelopeKind::Text("hello world".to_string()));
 //! let output = adapter.execute(&input)?;
+//! # let _ = output;
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::ir::Envelope;
@@ -122,9 +127,8 @@ pub use mistral::MistralBackend;
 #[cfg(feature = "llm-llamacpp")]
 pub use llama_cpp::LlamaCppBackend;
 
-// llama.cpp log control exports — only meaningful at the runtime tier
-// since the skeleton tier doesn't link a llama.cpp logger to talk to.
-#[cfg(feature = "llm-llamacpp-runtime")]
+// llama.cpp log control exports.
+#[cfg(feature = "llm-llamacpp")]
 pub use llama_cpp::{llama_log_get_verbosity, llama_log_set_verbosity};
 
 // Re-export inference backend types
@@ -176,12 +180,6 @@ pub enum AdapterError {
     RuntimeError(String),
     #[error("Aborted for cloud fallback: {reason}")]
     AbortedForCloudFallback { reason: crate::abort::AbortReason },
-    /// The backend's type surface compiled but the actual link to its
-    /// runtime was not enabled (e.g., `llm-llamacpp` skeleton tier
-    /// without `llm-llamacpp-runtime`). Carries the backend name so
-    /// callers can produce a "rebuild with `<feature>`" hint.
-    #[error("Backend `{backend}` is not linked into this build — rebuild with the corresponding runtime feature flag")]
-    BackendNotLinked { backend: &'static str },
 }
 
 impl AdapterError {
@@ -206,17 +204,16 @@ impl AdapterError {
 /// and the call sites in `runtime_adapter::llama_cpp` keep their
 /// `Result<..., AdapterError>` shape unchanged via `?`.
 ///
-/// Gated on `llm-llamacpp-runtime` because `xybrid-llama` (the crate
-/// providing `LlamaError`) is only in the dep graph at that tier. The
-/// skeleton tier (`llm-llamacpp` only) has no real backend to convert
-/// errors from.
+/// Gated on `llm-llamacpp` because `xybrid-llama` (the crate providing
+/// `LlamaError`) is only in the dep graph when that feature links the
+/// llama.cpp runtime.
 ///
 /// The `StreamingCallbackAborted` arm forwards through
 /// [`AdapterError::from_streaming_callback_error`] so that
 /// `xybrid-core::abort::CloudFallbackAbort` is downcast back to
 /// `AdapterError::AbortedForCloudFallback` exactly as it did before the
 /// refactor.
-#[cfg(feature = "llm-llamacpp-runtime")]
+#[cfg(feature = "llm-llamacpp")]
 impl From<xybrid_llama::LlamaError> for AdapterError {
     fn from(err: xybrid_llama::LlamaError) -> Self {
         use xybrid_llama::LlamaError;
@@ -328,11 +325,19 @@ pub trait RuntimeAdapter: Send + Sync {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_core::ir::{Envelope, EnvelopeKind};
+    /// use xybrid_core::runtime_adapter::{OnnxRuntimeAdapter, RuntimeAdapter};
+    ///
     /// let mut adapter = OnnxRuntimeAdapter::new();
     /// adapter.load_model("model.onnx")?;
     /// adapter.warmup()?;  // Optional: trigger GPU initialization
+    /// # let input = Envelope::new(EnvelopeKind::Text("probe".into()));
     /// let output = adapter.execute(&input)?;  // First inference is now fast
+    /// # let _ = output;
+    /// # Ok(())
+    /// # }
     /// ```
     fn warmup(&mut self) -> AdapterResult<()> {
         Ok(())

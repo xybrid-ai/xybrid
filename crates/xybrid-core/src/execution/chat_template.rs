@@ -10,7 +10,7 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use xybrid_core::execution::chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
 //! use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
 //!

@@ -12,8 +12,7 @@ part of 'model.dart';
 T _$identity<T>(T value) => value;
 
 final _privateConstructorUsedError = UnsupportedError(
-  'It seems like you constructed your class using `MyClass._()`. This constructor is only meant to be used by freezed and you are not supposed to need it nor use it.\nPlease check the documentation here for more information: https://github.com/rrousselGit/freezed#adding-getters-and-methods-to-our-models',
-);
+    'It seems like you constructed your class using `MyClass._()`. This constructor is only meant to be used by freezed and you are not supposed to need it nor use it.\nPlease check the documentation here for more information: https://github.com/rrousselGit/freezed#adding-getters-and-methods-to-our-models');
 
 /// @nodoc
 mixin _$FfiLoadEvent {
@@ -22,47 +21,52 @@ mixin _$FfiLoadEvent {
     required TResult Function(double field0) progress,
     required TResult Function() complete,
     required TResult Function(String field0) error,
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
     TResult? Function(double field0)? progress,
     TResult? Function()? complete,
     TResult? Function(String field0)? error,
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
     TResult Function(double field0)? progress,
     TResult Function()? complete,
     TResult Function(String field0)? error,
     required TResult orElse(),
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult map<TResult extends Object?>({
     required TResult Function(FfiLoadEvent_Progress value) progress,
     required TResult Function(FfiLoadEvent_Complete value) complete,
     required TResult Function(FfiLoadEvent_Error value) error,
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? mapOrNull<TResult extends Object?>({
     TResult? Function(FfiLoadEvent_Progress value)? progress,
     TResult? Function(FfiLoadEvent_Complete value)? complete,
     TResult? Function(FfiLoadEvent_Error value)? error,
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeMap<TResult extends Object?>({
     TResult Function(FfiLoadEvent_Progress value)? progress,
     TResult Function(FfiLoadEvent_Complete value)? complete,
     TResult Function(FfiLoadEvent_Error value)? error,
     required TResult orElse(),
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
 }
 
 /// @nodoc
 abstract class $FfiLoadEventCopyWith<$Res> {
   factory $FfiLoadEventCopyWith(
-    FfiLoadEvent value,
-    $Res Function(FfiLoadEvent) then,
-  ) = _$FfiLoadEventCopyWithImpl<$Res, FfiLoadEvent>;
+          FfiLoadEvent value, $Res Function(FfiLoadEvent) then) =
+      _$FfiLoadEventCopyWithImpl<$Res, FfiLoadEvent>;
 }
 
 /// @nodoc
@@ -82,9 +86,9 @@ class _$FfiLoadEventCopyWithImpl<$Res, $Val extends FfiLoadEvent>
 /// @nodoc
 abstract class _$$FfiLoadEvent_ProgressImplCopyWith<$Res> {
   factory _$$FfiLoadEvent_ProgressImplCopyWith(
-    _$FfiLoadEvent_ProgressImpl value,
-    $Res Function(_$FfiLoadEvent_ProgressImpl) then,
-  ) = __$$FfiLoadEvent_ProgressImplCopyWithImpl<$Res>;
+          _$FfiLoadEvent_ProgressImpl value,
+          $Res Function(_$FfiLoadEvent_ProgressImpl) then) =
+      __$$FfiLoadEvent_ProgressImplCopyWithImpl<$Res>;
   @useResult
   $Res call({double field0});
 }
@@ -93,24 +97,23 @@ abstract class _$$FfiLoadEvent_ProgressImplCopyWith<$Res> {
 class __$$FfiLoadEvent_ProgressImplCopyWithImpl<$Res>
     extends _$FfiLoadEventCopyWithImpl<$Res, _$FfiLoadEvent_ProgressImpl>
     implements _$$FfiLoadEvent_ProgressImplCopyWith<$Res> {
-  __$$FfiLoadEvent_ProgressImplCopyWithImpl(
-    _$FfiLoadEvent_ProgressImpl _value,
-    $Res Function(_$FfiLoadEvent_ProgressImpl) _then,
-  ) : super(_value, _then);
+  __$$FfiLoadEvent_ProgressImplCopyWithImpl(_$FfiLoadEvent_ProgressImpl _value,
+      $Res Function(_$FfiLoadEvent_ProgressImpl) _then)
+      : super(_value, _then);
 
   /// Create a copy of FfiLoadEvent
   /// with the given fields replaced by the non-null parameter values.
   @pragma('vm:prefer-inline')
   @override
-  $Res call({Object? field0 = null}) {
-    return _then(
-      _$FfiLoadEvent_ProgressImpl(
-        null == field0
-            ? _value.field0
-            : field0 // ignore: cast_nullable_to_non_nullable
-                  as double,
-      ),
-    );
+  $Res call({
+    Object? field0 = null,
+  }) {
+    return _then(_$FfiLoadEvent_ProgressImpl(
+      null == field0
+          ? _value.field0
+          : field0 // ignore: cast_nullable_to_non_nullable
+              as double,
+    ));
   }
 }
 
@@ -144,11 +147,8 @@ class _$FfiLoadEvent_ProgressImpl extends FfiLoadEvent_Progress {
   @override
   @pragma('vm:prefer-inline')
   _$$FfiLoadEvent_ProgressImplCopyWith<_$FfiLoadEvent_ProgressImpl>
-  get copyWith =>
-      __$$FfiLoadEvent_ProgressImplCopyWithImpl<_$FfiLoadEvent_ProgressImpl>(
-        this,
-        _$identity,
-      );
+      get copyWith => __$$FfiLoadEvent_ProgressImplCopyWithImpl<
+          _$FfiLoadEvent_ProgressImpl>(this, _$identity);
 
   @override
   @optionalTypeArgs
@@ -230,25 +230,24 @@ abstract class FfiLoadEvent_Progress extends FfiLoadEvent {
   /// with the given fields replaced by the non-null parameter values.
   @JsonKey(includeFromJson: false, includeToJson: false)
   _$$FfiLoadEvent_ProgressImplCopyWith<_$FfiLoadEvent_ProgressImpl>
-  get copyWith => throw _privateConstructorUsedError;
+      get copyWith => throw _privateConstructorUsedError;
 }
 
 /// @nodoc
 abstract class _$$FfiLoadEvent_CompleteImplCopyWith<$Res> {
   factory _$$FfiLoadEvent_CompleteImplCopyWith(
-    _$FfiLoadEvent_CompleteImpl value,
-    $Res Function(_$FfiLoadEvent_CompleteImpl) then,
-  ) = __$$FfiLoadEvent_CompleteImplCopyWithImpl<$Res>;
+          _$FfiLoadEvent_CompleteImpl value,
+          $Res Function(_$FfiLoadEvent_CompleteImpl) then) =
+      __$$FfiLoadEvent_CompleteImplCopyWithImpl<$Res>;
 }
 
 /// @nodoc
 class __$$FfiLoadEvent_CompleteImplCopyWithImpl<$Res>
     extends _$FfiLoadEventCopyWithImpl<$Res, _$FfiLoadEvent_CompleteImpl>
     implements _$$FfiLoadEvent_CompleteImplCopyWith<$Res> {
-  __$$FfiLoadEvent_CompleteImplCopyWithImpl(
-    _$FfiLoadEvent_CompleteImpl _value,
-    $Res Function(_$FfiLoadEvent_CompleteImpl) _then,
-  ) : super(_value, _then);
+  __$$FfiLoadEvent_CompleteImplCopyWithImpl(_$FfiLoadEvent_CompleteImpl _value,
+      $Res Function(_$FfiLoadEvent_CompleteImpl) _then)
+      : super(_value, _then);
 
   /// Create a copy of FfiLoadEvent
   /// with the given fields replaced by the non-null parameter values.
@@ -350,10 +349,9 @@ abstract class FfiLoadEvent_Complete extends FfiLoadEvent {
 
 /// @nodoc
 abstract class _$$FfiLoadEvent_ErrorImplCopyWith<$Res> {
-  factory _$$FfiLoadEvent_ErrorImplCopyWith(
-    _$FfiLoadEvent_ErrorImpl value,
-    $Res Function(_$FfiLoadEvent_ErrorImpl) then,
-  ) = __$$FfiLoadEvent_ErrorImplCopyWithImpl<$Res>;
+  factory _$$FfiLoadEvent_ErrorImplCopyWith(_$FfiLoadEvent_ErrorImpl value,
+          $Res Function(_$FfiLoadEvent_ErrorImpl) then) =
+      __$$FfiLoadEvent_ErrorImplCopyWithImpl<$Res>;
   @useResult
   $Res call({String field0});
 }
@@ -362,24 +360,23 @@ abstract class _$$FfiLoadEvent_ErrorImplCopyWith<$Res> {
 class __$$FfiLoadEvent_ErrorImplCopyWithImpl<$Res>
     extends _$FfiLoadEventCopyWithImpl<$Res, _$FfiLoadEvent_ErrorImpl>
     implements _$$FfiLoadEvent_ErrorImplCopyWith<$Res> {
-  __$$FfiLoadEvent_ErrorImplCopyWithImpl(
-    _$FfiLoadEvent_ErrorImpl _value,
-    $Res Function(_$FfiLoadEvent_ErrorImpl) _then,
-  ) : super(_value, _then);
+  __$$FfiLoadEvent_ErrorImplCopyWithImpl(_$FfiLoadEvent_ErrorImpl _value,
+      $Res Function(_$FfiLoadEvent_ErrorImpl) _then)
+      : super(_value, _then);
 
   /// Create a copy of FfiLoadEvent
   /// with the given fields replaced by the non-null parameter values.
   @pragma('vm:prefer-inline')
   @override
-  $Res call({Object? field0 = null}) {
-    return _then(
-      _$FfiLoadEvent_ErrorImpl(
-        null == field0
-            ? _value.field0
-            : field0 // ignore: cast_nullable_to_non_nullable
-                  as String,
-      ),
-    );
+  $Res call({
+    Object? field0 = null,
+  }) {
+    return _then(_$FfiLoadEvent_ErrorImpl(
+      null == field0
+          ? _value.field0
+          : field0 // ignore: cast_nullable_to_non_nullable
+              as String,
+    ));
   }
 }
 
@@ -414,9 +411,7 @@ class _$FfiLoadEvent_ErrorImpl extends FfiLoadEvent_Error {
   @pragma('vm:prefer-inline')
   _$$FfiLoadEvent_ErrorImplCopyWith<_$FfiLoadEvent_ErrorImpl> get copyWith =>
       __$$FfiLoadEvent_ErrorImplCopyWithImpl<_$FfiLoadEvent_ErrorImpl>(
-        this,
-        _$identity,
-      );
+          this, _$identity);
 
   @override
   @optionalTypeArgs
@@ -509,47 +504,52 @@ mixin _$FfiStreamEvent {
     required TResult Function(FfiStreamToken field0) token,
     required TResult Function(FfiResult field0) complete,
     required TResult Function(String field0) error,
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
     TResult? Function(FfiStreamToken field0)? token,
     TResult? Function(FfiResult field0)? complete,
     TResult? Function(String field0)? error,
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
     TResult Function(FfiStreamToken field0)? token,
     TResult Function(FfiResult field0)? complete,
     TResult Function(String field0)? error,
     required TResult orElse(),
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult map<TResult extends Object?>({
     required TResult Function(FfiStreamEvent_Token value) token,
     required TResult Function(FfiStreamEvent_Complete value) complete,
     required TResult Function(FfiStreamEvent_Error value) error,
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? mapOrNull<TResult extends Object?>({
     TResult? Function(FfiStreamEvent_Token value)? token,
     TResult? Function(FfiStreamEvent_Complete value)? complete,
     TResult? Function(FfiStreamEvent_Error value)? error,
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeMap<TResult extends Object?>({
     TResult Function(FfiStreamEvent_Token value)? token,
     TResult Function(FfiStreamEvent_Complete value)? complete,
     TResult Function(FfiStreamEvent_Error value)? error,
     required TResult orElse(),
-  }) => throw _privateConstructorUsedError;
+  }) =>
+      throw _privateConstructorUsedError;
 }
 
 /// @nodoc
 abstract class $FfiStreamEventCopyWith<$Res> {
   factory $FfiStreamEventCopyWith(
-    FfiStreamEvent value,
-    $Res Function(FfiStreamEvent) then,
-  ) = _$FfiStreamEventCopyWithImpl<$Res, FfiStreamEvent>;
+          FfiStreamEvent value, $Res Function(FfiStreamEvent) then) =
+      _$FfiStreamEventCopyWithImpl<$Res, FfiStreamEvent>;
 }
 
 /// @nodoc
@@ -568,10 +568,9 @@ class _$FfiStreamEventCopyWithImpl<$Res, $Val extends FfiStreamEvent>
 
 /// @nodoc
 abstract class _$$FfiStreamEvent_TokenImplCopyWith<$Res> {
-  factory _$$FfiStreamEvent_TokenImplCopyWith(
-    _$FfiStreamEvent_TokenImpl value,
-    $Res Function(_$FfiStreamEvent_TokenImpl) then,
-  ) = __$$FfiStreamEvent_TokenImplCopyWithImpl<$Res>;
+  factory _$$FfiStreamEvent_TokenImplCopyWith(_$FfiStreamEvent_TokenImpl value,
+          $Res Function(_$FfiStreamEvent_TokenImpl) then) =
+      __$$FfiStreamEvent_TokenImplCopyWithImpl<$Res>;
   @useResult
   $Res call({FfiStreamToken field0});
 }
@@ -580,24 +579,23 @@ abstract class _$$FfiStreamEvent_TokenImplCopyWith<$Res> {
 class __$$FfiStreamEvent_TokenImplCopyWithImpl<$Res>
     extends _$FfiStreamEventCopyWithImpl<$Res, _$FfiStreamEvent_TokenImpl>
     implements _$$FfiStreamEvent_TokenImplCopyWith<$Res> {
-  __$$FfiStreamEvent_TokenImplCopyWithImpl(
-    _$FfiStreamEvent_TokenImpl _value,
-    $Res Function(_$FfiStreamEvent_TokenImpl) _then,
-  ) : super(_value, _then);
+  __$$FfiStreamEvent_TokenImplCopyWithImpl(_$FfiStreamEvent_TokenImpl _value,
+      $Res Function(_$FfiStreamEvent_TokenImpl) _then)
+      : super(_value, _then);
 
   /// Create a copy of FfiStreamEvent
   /// with the given fields replaced by the non-null parameter values.
   @pragma('vm:prefer-inline')
   @override
-  $Res call({Object? field0 = null}) {
-    return _then(
-      _$FfiStreamEvent_TokenImpl(
-        null == field0
-            ? _value.field0
-            : field0 // ignore: cast_nullable_to_non_nullable
-                  as FfiStreamToken,
-      ),
-    );
+  $Res call({
+    Object? field0 = null,
+  }) {
+    return _then(_$FfiStreamEvent_TokenImpl(
+      null == field0
+          ? _value.field0
+          : field0 // ignore: cast_nullable_to_non_nullable
+              as FfiStreamToken,
+    ));
   }
 }
 
@@ -631,11 +629,9 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
   @override
   @pragma('vm:prefer-inline')
   _$$FfiStreamEvent_TokenImplCopyWith<_$FfiStreamEvent_TokenImpl>
-  get copyWith =>
-      __$$FfiStreamEvent_TokenImplCopyWithImpl<_$FfiStreamEvent_TokenImpl>(
-        this,
-        _$identity,
-      );
+      get copyWith =>
+          __$$FfiStreamEvent_TokenImplCopyWithImpl<_$FfiStreamEvent_TokenImpl>(
+              this, _$identity);
 
   @override
   @optionalTypeArgs
@@ -718,15 +714,15 @@ abstract class FfiStreamEvent_Token extends FfiStreamEvent {
   /// with the given fields replaced by the non-null parameter values.
   @JsonKey(includeFromJson: false, includeToJson: false)
   _$$FfiStreamEvent_TokenImplCopyWith<_$FfiStreamEvent_TokenImpl>
-  get copyWith => throw _privateConstructorUsedError;
+      get copyWith => throw _privateConstructorUsedError;
 }
 
 /// @nodoc
 abstract class _$$FfiStreamEvent_CompleteImplCopyWith<$Res> {
   factory _$$FfiStreamEvent_CompleteImplCopyWith(
-    _$FfiStreamEvent_CompleteImpl value,
-    $Res Function(_$FfiStreamEvent_CompleteImpl) then,
-  ) = __$$FfiStreamEvent_CompleteImplCopyWithImpl<$Res>;
+          _$FfiStreamEvent_CompleteImpl value,
+          $Res Function(_$FfiStreamEvent_CompleteImpl) then) =
+      __$$FfiStreamEvent_CompleteImplCopyWithImpl<$Res>;
   @useResult
   $Res call({FfiResult field0});
 }
@@ -736,23 +732,23 @@ class __$$FfiStreamEvent_CompleteImplCopyWithImpl<$Res>
     extends _$FfiStreamEventCopyWithImpl<$Res, _$FfiStreamEvent_CompleteImpl>
     implements _$$FfiStreamEvent_CompleteImplCopyWith<$Res> {
   __$$FfiStreamEvent_CompleteImplCopyWithImpl(
-    _$FfiStreamEvent_CompleteImpl _value,
-    $Res Function(_$FfiStreamEvent_CompleteImpl) _then,
-  ) : super(_value, _then);
+      _$FfiStreamEvent_CompleteImpl _value,
+      $Res Function(_$FfiStreamEvent_CompleteImpl) _then)
+      : super(_value, _then);
 
   /// Create a copy of FfiStreamEvent
   /// with the given fields replaced by the non-null parameter values.
   @pragma('vm:prefer-inline')
   @override
-  $Res call({Object? field0 = null}) {
-    return _then(
-      _$FfiStreamEvent_CompleteImpl(
-        null == field0
-            ? _value.field0
-            : field0 // ignore: cast_nullable_to_non_nullable
-                  as FfiResult,
-      ),
-    );
+  $Res call({
+    Object? field0 = null,
+  }) {
+    return _then(_$FfiStreamEvent_CompleteImpl(
+      null == field0
+          ? _value.field0
+          : field0 // ignore: cast_nullable_to_non_nullable
+              as FfiResult,
+    ));
   }
 }
 
@@ -786,10 +782,8 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
   @override
   @pragma('vm:prefer-inline')
   _$$FfiStreamEvent_CompleteImplCopyWith<_$FfiStreamEvent_CompleteImpl>
-  get copyWith =>
-      __$$FfiStreamEvent_CompleteImplCopyWithImpl<
-        _$FfiStreamEvent_CompleteImpl
-      >(this, _$identity);
+      get copyWith => __$$FfiStreamEvent_CompleteImplCopyWithImpl<
+          _$FfiStreamEvent_CompleteImpl>(this, _$identity);
 
   @override
   @optionalTypeArgs
@@ -872,15 +866,14 @@ abstract class FfiStreamEvent_Complete extends FfiStreamEvent {
   /// with the given fields replaced by the non-null parameter values.
   @JsonKey(includeFromJson: false, includeToJson: false)
   _$$FfiStreamEvent_CompleteImplCopyWith<_$FfiStreamEvent_CompleteImpl>
-  get copyWith => throw _privateConstructorUsedError;
+      get copyWith => throw _privateConstructorUsedError;
 }
 
 /// @nodoc
 abstract class _$$FfiStreamEvent_ErrorImplCopyWith<$Res> {
-  factory _$$FfiStreamEvent_ErrorImplCopyWith(
-    _$FfiStreamEvent_ErrorImpl value,
-    $Res Function(_$FfiStreamEvent_ErrorImpl) then,
-  ) = __$$FfiStreamEvent_ErrorImplCopyWithImpl<$Res>;
+  factory _$$FfiStreamEvent_ErrorImplCopyWith(_$FfiStreamEvent_ErrorImpl value,
+          $Res Function(_$FfiStreamEvent_ErrorImpl) then) =
+      __$$FfiStreamEvent_ErrorImplCopyWithImpl<$Res>;
   @useResult
   $Res call({String field0});
 }
@@ -889,24 +882,23 @@ abstract class _$$FfiStreamEvent_ErrorImplCopyWith<$Res> {
 class __$$FfiStreamEvent_ErrorImplCopyWithImpl<$Res>
     extends _$FfiStreamEventCopyWithImpl<$Res, _$FfiStreamEvent_ErrorImpl>
     implements _$$FfiStreamEvent_ErrorImplCopyWith<$Res> {
-  __$$FfiStreamEvent_ErrorImplCopyWithImpl(
-    _$FfiStreamEvent_ErrorImpl _value,
-    $Res Function(_$FfiStreamEvent_ErrorImpl) _then,
-  ) : super(_value, _then);
+  __$$FfiStreamEvent_ErrorImplCopyWithImpl(_$FfiStreamEvent_ErrorImpl _value,
+      $Res Function(_$FfiStreamEvent_ErrorImpl) _then)
+      : super(_value, _then);
 
   /// Create a copy of FfiStreamEvent
   /// with the given fields replaced by the non-null parameter values.
   @pragma('vm:prefer-inline')
   @override
-  $Res call({Object? field0 = null}) {
-    return _then(
-      _$FfiStreamEvent_ErrorImpl(
-        null == field0
-            ? _value.field0
-            : field0 // ignore: cast_nullable_to_non_nullable
-                  as String,
-      ),
-    );
+  $Res call({
+    Object? field0 = null,
+  }) {
+    return _then(_$FfiStreamEvent_ErrorImpl(
+      null == field0
+          ? _value.field0
+          : field0 // ignore: cast_nullable_to_non_nullable
+              as String,
+    ));
   }
 }
 
@@ -940,11 +932,9 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
   @override
   @pragma('vm:prefer-inline')
   _$$FfiStreamEvent_ErrorImplCopyWith<_$FfiStreamEvent_ErrorImpl>
-  get copyWith =>
-      __$$FfiStreamEvent_ErrorImplCopyWithImpl<_$FfiStreamEvent_ErrorImpl>(
-        this,
-        _$identity,
-      );
+      get copyWith =>
+          __$$FfiStreamEvent_ErrorImplCopyWithImpl<_$FfiStreamEvent_ErrorImpl>(
+              this, _$identity);
 
   @override
   @optionalTypeArgs
@@ -1027,5 +1017,5 @@ abstract class FfiStreamEvent_Error extends FfiStreamEvent {
   /// with the given fields replaced by the non-null parameter values.
   @JsonKey(includeFromJson: false, includeToJson: false)
   _$$FfiStreamEvent_ErrorImplCopyWith<_$FfiStreamEvent_ErrorImpl>
-  get copyWith => throw _privateConstructorUsedError;
+      get copyWith => throw _privateConstructorUsedError;
 }

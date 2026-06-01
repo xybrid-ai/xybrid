@@ -62,16 +62,14 @@ abstract class XybridDevice implements RustOpaqueInterface {
   /// Values above 100 are clamped by the underlying setter — pass
   /// through whatever the OS observer reports without rounding host
   /// side, so the SDK has the freshest possible signal.
-  static void setBatteryLevel({required int percent}) => XybridRustLib
-      .instance
-      .api
-      .crateApiDeviceXybridDeviceSetBatteryLevel(percent: percent);
+  static void setBatteryLevel({required int percent}) =>
+      XybridRustLib.instance.api
+          .crateApiDeviceXybridDeviceSetBatteryLevel(percent: percent);
 
   /// Forward a thermal pressure reading from the host.
-  static void setThermalState({required FfiThermalState state}) => XybridRustLib
-      .instance
-      .api
-      .crateApiDeviceXybridDeviceSetThermalState(state: state);
+  static void setThermalState({required FfiThermalState state}) =>
+      XybridRustLib.instance.api
+          .crateApiDeviceXybridDeviceSetThermalState(state: state);
 }
 
 /// Derived memory-pressure classification mirrored onto the FFI surface.
@@ -79,7 +77,13 @@ abstract class XybridDevice implements RustOpaqueInterface {
 /// Maps directly to [`xybrid_sdk::MemoryPressure`]. `Unknown` means the
 /// snapshot couldn't be computed (sysinfo refused to answer, or the
 /// host hasn't pushed an iOS / Android memory-warning observer yet).
-enum FfiMemoryPressure { unknown, normal, warn, critical }
+enum FfiMemoryPressure {
+  unknown,
+  normal,
+  warn,
+  critical,
+  ;
+}
 
 /// Snapshot of routing-engine signals as the runtime currently sees them.
 ///
@@ -152,4 +156,5 @@ enum FfiThermalState {
 
   /// Critical — heavy operations should pause (>= 80 °C).
   critical,
+  ;
 }

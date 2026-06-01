@@ -48,12 +48,12 @@
 //!
 //! ```bash
 //! cargo run -p xybrid-sdk --example cloud_fallback_demo \
-//!   --features platform-macos,dev-tools,llm-llamacpp-runtime
+//!   --features platform-macos,dev-tools,llm-llamacpp
 //! ```
 //!
 //! On Linux/Windows replace `platform-macos` with `platform-desktop`. On
 //! Android the demo is not supported (the streaming abort uses Metal-bound
-//! types). The `llm-llamacpp-runtime` feature is required for local llama.cpp
+//! types). The `llm-llamacpp` feature is required for local llama.cpp
 //! execution; the platform preset already enables it transitively.
 //!
 //! # What the demo proves

@@ -278,7 +278,7 @@ pub(crate) fn handle_repl_command(
         let use_streaming = {
             if stream {
                 ui::warning("Streaming requested but LLM features not enabled");
-                ui::hint("Build with: --features llm-llamacpp-runtime (or llm-mistral)");
+                ui::hint("Build with: --features llm-llamacpp (or llm-mistral)");
             }
             false
         };
