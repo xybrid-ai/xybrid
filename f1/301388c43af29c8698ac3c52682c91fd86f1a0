@@ -1,0 +1,74 @@
+docs/content/docs/(integration)/sdks/android.mdx
+  s_21444584ff3f63::t_0bd5cb5538451a 14
+bindings/kotlin/README.md
+  s_21444584ff3f63::t_38cc4eff63e5a8 15
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_21444584ff3f63::t_52836d61a8f93c 14
+README.zh-CN.md
+  s_21444584ff3f63::t_798972f02a2182 165
+  s_21444584ff3f63::t_24f6729b004181 217
+  s_21444584ff3f63::t_0d9f33bf188f99 148
+  s_21444584ff3f63::t_28963d843b84dd 183
+docs/FEATURE_MATRIX.md
+  s_21444584ff3f63::t_58bc1771fa1877 219
+README.ja-JP.md
+  s_21444584ff3f63::t_340bff0f032528 165
+  s_21444584ff3f63::t_ac10addda85690 217
+  s_21444584ff3f63::t_186ccb653db134 148
+  s_21444584ff3f63::t_4a4b628fa95d43 183
+README.md
+  s_21444584ff3f63::t_a4e8f942e37af9 165
+  s_21444584ff3f63::t_40a86b00782e84 199
+  s_21444584ff3f63::t_3981599b12fa43 130
+  s_21444584ff3f63::t_9358adef967d53 147
+bindings/apple/README.md
+  s_21444584ff3f63::t_df3ad45e675611 22
+  s_21444584ff3f63::t_ed62dc084587ac 15
+bindings/flutter/README.md
+  s_21444584ff3f63::t_6d38f5b28ced8f 18
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_21444584ff3f63::t_d1a85320c2e120 14
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_21444584ff3f63::t_a7a26d2adde095 18
+docs/content/docs/quickstart.zh.mdx
+  s_21444584ff3f63::t_09b8be15569071 57
+  s_21444584ff3f63::t_f0dc1e6e37faac 15
+  s_21444584ff3f63::t_6ec4d2ac49309d 89
+  s_21444584ff3f63::t_03e66ba24b6b1b 128
+docs/content/docs/quickstart.mdx
+  s_21444584ff3f63::t_5faafaf41beb8f 89
+  s_21444584ff3f63::t_5f11089d7352a0 57
+  s_21444584ff3f63::t_2cd6f6aaa9a8ac 15
+  s_21444584ff3f63::t_705e30af6e873a 127
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_21444584ff3f63::t_97bbc22966e624 18
+bindings/unity/README.md
+  s_21444584ff3f63::t_db650d90e84f0b 32
+.github/ISSUE_TEMPLATE/bug_report.md
+  s_21444584ff3f63::t_569bdb11682e32 11
+tools/README.md
+  s_21444584ff3f63::t_778dc2d76425b2 282
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_21444584ff3f63::t_1233c98c58e0a6 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f1301388c43af29c8698ac3c52682c91fd86f1a0",
+  "prompts": {},
+  "humans": {
+    "h_92edd19a2533f1": {
+      "author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_21444584ff3f63": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c5c476fc-e348-489e-99cf-075a2c3fa7f5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
