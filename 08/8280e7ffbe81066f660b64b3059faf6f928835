@@ -1,0 +1,110 @@
+crates/xybrid-cli/src/commands/init.rs
+  s_3babce63f53ca4::t_fca74f1f00d836 73
+crates/xybrid-cli/src/commands/models.rs
+  s_3babce63f53ca4::t_952431af442a7d 36-37
+crates/xybrid-sdk/src/pipeline/mod.rs
+  s_3babce63f53ca4::t_1f750a6be467e4 137
+  s_3babce63f53ca4::t_e7cb048d817804 1277-1279,1566-1568
+  s_3babce63f53ca4::t_40a490d74a1016 1197
+  s_3babce63f53ca4::t_09be635b873f46 149
+  s_3babce63f53ca4::t_dcac61941e9223 1497
+  s_3babce63f53ca4::t_190c1a188778ea 724
+  s_3babce63f53ca4::t_be8769e9f8b76b 1509-1512
+  s_3babce63f53ca4::t_482e2b4f20465e 877
+crates/xybrid-sdk/src/registry_client.rs
+  s_3babce63f53ca4::t_4b1f569a911708 717
+  s_3babce63f53ca4::t_0d7c291a2707eb 853-854
+  s_3babce63f53ca4::t_2e214274945ec1 306
+  s_3babce63f53ca4::t_0fcb4a0e2165df 448
+  s_3babce63f53ca4::t_013705acb55408 551-555,560-565
+  s_3babce63f53ca4::t_e676909f9890d5 888
+  s_3babce63f53ca4::t_0e52252601da39 356
+  s_3babce63f53ca4::t_1243c48a0be799 900-903
+  s_3babce63f53ca4::t_e2171aea223422 1045
+  s_3babce63f53ca4::t_409df971f9df9d 910
+  s_3babce63f53ca4::t_40b4b77f536815 1078
+  s_3babce63f53ca4::t_f727e0784d662b 1598,1603
+  s_3babce63f53ca4::t_8d815e6aad0278 470
+  s_3babce63f53ca4::t_06996e6943dc6f 566
+  s_3babce63f53ca4::t_3ace10dc251f4c 1628
+  s_3babce63f53ca4::t_1e1e744737f4d1 526
+  s_3babce63f53ca4::t_16a76d9daeb572 327
+  s_3babce63f53ca4::t_e7cb048d817804 397-398,534,556-559,1007-1008
+crates/xybrid-uniffi/src/lib.rs
+  s_3babce63f53ca4::t_4d73d4a6ac9e06 375-377,381-385
+  s_3babce63f53ca4::t_f5608c71b47861 332-346
+  s_3babce63f53ca4::t_d4eb5398ec2c09 865-869
+  s_3babce63f53ca4::t_08e413464a0198 354-359
+  s_3babce63f53ca4::t_a35a6e366c7e93 366-368
+crates/xybrid-cli/src/main.rs
+  s_3babce63f53ca4::t_b756b2d5374049 352-353
+crates/xybrid-sdk/src/stream.rs
+  s_3babce63f53ca4::t_8e70528d310980 226
+  s_3babce63f53ca4::t_7e0868c3ce2ef0 253
+  s_3babce63f53ca4::t_ac2ae432bb8fc1 221,248,273
+  s_3babce63f53ca4::t_6165de8a28d4e7 159
+crates/xybrid-sdk/src/model.rs
+  s_3babce63f53ca4::t_0acbf4c14c4005 1217-1220
+  s_3babce63f53ca4::t_2a16905e284c4d 2029,2148,2290,2458,2879
+  s_3babce63f53ca4::t_10f83cd6075f60 1950,2908
+  s_3babce63f53ca4::t_7983161a861dfe 3807
+  s_3babce63f53ca4::t_dd3a9f5f4f5571 208,214,221-222,230-231
+  s_3babce63f53ca4::t_1679634c43b9e8 771
+  s_3babce63f53ca4::t_09fa5487efd7cc 3052,3054-3056
+  s_3babce63f53ca4::t_6481d8db7d7206 788
+  s_3babce63f53ca4::t_0ff16d506134ec 1079
+  s_3babce63f53ca4::t_18ee0725c335d5 268,276
+  s_3babce63f53ca4::t_fd30e7b18abfab 531,565
+  s_3babce63f53ca4::t_2a35b4fe67ee98 1293-1296
+  s_3babce63f53ca4::t_579c9ad12e1a96 3041-3051,3053,3057-3068
+  s_3babce63f53ca4::t_14da187ab41cfb 1133
+  s_3babce63f53ca4::t_03c78bcac6ad09 3764-3766,4026
+  s_3babce63f53ca4::t_8f9293946d34c8 477
+  s_3babce63f53ca4::t_11c81bdca0378f 3010
+  s_3babce63f53ca4::t_3a3328af339d0a 4023-4025
+  s_3babce63f53ca4::t_d47b20356fd177 63-67,69-76,87-98,114-119,125-130,133-144,153-183
+  s_3babce63f53ca4::t_d4c53343238756 1225
+  s_3babce63f53ca4::t_3acb27818f7540 1911
+  s_3babce63f53ca4::t_d7cb76bceed928 3018
+  s_3babce63f53ca4::t_e27f7e13984b8f 288
+  s_3babce63f53ca4::t_4d3200834ce930 2070,2191
+  s_3babce63f53ca4::t_bfc52077a87377 3647-3651
+  s_3babce63f53ca4::t_cca833011c00b6 1455-1456,1458
+  s_3babce63f53ca4::t_e7cb048d817804 1204-1205,1392-1393,2748,3958,3978-3980
+  s_3babce63f53ca4::t_228757114bc757 1790
+  s_3babce63f53ca4::t_25c58b99e39ca0 3106,3108-3111
+crates/xybrid-sdk/src/metadata_gen.rs
+  s_3babce63f53ca4::t_c9a8bb1ee37b95 59
+  s_3babce63f53ca4::t_ed2773a3557228 212
+  s_3babce63f53ca4::t_84c4d629bf18b4 203
+crates/xybrid-sdk/src/cache/cache_manager.rs
+  s_3babce63f53ca4::t_e7cb048d817804 192
+  s_3babce63f53ca4::t_168eecd500ab39 340,350,352-354,360-361,365,370,375,377
+  s_3babce63f53ca4::t_6c9a02b78f887c 105-106
+  s_3babce63f53ca4::t_d99e04e6d65f53 148-149
+  s_3babce63f53ca4::t_8a0ad4ae2aabb3 121-122
+  s_3babce63f53ca4::t_8a2e7ad2daaad0 518-519,529
+  s_3babce63f53ca4::t_094e150e04a9ea 566,573,576-577,587
+  s_3babce63f53ca4::t_03f7eaf5f2a54f 624-625
+  s_3babce63f53ca4::t_10ee6fb3e1e584 171-172
+  s_3babce63f53ca4::t_e2619f6fa402cc 162,165
+  s_3babce63f53ca4::t_448202dbbad4ea 199-200
+  s_3babce63f53ca4::t_078420591f5b65 486,494,499-500,503
+  s_3babce63f53ca4::t_3fb4a6b96335c5 189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "088280e7ffbe81066f660b64b3059faf6f928835",
+  "prompts": {},
+  "sessions": {
+    "s_3babce63f53ca4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7fe35b37-657f-468b-8e6c-31cbe6585451",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
