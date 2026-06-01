@@ -1,0 +1,21 @@
+crates/xybrid-sdk/src/registry_client.rs
+  s_3babce63f53ca4::t_5ff21073a9121c 1076
+Cargo.lock
+  ai_agent 591,892,3242,5086-5091,7131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "6cfed4fa1eb7c41969219bb3d803b99300f14e2d",
+  "prompts": {},
+  "sessions": {
+    "s_3babce63f53ca4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7fe35b37-657f-468b-8e6c-31cbe6585451",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
