@@ -1,0 +1,12 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1b254fc8397d62df1a5860e05a76687be6cdc80a",
+  "prompts": {},
+  "humans": {
+    "h_92edd19a2533f1": {
+      "author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
