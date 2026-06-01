@@ -1,7 +1,28 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+// Resolve Xybrid config without committing it to the repo. Precedence:
+//   1. -P<name>=... on the Gradle command line (CI / one-liner)
+//   2. <name> environment variable
+//   3. <localPropKey> in local.properties (gitignored — best for Android Studio)
+// Unset resolves to "", which the SDK treats as anonymous / default platform.
+val localProperties = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+fun resolveConfig(name: String, localPropKey: String): String =
+    project.findProperty(name)?.toString()
+        ?: System.getenv(name)
+        ?: localProperties.getProperty(localPropKey)
+        ?: ""
+
+val xybridApiKey = resolveConfig("XYBRID_API_KEY", "xybrid.apiKey")
+val xybridPlatformUrl = resolveConfig("XYBRID_PLATFORM_URL", "xybrid.platformUrl")
 
 android {
     namespace = "ai.xybrid.example"
@@ -15,6 +36,10 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Surfaced to the app as BuildConfig.XYBRID_API_KEY / XYBRID_PLATFORM_URL.
+        buildConfigField("String", "XYBRID_API_KEY", "\"$xybridApiKey\"")
+        buildConfigField("String", "XYBRID_PLATFORM_URL", "\"$xybridPlatformUrl\"")
 
         vectorDrawables {
             useSupportLibrary = true
@@ -42,6 +67,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {

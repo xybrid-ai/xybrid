@@ -49,7 +49,37 @@ Or build from the command line:
 ./gradlew assembleDebug
 ```
 
-### 3. Obtain Model Files
+### 3. Set your API key (optional)
+
+The app reads `XYBRID_API_KEY` (and optionally `XYBRID_PLATFORM_URL`, the
+telemetry ingest endpoint) through `BuildConfig`, wired in
+`app/build.gradle.kts` from one of three sources (first one wins) — so neither
+lands in the repo:
+
+| Source | Best for | How |
+|--------|----------|-----|
+| `local.properties` | Android Studio (just press Run) | `xybrid.apiKey=sk_test_...` / `xybrid.platformUrl=https://...` |
+| Gradle property | one-liner / CI | `-PXYBRID_API_KEY=sk_test_...` / `-PXYBRID_PLATFORM_URL=https://...` |
+| Env variable | shells / CI | `export XYBRID_API_KEY=sk_test_...` / `export XYBRID_PLATFORM_URL=https://...` |
+
+The Gradle-property form is the Android analog of Flutter's
+`flutter run --dart-define=...`:
+
+```bash
+./gradlew installDebug \
+  -PXYBRID_API_KEY=sk_test_... \
+  -PXYBRID_PLATFORM_URL=https://your-platform.example.com
+```
+
+For Android Studio, copy
+[`local.properties.example`](local.properties.example) to `local.properties`
+(already gitignored) and fill in your values. Both are optional: without a key
+the app runs anonymously (on-device inference, telemetry disabled); without a
+platform URL it uses the default Xybrid endpoint (`XYBRID_PLATFORM_URL` is
+handy for pointing a debug build at a self-hosted or tunneled platform). Get a
+free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+
+### 4. Obtain Model Files
 
 The app loads models from the device filesystem. You need to place model files on the device before running inference.
 
@@ -88,7 +118,7 @@ The app defaults to `<app-files-dir>/models/kokoro-82m` — you can edit the pat
 - `tokens.txt` — Phoneme token vocabulary
 - `voices.bin` — Voice embeddings
 
-### 4. Run the App
+### 5. Run the App
 
 1. Select a device or emulator (API 28+)
 2. Click **Run** (Shift+F10)

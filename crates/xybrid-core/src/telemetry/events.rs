@@ -98,7 +98,7 @@ static GLOBAL_LOG_LEVEL: AtomicU8 = AtomicU8::new(1); // Default: Normal
 pub fn set_global_log_level(level: LogLevel) {
     GLOBAL_LOG_LEVEL.store(level as u8, Ordering::SeqCst);
 
-    // Also update llama.cpp verbosity if available
+    // Also update llama.cpp verbosity if available.
     #[cfg(feature = "llm-llamacpp")]
     {
         crate::runtime_adapter::llama_cpp::llama_log_set_verbosity(level.to_llamacpp_verbosity());

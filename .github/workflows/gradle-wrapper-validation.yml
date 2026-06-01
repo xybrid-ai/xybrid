@@ -1,0 +1,37 @@
+# Validates every gradle-wrapper.jar in the repo against Gradle's published
+# checksums, so a tampered wrapper can't slip in via the binary blobs we ship
+# in the Android/Kotlin bindings and examples. Also satisfies the OpenSSF
+# Scorecard Binary-Artifacts allowance for gradle-wrapper.jar files.
+name: Gradle Wrapper Validation
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '**/gradle/wrapper/gradle-wrapper.jar'
+      - '**/gradle/wrapper/gradle-wrapper.properties'
+      - '**/gradlew'
+      - '**/gradlew.bat'
+      - '**/*.gradle'
+      - '**/*.gradle.kts'
+      - '.github/workflows/gradle-wrapper-validation.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - '**/gradle/wrapper/gradle-wrapper.jar'
+      - '**/gradle/wrapper/gradle-wrapper.properties'
+      - '**/gradlew'
+      - '**/gradlew.bat'
+      - '**/*.gradle'
+      - '**/*.gradle.kts'
+      - '.github/workflows/gradle-wrapper-validation.yml'
+
+permissions: read-all
+
+jobs:
+  validation:
+    name: Validate Gradle wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: gradle/actions/wrapper-validation@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d # v4

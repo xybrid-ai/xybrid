@@ -8,7 +8,7 @@ labels: [bug]
 
 - **Platform**: (e.g., iOS 17, Android 14, macOS 14, Linux, Windows)
 - **SDK**: (Flutter / Swift / Kotlin / Unity / CLI / Rust)
-- **SDK Version**: (e.g., 0.1.0)
+- **SDK Version**: (e.g., 0.1.1)
 - **Model** (if applicable): (e.g., whisper-tiny, kokoro-82m)
 
 ## Steps to Reproduce

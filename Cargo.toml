@@ -8,6 +8,8 @@ members = [
     "crates/xybrid-bolt",
     "crates/xybrid-cli",
     "crates/xybrid-ffi",
+    "crates/llama-cpp-sys",
+    "crates/xybrid-llama",
     "bindings/flutter/rust",
     "macros",
     "xtask",
@@ -15,7 +17,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/xybrid-ai/xybrid"

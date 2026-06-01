@@ -250,8 +250,10 @@ pub use telemetry::{
     bridge_orchestrator_events,
     convert_orchestrator_event,
     flush_platform_telemetry,
+    flush_platform_telemetry_blocking,
     init_platform_telemetry,
     init_platform_telemetry_from_env,
+    install_telemetry_panic_hook,
     publish_telemetry_event,
     register_telemetry_sender,
     set_telemetry_pipeline_context,
@@ -441,8 +443,12 @@ pub fn is_sdk_cache_configured() -> bool {
 
 /// Set the Xybrid API key for gateway authentication.
 ///
-/// This sets the `XYBRID_API_KEY` environment variable which is used
-/// by the LLM client when routing through the Xybrid Gateway.
+/// The key is stored in process memory (not the environment) and used by the
+/// LLM client when routing through the Xybrid Gateway. Keeping it out of the
+/// environment means it is not inherited by child processes the host app
+/// spawns. A key set in the real `XYBRID_API_KEY` environment variable
+/// (e.g. via the CLI, Flutter `--dart-define`, or iOS `ProcessInfo`) is still
+/// honored as a fallback.
 ///
 /// # Example
 ///
@@ -458,9 +464,9 @@ pub fn is_sdk_cache_configured() -> bool {
 /// # Note
 ///
 /// For Flutter apps, you can also set this from Dart before running pipelines.
-/// The key is stored in the process environment and persists for the app lifetime.
+/// The key persists in memory for the app lifetime.
 pub fn set_api_key(api_key: &str) {
-    std::env::set_var("XYBRID_API_KEY", api_key);
+    xybrid_core::cloud::set_xybrid_api_key(Some(api_key.to_string()));
 }
 
 /// Set a provider-specific API key for direct API calls.
@@ -502,14 +508,19 @@ pub fn set_provider_api_key(provider: &str, api_key: &str) {
 
 /// Get the currently configured Xybrid API key (if set).
 ///
-/// Returns `None` if no API key is configured.
+/// Returns the key set via [`set_api_key`] (held in memory), falling back to
+/// the `XYBRID_API_KEY` environment variable. Returns `None` if neither is
+/// configured.
 pub fn get_api_key() -> Option<String> {
-    std::env::var("XYBRID_API_KEY").ok()
+    xybrid_core::cloud::xybrid_api_key().or_else(|| std::env::var("XYBRID_API_KEY").ok())
 }
 
 /// Check if the Xybrid API key is configured.
+///
+/// Avoids cloning the key (unlike [`get_api_key`]) — checks the in-memory cell
+/// then the `XYBRID_API_KEY` environment variable for presence only.
 pub fn has_api_key() -> bool {
-    std::env::var("XYBRID_API_KEY").is_ok()
+    xybrid_core::cloud::has_xybrid_api_key() || std::env::var("XYBRID_API_KEY").is_ok()
 }
 
 // ============================================================================

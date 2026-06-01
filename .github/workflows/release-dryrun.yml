@@ -33,9 +33,7 @@ env:
   FLUTTER_VERSION: "3.35.7"
   FRB_VERSION: "2.11.1"
 
-permissions:
-  contents: read
-  pull-requests: write  # for posting the dry-run report comment
+permissions: read-all
 
 jobs:
   #

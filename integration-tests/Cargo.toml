@@ -11,7 +11,7 @@ default = []
 llm-mistral = ["xybrid-core/llm-mistral"]              # mistral.rs (CPU)
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]  # mistral.rs + Metal (macOS)
 llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]    # mistral.rs + CUDA (NVIDIA)
-llm-llamacpp = ["xybrid-core/llm-llamacpp"]            # llama.cpp (Android-compatible)
+llm-llamacpp = ["xybrid-core/llm-llamacpp"]            # llama.cpp (links native backend)
 
 [dependencies]
 xybrid-core = { path = "../crates/xybrid-core" }

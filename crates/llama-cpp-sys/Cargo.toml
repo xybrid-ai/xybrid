@@ -1,0 +1,38 @@
+[package]
+name = "llama-cpp-sys"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+description = "Raw FFI bindings to llama.cpp. Build-time clones + cmake-compiles the pinned upstream commit; first-party C++ shim lives in wrapper.cpp."
+publish = false
+
+# The llama.cpp source tree (~180MB) is fetched via the workspace-level
+# submodule consumed by build.rs (`vendor/llama-cpp/`). This path does not live under this
+# crate's manifest dir, so no `exclude` line is needed — they were never
+# bundled into this crate's tarball to begin with. `wrapper.cpp` is
+# first-party and ships unconditionally.
+
+[lib]
+name = "llama_cpp_sys"
+path = "src/lib.rs"
+
+[features]
+# Default: empty crate that compiles on any target. Consumers opt in by
+# enabling `bindings`, which pulls in the extern declarations and runs the
+# cmake build via build.rs. This mirrors `mlx-c-sys`'s split so that
+# `cargo check --workspace` on a Linux CI runner without a C++ toolchain
+# can stay green.
+default = []
+bindings = []
+
+[build-dependencies]
+# For compiling the wrapper.cpp shim and llama.cpp source. Carried at the
+# crate level so the heavy build dependency is only paid when a downstream
+# crate enables the `bindings` feature (CARGO_FEATURE_BINDINGS gate inside
+# build.rs short-circuits otherwise).
+cc = "1.0"
+cmake = "0.1"
+# Phase 5 of the `llamacpp-crate-split` epic: generate the FFI surface
+# from `wrapper.h` via bindgen instead of the prior 26 hand-written
+# extern declarations. Pinned to the same major as `mlx-c-sys`.
+bindgen = "0.70"

@@ -72,8 +72,9 @@ fn llamacpp_execution_provider() -> &'static str {
 
 #[cfg(not(feature = "llm-llamacpp"))]
 fn llamacpp_execution_provider() -> &'static str {
-    // Compiled without llama.cpp — should be unreachable from a
-    // LlamaCppBackend instance, but pick a safe fallback for tests.
+    // Compiled in builds without llama.cpp linked (e.g. `llm-mistral`-only
+    // or tests): the `"llama-cpp"` arm of `local_execution_provider` is
+    // still reachable by backend name, so return a safe CPU fallback.
     "cpu"
 }
 
