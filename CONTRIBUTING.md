@@ -55,7 +55,7 @@ cargo fmt --all -- --check                # Format check
 ## PR Process
 
 1. **Fork** the repository on GitHub
-2. **Create a branch** from `main`:
+2. **Create a branch** from `master`:
    ```bash
    git checkout -b your-feature-name
    ```
@@ -64,7 +64,7 @@ cargo fmt --all -- --check                # Format check
    ```bash
    cargo test --workspace && cargo clippy --workspace -- -D warnings && cargo fmt --all -- --check
    ```
-5. **Push** your branch and open a Pull Request against `main`
+5. **Push** your branch and open a Pull Request against `master`
 6. **Respond to review feedback** — a maintainer will review your PR
 
 ### PR Guidelines
