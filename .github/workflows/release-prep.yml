@@ -807,7 +807,13 @@ jobs:
           case "$STATE" in
             true)
               echo "::notice::Deleting pre-existing DRAFT release for ${TAG} so this run can recreate it."
-              gh release delete "$TAG" --yes --cleanup-tag
+              # NOTE: no --cleanup-tag here. A draft release has no materialized
+              # git tag (drafts only hold a tag *name*; the ref is created at
+              # publish time), so `--cleanup-tag` 422s with "Reference does not
+              # exist" and aborts this step *after* deleting the release —
+              # leaving the branch with no draft at all. Deleting just the
+              # release is correct; there is no tag to clean up.
+              gh release delete "$TAG" --yes
               ;;
             false)
               echo "::error::Release ${TAG} is already PUBLISHED. Refusing to delete. Bump the version on this branch (or pick a new branch name) and re-push."
@@ -845,7 +851,16 @@ jobs:
 
       - name: Open PR (if not already open)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer a PAT (RELEASE_PAT) over GITHUB_TOKEN to OPEN the PR.
+          # GitHub does not trigger `pull_request` workflows for PRs opened by
+          # GITHUB_TOKEN (loop prevention), so with the default token the
+          # branch-protection-required `CI Success` check never runs on the PR
+          # head and the release PR can never be merged without an admin
+          # bypass. Opening the PR with a PAT makes ci.yml's `pull_request`
+          # trigger fire and the required check report. Falls back to
+          # GITHUB_TOKEN when RELEASE_PAT is unset (PR opens, but `CI Success`
+          # stays pending — merge then needs a manual CI run or admin bypass).
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.check-release-branch.outputs.tag }}
           BRANCH: ${{ needs.check-release-branch.outputs.branch }}
         run: |
