@@ -1,0 +1,25 @@
+GOVERNANCE.md
+  s_b8aab199534436::t_9c69f01fed7c1e 1-66
+MAINTAINERS.md
+  s_b8aab199534436::t_19482768ab025c 1-31
+CONTRIBUTING.md
+  s_b8aab199534436::t_231f93688f22d9 124-157
+RELEASES.md
+  s_b8aab199534436::t_d14dc57a32e8fe 1-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2b9353b246392b3e60a671e6b9c79b0ecddf51f2",
+  "prompts": {},
+  "sessions": {
+    "s_b8aab199534436": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e3d1eb8-b32d-47ba-aaf9-eeefda9f2c39",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
