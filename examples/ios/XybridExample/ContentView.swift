@@ -61,10 +61,19 @@ struct ContentView: View {
                 .first!.appendingPathComponent("xybrid").path
             initSdkCacheDir(cacheDir: cacheDir)
 
-            // Initialize the runtime. Runs locally as-is; add a free key from
-            // dashboard.xybrid.dev to see inference traces:
-            //   Xybrid.initialize(apiKey: "xy_live_...")
-            Xybrid.initialize()
+            // The key and platform URL come from the XYBRID_API_KEY and
+            // XYBRID_PLATFORM_URL scheme environment variables (Product →
+            // Scheme → Edit Scheme → Run → Arguments), so they never land in
+            // the repo. Empty/unset resolves to anonymous, local-only init
+            // against the default platform. Get a free key at
+            // dashboard.xybrid.dev. See README.
+            let env = ProcessInfo.processInfo.environment
+            let apiKey = env["XYBRID_API_KEY"]
+            let platformUrl = env["XYBRID_PLATFORM_URL"]
+            Xybrid.initialize(
+                apiKey: (apiKey ?? "").isEmpty ? nil : apiKey,
+                ingestUrl: (platformUrl ?? "").isEmpty ? nil : platformUrl
+            )
 
             await MainActor.run {
                 appState = .ready

@@ -216,7 +216,7 @@ The `xtask` crate provides build automation commands. Run `cargo xtask --help` f
 | `build-flutter` | Build Flutter native libraries | Varies | `cargo xtask build-flutter --platform macos` |
 | `setup-targets` | Install Rust cross-compilation targets | Any | `cargo xtask setup-targets` |
 | `build-all` | Build all platforms | Varies | `cargo xtask build-all --release` |
-| `package` | Package artifacts for distribution | Any | `cargo xtask package --version 0.1.0` |
+| `package` | Package artifacts for distribution | Any | `cargo xtask package --version 0.1.1` |
 
 ### xtask to Feature Preset Mapping
 

@@ -15,7 +15,7 @@ Or add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.1.0
+  xybrid_flutter: ^0.1.1
 ```
 
 <details>
@@ -187,26 +187,6 @@ Streaming with context also supported:
 await for (final token in model.runStreamingWithContext(envelope, context)) {
   stdout.write(token.token);
 }
-```
-
-### Pipeline Execution
-
-Run multi-stage ML pipelines from YAML:
-
-```dart
-final pipeline = XybridPipeline.fromYaml('''
-name: "Speech-to-Text"
-stages:
-  - "whisper-tiny@1.0"
-''');
-
-print('Pipeline: ${pipeline.name}, ${pipeline.stageCount} stages');
-
-final result = await pipeline.run(XybridEnvelope.audio(
-  bytes: audioBytes,
-  sampleRate: 16000,
-));
-print('Transcription: ${result.text}');
 ```
 
 ## Platform Support

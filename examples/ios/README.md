@@ -43,7 +43,37 @@ In Xcode:
 3. Click **+** and add local package: `../../bindings/apple`
 4. Select **Xybrid** library
 
-### 4. Build and Run
+### 4. Set your API key (optional)
+
+The app reads `XYBRID_API_KEY` (and optionally `XYBRID_PLATFORM_URL`, the
+telemetry ingest endpoint) from the scheme's environment — the Xcode-native way
+to inject values at run time without committing them. This is the iOS analog of
+Flutter's `flutter run --dart-define=...`.
+
+1. **Product → Scheme → Edit Scheme…** (or `Cmd+<`)
+2. Select **Run** → **Arguments** tab
+3. Under **Environment Variables**, add:
+   - `XYBRID_API_KEY` = `sk_test_...`
+   - `XYBRID_PLATFORM_URL` = `https://your-platform.example.com` *(optional)*
+
+The values are saved in your *user* scheme under `xcuserdata/`, which is
+gitignored — so they never land in the repo. Leave **Shared** unchecked
+(the default) to keep it that way. Both are optional: without a key the app
+runs anonymously (on-device inference, telemetry disabled); without a platform
+URL it uses the default Xybrid endpoint (`XYBRID_PLATFORM_URL` is handy for
+pointing a debug build at a self-hosted or tunneled platform). Get a free key
+at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+
+To inject them from the command line on a Simulator instead, prefix the
+launch environment:
+
+```bash
+SIMCTL_CHILD_XYBRID_API_KEY=sk_test_... \
+SIMCTL_CHILD_XYBRID_PLATFORM_URL=https://your-platform.example.com \
+  xcrun simctl launch --console booted ai.xybrid.example
+```
+
+### 5. Build and Run
 
 1. Select an iOS device (arm64) — simulator requires separate ORT build
 2. Press **Cmd+R** to build and run
@@ -81,9 +111,15 @@ let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMa
     .first!.appendingPathComponent("xybrid").path
 initSdkCacheDir(cacheDir: cacheDir)
 
-// Runs locally with no key. Pass an apiKey to light up the dashboard:
-//   Xybrid.initialize(apiKey: ProcessInfo.processInfo.environment["XYBRID_API_KEY"])
-Xybrid.initialize()
+// Reads the key and platform URL from scheme environment variables (see
+// "Set your API key" above). Empty/unset → anonymous, local-only init.
+let env = ProcessInfo.processInfo.environment
+let apiKey = env["XYBRID_API_KEY"]
+let platformUrl = env["XYBRID_PLATFORM_URL"]
+Xybrid.initialize(
+    apiKey: (apiKey ?? "").isEmpty ? nil : apiKey,
+    ingestUrl: (platformUrl ?? "").isEmpty ? nil : platformUrl
+)
 ```
 
 ### Load Model

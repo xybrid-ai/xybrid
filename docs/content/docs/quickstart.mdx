@@ -12,7 +12,7 @@ Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.1.0-beta5
+  xybrid_flutter: ^0.1.1
 ```
 
 ```bash
@@ -54,13 +54,9 @@ Or add to `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.1")
 ]
 ```
-
-> Use `exact:` while pinning a beta tag — SPM's `from:` excludes pre-release
-> identifiers per SemVer. Switch to `from: "0.1.0"` once a stable `0.1.0`
-> ships.
 
 **Run inference**
 
@@ -90,7 +86,7 @@ let result = try model.run(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta5")
+    implementation("ai.xybrid:xybrid-kotlin:0.1.1")
 }
 ```
 
@@ -128,7 +124,7 @@ https://github.com/xybrid-ai/xybrid.git#upm
 Or pin a specific version:
 
 ```
-https://github.com/xybrid-ai/xybrid.git#upm/v0.1.0-beta5
+https://github.com/xybrid-ai/xybrid.git#upm/v0.1.1
 ```
 
 **Run inference**
@@ -184,6 +180,5 @@ Transcription: "Hello, how can I help you?"
 
 <Cards>
   <Card title="SDKs" href="/docs/integrations/sdks" description="Detailed SDK guides for each platform" />
-  <Card title="Pipelines" href="/docs/concepts/pipelines" description="Chain multiple models together" />
   <Card title="Concepts" href="/docs/concepts" description="How Xybrid works under the hood" />
 </Cards>
