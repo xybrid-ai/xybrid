@@ -1073,9 +1073,7 @@ impl RegistryClient {
 
     /// Clear the entire model cache.
     pub fn clear_all_cache(&mut self) -> Result<(), SdkError> {
-        self.cache
-            .clear()
-            .map_err(|e| SdkError::cache(e.to_string()))?;
+        self.cache.clear()?;
         Ok(())
     }
 
