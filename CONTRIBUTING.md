@@ -121,6 +121,40 @@ cargo fmt --all -- --check                # Format check
 
 4. **Run your example:** `cargo run --example your_model_example`
 
+## Dependencies
+
+How Xybrid selects, declares, and keeps its third-party dependencies up to date.
+
+**Where dependencies are declared**
+
+| Area               | Manifest                                             |
+|--------------------|------------------------------------------------------|
+| Rust core & SDKs   | `Cargo.toml` (workspace root + per-crate)            |
+| Flutter binding    | `bindings/flutter/pubspec.yaml`                      |
+| Kotlin / Android   | `bindings/kotlin/build.gradle.kts`                   |
+| Unity              | `bindings/unity/package.json`                        |
+| Swift              | `Package.swift`                                       |
+| Documentation site | `docs/package.json` (pnpm)                           |
+
+Lock files (`Cargo.lock`, `pnpm-lock.yaml`, `pubspec.lock`) are committed so
+builds are reproducible.
+
+**Choosing a dependency**
+
+- Prefer the standard library; add a dependency only when it earns its keep.
+- Prefer well-maintained, widely-used crates with a license compatible with
+  Apache-2.0 (e.g. MIT/Apache-2.0). Avoid copyleft licenses for linked code.
+- Match the surrounding crate's existing version-pinning style (see
+  `CLAUDE.md`); don't unilaterally migrate conventions.
+
+**Keeping dependencies current**
+
+- [Dependabot](.github/dependabot.yml) opens weekly update PRs for Cargo and
+  GitHub Actions dependencies.
+- Security advisories across ecosystems are surfaced by Dependabot security
+  alerts and the OpenSSF Scorecard / OSV database; known-vulnerable
+  dependencies are upgraded promptly.
+
 ## Getting Help
 
 - **Questions?** Open a [GitHub Issue](https://github.com/xybrid-ai/xybrid/issues) or ask on [Discord](https://discord.gg/YhFHHkhbad)
