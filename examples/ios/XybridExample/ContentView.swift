@@ -71,8 +71,8 @@ struct ContentView: View {
             let apiKey = env["XYBRID_API_KEY"]
             let platformUrl = env["XYBRID_PLATFORM_URL"]
             Xybrid.initialize(
-                apiKey: apiKey?.isEmpty == false ? apiKey : nil,
-                ingestUrl: platformUrl?.isEmpty == false ? platformUrl : nil
+                apiKey: (apiKey ?? "").isEmpty ? nil : apiKey,
+                ingestUrl: (platformUrl ?? "").isEmpty ? nil : platformUrl
             )
 
             await MainActor.run {

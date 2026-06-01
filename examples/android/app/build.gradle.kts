@@ -16,7 +16,7 @@ val localProperties = Properties().apply {
 }
 
 fun resolveConfig(name: String, localPropKey: String): String =
-    (project.findProperty(name) as String?)
+    project.findProperty(name)?.toString()
         ?: System.getenv(name)
         ?: localProperties.getProperty(localPropKey)
         ?: ""
