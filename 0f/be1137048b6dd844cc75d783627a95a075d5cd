@@ -1,0 +1,40 @@
+crates/xybrid-cli/src/commands/models.rs
+  s_93e9e173c209bc::t_0ff33775ccc7f9 36-37
+crates/xybrid-sdk/src/pipeline/mod.rs
+  s_93e9e173c209bc::t_0ff33775ccc7f9 137,149,724,877,1197,1277-1279,1497,1509-1512,1566-1568
+crates/xybrid-sdk/src/registry_client.rs
+  s_93e9e173c209bc::t_0ff33775ccc7f9 306,327,356,397-398,448,470,526,534,551-566,717,853-854,888,900-903,910,1007-1008,1045,1076,1596,1601,1626
+crates/xybrid-sdk/src/stream.rs
+  s_93e9e173c209bc::t_0ff33775ccc7f9 159,221,226,248,253,273
+crates/xybrid-ffi-facade/src/lib.rs
+  s_93e9e173c209bc::t_3aa61b46445417 188-193
+  s_93e9e173c209bc::t_cbea21521a79a1 176-181
+  s_93e9e173c209bc::t_57e35ea9c8dd9f 159-170
+  s_93e9e173c209bc::t_a3a04f60ddb6d2 197-202
+crates/xybrid-sdk/src/model.rs
+  s_93e9e173c209bc::t_0ff33775ccc7f9 63-67,69-76,87-98,114-119,125-130,133-144,153-185,208,214,221-222,230-231,268,276,288,477,531,565,771,788,1079,1133,1204-1205,1217-1220,1225,1293-1296,1392-1393,1455-1456,1458,1790,1911,1950,2029,2070,2148,2191,2290,2458,2748,2879,2908,3010,3018,3041-3068,3106,3108-3111,3647-3651,3764-3766,3807,3958,3978-3980,4023-4026
+crates/xybrid-sdk/src/metadata_gen.rs
+  s_93e9e173c209bc::t_0ff33775ccc7f9 59,203,212
+crates/xybrid-cli/src/commands/init.rs
+  s_93e9e173c209bc::t_0ff33775ccc7f9 73
+crates/xybrid-sdk/src/cache/cache_manager.rs
+  s_93e9e173c209bc::t_0ff33775ccc7f9 105-106,121-122,148-149,162,165,171-172,189,192,199-200,340,350,352-354,360-361,365,370,375,377,486,494,499-500,503,518-519,529,566,573,576-577,587,624-625
+crates/xybrid-cli/src/main.rs
+  s_93e9e173c209bc::t_0ff33775ccc7f9 352-353
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0fbe1137048b6dd844cc75d783627a95a075d5cd",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
