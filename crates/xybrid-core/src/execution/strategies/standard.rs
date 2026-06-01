@@ -12,7 +12,7 @@ use crate::execution::template::{ExecutionTemplate, ModelMetadata, Preprocessing
 use crate::execution::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use crate::execution::{postprocessing, preprocessing};
 use crate::ir::Envelope;
-use crate::runtime_adapter::onnx::{ExecutionProviderKind, SessionOptions};
+use crate::runtime_adapter::onnx::ExecutionProviderKind;
 use crate::runtime_adapter::AdapterError;
 use crate::tracing as xybrid_trace;
 
@@ -143,7 +143,7 @@ impl StandardStrategy {
     /// Execute BERT-style inference with token IDs.
     fn execute_bert(
         &self,
-        _ctx: &ExecutionContext<'_>,
+        ctx: &ExecutionContext<'_>,
         _metadata: &ModelMetadata,
         preprocessed: &PreprocessedData,
         model_path: &std::path::Path,
@@ -160,7 +160,7 @@ impl StandardStrategy {
         let session = OnnxSessionFactory::create_session(
             model_path,
             ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
+            ctx.onnx_session_options,
         )?;
         let raw_outputs = execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
 

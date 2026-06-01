@@ -65,6 +65,9 @@ platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-
 # Desktop (Linux/Windows): CPU with llama.cpp
 platform-desktop = ["xybrid-core/ort-download", "xybrid-core/llm-llamacpp", "llm-llamacpp"]
 
+# CPU-only desktop/macOS service builds: ORT download + llama.cpp with GPU backends disabled.
+platform-cpu = ["xybrid-core/ort-download", "xybrid-core/llm-llamacpp-cpu", "llm-llamacpp-cpu"]
+
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 
 # ONNX Runtime Execution Providers
@@ -83,6 +86,7 @@ llm-mistral = ["xybrid-core/llm-mistral"]
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-core/llm-llamacpp"]
+llm-llamacpp-cpu = ["xybrid-core/llm-llamacpp-cpu"]
 
 # Dev-tools (test seams for demos and integration tests)
 dev-tools = ["xybrid-core/dev-tools"]

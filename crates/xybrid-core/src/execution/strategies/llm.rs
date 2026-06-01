@@ -1130,6 +1130,7 @@ mod tests {
         let mut ctx = ExecutionContext {
             base_path: "/models",
             runtimes: &mut runtimes,
+            onnx_session_options: crate::runtime_adapter::onnx::SessionOptions::default(),
         };
 
         let result = strategy.execute(&mut ctx, &metadata, &input).unwrap();
@@ -1162,6 +1163,7 @@ mod tests {
         let mut ctx = ExecutionContext {
             base_path: "/models",
             runtimes: &mut runtimes,
+            onnx_session_options: crate::runtime_adapter::onnx::SessionOptions::default(),
         };
 
         let _ = strategy.execute(&mut ctx, &metadata, &input);
@@ -1192,6 +1194,7 @@ mod tests {
         let mut ctx = ExecutionContext {
             base_path: "/models",
             runtimes: &mut runtimes,
+            onnx_session_options: crate::runtime_adapter::onnx::SessionOptions::default(),
         };
 
         let _ = strategy.execute(&mut ctx, &metadata, &input);
@@ -1233,6 +1236,7 @@ mod tests {
         let mut ctx = ExecutionContext {
             base_path: "/models",
             runtimes: &mut runtimes,
+            onnx_session_options: crate::runtime_adapter::onnx::SessionOptions::default(),
         };
 
         let _ = strategy.execute(&mut ctx, &metadata, &input);

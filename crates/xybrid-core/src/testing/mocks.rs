@@ -159,6 +159,10 @@ impl ModelRuntime for MockRuntime {
         self
     }
 
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn execute(&mut self, _input: &Envelope) -> Result<Envelope, AdapterError> {
         if let Some(ref error) = self.simulate_error {
             return Err(AdapterError::RuntimeError(error.clone()));

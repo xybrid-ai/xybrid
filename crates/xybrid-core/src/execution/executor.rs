@@ -53,6 +53,17 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     }
 }
 
+fn onnx_session_options(threads: Option<usize>) -> SessionOptions {
+    match threads.filter(|threads| *threads > 0) {
+        Some(threads) => SessionOptions {
+            intra_threads: Some(threads),
+            inter_threads: Some(threads),
+            ..SessionOptions::default()
+        },
+        None => SessionOptions::default(),
+    }
+}
+
 /// Stamp cost-attribution metadata (`backend`, `quantization`) onto the
 /// currently-open span.
 ///
@@ -177,6 +188,12 @@ pub struct TemplateExecutor {
     /// This ensures the struct has consistent fields regardless of features.
     #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
     llm_adapter_cache: Option<()>,
+    /// Optional override for LLM GPU offload layers. `Some(0)` pins LLMs to CPU.
+    llm_gpu_layers: Option<i32>,
+    /// Optional override for LLM inference threads. `Some(0)` uses backend auto-detect.
+    llm_threads: Option<usize>,
+    /// Optional override for ONNX Runtime intra/inter-op threads. `Some(0)` uses ORT defaults.
+    onnx_threads: Option<usize>,
 }
 
 impl TemplateExecutor {
@@ -230,7 +247,78 @@ impl TemplateExecutor {
             runtimes,
             base_path: base_path.into(),
             llm_adapter_cache: None,
+            llm_gpu_layers: None,
+            llm_threads: None,
+            onnx_threads: None,
         }
+    }
+
+    /// Override the number of LLM layers offloaded to GPU backends.
+    ///
+    /// Use `0` to force CPU-only llama.cpp inference even when the binary was
+    /// built with GPU backends available.
+    pub fn with_llm_gpu_layers(mut self, gpu_layers: i32) -> Self {
+        self.llm_gpu_layers = Some(gpu_layers);
+        self
+    }
+
+    /// Return the configured LLM GPU layer override, if any.
+    pub fn llm_gpu_layers(&self) -> Option<i32> {
+        self.llm_gpu_layers
+    }
+
+    /// Override the number of threads used by LLM backends.
+    ///
+    /// Use `0` to delegate thread selection to the backend.
+    pub fn with_llm_threads(mut self, n_threads: usize) -> Self {
+        self.llm_threads = Some(n_threads);
+        self
+    }
+
+    /// Return the configured LLM thread override, if any.
+    pub fn llm_threads(&self) -> Option<usize> {
+        self.llm_threads
+    }
+
+    /// Override ONNX Runtime thread count for sessions created by this executor.
+    ///
+    /// Use `0` to keep ORT defaults.
+    pub fn with_onnx_threads(mut self, n_threads: usize) -> Self {
+        self.onnx_threads = Some(n_threads);
+        self.configure_onnx_runtime_options();
+        self
+    }
+
+    /// Return the configured ONNX thread override, if any.
+    pub fn onnx_threads(&self) -> Option<usize> {
+        self.onnx_threads
+    }
+
+    fn onnx_session_options(&self) -> SessionOptions {
+        onnx_session_options(self.onnx_threads)
+    }
+
+    fn configure_onnx_runtime_options(&mut self) {
+        let options = self.onnx_session_options();
+        if let Some(runtime) = self
+            .runtimes
+            .get_mut("onnx")
+            .and_then(|runtime| runtime.as_any_mut().downcast_mut::<OnnxRuntime>())
+        {
+            runtime.set_session_options(options);
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn llm_config_for_model(&self, model_path: String, context_length: usize) -> LlmConfig {
+        let mut config = LlmConfig::new(model_path).with_context_length(context_length);
+        if let Some(gpu_layers) = self.llm_gpu_layers {
+            config = config.with_gpu_layers(gpu_layers);
+        }
+        if let Some(n_threads) = self.llm_threads {
+            config = config.with_threads(n_threads);
+        }
+        config
     }
 
     /// Create the default set of runtimes based on enabled features.
@@ -396,9 +484,11 @@ impl TemplateExecutor {
                 "Detected codec TTS metadata, dispatching to CodecTtsStrategy"
             );
             let strategy = CodecTtsStrategy::new();
+            let onnx_session_options = self.onnx_session_options();
             let mut ctx = ExecutionContext {
                 base_path: &self.base_path,
                 runtimes: &mut self.runtimes,
+                onnx_session_options,
             };
             return strategy.execute(&mut ctx, metadata, input);
         }
@@ -493,7 +583,7 @@ impl TemplateExecutor {
             let session = OnnxSessionFactory::create_session(
                 &model_full_path,
                 ExecutionProviderKind::Cpu,
-                SessionOptions::default(),
+                self.onnx_session_options(),
             )?;
             let raw_outputs =
                 execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
@@ -1066,8 +1156,7 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = self.llm_config_for_model(model_path_str.clone(), context_length);
 
             if let Some(template) = chat_template {
                 let template_path = Path::new(&self.base_path).join(template);
@@ -1208,7 +1297,7 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let config = self.llm_config_for_model(model_path_str.clone(), context_length);
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
@@ -1308,7 +1397,7 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let config = self.llm_config_for_model(model_path_str.clone(), context_length);
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
@@ -1427,8 +1516,7 @@ impl TemplateExecutor {
         // Load model if needed (cache miss or different model)
         if need_load {
             // Create LLM config
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = self.llm_config_for_model(model_path_str.clone(), context_length);
 
             if let Some(template) = chat_template {
                 let template_path = Path::new(&self.base_path).join(template);
@@ -2041,7 +2129,7 @@ impl TemplateExecutor {
         let session = OnnxSessionFactory::create_session(
             model_path,
             ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
+            self.onnx_session_options(),
         )?;
         let speed = extract_tts_speed(input);
 
@@ -2145,7 +2233,7 @@ impl TemplateExecutor {
         let session = OnnxSessionFactory::create_session(
             model_path,
             ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
+            self.onnx_session_options(),
         )?;
         let speed = extract_tts_speed(input);
         let mut raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
@@ -2396,6 +2484,64 @@ mod tests {
         let executor = TemplateExecutor::with_runtimes("/test", runtimes);
         assert_eq!(executor.base_path, "/test");
         assert!(executor.list_runtimes().is_empty());
+    }
+
+    #[test]
+    fn test_llm_gpu_layer_override_is_recorded() {
+        let executor = TemplateExecutor::with_base_path("/models").with_llm_gpu_layers(0);
+        assert_eq!(executor.llm_gpu_layers(), Some(0));
+    }
+
+    #[test]
+    fn test_llm_thread_override_is_recorded() {
+        let executor = TemplateExecutor::with_base_path("/models").with_llm_threads(4);
+        assert_eq!(executor.llm_threads(), Some(4));
+    }
+
+    #[test]
+    fn test_onnx_thread_override_is_recorded_and_applied_to_runtime() {
+        let executor = TemplateExecutor::with_base_path("/models").with_onnx_threads(4);
+
+        assert_eq!(executor.onnx_threads(), Some(4));
+        let runtime = executor
+            .get_runtime("onnx")
+            .and_then(|runtime| runtime.as_any().downcast_ref::<OnnxRuntime>())
+            .expect("default ONNX runtime");
+        assert_eq!(runtime.session_options().intra_threads, Some(4));
+        assert_eq!(runtime.session_options().inter_threads, Some(4));
+    }
+
+    #[test]
+    fn test_onnx_thread_zero_keeps_ort_defaults() {
+        let executor = TemplateExecutor::with_base_path("/models").with_onnx_threads(0);
+
+        assert_eq!(executor.onnx_threads(), Some(0));
+        let runtime = executor
+            .get_runtime("onnx")
+            .and_then(|runtime| runtime.as_any().downcast_ref::<OnnxRuntime>())
+            .expect("default ONNX runtime");
+        assert_eq!(runtime.session_options().intra_threads, None);
+        assert_eq!(runtime.session_options().inter_threads, None);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn test_llm_config_uses_gpu_layer_override() {
+        let executor = TemplateExecutor::with_base_path("/models").with_llm_gpu_layers(0);
+        let config = executor.llm_config_for_model("/models/model.gguf".to_string(), 2048);
+
+        assert_eq!(config.context_length, 2048);
+        assert_eq!(config.gpu_layers, 0);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn test_llm_config_uses_thread_override() {
+        let executor = TemplateExecutor::with_base_path("/models").with_llm_threads(4);
+        let config = executor.llm_config_for_model("/models/model.gguf".to_string(), 2048);
+
+        assert_eq!(config.context_length, 2048);
+        assert_eq!(config.n_threads, 4);
     }
 
     #[test]

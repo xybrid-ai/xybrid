@@ -55,6 +55,8 @@ pub struct OnnxRuntimeAdapter {
     current_model: Option<String>,
     /// Execution provider to use for new sessions
     execution_provider: ExecutionProviderKind,
+    /// Session options applied to future model loads.
+    session_options: SessionOptions,
 }
 
 impl OnnxRuntimeAdapter {
@@ -65,6 +67,7 @@ impl OnnxRuntimeAdapter {
             sessions: HashMap::new(),
             current_model: None,
             execution_provider: ExecutionProviderKind::Cpu,
+            session_options: SessionOptions::default(),
         }
     }
 
@@ -95,6 +98,7 @@ impl OnnxRuntimeAdapter {
             sessions: HashMap::new(),
             current_model: None,
             execution_provider,
+            session_options: SessionOptions::default(),
         }
     }
 
@@ -106,6 +110,22 @@ impl OnnxRuntimeAdapter {
     /// Sets the execution provider for future model loads.
     pub fn set_execution_provider(&mut self, provider: ExecutionProviderKind) {
         self.execution_provider = provider;
+    }
+
+    /// Returns the session options used for future model loads.
+    pub fn session_options(&self) -> SessionOptions {
+        self.session_options
+    }
+
+    /// Sets the session options used for future model loads.
+    pub fn set_session_options(&mut self, options: SessionOptions) {
+        self.session_options = options;
+    }
+
+    /// Creates a new adapter with explicit session options.
+    pub fn with_session_options(mut self, options: SessionOptions) -> Self {
+        self.session_options = options;
+        self
     }
 
     /// Creates a new adapter with auto-selected execution provider based on model hints.
@@ -230,18 +250,6 @@ impl OnnxRuntimeAdapter {
             crate::tracing::add_metadata("execution_provider", resolved.primary);
         }
 
-        // DEBUG: Log raw output tensor info before conversion
-        eprintln!("🔵 DEBUG: Raw ONNX Output Tensors");
-        eprintln!("   Number of outputs: {}", output_tensors.len());
-        for (name, tensor) in &output_tensors {
-            eprintln!(
-                "   Output '{}': shape {:?}, size {}",
-                name,
-                tensor.shape(),
-                tensor.len()
-            );
-        }
-
         let output_names: Vec<String> = session.output_names().to_vec();
         let output = tensors_to_envelope(&output_tensors, &output_names)?;
 
@@ -341,13 +349,9 @@ impl RuntimeAdapter for OnnxRuntimeAdapter {
         // single biggest reason latency varies on the same chip + model.
         // The capture costs ~10-15% on the first inference (the warm-up
         // call) and zero on every subsequent call.
-        let session = ONNXSession::build(
-            path,
-            self.execution_provider,
-            SessionOptions {
-                capture_resolved_ep: true,
-            },
-        )?;
+        let mut session_options = self.session_options;
+        session_options.capture_resolved_ep = true;
+        let session = ONNXSession::build(path, self.execution_provider, session_options)?;
 
         log::info!(
             "Loaded model '{}' with {} execution provider",

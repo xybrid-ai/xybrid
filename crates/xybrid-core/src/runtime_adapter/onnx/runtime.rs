@@ -1,5 +1,5 @@
 use crate::ir::Envelope;
-use crate::runtime_adapter::onnx::OnnxRuntimeAdapter;
+use crate::runtime_adapter::onnx::{OnnxRuntimeAdapter, SessionOptions};
 use crate::runtime_adapter::{AdapterResult, ModelRuntime, RuntimeAdapter};
 use std::path::Path;
 
@@ -22,6 +22,20 @@ impl OnnxRuntime {
         }
     }
 
+    pub fn with_session_options(options: SessionOptions) -> Self {
+        Self {
+            adapter: OnnxRuntimeAdapter::new().with_session_options(options),
+        }
+    }
+
+    pub fn set_session_options(&mut self, options: SessionOptions) {
+        self.adapter.set_session_options(options);
+    }
+
+    pub fn session_options(&self) -> SessionOptions {
+        self.adapter.session_options()
+    }
+
     pub fn get_session(
         &self,
         model_path: &str,
@@ -39,6 +53,10 @@ impl ModelRuntime for OnnxRuntime {
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
 

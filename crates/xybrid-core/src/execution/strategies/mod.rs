@@ -51,6 +51,7 @@ pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig, LlmStrategy};
 use super::template::ModelMetadata;
 use super::types::ExecutorResult;
 use crate::ir::Envelope;
+use crate::runtime_adapter::onnx::SessionOptions;
 use crate::runtime_adapter::ModelRuntime;
 use std::collections::HashMap;
 use std::path::Path;
@@ -64,6 +65,8 @@ pub struct ExecutionContext<'a> {
     pub base_path: &'a str,
     /// Available runtimes (e.g., "onnx", "candle")
     pub runtimes: &'a mut HashMap<String, Box<dyn ModelRuntime>>,
+    /// ONNX session options to use for direct strategy-created sessions.
+    pub onnx_session_options: SessionOptions,
 }
 
 impl<'a> ExecutionContext<'a> {

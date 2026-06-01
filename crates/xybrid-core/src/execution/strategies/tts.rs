@@ -21,7 +21,7 @@ use crate::execution::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use crate::execution::voice_loader::TtsVoiceLoader;
 use crate::execution::{postprocessing, preprocessing};
 use crate::ir::{Envelope, EnvelopeKind};
-use crate::runtime_adapter::onnx::{ExecutionProviderKind, SessionOptions};
+use crate::runtime_adapter::onnx::ExecutionProviderKind;
 use crate::runtime_adapter::AdapterError;
 use crate::tracing as xybrid_trace;
 
@@ -149,7 +149,7 @@ impl TtsStrategy {
         let session = OnnxSessionFactory::create_session(
             model_path,
             ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
+            ctx.onnx_session_options,
         )?;
         let speed = extract_tts_speed(input);
         let mut raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
@@ -213,7 +213,7 @@ impl TtsStrategy {
         let session = OnnxSessionFactory::create_session(
             model_path,
             ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
+            ctx.onnx_session_options,
         )?;
         let speed = extract_tts_speed(input);
 

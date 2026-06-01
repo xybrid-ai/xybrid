@@ -126,6 +126,7 @@ llm-mistral-cuda = ["llm-mistral"]
 # and source code (#[cfg(feature = "llm-llamacpp")] blocks), not external dependencies.
 # Requires: vendor/llama.cpp directory with cloned llama.cpp source.
 llm-llamacpp = []
+llm-llamacpp-cpu = ["llm-llamacpp"]
 
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
 # downstream demos, integration tests, and benchmarks. Off by default.

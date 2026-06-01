@@ -42,8 +42,8 @@ pub type LlmResult<T> = Result<T, AdapterError>;
 ///
 /// Build flags determine the answer because backend selection happens at
 /// compile time: `llm-mistral-metal` and `llm-mistral-cuda` switch
-/// mistralrs to the corresponding accelerator; `llm-llamacpp` on macOS
-/// builds with `GGML_METAL=ON` by default (see `build.rs`). For unknown
+/// mistralrs to the corresponding accelerator; `llm-llamacpp-cpu` forces
+/// llama.cpp to report CPU even on Apple targets. For unknown
 /// or mock backends we report `cpu` rather than guessing — wrong is
 /// worse than missing on a diagnostic field.
 pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
@@ -54,7 +54,16 @@ pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
     }
 }
 
-#[cfg(all(feature = "llm-llamacpp", any(target_os = "macos", target_os = "ios")))]
+#[cfg(feature = "llm-llamacpp-cpu")]
+fn llamacpp_execution_provider() -> &'static str {
+    "cpu"
+}
+
+#[cfg(all(
+    feature = "llm-llamacpp",
+    not(feature = "llm-llamacpp-cpu"),
+    any(target_os = "macos", target_os = "ios")
+))]
 fn llamacpp_execution_provider() -> &'static str {
     // build.rs sets GGML_METAL=ON for both macOS and iOS Apple targets.
     "metal"
@@ -62,6 +71,7 @@ fn llamacpp_execution_provider() -> &'static str {
 
 #[cfg(all(
     feature = "llm-llamacpp",
+    not(feature = "llm-llamacpp-cpu"),
     not(any(target_os = "macos", target_os = "ios"))
 ))]
 fn llamacpp_execution_provider() -> &'static str {
@@ -693,6 +703,12 @@ mod tests {
         assert!(!llama.is_empty(), "llama-cpp must map to a label");
         let mistral = local_execution_provider("mistral");
         assert!(!mistral.is_empty(), "mistral must map to a label");
+    }
+
+    #[cfg(feature = "llm-llamacpp-cpu")]
+    #[test]
+    fn local_execution_provider_reports_cpu_for_llamacpp_cpu_feature() {
+        assert_eq!(local_execution_provider("llama-cpp"), "cpu");
     }
 
     #[test]

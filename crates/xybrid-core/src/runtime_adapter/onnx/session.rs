@@ -79,6 +79,13 @@ pub struct SessionOptions {
     /// session, so leave this `false` on any path that doesn't actually
     /// read the resolved EP.
     pub capture_resolved_ep: bool,
+    /// Optional ORT intra-op thread limit. `None` keeps the ORT default;
+    /// `Some(0)` is treated as `None` by callers that use `0` for backend
+    /// auto-detect.
+    pub intra_threads: Option<usize>,
+    /// Optional ORT inter-op thread limit. `None` keeps the ORT default;
+    /// `Some(0)` is treated as `None`.
+    pub inter_threads: Option<usize>,
 }
 
 /// Lifecycle state for the resolved-EP capture.
@@ -217,6 +224,17 @@ impl ONNXSession {
                 AdapterError::RuntimeError(format!("Failed to set optimization level: {}", e))
             })?;
 
+        if let Some(intra_threads) = options.intra_threads.filter(|threads| *threads > 0) {
+            builder = builder.with_intra_threads(intra_threads).map_err(|e| {
+                AdapterError::RuntimeError(format!("Failed to set intra-op threads: {}", e))
+            })?;
+        }
+        if let Some(inter_threads) = options.inter_threads.filter(|threads| *threads > 0) {
+            builder = builder.with_inter_threads(inter_threads).map_err(|e| {
+                AdapterError::RuntimeError(format!("Failed to set inter-op threads: {}", e))
+            })?;
+        }
+
         let resolved_state = if options.capture_resolved_ep {
             let tempdir = tempfile::tempdir().map_err(|e| {
                 AdapterError::RuntimeError(format!(
@@ -248,10 +266,12 @@ impl ONNXSession {
         let (output_names, output_shapes) = Self::extract_output_metadata(&session)?;
 
         log::info!(
-            "Created ONNX session with {} execution provider for model: {} (capture_resolved_ep={})",
+            "Created ONNX session with {} execution provider for model: {} (capture_resolved_ep={}, intra_threads={:?}, inter_threads={:?})",
             execution_provider,
             model_path,
             options.capture_resolved_ep,
+            options.intra_threads,
+            options.inter_threads,
         );
 
         Ok(Self {
@@ -854,6 +874,7 @@ mod tests {
             ExecutionProviderKind::Cpu,
             SessionOptions {
                 capture_resolved_ep: true,
+                ..SessionOptions::default()
             },
         )
         .expect("Failed to load MNIST model with resolved-EP capture enabled");

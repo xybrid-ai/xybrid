@@ -269,6 +269,48 @@ fn cloud_target(provider: Option<&str>) -> ResolvedTarget {
     }
 }
 
+fn cloud_retry_envelope(
+    envelope: &Envelope,
+    generation_config: Option<&GenerationConfig>,
+    output_type: OutputType,
+) -> Envelope {
+    let mut cloud_envelope = envelope.clone();
+    cloud_envelope
+        .metadata
+        .entry("output_type".to_string())
+        .or_insert_with(|| output_type.to_string());
+    if let Some(config) = generation_config {
+        fill_missing_cloud_generation_metadata(&mut cloud_envelope, config);
+    }
+    cloud_envelope
+}
+
+fn fill_missing_cloud_generation_metadata(envelope: &mut Envelope, config: &GenerationConfig) {
+    envelope
+        .metadata
+        .entry("max_tokens".to_string())
+        .or_insert_with(|| config.max_tokens.to_string());
+    envelope
+        .metadata
+        .entry("temperature".to_string())
+        .or_insert_with(|| config.temperature.to_string());
+    envelope
+        .metadata
+        .entry("top_p".to_string())
+        .or_insert_with(|| config.top_p.to_string());
+
+    if !config.stop_sequences.is_empty()
+        && !envelope.metadata.contains_key("stop")
+        && !envelope.metadata.contains_key("stop_sequences")
+    {
+        let stops = serde_json::to_string(&config.stop_sequences)
+            .expect("Vec<String> stop sequences should serialize");
+        envelope
+            .metadata
+            .insert("stop_sequences".to_string(), stops);
+    }
+}
+
 fn record_local_abort_outcome(
     authority: &dyn OrchestrationAuthority,
     model_id: &str,
@@ -348,6 +390,8 @@ fn local_reliability_hint_after_abort(
 fn dispatch_after_local<F, S>(
     local_result: SdkResult<InferenceResult>,
     envelope: &Envelope,
+    generation_config: Option<&GenerationConfig>,
+    output_type: OutputType,
     cloud_adapter: &dyn xybrid_core::runtime_adapter::CloudStreaming,
     correlation_id: String,
     model_id: &str,
@@ -411,7 +455,11 @@ where
             }
 
             // FR-6: reuse the original prompt; no partial-token reuse.
-            let cloud_envelope = envelope.clone();
+            // `RunOptions::generation_config` drives the local leg. Fill any
+            // missing cloud metadata from it so fallback keeps the same common
+            // OpenAI generation controls without overriding explicit cloud
+            // envelope settings.
+            let cloud_envelope = cloud_retry_envelope(envelope, generation_config, output_type);
             let cloud_provider = cloud_envelope.metadata.get("provider").cloned();
             // The cloud leg almost always runs a different model than the
             // local leg (e.g. local `qwen2.5-0.5b-instruct` falling back to
@@ -724,6 +772,9 @@ pub struct ModelLoader {
     source: ModelSource,
     model_id: Option<String>,
     version: Option<String>,
+    llm_gpu_layers: Option<i32>,
+    llm_threads: Option<usize>,
+    onnx_threads: Option<usize>,
 }
 
 impl ModelLoader {
@@ -747,6 +798,9 @@ impl ModelLoader {
             source: ModelSource::registry(id),
             model_id: Some(id.to_string()),
             version: None, // Version is resolved by registry API
+            llm_gpu_layers: None,
+            llm_threads: None,
+            onnx_threads: None,
         }
     }
 
@@ -766,6 +820,9 @@ impl ModelLoader {
             source: ModelSource::registry_with_platform(id, platform),
             model_id: Some(id.to_string()),
             version: None,
+            llm_gpu_layers: None,
+            llm_threads: None,
+            onnx_threads: None,
         }
     }
 
@@ -780,6 +837,9 @@ impl ModelLoader {
             source: ModelSource::legacy_registry(url, model_id, version),
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
+            llm_gpu_layers: None,
+            llm_threads: None,
+            onnx_threads: None,
         }
     }
 
@@ -802,6 +862,9 @@ impl ModelLoader {
             source: ModelSource::legacy_registry_with_platform(url, model_id, version, platform),
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
+            llm_gpu_layers: None,
+            llm_threads: None,
+            onnx_threads: None,
         }
     }
 
@@ -818,6 +881,9 @@ impl ModelLoader {
             source: ModelSource::bundle(path),
             model_id: None,
             version: None,
+            llm_gpu_layers: None,
+            llm_threads: None,
+            onnx_threads: None,
         })
     }
 
@@ -851,6 +917,9 @@ impl ModelLoader {
             source: ModelSource::directory(path),
             model_id: None,
             version: None,
+            llm_gpu_layers: None,
+            llm_threads: None,
+            onnx_threads: None,
         })
     }
 
@@ -879,6 +948,9 @@ impl ModelLoader {
             source: ModelSource::huggingface(repo),
             model_id: Some(repo.to_string()),
             version: None,
+            llm_gpu_layers: None,
+            llm_threads: None,
+            onnx_threads: None,
         }
     }
 
@@ -898,6 +970,9 @@ impl ModelLoader {
             source: ModelSource::huggingface_with_revision(repo, revision),
             model_id: Some(repo.to_string()),
             version: Some(revision.to_string()),
+            llm_gpu_layers: None,
+            llm_threads: None,
+            onnx_threads: None,
         }
     }
 
@@ -922,6 +997,9 @@ impl ModelLoader {
             source,
             model_id: Some(repo),
             version: None,
+            llm_gpu_layers: None,
+            llm_threads: None,
+            onnx_threads: None,
         }
     }
 
@@ -938,6 +1016,30 @@ impl ModelLoader {
     /// Get the source type.
     pub fn source_type(&self) -> &'static str {
         self.source.source_type()
+    }
+
+    /// Override LLM GPU offload layers for models loaded by this loader.
+    ///
+    /// Use `0` to pin llama.cpp-backed LLM inference to CPU.
+    pub fn with_llm_gpu_layers(mut self, gpu_layers: i32) -> Self {
+        self.llm_gpu_layers = Some(gpu_layers);
+        self
+    }
+
+    /// Override LLM inference thread count for models loaded by this loader.
+    ///
+    /// Use `0` to let the backend auto-detect.
+    pub fn with_llm_threads(mut self, n_threads: usize) -> Self {
+        self.llm_threads = Some(n_threads);
+        self
+    }
+
+    /// Override ONNX Runtime thread count for models loaded by this loader.
+    ///
+    /// Use `0` to keep ORT defaults.
+    pub fn with_onnx_threads(mut self, n_threads: usize) -> Self {
+        self.onnx_threads = Some(n_threads);
+        self
     }
 
     /// Load the model into memory (synchronous).
@@ -1085,7 +1187,7 @@ impl ModelLoader {
         let extract_dir = cache.ensure_extracted(path)?;
 
         // Load from extracted directory (extraction is permanent in cache)
-        let handle = Self::create_model_handle(&extract_dir)?;
+        let handle = self.create_model_handle(&extract_dir)?;
 
         let model_id = handle.metadata.model_id.clone();
         let version = handle.metadata.version.clone();
@@ -1365,7 +1467,7 @@ impl ModelLoader {
     }
 
     fn load_from_directory(&self, path: &PathBuf) -> SdkResult<XybridModel> {
-        let handle = Self::create_model_handle(path)?;
+        let handle = self.create_model_handle(path)?;
 
         let model_id = handle.metadata.model_id.clone();
         let version = handle.metadata.version.clone();
@@ -1381,7 +1483,7 @@ impl ModelLoader {
         })
     }
 
-    fn create_model_handle(model_dir: &PathBuf) -> SdkResult<ModelHandle> {
+    fn create_model_handle(&self, model_dir: &PathBuf) -> SdkResult<ModelHandle> {
         // Load metadata
         let metadata_path = model_dir.join("model_metadata.json");
         let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
@@ -1391,7 +1493,16 @@ impl ModelLoader {
             .map_err(|e| SdkError::LoadError(format!("Failed to parse metadata: {}", e)))?;
 
         // Create executor with base path
-        let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
+        let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
+        if let Some(gpu_layers) = self.llm_gpu_layers {
+            executor = executor.with_llm_gpu_layers(gpu_layers);
+        }
+        if let Some(n_threads) = self.llm_threads {
+            executor = executor.with_llm_threads(n_threads);
+        }
+        if let Some(n_threads) = self.onnx_threads {
+            executor = executor.with_onnx_threads(n_threads);
+        }
 
         Ok(ModelHandle {
             executor,
@@ -2559,6 +2670,8 @@ impl XybridModel {
         dispatch_after_local(
             local_result,
             envelope,
+            options.generation_config.as_ref(),
+            self.output_type,
             cloud_adapter,
             correlation_id,
             &self.model_id,
@@ -3206,6 +3319,63 @@ mod tests {
         }
     }
 
+    #[test]
+    fn model_loader_threads_llm_gpu_layer_override_into_model_handle() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let metadata =
+            xybrid_core::execution::ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
+        let metadata_json = serde_json::to_string(&metadata).expect("metadata json");
+        std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
+            .expect("write metadata");
+
+        let model = ModelLoader::from_directory(temp_dir.path())
+            .expect("loader")
+            .with_llm_gpu_layers(0)
+            .load()
+            .expect("load model handle");
+        let handle = model.handle.read().expect("model handle");
+
+        assert_eq!(handle.executor.llm_gpu_layers(), Some(0));
+    }
+
+    #[test]
+    fn model_loader_threads_llm_thread_override_into_model_handle() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let metadata =
+            xybrid_core::execution::ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
+        let metadata_json = serde_json::to_string(&metadata).expect("metadata json");
+        std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
+            .expect("write metadata");
+
+        let model = ModelLoader::from_directory(temp_dir.path())
+            .expect("loader")
+            .with_llm_threads(4)
+            .load()
+            .expect("load model handle");
+        let handle = model.handle.read().expect("model handle");
+
+        assert_eq!(handle.executor.llm_threads(), Some(4));
+    }
+
+    #[test]
+    fn model_loader_threads_onnx_thread_override_into_model_handle() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let metadata =
+            xybrid_core::execution::ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
+        let metadata_json = serde_json::to_string(&metadata).expect("metadata json");
+        std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
+            .expect("write metadata");
+
+        let model = ModelLoader::from_directory(temp_dir.path())
+            .expect("loader")
+            .with_onnx_threads(4)
+            .load()
+            .expect("load model handle");
+        let handle = model.handle.read().expect("model handle");
+
+        assert_eq!(handle.executor.onnx_threads(), Some(4));
+    }
+
     fn default_metrics() -> xybrid_core::context::DeviceMetrics {
         xybrid_core::context::DeviceMetrics::default()
     }
@@ -3342,6 +3512,8 @@ mod tests {
         let result = dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-1".to_string(),
             "test-model",
@@ -3472,6 +3644,8 @@ mod tests {
         dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-record".to_string(),
             "local-model",
@@ -3533,6 +3707,8 @@ mod tests {
         let result = dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-cloud-fail".to_string(),
             "local-model",
@@ -3571,6 +3747,136 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_after_local_fills_missing_generation_metadata_for_cloud_retry() {
+        let cloud = FakeCloudAdapter::new("cloud continuation");
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("original prompt");
+        envelope
+            .metadata
+            .insert("provider".to_string(), "openai".to_string());
+        envelope
+            .metadata
+            .insert("model".to_string(), "gpt-4o-mini".to_string());
+
+        let generation = GenerationConfig {
+            max_tokens: 17,
+            temperature: 0.42,
+            top_p: 0.73,
+            stop_sequences: vec!["STOP".to_string(), "END".to_string()],
+            ..Default::default()
+        };
+
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            Some(&generation),
+            OutputType::Text,
+            &cloud,
+            "corr-generation".to_string(),
+            "local-model",
+            0,
+            1,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("cloud retry should succeed");
+
+        let cloud_calls = cloud.calls();
+        assert_eq!(cloud_calls.len(), 1);
+        let metadata = &cloud_calls[0].metadata;
+        assert_eq!(metadata.get("max_tokens").map(String::as_str), Some("17"));
+        assert_eq!(
+            metadata.get("temperature").map(String::as_str),
+            Some("0.42")
+        );
+        assert_eq!(metadata.get("top_p").map(String::as_str), Some("0.73"));
+        let stops: Vec<String> = serde_json::from_str(
+            metadata
+                .get("stop_sequences")
+                .expect("stop metadata should be present"),
+        )
+        .expect("stop metadata should be JSON");
+        assert_eq!(stops, ["STOP", "END"]);
+
+        let policy_requests = authority.policy_requests();
+        assert_eq!(policy_requests.len(), 1);
+        assert_eq!(policy_requests[0].envelope.metadata, *metadata);
+    }
+
+    #[test]
+    fn dispatch_after_local_marks_non_text_output_type_for_cloud_retry() {
+        let cloud = FakeCloudAdapter::new("cloud continuation");
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("embedding prompt");
+        envelope
+            .metadata
+            .insert("provider".to_string(), "openai".to_string());
+        envelope
+            .metadata
+            .insert("model".to_string(), "text-embedding-3-small".to_string());
+
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<
+                (),
+                Box<dyn std::error::Error + Send + Sync>,
+            > { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            None,
+            OutputType::Embedding,
+            &cloud,
+            "corr-embedding-output-type".to_string(),
+            "local-embedding-model",
+            0,
+            1,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("cloud retry should succeed");
+
+        let cloud_calls = cloud.calls();
+        assert_eq!(cloud_calls.len(), 1);
+        assert_eq!(
+            cloud_calls[0]
+                .metadata
+                .get("output_type")
+                .map(String::as_str),
+            Some("embedding")
+        );
+        assert_eq!(
+            authority.policy_requests()[0]
+                .envelope
+                .metadata
+                .get("output_type")
+                .map(String::as_str),
+            Some("embedding")
+        );
+    }
+
+    #[test]
     fn dispatch_after_local_rechecks_policy_and_retries_with_original_envelope() {
         let cloud = FakeCloudAdapter::new("cloud continuation");
         let authority = FakeAuthority::allow();
@@ -3599,6 +3905,8 @@ mod tests {
         dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-original-envelope".to_string(),
             "local-model",
@@ -3617,11 +3925,15 @@ mod tests {
         let policy_requests = authority.policy_requests();
         assert_eq!(policy_requests.len(), 1);
         assert_eq!(policy_requests[0].stage_id, "gpt-4o-mini");
-        assert_eq!(policy_requests[0].envelope, envelope);
+        let mut expected_cloud_envelope = envelope.clone();
+        expected_cloud_envelope
+            .metadata
+            .insert("output_type".to_string(), "text".to_string());
+        assert_eq!(policy_requests[0].envelope, expected_cloud_envelope);
 
         let cloud_calls = cloud.calls();
         assert_eq!(cloud_calls.len(), 1);
-        assert_eq!(cloud_calls[0], envelope);
+        assert_eq!(cloud_calls[0], expected_cloud_envelope);
         assert_eq!(received.lock().unwrap().as_slice(), ["cloud continuation"]);
     }
 
@@ -3647,6 +3959,8 @@ mod tests {
         let result = dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-cancel-after-seam".to_string(),
             "local-model",
@@ -3688,6 +4002,8 @@ mod tests {
         let result = dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-denied".to_string(),
             "local-model",
@@ -3746,6 +4062,8 @@ mod tests {
         let result = dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-cloud-model".to_string(),
             "qwen2.5-0.5b-instruct",
@@ -3783,6 +4101,8 @@ mod tests {
         let result = dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-fallback".to_string(),
             "local-only-model",
@@ -3820,6 +4140,8 @@ mod tests {
         let result = dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-2".to_string(),
             "test-model",
@@ -3860,6 +4182,8 @@ mod tests {
         let result = dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-3".to_string(),
             "test-model",
@@ -3903,6 +4227,8 @@ mod tests {
         let result = dispatch_after_local(
             local_result,
             &envelope,
+            None,
+            OutputType::Text,
             &cloud,
             "corr-cancel".to_string(),
             "test-model",

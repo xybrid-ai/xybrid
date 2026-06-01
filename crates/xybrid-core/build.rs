@@ -34,6 +34,18 @@ fn cmake_install_instructions() -> &'static str {
     }
 }
 
+#[cfg(feature = "llm-llamacpp")]
+fn env_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 /// Result of NDK detection with both found path and list of tried paths
 #[cfg(feature = "llm-llamacpp")]
 struct NdkDetectionResult {
@@ -294,6 +306,9 @@ fn compile_llama_cpp() {
     // Detect target platform
     let target = env::var("TARGET").unwrap();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let cpu_only = env::var_os("CARGO_FEATURE_LLM_LLAMACPP_CPU").is_some()
+        || env_truthy("XYBRID_LLAMACPP_CPU_ONLY")
+        || env_truthy("XYBRID_LLAMA_CPP_CPU_ONLY");
 
     // Track build configuration for summary
     let mut metal_enabled = false;
@@ -301,6 +316,8 @@ fn compile_llama_cpp() {
 
     println!("cargo:rerun-if-changed=vendor/llama.cpp");
     println!("cargo:rerun-if-changed=vendor/llama_wrapper.cpp");
+    println!("cargo:rerun-if-env-changed=XYBRID_LLAMACPP_CPU_ONLY");
+    println!("cargo:rerun-if-env-changed=XYBRID_LLAMA_CPP_CPU_ONLY");
 
     // Configure CMake
     let mut cmake_config = cmake::Config::new(&llama_cpp_dir);
@@ -391,17 +408,32 @@ fn compile_llama_cpp() {
             process::exit(1);
         }
     } else if target_os == "macos" || target_os == "ios" {
-        // Apple: Enable Metal and Accelerate, disable BLAS (use Accelerate directly)
-        cmake_config
-            .define("GGML_METAL", "ON")
-            .define("GGML_ACCELERATE", "ON")
-            .define("GGML_BLAS", "OFF");
-        metal_enabled = true;
+        if cpu_only {
+            // Apple CPU-only builds keep Accelerate for CPU kernels but disable Metal.
+            cmake_config
+                .define("GGML_METAL", "OFF")
+                .define("GGML_ACCELERATE", "ON")
+                .define("GGML_BLAS", "OFF");
+        } else {
+            // Apple: Enable Metal and Accelerate, disable BLAS (use Accelerate directly)
+            cmake_config
+                .define("GGML_METAL", "ON")
+                .define("GGML_ACCELERATE", "ON")
+                .define("GGML_BLAS", "OFF");
+            metal_enabled = true;
+        }
     } else if target.contains("linux") {
         // Linux: CPU only (can enable CUDA later)
         cmake_config
+            .define("GGML_NATIVE", "OFF")
             .define("GGML_METAL", "OFF")
-            .define("GGML_CUDA", "OFF");
+            .define("GGML_CUDA", "OFF")
+            .define("GGML_VULKAN", "OFF")
+            .define("GGML_CPU_HBM", "OFF");
+
+        if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64") {
+            cmake_config.define("GGML_LLAMAFILE", "OFF");
+        }
     } else if target.contains("windows") {
         // Windows: CPU only
         cmake_config
@@ -467,11 +499,12 @@ fn compile_llama_cpp() {
         println!("cargo:rustc-link-lib=c++");
         println!("cargo:rustc-link-lib=framework=Accelerate");
 
-        // Metal framework
-        println!("cargo:rustc-link-lib=framework=Metal");
-        println!("cargo:rustc-link-lib=framework=Foundation");
-        println!("cargo:rustc-link-lib=framework=MetalKit");
-        println!("cargo:rustc-link-lib=static=ggml-metal");
+        if metal_enabled {
+            println!("cargo:rustc-link-lib=framework=Metal");
+            println!("cargo:rustc-link-lib=framework=Foundation");
+            println!("cargo:rustc-link-lib=framework=MetalKit");
+            println!("cargo:rustc-link-lib=static=ggml-metal");
+        }
     } else if target.contains("windows") {
         // Windows linking handled by CMake
     }
