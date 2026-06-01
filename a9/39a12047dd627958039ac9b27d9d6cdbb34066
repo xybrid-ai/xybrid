@@ -1,0 +1,183 @@
+.github/workflows/release-dryrun.yml
+  s_93e9e173c209bc::t_435d9aefa05901 36
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_93e9e173c209bc::t_435d9aefa05901 18
+crates/xybrid-llama/src/log_control.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-27
+docs/package.json
+  s_93e9e173c209bc::t_435d9aefa05901 17-18,29,32-42,44
+CHANGELOG.md
+  s_93e9e173c209bc::t_435d9aefa05901 16-79
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_93e9e173c209bc::t_435d9aefa05901 126,176-222
+README.zh-CN.md
+  s_93e9e173c209bc::t_435d9aefa05901 148,165,183,217
+crates/xybrid-core/Cargo.toml
+  s_93e9e173c209bc::t_435d9aefa05901 11-14,21-29,104-105,132-145,154-156,170
+crates/xybrid-sdk/Cargo.toml
+  s_93e9e173c209bc::t_435d9aefa05901 57,60,63,66,104
+.github/workflows/release.yml
+  s_93e9e173c209bc::t_435d9aefa05901 29,172-173,436-437,514-515,701-702,776-777
+crates/llama-cpp-sys/wrapper.cpp
+  s_93e9e173c209bc::t_435d9aefa05901 8,371-373,375-377,380,741
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_93e9e173c209bc::t_435d9aefa05901 14
+docs/FEATURE_MATRIX.md
+  s_93e9e173c209bc::t_435d9aefa05901 23,34,38-46,102-105,164,217,253,255,264-265,274,300,302,307
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_93e9e173c209bc::t_435d9aefa05901 75-77
+crates/llama-cpp-sys/src/lib.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-137
+.gitmodules
+  s_93e9e173c209bc::t_435d9aefa05901 1-2
+README.ja-JP.md
+  s_93e9e173c209bc::t_435d9aefa05901 148,165,183,217
+crates/xybrid-core/src/features.rs
+  s_93e9e173c209bc::t_435d9aefa05901 107-112
+bindings/kotlin/build.gradle.kts
+  s_93e9e173c209bc::t_435d9aefa05901 8
+examples/android/local.properties.example
+  s_93e9e173c209bc::t_435d9aefa05901 1-12
+docs/pnpm-lock.yaml
+  ai_agent 7-14,21,24,27,32-33,35-36,63-64,84-85,426-427,429-430,432-433,438-439,444-445,450-451,456-457,462-463,468-469,474-475,1110-1112,1137-1141,1361-1362,1396-1397,1403-1405,1452,1690-1691,1767-1768,1881-1882,1896-1897,1936-1937,1945-1946,1962-1963,2217-2218,2244,2504,2506,2508,2510,2513,2516,2519,2522,2525,2528,2531,3011,3176-3180,3197-3198,3426,3429,3455,3464-3465,3550,3552,3554,3567,3577,3584,3591,3595,3605,3610,3623,3634,3811,3994,3998,4000,4006,4008-4009,4016,4291,4300,4302,4304,4306,4311-4318,4348,4354,4374,4376,4621-4622,4697
+bindings/kotlin/README.md
+  s_93e9e173c209bc::t_435d9aefa05901 15
+bindings/flutter/rust/Cargo.toml
+  s_93e9e173c209bc::t_435d9aefa05901 3,72
+crates/xybrid-llama/tests/wrapper_invariants.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-155
+.github/ISSUE_TEMPLATE/bug_report.md
+  s_93e9e173c209bc::t_435d9aefa05901 11
+crates/xybrid-sdk/examples/cloud_fallback_demo.rs
+  s_93e9e173c209bc::t_435d9aefa05901 56-57
+bindings/unity/package.json
+  s_93e9e173c209bc::t_435d9aefa05901 3
+docs/content/docs/(integration)/sdks/android.mdx
+  s_93e9e173c209bc::t_435d9aefa05901 14
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_93e9e173c209bc::t_435d9aefa05901 14
+crates/xybrid-ffi/Cargo.toml
+  s_93e9e173c209bc::t_435d9aefa05901 36
+crates/xybrid-core/src/cloud/mod.rs
+  s_93e9e173c209bc::t_435d9aefa05901 66-68
+examples/android/app/build.gradle.kts
+  s_93e9e173c209bc::t_435d9aefa05901 1-2,8-26,40-43,70
+Package.swift
+  s_93e9e173c209bc::t_435d9aefa05901 39,44
+crates/xybrid-llama/src/context.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-113
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_93e9e173c209bc::t_435d9aefa05901 18
+README.md
+  s_93e9e173c209bc::t_435d9aefa05901 38,65-66,133,150,168,202
+.gitignore
+  s_93e9e173c209bc::t_435d9aefa05901 52-55
+crates/xybrid-sdk/src/lib.rs
+  s_93e9e173c209bc::t_435d9aefa05901 253,256,446-451,467,469,511-513,515,519-521,523
+crates/xybrid-core/src/runtime_adapter/candle/runtime.rs
+  s_93e9e173c209bc::t_435d9aefa05901 105-117
+bindings/apple/README.md
+  s_93e9e173c209bc::t_435d9aefa05901 15,22
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_93e9e173c209bc::t_435d9aefa05901 4-5,25-33,38,47-48,76,82,118-121,160,179,199-200,226-227,233,246,256,263-264,273-416,487-489,493-495,500,542-544,557,560-561,563,565,582,592,614,616,618-619,630-632,644,647-648,650,653,662,664,666-667,682-684,707,710-711,713,741-742,766,768,770-771,798,802-822
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_93e9e173c209bc::t_435d9aefa05901 14
+crates/llama-cpp-sys/build.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1,3-45,48-75,79-167,170,190-257,266-351,413-417,422-426,433-447,452-456,466-477,479,481-492,494,496-498,500-512,516-526,529-540,545-546,557-559,565,569,583,611-614,622,625,628,636,640-838
+examples/android/README.md
+  s_93e9e173c209bc::t_435d9aefa05901 52-82,121
+.github/workflows/gradle-wrapper-validation.yml
+  s_93e9e173c209bc::t_435d9aefa05901 1-37
+.github/workflows/release-prep.yml
+  s_93e9e173c209bc::t_435d9aefa05901 56-65,208-209,431-432,522-523,686-687,731-732,810-816,844-846,854-863
+crates/xybrid-core/src/orchestrator.rs
+  s_93e9e173c209bc::t_435d9aefa05901 941,943,1045-1050,1054-1058
+bindings/flutter/README.md
+  s_93e9e173c209bc::t_435d9aefa05901 18
+.github/workflows/ci-docs.yml
+  s_93e9e173c209bc::t_435d9aefa05901 1-36
+.github/workflows/test-ci.yml
+  s_93e9e173c209bc::t_435d9aefa05901 25,94-95,151-152,220-221
+crates/llama-cpp-sys/wrapper.h
+  s_93e9e173c209bc::t_435d9aefa05901 1-197
+bindings/flutter/pubspec.yaml
+  s_93e9e173c209bc::t_435d9aefa05901 3
+crates/xybrid-core/src/runtime_adapter/llama_cpp/chat.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-43
+crates/xybrid-sdk/src/telemetry.rs
+  s_93e9e173c209bc::t_435d9aefa05901 28,82-88,412-417,465,469-477,592,629-691,706,712,1505-1509,1972-1976,2006-2008,2139-2145,2196-2217,2219-2241,2254-2302,4145-4189
+crates/xybrid-llama/src/generation.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-2,4-13,15,17,19-22,24-29,31-42,45-46,48,52-57,59-74,76-79,82-87,91,93-103,106,109-130,132-133,135-138,142-147,149-154,156-158,161-173,177-178,180-185,196-199,201-202,204-206,208,210,214,216,224,231-233,235-237,239,252,254,256-258,265-269,271-273,275,277,281,283,287,289,293,295,298-300,313-342,344-351,353-354,356-359,361-373,375-382,384-412,414,417-420,423-432,434-438,443-458,460-462,464,466-467,471-489,491-492,501-510,520-523,527-528,530-536,540-542,544-549
+crates/xybrid-llama/tests/recurrent_gating_smoke.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-158
+docs/content/docs/quickstart.mdx
+  s_93e9e173c209bc::t_435d9aefa05901 15,57,89,127
+examples/ios/README.md
+  s_93e9e173c209bc::t_435d9aefa05901 46-76,114-122
+docs/INSTALLATION.md
+  s_93e9e173c209bc::t_435d9aefa05901 76
+crates/xybrid-llama/src/lib.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-101
+crates/llama-cpp-sys/Cargo.toml
+  s_93e9e173c209bc::t_435d9aefa05901 1-38
+crates/xybrid-llama/src/error.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-92
+crates/xybrid-llama/Cargo.toml
+  s_93e9e173c209bc::t_435d9aefa05901 1-25
+integration-tests/Cargo.toml
+  s_93e9e173c209bc::t_435d9aefa05901 14
+tools/README.md
+  s_93e9e173c209bc::t_435d9aefa05901 244
+crates/xybrid-llama/tests/prefix_cache_hit_smoke.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-176
+bindings/flutter/CHANGELOG.md
+  s_93e9e173c209bc::t_435d9aefa05901 3-10
+examples/android/app/src/main/java/ai/xybrid/example/MainActivity.kt
+  s_93e9e173c209bc::t_435d9aefa05901 25-34
+crates/xybrid-llama/src/ffi.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-341
+docs/content/docs/quickstart.zh.mdx
+  s_93e9e173c209bc::t_435d9aefa05901 15,57,89,128
+crates/xybrid-cli/Cargo.toml
+  s_93e9e173c209bc::t_435d9aefa05901 40
+.github/workflows/release-publish.yml
+  s_93e9e173c209bc::t_435d9aefa05901 26-31,49-53,55,67-68,156-158,185-187,260-273,278-281,305-358,369-372,425-430
+Cargo.toml
+  s_93e9e173c209bc::t_435d9aefa05901 11-12,20
+bindings/unity/README.md
+  s_93e9e173c209bc::t_435d9aefa05901 32
+examples/ios/XybridExample/ContentView.swift
+  s_93e9e173c209bc::t_435d9aefa05901 64-76
+examples/flutter/lib/main.dart
+  s_93e9e173c209bc::t_435d9aefa05901 13-20,77-78
+examples/flutter/README.md
+  s_93e9e173c209bc::t_435d9aefa05901 56-74
+Cargo.lock
+  ai_agent 513-531,624,626,634,636,645,647,651,653,829,831,836-845,895-905,2576,2578,2602,2631,2651,2656,2911,3164-3172,3354,3356,4598,4652-4657,4970-4975,5037,5039,5493,5740,5742,5951,5953,6726,6741,6748,6757,6784,6803,6841,6848,6859,6866-6874,6877,6886,6912,6982,6984,6991,6993
+crates/xybrid-core/src/cloud/config.rs
+  s_93e9e173c209bc::t_435d9aefa05901 4-46,193-197,250-274
+.github/workflows/build-unity.yml
+  s_93e9e173c209bc::t_435d9aefa05901 20,460-461,553-554
+crates/xybrid-core/src/telemetry/events.rs
+  s_93e9e173c209bc::t_435d9aefa05901 101
+crates/xybrid-core/examples/streaming_llm.rs
+  s_93e9e173c209bc::t_435d9aefa05901 8,10,12
+crates/xybrid-llama/src/model.rs
+  s_93e9e173c209bc::t_435d9aefa05901 1-264
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a939a12047dd627958039ac9b27d9d6cdbb34066",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
