@@ -35,6 +35,7 @@
 [![License][license-shield]][license-url]
 [![Build][build-shield]][build-url]
 [![OpenSSF Scorecard][scorecard-shield]][scorecard-url]
+[![OpenSSF Best Practices][bestpractices-shield]][bestpractices-url]
 [![Stars][stars-shield]][stars-url]
 [![Release][release-shield]][release-url]
 [![Release Date][release-date-shield]][release-url]
@@ -61,6 +62,8 @@
 [build-url]: https://github.com/xybrid-ai/xybrid/actions
 [scorecard-shield]: https://api.scorecard.dev/projects/github.com/xybrid-ai/xybrid/badge
 [scorecard-url]: https://scorecard.dev/viewer/?uri=github.com/xybrid-ai/xybrid
+[bestpractices-shield]: https://www.bestpractices.dev/projects/13041/badge
+[bestpractices-url]: https://www.bestpractices.dev/projects/13041
 [stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat
 [stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
 [release-shield]: https://img.shields.io/github/v/release/xybrid-ai/xybrid?style=flat&sort=semver

@@ -23,7 +23,12 @@ name: Release Publish
 #      published, which is the typical recovery scenario.)
 #   3. Verifies the published tag's Package.swift checksum matches the
 #      now-public xcframework zip (sanity belt).
-#   4. Publishes the language packages: crates.io, pub.dev, Maven Central.
+#   4. Publishes the language packages: crates.io and Maven Central run on
+#      either trigger. pub.dev (publish-flutter) only runs on
+#      workflow_dispatch-from-tag — pub.dev's OIDC binding rejects
+#      pull_request / branch-ref tokens — so on the merge path
+#      dispatch-flutter-publish re-fires this workflow against the new tag
+#      (needs the RELEASE_PAT secret; otherwise it prints a one-liner).
 #   5. Updates the legacy `swift` branch with the URL-based Package.swift
 #      (planned to be deprecated once consumers move to `from: "<version>"`).
 #
@@ -41,6 +46,11 @@ on:
         description: "Release tag to publish/republish, e.g. v0.1.0-rc4 (must already exist on origin)"
         required: true
         type: string
+      flutter_only:
+        description: "Internal: publish ONLY to pub.dev. Set by the auto re-dispatch from the merge path (pub.dev needs a workflow_dispatch-from-tag token). Leave false for manual full recovery — that republishes crates.io / Maven / swift too."
+        required: false
+        default: false
+        type: boolean
 
 permissions: read-all
 
@@ -143,6 +153,9 @@ jobs:
   # =========================================================================
   verify-spm-checksum:
     name: Verify SPM checksum
+    # Skip on the flutter_only auto re-dispatch (pub.dev-only run). Still runs
+    # on the merge path and on a manual full-recovery dispatch.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
     needs: [publish-release]
     runs-on: ubuntu-latest
     steps:
@@ -169,6 +182,9 @@ jobs:
   # =========================================================================
   publish-crates:
     name: Publish to crates.io
+    # Skip on the flutter_only auto re-dispatch (pub.dev-only run). Still runs
+    # on the merge path and on a manual full-recovery dispatch.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
     needs: [publish-release]
     runs-on: ubuntu-latest
     steps:
@@ -241,19 +257,28 @@ jobs:
   # Inlines the dart-lang/setup-dart publish.yml steps (rather than calling
   # the reusable workflow) so we control the OIDC token's claims directly.
   #
-  # pub.dev's trusted-publisher binding for xybrid_flutter is gated on the
-  # `pub-dev-publish` GitHub Actions environment (set on
-  # https://pub.dev/packages/xybrid_flutter/admin) rather than on a tag
-  # pattern. The environment claim in the OIDC token is what pub.dev
-  # validates against, so this works regardless of how the workflow was
-  # triggered — pull_request: closed, workflow_dispatch, push: tags, etc.
-  # (The old release.yml relied on the tag-ref claim because it triggered
-  # on tag push; the release-branch flow can't satisfy that since it
-  # triggers on PR-merge / dispatch, hence the move to env-based binding.)
+  # IMPORTANT — pub.dev's trusted-publisher binding for xybrid_flutter
+  # (configured on https://pub.dev/packages/xybrid_flutter/admin) rejects the
+  # OIDC token unless BOTH hold:
+  #   * the triggering event is `workflow_dispatch` or `push` (NOT
+  #     `pull_request` — "this token originates from a 'pull_request' event"),
+  #   * the run's ref is a TAG, not a branch ("this token has 'branch'
+  #     refType").
+  # The PR-merge trigger is a `pull_request` event on a branch ref, so it can
+  # *never* satisfy this — checking out the tag (below) does not change the
+  # token's claims. The only context that works is `workflow_dispatch` run
+  # against the tag ref, i.e. `gh workflow run release-publish.yml
+  # --ref <tag> --field tag=<tag>`. Hence the `if:` guard, and the
+  # dispatch-flutter-publish job below which fires that dispatch automatically
+  # (given a PAT) on the merge path.
   # =========================================================================
   publish-flutter:
     name: Publish Flutter to pub.dev
     needs: [publish-release]
+    # Only the workflow_dispatch-from-tag context can satisfy pub.dev's OIDC
+    # binding (see comment above). On the pull_request merge path this job is
+    # skipped and dispatch-flutter-publish re-fires the workflow from the tag.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: pub-dev-publish
     permissions:
@@ -278,6 +303,60 @@ jobs:
         working-directory: bindings/flutter
 
   # =========================================================================
+  # Bridge the merge path to pub.dev.
+  #
+  # publish-flutter can only run as a workflow_dispatch-from-tag (see its
+  # comment). On the PR-merge path this job re-dispatches release-publish
+  # against the freshly-created tag so publish-flutter runs in a context
+  # pub.dev accepts. The re-dispatch needs a PAT: `gh workflow run` /
+  # workflow_dispatch fired with GITHUB_TOKEN does NOT create a new run
+  # (loop prevention). When RELEASE_PAT is absent we degrade gracefully and
+  # print the one-liner to the job summary for a maintainer to run.
+  # =========================================================================
+  dispatch-flutter-publish:
+    name: Dispatch pub.dev publish from tag
+    # Wait for the merge run's own publishes to finish before re-dispatching,
+    # so the pub.dev-only run can't race the Maven deploy / swift force-push,
+    # and we never re-dispatch on top of a half-failed release.
+    needs:
+      - publish-release
+      - verify-spm-checksum
+      - publish-crates
+      - publish-kotlin
+      - publish-swift-branch
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-dispatch from the tag ref (or print recovery one-liner)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.publish-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### pub.dev publish needs one manual step
+
+          pub.dev's trusted-publisher binding requires the OIDC token to come from a
+          \`workflow_dispatch\`/\`push\` event with \`refType: tag\`. This merge run is a
+          \`pull_request\` event on a branch ref, so it cannot publish to pub.dev.
+          Every other registry (crates.io, Maven Central, GitHub release) already published.
+
+          Run this to publish ONLY the Flutter package (or set the \`RELEASE_PAT\` secret to automate it):
+
+          \`\`\`
+          gh workflow run release-publish.yml --ref ${TAG} --field tag=${TAG} --field flutter_only=true
+          \`\`\`
+          EOF
+            echo "::warning::pub.dev publish skipped — no RELEASE_PAT. See the job summary for the one-liner."
+            exit 0
+          fi
+          gh workflow run release-publish.yml --repo "$REPO" --ref "$TAG" \
+            --field tag="$TAG" --field flutter_only=true
+          echo "::notice::Re-dispatched release-publish (flutter_only) from tag ${TAG} to publish Flutter to pub.dev."
+
+  # =========================================================================
   # Publish Kotlin SDK to Maven Central.
   #
   # The .so files come from the just-published GitHub Release asset (the
@@ -287,6 +366,10 @@ jobs:
   # =========================================================================
   publish-kotlin:
     name: Publish Kotlin SDK
+    # Skip on the flutter_only auto re-dispatch — Maven Central rejects
+    # re-deploying an already-published version. Runs on the merge path and on
+    # a manual full-recovery dispatch.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
     needs: [publish-release]
     runs-on: ubuntu-latest
     steps:
@@ -339,6 +422,10 @@ jobs:
   # =========================================================================
   publish-swift-branch:
     name: Update swift branch
+    # Skip on the flutter_only auto re-dispatch — avoids a second force-push of
+    # the swift branch racing the merge run's. Runs on the merge path and on a
+    # manual full-recovery dispatch.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
     permissions:
       contents: write   # force-pushes the swift distribution branch
     needs: [publish-release]
