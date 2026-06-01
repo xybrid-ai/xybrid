@@ -156,26 +156,50 @@ impl From<sdk::SdkError> for Error {
     fn from(err: sdk::SdkError) -> Self {
         // The whole point of the facade: this `match` is written ONCE, not
         // duplicated across xybrid-ffi / xybrid-uniffi / flutter bindings.
+        //
+        // The message-bearing variants now carry a `#[source]` cause (the SDK
+        // stopped pre-formatting it into the message as of the error-source
+        // refactor). The FFI boundary flattens to a single string, so fold the
+        // source back into the message to preserve the detail consumers saw
+        // before the refactor.
+        let with_cause =
+            |message: String, source: Option<Box<dyn std::error::Error + Send + Sync>>| match source
+            {
+                Some(cause) => format!("{message}: {cause}"),
+                None => message,
+            };
         match err {
             sdk::SdkError::ModelNotFound(id) => Error::ModelNotFound { id },
             sdk::SdkError::DirectoryNotFound(path) => Error::DirectoryNotFound { path },
             sdk::SdkError::MetadataNotFound(path) => Error::MetadataNotFound { path },
             sdk::SdkError::MetadataInvalid(message) => Error::MetadataInvalid { message },
-            sdk::SdkError::LoadError(message) => Error::LoadError { message },
-            sdk::SdkError::InferenceError(message) => Error::InferenceError { message },
+            sdk::SdkError::LoadError { message, source } => Error::LoadError {
+                message: with_cause(message, source),
+            },
+            sdk::SdkError::InferenceError { message, source } => Error::InferenceError {
+                message: with_cause(message, source),
+            },
             sdk::SdkError::AbortedForCloudFallback { reason } => Error::AbortedForCloudFallback {
                 reason: reason.to_string(),
             },
             sdk::SdkError::StreamingNotSupported => Error::StreamingNotSupported,
             sdk::SdkError::NotLoaded => Error::NotLoaded,
             sdk::SdkError::ConfigError(message) => Error::ConfigError { message },
-            sdk::SdkError::NetworkError(message) => Error::NetworkError { message },
-            sdk::SdkError::Offline(message) => Error::Offline { message },
+            sdk::SdkError::NetworkError { message, source } => Error::NetworkError {
+                message: with_cause(message, source),
+            },
+            sdk::SdkError::Offline { message, source } => Error::Offline {
+                message: with_cause(message, source),
+            },
             sdk::SdkError::IoError(e) => Error::IoError {
                 message: e.to_string(),
             },
-            sdk::SdkError::CacheError(message) => Error::CacheError { message },
-            sdk::SdkError::PipelineError(message) => Error::PipelineError { message },
+            sdk::SdkError::CacheError { message, source } => Error::CacheError {
+                message: with_cause(message, source),
+            },
+            sdk::SdkError::PipelineError { message, source } => Error::PipelineError {
+                message: with_cause(message, source),
+            },
             sdk::SdkError::CircuitOpen(message) => Error::CircuitOpen { message },
             sdk::SdkError::RateLimited { retry_after_secs } => {
                 Error::RateLimited { retry_after_secs }

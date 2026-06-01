@@ -349,8 +349,8 @@ fn find_model_not_found(err: &anyhow::Error) -> Option<&str> {
 /// local unreachability issue rather than a registry-side problem.
 fn find_offline_error(err: &anyhow::Error) -> Option<&str> {
     for cause in err.chain() {
-        if let Some(SdkError::Offline(msg)) = cause.downcast_ref::<SdkError>() {
-            return Some(msg.as_str());
+        if let Some(SdkError::Offline { message, .. }) = cause.downcast_ref::<SdkError>() {
+            return Some(message.as_str());
         }
     }
     None

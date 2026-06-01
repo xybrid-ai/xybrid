@@ -102,9 +102,8 @@ impl CacheManager {
         let cache_dir = Self::get_cache_dir()?;
 
         // Create cache directory if it doesn't exist
-        std::fs::create_dir_all(&cache_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create cache directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&cache_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create cache directory", e))?;
 
         let mut manager = Self {
             cache_dir,
@@ -119,9 +118,8 @@ impl CacheManager {
 
     /// Creates a cache manager with a custom directory.
     pub fn with_dir(cache_dir: PathBuf) -> Result<Self, SdkError> {
-        std::fs::create_dir_all(&cache_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create cache directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&cache_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create cache directory", e))?;
 
         let mut manager = Self {
             cache_dir,
@@ -147,9 +145,8 @@ impl CacheManager {
         // Platform-specific defaults
         #[cfg(target_os = "ios")]
         {
-            let home = std::env::var("HOME").map_err(|_| {
-                SdkError::CacheError("HOME environment variable not set".to_string())
-            })?;
+            let home = std::env::var("HOME")
+                .map_err(|_| SdkError::cache("HOME environment variable not set"))?;
             Ok(PathBuf::from(home)
                 .join("Library")
                 .join("Application Support")
@@ -162,18 +159,17 @@ impl CacheManager {
             // Android apps cannot write to arbitrary paths - they MUST use
             // the app's sandbox directory provided by the platform.
             // The directory must be passed from Flutter using path_provider.
-            Err(SdkError::CacheError(
+            Err(SdkError::cache(
                 "Android requires cache directory to be configured. \
                 Call init_sdk_cache_dir() with a path from path_provider before loading models. \
-                Example: initSdkCacheDir('${appDir.path}/xybrid/models')"
-                    .to_string(),
+                Example: initSdkCacheDir('${appDir.path}/xybrid/models')",
             ))
         }
 
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
         {
-            let home = dirs::home_dir()
-                .ok_or_else(|| SdkError::CacheError("Home directory not found".to_string()))?;
+            let home =
+                dirs::home_dir().ok_or_else(|| SdkError::cache("Home directory not found"))?;
             Ok(home.join(".xybrid").join("cache").join("models"))
         }
     }
@@ -190,20 +186,18 @@ impl CacheManager {
         }
 
         let entries = std::fs::read_dir(&self.cache_dir)
-            .map_err(|e| SdkError::CacheError(format!("Failed to read cache directory: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to read cache directory", e))?;
 
         for entry in entries {
-            let entry = entry
-                .map_err(|e| SdkError::CacheError(format!("Failed to read cache entry: {}", e)))?;
+            let entry = entry.map_err(|e| SdkError::cache_src("Failed to read cache entry", e))?;
 
             let path = entry.path();
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("xyb") {
                 // Extract ID and version from filename (format: id@version.xyb)
                 if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
                     if let Some((id, version)) = file_stem.split_once('@') {
-                        let metadata = std::fs::metadata(&path).map_err(|e| {
-                            SdkError::CacheError(format!("Failed to read metadata: {}", e))
-                        })?;
+                        let metadata = std::fs::metadata(&path)
+                            .map_err(|e| SdkError::cache_src("Failed to read metadata", e))?;
 
                         let cached_at = metadata
                             .modified()
@@ -343,7 +337,7 @@ impl CacheManager {
     pub fn decompress_bundle(&self, bundle_path: &Path) -> Result<PathBuf, SdkError> {
         // Validate bundle exists
         if !bundle_path.exists() {
-            return Err(SdkError::CacheError(format!(
+            return Err(SdkError::cache(format!(
                 "Bundle not found: {}",
                 bundle_path.display()
             )));
@@ -353,35 +347,34 @@ impl CacheManager {
         let file_stem = bundle_path
             .file_stem()
             .and_then(|s| s.to_str())
-            .ok_or_else(|| SdkError::CacheError("Invalid bundle filename".to_string()))?;
+            .ok_or_else(|| SdkError::cache("Invalid bundle filename"))?;
 
-        let (id, version) = file_stem.split_once('@').ok_or_else(|| {
-            SdkError::CacheError("Bundle filename must be in format id@version.xyb".to_string())
-        })?;
+        let (id, version) = file_stem
+            .split_once('@')
+            .ok_or_else(|| SdkError::cache("Bundle filename must be in format id@version.xyb"))?;
 
         // Decompressed bundle directory
         let decompressed_dir = self.cache_dir.join(format!("{}_{}", id, version));
 
         // Create decompressed directory
-        std::fs::create_dir_all(&decompressed_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create decompressed directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&decompressed_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create decompressed directory", e))?;
 
         // Load and extract bundle
         let bundle = XyBundle::load(bundle_path)
-            .map_err(|e| SdkError::CacheError(format!("Failed to load bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to load bundle", e))?;
 
         // Extract bundle contents
         bundle
             .extract_to(&decompressed_dir)
-            .map_err(|e| SdkError::CacheError(format!("Failed to extract bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to extract bundle", e))?;
 
         // Write manifest.json
         let manifest_path = decompressed_dir.join("manifest.json");
         let manifest_json = serde_json::to_string_pretty(bundle.manifest())
-            .map_err(|e| SdkError::CacheError(format!("Failed to serialize manifest: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to serialize manifest", e))?;
         std::fs::write(&manifest_path, manifest_json)
-            .map_err(|e| SdkError::CacheError(format!("Failed to write manifest: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to write manifest", e))?;
 
         Ok(decompressed_dir)
     }
@@ -490,7 +483,7 @@ impl CacheManager {
 
         // Validate bundle exists
         if !xyb_path.exists() {
-            return Err(SdkError::CacheError(format!(
+            return Err(SdkError::cache(format!(
                 "Bundle not found: {}",
                 xyb_path.display()
             )));
@@ -498,16 +491,16 @@ impl CacheManager {
 
         // Load bundle to get metadata
         let bundle = XyBundle::load(xyb_path)
-            .map_err(|e| SdkError::CacheError(format!("Failed to load bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to load bundle", e))?;
 
         // Get model_id from metadata
         let metadata_json = bundle
             .get_metadata_json()
-            .map_err(|e| SdkError::CacheError(format!("Failed to read bundle metadata: {}", e)))?
-            .ok_or_else(|| SdkError::CacheError("Bundle has no model_metadata.json".to_string()))?;
+            .map_err(|e| SdkError::cache_src("Failed to read bundle metadata", e))?
+            .ok_or_else(|| SdkError::cache("Bundle has no model_metadata.json"))?;
 
         let metadata: ModelMetadata = serde_json::from_str(&metadata_json)
-            .map_err(|e| SdkError::CacheError(format!("Failed to parse model metadata: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to parse model metadata", e))?;
 
         let extract_dir = self.extraction_dir(&metadata.model_id);
 
@@ -522,9 +515,8 @@ impl CacheManager {
         }
 
         // Create extraction directory
-        std::fs::create_dir_all(&extract_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create extraction directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&extract_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
         // Extract bundle contents
         log::info!(
@@ -534,7 +526,7 @@ impl CacheManager {
         );
         bundle
             .extract_to(&extract_dir)
-            .map_err(|e| SdkError::CacheError(format!("Failed to extract bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to extract bundle", e))?;
 
         Ok(extract_dir)
     }
@@ -571,19 +563,18 @@ impl CacheManager {
 
         // Need to extract - load bundle
         if !xyb_path.exists() {
-            return Err(SdkError::CacheError(format!(
+            return Err(SdkError::cache(format!(
                 "Bundle not found: {}",
                 xyb_path.display()
             )));
         }
 
         let bundle = XyBundle::load(xyb_path)
-            .map_err(|e| SdkError::CacheError(format!("Failed to load bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to load bundle", e))?;
 
         // Create extraction directory
-        std::fs::create_dir_all(&extract_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create extraction directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&extract_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
         // Extract bundle contents
         log::info!(
@@ -593,7 +584,7 @@ impl CacheManager {
         );
         bundle
             .extract_to(&extract_dir)
-            .map_err(|e| SdkError::CacheError(format!("Failed to extract bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to extract bundle", e))?;
 
         Ok(extract_dir)
     }
@@ -630,9 +621,8 @@ impl CacheManager {
             if let Some(entry) = self.entries.remove(&key) {
                 // Remove bundle file
                 if entry.path.exists() {
-                    std::fs::remove_file(&entry.path).map_err(|e| {
-                        SdkError::CacheError(format!("Failed to remove expired bundle: {}", e))
-                    })?;
+                    std::fs::remove_file(&entry.path)
+                        .map_err(|e| SdkError::cache_src("Failed to remove expired bundle", e))?;
                 }
                 removed_count += 1;
             }

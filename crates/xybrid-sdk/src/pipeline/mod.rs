@@ -134,7 +134,7 @@ impl PipelineRef {
     /// Parse a pipeline from YAML content (instant, no network).
     pub fn from_yaml(yaml: &str) -> PipelineResult<Self> {
         let config: PipelineConfig = serde_yaml::from_str(yaml)
-            .map_err(|e| SdkError::PipelineError(format!("Failed to parse YAML: {}", e)))?;
+            .map_err(|e| SdkError::pipeline_src("Failed to parse YAML", e))?;
 
         Ok(Self {
             yaml_content: yaml.to_string(),
@@ -146,7 +146,7 @@ impl PipelineRef {
     pub fn from_file(path: impl Into<PathBuf>) -> PipelineResult<Self> {
         let path = path.into();
         let content = std::fs::read_to_string(&path)
-            .map_err(|e| SdkError::PipelineError(format!("Failed to read file: {}", e)))?;
+            .map_err(|e| SdkError::pipeline_src("Failed to read file", e))?;
         Self::from_yaml(&content)
     }
 
@@ -721,7 +721,7 @@ impl Pipeline {
 
         let handle_read = handle
             .read()
-            .map_err(|_| SdkError::PipelineError("Failed to read pipeline handle".to_string()))?;
+            .map_err(|_| SdkError::pipeline("Failed to read pipeline handle"))?;
 
         for stage_config in &config.stages {
             let stage_id = stage_config.stage_id();
@@ -874,7 +874,7 @@ impl Pipeline {
         let registry_url = self
             .handle
             .read()
-            .map_err(|_| SdkError::PipelineError("Failed to read handle".to_string()))?
+            .map_err(|_| SdkError::pipeline("Failed to read handle"))?
             .registry_url
             .clone();
 
@@ -1194,7 +1194,7 @@ impl Pipeline {
             )
         })
         .await
-        .map_err(|e| SdkError::PipelineError(format!("Task join error: {}", e)))?
+        .map_err(|e| SdkError::pipeline_src("Task join error", e))?
     }
 
     /// Snapshot the stage descriptors (with bundle paths applied) and the
@@ -1274,10 +1274,9 @@ fn execute_blocking(
     // surface the *execution* error first when both fail — the pipeline
     // failure is the root cause; a bridge-join failure is secondary noise.
     let bridge_res = bridge.join();
-    let results: Vec<StageExecutionResult> = execution_result
-        .map_err(|e| SdkError::PipelineError(format!("Pipeline execution failed: {}", e)))?;
-    bridge_res
-        .map_err(|e| SdkError::PipelineError(format!("Orchestrator event bridge failed: {}", e)))?;
+    let results: Vec<StageExecutionResult> =
+        execution_result.map_err(|e| SdkError::pipeline_src("Pipeline execution failed", e))?;
+    bridge_res.map_err(|e| SdkError::pipeline_src("Orchestrator event bridge failed", e))?;
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
     let stages: Vec<StageTiming> = results
@@ -1495,7 +1494,7 @@ impl Xybrid {
         let handle = pipeline
             .handle
             .read()
-            .map_err(|_| SdkError::PipelineError("Failed to acquire pipeline lock".to_string()))?;
+            .map_err(|_| SdkError::pipeline("Failed to acquire pipeline lock"))?;
 
         // For streaming, we need to identify if there's an LLM stage and execute it with streaming
         // For now, support single-stage LLM pipelines
@@ -1507,13 +1506,10 @@ impl Xybrid {
                     stage_descriptor_with_bundle_path(&handle.stage_descriptors[0], &bundle_path);
                 let metadata_path = bundle_path.join("model_metadata.json");
                 if metadata_path.exists() {
-                    let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
-                        SdkError::PipelineError(format!("Failed to read metadata: {}", e))
-                    })?;
-                    let metadata: ModelMetadata =
-                        serde_json::from_str(&metadata_str).map_err(|e| {
-                            SdkError::PipelineError(format!("Failed to parse metadata: {}", e))
-                        })?;
+                    let metadata_str = std::fs::read_to_string(&metadata_path)
+                        .map_err(|e| SdkError::pipeline_src("Failed to read metadata", e))?;
+                    let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
+                        .map_err(|e| SdkError::pipeline_src("Failed to parse metadata", e))?;
 
                     // Check if this is an LLM model
                     if matches!(
@@ -1567,7 +1563,9 @@ impl Xybrid {
                         let start_time = std::time::Instant::now();
                         let output = executor
                             .execute_streaming(&metadata, envelope, on_token, None)
-                            .map_err(|e| SdkError::InferenceError(format!("{}", e)))?;
+                            .map_err(|e| {
+                                SdkError::inference_src("LLM streaming execution failed", e)
+                            })?;
                         let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
                         let output_type = match &output.kind {

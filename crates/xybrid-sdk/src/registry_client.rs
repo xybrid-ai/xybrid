@@ -303,7 +303,7 @@ impl RegistryClient {
         .and_then(|response| {
             let list_response: ListModelsResponse = response
                 .into_json()
-                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))?;
+                .map_err(|e| SdkError::network_src("Failed to parse response", e))?;
             Ok(list_response.models)
         })
     }
@@ -324,7 +324,7 @@ impl RegistryClient {
         .and_then(|response| {
             response
                 .into_json()
-                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))
+                .map_err(|e| SdkError::network_src("Failed to parse response", e))
         })
     }
 
@@ -353,7 +353,7 @@ impl RegistryClient {
         .and_then(|response| {
             let resolve_response: ResolveResponse = response
                 .into_json()
-                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))?;
+                .map_err(|e| SdkError::network_src("Failed to parse response", e))?;
             Ok(resolve_response.resolved)
         })
     }
@@ -394,9 +394,8 @@ impl RegistryClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            SdkError::NetworkError("All registry URLs failed or circuits open".to_string())
-        }))
+        Err(last_error
+            .unwrap_or_else(|| SdkError::network("All registry URLs failed or circuits open")))
     }
 
     /// Execute an operation with retry for a specific URL.
@@ -446,7 +445,7 @@ impl RegistryClient {
                     // online), and skip the retry loop within this URL since
                     // backoff won't help a DNS failure. Return immediately and
                     // let `execute_with_fallback` try the next URL.
-                    if matches!(&err, SdkError::Offline(_)) {
+                    if matches!(&err, SdkError::Offline { .. }) {
                         return Err(err);
                     }
 
@@ -468,7 +467,7 @@ impl RegistryClient {
         }
 
         Err(last_error.unwrap_or_else(|| {
-            SdkError::NetworkError(format!("All retry attempts exhausted for {}", api_url))
+            SdkError::network(format!("All retry attempts exhausted for {}", api_url))
         }))
     }
 
@@ -524,7 +523,7 @@ impl RegistryClient {
                     retry_after_secs: 60,
                 }
             }
-            502..=504 => SdkError::NetworkError(format!(
+            502..=504 => SdkError::network(format!(
                 "Registry {} failed with status {} (server error)",
                 operation, status
             )),
@@ -532,9 +531,7 @@ impl RegistryClient {
                 "Registry {} failed with status {} (client error)",
                 operation, status
             )),
-            _ => {
-                SdkError::NetworkError(format!("Registry {} returned status {}", operation, status))
-            }
+            _ => SdkError::network(format!("Registry {} returned status {}", operation, status)),
         }
     }
 
@@ -551,20 +548,22 @@ impl RegistryClient {
             ureq::Error::Transport(transport) => {
                 let kind = transport.kind();
                 match kind {
-                    ureq::ErrorKind::Dns => SdkError::Offline(format!(
-                        "Failed to {} (DNS resolution failed)",
-                        operation
-                    )),
-                    ureq::ErrorKind::ConnectionFailed => SdkError::Offline(format!(
-                        "Failed to {} (connection refused or host unreachable)",
-                        operation
-                    )),
-                    ureq::ErrorKind::Io => SdkError::Offline(format!(
-                        "Failed to {} (network I/O error: {})",
-                        operation,
-                        transport.message().unwrap_or("unknown")
-                    )),
-                    _ => SdkError::NetworkError(format!("Failed to {}: {}", operation, transport)),
+                    ureq::ErrorKind::Dns => SdkError::offline_src(
+                        format!("Failed to {} (DNS resolution failed)", operation),
+                        transport,
+                    ),
+                    ureq::ErrorKind::ConnectionFailed => SdkError::offline_src(
+                        format!(
+                            "Failed to {} (connection refused or host unreachable)",
+                            operation
+                        ),
+                        transport,
+                    ),
+                    ureq::ErrorKind::Io => SdkError::offline_src(
+                        format!("Failed to {} (network I/O error)", operation),
+                        transport,
+                    ),
+                    _ => SdkError::network_src(format!("Failed to {}", operation), transport),
                 }
             }
         }
@@ -715,7 +714,7 @@ impl RegistryClient {
             let hash = compute_sha256(&cache_path)?;
             if hash != resolved.sha256 {
                 std::fs::remove_file(&cache_path).ok();
-                return Err(SdkError::CacheError(format!(
+                return Err(SdkError::cache(format!(
                     "SHA256 mismatch: expected {}, got {}",
                     resolved.sha256, hash
                 )));
@@ -851,9 +850,8 @@ impl RegistryClient {
         }
 
         // Create extraction directory
-        std::fs::create_dir_all(&extract_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create extraction directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&extract_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
         // Download raw model file directly to extraction dir
         info!(
@@ -887,7 +885,7 @@ impl RegistryClient {
             let hash = compute_sha256(&model_file_path)?;
             if hash != resolved.sha256 {
                 std::fs::remove_file(&model_file_path).ok();
-                return Err(SdkError::CacheError(format!(
+                return Err(SdkError::cache(format!(
                     "Passthrough SHA256 mismatch: expected {}, got {}",
                     resolved.sha256, hash
                 )));
@@ -899,19 +897,17 @@ impl RegistryClient {
 
         // Write model_metadata.json from registry response
         if let Some(ref metadata) = resolved.model_metadata {
-            let metadata_json = serde_json::to_string_pretty(metadata).map_err(|e| {
-                SdkError::CacheError(format!("Failed to serialize model metadata: {}", e))
-            })?;
-            std::fs::write(&metadata_path, metadata_json).map_err(|e| {
-                SdkError::CacheError(format!("Failed to write model_metadata.json: {}", e))
-            })?;
+            let metadata_json = serde_json::to_string_pretty(metadata)
+                .map_err(|e| SdkError::cache_src("Failed to serialize model metadata", e))?;
+            std::fs::write(&metadata_path, metadata_json)
+                .map_err(|e| SdkError::cache_src("Failed to write model_metadata.json", e))?;
             info!(
                 "Wrote model_metadata.json for passthrough model '{}' at {}",
                 mask,
                 metadata_path.display()
             );
         } else {
-            return Err(SdkError::CacheError(format!(
+            return Err(SdkError::cache(format!(
                 "Passthrough variant for '{}' has no model_metadata in registry response",
                 mask
             )));
@@ -1008,9 +1004,8 @@ impl RegistryClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            SdkError::NetworkError("Download failed after all retry attempts".to_string())
-        }))
+        Err(last_error
+            .unwrap_or_else(|| SdkError::network("Download failed after all retry attempts")))
     }
 
     /// Attempt a single download.
@@ -1047,7 +1042,7 @@ impl RegistryClient {
         loop {
             let bytes_read = reader
                 .read(&mut buffer)
-                .map_err(|e| SdkError::NetworkError(format!("Read error: {}", e)))?;
+                .map_err(|e| SdkError::network_src("Read error", e))?;
 
             if bytes_read == 0 {
                 break;
@@ -1078,9 +1073,7 @@ impl RegistryClient {
 
     /// Clear the entire model cache.
     pub fn clear_all_cache(&mut self) -> Result<(), SdkError> {
-        self.cache
-            .clear()
-            .map_err(|e| SdkError::CacheError(e.to_string()))?;
+        self.cache.clear()?;
         Ok(())
     }
 
@@ -1600,12 +1593,12 @@ mod tests {
         assert!(circuit.is_closed(), "breaker starts closed");
 
         let mut op = |_url: &str| -> Result<ureq::Response, SdkError> {
-            Err(SdkError::Offline("simulated offline".to_string()))
+            Err(SdkError::offline("simulated offline"))
         };
 
         let result =
             client.execute_with_retry_for_url("https://primary.example.invalid", &circuit, &mut op);
-        assert!(matches!(result, Err(SdkError::Offline(_))));
+        assert!(matches!(result, Err(SdkError::Offline { .. })));
         assert_eq!(
             circuit.failure_count(),
             0,
@@ -1630,7 +1623,7 @@ mod tests {
 
         let mut op = |_url: &str| -> Result<ureq::Response, SdkError> {
             call_count.fetch_add(1, Ordering::SeqCst);
-            Err(SdkError::Offline("simulated offline".to_string()))
+            Err(SdkError::offline("simulated offline"))
         };
 
         let result =

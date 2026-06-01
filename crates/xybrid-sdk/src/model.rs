@@ -60,7 +60,20 @@ pub enum StreamEvent {
     Error(String),
 }
 
+/// A boxed, thread-safe error cause carried by the wrapping [`SdkError`]
+/// variants so the underlying error stays `source()`-walkable and
+/// downcastable instead of being flattened into a string.
+pub type SdkErrorSource = Box<dyn std::error::Error + Send + Sync>;
+
 /// SDK-level error type.
+///
+/// The variants that wrap an underlying failure (`LoadError`,
+/// `InferenceError`, `NetworkError`, `CacheError`, `PipelineError`,
+/// `Offline`) carry the original error as a `#[source]` cause rather than
+/// pre-formatting it into the message, so callers can walk
+/// [`std::error::Error::source`] and downcast to the real type. Construct
+/// them with the [`SdkError::inference`] / [`SdkError::inference_src`]
+/// family of helpers.
 #[derive(Debug, thiserror::Error)]
 pub enum SdkError {
     #[error("Model not found: {0}")]
@@ -71,10 +84,18 @@ pub enum SdkError {
     MetadataNotFound(String),
     #[error("model_metadata.json is invalid: {0}")]
     MetadataInvalid(String),
-    #[error("Failed to load model: {0}")]
-    LoadError(String),
-    #[error("Inference failed: {0}")]
-    InferenceError(String),
+    #[error("Failed to load model: {message}")]
+    LoadError {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
+    #[error("Inference failed: {message}")]
+    InferenceError {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
     /// Local streaming aborted under resource pressure with the caller's
     /// permission to retry on cloud (`AbortPolicy::fallback_to_cloud`).
     /// `run_streaming_with_fallback` catches this variant; lower-level
@@ -90,27 +111,76 @@ pub enum SdkError {
     NotLoaded,
     #[error("Invalid configuration: {0}")]
     ConfigError(String),
-    #[error("Network error: {0}")]
-    NetworkError(String),
+    #[error("Network error: {message}")]
+    NetworkError {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
     /// The registry could not be reached at all (DNS failure, connection refused,
     /// network unreachable, interface down). This is distinct from `NetworkError`
     /// because it represents *local* unreachability rather than a server-side problem,
     /// and the circuit breaker treats it differently — offline errors don't count
     /// toward the failure threshold so callers aren't punished for being offline.
-    #[error("Registry unreachable: {0}")]
-    Offline(String),
+    #[error("Registry unreachable: {message}")]
+    Offline {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("Cache error: {0}")]
-    CacheError(String),
-    #[error("Pipeline error: {0}")]
-    PipelineError(String),
+    #[error("Cache error: {message}")]
+    CacheError {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
+    #[error("Pipeline error: {message}")]
+    PipelineError {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
     #[error("Circuit breaker open: {0}")]
     CircuitOpen(String),
     #[error("Rate limited, retry after {retry_after_secs} seconds")]
     RateLimited { retry_after_secs: u64 },
     #[error("Request timeout after {timeout_ms}ms")]
     Timeout { timeout_ms: u64 },
+}
+
+/// Generates the `message`-only and `_src` (cause-chaining) constructors for
+/// the wrapping `SdkError` variants, so call sites stay terse
+/// (`SdkError::cache_src("…", e)`) while preserving the underlying cause.
+macro_rules! sdk_error_ctors {
+    ($($msg_fn:ident, $src_fn:ident => $variant:ident);+ $(;)?) => {
+        impl SdkError {
+            $(
+                #[doc = concat!("Build [`SdkError::", stringify!($variant), "`] from a message with no underlying cause.")]
+                pub(crate) fn $msg_fn(message: impl Into<String>) -> Self {
+                    SdkError::$variant { message: message.into(), source: None }
+                }
+
+                #[doc = concat!("Build [`SdkError::", stringify!($variant), "`] from a message, chaining `source` as the `#[source]` cause.")]
+                pub(crate) fn $src_fn(
+                    message: impl Into<String>,
+                    source: impl Into<SdkErrorSource>,
+                ) -> Self {
+                    SdkError::$variant { message: message.into(), source: Some(source.into()) }
+                }
+            )+
+        }
+    };
+}
+
+sdk_error_ctors! {
+    load, load_src => LoadError;
+    inference, inference_src => InferenceError;
+    network, network_src => NetworkError;
+    cache, cache_src => CacheError;
+    pipeline, pipeline_src => PipelineError;
+    offline, offline_src => Offline;
 }
 
 /// Result type for SDK operations.
@@ -135,21 +205,21 @@ impl SdkError {
     pub fn is_retryable(&self) -> bool {
         match self {
             // Retryable errors (transient failures)
-            SdkError::NetworkError(_) => true,
+            SdkError::NetworkError { .. } => true,
             SdkError::RateLimited { .. } => true,
             SdkError::Timeout { .. } => true,
             // Offline is "retryable" only across URLs — the fallback registry
             // may be reachable even when the primary isn't. Within a single URL
             // the retry loop short-circuits immediately (see registry_client).
-            SdkError::Offline(_) => true,
+            SdkError::Offline { .. } => true,
 
             // Non-retryable errors (permanent failures)
             SdkError::ModelNotFound(_) => false,
             SdkError::DirectoryNotFound(_) => false,
             SdkError::MetadataNotFound(_) => false,
             SdkError::MetadataInvalid(_) => false,
-            SdkError::LoadError(_) => false,
-            SdkError::InferenceError(_) => false,
+            SdkError::LoadError { .. } => false,
+            SdkError::InferenceError { .. } => false,
             // Resource-driven abort is not retryable on the same path; the
             // wrapper redirects to cloud instead.
             SdkError::AbortedForCloudFallback { .. } => false,
@@ -157,8 +227,8 @@ impl SdkError {
             SdkError::NotLoaded => false,
             SdkError::ConfigError(_) => false,
             SdkError::IoError(_) => false,
-            SdkError::CacheError(_) => false,
-            SdkError::PipelineError(_) => false,
+            SdkError::CacheError { .. } => false,
+            SdkError::PipelineError { .. } => false,
             SdkError::CircuitOpen(_) => false, // Don't retry when circuit is open
         }
     }
@@ -195,7 +265,7 @@ fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) 
         xybrid_core::runtime_adapter::AdapterError::AbortedForCloudFallback { reason } => {
             SdkError::AbortedForCloudFallback { reason }
         }
-        other => SdkError::InferenceError(format!("Streaming execution failed: {}", other)),
+        other => SdkError::inference_src("Streaming execution failed", other),
     }
 }
 
@@ -203,7 +273,7 @@ fn streaming_callback_error(error: Box<dyn std::error::Error + Send + Sync>) -> 
     if let Some(reason) = xybrid_core::abort::cloud_fallback_reason_from_error(error.as_ref()) {
         return SdkError::AbortedForCloudFallback { reason };
     }
-    SdkError::InferenceError(format!("Streaming callback failed: {}", error))
+    SdkError::inference_src("Streaming callback failed", error)
 }
 
 fn streaming_pre_run_abort_error(
@@ -215,7 +285,7 @@ fn streaming_pre_run_abort_error(
             reason: reason.to_core_abort_reason(),
         };
     }
-    SdkError::InferenceError(format!("Execution aborted: {reason}"))
+    SdkError::inference(format!("Execution aborted: {reason}"))
 }
 
 /// Information about a local→cloud handoff "seam" surfaced by
@@ -404,7 +474,7 @@ where
                 .as_ref()
                 .is_some_and(CancellationToken::is_cancelled)
             {
-                return Err(SdkError::InferenceError(format!(
+                return Err(SdkError::inference(format!(
                     "Execution aborted: {}",
                     crate::run_options::AbortReason::UserCancelled
                 )));
@@ -458,7 +528,7 @@ where
                         },
                         signal_context,
                     );
-                    return Err(SdkError::InferenceError(format!(
+                    return Err(SdkError::inference(format!(
                         "cloud_denied_by_policy: {}",
                         policy_reason
                     )));
@@ -492,7 +562,7 @@ where
                         },
                         signal_context,
                     );
-                    return Err(SdkError::InferenceError(format!(
+                    return Err(SdkError::inference(format!(
                         "cloud_denied_by_policy: {}",
                         policy_reason
                     )));
@@ -698,7 +768,7 @@ fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<
         {
             return Ok(found.to_string());
         }
-        return Err(SdkError::LoadError(format!(
+        return Err(SdkError::load(format!(
             "No GGUF file matching variant '{}'. Available: {}",
             v,
             gguf_files.join(", ")
@@ -715,7 +785,7 @@ fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<
     // Fallback: pick the smallest file (likely the most quantized)
     Ok(gguf_files
         .first()
-        .ok_or_else(|| SdkError::LoadError("No GGUF files found".to_string()))?
+        .ok_or_else(|| SdkError::load("No GGUF files found"))?
         .to_string())
 }
 
@@ -1006,7 +1076,7 @@ impl ModelLoader {
         let loader = self.clone();
         tokio::task::spawn_blocking(move || loader.load())
             .await
-            .map_err(|e| SdkError::LoadError(format!("Task join error: {}", e)))?
+            .map_err(|e| SdkError::load_src("Task join error", e))?
     }
 
     /// Load model from registry using RegistryClient.
@@ -1060,7 +1130,7 @@ impl ModelLoader {
         // Use blocking HTTP client
         let response = ureq::get(&bundle_url)
             .call()
-            .map_err(|e| SdkError::NetworkError(format!("Failed to download bundle: {}", e)))?;
+            .map_err(|e| SdkError::network_src("Failed to download bundle", e))?;
 
         if response.status() != 200 {
             return Err(SdkError::ModelNotFound(format!(
@@ -1131,9 +1201,8 @@ impl ModelLoader {
         log::info!(target: "xybrid_sdk", "Downloading model from HuggingFace: {}", repo);
 
         // Create HF API client
-        let api = Api::new().map_err(|e| {
-            SdkError::NetworkError(format!("Failed to create HuggingFace API client: {}", e))
-        })?;
+        let api = Api::new()
+            .map_err(|e| SdkError::network_src("Failed to create HuggingFace API client", e))?;
 
         // Create repo reference with optional revision
         let hf_repo = if let Some(rev) = revision {
@@ -1145,15 +1214,15 @@ impl ModelLoader {
 
         // Get repo info to list all files
         let repo_info = repo_api.info().map_err(|e| {
-            SdkError::NetworkError(format!(
-                "Failed to get HuggingFace repo info for '{}': {}",
-                repo, e
-            ))
+            SdkError::network_src(
+                format!("Failed to get HuggingFace repo info for '{}'", repo),
+                e,
+            )
         })?;
 
         let siblings = repo_info.siblings;
         if siblings.is_empty() {
-            return Err(SdkError::LoadError(format!(
+            return Err(SdkError::load(format!(
                 "HuggingFace repo '{}' has no files",
                 repo
             )));
@@ -1221,10 +1290,10 @@ impl ModelLoader {
 
             // Download file (hf-hub caches internally)
             let cached_path = repo_api.get(filename).map_err(|e| {
-                SdkError::NetworkError(format!(
-                    "Failed to download '{}' from '{}': {}",
-                    filename, repo, e
-                ))
+                SdkError::network_src(
+                    format!("Failed to download '{}' from '{}'", filename, repo),
+                    e,
+                )
             })?;
 
             // Create target path in our cache directory
@@ -1320,9 +1389,8 @@ impl ModelLoader {
         let base_cache = if let Some(sdk_cache) = crate::get_sdk_cache_dir() {
             sdk_cache.join("hf")
         } else {
-            let home = dirs::home_dir().ok_or_else(|| {
-                SdkError::CacheError("Cannot determine home directory".to_string())
-            })?;
+            let home = dirs::home_dir()
+                .ok_or_else(|| SdkError::cache("Cannot determine home directory"))?;
             home.join(".xybrid").join("cache").join("hf")
         };
 
@@ -1384,11 +1452,10 @@ impl ModelLoader {
     fn create_model_handle(model_dir: &PathBuf) -> SdkResult<ModelHandle> {
         // Load metadata
         let metadata_path = model_dir.join("model_metadata.json");
-        let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
-            SdkError::LoadError(format!("Failed to read model_metadata.json: {}", e))
-        })?;
+        let metadata_str = std::fs::read_to_string(&metadata_path)
+            .map_err(|e| SdkError::load_src("Failed to read model_metadata.json", e))?;
         let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
-            .map_err(|e| SdkError::LoadError(format!("Failed to parse metadata: {}", e)))?;
+            .map_err(|e| SdkError::load_src("Failed to parse metadata", e))?;
 
         // Create executor with base path
         let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
@@ -1720,7 +1787,7 @@ impl XybridModel {
             handle
                 .executor
                 .execute(&metadata, &warmup_input, None)
-                .map_err(|e| SdkError::InferenceError(format!("Warmup execution failed: {}", e)))?;
+                .map_err(|e| SdkError::inference_src("Warmup execution failed", e))?;
         }
 
         let latency_ms = start.elapsed().as_millis() as u32;
@@ -1841,7 +1908,7 @@ impl XybridModel {
                 guard
                     .executor
                     .execute(&metadata, &warmup_input, None)
-                    .map_err(|e| SdkError::InferenceError(format!("Warmup failed: {}", e)))?;
+                    .map_err(|e| SdkError::inference_src("Warmup failed", e))?;
 
                 version_for_event = metadata.version.clone();
                 output_type_str = format!("{:?}", output_type);
@@ -1880,7 +1947,7 @@ impl XybridModel {
             Ok(())
         })
         .await
-        .map_err(|e| SdkError::InferenceError(format!("Task join error: {}", e)))?
+        .map_err(|e| SdkError::inference_src("Task join error", e))?
     }
 
     /// Create a minimal WAV file bytes from samples for warmup.
@@ -1959,7 +2026,7 @@ impl XybridModel {
         let output = handle
             .executor
             .execute(&metadata, envelope, config)
-            .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+            .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
         let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -2000,7 +2067,7 @@ impl XybridModel {
         let mut abort_state = AbortState::new(options);
         abort_state
             .check_before_run()
-            .map_err(|reason| SdkError::InferenceError(format!("Execution aborted: {reason}")))?;
+            .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
         self.run(envelope, options.generation_config.as_ref())
     }
 
@@ -2078,7 +2145,7 @@ impl XybridModel {
         let output = handle
             .executor
             .execute_with_context(&metadata, envelope, context, config)
-            .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+            .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
         let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -2121,7 +2188,7 @@ impl XybridModel {
         let mut abort_state = AbortState::new(options);
         abort_state
             .check_before_run()
-            .map_err(|reason| SdkError::InferenceError(format!("Execution aborted: {reason}")))?;
+            .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
         self.run_with_context(envelope, context, options.generation_config.as_ref())
     }
 
@@ -2220,7 +2287,7 @@ impl XybridModel {
             let result = handle
                 .executor
                 .execute_with_context(&metadata, envelope, context, config)
-                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+                .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
             // Extract text from result (if any) and emit as single token
             if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
@@ -2388,7 +2455,7 @@ impl XybridModel {
             let result = handle
                 .executor
                 .execute(&metadata, envelope, config)
-                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+                .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
             // Extract text from result (if any) and emit as single token
             if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
@@ -2678,9 +2745,7 @@ impl XybridModel {
                     let result = guard
                         .executor
                         .execute(&metadata, &envelope, config.as_ref())
-                        .map_err(|e| {
-                            SdkError::InferenceError(format!("Execution failed: {}", e))
-                        })?;
+                        .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
                     // Emit single token with full result
                     if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
@@ -2811,7 +2876,7 @@ impl XybridModel {
             let output = guard
                 .executor
                 .execute(&metadata, &envelope, config.as_ref())
-                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+                .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
             let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -2840,7 +2905,7 @@ impl XybridModel {
             Ok(InferenceResult::new(output, &model_id, latency_ms))
         })
         .await
-        .map_err(|e| SdkError::InferenceError(format!("Task join error: {}", e)))?
+        .map_err(|e| SdkError::inference_src("Task join error", e))?
     }
 
     /// Create a streaming session for real-time ASR.
@@ -2942,7 +3007,7 @@ mod tests {
         use xybrid_core::http::RetryableError;
 
         let cases = [
-            (SdkError::NetworkError("x".into()), true),
+            (SdkError::network("x"), true),
             (
                 SdkError::RateLimited {
                     retry_after_secs: 5,
@@ -2950,7 +3015,7 @@ mod tests {
                 true,
             ),
             (SdkError::Timeout { timeout_ms: 100 }, true),
-            (SdkError::Offline("x".into()), true),
+            (SdkError::offline("x"), true),
             (SdkError::CircuitOpen("x".into()), false),
             (SdkError::NotLoaded, false),
             (SdkError::ConfigError("x".into()), false),
@@ -2971,6 +3036,34 @@ mod tests {
         assert_eq!(rl.retry_after(), Some(std::time::Duration::from_secs(7)));
         assert_eq!(rl.retry_after(), RetryableError::retry_after(&rl));
         assert_eq!(SdkError::NotLoaded.retry_after(), None);
+    }
+
+    /// The wrapping variants must keep the underlying cause walkable via
+    /// `std::error::Error::source` and downcastable to its concrete type,
+    /// rather than flattening it into the message string. This is the whole
+    /// point of the `#[source]` cause: a consumer can inspect the real error
+    /// instead of string-grepping. Also asserts the message no longer
+    /// embeds the cause (no double-rendering).
+    #[test]
+    fn wrapping_variants_chain_source_cause() {
+        use std::error::Error as _;
+
+        let io = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "boom");
+        let err = SdkError::load_src("metadata unreadable", io);
+
+        // Display shows the variant prefix + context message, not the cause —
+        // the cause is reachable through `source()`, not flattened into the text.
+        assert_eq!(err.to_string(), "Failed to load model: metadata unreadable");
+
+        // The cause is preserved, walkable, and downcasts to the real type.
+        let source = err.source().expect("source cause should be present");
+        let io_cause = source
+            .downcast_ref::<std::io::Error>()
+            .expect("source should downcast to io::Error");
+        assert_eq!(io_cause.kind(), std::io::ErrorKind::PermissionDenied);
+
+        // A message-only constructor carries no source.
+        assert!(SdkError::load("no cause here").source().is_none());
     }
 
     #[test]
@@ -3010,9 +3103,12 @@ mod tests {
             streaming_callback_error(Box::new(crate::run_options::AbortReason::UserCancelled));
 
         match error {
-            SdkError::InferenceError(message) => {
+            SdkError::InferenceError { message, source } => {
                 assert!(message.contains("Streaming callback failed"));
-                assert!(message.contains("user_cancelled"));
+                // The callback's cause is now chained as `#[source]`, not
+                // flattened into the message.
+                let cause = source.expect("callback error should chain its cause");
+                assert!(cause.to_string().contains("user_cancelled"));
             }
             other => panic!("expected inference error, got {other:?}"),
         }
@@ -3548,8 +3644,11 @@ mod tests {
         );
 
         match result {
-            Err(SdkError::InferenceError(message)) => {
-                assert!(message.contains("gateway unavailable"), "{message}");
+            Err(SdkError::InferenceError { message, source }) => {
+                // The underlying cause is chained as `#[source]`; reconstruct
+                // the full chain to assert on the original failure text.
+                let full = source.map_or(message.clone(), |s| format!("{message}: {s}"));
+                assert!(full.contains("gateway unavailable"), "{full}");
             }
             other => panic!("expected cloud retry failure, got {other:?}"),
         }
@@ -3662,7 +3761,9 @@ mod tests {
         );
 
         match result {
-            Err(SdkError::InferenceError(message)) => assert!(message.contains("user_cancelled")),
+            Err(SdkError::InferenceError { message, .. }) => {
+                assert!(message.contains("user_cancelled"))
+            }
             other => panic!("expected user_cancelled error, got {other:?}"),
         }
         assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -3703,7 +3804,7 @@ mod tests {
         );
 
         match result {
-            Err(SdkError::InferenceError(message)) => {
+            Err(SdkError::InferenceError { message, .. }) => {
                 assert!(message.contains("cloud_denied_by_policy"));
             }
             other => panic!("expected cloud_denied_by_policy error, got {other:?}"),
@@ -3854,8 +3955,7 @@ mod tests {
             seam_fired_for_cb.store(true, std::sync::atomic::Ordering::SeqCst);
         };
 
-        let local_result: SdkResult<InferenceResult> =
-            Err(SdkError::InferenceError("local failed".to_string()));
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::inference("local failed"));
 
         let result = dispatch_after_local(
             local_result,
@@ -3875,7 +3975,9 @@ mod tests {
         );
 
         match result {
-            Err(SdkError::InferenceError(msg)) => assert!(msg.contains("local failed")),
+            Err(SdkError::InferenceError { message: msg, .. }) => {
+                assert!(msg.contains("local failed"))
+            }
             other => panic!("expected InferenceError, got {:?}", other),
         }
         assert!(!seam_fired.load(std::sync::atomic::Ordering::SeqCst));
@@ -3918,7 +4020,10 @@ mod tests {
         );
 
         match result {
-            Err(SdkError::InferenceError(message)) => assert!(message.contains("user_cancelled")),
+            Err(SdkError::InferenceError { message, source }) => {
+                let full = source.map_or(message.clone(), |s| format!("{message}: {s}"));
+                assert!(full.contains("user_cancelled"), "{full}");
+            }
             other => panic!("expected terminal user_cancelled error, got {other:?}"),
         }
         assert!(!seam_fired.load(std::sync::atomic::Ordering::SeqCst));
