@@ -1,0 +1,19 @@
+crates/xybrid-core/src/orchestrator/authority/local.rs
+  s_323a65fe865faa::t_527c0de8b51099 534-539,541-544
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d81651fd8f6808414f34c2429cd7ddf220dfa5cf",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
