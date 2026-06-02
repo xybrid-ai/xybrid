@@ -190,7 +190,7 @@ kotlin/
 
 The SDK bundles ONNX Runtime (`libonnxruntime.so`) and the C++ shared library (`libc++_shared.so`) alongside `libxybrid_uniffi.so`. These are included automatically in the AAR — no manual setup required.
 
-> **Note:** `libxybrid_uniffi.so` is a build output and is **not** committed to the repository. The AAR published to Maven Central includes it (built in CI). For a **local** build, generate it first with `cargo ndk` (see [Building Native Libraries](#building-native-libraries) below) so `libs/<abi>/` is populated before running `./gradlew`.
+> **Note:** `libxybrid_uniffi.so` is a build output and is **not** committed to the repository. The AAR published to Maven Central includes it (built in CI). For a **local** build, generate it first with `cargo xtask build-android` (see [Building Native Libraries](#building-native-libraries) below) so `libs/<abi>/` is populated before running `./gradlew`.
 
 | Library | Purpose | Source |
 |---------|---------|--------|
