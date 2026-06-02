@@ -15,8 +15,10 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{CacheManager, SdkCacheProvider};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::{CacheManager, CacheProvider, SdkCacheProvider};
+//! use std::path::PathBuf;
 //!
 //! // Direct cache management
 //! let cache = CacheManager::new()?;
@@ -24,10 +26,12 @@
 //! println!("Cached models: {}", status.total_models);
 //!
 //! // As a provider for the orchestrator
-//! let provider = SdkCacheProvider::new()?;
+//! let provider = SdkCacheProvider::with_dir(PathBuf::from("/tmp/xybrid-cache"))?;
 //! if provider.is_model_cached("kokoro-82m") {
 //!     println!("Model available locally");
 //! }
+//! # Ok(())
+//! # }
 //! ```
 
 mod cache_manager;

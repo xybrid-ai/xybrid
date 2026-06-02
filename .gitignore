@@ -50,3 +50,6 @@ Package.resolved
 
 # Build artifacts - XCFrameworks (built by `cargo xtask build-xcframework`)
 bindings/apple/XCFrameworks/*.xcframework/
+# Python bytecode
+__pycache__/
+*.pyc

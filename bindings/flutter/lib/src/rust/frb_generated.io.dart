@@ -208,6 +208,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiGenerationConfig dco_decode_ffi_generation_config(dynamic raw);
 
   @protected
+  FfiInferenceMetrics dco_decode_ffi_inference_metrics(dynamic raw);
+
+  @protected
   FfiLoadEvent dco_decode_ffi_load_event(dynamic raw);
 
   @protected
@@ -226,6 +229,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiRunOptions dco_decode_ffi_run_options(dynamic raw);
 
   @protected
+  FfiStageLatency dco_decode_ffi_stage_latency(dynamic raw);
+
+  @protected
   FfiStreamEvent dco_decode_ffi_stream_event(dynamic raw);
 
   @protected
@@ -242,6 +248,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<FfiStageLatency> dco_decode_list_ffi_stage_latency(dynamic raw);
 
   @protected
   List<double> dco_decode_list_prim_f_32_loose(dynamic raw);
@@ -461,6 +470,10 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiInferenceMetrics sse_decode_ffi_inference_metrics(
+      SseDeserializer deserializer);
+
+  @protected
   FfiLoadEvent sse_decode_ffi_load_event(SseDeserializer deserializer);
 
   @protected
@@ -481,6 +494,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiRunOptions sse_decode_ffi_run_options(SseDeserializer deserializer);
 
   @protected
+  FfiStageLatency sse_decode_ffi_stage_latency(SseDeserializer deserializer);
+
+  @protected
   FfiStreamEvent sse_decode_ffi_stream_event(SseDeserializer deserializer);
 
   @protected
@@ -497,6 +513,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<FfiStageLatency> sse_decode_list_ffi_stage_latency(
+      SseDeserializer deserializer);
 
   @protected
   List<double> sse_decode_list_prim_f_32_loose(SseDeserializer deserializer);
@@ -721,6 +741,10 @@ abstract class XybridRustLibApiImplPlatform
       FfiGenerationConfig self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_inference_metrics(
+      FfiInferenceMetrics self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_load_event(FfiLoadEvent self, SseSerializer serializer);
 
   @protected
@@ -742,6 +766,10 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_ffi_run_options(FfiRunOptions self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_stage_latency(
+      FfiStageLatency self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_stream_event(
       FfiStreamEvent self, SseSerializer serializer);
 
@@ -761,6 +789,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_stage_latency(
+      List<FfiStageLatency> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_f_32_loose(

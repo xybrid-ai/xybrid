@@ -42,6 +42,14 @@ abstract class FfiPipeline implements RustOpaqueInterface {
   /// Execute the pipeline with the given input envelope.
   ///
   /// Returns the inference result from the final stage.
+  ///
+  /// LLM-specific metric fields (`ttft_ms`, `tokens_per_second`,
+  /// `prefill_tps`, `decode_tps`, `tokens_out`) are parsed from the
+  /// **final** stage envelope's metadata, so they are `None` whenever the
+  /// final stage isn't the LLM — e.g. an `ASR → LLM → TTS` pipeline
+  /// produces a TTS envelope and the LLM metrics are not surfaced here.
+  /// Hoisting them from intermediate stages is a follow-up at the SDK
+  /// layer.
   Future<FfiResult> run({required FfiEnvelope envelope});
 
   /// Get the number of stages in the pipeline.

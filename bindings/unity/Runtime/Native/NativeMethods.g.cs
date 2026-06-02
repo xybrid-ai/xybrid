@@ -1395,6 +1395,79 @@ namespace Xybrid.Native
         internal static extern void xybrid_result_free(XybridResultHandle* handle);
 
         /// <summary>
+        ///  Get time-to-first-token in milliseconds (LLM only).
+        ///
+        ///  Returns `-1` if the result is not from an LLM run, the LLM did not
+        ///  emit a `ttft_ms` metric, or the handle is null/invalid.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_ttft_ms", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern long xybrid_result_ttft_ms(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get generation throughput in tokens/sec (LLM only).
+        ///
+        ///  Returns `f32::NAN` when the metric is absent (non-LLM run, the LLM
+        ///  did not emit it, or the handle is null/invalid). Use `isnan()` to
+        ///  check.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_tokens_per_second", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern float xybrid_result_tokens_per_second(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get prefill-phase throughput in tokens/sec (LLM only).
+        ///
+        ///  Returns `f32::NAN` when the metric is absent.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_prefill_tps", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern float xybrid_result_prefill_tps(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get decode-phase throughput in tokens/sec (LLM only).
+        ///
+        ///  Returns `f32::NAN` when the metric is absent.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_decode_tps", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern float xybrid_result_decode_tps(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get completion token count (LLM only).
+        ///
+        ///  Returns `-1` when the metric is absent.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_tokens_out", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern long xybrid_result_tokens_out(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get the number of per-stage latency entries.
+        ///
+        ///  Returns 0 for `model.run()` results (no stages) or when the handle
+        ///  is null/invalid. Pipeline runs return one entry per executed stage.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_stage_count", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint xybrid_result_stage_count(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get the stage_id string for the entry at `index`.
+        ///
+        ///  Returns a thread-local pointer valid until the next call to this
+        ///  function on the same thread. Do NOT free. Returns null if `index`
+        ///  is out of bounds or the handle is null/invalid. Callers should
+        ///  check `xybrid_result_stage_count` first.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_stage_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_result_stage_id(XybridResultHandle* result, nuint index);
+
+        /// <summary>
+        ///  Get the latency_ms value for the stage at `index`.
+        ///
+        ///  Returns 0 if `index` is out of bounds or the handle is null/invalid.
+        ///  Callers should check `xybrid_result_stage_count` first to disambiguate
+        ///  "stage took 0 ms" from "index out of bounds".
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_stage_latency_ms", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint xybrid_result_stage_latency_ms(XybridResultHandle* result, nuint index);
+
+        /// <summary>
         ///  Open a .xyb bundle file and return a handle.
         ///
         ///  Loads the bundle into memory (decompresses zstd, parses tar, validates manifest).

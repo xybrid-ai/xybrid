@@ -28,7 +28,8 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_core::cloud::{Cloud, CompletionRequest};
 //!
 //! // Create client (routes through gateway by default)
@@ -44,6 +45,9 @@
 //!         .with_system("You are a helpful programming tutor.")
 //!         .with_max_tokens(100)
 //! )?;
+//! # let _ = response;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Note
@@ -59,5 +63,7 @@ mod error;
 pub(crate) use client::parse_gateway_usage;
 pub use client::Cloud;
 pub use completion::{CompletionRequest, CompletionResponse, Message, Role, Usage};
-pub use config::{CloudBackend, CloudConfig};
+pub use config::{
+    has_xybrid_api_key, set_xybrid_api_key, xybrid_api_key, CloudBackend, CloudConfig,
+};
 pub use error::CloudError;

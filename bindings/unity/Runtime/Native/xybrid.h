@@ -1503,6 +1503,71 @@ uintptr_t xybrid_result_embedding_len(struct XybridResultHandle *result);
 void xybrid_result_free(struct XybridResultHandle *handle);
 
 /*
+ Get time-to-first-token in milliseconds (LLM only).
+
+ Returns `-1` if the result is not from an LLM run, the LLM did not
+ emit a `ttft_ms` metric, or the handle is null/invalid.
+ */
+int64_t xybrid_result_ttft_ms(struct XybridResultHandle *result);
+
+/*
+ Get generation throughput in tokens/sec (LLM only).
+
+ Returns `f32::NAN` when the metric is absent (non-LLM run, the LLM
+ did not emit it, or the handle is null/invalid). Use `isnan()` to
+ check.
+ */
+float xybrid_result_tokens_per_second(struct XybridResultHandle *result);
+
+/*
+ Get prefill-phase throughput in tokens/sec (LLM only).
+
+ Returns `f32::NAN` when the metric is absent.
+ */
+float xybrid_result_prefill_tps(struct XybridResultHandle *result);
+
+/*
+ Get decode-phase throughput in tokens/sec (LLM only).
+
+ Returns `f32::NAN` when the metric is absent.
+ */
+float xybrid_result_decode_tps(struct XybridResultHandle *result);
+
+/*
+ Get completion token count (LLM only).
+
+ Returns `-1` when the metric is absent.
+ */
+int64_t xybrid_result_tokens_out(struct XybridResultHandle *result);
+
+/*
+ Get the number of per-stage latency entries.
+
+ Returns 0 for `model.run()` results (no stages) or when the handle
+ is null/invalid. Pipeline runs return one entry per executed stage.
+ */
+uintptr_t xybrid_result_stage_count(struct XybridResultHandle *result);
+
+/*
+ Get the stage_id string for the entry at `index`.
+
+ Returns a thread-local pointer valid until the next call to this
+ function on the same thread. Do NOT free. Returns null if `index`
+ is out of bounds or the handle is null/invalid. Callers should
+ check `xybrid_result_stage_count` first.
+ */
+const char *xybrid_result_stage_id(struct XybridResultHandle *result, uintptr_t index);
+
+/*
+ Get the latency_ms value for the stage at `index`.
+
+ Returns 0 if `index` is out of bounds or the handle is null/invalid.
+ Callers should check `xybrid_result_stage_count` first to disambiguate
+ "stage took 0 ms" from "index out of bounds".
+ */
+uint32_t xybrid_result_stage_latency_ms(struct XybridResultHandle *result, uintptr_t index);
+
+/*
  Open a .xyb bundle file and return a handle.
 
  Loads the bundle into memory (decompresses zstd, parses tar, validates manifest).

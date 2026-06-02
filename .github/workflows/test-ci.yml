@@ -22,8 +22,7 @@ env:
   FLUTTER_VERSION: "3.35.7"
   FRB_VERSION: "2.11.1"
 
-permissions:
-  contents: write
+permissions: read-all
 
 jobs:
   #
@@ -86,6 +85,8 @@ jobs:
   #
   precompile-darwin:
     name: Precompile Flutter (darwin)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     if: inputs.platform == 'darwin-precompile'
     runs-on: macos-14
     steps:
@@ -141,6 +142,8 @@ jobs:
   #
   precompile-linux:
     name: Precompile Flutter (linux)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     if: inputs.platform == 'linux-precompile'
     runs-on: ubuntu-latest
     steps:
@@ -208,6 +211,8 @@ jobs:
   #
   precompile-windows:
     name: Precompile Flutter (windows)
+    permissions:
+      contents: write   # cargokit precompile-binaries uploads release assets
     if: inputs.platform == 'windows-precompile'
     runs-on: windows-latest
     steps:

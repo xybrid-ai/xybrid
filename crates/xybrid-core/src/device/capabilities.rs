@@ -19,7 +19,7 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use xybrid_core::device::capabilities::{HardwareCapabilities, detect_capabilities};
 //!
 //! let capabilities = detect_capabilities();

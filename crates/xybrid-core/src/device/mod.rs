@@ -17,7 +17,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use xybrid_core::device::{detect_capabilities, HardwareCapabilities};
 //!
 //! let capabilities = detect_capabilities();

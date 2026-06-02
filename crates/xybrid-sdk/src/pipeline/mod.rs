@@ -6,21 +6,32 @@
 //!
 //! # Example (Simple - just run)
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{PipelineRef, Envelope};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::PipelineRef;
+//! use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 //!
+//! # let yaml_content = "stages: []";
+//! # let audio_bytes: Vec<u8> = vec![];
 //! // Load and run in a few lines
 //! let pipeline = PipelineRef::from_yaml(yaml_content)?.load()?;
 //! pipeline.load_models()?;  // Optional: explicit preloading
-//! let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+//! let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+//! let result = pipeline.run(&envelope)?;
 //! println!("Pipeline completed in {}ms", result.total_latency_ms);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Example (Staged - inspect and preload)
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{PipelineRef, Envelope};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::PipelineRef;
+//! use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 //!
+//! # let yaml_content = "stages: []";
+//! # let audio_bytes: Vec<u8> = vec![];
 //! // Step 1: Parse YAML (instant, no network)
 //! let ref_ = PipelineRef::from_yaml(yaml_content)?;
 //! println!("Stages: {:?}", ref_.stage_ids());
@@ -35,7 +46,11 @@
 //! })?;
 //!
 //! // Step 4: Run
-//! let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+//! let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+//! let result = pipeline.run(&envelope)?;
+//! # let _ = result;
+//! # Ok(())
+//! # }
 //! ```
 
 // ============================================================================
@@ -60,6 +75,8 @@ use crate::result::OutputType;
 use crate::run_options::RunOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -93,14 +110,19 @@ pub type PipelineResult<T> = Result<T, SdkError>;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 /// use xybrid_sdk::PipelineRef;
 ///
+/// # let yaml = "stages: []";
 /// let ref_ = PipelineRef::from_yaml(yaml)?;
 /// println!("Pipeline: {:?}", ref_.name());
 /// println!("Stages: {:?}", ref_.stage_ids());
 ///
 /// let pipeline = ref_.load()?;
+/// # let _ = pipeline;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct PipelineRef {
@@ -112,7 +134,7 @@ impl PipelineRef {
     /// Parse a pipeline from YAML content (instant, no network).
     pub fn from_yaml(yaml: &str) -> PipelineResult<Self> {
         let config: PipelineConfig = serde_yaml::from_str(yaml)
-            .map_err(|e| SdkError::PipelineError(format!("Failed to parse YAML: {}", e)))?;
+            .map_err(|e| SdkError::pipeline_src("Failed to parse YAML", e))?;
 
         Ok(Self {
             yaml_content: yaml.to_string(),
@@ -124,7 +146,7 @@ impl PipelineRef {
     pub fn from_file(path: impl Into<PathBuf>) -> PipelineResult<Self> {
         let path = path.into();
         let content = std::fs::read_to_string(&path)
-            .map_err(|e| SdkError::PipelineError(format!("Failed to read file: {}", e)))?;
+            .map_err(|e| SdkError::pipeline_src("Failed to read file", e))?;
         Self::from_yaml(&content)
     }
 
@@ -358,6 +380,16 @@ impl CacheProvider for StreamingFastPathCacheProvider {
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn stage_descriptor_with_bundle_path(
+    stage_descriptor: &StageDescriptor,
+    bundle_path: &Path,
+) -> StageDescriptor {
+    let mut stage_descriptor = stage_descriptor.clone();
+    stage_descriptor.bundle_path = Some(bundle_path.to_string_lossy().to_string());
+    stage_descriptor
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 #[derive(Debug, Clone)]
 struct StreamingFastPathRoute {
     policy_allowed: bool,
@@ -393,6 +425,7 @@ fn resolve_streaming_fast_path_route(
         metrics: metrics.clone(),
         resource_monitor: ResourceMonitor::global(),
         explicit_target: stage.target.clone(),
+        local_availability: Some(LocalAvailability::new(stage.is_locally_runnable())),
         device_class: Some(metrics.canonical_device_class()),
         device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
     };
@@ -405,6 +438,7 @@ fn resolve_streaming_fast_path_route(
     let hint = resolution.local_reliability_hint.unwrap_or_default();
     let can_stream_locally = policy_allowed
         && matches!(resolution.decision.result, ResolvedTarget::Device)
+        && stage.is_locally_runnable()
         && !policy_transform;
 
     StreamingFastPathRoute {
@@ -516,9 +550,13 @@ struct PipelineHandle {
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// use xybrid_sdk::{PipelineRef, Envelope};
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use xybrid_sdk::PipelineRef;
+/// use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 ///
+/// # let yaml = "stages: []";
+/// # let audio_bytes: Vec<u8> = vec![];
 /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
 ///
 /// // Inspect the pipeline
@@ -530,7 +568,10 @@ struct PipelineHandle {
 /// pipeline.load_models()?;
 ///
 /// // Run inference
-/// let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+/// let result = pipeline.run(&Envelope::new(EnvelopeKind::Audio(audio_bytes)))?;
+/// # let _ = result;
+/// # Ok(())
+/// # }
 /// ```
 pub struct Pipeline {
     name: Option<String>,
@@ -680,7 +721,7 @@ impl Pipeline {
 
         let handle_read = handle
             .read()
-            .map_err(|_| SdkError::PipelineError("Failed to read pipeline handle".to_string()))?;
+            .map_err(|_| SdkError::pipeline("Failed to read pipeline handle"))?;
 
         for stage_config in &config.stages {
             let stage_id = stage_config.stage_id();
@@ -833,7 +874,7 @@ impl Pipeline {
         let registry_url = self
             .handle
             .read()
-            .map_err(|_| SdkError::PipelineError("Failed to read handle".to_string()))?
+            .map_err(|_| SdkError::pipeline("Failed to read handle"))?
             .registry_url
             .clone();
 
@@ -853,7 +894,7 @@ impl Pipeline {
             .stages
             .iter()
             .enumerate()
-            .filter(|(_, s)| matches!(s.status, StageStatus::NeedsDownload))
+            .filter(|(_, s)| matches!(s.status, StageStatus::Cached | StageStatus::NeedsDownload))
             .filter_map(|(idx, s)| {
                 s.model_id.as_ref().map(|m| {
                     (
@@ -862,17 +903,35 @@ impl Pipeline {
                         m.clone(),
                         s.download_bytes.unwrap_or(0),
                         s.target.clone(),
+                        s.status.clone(),
                     )
                 })
             })
             .collect();
 
-        let total_stages = stages_to_fetch.len();
+        let total_stages = stages_to_fetch
+            .iter()
+            .filter(|(_, _, _, _, _, status)| matches!(status, StageStatus::NeedsDownload))
+            .count();
         let mut skipped_count = 0;
 
-        for (stage_idx, (_, stage_id, model_id, total_bytes, stage_target)) in
-            stages_to_fetch.into_iter().enumerate()
-        {
+        let mut download_stage_idx = 0;
+        for (_, stage_id, model_id, total_bytes, stage_target, stage_status) in stages_to_fetch {
+            if matches!(stage_status, StageStatus::Cached) {
+                let model_dir = client.fetch_extracted(&model_id, None, |_| {})?;
+                let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+                handle.availability_map.insert(model_id.clone(), true);
+                handle.availability_map.insert(stage_id.clone(), true);
+                handle
+                    .bundle_paths
+                    .insert(stage_id.clone(), model_dir.clone());
+                handle.bundle_paths.insert(model_id, model_dir);
+                continue;
+            }
+
+            let stage_idx = download_stage_idx;
+            download_stage_idx += 1;
+
             // Convert StageTarget to ExecutionTarget for authority
             // - Device: user explicitly wants local, authority should respect it
             // - Auto: let authority decide based on device conditions
@@ -892,6 +951,7 @@ impl Pipeline {
                 metrics: metrics.clone(),
                 resource_monitor: ResourceMonitor::global(),
                 explicit_target,
+                local_availability: None,
                 device_class: Some(metrics.canonical_device_class()),
                 device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
             };
@@ -968,13 +1028,21 @@ impl Pipeline {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::PipelineRef;
+    /// # use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+    /// # let yaml = "stages: []";
     /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
     /// pipeline.load_models()?;  // Download models
     /// pipeline.warmup()?;       // Pre-load into memory
     ///
     /// // First inference is now fast
-    /// let result = pipeline.run(&Envelope::text("Hello"))?;
+    /// let envelope = Envelope::new(EnvelopeKind::Text("Hello".into()));
+    /// let result = pipeline.run(&envelope)?;
+    /// # let _ = result;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn warmup(&self) -> PipelineResult<()> {
         log::info!(target: "xybrid_sdk", "Warming up pipeline: {:?}", self.name);
@@ -1011,7 +1079,10 @@ impl Pipeline {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # async fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::PipelineRef;
+    /// # let yaml = "stages: []";
     /// let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
     /// pipeline.load_models()?;
     ///
@@ -1025,6 +1096,8 @@ impl Pipeline {
     ///
     /// // Wait for warmup if needed
     /// warmup_handle.await??;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn warmup_async(&self) -> PipelineResult<()> {
         log::info!(target: "xybrid_sdk", "Warming up pipeline (async): {:?}", self.name);
@@ -1076,137 +1149,14 @@ impl Pipeline {
             self.load_models()?;
         }
 
-        let handle = self
-            .handle
-            .read()
-            .map_err(|_| SdkError::PipelineError("Failed to acquire pipeline lock".to_string()))?;
-
-        // Clone stage descriptors and set bundle_path on each
-        let mut stage_descriptors = handle.stage_descriptors.clone();
-        for desc in &mut stage_descriptors {
-            if let Some(bundle_path) = handle.bundle_paths.get(&desc.name) {
-                desc.bundle_path = Some(bundle_path.to_string_lossy().to_string());
-            }
-        }
-        let availability_map = handle.availability_map.clone();
-        drop(handle);
-
-        // Collect runtime metrics from caller options when provided.
-        let metrics = pipeline_metrics(options);
-
-        // Install per-call pipeline context. The RAII guard clears on
-        // every exit (success, `?` error, panic) so we don't leak the
-        // global `trace_id` onto later unrelated telemetry — replaces
-        // the manual `set_telemetry_pipeline_context(None, None)` calls
-        // that previously had to be threaded through every exit.
-        let trace_id = uuid::Uuid::new_v4();
-        let pipeline_id = self
-            .name
-            .as_ref()
-            .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-        let _context_guard =
-            crate::telemetry::TelemetryPipelineContextGuard::install(pipeline_id, Some(trace_id));
-
-        let mut orchestrator = Orchestrator::new();
-        // Subscribe after construction: bootstrap events emitted by
-        // `Orchestrator::new()` are constructor-local, while execution events
-        // below must be drained before this short-lived orchestrator returns.
-        let bridge = crate::telemetry::bridge_orchestrator_events(&orchestrator);
-        // No need to set registry config - executor uses bundle_path from stage descriptors
-
-        let availability_fn = move |stage: &str| -> LocalAvailability {
-            let exists = availability_map.get(stage).copied().unwrap_or(false);
-            LocalAvailability::new(exists)
-        };
-
-        let start_time = std::time::Instant::now();
-        let resource_guard = crate::telemetry::begin_resource_run();
-        let execution_result =
-            orchestrator.execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn);
-        drop(orchestrator);
-        bridge.join().map_err(|e| {
-            SdkError::PipelineError(format!("Orchestrator event bridge failed: {}", e))
-        })?;
-        let results: Vec<StageExecutionResult> = execution_result
-            .map_err(|e| SdkError::PipelineError(format!("Pipeline execution failed: {}", e)))?;
-        let total_latency_ms = start_time.elapsed().as_millis() as u32;
-
-        let stages: Vec<StageTiming> = results
-            .iter()
-            .map(|result| StageTiming {
-                name: result.stage.clone(),
-                latency_ms: result.latency_ms,
-                target: result.routing_decision.target.to_string(),
-                reason: result.routing_decision.reason.clone(),
-            })
-            .collect();
-
-        let (output_type, output) = if let Some(last) = results.last() {
-            let output_type = match &last.output.kind {
-                EnvelopeKind::Text(_) => OutputType::Text,
-                EnvelopeKind::Audio(_) => OutputType::Audio,
-                EnvelopeKind::Embedding(_) => OutputType::Embedding,
-            };
-            (output_type, last.output.clone())
-        } else {
-            (
-                OutputType::Unknown,
-                Envelope::new(EnvelopeKind::Text(String::new())),
-            )
-        };
-
-        // Emit telemetry event. LLM metrics ride on the separate
-        // `PlatformEvent.stages[].spans[].metadata` path (populated
-        // via `xybrid_core::tracing::add_metadata` in the LLM
-        // adapter), so we intentionally keep this `data` blob compact
-        // — only the fields that already crossed the wire before
-        // llm_metrics existed.
-        // For single-stage pipelines, attribute the `PipelineComplete`
-        // row to the inner stage so the Traces dashboard reads
-        // `pipeline / <stage>` (with a real `target`) instead of the
-        // less-informative `pipeline / <pipeline-name>` with `target:
-        // None`. Multi-stage pipelines keep the pipeline-level naming
-        // so ASR → LLM → TTS legs still collapse under one row via the
-        // shared `trace_id`.
-        let (event_stage_name, event_target) = if results.len() == 1 {
-            let only = &results[0];
-            (
-                Some(only.stage.clone()),
-                Some(only.routing_decision.target.to_string()),
-            )
-        } else {
-            (self.name.clone(), None)
-        };
-        let event = crate::telemetry::TelemetryEvent {
-            event_type: "PipelineComplete".to_string(),
-            stage_name: event_stage_name,
-            target: event_target,
-            latency_ms: Some(total_latency_ms),
-            error: None,
-            data: Some(pipeline_complete_data(
-                &stages,
-                &output_type,
-                options.correlation_id.as_deref(),
-            )),
-            timestamp_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
-        };
-        crate::telemetry::publish_with_resource_summary_in_context(
-            event,
-            resource_guard,
-            pipeline_id,
-            Some(trace_id),
-        );
-
-        Ok(PipelineExecutionResult {
-            name: self.name.clone(),
-            stages,
-            total_latency_ms,
-            output_type,
-            output,
-        })
+        let (stage_descriptors, availability_map) = self.resolve_run_inputs();
+        execute_blocking(
+            self.name.clone(),
+            stage_descriptors,
+            availability_map,
+            envelope,
+            options,
+        )
     }
 
     /// Run inference asynchronously.
@@ -1221,148 +1171,188 @@ impl Pipeline {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> PipelineResult<PipelineExecutionResult> {
-        if !self.is_ready() {
-            self.load_models()?;
-        }
-
-        let (stage_descriptors, availability_map) = {
-            // Recover from poisoned RwLock to prevent permanent lock errors
-            let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
-
-            // Clone stage descriptors and set bundle_path on each
-            let mut descriptors = handle.stage_descriptors.clone();
-            for desc in &mut descriptors {
-                if let Some(bundle_path) = handle.bundle_paths.get(&desc.name) {
-                    desc.bundle_path = Some(bundle_path.to_string_lossy().to_string());
-                }
-            }
-
-            (descriptors, handle.availability_map.clone())
-        };
-
-        let envelope_clone = envelope.clone();
-        let name = self.name.clone();
+        // `Pipeline` shares its handle via `Arc`, so a clone is a cheap
+        // `'static + Send` handle we can move into `spawn_blocking`. Running
+        // the *whole* operation — preload (a synchronous model download) and
+        // orchestration — on the blocking pool keeps both off the async
+        // executor; previously the download ran inline on the runtime worker.
+        let pipeline = self.clone();
+        let envelope = envelope.clone();
         let options = options.clone();
 
         tokio::task::spawn_blocking(move || {
-            // Collect runtime metrics from caller options when provided.
-            let metrics = pipeline_metrics(&options);
-
-            // RAII pipeline context — see sync `run` for rationale.
-            // Drops on every exit path (success, `?` error, panic) and
-            // replaces the manual `set_telemetry_pipeline_context(None, None)`
-            // cleanup the previous shape needed at every branch.
-            let trace_id = uuid::Uuid::new_v4();
-            let pipeline_id = name
-                .as_ref()
-                .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-            let _context_guard = crate::telemetry::TelemetryPipelineContextGuard::install(
-                pipeline_id,
-                Some(trace_id),
-            );
-
-            let mut orchestrator = Orchestrator::new();
-            // Subscribe after construction; see the sync path above.
-            let bridge = crate::telemetry::bridge_orchestrator_events(&orchestrator);
-            // No need to set registry config - executor uses bundle_path from stage descriptors
-
-            let availability_fn = move |stage: &str| -> LocalAvailability {
-                let exists = availability_map.get(stage).copied().unwrap_or(false);
-                LocalAvailability::new(exists)
-            };
-
-            let start_time = std::time::Instant::now();
-            let resource_guard = crate::telemetry::begin_resource_run();
-            let execution_result = orchestrator.execute_pipeline(
-                &stage_descriptors,
-                &envelope_clone,
-                &metrics,
-                &availability_fn,
-            );
-            drop(orchestrator);
-            bridge.join().map_err(|e| {
-                SdkError::PipelineError(format!("Orchestrator event bridge failed: {}", e))
-            })?;
-            let results: Vec<StageExecutionResult> = execution_result.map_err(|e| {
-                SdkError::PipelineError(format!("Pipeline execution failed: {}", e))
-            })?;
-            let total_latency_ms = start_time.elapsed().as_millis() as u32;
-
-            let stages: Vec<StageTiming> = results
-                .iter()
-                .map(|result| StageTiming {
-                    name: result.stage.clone(),
-                    latency_ms: result.latency_ms,
-                    target: result.routing_decision.target.to_string(),
-                    reason: result.routing_decision.reason.clone(),
-                })
-                .collect();
-
-            let (output_type, output) = if let Some(last) = results.last() {
-                let output_type = match &last.output.kind {
-                    EnvelopeKind::Text(_) => OutputType::Text,
-                    EnvelopeKind::Audio(_) => OutputType::Audio,
-                    EnvelopeKind::Embedding(_) => OutputType::Embedding,
-                };
-                (output_type, last.output.clone())
-            } else {
-                (
-                    OutputType::Unknown,
-                    Envelope::new(EnvelopeKind::Text(String::new())),
-                )
-            };
-
-            // Emit PipelineComplete telemetry event. Previously absent from
-            // this async path (existed only in sync `run`); attaching now
-            // brings the two paths to parity. LLM metrics ride on span
-            // metadata (see the sync arm above for rationale), so this
-            // `data` blob stays compact.
-            // Single-stage pipelines attribute the row to the inner
-            // stage so the Traces dashboard reads `pipeline / <stage>`
-            // with a real `target`; see sync `run` above.
-            let (event_stage_name, event_target) = if results.len() == 1 {
-                let only = &results[0];
-                (
-                    Some(only.stage.clone()),
-                    Some(only.routing_decision.target.to_string()),
-                )
-            } else {
-                (name.clone(), None)
-            };
-            let event = crate::telemetry::TelemetryEvent {
-                event_type: "PipelineComplete".to_string(),
-                stage_name: event_stage_name,
-                target: event_target,
-                latency_ms: Some(total_latency_ms),
-                error: None,
-                data: Some(pipeline_complete_data(
-                    &stages,
-                    &output_type,
-                    options.correlation_id.as_deref(),
-                )),
-                timestamp_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0),
-            };
-            crate::telemetry::publish_with_resource_summary_in_context(
-                event,
-                resource_guard,
-                pipeline_id,
-                Some(trace_id),
-            );
-
-            Ok(PipelineExecutionResult {
-                name,
-                stages,
-                total_latency_ms,
-                output_type,
-                output,
-            })
+            if !pipeline.is_ready() {
+                pipeline.load_models()?;
+            }
+            let (stage_descriptors, availability_map) = pipeline.resolve_run_inputs();
+            execute_blocking(
+                pipeline.name,
+                stage_descriptors,
+                availability_map,
+                &envelope,
+                &options,
+            )
         })
         .await
-        .map_err(|e| SdkError::PipelineError(format!("Task join error: {}", e)))?
+        .map_err(|e| SdkError::pipeline_src("Task join error", e))?
     }
+
+    /// Snapshot the stage descriptors (with bundle paths applied) and the
+    /// local-availability map from the current handle.
+    ///
+    /// Recovers from a poisoned lock (`into_inner`) rather than failing the
+    /// run, matching the write-path convention elsewhere in this module and
+    /// keeping the sync/async `run` paths consistent.
+    fn resolve_run_inputs(&self) -> (Vec<StageDescriptor>, HashMap<String, bool>) {
+        let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
+
+        // Clone stage descriptors and set bundle_path on each
+        let mut stage_descriptors = handle.stage_descriptors.clone();
+        for desc in &mut stage_descriptors {
+            if let Some(bundle_path) = handle.bundle_paths.get(&desc.name) {
+                desc.bundle_path = Some(bundle_path.to_string_lossy().to_string());
+            }
+        }
+
+        let availability_map: HashMap<String, bool> = stage_descriptors
+            .iter()
+            .map(|stage| (stage.name.clone(), stage.is_locally_runnable()))
+            .collect();
+
+        (stage_descriptors, availability_map)
+    }
+}
+
+/// Run the orchestrator on already-resolved stage descriptors and emit the
+/// `PipelineComplete` telemetry event.
+///
+/// Blocking: drives the full pipeline synchronously. Shared by sync
+/// `run_with_options` and the `spawn_blocking` body of
+/// `run_async_with_options` so the two paths can't drift — the async path
+/// previously had its own copy that, at one point, omitted the
+/// `PipelineComplete` event entirely.
+fn execute_blocking(
+    name: Option<String>,
+    stage_descriptors: Vec<StageDescriptor>,
+    availability_map: HashMap<String, bool>,
+    envelope: &Envelope,
+    options: &RunOptions,
+) -> PipelineResult<PipelineExecutionResult> {
+    // Collect runtime metrics from caller options when provided.
+    let metrics = pipeline_metrics(options);
+
+    // Install per-call pipeline context. The RAII guard clears on every exit
+    // (success, `?` error, panic) so we don't leak the global `trace_id` onto
+    // later unrelated telemetry — replaces the manual
+    // `set_telemetry_pipeline_context(None, None)` calls that previously had
+    // to be threaded through every exit.
+    let trace_id = uuid::Uuid::new_v4();
+    let pipeline_id = name
+        .as_ref()
+        .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
+    let _context_guard =
+        crate::telemetry::TelemetryPipelineContextGuard::install(pipeline_id, Some(trace_id));
+
+    let mut orchestrator = Orchestrator::new();
+    // Subscribe after construction: bootstrap events emitted by
+    // `Orchestrator::new()` are constructor-local, while execution events
+    // below must be drained before this short-lived orchestrator returns.
+    let bridge = crate::telemetry::bridge_orchestrator_events(&orchestrator);
+    // No need to set registry config - executor uses bundle_path from stage descriptors
+
+    let availability_fn = move |stage: &str| -> LocalAvailability {
+        let exists = availability_map.get(stage).copied().unwrap_or(false);
+        LocalAvailability::new(exists)
+    };
+
+    let start_time = std::time::Instant::now();
+    let resource_guard = crate::telemetry::begin_resource_run();
+    let execution_result =
+        orchestrator.execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn);
+    drop(orchestrator);
+    // Join the event bridge unconditionally so its thread never leaks, but
+    // surface the *execution* error first when both fail — the pipeline
+    // failure is the root cause; a bridge-join failure is secondary noise.
+    let bridge_res = bridge.join();
+    let results: Vec<StageExecutionResult> =
+        execution_result.map_err(|e| SdkError::pipeline_src("Pipeline execution failed", e))?;
+    bridge_res.map_err(|e| SdkError::pipeline_src("Orchestrator event bridge failed", e))?;
+    let total_latency_ms = start_time.elapsed().as_millis() as u32;
+
+    let stages: Vec<StageTiming> = results
+        .iter()
+        .map(|result| StageTiming {
+            name: result.stage.clone(),
+            latency_ms: result.latency_ms,
+            target: result.routing_decision.target.to_string(),
+            reason: result.routing_decision.reason.clone(),
+        })
+        .collect();
+
+    let (output_type, output) = if let Some(last) = results.last() {
+        let output_type = match &last.output.kind {
+            EnvelopeKind::Text(_) => OutputType::Text,
+            EnvelopeKind::Audio(_) => OutputType::Audio,
+            EnvelopeKind::Embedding(_) => OutputType::Embedding,
+        };
+        (output_type, last.output.clone())
+    } else {
+        (
+            OutputType::Unknown,
+            Envelope::new(EnvelopeKind::Text(String::new())),
+        )
+    };
+
+    // Emit telemetry event. LLM metrics ride on the separate
+    // `PlatformEvent.stages[].spans[].metadata` path (populated via
+    // `xybrid_core::tracing::add_metadata` in the LLM adapter), so we
+    // intentionally keep this `data` blob compact — only the fields that
+    // already crossed the wire before llm_metrics existed.
+    // For single-stage pipelines, attribute the `PipelineComplete` row to the
+    // inner stage so the Traces dashboard reads `pipeline / <stage>` (with a
+    // real `target`) instead of the less-informative
+    // `pipeline / <pipeline-name>` with `target: None`. Multi-stage pipelines
+    // keep the pipeline-level naming so ASR → LLM → TTS legs still collapse
+    // under one row via the shared `trace_id`.
+    let (event_stage_name, event_target) = if results.len() == 1 {
+        let only = &results[0];
+        (
+            Some(only.stage.clone()),
+            Some(only.routing_decision.target.to_string()),
+        )
+    } else {
+        (name.clone(), None)
+    };
+    let event = crate::telemetry::TelemetryEvent {
+        event_type: "PipelineComplete".to_string(),
+        stage_name: event_stage_name,
+        target: event_target,
+        latency_ms: Some(total_latency_ms),
+        error: None,
+        data: Some(pipeline_complete_data(
+            &stages,
+            &output_type,
+            options.correlation_id.as_deref(),
+        )),
+        timestamp_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    };
+    crate::telemetry::publish_with_resource_summary_in_context(
+        event,
+        resource_guard,
+        pipeline_id,
+        Some(trace_id),
+    );
+
+    Ok(PipelineExecutionResult {
+        name,
+        stages,
+        total_latency_ms,
+        output_type,
+        output,
+    })
 }
 
 // Make Pipeline cloneable (shares the handle via Arc)
@@ -1392,11 +1382,18 @@ impl Xybrid {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// use xybrid_sdk::{Xybrid, Envelope};
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_sdk::Xybrid;
+    /// use xybrid_sdk::ir::{Envelope, EnvelopeKind};
     ///
-    /// let result = Xybrid::run_pipeline(yaml_content, &Envelope::audio(audio_bytes))?;
+    /// # let yaml_content = "stages: []";
+    /// # let audio_bytes: Vec<u8> = vec![];
+    /// let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+    /// let result = Xybrid::run_pipeline(yaml_content, &envelope)?;
     /// println!("Output: {:?}", result.text());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_pipeline(
         yaml: &str,
@@ -1436,19 +1433,27 @@ impl Xybrid {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// use xybrid_sdk::{Xybrid, Envelope, PartialToken};
+    /// ```no_run
+    /// # #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_sdk::{Xybrid, PartialToken};
+    /// use xybrid_sdk::ir::{Envelope, EnvelopeKind};
     /// use std::io::Write;
     ///
+    /// # let yaml_content = "stages: []";
+    /// let envelope = Envelope::new(EnvelopeKind::Text("Hello, how are you?".into()));
     /// let result = Xybrid::run_pipeline_streaming(
     ///     yaml_content,
-    ///     &Envelope::text("Hello, how are you?"),
+    ///     &envelope,
     ///     Box::new(|token: PartialToken| {
     ///         print!("{}", token.token);
     ///         std::io::stdout().flush()?;
     ///         Ok(())
     ///     }),
     /// )?;
+    /// # let _ = result;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Note
@@ -1489,24 +1494,22 @@ impl Xybrid {
         let handle = pipeline
             .handle
             .read()
-            .map_err(|_| SdkError::PipelineError("Failed to acquire pipeline lock".to_string()))?;
+            .map_err(|_| SdkError::pipeline("Failed to acquire pipeline lock"))?;
 
         // For streaming, we need to identify if there's an LLM stage and execute it with streaming
         // For now, support single-stage LLM pipelines
         if handle.stage_descriptors.len() == 1 {
-            let stage_descriptor = handle.stage_descriptors[0].clone();
-            let stage_name = stage_descriptor.name.clone();
+            let stage_name = handle.stage_descriptors[0].name.clone();
             if let Some(bundle_path) = handle.bundle_paths.get(&stage_name) {
                 let bundle_path = bundle_path.clone(); // Clone to avoid borrow issues
+                let stage_descriptor =
+                    stage_descriptor_with_bundle_path(&handle.stage_descriptors[0], &bundle_path);
                 let metadata_path = bundle_path.join("model_metadata.json");
                 if metadata_path.exists() {
-                    let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
-                        SdkError::PipelineError(format!("Failed to read metadata: {}", e))
-                    })?;
-                    let metadata: ModelMetadata =
-                        serde_json::from_str(&metadata_str).map_err(|e| {
-                            SdkError::PipelineError(format!("Failed to parse metadata: {}", e))
-                        })?;
+                    let metadata_str = std::fs::read_to_string(&metadata_path)
+                        .map_err(|e| SdkError::pipeline_src("Failed to read metadata", e))?;
+                    let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
+                        .map_err(|e| SdkError::pipeline_src("Failed to parse metadata", e))?;
 
                     // Check if this is an LLM model
                     if matches!(
@@ -1560,7 +1563,9 @@ impl Xybrid {
                         let start_time = std::time::Instant::now();
                         let output = executor
                             .execute_streaming(&metadata, envelope, on_token, None)
-                            .map_err(|e| SdkError::InferenceError(format!("{}", e)))?;
+                            .map_err(|e| {
+                                SdkError::inference_src("LLM streaming execution failed", e)
+                            })?;
                         let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
                         let output_type = match &output.kind {
@@ -1568,6 +1573,40 @@ impl Xybrid {
                             EnvelopeKind::Audio(_) => OutputType::Audio,
                             EnvelopeKind::Embedding(_) => OutputType::Embedding,
                         };
+
+                        // Publish a `ModelComplete` mirroring the
+                        // `XybridModel::run_streaming` SDK path so the
+                        // streaming-fast-path branch isn't silent on the
+                        // Traces dashboard. Without this the policy /
+                        // routing events fire but no completion event
+                        // ever lands — billing, cost-attribution, and the
+                        // dashboard's per-turn row all go missing for
+                        // calls that take this code path.
+                        let event = crate::telemetry::TelemetryEvent {
+                            event_type: "ModelComplete".to_string(),
+                            stage_name: Some(model_id.clone()),
+                            target: Some(route.target.clone()),
+                            latency_ms: Some(total_latency_ms),
+                            error: None,
+                            data: Some(
+                                serde_json::json!({
+                                    "model_id": model_id,
+                                    "version": metadata.version,
+                                    "output_type": format!("{:?}", output_type),
+                                    "streaming": true,
+                                })
+                                .to_string(),
+                            ),
+                            timestamp_ms: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0),
+                        };
+                        crate::telemetry::publish_telemetry_event_in_context(
+                            event,
+                            pipeline_id,
+                            Some(trace_id),
+                        );
 
                         return Ok(PipelineExecutionResult {
                             name: pipeline.name.clone(),
@@ -1701,6 +1740,7 @@ stages:
         ));
         let stage = StageDescriptor::new("llm")
             .with_model(model_id)
+            .with_bundle_path(tempdir.path().to_string_lossy().to_string())
             .with_target(ExecutionTarget::Device);
         let envelope = Envelope::new(EnvelopeKind::Text("prompt".to_string()));
         let metrics = DeviceMetrics::default();
@@ -1713,6 +1753,43 @@ stages:
         assert_eq!(route.target, "local");
         assert_eq!(route.sample_size, 0);
         assert!(route.reason.contains("Explicit target"));
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_descriptor_uses_loaded_bundle_path() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let stage = StageDescriptor::new("llm")
+            .with_model("streaming-local-model")
+            .with_target(ExecutionTarget::Device);
+
+        assert!(!stage.is_locally_runnable());
+
+        let stage = stage_descriptor_with_bundle_path(&stage, tempdir.path());
+
+        assert!(stage.is_locally_runnable());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_network_target_disables_local_streaming() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let model_id = "streaming-cloud-model";
+        let authority = LocalAuthority::with_cache_provider(Arc::new(
+            StreamingFastPathCacheProvider::new(model_id, tempdir.path().to_path_buf()),
+        ));
+        let stage = StageDescriptor::new("llm")
+            .with_model(model_id)
+            .with_bundle_path(tempdir.path().to_string_lossy().to_string())
+            .with_target(ExecutionTarget::Cloud);
+        let envelope = Envelope::new(EnvelopeKind::Text("prompt".to_string()));
+        let metrics = DeviceMetrics::default();
+
+        let route =
+            resolve_streaming_fast_path_route(&authority, &stage, model_id, &envelope, &metrics);
+
+        assert!(!route.can_stream_locally);
+        assert_eq!(route.target, "cloud");
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]

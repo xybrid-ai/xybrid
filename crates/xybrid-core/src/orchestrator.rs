@@ -112,7 +112,7 @@ pub enum ExecutionMode {
 /// For smarter decisions based on fleet-wide data, configure a `RemoteAuthority` which
 /// will automatically fall back to `LocalAuthority` when the backend is unavailable.
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::orchestrator::{Orchestrator, RemoteAuthority};
 ///
 /// // Default: LocalAuthority (fully offline)
@@ -213,7 +213,7 @@ impl Orchestrator {
     ///
     /// Use this to configure smart routing via `RemoteAuthority`:
     ///
-    /// ```rust,ignore
+    /// ```no_run
     /// use xybrid_core::orchestrator::{Orchestrator, RemoteAuthority};
     ///
     /// // RemoteAuthority automatically falls back to LocalAuthority
@@ -299,7 +299,7 @@ impl Orchestrator {
         stage: &StageDescriptor,
         input: &Envelope,
         metrics: &DeviceMetrics,
-        _availability: &LocalAvailability,
+        availability: &LocalAvailability,
     ) -> OrchestratorResult<StageExecutionResult> {
         let _start_time = std::time::Instant::now();
 
@@ -348,6 +348,7 @@ impl Orchestrator {
             metrics: metrics.clone(),
             resource_monitor: self.resource_monitor.clone(),
             explicit_target: stage.target.clone(),
+            local_availability: Some(availability.clone()),
             device_class: Some(metrics.canonical_device_class()),
             device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
         };
@@ -547,7 +548,7 @@ impl Orchestrator {
         stage: &StageDescriptor,
         input: &Envelope,
         metrics: &DeviceMetrics,
-        _availability: &LocalAvailability,
+        availability: &LocalAvailability,
     ) -> OrchestratorResult<StageExecutionResult> {
         // Emit stage start event (consistent with sync execute_stage)
         self.event_bus.publish(OrchestratorEvent::StageStart {
@@ -593,6 +594,7 @@ impl Orchestrator {
             metrics: metrics.clone(),
             resource_monitor: self.resource_monitor.clone(),
             explicit_target: stage.target.clone(),
+            local_availability: Some(availability.clone()),
             device_class: Some(metrics.canonical_device_class()),
             device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
         };
@@ -936,7 +938,9 @@ impl Default for Orchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::ResourceSnapshot;
     use crate::ir::{Envelope, EnvelopeKind};
+    use crate::orchestrator::authority::test_seams::FixedResourceProvider;
     use crate::pipeline::ExecutionTarget;
     use crate::runtime_adapter::{AdapterError, AdapterResult, RuntimeAdapter};
     use crate::testing::mocks::MockRuntimeAdapter;
@@ -1038,15 +1042,20 @@ mod tests {
 
     /// Helper to create an orchestrator with a pre-loaded mock adapter registered.
     ///
-    /// For `Batch` we deliberately use `with_authority(LocalAuthority::new())`
-    /// instead of `Orchestrator::new()` — the latter bootstraps the real
-    /// ONNX/cloud adapters and wires them as the default for `local`/`cloud`
-    /// targets, so a subsequently-added mock would never be selected. The
-    /// fresh-executor path leaves the mock as the only registered adapter.
+    /// For `Batch` we deliberately use `with_authority(...)` instead of
+    /// `Orchestrator::new()` — the latter bootstraps the real ONNX/cloud
+    /// adapters and wires them as the default for `local`/`cloud` targets,
+    /// so a subsequently-added mock would never be selected. The fixed
+    /// resource provider also keeps local-routing tests independent of the
+    /// machine's live pressure while leaving the mock as the only adapter.
     fn orchestrator_with_mock_adapter(execution_mode: ExecutionMode) -> Orchestrator {
         let mut orchestrator = match execution_mode {
             ExecutionMode::Streaming => Orchestrator::with_streaming(StreamConfig::default()),
-            ExecutionMode::Batch => Orchestrator::with_authority(Box::new(LocalAuthority::new())),
+            ExecutionMode::Batch => Orchestrator::with_authority(Box::new(
+                LocalAuthority::new().with_resource_provider(Arc::new(FixedResourceProvider::new(
+                    ResourceSnapshot::unknown(),
+                ))),
+            )),
         };
 
         // Register a mock adapter that returns text output
@@ -1086,6 +1095,7 @@ mod tests {
             metrics: DeviceMetrics::default(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
+            local_availability: None,
             device_class: None,
             device_class_schema_version: None,
         }
@@ -1118,13 +1128,16 @@ mod tests {
         let stage = StageDescriptor::new("test_stage");
         let input = text_envelope("Text");
         let metrics = DeviceMetrics::default();
-        let availability = LocalAvailability::new(true);
+        // This test exercises the cloud/mock execution path; the model is
+        // intentionally not advertised as locally runnable.
+        let availability = LocalAvailability::new(false);
 
         let result = orchestrator.execute_stage(&stage, &input, &metrics, &availability);
 
         assert!(result.is_ok());
         let exec_result = result.unwrap();
         assert_eq!(exec_result.stage, "test_stage");
+        assert_eq!(exec_result.routing_decision.target.as_str(), "cloud");
         match &exec_result.output.kind {
             EnvelopeKind::Text(text) => assert!(text.contains("output")),
             other => panic!("expected text output, got {:?}", other),
@@ -1172,7 +1185,7 @@ mod tests {
         let stage = StageDescriptor::new("test_stage");
         let input = audio_envelope(&[9, 9, 9, 9]);
         let metrics = DeviceMetrics::default();
-        let availability = LocalAvailability::new(true);
+        let availability = LocalAvailability::new(false);
 
         let result = orchestrator.execute_stage(&stage, &input, &metrics, &availability);
 
@@ -1184,6 +1197,39 @@ mod tests {
             .routing_decision
             .reason
             .contains("model_unavailable"));
+    }
+
+    #[test]
+    fn test_execute_stage_uses_local_availability_hint() {
+        let mut orchestrator = orchestrator_with_mock_adapter(ExecutionMode::Batch);
+        let stage = StageDescriptor::new("test_stage");
+        let input = text_envelope("hello");
+        let metrics = DeviceMetrics::default();
+        let availability = LocalAvailability::new(true);
+
+        let result = orchestrator
+            .execute_stage(&stage, &input, &metrics, &availability)
+            .unwrap();
+
+        assert_eq!(result.routing_decision.target.as_str(), "local");
+    }
+
+    #[test]
+    fn test_execute_stage_ignores_bundle_path_when_local_availability_is_false() {
+        let mut orchestrator = orchestrator_with_mock_adapter(ExecutionMode::Batch);
+        let model_dir = tempfile::tempdir().unwrap();
+        let stage = StageDescriptor::new("test_stage")
+            .with_bundle_path(model_dir.path().to_string_lossy().to_string());
+        let input = text_envelope("hello");
+        let metrics = DeviceMetrics::default();
+        let availability = LocalAvailability::new(false);
+
+        let result = orchestrator
+            .execute_stage(&stage, &input, &metrics, &availability)
+            .unwrap();
+
+        assert_eq!(result.routing_decision.target.as_str(), "cloud");
+        assert!(result.routing_decision.reason.contains("model_unavailable"));
     }
 
     #[test]

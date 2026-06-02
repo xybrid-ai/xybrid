@@ -24,7 +24,12 @@ classes:
           - { name: gatewayUrl, type: "String?" }
           - { name: ingestUrl, type: "String?" }
           - { name: resourceTelemetry, type: "String?" }
-        status: { dart: implemented, kotlin: implemented, swift: planned, csharp: implemented }
+        # apiKey-bundled init shipped across all four bindings: Dart
+        # Xybrid.init, Kotlin Xybrid.init(context, …), Swift
+        # Xybrid.initialize(apiKey:), Unity XybridClient.Initialize(apiKey:).
+        # Param coverage varies by binding (e.g. Unity omits gatewayUrl;
+        # resourceTelemetry is Dart/Rust only) — the apiKey path is universal.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       setApiKey:
         params: [{ name: apiKey, type: String }]
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -267,7 +272,7 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       embedding:
         params: [{ name: embedding, type: "List<double>" }]
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       textWithRole:
         params:
           - { name: text, type: String }
@@ -353,7 +358,7 @@ classes:
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       metrics:
         type: InferenceMetrics
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   InferenceMetrics:
     type: data
@@ -365,25 +370,25 @@ classes:
     properties:
       totalMs:
         type: int
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       ttftMs:
         type: "int?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       tokensPerSecond:
         type: "double?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       prefillTps:
         type: "double?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       decodeTps:
         type: "double?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       tokensOut:
         type: "int?"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       stageLatenciesMs:
         type: "List<StageLatency>"
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   StageLatency:
     type: data
@@ -395,10 +400,10 @@ classes:
     properties:
       stageId:
         type: String
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       latencyMs:
         type: int
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 8. Supporting Types

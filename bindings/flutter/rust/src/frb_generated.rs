@@ -2483,6 +2483,29 @@ impl SseDecode for crate::api::model::FfiGenerationConfig {
     }
 }
 
+impl SseDecode for crate::api::result::FfiInferenceMetrics {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_totalMs = <u32>::sse_decode(deserializer);
+        let mut var_ttftMs = <Option<u32>>::sse_decode(deserializer);
+        let mut var_tokensPerSecond = <Option<f32>>::sse_decode(deserializer);
+        let mut var_prefillTps = <Option<f32>>::sse_decode(deserializer);
+        let mut var_decodeTps = <Option<f32>>::sse_decode(deserializer);
+        let mut var_tokensOut = <Option<u32>>::sse_decode(deserializer);
+        let mut var_stageLatenciesMs =
+            <Vec<crate::api::result::FfiStageLatency>>::sse_decode(deserializer);
+        return crate::api::result::FfiInferenceMetrics {
+            total_ms: var_totalMs,
+            ttft_ms: var_ttftMs,
+            tokens_per_second: var_tokensPerSecond,
+            prefill_tps: var_prefillTps,
+            decode_tps: var_decodeTps,
+            tokens_out: var_tokensOut,
+            stage_latencies_ms: var_stageLatenciesMs,
+        };
+    }
+}
+
 impl SseDecode for crate::api::model::FfiLoadEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2566,12 +2589,14 @@ impl SseDecode for crate::api::result::FfiResult {
         let mut var_audioBytes = <Option<Vec<u8>>>::sse_decode(deserializer);
         let mut var_embedding = <Option<Vec<f32>>>::sse_decode(deserializer);
         let mut var_latencyMs = <u32>::sse_decode(deserializer);
+        let mut var_metrics = <crate::api::result::FfiInferenceMetrics>::sse_decode(deserializer);
         return crate::api::result::FfiResult {
             success: var_success,
             text: var_text,
             audio_bytes: var_audioBytes,
             embedding: var_embedding,
             latency_ms: var_latencyMs,
+            metrics: var_metrics,
         };
     }
 }
@@ -2596,6 +2621,18 @@ impl SseDecode for crate::api::model::FfiRunOptions {
             abort_on_thermal_critical: var_abortOnThermalCritical,
             fallback_to_cloud: var_fallbackToCloud,
             max_grace_tokens: var_maxGraceTokens,
+        };
+    }
+}
+
+impl SseDecode for crate::api::result::FfiStageLatency {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_stageId = <String>::sse_decode(deserializer);
+        let mut var_latencyMs = <u32>::sse_decode(deserializer);
+        return crate::api::result::FfiStageLatency {
+            stage_id: var_stageId,
+            latency_ms: var_latencyMs,
         };
     }
 }
@@ -2677,6 +2714,20 @@ impl SseDecode for Vec<String> {
         let mut ans_ = vec![];
         for idx_ in 0..len_ {
             ans_.push(<String>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::result::FfiStageLatency> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::result::FfiStageLatency>::sse_decode(
+                deserializer,
+            ));
         }
         return ans_;
     }
@@ -3215,6 +3266,32 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiGenerationConfig>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::result::FfiInferenceMetrics {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.total_ms.into_into_dart().into_dart(),
+            self.ttft_ms.into_into_dart().into_dart(),
+            self.tokens_per_second.into_into_dart().into_dart(),
+            self.prefill_tps.into_into_dart().into_dart(),
+            self.decode_tps.into_into_dart().into_dart(),
+            self.tokens_out.into_into_dart().into_dart(),
+            self.stage_latencies_ms.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::result::FfiInferenceMetrics
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::result::FfiInferenceMetrics>
+    for crate::api::result::FfiInferenceMetrics
+{
+    fn into_into_dart(self) -> crate::api::result::FfiInferenceMetrics {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::model::FfiLoadEvent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -3323,6 +3400,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::result::FfiResult {
             self.audio_bytes.into_into_dart().into_dart(),
             self.embedding.into_into_dart().into_dart(),
             self.latency_ms.into_into_dart().into_dart(),
+            self.metrics.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3361,6 +3439,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiRunOptions>
     for crate::api::model::FfiRunOptions
 {
     fn into_into_dart(self) -> crate::api::model::FfiRunOptions {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::result::FfiStageLatency {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.stage_id.into_into_dart().into_dart(),
+            self.latency_ms.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::result::FfiStageLatency
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::result::FfiStageLatency>
+    for crate::api::result::FfiStageLatency
+{
+    fn into_into_dart(self) -> crate::api::result::FfiStageLatency {
         self
     }
 }
@@ -3641,6 +3740,19 @@ impl SseEncode for crate::api::model::FfiGenerationConfig {
     }
 }
 
+impl SseEncode for crate::api::result::FfiInferenceMetrics {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u32>::sse_encode(self.total_ms, serializer);
+        <Option<u32>>::sse_encode(self.ttft_ms, serializer);
+        <Option<f32>>::sse_encode(self.tokens_per_second, serializer);
+        <Option<f32>>::sse_encode(self.prefill_tps, serializer);
+        <Option<f32>>::sse_encode(self.decode_tps, serializer);
+        <Option<u32>>::sse_encode(self.tokens_out, serializer);
+        <Vec<crate::api::result::FfiStageLatency>>::sse_encode(self.stage_latencies_ms, serializer);
+    }
+}
+
 impl SseEncode for crate::api::model::FfiLoadEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3720,6 +3832,7 @@ impl SseEncode for crate::api::result::FfiResult {
         <Option<Vec<u8>>>::sse_encode(self.audio_bytes, serializer);
         <Option<Vec<f32>>>::sse_encode(self.embedding, serializer);
         <u32>::sse_encode(self.latency_ms, serializer);
+        <crate::api::result::FfiInferenceMetrics>::sse_encode(self.metrics, serializer);
     }
 }
 
@@ -3734,6 +3847,14 @@ impl SseEncode for crate::api::model::FfiRunOptions {
         <bool>::sse_encode(self.abort_on_thermal_critical, serializer);
         <bool>::sse_encode(self.fallback_to_cloud, serializer);
         <Option<u32>>::sse_encode(self.max_grace_tokens, serializer);
+    }
+}
+
+impl SseEncode for crate::api::result::FfiStageLatency {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.stage_id, serializer);
+        <u32>::sse_encode(self.latency_ms, serializer);
     }
 }
 
@@ -3809,6 +3930,16 @@ impl SseEncode for Vec<String> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <String>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::result::FfiStageLatency> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::result::FfiStageLatency>::sse_encode(item, serializer);
         }
     }
 }

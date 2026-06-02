@@ -47,13 +47,25 @@ namespace Xybrid
         /// <summary>
         /// Initializes the Xybrid SDK.
         /// </summary>
+        /// <param name="apiKey">
+        /// Optional Xybrid API key. When provided, the platform telemetry exporter
+        /// starts automatically and your inference runs show up on the dashboard.
+        /// Omit it to run anonymously — inference still runs fully on-device, and
+        /// the first inference logs a one-shot hint pointing at the dashboard
+        /// (suppress with the <c>XYBRID_QUIET=1</c> environment variable). Get a
+        /// free key at https://dashboard.xybrid.dev.
+        /// </param>
+        /// <param name="ingestUrl">
+        /// Optional override for the telemetry ingest URL (for a self-hosted
+        /// dashboard). Ignored when <paramref name="apiKey"/> is null or blank.
+        /// </param>
         /// <remarks>
         /// This method should be called once at application startup, before using
         /// any other SDK features. It is safe to call multiple times - subsequent
-        /// calls are no-ops.
+        /// calls are no-ops, so configuration is applied on the first call only.
         /// </remarks>
         /// <exception cref="XybridException">Thrown if initialization fails.</exception>
-        public static unsafe void Initialize()
+        public static unsafe void Initialize(string apiKey = null, string ingestUrl = null)
         {
             lock (_lock)
             {
@@ -75,6 +87,31 @@ namespace Xybrid
                 }
 
                 _initialized = true;
+
+                // Fold telemetry into init: a non-blank API key starts the
+                // exporter, mirroring the Swift initialize(apiKey:) / Kotlin
+                // init(apiKey =) surfaces. The standalone
+                // InitializeTelemetry(TelemetryConfig) path remains available for
+                // advanced configuration (batch size, device attributes, flush
+                // interval). TelemetryConfig defaults the endpoint to the
+                // production ingest URL, so apiKey alone is enough.
+                //
+                // Kept inside the lock so a concurrent caller that observes
+                // _initialized == true (and returns) is guaranteed the exporter
+                // is already running — and so the _telemetryInitialized read
+                // here has the same visibility as InitializeTelemetry's write.
+                // C# locks are reentrant, so InitializeTelemetry re-taking _lock
+                // is safe.
+                if (!string.IsNullOrWhiteSpace(apiKey) && !_telemetryInitialized)
+                {
+                    var config = new TelemetryConfig(apiKey);
+                    if (!string.IsNullOrWhiteSpace(ingestUrl))
+                    {
+                        config.WithEndpoint(ingestUrl);
+                    }
+
+                    InitializeTelemetry(config);
+                }
             }
         }
 
@@ -159,6 +196,12 @@ namespace Xybrid
         /// </exception>
         /// <exception cref="XybridException">Thrown if native telemetry initialization fails.</exception>
         /// <remarks>
+        /// Advanced entry point. For the common case, pass an <c>apiKey</c> to
+        /// <see cref="Initialize(string, string)"/> instead — that starts the
+        /// exporter as part of SDK init. Use this overload only when you need the
+        /// extra knobs on <see cref="TelemetryConfig"/> (batch size, flush
+        /// interval, device label/attributes); both paths share the same
+        /// process-wide once-guard.
         /// Thread-safe: serialized via the SDK's initialization lock. Call
         /// <see cref="ShutdownTelemetry"/> before re-initializing.
         /// </remarks>

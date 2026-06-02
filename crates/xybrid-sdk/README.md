@@ -6,6 +6,28 @@ Developer-facing API for hybrid cloud-edge AI inference with declarative routing
 
 The Xybrid SDK provides high-level abstractions and macros for building hybrid inference pipelines. It allows developers to annotate functions with `#[hybrid::route]` to enable automatic orchestrator-based routing between local and cloud execution.
 
+## Initialization
+
+Configure the SDK in one call with the `init()` builder. Inference runs
+on-device whether or not you authenticate; passing an API key starts the
+platform telemetry exporter so your runs show up on the dashboard.
+
+```rust
+// Anonymous — local inference, telemetry disabled
+xybrid_sdk::init().run();
+
+// Authenticated — telemetry exporter starts automatically
+xybrid_sdk::init()
+    .api_key("xy_live_...")
+    .run();
+```
+
+Without a key, the first inference logs a one-shot hint pointing at the
+dashboard (suppress with `XYBRID_QUIET=1`). Get a free key at
+<https://dashboard.xybrid.dev>. The builder also takes `.cache_dir(...)`,
+`.gateway_url(...)`, `.ingest_url(...)` (self-hosted dashboards), and
+`.resource_telemetry(...)`.
+
 ## Usage
 
 ### Basic Example
@@ -55,14 +77,19 @@ Future versions of the macro will:
 
 ## Telemetry
 
-The SDK includes built-in telemetry that can export events to the Xybrid Platform.
+The SDK includes built-in telemetry that exports events to the Xybrid Platform.
+For the common case you don't need anything here — just pass `.api_key(...)` to
+[`init()`](#initialization) and the exporter starts with sensible defaults
+(production ingest URL, batching, retry). The APIs below are the **advanced**
+path for callers that need explicit control over batching, device context, or
+the exporter lifecycle.
 
-### Configuration
+### Advanced configuration
 
 ```rust
 use xybrid_sdk::telemetry::{TelemetryConfig, HttpTelemetryExporter};
 
-// From environment variables (recommended)
+// From environment variables
 let exporter = HttpTelemetryExporter::from_env()?;
 
 // Manual configuration

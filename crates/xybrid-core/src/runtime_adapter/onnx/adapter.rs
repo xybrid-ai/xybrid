@@ -6,19 +6,19 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use xybrid_core::runtime_adapter::onnx::{OnnxRuntimeAdapter, ExecutionProviderKind};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_core::runtime_adapter::onnx::OnnxRuntimeAdapter;
 //! use xybrid_core::runtime_adapter::RuntimeAdapter;
 //!
 //! // CPU execution (default)
 //! let mut adapter = OnnxRuntimeAdapter::new();
 //! adapter.load_model("/path/to/model.onnx")?;
 //!
-//! // CoreML execution (macOS/iOS, requires ort-coreml feature)
-//! #[cfg(feature = "ort-coreml")]
-//! let mut adapter = OnnxRuntimeAdapter::with_execution_provider(
-//!     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
-//! );
+//! // CoreML execution (macOS/iOS, requires `ort-coreml` feature) is gated by cfg —
+//! // see `with_execution_provider` for the typed entry point.
+//! # Ok(())
+//! # }
 //! ```
 
 use super::execution_provider::ExecutionProviderKind;
@@ -72,16 +72,21 @@ impl OnnxRuntimeAdapter {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
     /// use xybrid_core::runtime_adapter::onnx::{OnnxRuntimeAdapter, ExecutionProviderKind};
     ///
     /// // CPU execution
     /// let adapter = OnnxRuntimeAdapter::with_execution_provider(ExecutionProviderKind::Cpu);
+    /// ```
     ///
-    /// // CoreML with Neural Engine (requires ort-coreml feature)
-    /// #[cfg(feature = "ort-coreml")]
+    /// With the `ort-coreml` feature, additionally:
+    ///
+    /// ```ignore
+    /// use xybrid_core::runtime_adapter::onnx::{
+    ///     CoreMLConfig, ExecutionProviderKind, OnnxRuntimeAdapter,
+    /// };
     /// let adapter = OnnxRuntimeAdapter::with_execution_provider(
-    ///     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine())
+    ///     ExecutionProviderKind::CoreML(CoreMLConfig::with_neural_engine()),
     /// );
     /// ```
     pub fn with_execution_provider(execution_provider: ExecutionProviderKind) -> Self {
@@ -113,7 +118,7 @@ impl OnnxRuntimeAdapter {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
     /// use xybrid_core::runtime_adapter::onnx::{OnnxRuntimeAdapter, ModelHints};
     ///
     /// let hints = ModelHints {

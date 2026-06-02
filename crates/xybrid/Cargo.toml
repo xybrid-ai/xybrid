@@ -1,0 +1,45 @@
+[package]
+name = "xybrid"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Hybrid cloud-edge AI inference SDK — umbrella crate re-exporting xybrid-sdk."
+readme = "README.md"
+
+[lib]
+name = "xybrid"
+path = "src/lib.rs"
+
+[dependencies]
+xybrid-sdk = { version = "0.1.0-rc3", path = "../xybrid-sdk", default-features = false }
+
+[features]
+default = []
+
+# Platform presets — forward to xybrid-sdk.
+platform-android = ["xybrid-sdk/platform-android"]
+platform-ios = ["xybrid-sdk/platform-ios"]
+platform-macos = ["xybrid-sdk/platform-macos"]
+platform-desktop = ["xybrid-sdk/platform-desktop"]
+
+# Individual feature forwarders.
+ort-download = ["xybrid-sdk/ort-download"]
+ort-dynamic = ["xybrid-sdk/ort-dynamic"]
+ort-coreml = ["xybrid-sdk/ort-coreml"]
+candle = ["xybrid-sdk/candle"]
+candle-hub = ["xybrid-sdk/candle-hub"]
+candle-metal = ["xybrid-sdk/candle-metal"]
+candle-cuda = ["xybrid-sdk/candle-cuda"]
+llm-mistral = ["xybrid-sdk/llm-mistral"]
+llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
+llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
+llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
+huggingface = ["xybrid-sdk/huggingface"]
+onnx-inspect = ["xybrid-sdk/onnx-inspect"]
+dev-tools = ["xybrid-sdk/dev-tools"]
+
+[package.metadata.docs.rs]
+all-features = true

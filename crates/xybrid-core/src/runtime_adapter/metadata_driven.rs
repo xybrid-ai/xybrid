@@ -51,11 +51,13 @@ impl MetadataDrivenAdapter {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// # use xybrid_core::runtime_adapter::metadata_driven::MetadataDrivenAdapter;
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_core::runtime_adapter::MetadataDrivenAdapter;
     /// let mut adapter = MetadataDrivenAdapter::new();
     /// adapter.load_metadata("models/whisper-tiny/model_metadata.json")?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn load_metadata(&mut self, metadata_path: impl AsRef<Path>) -> AdapterResult<()> {
         let path = metadata_path.as_ref();

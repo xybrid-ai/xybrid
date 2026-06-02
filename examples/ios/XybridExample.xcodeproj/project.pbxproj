@@ -105,7 +105,7 @@
 			);
 			mainGroup = 3B1A00002B0000000000000C;
 			packageReferences = (
-				E3C7BD032F600DA900A10DD1 /* XCLocalSwiftPackageReference "../../bindings/apple" */,
+				E3C7BD032F600DA900A10DD1 /* XCLocalSwiftPackageReference "../.." */,
 			);
 			productRefGroup = 3B1A00022B0000020000000C /* Products */;
 			projectDirPath = "";
@@ -341,9 +341,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		E3C7BD032F600DA900A10DD1 /* XCLocalSwiftPackageReference "../../bindings/apple" */ = {
+		E3C7BD032F600DA900A10DD1 /* XCLocalSwiftPackageReference "../.." */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../bindings/apple;
+			relativePath = ../..;
 		};
 /* End XCLocalSwiftPackageReference section */
 

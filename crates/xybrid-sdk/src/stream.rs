@@ -116,7 +116,12 @@ struct StreamHandle {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
+/// # use xybrid_sdk::{XybridModel, StreamConfig};
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # let model: XybridModel = unimplemented!();
+/// # let audio_chunk_1: Vec<f32> = vec![];
+/// # let audio_chunk_2: Vec<f32> = vec![];
 /// let stream = model.stream(StreamConfig::with_vad())?;
 ///
 /// // Feed audio samples (16kHz mono f32)
@@ -134,6 +139,8 @@ struct StreamHandle {
 ///
 /// // Reset for new utterance
 /// stream.reset()?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct XybridStream {
     handle: Arc<RwLock<StreamHandle>>,
@@ -149,7 +156,7 @@ impl XybridStream {
         model_id: &str,
     ) -> Result<Self, SdkError> {
         let session = StreamSession::new(model_dir, config)
-            .map_err(|e| SdkError::LoadError(format!("Failed to create stream session: {}", e)))?;
+            .map_err(|e| SdkError::load_src("Failed to create stream session", e))?;
 
         Ok(Self {
             handle: Arc::new(RwLock::new(StreamHandle {
@@ -211,12 +218,12 @@ impl XybridStream {
         let mut handle = self
             .handle
             .write()
-            .map_err(|_| SdkError::InferenceError("Failed to acquire stream lock".to_string()))?;
+            .map_err(|_| SdkError::inference("Failed to acquire stream lock"))?;
 
         handle
             .session
             .feed(samples)
-            .map_err(|e| SdkError::InferenceError(format!("Feed failed: {}", e)))?;
+            .map_err(|e| SdkError::inference_src("Feed failed", e))?;
 
         // Get partial result if available
         Ok(handle.session.partial_result().map(|p| p.into()))
@@ -238,12 +245,12 @@ impl XybridStream {
         let mut handle = self
             .handle
             .write()
-            .map_err(|_| SdkError::InferenceError("Failed to acquire stream lock".to_string()))?;
+            .map_err(|_| SdkError::inference("Failed to acquire stream lock"))?;
 
         let text = handle
             .session
             .flush()
-            .map_err(|e| SdkError::InferenceError(format!("Flush failed: {}", e)))?;
+            .map_err(|e| SdkError::inference_src("Flush failed", e))?;
 
         let stats = handle.session.stats();
 
@@ -263,7 +270,7 @@ impl XybridStream {
         let mut handle = self
             .handle
             .write()
-            .map_err(|_| SdkError::InferenceError("Failed to acquire stream lock".to_string()))?;
+            .map_err(|_| SdkError::inference("Failed to acquire stream lock"))?;
 
         handle.session.reset();
         Ok(())

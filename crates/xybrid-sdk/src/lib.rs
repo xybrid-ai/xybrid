@@ -25,39 +25,69 @@
 //!
 //! # Quick Start
 //!
+//! ## Initialization
+//!
+//! Anonymous use works out of the box — every inference path runs locally.
+//! Provide an API key to light up the platform dashboard:
+//!
+//! ```no_run
+//! // Anonymous — local inference, telemetry disabled
+//! xybrid_sdk::init().run();
+//!
+//! // Authenticated — telemetry exporter starts automatically
+//! xybrid_sdk::init()
+//!     .api_key("xy_live_...")
+//!     .run();
+//! ```
+//!
+//! Get a free key at <https://dashboard.xybrid.dev>. The first inference
+//! call without a key emits a one-shot info log nudging the developer
+//! toward the dashboard; set `XYBRID_QUIET=1` to suppress it.
+//!
 //! ## Batch Inference
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{ModelLoader, Envelope};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::ModelLoader;
+//! use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 //!
 //! // Load model from registry
-//! let loader = ModelLoader::from_registry("http://localhost:8080", "whisper-tiny", "1.0");
+//! let loader = ModelLoader::from_registry("whisper-tiny");
 //! let model = loader.load()?;
 //!
 //! // Run inference
-//! let result = model.run(&Envelope::audio(audio_bytes))?;
+//! let audio_bytes: Vec<u8> = vec![];
+//! let envelope = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+//! let result = model.run(&envelope, None)?;
 //! println!("Transcription: {}", result.unwrap_text());
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Streaming ASR
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_sdk::{ModelLoader, StreamConfig};
 //!
 //! let model = ModelLoader::from_directory("/path/to/whisper-model")?.load()?;
 //! let stream = model.stream(StreamConfig::with_vad())?;
 //!
 //! // Feed audio chunks
+//! let audio_samples: Vec<f32> = vec![];
 //! stream.feed(&audio_samples)?;
 //!
 //! // Get final transcript
 //! let result = stream.flush()?;
 //! println!("Transcript: {}", result.text);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Pipelines
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_sdk::run_pipeline;
 //!
 //! let result = run_pipeline("examples/pipeline.yaml")?;
@@ -65,31 +95,40 @@
 //! for stage in &result.stages {
 //!     println!("  {}: {}ms ({})", stage.name, stage.latency_ms, stage.target);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Model Warmup (for LLM and other large models)
 //!
 //! Pre-load models at app startup for fast first inference:
 //!
-//! ```rust,ignore
-//! use xybrid_sdk::{ModelLoader, PipelineRef, Envelope};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_sdk::{ModelLoader, PipelineRef};
+//! use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 //!
 //! // Option 1: Warmup a single model
-//! let model = ModelLoader::from_registry("gemma-3-1b").load()?;
+//! let loader = ModelLoader::from_registry("gemma-3-1b");
+//! let model = loader.load()?;
 //! model.warmup()?;  // Pre-loads model weights, compiles shaders
-//! let result = model.run(&Envelope::text("Hello"))?;  // Fast!
+//! let envelope = Envelope::new(EnvelopeKind::Text("Hello".into()));
+//! let result = model.run(&envelope, None)?;  // Fast!
 //!
 //! // Option 2: Warmup a pipeline
+//! let yaml = "stages: []";
 //! let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
 //! pipeline.load_models()?;  // Download models
 //! pipeline.warmup()?;       // Pre-load into memory
-//! let result = pipeline.run(&Envelope::text("Hello"))?;  // Fast!
+//! let result = pipeline.run(&envelope)?;  // Fast!
 //!
 //! // Option 3: Async warmup for background loading
 //! let model = loader.load()?;
 //! tokio::spawn(async move {
 //!     model.warmup_async().await
 //! });
+//! # Ok(())
+//! # }
 //! ```
 
 use anyhow::Result;
@@ -172,6 +211,11 @@ pub use model::{
 pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
 pub use run_options::{AbortPolicy, AbortReason, AbortSignal, CancellationToken, RunOptions};
+// Re-exported so callers can use the trait form of `SdkError::is_retryable`
+// / `retry_after` (e.g. in generic retry helpers) without naming
+// `xybrid_core`. The inherent methods on `SdkError` cover the common case
+// without any import.
+pub use xybrid_core::http::RetryableError;
 // Pipeline API (PipelineRef → Pipeline)
 pub use pipeline::{
     // Config types for FFI bindings (Flutter, Kotlin, Swift)
@@ -206,8 +250,10 @@ pub use telemetry::{
     bridge_orchestrator_events,
     convert_orchestrator_event,
     flush_platform_telemetry,
+    flush_platform_telemetry_blocking,
     init_platform_telemetry,
     init_platform_telemetry_from_env,
+    install_telemetry_panic_hook,
     publish_telemetry_event,
     register_telemetry_sender,
     set_telemetry_pipeline_context,
@@ -254,6 +300,15 @@ static BINDING: OnceLock<&'static str> = OnceLock::new();
 /// [`set_binding`] (process-global) or [`SdkConfig::with_binding`] (per-config)
 /// so registry calls can be attributed correctly.
 pub const DEFAULT_BINDING: &str = "rust";
+
+/// SDK crate version, stamped onto every telemetry event as `sdk_version` and
+/// used in the `X-Xybrid-Client` registry header.
+///
+/// Sourced from `CARGO_PKG_VERSION` at compile time so the value tracks the
+/// `xybrid-sdk` crate's own `Cargo.toml` without manual sync. The `xybrid-core`
+/// version is exposed separately as [`xybrid_core::VERSION`]; the two can
+/// diverge across releases.
+pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Register the binding identifier for this process.
 ///
@@ -388,8 +443,12 @@ pub fn is_sdk_cache_configured() -> bool {
 
 /// Set the Xybrid API key for gateway authentication.
 ///
-/// This sets the `XYBRID_API_KEY` environment variable which is used
-/// by the LLM client when routing through the Xybrid Gateway.
+/// The key is stored in process memory (not the environment) and used by the
+/// LLM client when routing through the Xybrid Gateway. Keeping it out of the
+/// environment means it is not inherited by child processes the host app
+/// spawns. A key set in the real `XYBRID_API_KEY` environment variable
+/// (e.g. via the CLI, Flutter `--dart-define`, or iOS `ProcessInfo`) is still
+/// honored as a fallback.
 ///
 /// # Example
 ///
@@ -405,9 +464,9 @@ pub fn is_sdk_cache_configured() -> bool {
 /// # Note
 ///
 /// For Flutter apps, you can also set this from Dart before running pipelines.
-/// The key is stored in the process environment and persists for the app lifetime.
+/// The key persists in memory for the app lifetime.
 pub fn set_api_key(api_key: &str) {
-    std::env::set_var("XYBRID_API_KEY", api_key);
+    xybrid_core::cloud::set_xybrid_api_key(Some(api_key.to_string()));
 }
 
 /// Set a provider-specific API key for direct API calls.
@@ -449,14 +508,169 @@ pub fn set_provider_api_key(provider: &str, api_key: &str) {
 
 /// Get the currently configured Xybrid API key (if set).
 ///
-/// Returns `None` if no API key is configured.
+/// Returns the key set via [`set_api_key`] (held in memory), falling back to
+/// the `XYBRID_API_KEY` environment variable. Returns `None` if neither is
+/// configured.
 pub fn get_api_key() -> Option<String> {
-    std::env::var("XYBRID_API_KEY").ok()
+    xybrid_core::cloud::xybrid_api_key().or_else(|| std::env::var("XYBRID_API_KEY").ok())
 }
 
 /// Check if the Xybrid API key is configured.
+///
+/// Avoids cloning the key (unlike [`get_api_key`]) — checks the in-memory cell
+/// then the `XYBRID_API_KEY` environment variable for presence only.
 pub fn has_api_key() -> bool {
-    std::env::var("XYBRID_API_KEY").is_ok()
+    xybrid_core::cloud::has_xybrid_api_key() || std::env::var("XYBRID_API_KEY").is_ok()
+}
+
+// ============================================================================
+// XybridInit — one-stop builder for SDK initialization
+// ============================================================================
+
+/// Start configuring the SDK. Call `.run()` to apply.
+///
+/// See [`XybridInit`] for the full builder surface.
+pub fn init() -> XybridInit {
+    XybridInit::default()
+}
+
+/// Builder that bundles SDK initialization into a single call.
+///
+/// Replaces the older multi-step setup (`init_sdk_cache_dir` →
+/// `set_api_key` → `init_platform_telemetry`) for host apps that want one
+/// entry point. The legacy free functions stay public for callers that
+/// need finer control.
+///
+/// # Anonymous use
+///
+/// Omitting [`api_key`](Self::api_key) is supported: every inference path
+/// still runs locally. The platform telemetry exporter is not started, and
+/// the first inference logs a one-shot info-level hint pointing at the
+/// dashboard. Set `XYBRID_QUIET=1` to suppress the hint.
+///
+/// # Examples
+///
+/// Anonymous, default cache directory:
+///
+/// ```no_run
+/// xybrid_sdk::init().run();
+/// ```
+///
+/// Authenticated; telemetry defaults to the production ingest URL:
+///
+/// ```no_run
+/// xybrid_sdk::init()
+///     .api_key("xy_live_...")
+///     .run();
+/// ```
+///
+/// Full configuration — self-hosted dashboard with resource sampling on:
+///
+/// ```no_run
+/// use xybrid_sdk::ResourceTelemetryMode;
+///
+/// xybrid_sdk::init()
+///     .api_key("xy_live_...")
+///     .ingest_url("http://192.168.1.78:8081")
+///     .resource_telemetry(ResourceTelemetryMode::Summary { interval_ms: 5000 })
+///     .run();
+/// ```
+#[derive(Debug, Clone, Default)]
+#[must_use = "call .run() to apply the configuration"]
+pub struct XybridInit {
+    api_key: Option<String>,
+    cache_dir: Option<std::path::PathBuf>,
+    gateway_url: Option<String>,
+    ingest_url: Option<String>,
+    resource_telemetry: Option<xybrid_core::device::ResourceTelemetryMode>,
+    binding: Option<&'static str>,
+}
+
+impl XybridInit {
+    /// Set the Xybrid API key. With a key, the platform telemetry exporter
+    /// starts on `.run()` and inference traces flow to the dashboard.
+    ///
+    /// Skip this call to run anonymously.
+    pub fn api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(key.into());
+        self
+    }
+
+    /// Override the model cache directory. Required on Android (where
+    /// `dirs::cache_dir()` returns `None`); optional elsewhere.
+    pub fn cache_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.cache_dir = Some(dir.into());
+        self
+    }
+
+    /// Override the LLM gateway URL. Defaults to the production gateway
+    /// or to `XYBRID_GATEWAY_URL` / `XYBRID_PLATFORM_URL` if set.
+    pub fn gateway_url(mut self, url: impl Into<String>) -> Self {
+        self.gateway_url = Some(url.into());
+        self
+    }
+
+    /// Override the telemetry ingest URL. Defaults to
+    /// [`telemetry::DEFAULT_INGEST_URL`] when an API key is set. Use this
+    /// for self-hosted dashboards or on-device dev consoles.
+    pub fn ingest_url(mut self, url: impl Into<String>) -> Self {
+        self.ingest_url = Some(url.into());
+        self
+    }
+
+    /// Configure resource-telemetry sampling. Defaults to `Off`.
+    pub fn resource_telemetry(mut self, mode: xybrid_core::device::ResourceTelemetryMode) -> Self {
+        self.resource_telemetry = Some(mode);
+        self
+    }
+
+    /// Register the binding identifier for this process (e.g. `"flutter"`,
+    /// `"kotlin"`, `"swift"`, `"unity"`). Bindings call this; host apps
+    /// rarely need to.
+    pub fn binding(mut self, binding: &'static str) -> Self {
+        self.binding = Some(binding);
+        self
+    }
+
+    /// Apply the configuration. Cache dir, gateway URL, API key, and
+    /// telemetry exporter are wired up in the order other code in the SDK
+    /// expects them.
+    ///
+    /// Idempotent for the cache dir and binding (first-set-wins via
+    /// `OnceLock`). The telemetry exporter has its own process-wide
+    /// once-guard at the binding layer; a second `.run()` does not spawn a
+    /// second exporter.
+    pub fn run(self) {
+        if let Some(binding) = self.binding {
+            set_binding(binding);
+        }
+        if let Some(dir) = self.cache_dir {
+            init_sdk_cache_dir(dir);
+        }
+        if let Some(url) = self.gateway_url.as_deref() {
+            set_gateway_url(url);
+        }
+        if let Some(key) = self.api_key.as_deref() {
+            set_api_key(key);
+        }
+
+        if let Some(key) = self.api_key.as_deref() {
+            let endpoint = self
+                .ingest_url
+                .as_deref()
+                .unwrap_or(telemetry::DEFAULT_INGEST_URL);
+            let mut config = telemetry::TelemetryConfig::new(endpoint, key);
+            if let Some(mode) = self.resource_telemetry {
+                config = config.with_resource_telemetry(mode);
+            }
+            telemetry::init_platform_telemetry(config);
+        } else if self.ingest_url.is_some() {
+            log::warn!(
+                target: "xybrid_sdk",
+                "ingest_url set without api_key; telemetry exporter not started"
+            );
+        }
+    }
 }
 
 /// Re-export common types for convenience
@@ -523,7 +737,7 @@ pub mod hybrid {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
     /// use xybrid_sdk::hybrid;
     ///
     /// #[hybrid::route]
@@ -613,7 +827,7 @@ pub enum PipelineConfigError {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_sdk::run_pipeline;
 ///
 /// match run_pipeline("examples/hiiipe.yaml") {
@@ -662,12 +876,17 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
     // Create device metrics
     let metrics = DeviceMetrics::default();
 
-    // Create availability function from config
-    let availability_map = config.availability.clone();
-    let availability_fn = move |stage: &str| -> LocalAvailability {
-        let exists = availability_map.get(stage).copied().unwrap_or(false);
-        LocalAvailability::new(exists)
-    };
+    // Ignore legacy availability hints because these configs have no resolved
+    // bundle paths. Without a bundle path or preloaded adapter, local execution
+    // is not runnable.
+    if !config.availability.is_empty() {
+        log::warn!(
+            target: "xybrid_sdk",
+            "Legacy pipeline availability hints are ignored; use PipelineRef::load() and load_models() for local execution"
+        );
+    }
+    let availability_fn =
+        move |_stage: &str| -> LocalAvailability { LocalAvailability::new(false) };
 
     // Create orchestrator
     let mut orchestrator = Orchestrator::new();
@@ -724,7 +943,7 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_sdk::run_pipeline_async;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -773,12 +992,17 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
     // Create device metrics
     let metrics = DeviceMetrics::default();
 
-    // Create availability function from config
-    let availability_map = config.availability.clone();
-    let availability_fn = move |stage: &str| -> LocalAvailability {
-        let exists = availability_map.get(stage).copied().unwrap_or(false);
-        LocalAvailability::new(exists)
-    };
+    // Ignore legacy availability hints because these configs have no resolved
+    // bundle paths. Without a bundle path or preloaded adapter, local execution
+    // is not runnable.
+    if !config.availability.is_empty() {
+        log::warn!(
+            target: "xybrid_sdk",
+            "Legacy pipeline availability hints are ignored; use PipelineRef::load() and load_models() for local execution"
+        );
+    }
+    let availability_fn =
+        move |_stage: &str| -> LocalAvailability { LocalAvailability::new(false) };
 
     // Create orchestrator
     let mut orchestrator = Orchestrator::new();
@@ -856,5 +1080,69 @@ mod sdk_config_tests {
             cfg.cache_dir.as_deref(),
             Some(std::path::Path::new("/tmp/xybrid-cache"))
         );
+    }
+}
+
+#[cfg(test)]
+mod xybrid_init_tests {
+    use super::{init, XybridInit};
+    use xybrid_core::device::ResourceTelemetryMode;
+
+    #[test]
+    fn init_returns_default_anonymous_builder() {
+        let builder = init();
+        let default = XybridInit::default();
+        // Default builder carries no configuration — the anonymous path.
+        assert_eq!(format!("{:?}", builder), format!("{:?}", default));
+    }
+
+    #[test]
+    fn api_key_setter_stores_value() {
+        let builder = init().api_key("xy_test_123");
+        let dbg = format!("{:?}", builder);
+        assert!(dbg.contains("xy_test_123"), "debug = {}", dbg);
+    }
+
+    #[test]
+    fn cache_dir_setter_stores_path() {
+        let builder = init().cache_dir("/tmp/xybrid-test-cache");
+        let dbg = format!("{:?}", builder);
+        assert!(
+            dbg.contains("xybrid-test-cache"),
+            "cache_dir not stored, debug = {}",
+            dbg
+        );
+    }
+
+    #[test]
+    fn ingest_url_setter_stores_value() {
+        let builder = init().ingest_url("http://192.168.1.78:8081");
+        let dbg = format!("{:?}", builder);
+        assert!(dbg.contains("192.168.1.78"), "debug = {}", dbg);
+    }
+
+    #[test]
+    fn gateway_url_setter_stores_value() {
+        let builder = init().gateway_url("https://gateway.example/v1");
+        let dbg = format!("{:?}", builder);
+        assert!(dbg.contains("gateway.example"), "debug = {}", dbg);
+    }
+
+    #[test]
+    fn resource_telemetry_setter_stores_mode() {
+        let builder = init().resource_telemetry(ResourceTelemetryMode::Boundary);
+        let dbg = format!("{:?}", builder);
+        assert!(dbg.contains("Boundary"), "debug = {}", dbg);
+    }
+
+    #[test]
+    fn builder_is_chainable() {
+        let _builder = init()
+            .api_key("xy_test")
+            .cache_dir("/tmp/x")
+            .gateway_url("https://gateway")
+            .ingest_url("https://ingest")
+            .resource_telemetry(ResourceTelemetryMode::Off)
+            .binding("rust");
     }
 }

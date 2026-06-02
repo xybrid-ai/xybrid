@@ -1,0 +1,91 @@
+name: Discord notify (contributor activity)
+
+on:
+  issues:
+    types: [opened, labeled]
+  pull_request_target:
+    types: [opened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}-${{ github.event.action }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  notify-issue:
+    if: >-
+      github.event_name == 'issues' &&
+      (
+        (github.event.action == 'opened' &&
+          (contains(github.event.issue.labels.*.name, 'good first issue') ||
+           contains(github.event.issue.labels.*.name, 'help wanted'))) ||
+        (github.event.action == 'labeled' &&
+          (github.event.label.name == 'good first issue' ||
+           github.event.label.name == 'help wanted'))
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post issue to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_DEV_TESTS }}
+          TITLE: ${{ github.event.issue.title }}
+          URL: ${{ github.event.issue.html_url }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+          LABEL: ${{ github.event.label.name }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK_DEV_TESTS is unset — skipping post."
+            exit 0
+          fi
+          payload=$(jq -n \
+            --arg title "🆕 New contributor issue: $TITLE" \
+            --arg url "$URL" \
+            --arg desc "Author: \`$AUTHOR\` • Label: \`${LABEL:-good first issue}\`" \
+            '{
+              username: "Xybrid Bot",
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $desc,
+                color: 5814783
+              }]
+            }')
+          curl -sS -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK" > /dev/null
+
+  notify-pr:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'opened' &&
+      (github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR' ||
+       github.event.pull_request.author_association == 'FIRST_TIMER' ||
+       github.event.pull_request.author_association == 'NONE')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post PR to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_DEV_TESTS }}
+          TITLE: ${{ github.event.pull_request.title }}
+          URL: ${{ github.event.pull_request.html_url }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          ASSOC: ${{ github.event.pull_request.author_association }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK_DEV_TESTS is unset — skipping post."
+            exit 0
+          fi
+          payload=$(jq -n \
+            --arg title "🎉 First-time contributor PR: $TITLE" \
+            --arg url "$URL" \
+            --arg desc "Author: \`$AUTHOR\` • Association: \`$ASSOC\`" \
+            '{
+              username: "Xybrid Bot",
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $desc,
+                color: 3066993
+              }]
+            }')
+          curl -sS -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK" > /dev/null

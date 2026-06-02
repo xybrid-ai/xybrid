@@ -42,6 +42,11 @@ impl ExecutionTarget {
         matches!(self, ExecutionTarget::Server | ExecutionTarget::Cloud)
     }
 
+    /// Returns true if this target allows local execution.
+    pub fn allows_local(&self) -> bool {
+        !self.requires_network()
+    }
+
     /// Returns true if this target can work offline.
     pub fn supports_offline(&self) -> bool {
         matches!(self, ExecutionTarget::Device)
@@ -141,6 +146,14 @@ mod tests {
         assert!(ExecutionTarget::Server.requires_network());
         assert!(ExecutionTarget::Cloud.requires_network());
         assert!(!ExecutionTarget::Auto.requires_network()); // Auto doesn't inherently require network
+    }
+
+    #[test]
+    fn test_allows_local() {
+        assert!(ExecutionTarget::Device.allows_local());
+        assert!(!ExecutionTarget::Server.allows_local());
+        assert!(!ExecutionTarget::Cloud.allows_local());
+        assert!(ExecutionTarget::Auto.allows_local());
     }
 
     #[test]

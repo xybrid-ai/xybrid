@@ -296,6 +296,57 @@ private fun CompletedResult(state: InferenceState.Completed, pcmPlayer: PcmPlaye
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
             )
+
+            // Typed metrics section — populated from result.metrics.
+            // LLM-specific fields are null for TTS/ASR; stage latencies are
+            // empty for single-model runs.
+            state.metrics?.let { MetricsSection(it) }
+        }
+    }
+}
+
+@Composable
+private fun MetricsSection(metrics: ai.xybrid.XybridInferenceMetrics) {
+    val rows = buildList<Pair<String, String>> {
+        metrics.ttftMs?.let { add("TTFT" to "$it ms") }
+        metrics.tokensPerSecond?.let { add("Throughput" to "%.1f tok/s".format(it)) }
+        metrics.prefillTps?.let { add("Prefill" to "%.1f tok/s".format(it)) }
+        metrics.decodeTps?.let { add("Decode" to "%.1f tok/s".format(it)) }
+        metrics.tokensOut?.let { add("Tokens out" to it.toString()) }
+        if (metrics.stageLatenciesMs.isNotEmpty()) {
+            val stages = metrics.stageLatenciesMs.joinToString(", ") { "${it.stageId}=${it.latencyMs}ms" }
+            add("Stages" to stages)
+        }
+    }
+    if (rows.isEmpty()) return
+    Spacer(modifier = Modifier.height(4.dp))
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = "Metrics",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            rows.forEach { (label, value) ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = label, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        text = value,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
     }
 }

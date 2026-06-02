@@ -232,7 +232,7 @@ enum Commands {
         #[arg(long, value_name = "VOICE")]
         voice: Option<String>,
 
-        /// Target format for model resolution (onnx, coreml, tflite)
+        /// Execution target for REPL inference (auto, local/device, cloud, server)
         #[arg(long, value_name = "TARGET")]
         target: Option<String>,
 
@@ -349,8 +349,8 @@ fn find_model_not_found(err: &anyhow::Error) -> Option<&str> {
 /// local unreachability issue rather than a registry-side problem.
 fn find_offline_error(err: &anyhow::Error) -> Option<&str> {
     for cause in err.chain() {
-        if let Some(SdkError::Offline(msg)) = cause.downcast_ref::<SdkError>() {
-            return Some(msg.as_str());
+        if let Some(SdkError::Offline { message, .. }) = cause.downcast_ref::<SdkError>() {
+            return Some(message.as_str());
         }
     }
     None

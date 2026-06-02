@@ -29,7 +29,7 @@ Or add directly to `Packages/manifest.json`:
 To pin a specific version:
 
 ```bash
-https://github.com/xybrid-ai/xybrid.git#upm/v0.1.0-beta5
+https://github.com/xybrid-ai/xybrid.git#upm/v0.1.1
 ```
 
 ### Option 2: Local Development
@@ -90,7 +90,8 @@ public class XybridExample : MonoBehaviour
 
     void Start()
     {
-        // Initialize the SDK
+        // Runs locally with no key. Pass an apiKey to light up the
+        // dashboard: XybridClient.Initialize(apiKey: "xy_live_...")
         XybridClient.Initialize();
 
         // Load a model from the registry
@@ -142,6 +143,34 @@ using var result = model.Run(Envelope.Audio(microphoneBytes, sampleRate: 16000, 
 result.ThrowIfFailed();
 
 Debug.Log($"Player said: {result.Text}");
+```
+
+### Inference Metrics
+
+Every `InferenceResult` carries a typed `InferenceMetrics` with TTFT,
+tok/s, per-stage latencies, and token counts. LLM-specific fields are
+`null` for ASR / TTS / embedding runs.
+
+```csharp
+using Xybrid;
+
+using var model = XybridClient.LoadModel("lfm2.5-350m");
+using var result = model.Run(Envelope.Text("Tell me a joke."));
+result.ThrowIfFailed();
+
+var metrics = result.Metrics;
+Debug.Log($"Total: {metrics.TotalMs} ms");
+if (metrics.TtftMs.HasValue)
+    Debug.Log($"TTFT: {metrics.TtftMs.Value} ms");
+if (metrics.TokensPerSecond.HasValue)
+    Debug.Log($"Throughput: {metrics.TokensPerSecond.Value:F1} tok/s");
+if (metrics.TokensOut.HasValue)
+    Debug.Log($"Tokens out: {metrics.TokensOut.Value}");
+
+// For pipeline runs, per-stage latencies are populated.
+// model.Run() leaves StageLatenciesMs empty.
+foreach (var stage in metrics.StageLatenciesMs)
+    Debug.Log($"  stage {stage.StageId}: {stage.LatencyMs} ms");
 ```
 
 ### Multi-Turn Conversation

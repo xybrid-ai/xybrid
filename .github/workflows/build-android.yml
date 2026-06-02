@@ -8,6 +8,9 @@ on:
       - 'crates/xybrid-uniffi/**'
       - 'xtask/**'
       - '.github/workflows/build-android.yml'
+      # Docs-only changes under the paths above (READMEs, examples) never
+      # affect the native build — exclude markdown so they don't trigger it.
+      - '!**.md'
   workflow_dispatch:
 
 concurrency:

@@ -1,0 +1,529 @@
+name: Release Publish
+
+# Release-branch flow, step 2 of 2. Companion: release-prep.yml.
+#
+# Triggers:
+#
+#   1. Automatic: a release PR (head branch `release/v*`) merges into master.
+#      The metadata (tag + merge commit) is derived from the PR event.
+#   2. Manual: `workflow_dispatch` with a `tag` input (e.g. `v0.1.0-rc4`).
+#      Used as a recovery hatch when the automatic trigger didn't fire —
+#      e.g. the PR was deleted before its `closed` event reached GitHub
+#      Actions, or the merge happened by a path that bypassed `pull_request`
+#      events. When dispatched, the tag must already exist (either created
+#      by an earlier partial run or by manually publishing the draft).
+#
+# Either way, the workflow:
+#
+#   1. Resolves the tag + version + commit SHA from whichever trigger fired.
+#   2. Retargets the draft release at the PR's merge commit and publishes
+#      it — GitHub atomically creates the git tag v<version> at the merge
+#      commit and flips the asset URLs from collaborator-only to public.
+#      (Skipped in workflow_dispatch mode if the release is already
+#      published, which is the typical recovery scenario.)
+#   3. Verifies the published tag's Package.swift checksum matches the
+#      now-public xcframework zip (sanity belt).
+#   4. Publishes the language packages: crates.io and Maven Central run on
+#      either trigger. pub.dev (publish-flutter) only runs on
+#      workflow_dispatch-from-tag — pub.dev's OIDC binding rejects
+#      pull_request / branch-ref tokens — so on the merge path
+#      dispatch-flutter-publish re-fires this workflow against the new tag
+#      (needs the RELEASE_PAT secret; otherwise it prints a one-liner).
+#   5. Updates the legacy `swift` branch with the URL-based Package.swift
+#      (planned to be deprecated once consumers move to `from: "<version>"`).
+#
+# If a release PR is closed without merging, the pull_request trigger
+# doesn't run. The draft release lingers; the next release-prep run
+# replaces it.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish/republish, e.g. v0.1.0-rc4 (must already exist on origin)"
+        required: true
+        type: string
+      flutter_only:
+        description: "Internal: publish ONLY to pub.dev. Set by the auto re-dispatch from the merge path (pub.dev needs a workflow_dispatch-from-tag token). Leave false for manual full recovery — that republishes crates.io / Maven / swift too."
+        required: false
+        default: false
+        type: boolean
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # =========================================================================
+  # Tag, publish the draft release. This is the irreversible step.
+  # =========================================================================
+  publish-release:
+    name: Publish GitHub release
+    permissions:
+      contents: write   # gh release edit --draft=false to publish the release
+    # Run on workflow_dispatch always; on pull_request only when the release
+    # PR actually merged.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'release/v'))
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      merge_sha: ${{ steps.meta.outputs.merge_sha }}
+      already_published: ${{ steps.meta.outputs.already_published }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Extract release metadata
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+            # In dispatch mode the tag should already exist (manual recovery
+            # path). Resolve the commit SHA the tag points at so downstream
+            # jobs that need merge_sha still have something meaningful.
+            MERGE_SHA=$(gh api "repos/${{ github.repository }}/git/refs/tags/${TAG}" --jq .object.sha 2>/dev/null || echo "")
+            if [ -z "$MERGE_SHA" ]; then
+              echo "::error::Tag ${TAG} not found on origin. Create it (or publish the draft release for ${TAG}) before dispatching."
+              exit 1
+            fi
+          else
+            TAG="${HEAD_REF#release/}"
+          fi
+          VERSION="${TAG#v}"
+
+          # Was the release already published? (true in the workflow_dispatch
+          # recovery path, false in the normal pull_request path.)
+          STATE=$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null || echo "missing")
+          case "$STATE" in
+            true)    ALREADY_PUBLISHED=false ;;  # draft exists, not yet published
+            false)   ALREADY_PUBLISHED=true ;;   # already published — skip the publish step
+            missing)
+              if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+                echo "::error::No release found for ${TAG}. Create the draft (via release-prep) or publish it manually before dispatching."
+              else
+                echo "::error::No draft release found for ${TAG}. Did release-prep run?"
+              fi
+              exit 1
+              ;;
+          esac
+
+          echo "tag=${TAG}"                              >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}"                      >> "$GITHUB_OUTPUT"
+          echo "merge_sha=${MERGE_SHA}"                  >> "$GITHUB_OUTPUT"
+          echo "already_published=${ALREADY_PUBLISHED}"  >> "$GITHUB_OUTPUT"
+          echo "Tag: ${TAG} | Version: ${VERSION} | SHA: ${MERGE_SHA} | already_published: ${ALREADY_PUBLISHED}"
+
+      - name: Retarget draft to merge commit and publish
+        # Only run when there's a draft to publish (i.e. not the recovery
+        # path where someone already published it manually).
+        if: steps.meta.outputs.already_published == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          MERGE_SHA: ${{ steps.meta.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          # Drafts can be retargeted freely. The git tag is created at
+          # publish time using the (now-updated) target_commitish.
+          gh release edit "$TAG" --target "$MERGE_SHA"
+          gh release edit "$TAG" --draft=false
+          echo "::notice::Release ${TAG} published at ${MERGE_SHA}. Tag created, asset URLs are public."
+
+  # =========================================================================
+  # Sanity check: the published manifest's checksum matches the published
+  # asset. If this ever fires, something is fundamentally broken upstream.
+  # =========================================================================
+  verify-spm-checksum:
+    name: Verify SPM checksum
+    # Skip on the flutter_only auto re-dispatch (pub.dev-only run). Still runs
+    # on the merge path and on a manual full-recovery dispatch.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
+    needs: [publish-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.publish-release.outputs.tag }}
+
+      - name: Download published asset and verify SHA
+        env:
+          TAG: ${{ needs.publish-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/XybridFFI-${TAG}.xcframework.zip"
+          curl -fsSL -o /tmp/x.zip "$URL"
+          ./bindings/apple/scripts/sync-spm-checksum.sh --check /tmp/x.zip
+
+  # =========================================================================
+  # Publish Rust crates to crates.io.
+  #
+  # Dependency order: macros -> core -> sdk -> xybrid. Each publish waits
+  # for the new version to become visible on the sparse index before moving
+  # on. Idempotent: a re-run skips crates whose <name>@<version> is already
+  # on crates.io.
+  # =========================================================================
+  publish-crates:
+    name: Publish to crates.io
+    # Skip on the flutter_only auto re-dispatch (pub.dev-only run). Still runs
+    # on the merge path and on a manual full-recovery dispatch.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
+    needs: [publish-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.publish-release.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "publish-crates"
+          save-if: "true"
+
+      - name: Publish crates in dependency order
+        shell: bash
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "Publishing version: $VERSION"
+
+          # Treat anything other than HTTP 200 as "not published yet" so
+          # transient 5xx errors don't silently skip a real publish.
+          already_published() {
+            local crate=$1
+            local status
+            status=$(curl -fsS -o /dev/null -w "%{http_code}" \
+              -A "xybrid-release-workflow/1.0 (+https://github.com/${{ github.repository }})" \
+              "https://crates.io/api/v1/crates/${crate}/${VERSION}" || echo "000")
+            [ "$status" = "200" ]
+          }
+
+          wait_for_index() {
+            local crate=$1
+            for i in $(seq 1 60); do
+              if already_published "$crate"; then
+                echo "${crate}@${VERSION} visible on crates.io after ${i} polls."
+                return 0
+              fi
+              sleep 5
+            done
+            echo "::error::${crate}@${VERSION} did not appear on crates.io after 5 minutes"
+            return 1
+          }
+
+          publish_crate() {
+            local crate=$1
+            if already_published "$crate"; then
+              echo "::notice::${crate}@${VERSION} already published — skipping."
+              return 0
+            fi
+            echo "Publishing ${crate}@${VERSION}..."
+            cargo publish -p "$crate"
+            wait_for_index "$crate"
+          }
+
+          publish_crate xybrid-macros
+          publish_crate xybrid-core
+          publish_crate xybrid-sdk
+          publish_crate xybrid
+
+  # =========================================================================
+  # Publish Flutter to pub.dev via OIDC.
+  #
+  # Inlines the dart-lang/setup-dart publish.yml steps (rather than calling
+  # the reusable workflow) so we control the OIDC token's claims directly.
+  #
+  # IMPORTANT — pub.dev's trusted-publisher binding for xybrid_flutter
+  # (configured on https://pub.dev/packages/xybrid_flutter/admin) rejects the
+  # OIDC token unless BOTH hold:
+  #   * the triggering event is `workflow_dispatch` or `push` (NOT
+  #     `pull_request` — "this token originates from a 'pull_request' event"),
+  #   * the run's ref is a TAG, not a branch ("this token has 'branch'
+  #     refType").
+  # The PR-merge trigger is a `pull_request` event on a branch ref, so it can
+  # *never* satisfy this — checking out the tag (below) does not change the
+  # token's claims. The only context that works is `workflow_dispatch` run
+  # against the tag ref, i.e. `gh workflow run release-publish.yml
+  # --ref <tag> --field tag=<tag>`. Hence the `if:` guard, and the
+  # dispatch-flutter-publish job below which fires that dispatch automatically
+  # (given a PAT) on the merge path.
+  # =========================================================================
+  publish-flutter:
+    name: Publish Flutter to pub.dev
+    needs: [publish-release]
+    # Only the workflow_dispatch-from-tag context can satisfy pub.dev's OIDC
+    # binding (see comment above). On the pull_request merge path this job is
+    # skipped and dispatch-flutter-publish re-fires the workflow from the tag.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: pub-dev-publish
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.publish-release.outputs.tag }}
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
+      # flutter-actions/setup-flutter is pinned to an untagged commit
+      # (mirrors the SHA the upstream pub.dev publish workflow uses; no
+      # corresponding release tag exists on flutter-actions/setup-flutter).
+      - uses: flutter-actions/setup-flutter@18c66a64fb6f6d3338c63cabbc5cd6da395e7f1d
+      - name: Install dependencies
+        run: dart pub get
+        working-directory: bindings/flutter
+      - name: Publish - dry run
+        run: dart pub publish --dry-run
+        working-directory: bindings/flutter
+      - name: Publish to pub.dev
+        run: dart pub publish -f
+        working-directory: bindings/flutter
+
+  # =========================================================================
+  # Bridge the merge path to pub.dev.
+  #
+  # publish-flutter can only run as a workflow_dispatch-from-tag (see its
+  # comment). On the PR-merge path this job re-dispatches release-publish
+  # against the freshly-created tag so publish-flutter runs in a context
+  # pub.dev accepts. The re-dispatch needs a PAT: `gh workflow run` /
+  # workflow_dispatch fired with GITHUB_TOKEN does NOT create a new run
+  # (loop prevention). When RELEASE_PAT is absent we degrade gracefully and
+  # print the one-liner to the job summary for a maintainer to run.
+  # =========================================================================
+  dispatch-flutter-publish:
+    name: Dispatch pub.dev publish from tag
+    # Wait for the merge run's own publishes to finish before re-dispatching,
+    # so the pub.dev-only run can't race the Maven deploy / swift force-push,
+    # and we never re-dispatch on top of a half-failed release.
+    needs:
+      - publish-release
+      - verify-spm-checksum
+      - publish-crates
+      - publish-kotlin
+      - publish-swift-branch
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-dispatch from the tag ref (or print recovery one-liner)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.publish-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### pub.dev publish needs one manual step
+
+          pub.dev's trusted-publisher binding requires the OIDC token to come from a
+          \`workflow_dispatch\`/\`push\` event with \`refType: tag\`. This merge run is a
+          \`pull_request\` event on a branch ref, so it cannot publish to pub.dev.
+          Every other registry (crates.io, Maven Central, GitHub release) already published.
+
+          Run this to publish ONLY the Flutter package (or set the \`RELEASE_PAT\` secret to automate it):
+
+          \`\`\`
+          gh workflow run release-publish.yml --ref ${TAG} --field tag=${TAG} --field flutter_only=true
+          \`\`\`
+          EOF
+            echo "::warning::pub.dev publish skipped — no RELEASE_PAT. See the job summary for the one-liner."
+            exit 0
+          fi
+          gh workflow run release-publish.yml --repo "$REPO" --ref "$TAG" \
+            --field tag="$TAG" --field flutter_only=true
+          echo "::notice::Re-dispatched release-publish (flutter_only) from tag ${TAG} to publish Flutter to pub.dev."
+
+  # =========================================================================
+  # Publish Kotlin SDK to Maven Central.
+  #
+  # The .so files come from the just-published GitHub Release asset (the
+  # current release.yml grabs them via actions/download-artifact within a
+  # single workflow run; in the new flow they live as release assets, so
+  # we download them with gh).
+  # =========================================================================
+  publish-kotlin:
+    name: Publish Kotlin SDK
+    # Skip on the flutter_only auto re-dispatch — Maven Central rejects
+    # re-deploying an already-published version. Runs on the merge path and on
+    # a manual full-recovery dispatch.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
+    needs: [publish-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.publish-release.outputs.tag }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Download Android .so files from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.publish-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          gh release download "$TAG" \
+            --pattern "xybrid-android-*.zip" \
+            --dir artifacts
+
+      - name: Extract .so files into Kotlin libs/
+        run: |
+          mkdir -p bindings/kotlin/libs
+          cd bindings/kotlin/libs
+          unzip -o ${{ github.workspace }}/artifacts/xybrid-android-*.zip
+
+      - name: Publish to Maven Central
+        working-directory: bindings/kotlin
+        run: ./gradlew publishAllPublicationsToMavenCentralRepository
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.OSSRH_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+
+  # =========================================================================
+  # Update the legacy `swift` branch with the URL-based Package.swift.
+  #
+  # Planned for deprecation once consumers move to `from: "<version>"`
+  # against the main repo (which works because master's Package.swift is
+  # now always in sync with the latest release — that's the whole point of
+  # the release-branch flow).
+  # =========================================================================
+  publish-swift-branch:
+    name: Update swift branch
+    # Skip on the flutter_only auto re-dispatch — avoids a second force-push of
+    # the swift branch racing the merge run's. Runs on the merge path and on a
+    # manual full-recovery dispatch.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
+    permissions:
+      contents: write   # force-pushes the swift distribution branch
+    needs: [publish-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.publish-release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Download XCFramework from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.publish-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TAG" \
+            --pattern "XybridFFI-*.xcframework.zip" \
+            --dir dist
+
+      - name: Compute checksum and generate Package.swift
+        shell: bash
+        env:
+          TAG: ${{ needs.publish-release.outputs.tag }}
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          ZIPFILE=$(ls dist/XybridFFI-*.xcframework.zip)
+          CHECKSUM=$(shasum -a 256 "$ZIPFILE" | awk '{print $1}')
+          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/XybridFFI-${TAG}.xcframework.zip"
+
+          echo "Version: $VERSION"
+          echo "URL: $URL"
+          echo "Checksum: $CHECKSUM"
+
+          cat > Package.swift << SWIFT_EOF
+          // swift-tools-version:5.7
+          import PackageDescription
+
+          let package = Package(
+              name: "Xybrid",
+              platforms: [
+                  .iOS(.v13),
+                  .macOS(.v10_15)
+              ],
+              products: [
+                  .library(
+                      name: "Xybrid",
+                      targets: ["Xybrid"]
+                  )
+              ],
+              targets: [
+                  .target(
+                      name: "Xybrid",
+                      dependencies: ["XybridFFI"],
+                      path: "Sources/Xybrid",
+                      linkerSettings: [
+                          .linkedLibrary("c++"),
+                          .linkedFramework("Metal"),
+                          .linkedFramework("MetalPerformanceShaders"),
+                          .linkedFramework("MetalPerformanceShadersGraph"),
+                          .linkedFramework("CoreML"),
+                          .linkedFramework("Accelerate"),
+                          .linkedFramework("Security"),
+                      ]
+                  ),
+                  .binaryTarget(
+                      name: "XybridFFI",
+                      url: "$URL",
+                      checksum: "$CHECKSUM"
+                  )
+              ]
+          )
+          SWIFT_EOF
+
+      - name: Publish swift branch
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.publish-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # Stage files we want on the `swift` branch.
+          mkdir -p staging/Sources/Xybrid
+          cp Package.swift staging/
+          cp bindings/apple/Sources/Xybrid/Xybrid.swift        staging/Sources/Xybrid/
+          cp bindings/apple/Sources/Xybrid/xybrid_uniffi.swift staging/Sources/Xybrid/
+
+          git checkout --orphan swift
+          git rm -rf . 2>/dev/null || true
+          cp staging/Package.swift .
+          cp -r staging/Sources .
+          rm -rf staging
+
+          git add Package.swift Sources/
+          git commit -m "swift: update to ${TAG}"
+          git push origin swift --force

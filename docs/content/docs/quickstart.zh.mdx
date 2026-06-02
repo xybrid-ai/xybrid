@@ -12,7 +12,7 @@ description: 几分钟内开始使用 Xybrid
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.1.0-beta5
+  xybrid_flutter: ^0.1.1
 ```
 
 ```bash
@@ -24,6 +24,8 @@ flutter pub get
 ```dart
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
+// 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
+// 推理轨迹：Xybrid.init(apiKey: '...')
 await Xybrid.init();
 
 // 加载模型并运行文本转语音
@@ -52,16 +54,18 @@ https://github.com/xybrid-ai/xybrid
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.1")
 ]
 ```
-
-> beta 阶段请用 `exact:`，稳定版 `0.1.0` 发布后即可改用 `from: "0.1.0"`。
 
 **运行推理**
 
 ```swift
 import Xybrid
+
+// 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
+// 推理轨迹：Xybrid.initialize(apiKey: "...")
+Xybrid.initialize()
 
 // 从注册表加载模型
 let loader = XybridModelLoader.fromRegistry(modelId: "kokoro-82m")
@@ -82,7 +86,7 @@ let result = try model.run(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.0-beta5")
+    implementation("ai.xybrid:xybrid-kotlin:0.1.1")
 }
 ```
 
@@ -91,6 +95,10 @@ dependencies {
 ```kotlin
 import ai.xybrid.XybridModelLoader
 import ai.xybrid.XybridEnvelope
+
+// 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
+// 推理轨迹：Xybrid.init(context, apiKey = "...")
+Xybrid.init(context)
 
 // 从注册表加载模型
 val loader = XybridModelLoader.fromRegistry("kokoro-82m")
@@ -117,7 +125,7 @@ https://github.com/xybrid-ai/xybrid.git#upm
 或指定版本：
 
 ```
-https://github.com/xybrid-ai/xybrid.git#upm/v0.1.0-beta5
+https://github.com/xybrid-ai/xybrid.git#upm/v0.1.1
 ```
 
 **运行推理**
@@ -126,7 +134,8 @@ https://github.com/xybrid-ai/xybrid.git#upm/v0.1.0-beta5
 using Xybrid;
 using UnityEngine;
 
-// 初始化 SDK
+// 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
+// 推理轨迹：XybridClient.Initialize(apiKey: "...")
 XybridClient.Initialize();
 
 // 加载 TTS 模型并生成 NPC 对话
@@ -172,6 +181,5 @@ Transcription: "Hello, how can I help you?"
 
 <Cards>
   <Card title="SDK" href="/zh/docs/sdks" description="各平台的详细 SDK 指南" />
-  <Card title="流水线" href="/zh/docs/concepts/pipelines" description="将多个模型串联在一起" />
   <Card title="核心概念" href="/zh/docs/concepts" description="Xybrid 的工作原理" />
 </Cards>

@@ -12,7 +12,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use xybrid_core::testing::model_fixtures;
 //!
 //! // Get model path (panics if not found)
@@ -95,10 +95,13 @@ pub fn models_dir() -> Option<&'static PathBuf> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() {
+/// use xybrid_core::testing::model_fixtures;
 /// if let Some(path) = model_fixtures::model_path("kokoro-82m") {
 ///     let metadata = path.join("model_metadata.json");
 /// }
+/// # }
 /// ```
 pub fn model_path(model_name: &str) -> Option<PathBuf> {
     let models = models_dir()?;
@@ -133,12 +136,15 @@ fn has_model_binaries(dir: &Path) -> bool {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() {
+/// use xybrid_core::testing::model_fixtures;
 /// if model_fixtures::model_available("kokoro-82m") {
 ///     // Run integration test
 /// } else {
 ///     eprintln!("Skipping: kokoro-82m not downloaded");
 /// }
+/// # }
 /// ```
 pub fn model_available(model_name: &str) -> bool {
     model_path(model_name)
@@ -156,9 +162,13 @@ pub fn model_available(model_name: &str) -> bool {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() {
+/// use xybrid_core::testing::model_fixtures;
 /// let model_dir = model_fixtures::require_model("kokoro-82m");
 /// let metadata_path = model_dir.join("model_metadata.json");
+/// # let _ = metadata_path;
+/// # }
 /// ```
 pub fn require_model(model_name: &str) -> PathBuf {
     if let Some(path) = model_path(model_name) {
@@ -196,7 +206,7 @@ You can also set XYBRID_TEST_MODELS environment variable to a custom path.
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// #[test]
 /// fn test_tts_inference() {
 ///     let Some(model_dir) = model_fixtures::model_or_skip("kokoro-82m") else {
@@ -225,10 +235,13 @@ pub fn model_or_skip(model_name: &str) -> Option<PathBuf> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() {
+/// use xybrid_core::testing::model_fixtures;
 /// if let Some(fixtures) = model_fixtures::fixtures_dir() {
 ///     let test_audio = fixtures.join("input/test_audio.wav");
 /// }
+/// # }
 /// ```
 pub fn fixtures_dir() -> Option<PathBuf> {
     models_dir().and_then(|m| m.parent().map(|p| p.to_path_buf()))
@@ -262,10 +275,13 @@ pub fn list_available_models() -> Vec<String> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() {
+/// use xybrid_core::testing::model_fixtures;
 /// if let Some(input_dir) = model_fixtures::input_dir() {
 ///     let test_audio = input_dir.join("test_audio.wav");
 /// }
+/// # }
 /// ```
 pub fn input_dir() -> Option<PathBuf> {
     fixtures_dir().map(|f| f.join("input"))
@@ -275,10 +291,15 @@ pub fn input_dir() -> Option<PathBuf> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use xybrid_core::testing::model_fixtures;
 /// if let Some(audio_path) = model_fixtures::test_audio("test_audio.wav") {
 ///     let audio_bytes = std::fs::read(&audio_path)?;
+///     let _ = audio_bytes;
 /// }
+/// # Ok(())
+/// # }
 /// ```
 pub fn test_audio(filename: &str) -> Option<PathBuf> {
     input_dir().map(|d| d.join(filename)).filter(|p| p.exists())
@@ -288,9 +309,13 @@ pub fn test_audio(filename: &str) -> Option<PathBuf> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() {
+/// use xybrid_core::testing::model_fixtures;
 /// let audio_path = model_fixtures::default_test_audio()
 ///     .expect("test_audio.wav should exist");
+/// # let _ = audio_path;
+/// # }
 /// ```
 pub fn default_test_audio() -> Option<PathBuf> {
     test_audio("test_audio.wav")
@@ -300,10 +325,15 @@ pub fn default_test_audio() -> Option<PathBuf> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use xybrid_core::testing::model_fixtures;
 /// if let Some(text_path) = model_fixtures::test_text("sample.txt") {
 ///     let text = std::fs::read_to_string(&text_path)?;
+///     let _ = text;
 /// }
+/// # Ok(())
+/// # }
 /// ```
 pub fn test_text(filename: &str) -> Option<PathBuf> {
     input_dir().map(|d| d.join(filename)).filter(|p| p.exists())
@@ -320,10 +350,15 @@ pub fn pipelines_dir() -> Option<PathBuf> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use xybrid_core::testing::model_fixtures;
 /// if let Some(pipeline_path) = model_fixtures::pipeline("tts_pipeline.yaml") {
 ///     let yaml = std::fs::read_to_string(&pipeline_path)?;
+///     let _ = yaml;
 /// }
+/// # Ok(())
+/// # }
 /// ```
 pub fn pipeline(filename: &str) -> Option<PathBuf> {
     pipelines_dir()

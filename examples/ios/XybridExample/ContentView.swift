@@ -60,6 +60,21 @@ struct ContentView: View {
             let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
                 .first!.appendingPathComponent("xybrid").path
             initSdkCacheDir(cacheDir: cacheDir)
+
+            // The key and platform URL come from the XYBRID_API_KEY and
+            // XYBRID_PLATFORM_URL scheme environment variables (Product →
+            // Scheme → Edit Scheme → Run → Arguments), so they never land in
+            // the repo. Empty/unset resolves to anonymous, local-only init
+            // against the default platform. Get a free key at
+            // dashboard.xybrid.dev. See README.
+            let env = ProcessInfo.processInfo.environment
+            let apiKey = env["XYBRID_API_KEY"]
+            let platformUrl = env["XYBRID_PLATFORM_URL"]
+            Xybrid.initialize(
+                apiKey: (apiKey ?? "").isEmpty ? nil : apiKey,
+                ingestUrl: (platformUrl ?? "").isEmpty ? nil : platformUrl
+            )
+
             await MainActor.run {
                 appState = .ready
             }
@@ -477,6 +492,11 @@ struct ResultView: View {
                     }
                 }
 
+                // Typed metrics section — populated from result.metrics.
+                // LLM-specific fields are nil for TTS/ASR; stage latencies
+                // are empty for single-model runs.
+                MetricsSection(metrics: result.metrics)
+
                 // Play Button
                 if result.success && result.audioBytes != nil {
                     Button(action: onPlay) {
@@ -492,6 +512,58 @@ struct ResultView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.green.opacity(0.1))
             .cornerRadius(8)
+        }
+    }
+}
+
+// MARK: - Metrics Section
+
+struct MetricsSection: View {
+    let metrics: XybridInferenceMetrics
+
+    var rows: [(String, String)] {
+        var out: [(String, String)] = []
+        if let ttft = metrics.ttftMs { out.append(("TTFT", "\(ttft) ms")) }
+        if let tps = metrics.tokensPerSecond {
+            out.append(("Throughput", String(format: "%.1f tok/s", tps)))
+        }
+        if let p = metrics.prefillTps {
+            out.append(("Prefill", String(format: "%.1f tok/s", p)))
+        }
+        if let d = metrics.decodeTps {
+            out.append(("Decode", String(format: "%.1f tok/s", d)))
+        }
+        if let t = metrics.tokensOut { out.append(("Tokens out", "\(t)")) }
+        if !metrics.stageLatenciesMs.isEmpty {
+            let s = metrics.stageLatenciesMs.map { "\($0.stageId)=\($0.latencyMs)ms" }.joined(separator: ", ")
+            out.append(("Stages", s))
+        }
+        return out
+    }
+
+    var body: some View {
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Metrics")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .padding(.top, 8)
+                ForEach(rows, id: \.0) { row in
+                    HStack {
+                        Text(row.0)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(row.1)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.1))
+            .cornerRadius(4)
         }
     }
 }

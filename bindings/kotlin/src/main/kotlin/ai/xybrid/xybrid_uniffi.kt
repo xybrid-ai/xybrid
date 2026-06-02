@@ -415,6 +415,8 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_xybrid_uniffi_fn_func_clear_thermal_state(_uniffi_out_err: RustCallStatus, 
     ): Unit
+    fun uniffi_xybrid_uniffi_fn_func_configure_runtime(`apiKey`: RustBuffer.ByValue,`gatewayUrl`: RustBuffer.ByValue,`ingestUrl`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Unit
     fun uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(`cacheDir`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_xybrid_uniffi_fn_func_set_battery_level(`percent`: Byte,_uniffi_out_err: RustCallStatus, 
@@ -541,6 +543,8 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_xybrid_uniffi_checksum_func_clear_thermal_state(
     ): Short
+    fun uniffi_xybrid_uniffi_checksum_func_configure_runtime(
+    ): Short
     fun uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir(
     ): Short
     fun uniffi_xybrid_uniffi_checksum_func_set_battery_level(
@@ -592,6 +596,9 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_xybrid_uniffi_checksum_func_clear_thermal_state() != 36495.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_xybrid_uniffi_checksum_func_configure_runtime() != 13785.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir() != 59754.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -622,7 +629,7 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_xybrid_uniffi_checksum_method_xybridmodelloader_load() != 43654.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle() != 7105.toShort()) {
+    if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle() != 38159.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_directory() != 8635.toShort()) {
@@ -1211,7 +1218,7 @@ class XybridModelLoader(
     companion object {
         fun `fromBundle`(`path`: String): XybridModelLoader =
             XybridModelLoader(
-    rustCall() { _status ->
+    rustCallWithError(XybridException) { _status ->
     _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_bundle(FfiConverterString.lower(`path`),_status)
 })
         fun `fromDirectory`(`path`: String): XybridModelLoader =
@@ -1309,12 +1316,63 @@ public object FfiConverterTypeXybridGenerationConfig: FfiConverterRustBuffer<Xyb
 
 
 
+data class XybridInferenceMetrics (
+    var `totalMs`: UInt, 
+    var `ttftMs`: UInt?, 
+    var `tokensPerSecond`: Float?, 
+    var `prefillTps`: Float?, 
+    var `decodeTps`: Float?, 
+    var `tokensOut`: UInt?, 
+    var `stageLatenciesMs`: List<XybridStageLatency>
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeXybridInferenceMetrics: FfiConverterRustBuffer<XybridInferenceMetrics> {
+    override fun read(buf: ByteBuffer): XybridInferenceMetrics {
+        return XybridInferenceMetrics(
+            FfiConverterUInt.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterOptionalFloat.read(buf),
+            FfiConverterOptionalFloat.read(buf),
+            FfiConverterOptionalFloat.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterSequenceTypeXybridStageLatency.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: XybridInferenceMetrics) = (
+            FfiConverterUInt.allocationSize(value.`totalMs`) +
+            FfiConverterOptionalUInt.allocationSize(value.`ttftMs`) +
+            FfiConverterOptionalFloat.allocationSize(value.`tokensPerSecond`) +
+            FfiConverterOptionalFloat.allocationSize(value.`prefillTps`) +
+            FfiConverterOptionalFloat.allocationSize(value.`decodeTps`) +
+            FfiConverterOptionalUInt.allocationSize(value.`tokensOut`) +
+            FfiConverterSequenceTypeXybridStageLatency.allocationSize(value.`stageLatenciesMs`)
+    )
+
+    override fun write(value: XybridInferenceMetrics, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`totalMs`, buf)
+            FfiConverterOptionalUInt.write(value.`ttftMs`, buf)
+            FfiConverterOptionalFloat.write(value.`tokensPerSecond`, buf)
+            FfiConverterOptionalFloat.write(value.`prefillTps`, buf)
+            FfiConverterOptionalFloat.write(value.`decodeTps`, buf)
+            FfiConverterOptionalUInt.write(value.`tokensOut`, buf)
+            FfiConverterSequenceTypeXybridStageLatency.write(value.`stageLatenciesMs`, buf)
+    }
+}
+
+
+
+
 data class XybridResult (
     var `success`: Boolean, 
     var `text`: String?, 
     var `audioBytes`: ByteArray?, 
     var `embedding`: List<Float>?, 
-    var `latencyMs`: UInt
+    var `latencyMs`: UInt, 
+    var `metrics`: XybridInferenceMetrics
 ) {
     
     companion object
@@ -1328,6 +1386,7 @@ public object FfiConverterTypeXybridResult: FfiConverterRustBuffer<XybridResult>
             FfiConverterOptionalByteArray.read(buf),
             FfiConverterOptionalSequenceFloat.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterTypeXybridInferenceMetrics.read(buf),
         )
     }
 
@@ -1336,7 +1395,8 @@ public object FfiConverterTypeXybridResult: FfiConverterRustBuffer<XybridResult>
             FfiConverterOptionalString.allocationSize(value.`text`) +
             FfiConverterOptionalByteArray.allocationSize(value.`audioBytes`) +
             FfiConverterOptionalSequenceFloat.allocationSize(value.`embedding`) +
-            FfiConverterUInt.allocationSize(value.`latencyMs`)
+            FfiConverterUInt.allocationSize(value.`latencyMs`) +
+            FfiConverterTypeXybridInferenceMetrics.allocationSize(value.`metrics`)
     )
 
     override fun write(value: XybridResult, buf: ByteBuffer) {
@@ -1344,6 +1404,37 @@ public object FfiConverterTypeXybridResult: FfiConverterRustBuffer<XybridResult>
             FfiConverterOptionalString.write(value.`text`, buf)
             FfiConverterOptionalByteArray.write(value.`audioBytes`, buf)
             FfiConverterOptionalSequenceFloat.write(value.`embedding`, buf)
+            FfiConverterUInt.write(value.`latencyMs`, buf)
+            FfiConverterTypeXybridInferenceMetrics.write(value.`metrics`, buf)
+    }
+}
+
+
+
+
+data class XybridStageLatency (
+    var `stageId`: String, 
+    var `latencyMs`: UInt
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeXybridStageLatency: FfiConverterRustBuffer<XybridStageLatency> {
+    override fun read(buf: ByteBuffer): XybridStageLatency {
+        return XybridStageLatency(
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: XybridStageLatency) = (
+            FfiConverterString.allocationSize(value.`stageId`) +
+            FfiConverterUInt.allocationSize(value.`latencyMs`)
+    )
+
+    override fun write(value: XybridStageLatency, buf: ByteBuffer) {
+            FfiConverterString.write(value.`stageId`, buf)
             FfiConverterUInt.write(value.`latencyMs`, buf)
     }
 }
@@ -2207,6 +2298,31 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<String>> {
 
 
 
+public object FfiConverterSequenceTypeXybridStageLatency: FfiConverterRustBuffer<List<XybridStageLatency>> {
+    override fun read(buf: ByteBuffer): List<XybridStageLatency> {
+        val len = buf.getInt()
+        return List<XybridStageLatency>(len) {
+            FfiConverterTypeXybridStageLatency.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<XybridStageLatency>): Int {
+        val sizeForLength = 4
+        val sizeForItems = value.map { FfiConverterTypeXybridStageLatency.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<XybridStageLatency>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.forEach {
+            FfiConverterTypeXybridStageLatency.write(it, buf)
+        }
+    }
+}
+
+
+
+
 public object FfiConverterSequenceTypeXybridVoiceInfo: FfiConverterRustBuffer<List<XybridVoiceInfo>> {
     override fun read(buf: ByteBuffer): List<XybridVoiceInfo> {
         val len = buf.getInt()
@@ -2245,6 +2361,14 @@ fun `clearThermalState`() =
     
     rustCall() { _status ->
     _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_clear_thermal_state(_status)
+}
+
+
+
+fun `configureRuntime`(`apiKey`: String?, `gatewayUrl`: String?, `ingestUrl`: String?) =
+    
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_xybrid_uniffi_fn_func_configure_runtime(FfiConverterOptionalString.lower(`apiKey`),FfiConverterOptionalString.lower(`gatewayUrl`),FfiConverterOptionalString.lower(`ingestUrl`),_status)
 }
 
 

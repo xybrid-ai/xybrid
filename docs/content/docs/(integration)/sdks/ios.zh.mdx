@@ -15,17 +15,11 @@ Swift SDK 处于早期访问阶段，API 稳定但尚未作为正式版本发布
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.1")
 ]
 ```
 
 或在 Xcode 中：**File > Add Package Dependencies**，输入仓库 URL。
-
-<Callout type="info">
-beta 阶段请使用 `exact:` 精确锁定标签 —— 按 SemVer 规则，SPM 的 `from:`
-会排除带预发布标识符（如 `-beta13`）的版本。`0.1.0` 稳定版发布后可改用
-`from: "0.1.0"`。
-</Callout>
 
 **支持的平台：** iOS 13.0+，macOS 10.15+
 
@@ -47,6 +41,18 @@ if result.success {
     print("Latency: \(result.latency)s")
 }
 ```
+
+## 初始化
+
+无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.run(...)` 调用便会自动上报执行轨迹：
+
+```swift
+Xybrid.initialize(
+    apiKey: ProcessInfo.processInfo.environment["XYBRID_API_KEY"]
+)
+```
+
+未提供密钥时，遥测处于禁用状态，首次推理会打印一条一次性提示指向控制台（可通过环境变量 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。若使用自托管控制台，请额外传入 `ingestUrl`。
 
 ---
 
