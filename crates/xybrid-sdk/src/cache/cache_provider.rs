@@ -129,14 +129,15 @@ impl SdkCacheProvider {
             }
         }
 
-        // Development-only fallback: also look in the workspace's
-        // integration-tests fixtures so examples/dev runs find locally-staged
-        // models. Excluded from release builds — `models_dir()` resolves via
-        // `CARGO_MANIFEST_DIR` (the *build* machine's path) and the test
-        // fixtures, neither of which exists in a shipped SDK, so this is a
-        // no-op in production that would otherwise pull `xybrid_core::testing`
-        // (test scaffolding) into the release binary.
-        #[cfg(debug_assertions)]
+        // Development/test-only fallback: also look in the workspace's
+        // integration-tests fixtures so dev runs find locally-staged models.
+        // Gated behind the `test-util` feature (off by default) so shipped
+        // SDKs never reference `xybrid_core::testing` — `models_dir()` resolves
+        // via `CARGO_MANIFEST_DIR` / the fixtures tree, neither of which exists
+        // in a released binary, so it is a no-op in production anyway. Using a
+        // feature (not `debug_assertions`) keeps this consistent with core
+        // once `testing` is itself gated behind `xybrid-core/test-util`.
+        #[cfg(feature = "test-util")]
         if let Some(fixtures_dir) = xybrid_core::testing::model_fixtures::models_dir() {
             let fixtures_path = fixtures_dir.join(model_id);
             if fixtures_path.exists() && has_model_files(&fixtures_path) {

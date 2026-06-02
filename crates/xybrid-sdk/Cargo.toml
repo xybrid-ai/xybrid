@@ -45,6 +45,12 @@ ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 [features]
 default = []
 
+# Development/test convenience: lets SdkCacheProvider fall back to the
+# workspace's integration-test model fixtures. Off by default so shipped SDKs
+# never reference `xybrid_core::testing`. Forwards to `xybrid-core/test-util`
+# so the gate stays consistent if core later moves `testing` behind it.
+test-util = ["xybrid-core/test-util"]
+
 # HuggingFace Hub integration (download models directly from HF repos)
 huggingface = ["dep:hf-hub"]
 
