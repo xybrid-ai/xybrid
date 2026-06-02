@@ -162,6 +162,120 @@ flattening image turns into text. Backends are allowed to re-prefill image
 tokens on later turns; v0.2.0 does not introduce a cross-backend image embedding
 cache.
 
+## Real-Time / Live Camera Vision
+
+<Callout type="warn">
+Real-time camera vision is a feature-branch capability (`feat/realtime-vision`),
+code-complete and reviewed but **not yet validated on a real device** and not
+released. The runtime/SDK primitives below describe behavior that compiles and is
+unit-tested; on-device caption parity and sustained-session proof are still
+pending. Treat this section as a forward-looking guide, not a stable contract.
+</Callout>
+
+A live camera feed is not a video model. On-device VLMs cannot caption every
+frame, so the design point is **understanding events, not frames per second**.
+Xybrid models a live camera view as a *cascade*: a cheap always-on gate decides
+when the scene has meaningfully changed, and only then wakes the expensive VLM
+for a single frame. The viewfinder keeps running regardless; understanding lags
+the camera by design.
+
+### The cascade
+
+```
+camera frames ──► cheap luma change-gate ──► [fires only on change]
+                                               │
+                                  single-flight, latest-frame-wins
+                                               │
+                            one frame ──► VLM (mtmd) ──► streamed answer
+                                               │
+                                  replace-in-place answer + history log
+```
+
+The gate computes a format-aware luma signature over a downsampled grid and
+compares successive frames. A static scene produces near-zero VLM fires (idle ≈
+no inference); the gate is what prevents duplicate-answer spam and keeps
+token-per-frame cost — the dominant cost driver — bounded. The VLM only ever
+sees gated, single frames.
+
+### Expectations: best-effort, never block
+
+There is **no smooth-video promise and no latency SLA**. A realistic on-device
+rate is roughly **1–5 understanding events per second**, and that drops further
+under thermal load or on lower-end devices. The contract is:
+
+- The viewfinder never freezes while the VLM is busy.
+- Answers refresh when the scene changes and the model finishes a turn.
+- Under heat or memory pressure, fires slow down (graceful throttle) rather than
+  freezing the UI or crashing.
+
+This is a best-effort understanding loop layered on top of the existing
+stateless streaming VLM path, not a real-time perception engine.
+
+### Latest-frame-wins (drop-if-busy → cancel-and-replace)
+
+The loop is single-flight — only one VLM generation runs at a time. Two
+strategies bound how a new gated frame interacts with an in-flight one:
+
+- **Drop-if-busy** (app-only baseline): a new frame is ignored while a
+  generation is in flight. Simple, but the answer can lag the scene because the
+  loop waits for the current turn to finish.
+- **Cancel-and-replace** (with the runtime primitives): a newer gated frame
+  preempts the in-flight generation. This is built on **reachable streaming
+  cancellation** — cancelling the Dart stream now drives a real runtime abort
+  (the generation halts at the next token and releases the model lock) rather
+  than just unsubscribing in Dart — plus a preemptive cancel-current-run slot on
+  the model handle. The net effect is *latest-frame-wins*: the freshest scene
+  takes priority and stale frames don't head-of-line-block.
+
+### Capability and device floors
+
+Live vision entry is gated the same way single-image vision is — the selected
+model must declare image input, the native build must include a vision backend,
+the mmproj artifact must be present, and the device must meet the memory floor.
+A device or model below those floors is blocked with a typed capability error
+before the camera loop starts, not mid-session.
+
+### Raw-frame path (`imageRaw`)
+
+The baseline live loop JPEG-encodes each fired frame before handing it to the
+VLM. The runtime additionally exposes a **raw-frame path** that skips per-frame
+JPEG encoding: camera pixel buffers (packed RGB, with conversion from common
+camera formats) flow through `mtmd` directly via the `imageRaw` envelope binding
+instead of `image`. The encoded path is unchanged and remains the fallback.
+
+In Studio the raw path is **flag-gated and off by default**
+(`--dart-define=XYBRID_STUDIO_RAW_FRAMES=true`). It stays off until raw-vs-encoded
+caption parity is confirmed on-device; with the flag unset, Studio uses the
+encoded path. See the validation runbook for the parity check.
+
+```dart
+// Raw-frame envelope (skips per-frame JPEG encode).
+final image = XybridEnvelope.imageRaw(
+  bytes: rgbBytes,      // packed RGB pixel buffer
+  width: width,
+  height: height,
+);
+final prompt = XybridEnvelope.userMessage(
+  text: 'What does this label say?',
+  images: [image],
+);
+```
+
+### On-device only
+
+Image-bearing turns run on-device or fail — there is **no cloud fallback for
+image turns**, in live mode just as in single-image vision. The thermal /
+memory-pressure abort machinery is shared with the routing layer, but in live
+mode it throttles or stops the local loop rather than spilling to cloud.
+
+### Live-mode telemetry
+
+A naive live loop would emit one telemetry row per fired frame and flood the
+traces backend. Instead, live-mode inferences are **tagged** (a `live_mode` flag
+plus a `frame_session_id` that groups one camera session) and **rate-limited** by
+a per-session sampler (roughly one row per second per session, TTL-bounded), so a
+live session produces a sampled rollup rather than per-frame spam.
+
 ## Troubleshooting
 
 ### `MissingArtifact`
