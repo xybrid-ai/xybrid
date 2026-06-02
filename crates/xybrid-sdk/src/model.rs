@@ -8,7 +8,9 @@
 
 use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
-use crate::run_options::{check_abort_for_streaming, AbortState, CancellationToken, RunOptions};
+use crate::run_options::{
+    check_abort_for_streaming, AbortState, CancellationToken, LiveModeTag, RunOptions,
+};
 use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::PathBuf;
@@ -269,6 +271,26 @@ fn streaming_pre_run_abort_error(
         };
     }
     SdkError::InferenceError(format!("Execution aborted: {reason}"))
+}
+
+/// Stamp the live-capture tag onto a telemetry-event `data` object.
+///
+/// When `live_tag` is `Some`, inserts the flat `live_mode = true` +
+/// `frame_session_id = <uuid>` fields that `convert_to_platform_event` hoists
+/// to the wire payload top level and the dispatch funnel uses to rate-limit per
+/// session. When `None` (every non-live run), `data` is left **byte-for-byte
+/// unchanged** so the existing telemetry path is unaffected.
+fn stamp_live_mode_tag(data: &mut serde_json::Value, live_tag: Option<&LiveModeTag>) {
+    let Some(tag) = live_tag else {
+        return;
+    };
+    if let Some(obj) = data.as_object_mut() {
+        obj.insert("live_mode".to_string(), serde_json::json!(true));
+        obj.insert(
+            "frame_session_id".to_string(),
+            serde_json::json!(tag.frame_session_id),
+        );
+    }
 }
 
 /// Information about a local→cloud handoff "seam" surfaced by
@@ -2241,6 +2263,28 @@ impl XybridModel {
         envelope: &Envelope,
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
+        on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        // No live-capture tag on the bare context streaming path.
+        self.run_streaming_with_context_tagged(envelope, context, config, None, on_token)
+    }
+
+    /// Internal context-streaming entry point that optionally stamps a
+    /// live-capture telemetry tag onto the emitted `ModelComplete` event. See
+    /// [`Self::run_streaming_tagged`] for the rationale; this is the
+    /// conversation-context variant.
+    fn run_streaming_with_context_tagged<F>(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+        config: Option<&GenerationConfig>,
+        live_tag: Option<&LiveModeTag>,
         mut on_token: F,
     ) -> SdkResult<InferenceResult>
     where
@@ -2311,22 +2355,21 @@ impl XybridModel {
         let latency_ms = start.elapsed().as_millis() as u32;
 
         // Emit telemetry event
+        let mut data = serde_json::json!({
+            "model_id": self.model_id,
+            "version": self.version,
+            "output_type": format!("{:?}", self.output_type),
+            "streaming": true,
+            "context_messages": context.history().len(),
+        });
+        stamp_live_mode_tag(&mut data, live_tag);
         let event = crate::telemetry::TelemetryEvent {
             event_type: "ModelComplete".to_string(),
             stage_name: Some(self.model_id.clone()),
             target: Some("local".to_string()),
             latency_ms: Some(latency_ms),
             error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": self.model_id,
-                    "version": self.version,
-                    "output_type": format!("{:?}", self.output_type),
-                    "streaming": true,
-                    "context_messages": context.history().len(),
-                })
-                .to_string(),
-            ),
+            data: Some(data.to_string()),
             timestamp_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
@@ -2363,10 +2406,12 @@ impl XybridModel {
         abort_state
             .check_before_run()
             .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
-        self.run_streaming_with_context(
+        let live_tag = options.live_mode_tag();
+        self.run_streaming_with_context_tagged(
             envelope,
             context,
             options.generation_config.as_ref(),
+            live_tag.as_ref(),
             move |token| {
                 if let Err(reason) = abort_state.check_before_token() {
                     return Err(reason.into_streaming_error(fallback_to_cloud));
@@ -2416,6 +2461,32 @@ impl XybridModel {
         &self,
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
+        on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        // No live-capture tag on the bare `run_streaming` path — telemetry is
+        // byte-for-byte the pre-live-mode shape.
+        self.run_streaming_tagged(envelope, config, None, on_token)
+    }
+
+    /// Internal streaming entry point that optionally stamps a live-capture
+    /// telemetry tag onto the emitted `ModelComplete` event.
+    ///
+    /// `run_streaming` delegates here with `live_tag = None` (unchanged wire
+    /// payload). The options-aware streaming entry points pass
+    /// `RunOptions::live_mode_tag()` so live-capture sessions carry
+    /// `live_mode` + `frame_session_id` on the wire, which the telemetry
+    /// dispatch funnel then rate-limits per session.
+    fn run_streaming_tagged<F>(
+        &self,
+        envelope: &Envelope,
+        config: Option<&GenerationConfig>,
+        live_tag: Option<&LiveModeTag>,
         mut on_token: F,
     ) -> SdkResult<InferenceResult>
     where
@@ -2479,21 +2550,20 @@ impl XybridModel {
         let latency_ms = start.elapsed().as_millis() as u32;
 
         // Emit telemetry event
+        let mut data = serde_json::json!({
+            "model_id": self.model_id,
+            "version": self.version,
+            "output_type": format!("{:?}", self.output_type),
+            "streaming": true,
+        });
+        stamp_live_mode_tag(&mut data, live_tag);
         let event = crate::telemetry::TelemetryEvent {
             event_type: "ModelComplete".to_string(),
             stage_name: Some(self.model_id.clone()),
             target: Some("local".to_string()),
             latency_ms: Some(latency_ms),
             error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": self.model_id,
-                    "version": self.version,
-                    "output_type": format!("{:?}", self.output_type),
-                    "streaming": true,
-                })
-                .to_string(),
-            ),
+            data: Some(data.to_string()),
             timestamp_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
@@ -2533,10 +2603,16 @@ impl XybridModel {
         abort_state
             .check_before_run()
             .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
-        self.run_streaming(envelope, options.generation_config.as_ref(), move |token| {
-            check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)?;
-            on_token(token)
-        })
+        let live_tag = options.live_mode_tag();
+        self.run_streaming_tagged(
+            envelope,
+            options.generation_config.as_ref(),
+            live_tag.as_ref(),
+            move |token| {
+                check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)?;
+                on_token(token)
+            },
+        )
     }
 
     /// Swap `token` into the preemptive cancel-and-replace slot and cancel the

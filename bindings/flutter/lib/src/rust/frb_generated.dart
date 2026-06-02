@@ -196,7 +196,8 @@ abstract class XybridRustLibApi extends BaseApi {
       required FfiEnvelope envelope,
       FfiGenerationConfig? config,
       FfiCancellationToken? cancellationToken,
-      required bool preempt});
+      required bool preempt,
+      String? frameSessionId});
 
   Stream<FfiStreamEvent> crateApiModelFfiModelRunStreamWithContext(
       {required FfiModel that,
@@ -204,7 +205,8 @@ abstract class XybridRustLibApi extends BaseApi {
       required FfiConversationContext context,
       FfiGenerationConfig? config,
       FfiCancellationToken? cancellationToken,
-      required bool preempt});
+      required bool preempt,
+      String? frameSessionId});
 
   Stream<FfiStreamEvent> crateApiModelFfiModelRunStreamWithFallback(
       {required FfiModel that,
@@ -1235,7 +1237,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       required FfiEnvelope envelope,
       FfiGenerationConfig? config,
       FfiCancellationToken? cancellationToken,
-      required bool preempt}) {
+      required bool preempt,
+      String? frameSessionId}) {
     final sink = RustStreamSink<FfiStreamEvent>();
     unawaited(handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1248,6 +1251,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
             cancellationToken, serializer);
         sse_encode_bool(preempt, serializer);
+        sse_encode_opt_String(frameSessionId, serializer);
         sse_encode_StreamSink_ffi_stream_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 33, port: port_);
@@ -1257,7 +1261,15 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         decodeErrorData: null,
       ),
       constMeta: kCrateApiModelFfiModelRunStreamConstMeta,
-      argValues: [that, envelope, config, cancellationToken, preempt, sink],
+      argValues: [
+        that,
+        envelope,
+        config,
+        cancellationToken,
+        preempt,
+        frameSessionId,
+        sink
+      ],
       apiImpl: this,
     )));
     return sink.stream;
@@ -1272,6 +1284,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
           "config",
           "cancellationToken",
           "preempt",
+          "frameSessionId",
           "sink"
         ],
       );
@@ -1283,7 +1296,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       required FfiConversationContext context,
       FfiGenerationConfig? config,
       FfiCancellationToken? cancellationToken,
-      required bool preempt}) {
+      required bool preempt,
+      String? frameSessionId}) {
     final sink = RustStreamSink<FfiStreamEvent>();
     unawaited(handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1298,6 +1312,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
             cancellationToken, serializer);
         sse_encode_bool(preempt, serializer);
+        sse_encode_opt_String(frameSessionId, serializer);
         sse_encode_StreamSink_ffi_stream_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 34, port: port_);
@@ -1314,6 +1329,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         config,
         cancellationToken,
         preempt,
+        frameSessionId,
         sink
       ],
       apiImpl: this,
@@ -1331,6 +1347,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
           "config",
           "cancellationToken",
           "preempt",
+          "frameSessionId",
           "sink"
         ],
       );
@@ -2524,8 +2541,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiRunOptions dco_decode_ffi_run_options(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return FfiRunOptions(
       cloudProvider: dco_decode_opt_String(arr[0]),
       cloudModel: dco_decode_opt_String(arr[1]),
@@ -2535,6 +2552,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       abortOnThermalCritical: dco_decode_bool(arr[5]),
       fallbackToCloud: dco_decode_bool(arr[6]),
       maxGraceTokens: dco_decode_opt_box_autoadd_u_32(arr[7]),
+      frameSessionId: dco_decode_opt_String(arr[8]),
     );
   }
 
@@ -3274,6 +3292,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var var_abortOnThermalCritical = sse_decode_bool(deserializer);
     var var_fallbackToCloud = sse_decode_bool(deserializer);
     var var_maxGraceTokens = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_frameSessionId = sse_decode_opt_String(deserializer);
     return FfiRunOptions(
         cloudProvider: var_cloudProvider,
         cloudModel: var_cloudModel,
@@ -3282,7 +3301,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         abortOnMemoryPressureCritical: var_abortOnMemoryPressureCritical,
         abortOnThermalCritical: var_abortOnThermalCritical,
         fallbackToCloud: var_fallbackToCloud,
-        maxGraceTokens: var_maxGraceTokens);
+        maxGraceTokens: var_maxGraceTokens,
+        frameSessionId: var_frameSessionId);
   }
 
   @protected
@@ -4096,6 +4116,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_bool(self.abortOnThermalCritical, serializer);
     sse_encode_bool(self.fallbackToCloud, serializer);
     sse_encode_opt_box_autoadd_u_32(self.maxGraceTokens, serializer);
+    sse_encode_opt_String(self.frameSessionId, serializer);
   }
 
   @protected
@@ -4634,17 +4655,24 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
   /// drop-if-busy / serialized semantics passes `false` (or omits it) and the
   /// behavior is byte-for-byte the pre-preempt path. Preempt with no token is
   /// a no-op (there is nothing to register/cancel).
+  ///
+  /// Pass an optional `frame_session_id` (a caller-supplied UUID) to tag every
+  /// run in a continuous live-capture session. The SDK then rate-limits the
+  /// session's telemetry to ~1 wire row/sec instead of one row per frame.
+  /// `None` (chat and one-shot runs) leaves telemetry as plain per-run rows.
   Stream<FfiStreamEvent> runStream(
           {required FfiEnvelope envelope,
           FfiGenerationConfig? config,
           FfiCancellationToken? cancellationToken,
-          required bool preempt}) =>
+          required bool preempt,
+          String? frameSessionId}) =>
       XybridRustLib.instance.api.crateApiModelFfiModelRunStream(
           that: this,
           envelope: envelope,
           config: config,
           cancellationToken: cancellationToken,
-          preempt: preempt);
+          preempt: preempt,
+          frameSessionId: frameSessionId);
 
   /// Run inference with streaming output and conversation context.
   ///
@@ -4669,19 +4697,25 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
   /// streaming run before acquiring the write lock — see
   /// [`Self::run_stream`] for the full semantics. Defaults to `false`
   /// (drop-if-busy / serialized); chat passes `false` and is unaffected.
+  ///
+  /// Pass an optional `frame_session_id` (a caller-supplied UUID) to tag the
+  /// run as part of a continuous live-capture session — see [`Self::run_stream`]
+  /// for the telemetry rate-limit semantics. `None` for chat / one-shot runs.
   Stream<FfiStreamEvent> runStreamWithContext(
           {required FfiEnvelope envelope,
           required FfiConversationContext context,
           FfiGenerationConfig? config,
           FfiCancellationToken? cancellationToken,
-          required bool preempt}) =>
+          required bool preempt,
+          String? frameSessionId}) =>
       XybridRustLib.instance.api.crateApiModelFfiModelRunStreamWithContext(
           that: this,
           envelope: envelope,
           context: context,
           config: config,
           cancellationToken: cancellationToken,
-          preempt: preempt);
+          preempt: preempt,
+          frameSessionId: frameSessionId);
 
   /// Run streaming inference with local abort and Xybrid cloud fallback.
   ///

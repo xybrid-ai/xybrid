@@ -74,11 +74,17 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// drop-if-busy / serialized semantics passes `false` (or omits it) and the
   /// behavior is byte-for-byte the pre-preempt path. Preempt with no token is
   /// a no-op (there is nothing to register/cancel).
+  ///
+  /// Pass an optional `frame_session_id` (a caller-supplied UUID) to tag every
+  /// run in a continuous live-capture session. The SDK then rate-limits the
+  /// session's telemetry to ~1 wire row/sec instead of one row per frame.
+  /// `None` (chat and one-shot runs) leaves telemetry as plain per-run rows.
   Stream<FfiStreamEvent> runStream(
       {required FfiEnvelope envelope,
       FfiGenerationConfig? config,
       FfiCancellationToken? cancellationToken,
-      required bool preempt});
+      required bool preempt,
+      String? frameSessionId});
 
   /// Run inference with streaming output and conversation context.
   ///
@@ -103,12 +109,17 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// streaming run before acquiring the write lock — see
   /// [`Self::run_stream`] for the full semantics. Defaults to `false`
   /// (drop-if-busy / serialized); chat passes `false` and is unaffected.
+  ///
+  /// Pass an optional `frame_session_id` (a caller-supplied UUID) to tag the
+  /// run as part of a continuous live-capture session — see [`Self::run_stream`]
+  /// for the telemetry rate-limit semantics. `None` for chat / one-shot runs.
   Stream<FfiStreamEvent> runStreamWithContext(
       {required FfiEnvelope envelope,
       required FfiConversationContext context,
       FfiGenerationConfig? config,
       FfiCancellationToken? cancellationToken,
-      required bool preempt});
+      required bool preempt,
+      String? frameSessionId});
 
   /// Run streaming inference with local abort and Xybrid cloud fallback.
   ///
@@ -274,6 +285,13 @@ class FfiRunOptions {
   final bool fallbackToCloud;
   final int? maxGraceTokens;
 
+  /// Caller-supplied UUID identifying one continuous live-capture session
+  /// (e.g. the Flutter vision-live loop). When present, the run is tagged via
+  /// `RunOptions::with_frame_session`, which flips `live_mode = true` and
+  /// makes the SDK rate-limit live telemetry to ~1 wire row/sec per session.
+  /// `None` for one-shot / chat runs (telemetry path unchanged).
+  final String? frameSessionId;
+
   const FfiRunOptions({
     this.cloudProvider,
     this.cloudModel,
@@ -283,6 +301,7 @@ class FfiRunOptions {
     required this.abortOnThermalCritical,
     required this.fallbackToCloud,
     this.maxGraceTokens,
+    this.frameSessionId,
   });
 
   @override
@@ -294,7 +313,8 @@ class FfiRunOptions {
       abortOnMemoryPressureCritical.hashCode ^
       abortOnThermalCritical.hashCode ^
       fallbackToCloud.hashCode ^
-      maxGraceTokens.hashCode;
+      maxGraceTokens.hashCode ^
+      frameSessionId.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -309,7 +329,8 @@ class FfiRunOptions {
               other.abortOnMemoryPressureCritical &&
           abortOnThermalCritical == other.abortOnThermalCritical &&
           fallbackToCloud == other.fallbackToCloud &&
-          maxGraceTokens == other.maxGraceTokens;
+          maxGraceTokens == other.maxGraceTokens &&
+          frameSessionId == other.frameSessionId;
 }
 
 @freezed

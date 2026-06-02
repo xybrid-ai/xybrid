@@ -280,6 +280,11 @@ class XybridModel {
   ///   drop-if-busy to cancel-and-replace. Defaults to `false` (drop-if-busy /
   ///   serialized) — chat and one-shot callers leave it unset and are
   ///   unaffected. A `preempt` with no [cancellationToken] is a no-op.
+  /// * [frameSessionId] - Optional caller-supplied UUID identifying one
+  ///   continuous live-capture session. When set, the SDK tags every inference
+  ///   in the session and rate-limits its telemetry to ~1 wire row/sec instead
+  ///   of one row per frame. Leave unset for chat / one-shot runs (telemetry is
+  ///   plain per-run rows, unchanged).
   ///
   /// # Example
   /// ```dart
@@ -300,6 +305,7 @@ class XybridModel {
     GenerationConfig? config,
     CancellationToken? cancellationToken,
     bool preempt = false,
+    String? frameSessionId,
   }) async* {
     try {
       // Use native streaming from FFI
@@ -308,6 +314,7 @@ class XybridModel {
         config: config?.toFfi(),
         cancellationToken: cancellationToken?.inner,
         preempt: preempt,
+        frameSessionId: frameSessionId,
       );
 
       var emittedFinal = false;
@@ -464,12 +471,17 @@ class XybridModel {
   /// run before acquiring the write lock — see [runStreaming] for the full
   /// semantics. Defaults to `false` (drop-if-busy / serialized); chat leaves it
   /// unset and is unaffected.
+  ///
+  /// Pass an optional [frameSessionId] (a caller-supplied UUID) to tag the run
+  /// as part of a continuous live-capture session — see [runStreaming] for the
+  /// telemetry rate-limit semantics. Leave unset for chat / one-shot runs.
   Stream<StreamToken> runStreamingWithContext(
     XybridEnvelope envelope,
     ConversationContext context, {
     GenerationConfig? config,
     CancellationToken? cancellationToken,
     bool preempt = false,
+    String? frameSessionId,
   }) async* {
     try {
       final stream = inner.runStreamWithContext(
@@ -478,6 +490,7 @@ class XybridModel {
         config: config?.toFfi(),
         cancellationToken: cancellationToken?.inner,
         preempt: preempt,
+        frameSessionId: frameSessionId,
       );
 
       await for (final event in stream) {

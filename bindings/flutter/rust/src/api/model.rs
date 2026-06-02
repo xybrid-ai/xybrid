@@ -156,6 +156,12 @@ pub struct FfiRunOptions {
     pub abort_on_thermal_critical: bool,
     pub fallback_to_cloud: bool,
     pub max_grace_tokens: Option<u32>,
+    /// Caller-supplied UUID identifying one continuous live-capture session
+    /// (e.g. the Flutter vision-live loop). When present, the run is tagged via
+    /// `RunOptions::with_frame_session`, which flips `live_mode = true` and
+    /// makes the SDK rate-limit live telemetry to ~1 wire row/sec per session.
+    /// `None` for one-shot / chat runs (telemetry path unchanged).
+    pub frame_session_id: Option<String>,
 }
 
 impl FfiRunOptions {
@@ -203,6 +209,10 @@ impl FfiRunOptions {
             options = options.with_correlation_id(correlation_id.to_string());
         }
 
+        if let Some(frame_session_id) = non_empty(self.frame_session_id.as_deref()) {
+            options = options.with_frame_session(frame_session_id.to_string());
+        }
+
         options
     }
 }
@@ -227,6 +237,7 @@ fn should_cancel_on_sink_close(reached_terminal: bool) -> bool {
 fn streaming_run_options(
     generation_config: Option<GenerationConfig>,
     cancellation_token: Option<&FfiCancellationToken>,
+    frame_session_id: Option<&str>,
 ) -> RunOptions {
     let mut options = RunOptions::new();
     if let Some(config) = generation_config {
@@ -236,6 +247,12 @@ fn streaming_run_options(
         options = options
             .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::UserCancelled))
             .with_cancellation_token(token.0.clone());
+    }
+    // Tag the run as part of a live-capture session when the caller supplies a
+    // frame session id (the Flutter vision-live loop). Absent / empty → plain
+    // per-run telemetry, byte-for-byte the pre-live-mode path.
+    if let Some(frame_session_id) = non_empty(frame_session_id) {
+        options = options.with_frame_session(frame_session_id.to_string());
     }
     options
 }
@@ -568,12 +585,18 @@ impl FfiModel {
     /// drop-if-busy / serialized semantics passes `false` (or omits it) and the
     /// behavior is byte-for-byte the pre-preempt path. Preempt with no token is
     /// a no-op (there is nothing to register/cancel).
+    ///
+    /// Pass an optional `frame_session_id` (a caller-supplied UUID) to tag every
+    /// run in a continuous live-capture session. The SDK then rate-limits the
+    /// session's telemetry to ~1 wire row/sec instead of one row per frame.
+    /// `None` (chat and one-shot runs) leaves telemetry as plain per-run rows.
     pub fn run_stream(
         &self,
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
         cancellation_token: Option<FfiCancellationToken>,
         preempt: bool,
+        frame_session_id: Option<String>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
@@ -583,7 +606,13 @@ impl FfiModel {
         // Build per-run options carrying the cancellation token (when present).
         // The token is also kept as `cancel_handle` so a closed/unsubscribed
         // sink can drive the same cancellation flag the abort check observes.
-        let run_options = streaming_run_options(sdk_config, cancellation_token.as_ref());
+        // A non-empty `frame_session_id` tags the run as live-capture so the SDK
+        // rate-limits its telemetry per session.
+        let run_options = streaming_run_options(
+            sdk_config,
+            cancellation_token.as_ref(),
+            frame_session_id.as_deref(),
+        );
         let cancel_handle = cancellation_token;
 
         std::thread::spawn(move || {
@@ -699,6 +728,15 @@ impl FfiModel {
     /// streaming run before acquiring the write lock — see
     /// [`Self::run_stream`] for the full semantics. Defaults to `false`
     /// (drop-if-busy / serialized); chat passes `false` and is unaffected.
+    ///
+    /// Pass an optional `frame_session_id` (a caller-supplied UUID) to tag the
+    /// run as part of a continuous live-capture session — see [`Self::run_stream`]
+    /// for the telemetry rate-limit semantics. `None` for chat / one-shot runs.
+    // FRB-exported boundary fn: each param maps to a named Dart argument, so
+    // they cannot be bundled into a struct without reshaping the generated Dart
+    // API. The arg count (envelope, context, config, token, preempt,
+    // frame_session_id, sink) is inherent to the binding surface.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_stream_with_context(
         &self,
         envelope: super::envelope::FfiEnvelope,
@@ -706,13 +744,18 @@ impl FfiModel {
         config: Option<FfiGenerationConfig>,
         cancellation_token: Option<FfiCancellationToken>,
         preempt: bool,
+        frame_session_id: Option<String>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let ctx = context.0.clone();
         let sdk_config = config.map(|c| c.to_sdk());
-        let run_options = streaming_run_options(sdk_config, cancellation_token.as_ref());
+        let run_options = streaming_run_options(
+            sdk_config,
+            cancellation_token.as_ref(),
+            frame_session_id.as_deref(),
+        );
         let cancel_handle = cancellation_token;
 
         // Spawn a background thread
@@ -884,6 +927,7 @@ mod tests {
             abort_on_thermal_critical: false,
             fallback_to_cloud: false,
             max_grace_tokens: None,
+            frame_session_id: None,
         }
     }
 
@@ -929,14 +973,41 @@ mod tests {
 
     #[test]
     fn streaming_run_options_wires_token_only_when_present() {
-        let with_none = streaming_run_options(None, None);
+        let with_none = streaming_run_options(None, None, None);
         assert!(!with_none.abort_policy.observes(AbortSignal::UserCancelled));
         assert!(with_none.cancellation_token.is_none());
 
         let token = FfiCancellationToken::new();
-        let with_token = streaming_run_options(None, Some(&token));
+        let with_token = streaming_run_options(None, Some(&token), None);
         assert!(with_token.abort_policy.observes(AbortSignal::UserCancelled));
         assert!(with_token.cancellation_token.is_some());
+    }
+
+    #[test]
+    fn streaming_run_options_tags_live_session_when_frame_id_present() {
+        // A non-empty frame session id flips the run into live-capture mode.
+        let live = streaming_run_options(None, None, Some("frame-sess-7"));
+        assert!(live.live_mode);
+        assert_eq!(live.frame_session_id.as_deref(), Some("frame-sess-7"));
+
+        // Absent id → plain per-run telemetry (not live).
+        let non_live = streaming_run_options(None, None, None);
+        assert!(!non_live.live_mode);
+        assert_eq!(non_live.frame_session_id, None);
+
+        // Empty / whitespace id is treated as absent (no live tag).
+        let blank = streaming_run_options(None, None, Some("   "));
+        assert!(!blank.live_mode);
+        assert_eq!(blank.frame_session_id, None);
+    }
+
+    #[test]
+    fn to_sdk_with_frame_session_id_enables_live_mode() {
+        let mut ffi = sample_options();
+        ffi.frame_session_id = Some("frame-sess-9".to_string());
+        let sdk = ffi.to_sdk_with_cancellation(None, None);
+        assert!(sdk.live_mode);
+        assert_eq!(sdk.frame_session_id.as_deref(), Some("frame-sess-9"));
     }
 
     #[test]
@@ -969,6 +1040,7 @@ mod tests {
             abort_on_thermal_critical: false,
             fallback_to_cloud: false,
             max_grace_tokens: Some(2),
+            frame_session_id: None,
         };
 
         let sdk = ffi.to_sdk_with_cancellation(None, None);
@@ -983,6 +1055,9 @@ mod tests {
         assert!(!sdk.abort_policy.fallback_to_cloud);
         assert_eq!(sdk.abort_policy.max_grace_tokens, 2);
         assert_eq!(sdk.correlation_id.as_deref(), Some("corr-flutter"));
+        // No frame session id → run is not live-tagged.
+        assert!(!sdk.live_mode);
+        assert_eq!(sdk.frame_session_id, None);
     }
 
     #[test]

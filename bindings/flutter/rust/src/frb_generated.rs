@@ -1436,6 +1436,7 @@ fn wire__crate__api__model__FfiModel_run_stream_impl(
             let api_cancellation_token =
                 <Option<FfiCancellationToken>>::sse_decode(&mut deserializer);
             let api_preempt = <bool>::sse_decode(&mut deserializer);
+            let api_frame_session_id = <Option<String>>::sse_decode(&mut deserializer);
             let api_sink = <StreamSink<
                 crate::api::model::FfiStreamEvent,
                 flutter_rust_bridge::for_generated::SseCodec,
@@ -1464,6 +1465,7 @@ fn wire__crate__api__model__FfiModel_run_stream_impl(
                             api_config,
                             api_cancellation_token,
                             api_preempt,
+                            api_frame_session_id,
                             api_sink,
                         );
                     })?;
@@ -1507,6 +1509,7 @@ fn wire__crate__api__model__FfiModel_run_stream_with_context_impl(
             let api_cancellation_token =
                 <Option<FfiCancellationToken>>::sse_decode(&mut deserializer);
             let api_preempt = <bool>::sse_decode(&mut deserializer);
+            let api_frame_session_id = <Option<String>>::sse_decode(&mut deserializer);
             let api_sink = <StreamSink<
                 crate::api::model::FfiStreamEvent,
                 flutter_rust_bridge::for_generated::SseCodec,
@@ -1544,6 +1547,7 @@ fn wire__crate__api__model__FfiModel_run_stream_with_context_impl(
                             api_config,
                             api_cancellation_token,
                             api_preempt,
+                            api_frame_session_id,
                             api_sink,
                         );
                     })?;
@@ -2982,6 +2986,7 @@ impl SseDecode for crate::api::model::FfiRunOptions {
         let mut var_abortOnThermalCritical = <bool>::sse_decode(deserializer);
         let mut var_fallbackToCloud = <bool>::sse_decode(deserializer);
         let mut var_maxGraceTokens = <Option<u32>>::sse_decode(deserializer);
+        let mut var_frameSessionId = <Option<String>>::sse_decode(deserializer);
         return crate::api::model::FfiRunOptions {
             cloud_provider: var_cloudProvider,
             cloud_model: var_cloudModel,
@@ -2991,6 +2996,7 @@ impl SseDecode for crate::api::model::FfiRunOptions {
             abort_on_thermal_critical: var_abortOnThermalCritical,
             fallback_to_cloud: var_fallbackToCloud,
             max_grace_tokens: var_maxGraceTokens,
+            frame_session_id: var_frameSessionId,
         };
     }
 }
@@ -3975,6 +3981,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::model::FfiRunOptions {
             self.abort_on_thermal_critical.into_into_dart().into_dart(),
             self.fallback_to_cloud.into_into_dart().into_dart(),
             self.max_grace_tokens.into_into_dart().into_dart(),
+            self.frame_session_id.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4514,6 +4521,7 @@ impl SseEncode for crate::api::model::FfiRunOptions {
         <bool>::sse_encode(self.abort_on_thermal_critical, serializer);
         <bool>::sse_encode(self.fallback_to_cloud, serializer);
         <Option<u32>>::sse_encode(self.max_grace_tokens, serializer);
+        <Option<String>>::sse_encode(self.frame_session_id, serializer);
     }
 }
 

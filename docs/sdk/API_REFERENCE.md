@@ -1195,25 +1195,42 @@ final stream = model.runStreaming(
 );
 ```
 
-**Live mode / frame session (planned, issue 14).** For continuous live-capture
-loops (e.g. the Flutter vision-live loop), `RunOptions` carries an optional
-`frameSessionId` — a caller-supplied UUID identifying one continuous
-live-capture session — plus a `liveMode` flag. The **caller** generates the id
-(the SDK treats it as an opaque tag); `with_frame_session(frameSessionId)` is a
-convenience that sets the id and `liveMode = true`. This is surfaced on the
-streaming run-options path. On the wire, live-mode inferences carry
-`frame_session_id` and `live_mode` and are **sampled / rolled up per session**
-rather than emitted per frame, keeping telemetry low-cardinality across a live
-stream. Defaults are `frameSessionId = null` and `liveMode = false` (per-run
-telemetry). No implementation exists yet; the entry stays **planned** until the
-telemetry tagging + per-session sampler land in issue 14.
+**Live mode / frame session (implemented in Rust + Dart, issue 14).** For
+continuous live-capture loops (e.g. the Flutter vision-live loop), `RunOptions`
+carries an optional `frameSessionId` — a caller-supplied UUID identifying one
+continuous live-capture session — plus a `liveMode` flag. The **caller**
+generates the id (the SDK treats it as an opaque tag);
+`with_frame_session(frameSessionId)` is a convenience that sets the id and
+`liveMode = true`. This is surfaced on the streaming run-options path. On the
+wire, live-mode inferences carry `frame_session_id` and `live_mode` and are
+**rate-limited at the telemetry dispatch funnel to roughly one wire row per
+second per `frame_session_id`** (the intervening per-frame rows are dropped),
+keeping telemetry low-cardinality across a live stream. A true summary/rollup
+row needs a session-end signal the SDK never receives, so the per-session
+rate-limit is the v1 contract (epic Open Decision #5). Defaults are
+`frameSessionId = null` and `liveMode = false` (per-run telemetry, byte-for-byte
+unchanged). In Dart there is no standalone `RunOptions` builder yet; the
+capability is reachable via the optional `frameSessionId` parameter on the
+streaming run methods (`runStreaming` / `runStreamingWithContext`), which wires
+`FfiRunOptions.frame_session_id` → `with_frame_session` under the hood.
 
 ```rust
-// Planned shape — live-capture session tagging on the streaming path.
+// Rust — live-capture session tagging on the streaming run-options path.
 let session_id = uuid::Uuid::new_v4().to_string(); // caller-generated
 let options = RunOptions::new()
     .with_cancellation_token(token.clone())
     .with_frame_session(session_id); // sets frameSessionId + liveMode = true
+```
+
+```dart
+// Dart — tag a live-capture session via the streaming parameter.
+final sessionId = const Uuid().v4(); // caller-generated, one per live session
+final stream = model.runStreaming(
+  envelope,
+  cancellationToken: token,
+  preempt: true,
+  frameSessionId: sessionId,
+);
 ```
 
 `AbortSignal` is the shared policy enum. Rust currently supports
@@ -1243,9 +1260,10 @@ resource buckets. The SDK keeps `correlation_id` as an opaque string for
 cross-binding compatibility; telemetry may include flat `routing_source`,
 `routing_reason`, `outcome_category`, `abort_reason`, `fallback_target`,
 `fallback_reason`, and `fallback_outcome` fields. Live-mode runs additionally
-carry the flat `frame_session_id` and `live_mode` fields (planned, issue 14);
-those inferences are sampled / rolled up per session rather than emitted per
-frame so a continuous live stream stays low-cardinality.
+carry the flat `frame_session_id` and `live_mode` fields (implemented, issue 14);
+those inferences are rate-limited per `frame_session_id` (~1 wire row/sec) at the
+telemetry dispatch funnel rather than emitted per frame, so a continuous live
+stream stays low-cardinality.
 
 ### Implementation Status
 
@@ -1258,7 +1276,7 @@ frame so a continuous live stream stays low-cardinality.
 | `ImagePlane` | ✅ | 📋 | 📋 | 📋 |
 | `YuvColorInfo` | ✅ | 📋 | 📋 | 📋 |
 | `RunOptions` | ✅ | planned | planned | planned |
-| `RunOptions.frameSessionId` / `liveMode` | 📋 | 📋 | 📋 | 📋 |
+| `RunOptions.frameSessionId` / `liveMode` | ✅ | 📋 | 📋 | 📋 |
 | `AbortPolicy` | ✅ | planned | planned | planned |
 | `AbortSignal` | ✅ | planned | planned | planned |
 | `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | 📋 | 📋 | 📋 |
