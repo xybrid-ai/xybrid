@@ -15,9 +15,28 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `to_sdk`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_sdk_with_cancellation`, `to_sdk`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `current_snapshot`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `fmt`, `from`
+
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiCancellationToken>>
+abstract class FfiCancellationToken implements RustOpaqueInterface {
+  /// Request cooperative cancellation of the associated run.
+  ///
+  /// Takes effect at the next token boundary (cancellation is cooperative,
+  /// not preemptive — it never interrupts mid-token).
+  void cancel();
+
+  static Future<FfiCancellationToken> default_() =>
+      XybridRustLib.instance.api.crateApiModelFfiCancellationTokenDefault();
+
+  /// Whether cancellation has been requested on this token.
+  bool isCancelled();
+
+  /// Create a fresh, un-cancelled token.
+  factory FfiCancellationToken() =>
+      XybridRustLib.instance.api.crateApiModelFfiCancellationTokenNew();
+}
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>
 abstract class FfiModel implements RustOpaqueInterface {
@@ -39,8 +58,16 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
+  ///
+  /// Pass an optional `cancellation_token` to make the run cancellable: when
+  /// the token is cancelled (or the Dart sink is closed mid-stream), Rust
+  /// generation halts at the next token boundary and releases the model write
+  /// lock. When `None`, behavior matches the pre-cancellation streaming path
+  /// (no `UserCancelled` observation).
   Stream<FfiStreamEvent> runStream(
-      {required FfiEnvelope envelope, FfiGenerationConfig? config});
+      {required FfiEnvelope envelope,
+      FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken});
 
   /// Run inference with streaming output and conversation context.
   ///
@@ -54,10 +81,16 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
+  ///
+  /// Pass an optional `cancellation_token` to make the run cancellable: when
+  /// the token is cancelled (or the Dart sink is closed mid-stream), Rust
+  /// generation halts at the next token boundary and releases the model write
+  /// lock. When `None`, behavior matches the pre-cancellation streaming path.
   Stream<FfiStreamEvent> runStreamWithContext(
       {required FfiEnvelope envelope,
       required FfiConversationContext context,
-      FfiGenerationConfig? config});
+      FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken});
 
   /// Run streaming inference with local abort and Xybrid cloud fallback.
   ///
@@ -68,7 +101,8 @@ abstract class FfiModel implements RustOpaqueInterface {
   Stream<FfiStreamEvent> runStreamWithFallback(
       {required FfiEnvelope envelope,
       required FfiRunOptions options,
-      FfiGenerationConfig? config});
+      FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken});
 
   /// Run inference with conversation context.
   ///

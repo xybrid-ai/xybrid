@@ -6,7 +6,8 @@ use url::Url;
 use xybrid_core::device::{ResourceSnapshot, ResourceSnapshotProvider};
 use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
 use xybrid_sdk::{
-    AbortPolicy, AbortSignal, GenerationConfig, ModelLoader, RunOptions, XybridModel,
+    AbortPolicy, AbortSignal, CancellationToken, GenerationConfig, ModelLoader, RunOptions,
+    XybridModel,
 };
 
 use crate::frb_generated::StreamSink;
@@ -92,6 +93,56 @@ impl FfiGenerationConfig {
     }
 }
 
+/// Opaque cooperative cancellation handle shared across the FFI boundary.
+///
+/// Wraps the SDK [`CancellationToken`] (an `Arc<AtomicBool>` inside, hence
+/// `Clone + Send + Sync`). A Dart caller constructs one, passes it into a
+/// streaming run via the run options, and calls [`FfiCancellationToken::cancel`]
+/// to halt Rust generation at the next token boundary — releasing the model
+/// write lock promptly.
+///
+/// The handle is cheap to clone; cloning shares the same underlying flag, so
+/// the copy held by the spawned streaming thread observes a `cancel()` issued
+/// from Dart.
+#[frb(opaque)]
+pub struct FfiCancellationToken(pub(crate) CancellationToken);
+
+impl FfiCancellationToken {
+    /// Create a fresh, un-cancelled token.
+    #[frb(sync)]
+    pub fn new() -> FfiCancellationToken {
+        FfiCancellationToken(CancellationToken::new())
+    }
+
+    /// Request cooperative cancellation of the associated run.
+    ///
+    /// Takes effect at the next token boundary (cancellation is cooperative,
+    /// not preemptive — it never interrupts mid-token).
+    #[frb(sync)]
+    pub fn cancel(&self) {
+        self.0.cancel();
+    }
+
+    /// Whether cancellation has been requested on this token.
+    #[frb(sync)]
+    pub fn is_cancelled(&self) -> bool {
+        self.0.is_cancelled()
+    }
+}
+
+impl Default for FfiCancellationToken {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Allow cloning the handle (shares the same underlying cancellation flag).
+impl Clone for FfiCancellationToken {
+    fn clone(&self) -> Self {
+        FfiCancellationToken(self.0.clone())
+    }
+}
+
 /// Cloud fallback controls exposed to Flutter callers.
 ///
 /// This mirrors the customer-facing Dart `RunOptions` wrapper and maps into
@@ -108,7 +159,19 @@ pub struct FfiRunOptions {
 }
 
 impl FfiRunOptions {
-    fn to_sdk(&self, generation_config: Option<GenerationConfig>) -> RunOptions {
+    /// Build SDK [`RunOptions`], optionally wiring a cancellation token.
+    ///
+    /// When `cancellation_token` is `Some`, the resulting [`AbortPolicy`] is
+    /// extended to observe [`AbortSignal::UserCancelled`] and the token is
+    /// attached so `AbortState::check_before_token` halts generation when the
+    /// token is cancelled. When `None`, the policy is left untouched — the
+    /// default chat / cloud-fallback semantics (which never observe
+    /// `UserCancelled`) are preserved exactly.
+    fn to_sdk_with_cancellation(
+        &self,
+        generation_config: Option<GenerationConfig>,
+        cancellation_token: Option<&FfiCancellationToken>,
+    ) -> RunOptions {
         let mut policy = AbortPolicy::default()
             .with_cloud_fallback(self.fallback_to_cloud)
             .with_max_grace_tokens(self.max_grace_tokens.unwrap_or(0));
@@ -117,6 +180,11 @@ impl FfiRunOptions {
         }
         if self.abort_on_thermal_critical {
             policy = policy.stop_on(AbortSignal::ThermalCritical);
+        }
+        // Only observe UserCancelled when a token is actually supplied so the
+        // default abort policy for callers that pass no token is unchanged.
+        if cancellation_token.is_some() {
+            policy = policy.stop_on(AbortSignal::UserCancelled);
         }
 
         let mut options = RunOptions::new()
@@ -127,12 +195,49 @@ impl FfiRunOptions {
             options = options.with_generation_config(config);
         }
 
+        if let Some(token) = cancellation_token {
+            options = options.with_cancellation_token(token.0.clone());
+        }
+
         if let Some(correlation_id) = non_empty(self.correlation_id.as_deref()) {
             options = options.with_correlation_id(correlation_id.to_string());
         }
 
         options
     }
+}
+
+/// Tracks whether a streaming run has reached its terminal state (final token
+/// emitted or natural completion). A sink-close (Dart unsubscribe) is only
+/// treated as a user cancellation while the run is still mid-stream — a close
+/// that races in after the last token must NOT trigger a false cancel.
+fn should_cancel_on_sink_close(reached_terminal: bool) -> bool {
+    !reached_terminal
+}
+
+/// Build minimal SDK [`RunOptions`] for the plain (non-cloud-fallback)
+/// streaming FFI paths (`run_stream` / `run_stream_with_context`).
+///
+/// When `cancellation_token` is `Some`, the abort policy observes
+/// [`AbortSignal::UserCancelled`] and the token is attached so the per-token
+/// abort check halts generation on cancel. When `None`, the returned options
+/// carry only the optional generation config and an empty abort policy — which
+/// makes `run_streaming_with_options` behave exactly like the pre-cancellation
+/// `run_streaming` path (no abort observation, no resource checks).
+fn streaming_run_options(
+    generation_config: Option<GenerationConfig>,
+    cancellation_token: Option<&FfiCancellationToken>,
+) -> RunOptions {
+    let mut options = RunOptions::new();
+    if let Some(config) = generation_config {
+        options = options.with_generation_config(config);
+    }
+    if let Some(token) = cancellation_token {
+        options = options
+            .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::UserCancelled))
+            .with_cancellation_token(token.0.clone());
+    }
+    options
 }
 
 #[derive(Debug)]
@@ -447,46 +552,77 @@ impl FfiModel {
     ///
     /// Pass an optional `config` to control generation parameters.
     /// When `None`, the model's default parameters are used.
+    ///
+    /// Pass an optional `cancellation_token` to make the run cancellable: when
+    /// the token is cancelled (or the Dart sink is closed mid-stream), Rust
+    /// generation halts at the next token boundary and releases the model write
+    /// lock. When `None`, behavior matches the pre-cancellation streaming path
+    /// (no `UserCancelled` observation).
     pub fn run_stream(
         &self,
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
+        cancellation_token: Option<FfiCancellationToken>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
-        use tokio_stream::StreamExt;
-
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let sdk_config = config.map(|c| c.to_sdk());
 
-        // Spawn a background thread with its own Tokio runtime
-        // (same pattern as load_with_progress which works)
+        // Build per-run options carrying the cancellation token (when present).
+        // The token is also kept as `cancel_handle` so a closed/unsubscribed
+        // sink can drive the same cancellation flag the abort check observes.
+        let run_options = streaming_run_options(sdk_config, cancellation_token.as_ref());
+        let cancel_handle = cancellation_token;
+
         std::thread::spawn(move || {
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => rt,
-                Err(e) => {
-                    let _ = sink.add(FfiStreamEvent::Error(format!(
-                        "Failed to create runtime: {}",
-                        e
-                    )));
-                    return;
-                }
+            let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let mut token_index = 0u32;
+            let result = {
+                let reached_terminal = reached_terminal.clone();
+                let cancel_handle = cancel_handle.clone();
+                // Clone the sink for the callback so the original remains
+                // available for the terminal Complete/Error emit below.
+                let token_sink = sink.clone();
+                let on_token = move |token: xybrid_core::runtime_adapter::types::PartialToken| {
+                    let is_final = token.finish_reason.is_some();
+                    let ffi_token = FfiStreamToken {
+                        token: token.token.clone(),
+                        token_id: token.token_id,
+                        index: token_index,
+                        cumulative_text: token.cumulative_text.clone(),
+                        finish_reason: token.finish_reason.clone(),
+                    };
+                    token_index = token_index.saturating_add(1);
+                    // Mark terminal *before* the final emit so a sink-close that
+                    // races the last token does not look like a mid-stream cancel.
+                    if is_final {
+                        reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    if token_sink.add(FfiStreamEvent::Token(ffi_token)).is_err()
+                        && should_cancel_on_sink_close(
+                            reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
+                        )
+                    {
+                        if let Some(handle) = cancel_handle.as_ref() {
+                            handle.0.cancel();
+                        }
+                    }
+                    Ok(())
+                };
+                model.run_streaming_with_options(&env, &run_options, on_token)
             };
 
-            rt.block_on(async move {
-                let mut stream = model.run_stream(env, sdk_config);
-
-                while let Some(event) = stream.next().await {
-                    let ffi_event = FfiStreamEvent::from(event);
-                    // Send to Dart stream (ignore errors if sink is closed)
-                    if sink.add(ffi_event).is_err() {
-                        break;
-                    }
+            match result {
+                Ok(inference_result) => {
+                    reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
+                    let ffi_result = FfiResult::from_inference_result(&inference_result);
+                    let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
                 }
-            });
+                Err(e) => {
+                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                }
+            }
         });
     }
 
@@ -541,17 +677,25 @@ impl FfiModel {
     ///
     /// Pass an optional `config` to control generation parameters.
     /// When `None`, the model's default parameters are used.
+    ///
+    /// Pass an optional `cancellation_token` to make the run cancellable: when
+    /// the token is cancelled (or the Dart sink is closed mid-stream), Rust
+    /// generation halts at the next token boundary and releases the model write
+    /// lock. When `None`, behavior matches the pre-cancellation streaming path.
     pub fn run_stream_with_context(
         &self,
         envelope: super::envelope::FfiEnvelope,
         context: &FfiConversationContext,
         config: Option<FfiGenerationConfig>,
+        cancellation_token: Option<FfiCancellationToken>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let ctx = context.0.clone();
         let sdk_config = config.map(|c| c.to_sdk());
+        let run_options = streaming_run_options(sdk_config, cancellation_token.as_ref());
+        let cancel_handle = cancellation_token;
 
         // Spawn a background thread
         std::thread::spawn(move || {
@@ -567,26 +711,49 @@ impl FfiModel {
                 }
             };
 
-            // Track token index for the stream
+            let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut token_index = 0u32;
 
-            // Use callback-based streaming
-            let result =
-                model.run_streaming_with_context(&env, &ctx_guard, sdk_config.as_ref(), |token| {
-                    let ffi_token = FfiStreamToken {
-                        token: token.token.clone(),
-                        token_id: token.token_id,
-                        index: token_index,
-                        cumulative_text: token.cumulative_text.clone(),
-                        finish_reason: token.finish_reason.clone(),
-                    };
-                    token_index += 1;
-                    let _ = sink.add(FfiStreamEvent::Token(ffi_token));
-                    Ok(())
-                });
+            // Use callback-based streaming through the options-aware path so the
+            // per-token abort check runs (honouring the cancellation token).
+            let result = {
+                let reached_terminal = reached_terminal.clone();
+                let cancel_handle = cancel_handle.clone();
+                let token_sink = sink.clone();
+                model.run_streaming_with_context_options(
+                    &env,
+                    &ctx_guard,
+                    &run_options,
+                    move |token| {
+                        let is_final = token.finish_reason.is_some();
+                        let ffi_token = FfiStreamToken {
+                            token: token.token.clone(),
+                            token_id: token.token_id,
+                            index: token_index,
+                            cumulative_text: token.cumulative_text.clone(),
+                            finish_reason: token.finish_reason.clone(),
+                        };
+                        token_index = token_index.saturating_add(1);
+                        if is_final {
+                            reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
+                        if token_sink.add(FfiStreamEvent::Token(ffi_token)).is_err()
+                            && should_cancel_on_sink_close(
+                                reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
+                            )
+                        {
+                            if let Some(handle) = cancel_handle.as_ref() {
+                                handle.0.cancel();
+                            }
+                        }
+                        Ok(())
+                    },
+                )
+            };
 
             match result {
                 Ok(inference_result) => {
+                    reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
                     let ffi_result = FfiResult::from_inference_result(&inference_result);
                     let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
                 }
@@ -608,6 +775,7 @@ impl FfiModel {
         envelope: super::envelope::FfiEnvelope,
         options: FfiRunOptions,
         config: Option<FfiGenerationConfig>,
+        cancellation_token: Option<FfiCancellationToken>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
@@ -620,16 +788,22 @@ impl FfiModel {
             }
         };
         let sdk_config = config.map(|c| c.to_sdk());
-        let run_options = options.to_sdk(sdk_config);
+        let run_options = options.to_sdk_with_cancellation(sdk_config, cancellation_token.as_ref());
+        let cancel_handle = cancellation_token;
         let cloud_adapter = match gateway_url.as_deref() {
             Some(gateway_url) => CloudRuntimeAdapter::with_gateway(gateway_url),
             None => CloudRuntimeAdapter::new(),
         };
 
         std::thread::spawn(move || {
+            let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut token_index = 0u32;
             let result = {
+                let reached_terminal = reached_terminal.clone();
+                let cancel_handle = cancel_handle.clone();
+                let token_sink = sink.clone();
                 let mut on_token = |token: xybrid_core::runtime_adapter::types::PartialToken| {
+                    let is_final = token.finish_reason.is_some();
                     let ffi_token = FfiStreamToken {
                         token: token.token.clone(),
                         token_id: token.token_id,
@@ -638,7 +812,18 @@ impl FfiModel {
                         finish_reason: token.finish_reason.clone(),
                     };
                     token_index = token_index.saturating_add(1);
-                    let _ = sink.add(FfiStreamEvent::Token(ffi_token));
+                    if is_final {
+                        reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    if token_sink.add(FfiStreamEvent::Token(ffi_token)).is_err()
+                        && should_cancel_on_sink_close(
+                            reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
+                        )
+                    {
+                        if let Some(handle) = cancel_handle.as_ref() {
+                            handle.0.cancel();
+                        }
+                    }
                     Ok(())
                 };
                 let mut on_seam = |_seam: xybrid_sdk::model::SeamInfo| {};
@@ -654,6 +839,7 @@ impl FfiModel {
 
             match result {
                 Ok(inference_result) => {
+                    reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
                     let ffi_result = FfiResult::from_inference_result(&inference_result);
                     let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
                 }
@@ -669,6 +855,90 @@ impl FfiModel {
 mod tests {
     use super::*;
 
+    fn sample_options() -> FfiRunOptions {
+        FfiRunOptions {
+            cloud_provider: None,
+            cloud_model: None,
+            cloud_gateway_url: None,
+            correlation_id: None,
+            abort_on_memory_pressure_critical: false,
+            abort_on_thermal_critical: false,
+            fallback_to_cloud: false,
+            max_grace_tokens: None,
+        }
+    }
+
+    #[test]
+    fn to_sdk_without_cancellation_token_does_not_observe_user_cancelled() {
+        let sdk = sample_options().to_sdk_with_cancellation(None, None);
+
+        assert!(!sdk.abort_policy.observes(AbortSignal::UserCancelled));
+        assert!(sdk.cancellation_token.is_none());
+    }
+
+    #[test]
+    fn to_sdk_with_cancellation_token_observes_user_cancelled_and_sets_token() {
+        let token = FfiCancellationToken::new();
+        let sdk = sample_options().to_sdk_with_cancellation(None, Some(&token));
+
+        assert!(sdk.abort_policy.observes(AbortSignal::UserCancelled));
+        assert!(sdk.cancellation_token.is_some());
+
+        // Cancelling the FFI handle must flip the SDK token it was cloned into,
+        // proving they share the same underlying flag across the boundary.
+        let sdk_token = sdk.cancellation_token.expect("token attached");
+        assert!(!sdk_token.is_cancelled());
+        token.cancel();
+        assert!(sdk_token.is_cancelled());
+    }
+
+    #[test]
+    fn to_sdk_with_cancellation_token_preserves_existing_abort_signals() {
+        let mut ffi = sample_options();
+        ffi.abort_on_memory_pressure_critical = true;
+        ffi.abort_on_thermal_critical = true;
+        let token = FfiCancellationToken::new();
+
+        let sdk = ffi.to_sdk_with_cancellation(None, Some(&token));
+
+        assert!(sdk
+            .abort_policy
+            .observes(AbortSignal::MemoryPressureCritical));
+        assert!(sdk.abort_policy.observes(AbortSignal::ThermalCritical));
+        assert!(sdk.abort_policy.observes(AbortSignal::UserCancelled));
+    }
+
+    #[test]
+    fn streaming_run_options_wires_token_only_when_present() {
+        let with_none = streaming_run_options(None, None);
+        assert!(!with_none.abort_policy.observes(AbortSignal::UserCancelled));
+        assert!(with_none.cancellation_token.is_none());
+
+        let token = FfiCancellationToken::new();
+        let with_token = streaming_run_options(None, Some(&token));
+        assert!(with_token.abort_policy.observes(AbortSignal::UserCancelled));
+        assert!(with_token.cancellation_token.is_some());
+    }
+
+    #[test]
+    fn sink_close_cancels_only_before_terminal() {
+        // Non-terminal sink close (Dart unsubscribed mid-stream) → cancel.
+        assert!(should_cancel_on_sink_close(/* reached_terminal */ false));
+        // Terminal sink close (race after the last token) → no false cancel.
+        assert!(!should_cancel_on_sink_close(/* reached_terminal */ true));
+    }
+
+    #[test]
+    fn ffi_cancellation_token_is_cooperative() {
+        let token = FfiCancellationToken::new();
+        assert!(!token.is_cancelled());
+        token.cancel();
+        assert!(token.is_cancelled());
+        // Cloned handle shares the same flag.
+        let clone = token.clone();
+        assert!(clone.is_cancelled());
+    }
+
     #[test]
     fn ffi_run_options_maps_abort_policy_to_sdk() {
         let ffi = FfiRunOptions {
@@ -682,12 +952,15 @@ mod tests {
             max_grace_tokens: Some(2),
         };
 
-        let sdk = ffi.to_sdk(None);
+        let sdk = ffi.to_sdk_with_cancellation(None, None);
 
         assert!(sdk
             .abort_policy
             .observes(AbortSignal::MemoryPressureCritical));
         assert!(!sdk.abort_policy.observes(AbortSignal::ThermalCritical));
+        // No cancellation token supplied → UserCancelled must NOT be observed,
+        // preserving the existing chat / cloud-fallback abort semantics.
+        assert!(!sdk.abort_policy.observes(AbortSignal::UserCancelled));
         assert!(!sdk.abort_policy.fallback_to_cloud);
         assert_eq!(sdk.abort_policy.max_grace_tokens, 2);
         assert_eq!(sdk.correlation_id.as_deref(), Some("corr-flutter"));

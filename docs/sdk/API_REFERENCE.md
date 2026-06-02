@@ -1141,15 +1141,32 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
 
-**User cancellation (Dart binding surface — planned, issue 10).** A caller can
-abort an in-flight local streaming run via a `CancellationToken` cancel handle
-paired with `RunOptions` (`with_cancellation_token`). Cancellation is
-**cooperative**: the token's cancelled state is checked before every emitted
-token, so it takes effect at the next token boundary, not mid-token, and
-surfaces as the `AbortSignal::UserCancelled` policy signal. The Dart surface
-(a cancel handle exposing `cancel()` / `isCancelled`, plus the `userCancelled`
-signal) is implemented by issue 10; it stays **planned** until the
-FFI → FRB → Dart cancel path is wired.
+**User cancellation (Dart binding surface — implemented, issue 10).** A caller
+can abort an in-flight local streaming run via a `CancellationToken` cancel
+handle. In Rust the token is paired with `RunOptions`
+(`with_cancellation_token`); in Dart the caller constructs a
+`CancellationToken` and passes it to the streaming run methods
+(`runStreaming` / `runStreamingWithContext` / `runStreamingWithFallback`) via
+the optional `cancellationToken` parameter. Cancellation is **cooperative**:
+the token's cancelled state is checked before every emitted token, so it takes
+effect at the next token boundary, not mid-token, and surfaces as the
+`AbortSignal::UserCancelled` policy signal. When the token is cancelled — or
+the Dart stream is unsubscribed mid-run (sink-close-as-cancel) — Rust halts
+generation at the next token and **releases the model write lock promptly**, so
+a follow-up run can start. The Dart cancel handle exposes `cancel()` and an
+`isCancelled` getter.
+
+```dart
+final cancel = CancellationToken();
+final stream = model.runStreaming(
+  XybridEnvelope.text('Tell me a long story'),
+  cancellationToken: cancel,
+);
+final sub = stream.listen((token) { /* ... */ });
+// Later, to stop Rust generation (not just unsubscribe):
+cancel.cancel();
+await sub.cancel();
+```
 
 **Live mode / frame session (planned, issue 14).** For continuous live-capture
 loops (e.g. the Flutter vision-live loop), `RunOptions` carries an optional
@@ -1174,9 +1191,11 @@ let options = RunOptions::new()
 
 `AbortSignal` is the shared policy enum. Rust currently supports
 `UserCancelled`, `MemoryPressureWarn`, `MemoryPressureCritical`, `ThermalHot`,
-and `ThermalCritical`; Flutter currently exposes the customer-facing fallback
-signals `memoryPressureCritical` and `thermalCritical`. The `userCancelled`
-signal is part of the planned Dart cancellation surface (issue 10).
+and `ThermalCritical`; the Flutter `AbortSignal` enum exposes the customer-facing
+fallback signals `memoryPressureCritical` and `thermalCritical`. User
+cancellation is reachable from Dart (issue 10) via the `CancellationToken`
+handle rather than a Dart `AbortSignal.userCancelled` value — passing a
+cancelled token makes the run observe `UserCancelled` under the hood.
 
 Flutter exposes the customer opt-in surface as `RunOptions.cloudFallback(...)`
 plus `AbortPolicy.cloudFallback(...)`; plain `RunOptions()` stays neutral and
@@ -1215,7 +1234,7 @@ frame so a continuous live stream stays low-cardinality.
 | `RunOptions.frameSessionId` / `liveMode` | 📋 | 📋 | 📋 | 📋 |
 | `AbortPolicy` | ✅ | planned | planned | planned |
 | `AbortSignal` | ✅ | planned | planned | planned |
-| `AbortSignal.userCancelled` (Dart surface) | 📋 | 📋 | 📋 | 📋 |
+| `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | 📋 | 📋 | 📋 |
 | `CancellationToken` | ✅ | planned | planned | planned |
 | `StreamToken` | ✅ | — | — | ✅ |
 

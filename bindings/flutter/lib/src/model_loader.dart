@@ -26,6 +26,52 @@ class XybridException implements Exception {
   String toString() => 'XybridException: $message';
 }
 
+/// Cooperative cancel handle for an in-flight streaming run.
+///
+/// Construct one, pass it into [XybridModel.runStreaming],
+/// [XybridModel.runStreamingWithContext], or
+/// [XybridModel.runStreamingWithFallback], and call [cancel] to halt Rust
+/// generation. Cancellation is cooperative: it takes effect at the next token
+/// boundary (it never interrupts mid-token), and releases the model write lock
+/// promptly so a follow-up run can start.
+///
+/// A token is single-use in spirit — create a fresh one per run.
+///
+/// ## Example
+/// ```dart
+/// final cancel = CancellationToken();
+/// final stream = model.runStreaming(
+///   XybridEnvelope.text('Tell me a long story'),
+///   cancellationToken: cancel,
+/// );
+/// final sub = stream.listen((token) { ... });
+/// // Later, to stop generation:
+/// cancel.cancel();
+/// await sub.cancel();
+/// ```
+class CancellationToken {
+  /// The underlying FRB cancellation handle (shared with the Rust run).
+  final FfiCancellationToken inner;
+
+  /// Create a fresh, un-cancelled token.
+  CancellationToken() : inner = FfiCancellationToken();
+
+  CancellationToken._(this.inner);
+
+  /// Wrap an existing FRB handle.
+  factory CancellationToken.fromFfi(FfiCancellationToken handle) =>
+      CancellationToken._(handle);
+
+  /// Request cooperative cancellation of the associated run.
+  ///
+  /// Takes effect at the next token boundary. Safe to call more than once and
+  /// safe to call after the run has already finished (a no-op in that case).
+  void cancel() => inner.cancel();
+
+  /// Whether cancellation has been requested on this token.
+  bool get isCancelled => inner.isCancelled();
+}
+
 /// Event emitted during model loading with progress tracking.
 sealed class LoadEvent {
   const LoadEvent._();
@@ -222,10 +268,18 @@ class XybridModel {
   ///
   /// # Arguments
   /// * [envelope] - The input envelope (typically text for LLMs)
+  /// * [cancellationToken] - Optional cooperative cancel handle. Call
+  ///   [CancellationToken.cancel] to halt generation at the next token boundary
+  ///   and release the model write lock. Unsubscribing from the returned stream
+  ///   also cancels the in-flight Rust run.
   ///
   /// # Example
   /// ```dart
-  /// final stream = model.runStreaming(XybridEnvelope.text('Tell me a story'));
+  /// final cancel = CancellationToken();
+  /// final stream = model.runStreaming(
+  ///   XybridEnvelope.text('Tell me a story'),
+  ///   cancellationToken: cancel,
+  /// );
   /// await for (final token in stream) {
   ///   stdout.write(token.token);
   ///   if (token.isFinal) {
@@ -236,12 +290,14 @@ class XybridModel {
   Stream<StreamToken> runStreaming(
     XybridEnvelope envelope, {
     GenerationConfig? config,
+    CancellationToken? cancellationToken,
   }) async* {
     try {
       // Use native streaming from FFI
       final stream = inner.runStream(
         envelope: envelope.inner,
         config: config?.toFfi(),
+        cancellationToken: cancellationToken?.inner,
       );
 
       var emittedFinal = false;
@@ -295,16 +351,24 @@ class XybridModel {
   }
 
   /// Run streaming inference with local abort and cloud fallback.
+  ///
+  /// Pass an optional [cancellationToken] to make the run user-cancellable in
+  /// addition to the resource-pressure abort policy: calling
+  /// [CancellationToken.cancel] (or unsubscribing from the stream) halts the
+  /// local run at the next token boundary. User cancellation is terminal and
+  /// never triggers cloud fallback.
   Stream<StreamToken> runStreamingWithFallback(
     XybridEnvelope envelope, {
     required RunOptions options,
     GenerationConfig? config,
+    CancellationToken? cancellationToken,
   }) async* {
     try {
       final stream = inner.runStreamWithFallback(
         envelope: envelope.inner,
         options: options.toFfi(),
         config: config?.toFfi(),
+        cancellationToken: cancellationToken?.inner,
       );
 
       var emittedFinal = false;
@@ -380,16 +444,22 @@ class XybridModel {
   /// }
   /// context.pushText(buffer.toString(), MessageRole.assistant);
   /// ```
+  ///
+  /// Pass an optional [cancellationToken] to make the run cancellable: calling
+  /// [CancellationToken.cancel] (or unsubscribing from the stream) halts
+  /// generation at the next token boundary and releases the model write lock.
   Stream<StreamToken> runStreamingWithContext(
     XybridEnvelope envelope,
     ConversationContext context, {
     GenerationConfig? config,
+    CancellationToken? cancellationToken,
   }) async* {
     try {
       final stream = inner.runStreamWithContext(
         envelope: envelope.inner,
         context: context.inner,
         config: config?.toFfi(),
+        cancellationToken: cancellationToken?.inner,
       );
 
       await for (final event in stream) {

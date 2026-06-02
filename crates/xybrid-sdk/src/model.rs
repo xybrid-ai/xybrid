@@ -3794,6 +3794,218 @@ mod tests {
         assert_eq!(authority.outcomes().len(), 1);
     }
 
+    /// Short-circuit case (FFI issue 10): a token cancelled *before* the run
+    /// starts must abort in the pre-run gate (`check_before_run`) with
+    /// `UserCancelled`, before the model write lock is ever taken — and the
+    /// lock must be free afterwards.
+    ///
+    /// This intentionally does NOT prove the held-then-released path (the lock
+    /// is never acquired here because the pre-run gate fires first). The
+    /// mid-stream held-lock release is covered by
+    /// `run_streaming_with_options_mid_stream_cancel_releases_held_write_lock`.
+    #[test]
+    fn run_streaming_with_options_pre_run_cancellation_short_circuits_before_lock() {
+        let model = test_loaded_model(true);
+        let token = CancellationToken::new();
+        let options = RunOptions::new()
+            .with_cancellation_token(token.clone())
+            .with_abort_policy(
+                crate::run_options::AbortPolicy::default()
+                    .stop_on(crate::run_options::AbortSignal::UserCancelled),
+            );
+        let envelope = text_envelope("tell me a long story");
+
+        // Cancel before the run so the pre-run gate aborts deterministically
+        // without needing a real token stream.
+        token.cancel();
+
+        let started = Instant::now();
+        let err = model
+            .run_streaming_with_options(&envelope, &options, |_token| Ok(()))
+            .expect_err("cancelled run must abort, not produce a result");
+        let elapsed = started.elapsed();
+
+        // (a) The run halts with a user-cancellation error (terminal; never a
+        // cloud-fallback marker).
+        match err {
+            SdkError::InferenceError(ref message) => {
+                assert!(
+                    message.contains("user_cancelled"),
+                    "expected user_cancelled abort, got: {message}"
+                );
+            }
+            other => panic!("expected user_cancelled InferenceError, got {other:?}"),
+        }
+
+        // (b) The model write lock must be free immediately after the aborted
+        // run returns — `try_write` succeeding proves the run did not leave the
+        // lock held. (acquirable well within one token).
+        assert!(
+            model.handle.try_write().is_ok(),
+            "model write lock must be released after a cancelled streaming run"
+        );
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "cancelled run should return promptly, took {elapsed:?}"
+        );
+    }
+
+    /// Fake `"onnx"` runtime that blocks inside `execute()` until released, so a
+    /// test can observe the model write lock being *held* mid-run. On release it
+    /// returns a text envelope, after which the streaming path emits a single
+    /// synthetic token through the per-token abort gate — exactly the boundary
+    /// that halts a real LLM stream when the token is cancelled.
+    struct BlockingFakeRuntime {
+        entered_tx: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+        release_rx: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl xybrid_core::runtime_adapter::ModelRuntime for BlockingFakeRuntime {
+        fn name(&self) -> &str {
+            "onnx"
+        }
+
+        fn supported_formats(&self) -> Vec<&str> {
+            vec!["onnx"]
+        }
+
+        fn load(
+            &mut self,
+            _model_path: &std::path::Path,
+        ) -> xybrid_core::runtime_adapter::AdapterResult<()> {
+            Ok(())
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
+        fn execute(
+            &mut self,
+            _input: &xybrid_core::ir::Envelope,
+        ) -> xybrid_core::runtime_adapter::AdapterResult<xybrid_core::ir::Envelope> {
+            // Signal that we are inside execute() — the write lock is held now.
+            if let Some(tx) = self.entered_tx.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+            // Block until the test releases us (after it has cancelled the
+            // token and confirmed the lock is held).
+            let _ = self.release_rx.lock().unwrap().recv();
+            Ok(xybrid_core::ir::Envelope::new(
+                xybrid_core::ir::EnvelopeKind::Text("partial output".to_string()),
+            ))
+        }
+    }
+
+    fn test_model_with_runtime(
+        runtime: Box<dyn xybrid_core::runtime_adapter::ModelRuntime>,
+    ) -> XybridModel {
+        let metadata =
+            xybrid_core::execution::ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
+        let mut executor = TemplateExecutor::default();
+        // Register under "onnx" so the bare-Onnx execute path uses our fake.
+        executor.register_runtime("onnx", runtime);
+        XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor,
+                metadata,
+                model_dir: PathBuf::from("."),
+                loaded: true,
+            })),
+            model_id: "local-test-model".to_string(),
+            version: "1.0".to_string(),
+            output_type: OutputType::Text,
+            supports_streaming: true,
+        }
+    }
+
+    /// Acceptance for the reachable-cancellation path (FFI issue 10),
+    /// held-then-released case: a cancel issued *during* generation (while the
+    /// model write lock is HELD) must (a) halt the run with `UserCancelled`
+    /// rather than completing naturally, and (b) release the held write lock so
+    /// a follow-up run can acquire it.
+    ///
+    /// Unlike the pre-run short-circuit test, this drives a fake runtime that
+    /// blocks inside `execute()` — so the test can assert `try_write()` FAILS
+    /// while the run is mid-flight (lock genuinely held), then cancel, then
+    /// assert `try_write()` succeeds after the run unwinds.
+    #[test]
+    fn run_streaming_with_options_mid_stream_cancel_releases_held_write_lock() {
+        use std::sync::mpsc;
+
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let runtime = BlockingFakeRuntime {
+            entered_tx: Mutex::new(Some(entered_tx)),
+            release_rx: Mutex::new(release_rx),
+        };
+        let model = test_model_with_runtime(Box::new(runtime));
+
+        let token = CancellationToken::new();
+        let options = RunOptions::new()
+            .with_cancellation_token(token.clone())
+            .with_abort_policy(
+                crate::run_options::AbortPolicy::default()
+                    .stop_on(crate::run_options::AbortSignal::UserCancelled),
+            );
+
+        // Run the streaming call on a worker thread so we can inspect lock state
+        // from the test thread while the run is mid-flight.
+        let model_for_worker = model.clone();
+        let worker = std::thread::spawn(move || {
+            let envelope = text_envelope("tell me a long story");
+            model_for_worker.run_streaming_with_options(&envelope, &options, |_token| Ok(()))
+        });
+
+        // Wait until the runtime is inside execute() — the write lock is now held.
+        entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("runtime should enter execute() and hold the write lock");
+
+        // Prove the lock is genuinely HELD mid-run: a write acquisition must fail.
+        assert!(
+            model.handle.try_write().is_err(),
+            "write lock must be held while the streaming run is mid-flight"
+        );
+
+        // Cancel mid-generation, then let execute() return so the per-token
+        // abort gate observes the cancellation at the (single) token boundary.
+        token.cancel();
+        release_tx.send(()).expect("release the blocked runtime");
+
+        let result = worker.join().expect("streaming worker should not panic");
+
+        // (a) The run halted on user cancellation rather than completing
+        // naturally with the runtime's "partial output".
+        match result {
+            Err(SdkError::InferenceError(ref message)) => assert!(
+                message.contains("user_cancelled"),
+                "expected user_cancelled abort, got: {message}"
+            ),
+            Ok(r) => panic!(
+                "mid-stream cancel must abort, but run completed naturally: {:?}",
+                r.text()
+            ),
+            Err(other) => panic!("expected user_cancelled InferenceError, got {other:?}"),
+        }
+
+        // (b) The previously-HELD write lock must now be released — bounded wait
+        // to allow the worker's lock guard to drop on its own thread.
+        let mut acquired = false;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if model.handle.try_write().is_ok() {
+                acquired = true;
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(
+            acquired,
+            "the HELD model write lock must be released after a mid-stream cancellation"
+        );
+    }
+
     #[test]
     fn dispatch_after_local_stops_when_cloud_policy_is_denied() {
         let cloud = FakeCloudAdapter::new("should not run");

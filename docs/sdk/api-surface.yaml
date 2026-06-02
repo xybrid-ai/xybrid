@@ -809,6 +809,7 @@ classes:
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       with_cancellation_token:
         params: [{ name: token, type: CancellationToken }]
+        notes: "Rust builder that attaches a CancellationToken to the run options and makes the AbortPolicy observe UserCancelled. The Dart binding does not expose a with_cancellation_token builder; instead the streaming run methods take an optional cancellationToken parameter that wires the token + UserCancelled observation under the hood (issue 10). dart stays planned for this exact builder shape — the capability is reachable via the streaming parameter."
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       with_correlation_id:
         params: [{ name: correlationId, type: String }]
@@ -847,8 +848,8 @@ classes:
     section: "8. Supporting Types"
     variants:
       UserCancelled:
-        notes: "User-initiated cancellation. The Dart binding surface (issue 10) exposes this so a caller can abort an in-flight local streaming run via a cancel handle. Local streaming abort is cooperative and checked per-token before each emitted token. dart stays planned until issue 10 wires the FFI->FRB->Dart cancel path."
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "User-initiated cancellation. Reachable from Dart (issue 10) via the CancellationToken handle passed to the streaming run methods: cancelling the token makes the run's AbortPolicy observe UserCancelled and halts generation at the next token boundary. The Dart AbortSignal enum itself does not expose a userCancelled value — cancellation is driven by the token, not by adding the signal to a Dart policy. Local streaming abort is cooperative and checked per-token before each emitted token."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       MemoryPressureWarn:
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       MemoryPressureCritical:
@@ -861,12 +862,12 @@ classes:
   CancellationToken:
     type: class
     section: "8. Supporting Types"
-    notes: "Cooperative cancel handle for an in-flight run, paired with a RunOptions via with_cancellation_token. Local streaming abort is cooperative: the token's cancelled state is checked before every emitted token, so cancellation takes effect at the next token boundary, not mid-token. The Dart binding surface (cancel handle exposing cancel() / isCancelled, surfacing AbortSignal::UserCancelled) is implemented by issue 10; dart stays planned until then."
+    notes: "Cooperative cancel handle for an in-flight run. In Rust it is paired with a RunOptions via with_cancellation_token; in Dart the caller constructs a CancellationToken and passes it to the streaming run methods (runStreaming / runStreamingWithContext / runStreamingWithFallback) via the optional cancellationToken parameter. Local streaming abort is cooperative: the token's cancelled state is checked before every emitted token, so cancellation takes effect at the next token boundary, not mid-token, and the model write lock is released promptly. The Dart binding surface (cancel handle exposing cancel() / isCancelled, plus sink-close-as-cancel when the Dart stream is unsubscribed mid-run) was wired by issue 10."
     methods:
       cancel:
-        notes: "Request cooperative cancellation of the associated run. Dart binding surface lands with issue 10."
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Request cooperative cancellation of the associated run. Takes effect at the next token boundary."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       is_cancelled:
-        notes: "Whether cancellation has been requested (Dart: isCancelled). Dart binding surface lands with issue 10."
+        notes: "Whether cancellation has been requested (Dart: isCancelled getter)."
         return: bool
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
