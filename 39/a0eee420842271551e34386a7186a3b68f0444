@@ -1,0 +1,23 @@
+crates/xybrid-sdk/src/cache/cache_provider.rs
+  s_323a65fe865faa::t_9fda9c2ad00db9 132-140
+crates/xybrid-sdk/Cargo.toml
+  s_323a65fe865faa::t_3fb86500f0f817 48-53
+crates/xybrid-core/Cargo.toml
+  s_323a65fe865faa::t_9f3ea05bdb9e2e 111-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "39a0eee420842271551e34386a7186a3b68f0444",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
