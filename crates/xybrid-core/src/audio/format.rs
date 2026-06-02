@@ -17,30 +17,38 @@ pub enum AudioFormat {
     Float32 { sample_rate: u32, channels: u32 },
     /// WAV container format (format details extracted from header)
     Wav,
+    /// MP3 compressed audio
+    Mp3,
+    /// OGG container format
+    Ogg,
+    /// FLAC lossless audio
+    Flac,
 }
 
 impl AudioFormat {
     /// Returns the sample rate for this format.
     ///
-    /// For WAV format, returns None as the sample rate is in the header.
+    /// For container formats (WAV, MP3, OGG, FLAC), returns None as the sample
+    /// rate is encoded in the file header.
     pub fn sample_rate(&self) -> Option<u32> {
         match self {
             AudioFormat::Pcm16 { sample_rate, .. } => Some(*sample_rate),
             AudioFormat::Pcm32 { sample_rate, .. } => Some(*sample_rate),
             AudioFormat::Float32 { sample_rate, .. } => Some(*sample_rate),
-            AudioFormat::Wav => None,
+            AudioFormat::Wav | AudioFormat::Mp3 | AudioFormat::Ogg | AudioFormat::Flac => None,
         }
     }
 
     /// Returns the number of channels for this format.
     ///
-    /// For WAV format, returns None as the channels are in the header.
+    /// For container formats (WAV, MP3, OGG, FLAC), returns None as the channel
+    /// count is encoded in the file header.
     pub fn channels(&self) -> Option<u32> {
         match self {
             AudioFormat::Pcm16 { channels, .. } => Some(*channels),
             AudioFormat::Pcm32 { channels, .. } => Some(*channels),
             AudioFormat::Float32 { channels, .. } => Some(*channels),
-            AudioFormat::Wav => None,
+            AudioFormat::Wav | AudioFormat::Mp3 | AudioFormat::Ogg | AudioFormat::Flac => None,
         }
     }
 
@@ -50,7 +58,7 @@ impl AudioFormat {
             AudioFormat::Pcm16 { .. } => Some(2),
             AudioFormat::Pcm32 { .. } => Some(4),
             AudioFormat::Float32 { .. } => Some(4),
-            AudioFormat::Wav => None,
+            AudioFormat::Wav | AudioFormat::Mp3 | AudioFormat::Ogg | AudioFormat::Flac => None,
         }
     }
 
@@ -61,6 +69,9 @@ impl AudioFormat {
             AudioFormat::Pcm32 { .. } => "pcm32",
             AudioFormat::Float32 { .. } => "float32",
             AudioFormat::Wav => "wav",
+            AudioFormat::Mp3 => "mp3",
+            AudioFormat::Ogg => "ogg",
+            AudioFormat::Flac => "flac",
         }
     }
 
@@ -97,8 +108,7 @@ impl Default for AudioFormat {
 
 /// Detects the audio format from file bytes.
 ///
-/// Currently supports:
-/// - WAV files (RIFF header detection)
+/// Supports WAV, OGG, FLAC, and MP3 (both ID3-tagged and raw sync-word).
 ///
 /// # Arguments
 ///
@@ -112,8 +122,19 @@ pub fn detect_format(data: &[u8]) -> Result<AudioFormat, AudioFormatError> {
     if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WAVE" {
         return Ok(AudioFormat::Wav);
     }
-
-    // TODO: Add detection for other formats (MP3, OGG, FLAC, etc.)
+    if data.len() >= 4 && &data[0..4] == b"OggS" {
+        return Ok(AudioFormat::Ogg);
+    }
+    if data.len() >= 4 && &data[0..4] == b"fLaC" {
+        return Ok(AudioFormat::Flac);
+    }
+    if data.len() >= 3 && &data[0..3] == b"ID3" {
+        return Ok(AudioFormat::Mp3);
+    }
+    // Raw MP3 sync word: 11 set bits across the first two bytes.
+    if data.len() >= 2 && data[0] == 0xFF && (data[1] & 0xE0 == 0xE0) {
+        return Ok(AudioFormat::Mp3);
+    }
 
     Err(AudioFormatError::UnknownFormat(
         "Could not detect audio format from header".to_string(),
@@ -190,6 +211,61 @@ mod tests {
         let result = detect_format(wav_header);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), AudioFormat::Wav);
+    }
+
+    #[test]
+    fn test_detect_format_ogg() {
+        let result = detect_format(b"OggS\x00\x00\x00\x00");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), AudioFormat::Ogg);
+    }
+
+    #[test]
+    fn test_detect_format_flac() {
+        let result = detect_format(b"fLaC\x00\x00\x00\x00");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), AudioFormat::Flac);
+    }
+
+    #[test]
+    fn test_detect_format_mp3_id3() {
+        let result = detect_format(b"ID3\x03\x00\x00\x00\x00");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), AudioFormat::Mp3);
+    }
+
+    #[test]
+    fn test_detect_format_mp3_sync() {
+        let result = detect_format(&[0xFF, 0xFB, 0x00, 0x00]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), AudioFormat::Mp3);
+    }
+
+    #[test]
+    fn test_detect_format_truncated() {
+        let result = detect_format(&[0xFF]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_detect_format_truncated_ogg() {
+        assert!(detect_format(b"Ogg").is_err());
+    }
+
+    #[test]
+    fn test_detect_format_truncated_flac() {
+        assert!(detect_format(b"fLa").is_err());
+    }
+
+    #[test]
+    fn test_detect_format_truncated_mp3_id3() {
+        assert!(detect_format(b"ID").is_err());
+    }
+
+    #[test]
+    fn test_detect_format_empty() {
+        let result = detect_format(b"");
+        assert!(result.is_err());
     }
 
     #[test]
