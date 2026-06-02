@@ -108,6 +108,12 @@ default = ["ort-download"]
 # JSON Schema generation for model_metadata.json
 schema = ["dep:schemars"]
 
+# Expose the `testing` module (mocks + model fixtures) to downstream crates.
+# No-op marker today (the module is currently always `pub`); it exists so
+# consumers can depend on `xybrid-core/test-util` now and stay correct once
+# the `testing` module is gated behind this feature (audit 4a).
+test-util = []
+
 # ONNX Runtime
 ort-download = ["ort/download-binaries", "ort/tls-native"]  # Desktop/macOS/iOS: download prebuilt binaries
 ort-dynamic = ["ort/load-dynamic"]                          # Android: load .so at runtime from AAR

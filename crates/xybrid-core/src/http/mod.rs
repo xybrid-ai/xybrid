@@ -17,6 +17,7 @@
 //! impl RetryableError for MyError {
 //!     fn is_retryable(&self) -> bool { true }
 //!     fn retry_after(&self) -> Option<Duration> { None }
+//!     fn circuit_open() -> Self { MyError }
 //! }
 //!
 //! let policy = RetryPolicy::default();
