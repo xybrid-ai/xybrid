@@ -561,7 +561,7 @@ impl RegistryClient {
             429 => SdkError::RateLimited {
                 retry_after_secs: rate_limit_retry_after_secs(retry_after),
             },
-            502..=504 => SdkError::NetworkError(format!(
+            502..=504 => SdkError::network(format!(
                 "Registry {} failed with status {} (server error)",
                 operation, status
             )),
