@@ -162,12 +162,7 @@ fn raw_packed_to_tensor(
                         raw.pixel_format
                     ))
                 })?;
-            let [red, green, blue] = match raw.pixel_format {
-                PixelFormat::Rgb8 => [pixel[0], pixel[1], pixel[2]],
-                PixelFormat::Rgba8 => [pixel[0], pixel[1], pixel[2]],
-                PixelFormat::Bgra8 => [pixel[2], pixel[1], pixel[0]],
-                PixelFormat::Nv12 | PixelFormat::Nv21 | PixelFormat::I420 => unreachable!(),
-            };
+            let [red, green, blue] = packed_pixel_to_rgb(raw.pixel_format, pixel);
             let red = red as f32 / 255.0;
             let green = green as f32 / 255.0;
             let blue = blue as f32 / 255.0;
@@ -282,6 +277,74 @@ fn raw_yuv_to_rgb(raw: RawImageRef<'_>) -> ExecutorResult<Vec<u8>> {
             })?;
         }
         PixelFormat::Rgb8 | PixelFormat::Rgba8 | PixelFormat::Bgra8 => unreachable!(),
+    }
+
+    Ok(rgb)
+}
+
+/// Channel-swap a single packed pixel into RGB order.
+///
+/// Shared by the tensor path ([`raw_packed_to_tensor`]) and the packed-RGB
+/// byte path ([`raw_packed_to_rgb`]) so the per-format channel ordering and
+/// alpha stripping live in exactly one place.
+#[cfg(feature = "vision")]
+#[inline]
+fn packed_pixel_to_rgb(format: PixelFormat, pixel: &[u8]) -> [u8; 3] {
+    match format {
+        PixelFormat::Rgb8 | PixelFormat::Rgba8 => [pixel[0], pixel[1], pixel[2]],
+        PixelFormat::Bgra8 => [pixel[2], pixel[1], pixel[0]],
+        PixelFormat::Nv12 | PixelFormat::Nv21 | PixelFormat::I420 => unreachable!(),
+    }
+}
+
+/// Convert any [`ImageSource::Raw`] view into a tightly-packed RGB byte buffer
+/// of exactly `width * height * 3` bytes (RGBRGB... order, no stride padding,
+/// no alpha).
+///
+/// This is the ingress point for the raw-frame mtmd path: the returned buffer
+/// is exactly the layout `mtmd_bitmap_init` expects, so camera frames feed the
+/// VLM without a per-frame JPEG encode/decode round-trip. clip (inside mtmd)
+/// performs its own resize and normalization, so the full-resolution pixels
+/// are passed through unscaled.
+///
+/// YUV formats reuse the existing BT.601/BT.709 conversion in
+/// [`raw_yuv_to_rgb`]; RGB-family formats strip row stride and alpha while
+/// honoring each plane's `pixel_stride`.
+#[cfg(feature = "vision")]
+pub fn raw_image_to_packed_rgb(raw: RawImageRef<'_>) -> ExecutorResult<Vec<u8>> {
+    match raw.pixel_format {
+        PixelFormat::Rgb8 | PixelFormat::Rgba8 | PixelFormat::Bgra8 => raw_packed_to_rgb(raw),
+        PixelFormat::Nv12 | PixelFormat::Nv21 | PixelFormat::I420 => raw_yuv_to_rgb(raw),
+    }
+}
+
+/// Strip stride/alpha from a packed RGB-family raw image into tightly-packed RGB.
+#[cfg(feature = "vision")]
+fn raw_packed_to_rgb(raw: RawImageRef<'_>) -> ExecutorResult<Vec<u8>> {
+    let plane = raw.planes.first().ok_or_else(|| {
+        AdapterError::InvalidInput(format!("{} raw image is missing plane 0", raw.pixel_format))
+    })?;
+    let width = raw.dimensions.width as usize;
+    let height = raw.dimensions.height as usize;
+    let pixel_count = width
+        .checked_mul(height)
+        .ok_or_else(|| AdapterError::InvalidInput("raw image size overflow".to_string()))?;
+    let mut rgb = Vec::with_capacity(pixel_count * 3);
+
+    for y in 0..height {
+        for x in 0..width {
+            let source_offset = sample_offset(plane, x, y)?;
+            let pixel = raw
+                .pixels
+                .get(source_offset..source_offset + plane.pixel_stride)
+                .ok_or_else(|| {
+                    AdapterError::InvalidInput(format!(
+                        "{} raw image plane 0 is out of bounds",
+                        raw.pixel_format
+                    ))
+                })?;
+            rgb.extend_from_slice(&packed_pixel_to_rgb(raw.pixel_format, pixel));
+        }
     }
 
     Ok(rgb)
@@ -2064,5 +2127,226 @@ mod tests {
         let result = resize_step(input, 20, 20, &InterpolationMethod::Nearest);
 
         assert!(result.is_err());
+    }
+
+    #[cfg(feature = "vision")]
+    fn bt601_full_color() -> YuvColorInfo {
+        YuvColorInfo {
+            matrix: YuvColorMatrix::Bt601,
+            range: YuvColorRange::Full,
+        }
+    }
+
+    /// 2x2 packed RGB-family raw envelope with an intentionally padded row
+    /// stride (one trailing byte per row) so the packed converter must honor
+    /// `row_stride > width * pixel_stride`.
+    #[cfg(feature = "vision")]
+    fn padded_packed_raw_envelope(format: PixelFormat, rows: [[u8; 8]; 2]) -> Envelope {
+        let pixel_stride = match format {
+            PixelFormat::Rgb8 => 3,
+            PixelFormat::Rgba8 | PixelFormat::Bgra8 => 4,
+            PixelFormat::Nv12 | PixelFormat::Nv21 | PixelFormat::I420 => unreachable!(),
+        };
+        let row_stride = pixel_stride * 2 + 1; // pad each row by one byte
+        let mut pixels = Vec::new();
+        for row in rows {
+            pixels.extend_from_slice(&row[..pixel_stride * 2]);
+            pixels.push(0xAA); // padding byte the converter must skip
+        }
+        Envelope::image_raw(
+            pixels,
+            format,
+            2,
+            2,
+            vec![ImagePlane {
+                offset: 0,
+                row_stride,
+                pixel_stride,
+                width: 2,
+                height: 2,
+            }],
+            None,
+        )
+        .unwrap()
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn raw_image_to_packed_rgb_strips_stride_for_rgb8() {
+        // Two rows of two RGB pixels, each row padded by one trailing byte.
+        let rows = [
+            [255, 0, 0, 0, 255, 0, 0, 0], // (255,0,0) (0,255,0)
+            [0, 0, 255, 9, 8, 7, 0, 0],   // (0,0,255) (9,8,7)
+        ];
+        let envelope = padded_packed_raw_envelope(PixelFormat::Rgb8, rows);
+        let raw = envelope.as_raw_image().unwrap();
+
+        let rgb = raw_image_to_packed_rgb(raw).unwrap();
+
+        assert_eq!(rgb.len(), 2 * 2 * 3);
+        assert_eq!(&rgb[0..3], &[255, 0, 0]);
+        assert_eq!(&rgb[3..6], &[0, 255, 0]);
+        assert_eq!(&rgb[6..9], &[0, 0, 255]);
+        assert_eq!(&rgb[9..12], &[9, 8, 7]);
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn raw_image_to_packed_rgb_swaps_channels_and_strips_alpha_for_bgra8() {
+        // BGRA pixels: stored B,G,R,A; expect channel-swapped RGB with alpha dropped.
+        let rows = [
+            [0, 0, 255, 99, 0, 255, 0, 88], // -> (255,0,0) (0,255,0)
+            [255, 0, 0, 77, 7, 8, 9, 66],   // -> (0,0,255) (9,8,7)
+        ];
+        let envelope = padded_packed_raw_envelope(PixelFormat::Bgra8, rows);
+        let raw = envelope.as_raw_image().unwrap();
+
+        let rgb = raw_image_to_packed_rgb(raw).unwrap();
+
+        assert_eq!(rgb.len(), 2 * 2 * 3);
+        assert_eq!(&rgb[0..3], &[255, 0, 0]);
+        assert_eq!(&rgb[3..6], &[0, 255, 0]);
+        assert_eq!(&rgb[6..9], &[0, 0, 255]);
+        assert_eq!(&rgb[9..12], &[9, 8, 7]);
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn raw_image_to_packed_rgb_decodes_neutral_gray_yuv_exactly() {
+        // Y=U=V=128 is neutral gray; BT.601 full-range maps it back to (128,128,128)
+        // for every 4:2:0 layout. Chroma planes carry pixel_stride 2 (NV12/NV21).
+        for format in [PixelFormat::Nv12, PixelFormat::Nv21, PixelFormat::I420] {
+            let (pixels, planes) = match format {
+                PixelFormat::Nv12 | PixelFormat::Nv21 => (
+                    vec![128, 128, 128, 128, 128, 128],
+                    vec![
+                        ImagePlane {
+                            offset: 0,
+                            row_stride: 2,
+                            pixel_stride: 1,
+                            width: 2,
+                            height: 2,
+                        },
+                        ImagePlane {
+                            offset: 4,
+                            row_stride: 2,
+                            pixel_stride: 2,
+                            width: 1,
+                            height: 1,
+                        },
+                    ],
+                ),
+                PixelFormat::I420 => (
+                    vec![128, 128, 128, 128, 128, 128],
+                    vec![
+                        ImagePlane {
+                            offset: 0,
+                            row_stride: 2,
+                            pixel_stride: 1,
+                            width: 2,
+                            height: 2,
+                        },
+                        ImagePlane {
+                            offset: 4,
+                            row_stride: 1,
+                            pixel_stride: 1,
+                            width: 1,
+                            height: 1,
+                        },
+                        ImagePlane {
+                            offset: 5,
+                            row_stride: 1,
+                            pixel_stride: 1,
+                            width: 1,
+                            height: 1,
+                        },
+                    ],
+                ),
+                _ => unreachable!(),
+            };
+            let envelope =
+                Envelope::image_raw(pixels, format, 2, 2, planes, Some(bt601_full_color())).unwrap();
+            let raw = envelope.as_raw_image().unwrap();
+
+            let rgb = raw_image_to_packed_rgb(raw).unwrap();
+
+            assert_eq!(rgb.len(), 2 * 2 * 3, "{format} packed length");
+            for (i, value) in rgb.iter().enumerate() {
+                assert!(
+                    value.abs_diff(128) <= 1,
+                    "{format} byte {i} expected ~128, got {value}"
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn raw_image_to_packed_rgb_applies_bt601_full_range_chroma() {
+        // Y=128, U=128, V=200 (NV12 stores U then V). BT.601 full-range:
+        //   R = Y + 1.402 * (V-128)          = 128 + 1.402*72  ≈ 229
+        //   G = Y - 0.344*(U-128) - 0.714*(V-128) ≈ 128 - 51.4  ≈ 77
+        //   B = Y + 1.772 * (U-128)          = 128
+        let pixels = vec![128, 128, 128, 128, 128, 200];
+        let planes = vec![
+            ImagePlane {
+                offset: 0,
+                row_stride: 2,
+                pixel_stride: 1,
+                width: 2,
+                height: 2,
+            },
+            ImagePlane {
+                offset: 4,
+                row_stride: 2,
+                pixel_stride: 2,
+                width: 1,
+                height: 1,
+            },
+        ];
+        let envelope =
+            Envelope::image_raw(pixels, PixelFormat::Nv12, 2, 2, planes, Some(bt601_full_color()))
+                .unwrap();
+        let raw = envelope.as_raw_image().unwrap();
+
+        let rgb = raw_image_to_packed_rgb(raw).unwrap();
+
+        assert_eq!(rgb.len(), 2 * 2 * 3);
+        // Every pixel shares the single chroma sample.
+        for pixel in rgb.chunks_exact(3) {
+            assert!(
+                pixel[0].abs_diff(229) <= 2,
+                "R expected ~229, got {}",
+                pixel[0]
+            );
+            assert!(pixel[1].abs_diff(77) <= 2, "G expected ~77, got {}", pixel[1]);
+            assert!(
+                pixel[2].abs_diff(128) <= 2,
+                "B expected ~128, got {}",
+                pixel[2]
+            );
+        }
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn raw_image_to_packed_rgb_matches_tensor_path_for_packed_sources() {
+        // The packed-RGB byte path must agree with the tensor path's per-pixel
+        // channel handling for the shared RGB-family formats.
+        let cases = [
+            (PixelFormat::Rgb8, vec![255, 0, 0, 0, 128, 255]),
+            (PixelFormat::Rgba8, vec![255, 0, 0, 99, 0, 128, 255, 100]),
+            (PixelFormat::Bgra8, vec![0, 0, 255, 99, 255, 128, 0, 100]),
+        ];
+
+        for (format, pixels) in cases {
+            let envelope = packed_raw_envelope(format, 2, 1, pixels);
+            let raw = envelope.as_raw_image().unwrap();
+            let rgb = raw_image_to_packed_rgb(raw).unwrap();
+
+            assert_eq!(rgb.len(), 2 * 3, "{format} packed length");
+            assert_eq!(&rgb[0..3], &[255, 0, 0], "{format} pixel 0");
+            assert_eq!(&rgb[3..6], &[0, 128, 255], "{format} pixel 1");
+        }
     }
 }

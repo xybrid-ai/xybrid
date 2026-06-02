@@ -130,10 +130,50 @@ struct MtmdContextState {
     _context: xybrid_llama::MtmdContext,
 }
 
+/// Bitmap payload extracted for one image part in a multimodal prompt.
+///
+/// `Encoded` carries container bytes that mtmd decodes itself (the original,
+/// unchanged single-image path). `RawRgb` carries tightly-packed RGB pixels
+/// (`width * height * 3` bytes) converted from an `ImageSource::Raw` camera
+/// frame, so the raw-frame path skips a per-frame JPEG round-trip.
+#[cfg(feature = "llm-llamacpp-vision")]
+#[derive(Debug)]
+enum MtmdPromptPayload {
+    Encoded {
+        bytes: Vec<u8>,
+    },
+    RawRgb {
+        rgb: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+}
+
 #[cfg(feature = "llm-llamacpp-vision")]
 struct MtmdPromptImage {
-    bytes: Vec<u8>,
+    payload: MtmdPromptPayload,
     local_id: String,
+}
+
+#[cfg(feature = "llm-llamacpp-vision")]
+impl MtmdPromptImage {
+    /// Build the mtmd bitmap for this image, selecting the encoded or raw
+    /// constructor based on how the source arrived.
+    fn build_bitmap(
+        &self,
+        mtmd_context: &xybrid_llama::MtmdContext,
+    ) -> LlmResult<xybrid_llama::MtmdBitmap> {
+        let mut bitmap = match &self.payload {
+            MtmdPromptPayload::Encoded { bytes } => {
+                xybrid_llama::MtmdBitmap::from_encoded_bytes(mtmd_context, bytes)?
+            }
+            MtmdPromptPayload::RawRgb { rgb, width, height } => {
+                xybrid_llama::MtmdBitmap::from_raw_rgb(mtmd_context, *width, *height, rgb)?
+            }
+        };
+        bitmap.set_id(&self.local_id)?;
+        Ok(bitmap)
+    }
 }
 
 #[cfg(feature = "llm-llamacpp-vision")]
@@ -160,13 +200,28 @@ fn mtmd_prompt_inputs_from_messages(
             let MultimodalMessagePart::Image(image) = part else {
                 continue;
             };
-            let Some((bytes, _format)) = image.source.as_encoded() else {
+            let payload = if let Some((bytes, _format)) = image.source.as_encoded() {
+                // Encoded path (unchanged): mtmd decodes the container bytes.
+                MtmdPromptPayload::Encoded {
+                    bytes: bytes.to_vec(),
+                }
+            } else if let Some(raw) = image.source.as_raw() {
+                // Raw path: strip stride/alpha (and convert YUV→RGB) into the
+                // tightly-packed RGB layout mtmd_bitmap_init expects, skipping
+                // the per-frame JPEG round-trip.
+                let rgb = crate::execution::preprocessing::image::raw_image_to_packed_rgb(raw)?;
+                MtmdPromptPayload::RawRgb {
+                    rgb,
+                    width: raw.dimensions.width,
+                    height: raw.dimensions.height,
+                }
+            } else {
                 return Err(AdapterError::InvalidInput(
-                    "llama.cpp mtmd currently requires encoded image bytes".to_string(),
+                    "llama.cpp mtmd requires encoded or raw image bytes".to_string(),
                 ));
             };
             images.push(MtmdPromptImage {
-                bytes: bytes.to_vec(),
+                payload,
                 local_id: image.local_id.clone(),
             });
         }
@@ -1011,16 +1066,11 @@ impl LlmBackend for LlamaCppBackend {
             let (_loaded, (output_tokens, stopped_by_callback, fields, image_preprocess_ms)) = self
                 .with_mtmd_context_loaded(model, &mmproj_path, |mtmd_context| {
                     let image_preprocess_started = std::time::Instant::now();
-                    let mut bitmaps = inputs
+                    let bitmaps = inputs
                         .images
                         .iter()
-                        .map(|image| {
-                            xybrid_llama::MtmdBitmap::from_encoded_bytes(mtmd_context, &image.bytes)
-                        })
+                        .map(|image| image.build_bitmap(mtmd_context))
                         .collect::<Result<Vec<_>, _>>()?;
-                    for (bitmap, image) in bitmaps.iter_mut().zip(inputs.images.iter()) {
-                        bitmap.set_id(&image.local_id)?;
-                    }
 
                     let chunks = xybrid_llama::MtmdInputChunks::tokenize(
                         mtmd_context,
@@ -1165,16 +1215,11 @@ impl LlmBackend for LlamaCppBackend {
                 ),
             ) = self.with_mtmd_context_loaded(model, &mmproj_path, |mtmd_context| {
                 let image_preprocess_started = std::time::Instant::now();
-                let mut bitmaps = inputs
+                let bitmaps = inputs
                     .images
                     .iter()
-                    .map(|image| {
-                        xybrid_llama::MtmdBitmap::from_encoded_bytes(mtmd_context, &image.bytes)
-                    })
+                    .map(|image| image.build_bitmap(mtmd_context))
                     .collect::<Result<Vec<_>, _>>()?;
-                for (bitmap, image) in bitmaps.iter_mut().zip(inputs.images.iter()) {
-                    bitmap.set_id(&image.local_id)?;
-                }
 
                 let chunks = xybrid_llama::MtmdInputChunks::tokenize(
                     mtmd_context,
@@ -1500,7 +1545,55 @@ mod tests {
         assert_eq!(inputs.images.len(), 2);
         assert_eq!(inputs.images[0].local_id, "first-image");
         assert_eq!(inputs.images[1].local_id, "second-image");
-        assert!(inputs.images.iter().all(|image| !image.bytes.is_empty()));
+        // Encoded sources stay on the encoded payload path (byte-for-byte
+        // unchanged); each carries non-empty container bytes.
+        assert!(inputs.images.iter().all(|image| matches!(
+            &image.payload,
+            MtmdPromptPayload::Encoded { bytes } if !bytes.is_empty()
+        )));
+    }
+
+    #[test]
+    fn mtmd_prompt_inputs_route_raw_frames_to_packed_rgb() {
+        use crate::ir::{Envelope, EnvelopeKind, MessageRole, PixelFormat};
+        use crate::runtime_adapter::MultimodalChatMessage;
+
+        // 2x1 raw RGBA frame -> tightly-packed RGB (alpha + nothing else stripped).
+        let raw = Envelope::image_raw(
+            vec![255, 0, 0, 200, 0, 128, 255, 210],
+            PixelFormat::Rgba8,
+            2,
+            1,
+            vec![crate::ir::ImagePlane {
+                offset: 0,
+                row_stride: 8,
+                pixel_stride: 4,
+                width: 2,
+                height: 1,
+            }],
+            None,
+        )
+        .unwrap()
+        .with_local_id("raw-frame");
+        let message = Envelope::new(EnvelopeKind::MultiPart(vec![
+            Envelope::new(EnvelopeKind::Text("describe ".to_string())),
+            raw,
+        ]))
+        .with_role(MessageRole::User);
+        let messages = vec![MultimodalChatMessage::from_envelope(&message).unwrap()];
+
+        let inputs = mtmd_prompt_inputs_from_messages(&messages).unwrap();
+
+        assert_eq!(inputs.images.len(), 1);
+        assert_eq!(inputs.images[0].local_id, "raw-frame");
+        match &inputs.images[0].payload {
+            MtmdPromptPayload::RawRgb { rgb, width, height } => {
+                assert_eq!(*width, 2);
+                assert_eq!(*height, 1);
+                assert_eq!(rgb.as_slice(), &[255, 0, 0, 0, 128, 255]);
+            }
+            other => panic!("expected packed RGB payload, got {other:?}"),
+        }
     }
 
     #[test]

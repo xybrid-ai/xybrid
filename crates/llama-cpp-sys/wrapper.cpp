@@ -8,6 +8,7 @@
  * - mtmd_init_from_file_c
  * - mtmd_free_c
  * - mtmd_bitmap_init_from_buf_c
+ * - mtmd_bitmap_init_rgb_c
  * - mtmd_bitmap_free_c
  * - mtmd_bitmap_get_nx_c
  * - mtmd_bitmap_get_ny_c
@@ -175,6 +176,16 @@ mtmd_bitmap* mtmd_bitmap_init_from_buf_c(
     size_t len
 ) {
     return mtmd_helper_bitmap_init_from_buf(ctx, buf, len);
+}
+
+mtmd_bitmap* mtmd_bitmap_init_rgb_c(
+    uint32_t nx,
+    uint32_t ny,
+    const unsigned char* data
+) {
+    // Upstream requires `data` to be exactly nx * ny * 3 packed RGB bytes;
+    // the safe wrapper guarantees that before crossing the FFI boundary.
+    return mtmd_bitmap_init(nx, ny, data);
 }
 
 void mtmd_bitmap_free_c(mtmd_bitmap* bitmap) {

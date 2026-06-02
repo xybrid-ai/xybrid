@@ -123,6 +123,58 @@ impl MtmdBitmap {
         Ok(Self { ptr })
     }
 
+    /// Build an mtmd bitmap directly from tightly-packed RGB pixels.
+    ///
+    /// `rgb` must contain exactly `width * height * 3` bytes in RGBRGB...
+    /// order (no row-stride padding, no alpha). This is the raw-frame path
+    /// that lets pre-decoded camera frames skip a per-frame JPEG round-trip;
+    /// clip (inside mtmd) still does its own resize and normalization, so
+    /// callers pass full-resolution pixels.
+    ///
+    /// The mtmd packed-RGB constructor does not consult the projector
+    /// context, but `_ctx` is accepted to mirror [`Self::from_encoded_bytes`]
+    /// and keep call sites uniform.
+    pub fn from_raw_rgb(
+        _ctx: &MtmdContext,
+        width: u32,
+        height: u32,
+        rgb: &[u8],
+    ) -> LlamaResult<Self> {
+        Self::from_raw_rgb_inner(width, height, rgb)
+    }
+
+    fn from_raw_rgb_inner(width: u32, height: u32, rgb: &[u8]) -> LlamaResult<Self> {
+        if width == 0 || height == 0 {
+            return Err(LlamaError::InvalidInput(
+                "raw RGB bitmap dimensions must be non-zero".to_string(),
+            ));
+        }
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|pixels| pixels.checked_mul(3))
+            .ok_or_else(|| {
+                LlamaError::InvalidInput("raw RGB bitmap size overflow".to_string())
+            })?;
+        if rgb.len() != expected {
+            return Err(LlamaError::InvalidInput(format!(
+                "raw RGB bitmap requires exactly {expected} packed bytes for {width}x{height}, got {}",
+                rgb.len()
+            )));
+        }
+
+        // SAFETY: rgb is exactly width * height * 3 tightly-packed RGB bytes,
+        // matching the contract of the packed-RGB ctor; the pointer is valid
+        // for that length for the duration of the call.
+        let ptr = unsafe { ffi::mtmd_bitmap_init_rgb(width, height, rgb.as_ptr()) };
+        if ptr.is_null() {
+            return Err(LlamaError::InvalidInput(
+                "mtmd failed to build a bitmap from packed RGB pixels".to_string(),
+            ));
+        }
+
+        Ok(Self { ptr })
+    }
+
     pub fn width(&self) -> u32 {
         // SAFETY: self.ptr is live.
         unsafe { ffi::mtmd_bitmap_get_nx(self.ptr) }
@@ -396,4 +448,65 @@ pub fn mtmd_helper_eval_chunks(
         )));
     }
     Ok(new_n_past)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Length validation runs before any FFI call, so a wrong-sized buffer is
+    /// rejected with a null (test-stub) context without crossing the boundary.
+    #[test]
+    fn from_raw_rgb_rejects_wrong_length_buffer() {
+        let ctx = MtmdContext::test_stub();
+        // 4x4 RGB needs 48 bytes; supply 47 to force the length guard.
+        let rgb = vec![0_u8; 47];
+        match MtmdBitmap::from_raw_rgb(&ctx, 4, 4, &rgb) {
+            Err(LlamaError::InvalidInput(message)) => {
+                assert!(
+                    message.contains("48") && message.contains("47"),
+                    "error should report expected/actual byte counts, got: {message}"
+                );
+            }
+            Err(other) => panic!("expected InvalidInput, got {other:?}"),
+            Ok(_) => panic!("undersized packed RGB buffer must be rejected"),
+        }
+    }
+
+    /// Zero dimensions are rejected before the size computation and FFI call.
+    #[test]
+    fn from_raw_rgb_rejects_zero_dimensions() {
+        let ctx = MtmdContext::test_stub();
+        assert!(matches!(
+            MtmdBitmap::from_raw_rgb(&ctx, 0, 4, &[]),
+            Err(LlamaError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            MtmdBitmap::from_raw_rgb(&ctx, 4, 0, &[]),
+            Err(LlamaError::InvalidInput(_))
+        ));
+    }
+
+    /// Build a real mtmd bitmap from a small synthetic packed-RGB buffer and
+    /// confirm the dimensions/byte-count accessors agree. This exercises the
+    /// `mtmd_bitmap_init_rgb_c` shim end to end, so it only runs when the
+    /// llama.cpp runtime is linked (`vision` feature). The packed-RGB ctor is
+    /// context-free, so a null test-stub context is sufficient — no mmproj.
+    #[cfg(feature = "vision")]
+    #[test]
+    fn from_raw_rgb_constructs_bitmap_with_expected_geometry() {
+        let ctx = MtmdContext::test_stub();
+        let width = 4_u32;
+        let height = 4_u32;
+        let rgb = (0..(width * height * 3))
+            .map(|i| (i % 256) as u8)
+            .collect::<Vec<u8>>();
+
+        let bitmap = MtmdBitmap::from_raw_rgb(&ctx, width, height, &rgb)
+            .expect("packed RGB bitmap constructs from a valid buffer");
+
+        assert_eq!(bitmap.width(), width);
+        assert_eq!(bitmap.height(), height);
+        assert_eq!(bitmap.n_bytes(), (width * height * 3) as usize);
+    }
 }

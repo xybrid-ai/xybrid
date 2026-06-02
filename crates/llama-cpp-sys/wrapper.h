@@ -221,6 +221,14 @@ mtmd_bitmap* mtmd_bitmap_init_from_buf_c(
     mtmd_context* ctx,
     const unsigned char* buf,
     size_t len);
+/* Build an mtmd image bitmap directly from tightly-packed RGB pixels.
+ * `data` must point to exactly nx * ny * 3 bytes in RGBRGB... order
+ * (no row-stride padding, no alpha). Wraps the packed-RGB ctor so raw
+ * camera frames skip the per-frame JPEG encode/decode round-trip. */
+mtmd_bitmap* mtmd_bitmap_init_rgb_c(
+    uint32_t nx,
+    uint32_t ny,
+    const unsigned char* data);
 void mtmd_bitmap_free_c(mtmd_bitmap* bitmap);
 uint32_t mtmd_bitmap_get_nx_c(const mtmd_bitmap* bitmap);
 uint32_t mtmd_bitmap_get_ny_c(const mtmd_bitmap* bitmap);
