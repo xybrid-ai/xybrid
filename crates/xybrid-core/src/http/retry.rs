@@ -155,6 +155,15 @@ pub trait RetryableError {
     ///
     /// This is typically parsed from the `Retry-After` HTTP header.
     fn retry_after(&self) -> Option<Duration>;
+
+    /// Construct the error to report when a circuit breaker stayed open for the
+    /// entire attempt budget, so no real attempt ever ran.
+    ///
+    /// [`with_retry`] returns this — rather than panicking — when every
+    /// iteration is skipped because the circuit is open.
+    fn circuit_open() -> Self
+    where
+        Self: Sized;
 }
 
 /// Execute an operation with automatic retry on failure.
@@ -181,6 +190,7 @@ pub trait RetryableError {
 /// impl RetryableError for MyError {
 ///     fn is_retryable(&self) -> bool { true }
 ///     fn retry_after(&self) -> Option<Duration> { None }
+///     fn circuit_open() -> Self { MyError }
 /// }
 ///
 /// # fn make_http_request() -> Result<String, MyError> { Ok("ok".into()) }
@@ -255,9 +265,11 @@ where
         }
     }
 
-    // All attempts exhausted
+    // All attempts exhausted. `last_error` is `None` only if every iteration
+    // was skipped by an open circuit breaker (no operation ever ran) — report
+    // that as a circuit-open error instead of panicking.
     RetryResult::Exhausted {
-        last_error: last_error.expect("at least one attempt should have been made"),
+        last_error: last_error.unwrap_or_else(E::circuit_open),
         attempts: policy.max_attempts,
     }
 }
@@ -306,6 +318,43 @@ mod tests {
         fn retry_after(&self) -> Option<Duration> {
             self.retry_after
         }
+
+        fn circuit_open() -> Self {
+            TestError {
+                retryable: false,
+                retry_after: None,
+            }
+        }
+    }
+
+    #[test]
+    fn circuit_open_for_all_attempts_returns_error_not_panic() {
+        use crate::http::CircuitConfig;
+
+        // Open the breaker by exceeding its failure threshold up front.
+        let breaker = CircuitBreaker::new(CircuitConfig::default());
+        for _ in 0..10 {
+            breaker.record_failure();
+        }
+        assert!(breaker.is_open(), "breaker should be open before the call");
+
+        // Short attempt budget so the per-skip 100ms wait stays quick.
+        let policy = RetryPolicy {
+            max_attempts: 2,
+            ..RetryPolicy::default()
+        };
+
+        let mut calls = 0;
+        let result: RetryResult<&str, TestError> = with_retry(&policy, Some(&breaker), || {
+            calls += 1;
+            Ok("unreachable while the circuit is open")
+        });
+
+        // The operation never ran, and we got a graceful error — previously
+        // this path panicked via `last_error.expect(...)`.
+        assert_eq!(calls, 0, "operation must not run while the circuit is open");
+        assert!(matches!(result, RetryResult::Exhausted { .. }));
+        assert!(result.into_result().is_err());
     }
 
     #[test]

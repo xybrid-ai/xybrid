@@ -258,6 +258,13 @@ impl xybrid_core::http::RetryableError for SdkError {
     fn retry_after(&self) -> Option<std::time::Duration> {
         SdkError::retry_after(self)
     }
+
+    fn circuit_open() -> Self {
+        SdkError::CircuitOpen(
+            "circuit breaker stayed open for the entire retry window; no request was sent"
+                .to_string(),
+        )
+    }
 }
 
 fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
