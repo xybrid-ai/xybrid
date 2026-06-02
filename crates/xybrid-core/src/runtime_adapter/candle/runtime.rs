@@ -102,7 +102,19 @@ impl ModelRuntime for CandleRuntime {
         // Load model
         // Determine configuration (can infer from path or default)
         // For now, default to Tiny/English like TemplateExecutor, or read config
-        let device = select_device(DeviceSelection::Auto)
+        //
+        // iOS quirk: candle-metal's IOGPUMetalBuffer path uses
+        // `MTLStorageModeManaged` (macOS-only) when wrapping the model's
+        // weight tensors, which trips an `Invalid storageMode 1` assertion on
+        // physical iOS devices (reproducible on iPadOS 26.4.2 / iOS 26.5).
+        // Until candle-metal is fixed upstream, prefer CPU on iOS — Whisper
+        // Tiny still runs comfortably in real-time on Apple Silicon CPU.
+        let preference = if cfg!(target_os = "ios") {
+            DeviceSelection::Cpu
+        } else {
+            DeviceSelection::Auto
+        };
+        let device = select_device(preference)
             .map_err(|e| AdapterError::RuntimeError(format!("Device selection failed: {}", e)))?;
 
         // Try to load

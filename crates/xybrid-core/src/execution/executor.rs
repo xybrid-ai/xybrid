@@ -8,14 +8,21 @@
 //!
 //! The executor supports dependency injection for testability:
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() {
+//! use std::collections::HashMap;
+//! use xybrid_core::execution::TemplateExecutor;
+//! use xybrid_core::runtime_adapter::ModelRuntime;
+//! use xybrid_core::testing::mocks::MockRuntime;
+//!
 //! // Default: uses ONNX (and Candle if feature-enabled)
 //! let executor = TemplateExecutor::new("models/");
 //!
 //! // Custom runtime injection for testing:
-//! let runtimes = HashMap::new();
-//! runtimes.insert("mock".to_string(), Box::new(MockRuntime::new()));
+//! let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
+//! runtimes.insert("mock".to_string(), Box::new(MockRuntime::with_text("hi")));
 //! let executor = TemplateExecutor::with_runtimes("models/", runtimes);
+//! # }
 //! ```
 
 use log::{debug, info, warn};
@@ -134,16 +141,27 @@ use super::voice_loader::TtsVoiceLoader;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use std::collections::HashMap;
+/// use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
+/// use xybrid_core::ir::{Envelope, EnvelopeKind};
+/// use xybrid_core::runtime_adapter::ModelRuntime;
+/// use xybrid_core::testing::mocks::MockRuntime;
+///
+/// # let metadata: ModelMetadata = unimplemented!();
+/// # let input = Envelope::new(EnvelopeKind::Text("hi".into()));
 /// // Default usage (recommended)
 /// let mut executor = TemplateExecutor::new("models/whisper");
-/// let output = executor.execute(&metadata, &input)?;
+/// let output = executor.execute(&metadata, &input, None)?;
 ///
 /// // Testing with mock runtime
-/// use std::collections::HashMap;
 /// let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
-/// runtimes.insert("mock".to_string(), Box::new(MockRuntime::new()));
+/// runtimes.insert("mock".to_string(), Box::new(MockRuntime::with_text("hi")));
 /// let executor = TemplateExecutor::with_runtimes("models/", runtimes);
+/// # let _ = (output, executor);
+/// # Ok(())
+/// # }
 /// ```
 pub struct TemplateExecutor {
     /// Configured runtimes (e.g., "onnx", "candle")
@@ -191,14 +209,18 @@ impl TemplateExecutor {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() {
     /// use std::collections::HashMap;
+    /// use xybrid_core::execution::TemplateExecutor;
     /// use xybrid_core::runtime_adapter::ModelRuntime;
+    /// use xybrid_core::testing::mocks::MockRuntime;
     ///
     /// // Inject a mock runtime for testing
     /// let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
-    /// runtimes.insert("onnx".to_string(), Box::new(MockRuntime::new()));
+    /// runtimes.insert("onnx".to_string(), Box::new(MockRuntime::with_text("hi")));
     /// let executor = TemplateExecutor::with_runtimes("models/", runtimes);
+    /// # }
     /// ```
     pub fn with_runtimes(
         base_path: &str,
@@ -537,28 +559,41 @@ impl TemplateExecutor {
     /// The input is automatically appended to the context when building the prompt.
     /// Push both input and result to context **after** execution for the next turn:
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
+    /// # use xybrid_core::conversation::ConversationContext;
+    /// # use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
+    /// # let metadata: ModelMetadata = unimplemented!();
+    /// # let mut executor = TemplateExecutor::new("models/");
+    /// # let mut ctx = ConversationContext::new();
     /// // CORRECT: Push AFTER execution
     /// let input = Envelope::new(EnvelopeKind::Text("Hello".into()))
     ///     .with_role(MessageRole::User);
-    /// let result = executor.execute_with_context(&metadata, &input, &ctx)?;
-    /// ctx.push(input);   // Push for next turn
+    /// let result = executor.execute_with_context(&metadata, &input, &ctx, None)?;
+    /// ctx.push(input.clone());   // Push for next turn
     /// ctx.push(result);  // Push for next turn
     ///
     /// // WRONG: Pushing before causes duplicate messages!
     /// ctx.push(input.clone());  // DON'T DO THIS
-    /// let result = executor.execute_with_context(&metadata, &input, &ctx)?;
+    /// let result = executor.execute_with_context(&metadata, &input, &ctx, None)?;
+    /// # let _ = result;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// A runtime warning is logged if the input is already in context (detected by local_id).
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// use xybrid_core::execution::TemplateExecutor;
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
     /// use xybrid_core::conversation::ConversationContext;
     /// use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
     ///
+    /// # let metadata: ModelMetadata = unimplemented!();
+    /// # let mut executor = TemplateExecutor::new("models/");
     /// let mut ctx = ConversationContext::new()
     ///     .with_system(Envelope::new(EnvelopeKind::Text("You are helpful.".into()))
     ///         .with_role(MessageRole::System));
@@ -573,12 +608,14 @@ impl TemplateExecutor {
     /// let input = Envelope::new(EnvelopeKind::Text("How are you?".into()))
     ///     .with_role(MessageRole::User);
     ///
-    /// let result = executor.execute_with_context(&metadata, &input, &ctx)?;
+    /// let result = executor.execute_with_context(&metadata, &input, &ctx, None)?;
     /// assert!(result.is_assistant_message());
     ///
     /// // Update context for next turn
     /// ctx.push(input);
     /// ctx.push(result);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn execute_with_context(
         &mut self,
@@ -724,12 +761,21 @@ impl TemplateExecutor {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use std::io::Write;
+    /// # use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
+    /// # use xybrid_core::ir::{Envelope, EnvelopeKind};
+    /// # let metadata: ModelMetadata = unimplemented!();
+    /// # let input = Envelope::new(EnvelopeKind::Text("hi".into()));
+    /// # let mut executor = TemplateExecutor::new("models/");
     /// executor.execute_streaming(&metadata, &input, Box::new(|token| {
     ///     print!("{}", token.token);
-    ///     std::io::stdout().flush()?;
+    ///     std::io::stdout().flush().ok();
     ///     Ok(())
-    /// }))?;
+    /// }), None)?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn execute_streaming(
         &mut self,
@@ -821,15 +867,25 @@ impl TemplateExecutor {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use std::io::Write;
+    /// # use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
+    /// # use xybrid_core::conversation::ConversationContext;
+    /// # use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
+    /// # let metadata: ModelMetadata = unimplemented!();
+    /// # let input = Envelope::new(EnvelopeKind::Text("hi".into()));
+    /// # let mut executor = TemplateExecutor::new("models/");
     /// let mut ctx = ConversationContext::new();
     /// ctx.push(Envelope::new(EnvelopeKind::Text("Hello!".into())).with_role(MessageRole::User));
     ///
     /// executor.execute_streaming_with_context(&metadata, &input, &ctx, Box::new(|token| {
     ///     print!("{}", token.token);
-    ///     std::io::stdout().flush()?;
+    ///     std::io::stdout().flush().ok();
     ///     Ok(())
-    /// }))?;
+    /// }), None)?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn execute_streaming_with_context(
         &mut self,

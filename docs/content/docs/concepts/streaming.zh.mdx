@@ -89,6 +89,30 @@ string response = model.RunStreamingText("Tell me a story.", token =>
 
 ---
 
+## 故障排查
+
+### 显示 llama.cpp C++ 日志
+
+当排查模型加载失败、流式输出异常或其他后端问题时，可以在启动进程前设置环境变量 `XYBRID_LLAMACPP_VERBOSITY`。该变量会提升 llama.cpp 内部 C++ 日志器的详细等级（默认在普通日志级别下被抑制）。
+
+| 值 | 含义 |
+|-------|---------|
+| `0` | 静默（不输出 llama.cpp 日志）|
+| `1` | 仅错误 |
+| `2` | 警告和错误 |
+| `3` | 信息、警告和错误 |
+| `4` | 全部调试输出（所有库日志）|
+
+调用示例：
+
+```bash
+XYBRID_LLAMACPP_VERBOSITY=4 ./my-xybrid-app
+```
+
+排查模型加载失败时建议使用 `4`：它会展示 Rust 层错误所包装的底层 llama.cpp 诊断信息。该变量仅在 llama.cpp 后端初始化时读取一次，所以请在启动进程之前设置。自 `v0.1.0-beta5` 起可用。
+
+---
+
 ## 实时音频流式输出（规划中）
 
 基于分块 Whisper 推理的实时音频转录（含部分结果输出）已列入未来版本计划，将支持：

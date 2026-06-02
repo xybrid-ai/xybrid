@@ -13,6 +13,168 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.1] - 2026-05-30
+
+First patch on the 0.1.0 line. Headline is the new `Xybrid.init()` entry point —
+anonymous-by-default telemetry wired up uniformly across every binding — plus a
+round of FFI soundness/safety hardening across the C ABI.
+
+### Added
+
+- **`Xybrid.init()` builder with anonymous-by-default telemetry** (#188): a single
+  SDK entry point that starts telemetry from an API key, anonymous unless configured
+  otherwise. Brought to every binding in lockstep: Swift `Xybrid.initialize()` (#196),
+  Kotlin `Xybrid.init()` (#201), Unity `XybridClient.Initialize()` (#202), and the
+  Flutter bundled `init()` (#195, which also marks the old `initTelemetry` legacy).
+- **Error retryability across bindings**: inherent `SdkError::is_retryable` /
+  `retry_after` (#198), surfaced to Swift and Kotlin through UniFFI (#200).
+- **Typed `XybridOutputType` enum** for the result output kind in the C FFI (#194).
+- **Telemetry stamps `sdk_version` and `binding`** on every `PlatformEvent` (#183),
+  so events are attributable to the SDK build and language binding that emitted them.
+
+### Changed
+
+- **SDK**: one shared blocking body backs pipeline `run` / `run_async` (#210);
+  platform detection deduplicated to a single `cfg` ladder (#206).
+- **FFI**: handle-lifecycle helpers consolidated behind a macro (#192).
+- **Docs**: READMEs and reference docs aligned with the bundled `init()` telemetry
+  (#204); the Flutter example reads `XYBRID_API_KEY` at init (#207); SAFETY comments
+  added to every `llama_cpp` unsafe block and impl (#191).
+- **CI**: workflow token permissions scoped to least privilege (#211); native build
+  workflows skipped on markdown-only changes (#208); docs deploy only when `docs/`
+  changes (#186); apple release-prep jobs parallelized, NDK cached (#184); verify-release
+  SPM + Flutter version parsing tightened (#182).
+
+### Fixed
+
+- **Redact Xybrid's own api-key prefix in telemetry** (#209): the SDK no longer leaks
+  the leading bytes of its own key into emitted events.
+- **Cache TTL clock handling is now panic-safe** (#203): a backwards clock no longer
+  panics the cache layer.
+- **FFI soundness and panic-safety**:
+  - removed the unsound `unsafe impl Sync` from `StreamCallbackCtx` (#187);
+  - every `extern "C"` body now guards against panics unwinding across the C ABI (#185);
+  - accessor strings are cached in handle state to fix a use-after-free contract (#189).
+
+### Known issues
+
+- **iOS Simulator slice still missing from the published xcframework**
+  ([#179](https://github.com/xybrid-ai/xybrid/issues/179)): unchanged from 0.1.0.
+  Swift consumers building against the iOS Simulator on Apple Silicon still need the
+  `useLocalNatives = true` workaround after vendoring the ORT iOS simulator slice.
+
+### Consumer install lines
+
+```swift
+// Swift Package Manager
+.package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.1")
+```
+
+```yaml
+# Flutter / pub.dev
+xybrid_flutter: ^0.1.1
+```
+
+---
+
+## [0.1.0] - 2026-05-27
+
+Production release of the 0.1.0 line. No code changes since rc4 — this release closes the rc series and finalizes the release toolchain that was iterated through rc1 → rc4.
+
+### Release infrastructure (since rc4)
+
+- **SLSA build provenance attestations** (#178): Every release asset (XCFramework zip, Android `.so` zip, all CLI binaries) is now signed and recorded in GitHub's transparency log via Sigstore. Consumers verify with `gh attestation verify <file> --repo xybrid-ai/xybrid`.
+- **Consumer-side resolution verification** (#177): `just verify-release <version>` spins up minimal consumer projects in a tmp dir for each registry (SPM / Cargo / Flutter pub.dev / Maven Central) and runs end-to-end resolution against the published artifacts. Also exercises an iOS Simulator xcodebuild against `examples/ios/XybridExample`.
+- **pub.dev OIDC binding moved to GitHub Actions environment** (#176): The trusted-publisher binding now gates on a `pub-dev-publish` environment claim rather than a tag-pattern claim, decoupling pub.dev publishes from the workflow trigger type. (See [#179](https://github.com/xybrid-ai/xybrid/issues/179) follow-up — full automation of pub.dev publishes pending.)
+- **`workflow_dispatch` recovery path on `release-publish.yml`** (#175): If the `pull_request: closed` event doesn't reach Actions (race condition, deleted PR, etc.) the publish flow can be re-run manually with `gh workflow run release-publish.yml --field tag=v<version>`. The publish-release step is gated on `isDraft=true` so it's a no-op when the release is already live.
+
+### Cumulative highlights — what 0.1.0 ships (vs. 0.1.0-rc3)
+
+Everything that landed in rc4 is in 0.1.0:
+
+- **`InferenceMetrics` across every binding** (INF-15 series, #120, #131, #135, #138, #139, #142): typed per-inference CPU / memory / GPU / wall-clock metrics now visible from Rust SDK, Kotlin + Swift (UniFFI), Dart (`XybridResult`), and Unity (C FFI accessors). Surfaced in the bundled Flutter demos and Unity docs.
+- **Streaming-LLM cloud fallback uses live device signals** (#121): real CPU / memory / thermal pressure feeds the routing decision instead of static thresholds.
+- **`ModelWarmup` telemetry events** (#158 + #164): `XybridModel::warmup` emits dedicated `ModelWarmup` spans; warmup events drain on event boundaries so they don't bleed into subsequent inferences.
+- **`streaming` field hoisted to top-level `PlatformEvent`** (#162): downstream consumers no longer descend into metadata to filter streaming events.
+- **GGUF backend label defaults to `llamacpp`** (#119): unannotated GGUF bundles attribute correctly in telemetry instead of showing `unknown`.
+- **`Denormalize` postprocessing step** (#133): inverse of `Normalize`, useful for round-tripping model output back into input-space coordinates.
+- **Release-branch flow** (#169, #171, #173): replaces the tag-driven release. `release-prep.yml` + `release-publish.yml` keep master's SPM checksum in sync, eliminate force-moved tags, and stage every release through a reviewable PR + draft release.
+
+### Fixed
+
+- **SPM `branch: "master"` consumers** unblocked (#167, #169): the new release-branch flow keeps master's `Package.swift` `xybridFFIChecksum` in sync with the released xcframework. The recommended consumer line is now `from: "0.1.0"`, but `branch: "master"` works too.
+- Streaming fast-path `ModelComplete` events restored (#137), orchestrator pipeline-frame events filtered at SDK bridge (#146), CLI REPL routes cached models locally (#165), warmup span collector drains on event boundary (#164) — all from rc4.
+
+### Known issues — deferred to v0.1.1
+
+- **iOS Simulator slice missing from the published xcframework** ([#179](https://github.com/xybrid-ai/xybrid/issues/179)): Swift consumers cannot build against the iOS Simulator on Apple Silicon without a workaround. Pre-existed in rc1 through rc4. Workaround: build locally with `useLocalNatives = true` after vendoring the ORT iOS simulator slice.
+- **pub.dev publish requires one manual step**: `flutter pub publish -f` from a maintainer's machine after merging the release PR. Refactor tracked separately.
+
+### Consumer install lines
+
+```swift
+// Swift Package Manager
+.package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.0")
+```
+
+```yaml
+# Flutter / pub.dev
+xybrid_flutter: ^0.1.0
+```
+
+```toml
+# Rust / crates.io
+xybrid = "0.1.0"
+```
+
+```kotlin
+// Kotlin / Maven Central
+implementation("ai.xybrid:xybrid-kotlin:0.1.0")
+```
+
+```sh
+# Unity / UPM
+https://github.com/xybrid-ai/xybrid.git#upm
+```
+
+---
+
+## [0.1.0-rc4] - 2026-05-26
+
+### Added
+
+- **`InferenceMetrics` on result types across every binding** (INF-15 — #120, #131, #135, #138): Typed per-inference metrics (CPU / memory / GPU / wall-clock) are now exposed on the SDK result type and threaded through to Kotlin + Swift (UniFFI), Dart (`XybridResult`), and Unity (C FFI accessors). Flutter demos and Unity docs now surface them end-to-end (#139, #142).
+- **Live-signal routing for streaming cloud fallback** (#121): The streaming-LLM fallback policy now consumes real-time device pressure signals (CPU / memory / thermal) instead of static thresholds when deciding whether to spill to cloud.
+- **`ModelWarmup` telemetry event** (#158): `XybridModel::warmup` now emits a dedicated `ModelWarmup` span; the CLI REPL routes its warmup through this event so first-token latency is attributable to warmup vs. inference.
+- **`streaming` field hoisted to `PlatformEvent` top-level payload** (#162): Previously nested under metadata, now a top-level field so downstream consumers don't have to descend into the payload to filter streaming events.
+- **GGUF backend label defaults to `llamacpp` on unannotated bundles** (#119): Telemetry events from bundles that don't carry an explicit backend tag now default to `llamacpp` rather than `unknown`, so dashboards correctly attribute GGUF traffic.
+- **`Denormalize` postprocessing step in core** (#133): New core postprocessing primitive that inverts a `Normalize` step, useful for round-tripping model output back into input-space coordinates.
+
+### Fixed
+
+- **`ModelComplete` events on streaming fast-path inference** (#137): The streaming fast-path was skipping the `ModelComplete` emission, leaving downstream consumers waiting on a terminal event that never arrived. Now emitted on every path.
+- **Orchestrator pipeline-frame events filtered at SDK bridge** (#146): Internal `PipelineFrame` events from the orchestrator no longer leak to binding consumers as opaque payloads.
+- **REPL routes cached models locally** (#165): The CLI REPL was occasionally re-resolving cached models through the cloud router; it now short-circuits to the local cache when the model is present on disk.
+- **`ModelWarmup` span collector drained on event boundary** (#164): Warmup spans were leaking into the subsequent event's batch; the span collector is now drained when `ModelWarmup` is published.
+- **SPM consumers on `branch: "master"` no longer hit checksum mismatch** (#167, #169): The new release-branch flow keeps master's `Package.swift` `xybridFFIChecksum` in sync with the released xcframework asset. Tag-pinned (`exact:` / `from:`) and `branch: "swift"` consumers were unaffected; this fixes the `branch: "master"` case that had been silently broken since rc1.
+
+### Build / CI
+
+- **Release-branch flow** (#169, #171): New `release-prep.yml` + `release-publish.yml` workflows. A maintainer cuts `release/v<version>`, runs `just bump-version`, and pushes — CI builds every artifact, patches the SPM checksum back to the branch, creates a draft GitHub Release with all assets, and opens a PR to master. Merging the PR publishes the draft (tag created at merge commit) and publishes to crates.io / pub.dev / Maven Central. The legacy `release.yml` is kept as a `workflow_dispatch`-only break-glass.
+- **`version-sync.sh` now bumps `bindings/flutter/rust/Cargo.toml`** (#173): `just bump-version` was silently leaving the Flutter rust crate behind because the crate hardcodes its version (cargokit hashes the file). The bump script now keeps it in sync; master's previously-stale rc1 version is brought up too.
+- **`publish-crates` job pushes the four crates to crates.io** (#143, #145): `xybrid-macros`, `xybrid-core`, `xybrid-sdk`, and the `xybrid` umbrella now publish from the release workflow.
+- **Discord notifications + contributor welcome workflow** (#147, #148): Release publish notifies the project Discord; new contributors get a welcome message on their first PR.
+
+### Docs
+
+- **Vision envelopes + multi-part user messages** (#123): SDK docs now cover the input shape for vision payloads and the multi-part message format.
+- **`XYBRID_LLAMACPP_VERBOSITY` env var documented** (#156).
+- **Doctest examples compile under `no_run`** (#168): All public-API doctests now compile cleanly even without runtime dependencies present, so `cargo test --doc` runs green in CI.
+- **README install snippets bumped to 0.1.0-rc4** (this release, see also #157 for the rc3 equivalent).
+- **New-contributor pointers** (#130): READMEs now point first-time contributors at the `good-first-issue` and area labels.
+
+---
+
 ## [0.1.0-rc3] - 2026-05-16
 
 ### Added

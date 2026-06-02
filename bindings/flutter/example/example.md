@@ -6,7 +6,9 @@
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
 Future<void> main() async {
-  // Initialize the SDK (call once at app startup)
+  // Initialize the SDK (call once at app startup). Runs locally with no
+  // key; pass an apiKey to light up the dashboard:
+  //   await Xybrid.init(apiKey: const String.fromEnvironment('XYBRID_API_KEY'));
   await Xybrid.init();
 
   // Load a TTS model from the registry

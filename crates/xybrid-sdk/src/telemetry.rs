@@ -25,7 +25,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -78,6 +78,13 @@ const CONNECT_TIMEOUT_MS: u64 = 5000;
 
 /// Request timeout for telemetry requests (10 seconds)
 const REQUEST_TIMEOUT_MS: u64 = 10000;
+
+/// Bounded timeout for the eager `ExecutionStarted` flush on the execution
+/// hot path. Long enough for a healthy ingest round-trip, short enough that
+/// a slow or unreachable endpoint can't stall inference startup — unlike the
+/// retry+backoff `flush()`, which can block for
+/// `max_retries × (backoff + REQUEST_TIMEOUT_MS)`.
+const STARTED_EVENT_FLUSH_TIMEOUT_MS: u64 = 750;
 
 /// Configuration for the HTTP telemetry exporter
 #[derive(Debug, Clone)]
@@ -332,6 +339,15 @@ struct PlatformEvent {
     session_id: Uuid,
     event_type: String,
     payload: serde_json::Value,
+    // SDK self-identification. Always present so the backend can slice
+    // telemetry by SDK version (regression analysis) and by binding
+    // (adoption / per-platform performance). `sdk_version` is the
+    // `xybrid-sdk` crate version (compile-time `CARGO_PKG_VERSION`);
+    // `binding` is the process-global identifier set by the platform
+    // binding at init (`flutter`/`swift`/`kotlin`/`unity`), defaulting
+    // to `rust` when no binding has called `set_binding`.
+    sdk_version: String,
+    binding: String,
     // `device_id` honors the opt-out contract: when the SDK clears it
     // because the caller opted out of hardware detection without supplying
     // an explicit id, the wire event omits the field entirely rather than
@@ -393,6 +409,12 @@ pub struct HttpTelemetryExporter {
     failed_queue: Arc<Mutex<VecDeque<PlatformEvent>>>,
     /// Counter for dropped events (when queue is full)
     dropped_count: Arc<AtomicU32>,
+    /// Monotonic count of events ever moved into `buffer` (via the channel
+    /// handoff or a direct `push`). Never decremented on drain/flush, so the
+    /// `ExecutionStarted` fast path can wait for *its* event's handoff by
+    /// observing this counter grow past a pre-publish baseline rather than
+    /// trusting a non-empty buffer (which a stale event would already satisfy).
+    ingested: Arc<AtomicU64>,
 }
 
 impl HttpTelemetryExporter {
@@ -440,7 +462,17 @@ impl HttpTelemetryExporter {
             retry_policy,
             failed_queue: Arc::new(Mutex::new(VecDeque::new())),
             dropped_count: Arc::new(AtomicU32::new(0)),
+            ingested: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Monotonic count of events that have entered the batch buffer.
+    ///
+    /// Used by the `ExecutionStarted` fast path to detect that a
+    /// just-published event has completed the async channel→buffer handoff
+    /// before triggering the eager flush.
+    pub fn ingested_count(&self) -> u64 {
+        self.ingested.load(Ordering::Acquire)
     }
 
     /// Create from environment variables
@@ -557,6 +589,7 @@ impl HttpTelemetryExporter {
     pub fn push(&self, event: TelemetryEvent) {
         let mut buffer = self.buffer.lock().unwrap();
         buffer.push(event);
+        self.ingested.fetch_add(1, Ordering::Release);
 
         // Flush if buffer is full
         if buffer.len() >= self.config.batch_size {
@@ -593,6 +626,69 @@ impl HttpTelemetryExporter {
         );
     }
 
+    /// Best-effort synchronous flush bounded by `timeout`.
+    ///
+    /// Designed for shutdown / panic / signal-handler paths where the
+    /// normal retry+backoff loop in [`flush`] would block too long. Drains
+    /// the buffer once, builds a single batch, and sends it with HTTP
+    /// timeouts capped at `timeout`. No retries, no circuit-breaker block,
+    /// no failed-queue requeue — if the call fails the events are dropped.
+    ///
+    /// Safe to call from a panic hook: holds the buffer mutex only long
+    /// enough to drain it, uses a dedicated short-timeout agent so we don't
+    /// stall the unwinding thread, and never re-enters
+    /// `publish_telemetry_event` (which would risk recursive panics).
+    pub fn flush_blocking(&self, timeout: Duration) {
+        if self.config.endpoint.is_empty() || self.config.api_key.is_empty() {
+            return;
+        }
+
+        // Drain the buffer under a short lock. Recover from poison so a
+        // panic in another component doesn't permanently block shutdown
+        // telemetry.
+        let events: Vec<TelemetryEvent> = match self.buffer.lock() {
+            Ok(mut buf) => buf.drain(..).collect(),
+            Err(poisoned) => poisoned.into_inner().drain(..).collect(),
+        };
+
+        if events.is_empty() {
+            return;
+        }
+
+        let pid = self.pipeline_id.read().ok().and_then(|g| *g);
+        let tid = self.trace_id.read().ok().and_then(|g| *g);
+
+        let platform_events: Vec<PlatformEvent> = events
+            .iter()
+            .map(|e| {
+                convert_to_platform_event(e, &self.config, self.device_profile.as_ref(), pid, tid)
+            })
+            .collect();
+
+        let batch = PlatformEventBatch {
+            events: platform_events,
+        };
+
+        let url = format!(
+            "{}/v1/events/batch",
+            self.config.endpoint.trim_end_matches('/')
+        );
+
+        // Dedicated agent with the caller's timeout so we never wait
+        // longer than the deadline. The default exporter agent has a
+        // 10-second request timeout that would defeat the purpose here.
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(timeout)
+            .timeout(timeout)
+            .build();
+
+        let _ = agent
+            .post(&url)
+            .set("Authorization", &format!("Bearer {}", self.config.api_key))
+            .set("Content-Type", "application/json")
+            .send_json(&batch);
+    }
+
     /// Create a telemetry sender that feeds into this exporter
     pub fn create_sender(&self) -> TelemetrySender {
         let (tx, rx) = mpsc::channel::<TelemetryEvent>();
@@ -607,11 +703,13 @@ impl HttpTelemetryExporter {
         let retry_policy = self.retry_policy.clone();
         let failed_queue = Arc::clone(&self.failed_queue);
         let dropped_count = Arc::clone(&self.dropped_count);
+        let ingested = Arc::clone(&self.ingested);
 
         thread::spawn(move || {
             for event in rx {
                 let mut buf = buffer.lock().unwrap();
                 buf.push(event);
+                ingested.fetch_add(1, Ordering::Release);
 
                 if buf.len() >= batch_size {
                     let events: Vec<TelemetryEvent> = buf.drain(..).collect();
@@ -940,6 +1038,14 @@ fn convert_to_platform_event(
                 // `json:$.local_reliability_hint.*` without descending
                 // into the nested data object.
                 "local_reliability_hint",
+                // Streaming flag — `XybridModel::run_streaming` and the
+                // streaming-fast-path `ModelComplete` (Pipeline) both
+                // stamp `data.streaming = true`. Hoisting to the top
+                // level lets the Tinybird datasource pick it up as a
+                // typed column for a `streaming` badge / filter on the
+                // Traces dashboard, distinguishing chat-flow / REPL
+                // turns from batch-style inferences at a glance.
+                "streaming",
             ]
             .iter()
             {
@@ -992,16 +1098,18 @@ fn convert_to_platform_event(
     // Span-bearing event types: completion-family events publish a final
     // ModelComplete/PipelineComplete that drains the collector, AND the
     // cloud-fallback flow publishes LocalAborted/CloudRetry as terminal
-    // markers for each leg without ever firing a *Complete. Both kinds
-    // need their flamegraph attached at the wire layer or the dashboard
-    // sees an empty trace detail. Adding LocalAborted/CloudRetry here is
-    // the symmetric counterpart of the same addition in
-    // `snapshot_spans_into_event` — both gates must agree, otherwise the
-    // SDK attaches spans to event.data["spans"] but `convert_to_platform_event`
-    // strips them again before the wire.
+    // markers for each leg without ever firing a *Complete, AND
+    // ModelWarmup is its own completion category (XybridModel::warmup
+    // opens executor spans then publishes a single ModelWarmup —
+    // distinct from ModelComplete so the dashboard can filter warmups
+    // out of cost-attribution rollups). All four kinds need their
+    // flamegraph attached at the wire layer or the dashboard sees an
+    // empty trace detail. This list MUST match `snapshot_spans_into_event`
+    // above; otherwise the SDK attaches spans to event.data["spans"]
+    // but `convert_to_platform_event` strips them again before the wire.
     let stages = if matches!(
         event.event_type.as_str(),
-        "PipelineComplete" | "ModelComplete" | "LocalAborted" | "CloudRetry"
+        "PipelineComplete" | "ModelComplete" | "ModelWarmup" | "LocalAborted" | "CloudRetry"
     ) && core_tracing::is_tracing_enabled()
     {
         let embedded_spans: Option<serde_json::Value> = payload
@@ -1123,6 +1231,8 @@ fn convert_to_platform_event(
         session_id: config.session_id,
         event_type: event.event_type.clone(),
         payload,
+        sdk_version: crate::SDK_VERSION.to_string(),
+        binding: crate::get_binding().to_string(),
         device_id: config.device_id.clone(),
         device_label: config.device_label.clone(),
         platform: config.platform.clone(),
@@ -1358,7 +1468,7 @@ static PLATFORM_EXPORTER: RwLock<Option<HttpTelemetryExporter>> = RwLock::new(No
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_sdk::telemetry::{init_platform_telemetry, TelemetryConfig};
 ///
 /// let config = TelemetryConfig::new("https://ingest.xybrid.dev", "your-api-key")
@@ -1392,6 +1502,11 @@ pub fn init_platform_telemetry(mut config: TelemetryConfig) {
     if let Ok(mut global) = PLATFORM_EXPORTER.write() {
         *global = Some(exporter);
     }
+
+    // Install a panic hook that flushes telemetry before the process
+    // dies. Without this, a panic during inference loses the entire
+    // buffered batch (Started / Failed pair included).
+    install_telemetry_panic_hook();
 }
 
 // -- Process-wide resource-telemetry mode ----------------------------------
@@ -1679,6 +1794,15 @@ fn redact_secret_like_token(token: &str) -> String {
         || trimmed.starts_with("gho_")
         || trimmed.starts_with("xoxb-")
         || trimmed.starts_with("xoxp-")
+        // Xybrid's own key prefixes — the secret most likely to appear in a
+        // *xybrid* error / gateway-auth failure string, and previously the one
+        // provider key this redactor missed. Matched specifically (`xy_live_`
+        // / `xy_test_`, the only two formats used across the SDK docs and
+        // bindings) rather than a bare `xy_`, which would over-redact common
+        // identifiers like `xy_coords` / `xy_axis` and corrupt legitimate
+        // error messages.
+        || trimmed.starts_with("xy_live_")
+        || trimmed.starts_with("xy_test_")
     {
         token.replacen(trimmed, "[REDACTED]", 1)
     } else {
@@ -1845,9 +1969,101 @@ pub fn init_platform_telemetry_from_env() -> bool {
         if let Ok(mut global) = PLATFORM_EXPORTER.write() {
             *global = Some(exporter);
         }
+
+        // Mirror `init_platform_telemetry`: install a panic hook so a
+        // crash during inference still ships its buffered Started/Failed
+        // events instead of dying silently.
+        install_telemetry_panic_hook();
         true
     } else {
         false
+    }
+}
+
+// ============================================================================
+// First-inference dev nudge
+// ============================================================================
+
+/// URL printed in the dev-nudge log. Hard-coded rather than wired through
+/// config because the nudge fires when no config has been provided.
+const DASHBOARD_URL: &str = "https://dashboard.xybrid.dev";
+
+/// Once-guard for [`maybe_emit_dev_nudge`].
+static DEV_NUDGE: std::sync::Once = std::sync::Once::new();
+
+/// Emit a one-shot info-level hint when the host app runs inference
+/// without configuring an API key. Subsequent calls are no-ops via
+/// [`std::sync::Once`].
+///
+/// Hooked into [`crate::model::XybridModel::run`] and
+/// [`crate::model::XybridModel::run_async`] so the nudge surfaces on first
+/// use rather than at init time — a host app that initializes the SDK far
+/// from where it runs inference still sees the hint.
+///
+/// Suppressed when `XYBRID_QUIET=1`.
+pub(crate) fn maybe_emit_dev_nudge() {
+    DEV_NUDGE.call_once(|| {
+        // Resolve via the SDK accessor so a programmatically-set key (held in
+        // memory, not the env) also suppresses the "no key" nudge.
+        let api_key = crate::get_api_key();
+        let quiet = std::env::var("XYBRID_QUIET").ok();
+        if !should_emit_dev_nudge(api_key.as_deref(), quiet.as_deref()) {
+            return;
+        }
+        log::info!(
+            target: "xybrid_sdk",
+            "telemetry disabled (no XYBRID_API_KEY set). Get a free key at {} to see your inference traces.",
+            DASHBOARD_URL,
+        );
+    });
+}
+
+/// Pure predicate that decides whether the dev-nudge should print. Split
+/// out so unit tests can exercise the rule without poking process
+/// environment variables.
+fn should_emit_dev_nudge(api_key: Option<&str>, quiet: Option<&str>) -> bool {
+    if quiet == Some("1") {
+        return false;
+    }
+    let has_key = api_key.map(|k| !k.is_empty()).unwrap_or(false);
+    !has_key
+}
+
+#[cfg(test)]
+mod dev_nudge_tests {
+    use super::should_emit_dev_nudge;
+
+    #[test]
+    fn emits_when_no_api_key_and_not_quiet() {
+        assert!(should_emit_dev_nudge(None, None));
+    }
+
+    #[test]
+    fn suppressed_when_quiet_flag_set() {
+        assert!(!should_emit_dev_nudge(None, Some("1")));
+    }
+
+    #[test]
+    fn suppressed_when_api_key_present() {
+        assert!(!should_emit_dev_nudge(Some("xy_live_abc"), None));
+    }
+
+    #[test]
+    fn empty_api_key_treated_as_unset() {
+        assert!(should_emit_dev_nudge(Some(""), None));
+    }
+
+    #[test]
+    fn quiet_takes_priority_over_missing_key() {
+        assert!(!should_emit_dev_nudge(None, Some("1")));
+    }
+
+    #[test]
+    fn quiet_other_value_not_suppressive() {
+        // Only "1" suppresses. "true" / "yes" don't — keeps the env-flag
+        // contract narrow.
+        assert!(should_emit_dev_nudge(None, Some("true")));
+        assert!(should_emit_dev_nudge(None, Some("0")));
     }
 }
 
@@ -1920,6 +2136,13 @@ fn register_execution_listener() {
             .unwrap()
             .as_millis() as u64;
 
+        // `Started` events are eagerly flushed after publish so a crash
+        // mid-inference (e.g. Metal SIGABRT, OOM kill) still leaves a
+        // breadcrumb on the backend. Without this, the event sits in the
+        // 10-event / 5-second batch buffer and dies with the process,
+        // which is exactly the bug this code is patching.
+        let is_started = matches!(event, ExecutionEvent::Started { .. });
+
         let telemetry_event = match event {
             ExecutionEvent::Started { model_id, method } => TelemetryEvent {
                 event_type: "ExecutionStarted".to_string(),
@@ -1970,7 +2193,52 @@ fn register_execution_listener() {
             },
         };
 
+        // Started-event fast path: ensure the event reaches the wire even
+        // if the process dies before the matching Completed/Failed.
+        //
+        // `publish_telemetry_event` enqueues onto an mpsc channel; a
+        // background thread moves the event into the exporter's batch
+        // buffer. That handoff takes microseconds, but the eager flush runs
+        // on *this* thread and would race the bg thread if called
+        // immediately. Snapshot the exporter's monotonic ingest counter
+        // *before* publishing so we can wait for THIS event's handoff —
+        // waiting on a merely non-empty buffer would let a stale, already-
+        // buffered event trip the flush before our Started event lands,
+        // leaving the breadcrumb stuck in the channel until the periodic
+        // flush (defeating the crash-before-completion guarantee).
+        let started_ingest_baseline = if is_started {
+            PLATFORM_EXPORTER
+                .read()
+                .ok()
+                .and_then(|g| g.as_ref().map(|exp| exp.ingested_count()))
+        } else {
+            None
+        };
+
         publish_telemetry_event(telemetry_event);
+
+        if let Some(baseline) = started_ingest_baseline {
+            if let Ok(exporter) = PLATFORM_EXPORTER.read() {
+                if let Some(exp) = exporter.as_ref() {
+                    // Spin briefly (≤10ms total, 100µs per attempt) until the
+                    // bg thread has moved our event into the buffer. If the
+                    // handoff never registers (bg thread stalled, sender
+                    // gone), fall through and flush anyway — a no-op when the
+                    // buffer is empty.
+                    for _ in 0..100 {
+                        if exp.ingested_count() > baseline {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_micros(100));
+                    }
+                    // Bounded, no-retry flush: a slow or unreachable endpoint
+                    // must not stall inference startup the way the
+                    // retry+backoff `flush()` would (it can block for many
+                    // seconds on this hot path).
+                    exp.flush_blocking(Duration::from_millis(STARTED_EVENT_FLUSH_TIMEOUT_MS));
+                }
+            }
+        }
     });
 }
 
@@ -1981,6 +2249,55 @@ pub fn flush_platform_telemetry() {
             exp.flush();
         }
     }
+}
+
+/// Synchronous, deadline-bounded flush for shutdown / panic paths.
+///
+/// Drains the buffer and sends one HTTP batch with the supplied timeout
+/// applied to both connect and request. Skips retry/backoff/circuit-breaker
+/// logic so the call returns within roughly `timeout`. Best-effort: failed
+/// events are dropped, not requeued. See
+/// [`HttpTelemetryExporter::flush_blocking`] for the safety contract this
+/// upholds for panic-handler use.
+pub fn flush_platform_telemetry_blocking(timeout: Duration) {
+    if let Ok(exporter) = PLATFORM_EXPORTER.read() {
+        if let Some(exp) = exporter.as_ref() {
+            exp.flush_blocking(timeout);
+        }
+    }
+}
+
+// Guards against double-installing the panic hook. The hook chains to the
+// previous one so we play nicely with frameworks that install their own
+// (test harnesses, color-eyre, etc.).
+static PANIC_HOOK_INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+/// Install a panic hook that synchronously flushes telemetry before
+/// re-raising. Idempotent — subsequent calls are no-ops.
+///
+/// Bounded at 500ms so a wedged HTTP endpoint cannot hang the unwinding
+/// thread indefinitely. The hook chains to whatever hook was previously
+/// installed so external frameworks (e.g. test harnesses) keep their
+/// behavior.
+///
+/// Does NOT cover async aborts (SIGABRT, SIGKILL, OS-level termination):
+/// those bypass Rust panic infrastructure entirely. For those paths,
+/// rely on `ExecutionStarted` being eagerly flushed so the backend at
+/// minimum sees that the run began before the process died.
+pub fn install_telemetry_panic_hook() {
+    if PANIC_HOOK_INSTALLED.set(()).is_err() {
+        return;
+    }
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Bound at 500ms — long enough for a healthy local network round
+        // trip, short enough that a wedged endpoint doesn't hang the
+        // dying process. `flush_platform_telemetry_blocking` reads the
+        // global exporter via a `try`-style lock recovery so a poisoned
+        // RwLock here will not double-panic.
+        flush_platform_telemetry_blocking(Duration::from_millis(500));
+        previous(info);
+    }));
 }
 
 /// Shutdown platform telemetry exporter
@@ -2257,9 +2574,18 @@ fn snapshot_spans_into_event(event: TelemetryEvent) -> TelemetryEvent {
     // so without these the cloud-leg `SpanGuard`s in
     // `runtime_adapter/cloud/mod.rs` get stranded in the global collector
     // and the dashboard's flamegraph stays empty.
+    //
+    // `ModelWarmup` follows the same shape: `XybridModel::warmup` opens
+    // `execute:<model>` + `llm_inference` spans via the executor before
+    // publishing. Without this entry those spans would (a) never reach
+    // the warmup event's payload — the dashboard falls back to a
+    // synthesized placeholder flamegraph — and (b) leak into the next
+    // event's snapshot (typically the first real inference of the
+    // session), giving that inference's trace two stray spans it
+    // didn't generate.
     let is_span_bearing = matches!(
         event.event_type.as_str(),
-        "PipelineComplete" | "ModelComplete" | "LocalAborted" | "CloudRetry"
+        "PipelineComplete" | "ModelComplete" | "ModelWarmup" | "LocalAborted" | "CloudRetry"
     );
     if !is_span_bearing || !core_tracing::is_tracing_enabled() {
         return event;
@@ -2612,7 +2938,43 @@ fn drain_available_orchestrator_events(subscription: &xybrid_core::event_bus::Su
     }
 }
 
+/// Returns `true` when the orchestrator event is wire-noise that the SDK
+/// already covers via its own publish sites, and should be dropped before
+/// reaching the registered telemetry sender.
+///
+/// Single-stage local LLM calls were producing 6–9 dashboard rows per
+/// turn because the orchestrator emits a full pipeline-execution event
+/// chain (`PipelineStart`, `StageStart`, `ExecutionStarted`,
+/// `ExecutionCompleted`, `StageComplete`, `PipelineComplete`) on top of
+/// the SDK's own `ModelComplete` / `PipelineComplete` — every one of
+/// these landed as its own row. The orchestrator-side events are useful
+/// for in-process subscribers (other code listening on the event bus)
+/// but they're noise at the wire boundary, where the user-facing
+/// contract is one row per turn (the SDK's completion event).
+///
+/// Keep: `PolicyEvaluated`, `RoutingDecided` (routing-decision metadata
+/// shown alongside the completion row), `StageError`, `ExecutionFailed`
+/// (errors must always reach the wire).
+///
+/// Drop: pipeline-frame and per-stage success-path events. Errors on
+/// these paths still surface via the `*Failed` / `*Error` variants
+/// above, which the filter passes through.
+fn orchestrator_event_is_wire_noise(event: &OrchestratorEvent) -> bool {
+    matches!(
+        event,
+        OrchestratorEvent::PipelineStart { .. }
+            | OrchestratorEvent::PipelineComplete { .. }
+            | OrchestratorEvent::StageStart { .. }
+            | OrchestratorEvent::StageComplete { .. }
+            | OrchestratorEvent::ExecutionStarted { .. }
+            | OrchestratorEvent::ExecutionCompleted { .. }
+    )
+}
+
 fn publish_orchestrator_event(event: OrchestratorEvent) {
+    if orchestrator_event_is_wire_noise(&event) {
+        return;
+    }
     let telemetry_event = convert_orchestrator_event(&event);
     publish_telemetry_event(telemetry_event);
 }
@@ -2676,6 +3038,50 @@ mod tests {
         // this, an empty payload would trivially satisfy the negation
         // above.
         assert!(payload_json.contains("cache_read_input_tokens"));
+    }
+
+    #[test]
+    fn platform_event_stamps_sdk_version_and_binding() {
+        // Invariant: every PlatformEvent that leaves the SDK carries
+        // `sdk_version` (= crate::SDK_VERSION) and `binding`
+        // (= crate::get_binding()). The assertion compares against the
+        // SDK's own view of itself rather than hardcoded strings so the
+        // test is hermetic regardless of `set_binding(...)` calls made by
+        // other tests sharing this process (BINDING is a OnceLock).
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("test_stage".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(10),
+            error: None,
+            data: None,
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+
+        assert_eq!(platform.sdk_version, crate::SDK_VERSION);
+        assert_eq!(platform.binding, crate::get_binding());
+        assert!(
+            !platform.sdk_version.is_empty(),
+            "sdk_version must not be empty"
+        );
+        assert!(!platform.binding.is_empty(), "binding must not be empty");
+
+        // Wire format: serialize and confirm the exact JSON keys land
+        // on the payload. Guards against an accidental `#[serde(rename)]`
+        // drift that would silently break the backend ingest contract.
+        let json = serde_json::to_value(&platform).unwrap();
+        assert_eq!(
+            json["sdk_version"].as_str(),
+            Some(crate::SDK_VERSION),
+            "wire key `sdk_version` missing or mismatched: {json}"
+        );
+        assert_eq!(
+            json["binding"].as_str(),
+            Some(crate::get_binding()),
+            "wire key `binding` missing or mismatched: {json}"
+        );
     }
 
     #[test]
@@ -3084,6 +3490,38 @@ mod tests {
         assert!(redacted.contains("api_key=[REDACTED]"));
         assert!(!redacted.contains("sk_test_abc123"));
         assert!(!redacted.contains("hf_secret_xyz"));
+    }
+
+    #[test]
+    fn telemetry_error_redaction_removes_xybrid_own_key() {
+        // The Xybrid key is the secret most likely to appear in a xybrid
+        // gateway-auth error; the redactor must catch its `xy_live_` /
+        // `xy_test_` prefixes just like every other provider's.
+        let redacted = redact_error_for_telemetry(
+            "Gateway auth failed for key xy_live_abc123def and xy_test_secret456",
+        );
+        assert!(
+            !redacted.contains("xy_live_abc123def"),
+            "redacted = {redacted}"
+        );
+        assert!(
+            !redacted.contains("xy_test_secret456"),
+            "redacted = {redacted}"
+        );
+        assert!(redacted.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn telemetry_error_redaction_does_not_over_redact_xy_identifiers() {
+        // The Xybrid-key match is intentionally specific (`xy_live_` /
+        // `xy_test_`), not a bare `xy_` — common identifiers like
+        // `xy_coords` must survive so error messages stay debuggable.
+        let msg = "decode failed at xy_coords=(3,4), xy_axis=z, xy_plane unset";
+        let redacted = redact_error_for_telemetry(msg);
+        assert_eq!(
+            redacted, msg,
+            "non-key xy_ identifiers must not be redacted"
+        );
     }
 
     #[test]
@@ -3705,6 +4143,53 @@ mod tests {
     }
 
     #[test]
+    fn ingest_counter_advances_on_channel_handoff() {
+        // The ExecutionStarted fast path waits for `ingested_count()` to grow
+        // past a pre-publish baseline so it observes THIS event's
+        // channel→buffer handoff rather than a merely non-empty buffer (which
+        // a stale, already-buffered event would satisfy immediately). Verify
+        // the counter advances exactly when an event crosses the sender
+        // channel into the buffer.
+        //
+        // batch_size is large so the handoff never auto-flushes (which would
+        // drain the buffer and attempt a network send to the invalid host).
+        let config = TelemetryConfig::new("http://example.invalid", "k").with_batch_size(1000);
+        let exporter = HttpTelemetryExporter::new(config);
+        let tx = exporter.create_sender();
+
+        assert_eq!(exporter.ingested_count(), 0, "counter starts at zero");
+
+        let baseline = exporter.ingested_count();
+        tx.send(TelemetryEvent {
+            event_type: "ExecutionStarted".to_string(),
+            stage_name: Some("chat".to_string()),
+            target: Some("device".to_string()),
+            latency_ms: None,
+            error: None,
+            data: None,
+            timestamp_ms: 1,
+        })
+        .expect("send to live handoff thread");
+
+        // Bounded wait for the background handoff thread to move it across.
+        let mut waited = Duration::ZERO;
+        while exporter.ingested_count() <= baseline && waited < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(5));
+            waited += Duration::from_millis(5);
+        }
+
+        assert!(
+            exporter.ingested_count() > baseline,
+            "ingest counter must advance once the event crosses into the buffer"
+        );
+        assert_eq!(
+            exporter.buffer.lock().unwrap().len(),
+            1,
+            "event must be buffered (large batch_size, no flush)"
+        );
+    }
+
+    #[test]
     fn test_queue_failed_events() {
         let queue = Arc::new(Mutex::new(VecDeque::new()));
         let dropped = Arc::new(AtomicU32::new(0));
@@ -3713,6 +4198,8 @@ mod tests {
             session_id: Uuid::new_v4(),
             event_type: "Test".to_string(),
             payload: serde_json::json!({}),
+            sdk_version: crate::SDK_VERSION.to_string(),
+            binding: crate::get_binding().to_string(),
             device_id: None,
             device_label: None,
             platform: None,
@@ -4261,6 +4748,79 @@ mod tests {
             parsed["quantization"].as_str(),
             Some("q4_k_m"),
             "quantization must be hoisted: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
+    fn streaming_field_hoists_to_payload_top_level() {
+        // `XybridModel::run_streaming` and the streaming-fast-path
+        // `ModelComplete` (Pipeline) both stamp `data.streaming = true`.
+        // The hoist must surface it on the wire payload's top level so
+        // the platform's Tinybird datasource can read it as a typed
+        // column for a `streaming` badge / filter on the Traces
+        // dashboard.
+        //
+        // Unlike `task` / `quantization` (which are sourced from spans),
+        // `streaming` is published directly on the event's `data` blob
+        // — no span involvement. Test exercises the convert path with a
+        // minimal `data` payload mirroring the production publish shape.
+        let data = serde_json::json!({
+            "model_id": "qwen2.5-0.5b-instruct",
+            "version": "1.0",
+            "output_type": "Text",
+            "streaming": true,
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b-instruct".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(1_200),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert_eq!(
+            parsed["streaming"].as_bool(),
+            Some(true),
+            "streaming must be hoisted to payload top level: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
+    fn streaming_field_omitted_when_data_does_not_carry_it() {
+        // Non-streaming inference events (`XybridModel::run`,
+        // non-streaming pipeline runs) don't stamp `data.streaming`.
+        // The hoist must leave the top-level key absent in that case so
+        // the platform-side column reads `NULL` (not `false`) for batch
+        // calls — preserves the three-valued logic the Tinybird
+        // datasource encodes via `Nullable(UInt8)`.
+        let data = serde_json::json!({
+            "model_id": "qwen2.5-0.5b-instruct",
+            "version": "1.0",
+            "output_type": "Text",
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b-instruct".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(1_200),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert!(
+            parsed.get("streaming").is_none(),
+            "streaming must be omitted from top-level payload when absent in data: {}",
             serde_json::to_string(&parsed).unwrap()
         );
     }

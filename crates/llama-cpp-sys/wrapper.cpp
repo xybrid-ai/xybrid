@@ -5,7 +5,7 @@
  * Uses the modern llama.cpp API (llama_model_* functions).
  */
 
-#include "llama.h"
+#include "wrapper.h"
 #include "ggml.h"
 #include <stdlib.h>
 #include <string.h>
@@ -368,12 +368,16 @@ int llama_format_chat_with_model_c(
     // Extract the model's chat template from GGUF metadata.
     // This returns the template embedded by the model author (e.g., Gemma uses
     // <start_of_turn>/<end_of_turn>, Qwen uses ChatML <|im_start|>/<|im_end|>).
-    // If the model has no template, tmpl is nullptr and llama_chat_apply_template
-    // falls back to ChatML.
+    // Do not pass nullptr through to llama_chat_apply_template: llama.cpp treats
+    // that as "use its built-in ChatML fallback", but xybrid-core owns fallback
+    // prompt policy.
     const char* tmpl = llama_model_chat_template(model, nullptr);
+    if (tmpl == nullptr || tmpl[0] == '\0') {
+        return -1;
+    }
 
     int result = llama_chat_apply_template(
-        tmpl,     // Use model's template (nullptr = fallback to ChatML)
+        tmpl,
         messages.data(),
         n_msg,
         true,     // add_ass: add assistant start tag
@@ -693,8 +697,6 @@ int llama_generate_c(
  * @param user_data  User-provided context pointer
  * @return 0 to continue, non-zero to stop generation
  */
-typedef int (*token_callback_t)(int32_t token_id, const char* token_text, void* user_data);
-
 /**
  * Generate tokens with streaming callback.
  *
@@ -736,7 +738,7 @@ int llama_generate_streaming_c(
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
-    token_callback_t callback,
+    llama_token_callback_c callback,
     void* user_data,
     // Position in the KV cache where input_tokens should be prefilled.
     // Pass 0 for the legacy "fresh prefill from scratch" behaviour. Positive

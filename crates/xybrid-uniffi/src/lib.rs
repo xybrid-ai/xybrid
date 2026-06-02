@@ -59,6 +59,50 @@ fn resolve_binding(binding: &str) -> &'static str {
     }
 }
 
+/// Apply optional runtime configuration during host SDK initialization.
+///
+/// The Swift `Xybrid.initialize(...)` and Kotlin `Xybrid.init(...)` wrappers
+/// call this once, after [`set_binding`], to thread through whatever the host
+/// app passed. Every argument is optional:
+///
+/// - `api_key` — when present and non-blank, starts the platform telemetry
+///   exporter so inference traces reach the dashboard. Omit it to run
+///   anonymously (local inference only); the first inference then logs a
+///   one-shot hint pointing at the dashboard.
+/// - `gateway_url` — overrides the LLM gateway URL.
+/// - `ingest_url` — overrides the telemetry ingest endpoint (self-hosted
+///   dashboards). When omitted, the exporter targets the production default.
+///
+/// Delegates entirely to the [`xybrid_sdk::init`] builder, so the
+/// API-key-gating and ingest-URL defaulting rules match every other binding.
+/// Blank strings are treated as absent so hosts can pass empty
+/// `String.fromEnvironment`-style values without accidentally configuring
+/// anything.
+#[uniffi::export]
+fn configure_runtime(
+    api_key: Option<String>,
+    gateway_url: Option<String>,
+    ingest_url: Option<String>,
+) {
+    let non_blank = |value: Option<String>| {
+        value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+
+    let mut builder = xybrid_sdk::init();
+    if let Some(key) = non_blank(api_key) {
+        builder = builder.api_key(key);
+    }
+    if let Some(gateway) = non_blank(gateway_url) {
+        builder = builder.gateway_url(gateway);
+    }
+    if let Some(ingest) = non_blank(ingest_url) {
+        builder = builder.ingest_url(ingest);
+    }
+    builder.run();
+}
+
 // -- Platform-state push API --
 //
 // Mobile telemetry APIs (`UIDevice.batteryLevel` on iOS,
@@ -195,6 +239,111 @@ pub enum XybridError {
     Timeout { timeout_ms: u64 },
 }
 
+impl XybridError {
+    /// Whether retrying the operation that produced this error could
+    /// succeed without the caller changing anything.
+    ///
+    /// Mirrors the Rust SDK's `SdkError::is_retryable` contract across
+    /// the UniFFI boundary: `NetworkError`, `RateLimited`, and `Timeout`
+    /// are retryable; everything else is not. (`SdkError::Offline`, also
+    /// retryable on the Rust side, is collapsed into `NetworkError` by
+    /// the `From` impl below, so its retryability is preserved.) Swift /
+    /// Kotlin callers reach this via the exported
+    /// [`xybrid_error_is_retryable`] free function rather than
+    /// pattern-matching on variants that may shift between releases.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            XybridError::NetworkError { .. }
+            | XybridError::RateLimited { .. }
+            | XybridError::Timeout { .. } => true,
+
+            XybridError::ModelNotFound { .. }
+            | XybridError::DirectoryNotFound { .. }
+            | XybridError::MetadataNotFound { .. }
+            | XybridError::MetadataInvalid { .. }
+            | XybridError::LoadError { .. }
+            | XybridError::InferenceError { .. }
+            | XybridError::StreamingNotSupported
+            | XybridError::NotLoaded
+            | XybridError::ConfigError { .. }
+            | XybridError::IoError { .. }
+            | XybridError::CacheError { .. }
+            | XybridError::PipelineError { .. }
+            | XybridError::CircuitOpen { .. } => false,
+        }
+    }
+
+    /// The minimum delay (in seconds) a caller should wait before
+    /// retrying, when the error itself dictates one. Only `RateLimited`
+    /// carries a server-specified backoff; every other variant returns
+    /// `None`. Exposed to Swift / Kotlin via
+    /// [`xybrid_error_retry_after_secs`].
+    ///
+    /// Matched exhaustively (rather than `_ => None`) so a future variant
+    /// that should carry a retry delay is compile-forced to be handled
+    /// here — same discipline as [`Self::is_retryable`].
+    pub fn retry_after_secs(&self) -> Option<u64> {
+        match self {
+            XybridError::RateLimited { retry_after_secs } => Some(*retry_after_secs),
+
+            XybridError::ModelNotFound { .. }
+            | XybridError::DirectoryNotFound { .. }
+            | XybridError::MetadataNotFound { .. }
+            | XybridError::MetadataInvalid { .. }
+            | XybridError::LoadError { .. }
+            | XybridError::InferenceError { .. }
+            | XybridError::StreamingNotSupported
+            | XybridError::NotLoaded
+            | XybridError::ConfigError { .. }
+            | XybridError::NetworkError { .. }
+            | XybridError::IoError { .. }
+            | XybridError::CacheError { .. }
+            | XybridError::PipelineError { .. }
+            | XybridError::CircuitOpen { .. }
+            | XybridError::Timeout { .. } => None,
+        }
+    }
+}
+
+/// Whether the given error is worth retrying without changes.
+///
+/// The UniFFI-exported mirror of the Rust SDK's retryability contract.
+/// Swift / Kotlin callers should branch on this instead of switching on
+/// `XybridError` variants directly, so retry logic survives variant
+/// additions/renames between releases.
+///
+/// In Swift: `if xybridErrorIsRetryable(error: caught) { … }`
+/// In Kotlin: `if (xybridErrorIsRetryable(caught)) { … }`
+#[uniffi::export]
+fn xybrid_error_is_retryable(error: &XybridError) -> bool {
+    error.is_retryable()
+}
+
+/// Server-specified retry delay in seconds, if the error carries one.
+///
+/// Returns the `RateLimited` backoff when present; `None` for every
+/// other error (the caller picks its own backoff if
+/// [`xybrid_error_is_retryable`] returned true).
+#[uniffi::export]
+fn xybrid_error_retry_after_secs(error: &XybridError) -> Option<u64> {
+    error.retry_after_secs()
+}
+
+/// Flattens an `SdkError`'s message and its optional `#[source]` cause into a
+/// single string for the UniFFI boundary, where `XybridError` variants carry
+/// only a `message: String`. The structured cause stays available on the Rust
+/// side; here we fold it back into the message (`"<message>: <cause>"`) so
+/// Swift/Kotlin callers don't lose the underlying error detail.
+fn flatten_cause(
+    message: String,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+) -> String {
+    match source {
+        Some(cause) => format!("{message}: {cause}"),
+        None => message,
+    }
+}
+
 impl From<SdkError> for XybridError {
     fn from(e: SdkError) -> Self {
         match e {
@@ -202,27 +351,39 @@ impl From<SdkError> for XybridError {
             SdkError::DirectoryNotFound(s) => XybridError::DirectoryNotFound { message: s },
             SdkError::MetadataNotFound(s) => XybridError::MetadataNotFound { message: s },
             SdkError::MetadataInvalid(s) => XybridError::MetadataInvalid { message: s },
-            SdkError::LoadError(s) => XybridError::LoadError { message: s },
-            SdkError::InferenceError(s) => XybridError::InferenceError { message: s },
+            SdkError::LoadError { message, source } => XybridError::LoadError {
+                message: flatten_cause(message, source),
+            },
+            SdkError::InferenceError { message, source } => XybridError::InferenceError {
+                message: flatten_cause(message, source),
+            },
             SdkError::AbortedForCloudFallback { reason } => XybridError::InferenceError {
                 message: format!("Aborted for cloud fallback: {reason}"),
             },
             SdkError::StreamingNotSupported => XybridError::StreamingNotSupported,
             SdkError::NotLoaded => XybridError::NotLoaded,
             SdkError::ConfigError(s) => XybridError::ConfigError { message: s },
-            SdkError::NetworkError(s) => XybridError::NetworkError { message: s },
+            SdkError::NetworkError { message, source } => XybridError::NetworkError {
+                message: flatten_cause(message, source),
+            },
             // `SdkError::Offline` is a Rust-side refinement of NetworkError
             // (see xybrid-sdk). We collapse it back to `NetworkError` at the
             // UniFFI boundary so the Swift/Kotlin public API stays stable —
             // adding a new variant here would be a breaking change to the
             // generated sealed/enum hierarchies and needs to go through the
             // spec-first API contract update in docs/sdk/api-surface.yaml.
-            SdkError::Offline(s) => XybridError::NetworkError { message: s },
+            SdkError::Offline { message, source } => XybridError::NetworkError {
+                message: flatten_cause(message, source),
+            },
             SdkError::IoError(e) => XybridError::IoError {
                 message: e.to_string(),
             },
-            SdkError::CacheError(s) => XybridError::CacheError { message: s },
-            SdkError::PipelineError(s) => XybridError::PipelineError { message: s },
+            SdkError::CacheError { message, source } => XybridError::CacheError {
+                message: flatten_cause(message, source),
+            },
+            SdkError::PipelineError { message, source } => XybridError::PipelineError {
+                message: flatten_cause(message, source),
+            },
             SdkError::CircuitOpen(s) => XybridError::CircuitOpen { message: s },
             SdkError::RateLimited { retry_after_secs } => {
                 XybridError::RateLimited { retry_after_secs }
@@ -573,12 +734,12 @@ impl XybridModelLoader {
     ///
     /// # Returns
     ///
-    /// A new `XybridModelLoader` instance configured to load from the bundle.
+    /// A new `XybridModelLoader` instance, or an `XybridError` if the bundle
+    /// cannot be opened (missing path, malformed archive, etc.).
     #[uniffi::constructor]
-    pub fn from_bundle(path: String) -> Arc<Self> {
-        Arc::new(Self {
-            inner: CoreModelLoader::from_bundle(&path).unwrap(),
-        })
+    pub fn from_bundle(path: String) -> Result<Arc<Self>, XybridError> {
+        let inner = CoreModelLoader::from_bundle(&path)?;
+        Ok(Arc::new(Self { inner }))
     }
 
     /// Create a model loader that will load from a local directory containing
@@ -666,6 +827,72 @@ impl XybridModelLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `XybridError` retryability must mirror the Rust SDK's
+    /// `SdkError::is_retryable` contract across the boundary, and the
+    /// `From<SdkError>` collapse of `Offline → NetworkError` must
+    /// preserve retryability (both are retryable). The match is
+    /// exhaustive so a new variant forces a decision here too.
+    #[test]
+    fn error_retryability_mirrors_sdk_contract() {
+        // Retryable variants.
+        assert!(XybridError::NetworkError {
+            message: "x".into()
+        }
+        .is_retryable());
+        assert!(XybridError::RateLimited {
+            retry_after_secs: 5
+        }
+        .is_retryable());
+        assert!(XybridError::Timeout { timeout_ms: 100 }.is_retryable());
+
+        // Representative non-retryable variants.
+        assert!(!XybridError::NotLoaded.is_retryable());
+        assert!(!XybridError::CircuitOpen {
+            message: "x".into()
+        }
+        .is_retryable());
+        assert!(!XybridError::InferenceError {
+            message: "x".into()
+        }
+        .is_retryable());
+
+        // SdkError::Offline collapses to NetworkError, which is retryable —
+        // so the Rust-side Offline retryability survives the boundary. This
+        // is the load-bearing cross-boundary assertion: the `From` impl
+        // must not silently demote a retryable error to a non-retryable
+        // variant.
+        let from_offline: XybridError = SdkError::Offline {
+            message: "down".into(),
+            source: None,
+        }
+        .into();
+        assert!(matches!(from_offline, XybridError::NetworkError { .. }));
+        assert!(from_offline.is_retryable());
+    }
+
+    #[test]
+    fn retry_after_secs_only_on_rate_limited() {
+        assert_eq!(
+            XybridError::RateLimited {
+                retry_after_secs: 7
+            }
+            .retry_after_secs(),
+            Some(7)
+        );
+        assert_eq!(
+            XybridError::Timeout { timeout_ms: 100 }.retry_after_secs(),
+            None
+        );
+        assert_eq!(XybridError::NotLoaded.retry_after_secs(), None);
+
+        // The exported free functions delegate to the inherent methods.
+        let rl = XybridError::RateLimited {
+            retry_after_secs: 9,
+        };
+        assert!(xybrid_error_is_retryable(&rl));
+        assert_eq!(xybrid_error_retry_after_secs(&rl), Some(9));
+    }
 
     // Pure-helper tests: exercise every accepted platform without touching
     // the process-global OnceLock in xybrid-sdk. This is the only way to

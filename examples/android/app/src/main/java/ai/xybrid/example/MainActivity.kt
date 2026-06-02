@@ -22,7 +22,16 @@ import ai.xybrid.example.ui.theme.XybridExampleTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Xybrid.init(this)
+        // The key and platform URL come from BuildConfig, wired in
+        // app/build.gradle.kts from local.properties (xybrid.apiKey /
+        // xybrid.platformUrl), -PXYBRID_API_KEY / -PXYBRID_PLATFORM_URL, or the
+        // matching env vars — never committed. Blank resolves to anonymous,
+        // local-only init against the default platform. See README.
+        Xybrid.init(
+            this,
+            apiKey = BuildConfig.XYBRID_API_KEY.ifBlank { null },
+            ingestUrl = BuildConfig.XYBRID_PLATFORM_URL.ifBlank { null },
+        )
         setContent {
             XybridExampleTheme {
                 Surface(

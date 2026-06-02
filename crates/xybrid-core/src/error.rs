@@ -18,7 +18,7 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use xybrid_core::error::{XybridError, XybridResult};
 //!
 //! fn load_and_run() -> XybridResult<String> {

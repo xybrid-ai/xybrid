@@ -11,7 +11,8 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 //! use xybrid_sdk::registry_client::RegistryClient;
 //!
 //! let client = RegistryClient::default_client()?;
@@ -30,6 +31,8 @@
 //! let bundle_path = client.fetch("kokoro-82m", None, |progress| {
 //!     println!("Downloaded: {:.1}%", progress * 100.0);
 //! })?;
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::cache::CacheManager;
@@ -37,7 +40,8 @@ use crate::model::SdkError;
 use crate::platform::current_platform;
 use crate::source::detect_platform;
 use crate::telemetry_optout::is_telemetry_opted_out;
-use crate::{get_binding, DEFAULT_BINDING};
+use crate::{get_binding, DEFAULT_BINDING, SDK_VERSION};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -47,7 +51,7 @@ use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy, RetryableError};
+use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 
 pub const DEFAULT_REGISTRY_URL: &str = "https://registry.xybrid.dev";
 pub const FALLBACK_REGISTRY_URL: &str = "https://r2.xybrid.dev";
@@ -94,7 +98,7 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
     Some(format!(
         "binding={}; sdk_version={}; core_version={}; platform={}; backends={}",
         safe_binding,
-        env!("CARGO_PKG_VERSION"),
+        SDK_VERSION,
         xybrid_core::VERSION,
         current_platform(),
         backends,
@@ -147,6 +151,41 @@ const CONNECT_TIMEOUT_MS: u64 = 5000;
 
 /// Request timeout in milliseconds.
 const REQUEST_TIMEOUT_MS: u64 = 15000;
+
+/// Default retry delay when a 429 response omits or mangles Retry-After.
+const DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS: u64 = 60;
+
+/// Cap Retry-After to avoid a registry hint sleeping the client indefinitely.
+const MAX_RATE_LIMIT_RETRY_AFTER_SECS: u64 = 5 * 60;
+
+fn rate_limit_retry_after_secs(retry_after: Option<&str>) -> u64 {
+    rate_limit_retry_after_secs_at(retry_after, Utc::now())
+}
+
+fn rate_limit_retry_after_secs_at(retry_after: Option<&str>, now: DateTime<Utc>) -> u64 {
+    let Some(value) = retry_after.map(str::trim).filter(|value| !value.is_empty()) else {
+        return DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS;
+    };
+
+    if let Ok(seconds) = value.parse::<u64>() {
+        return seconds.min(MAX_RATE_LIMIT_RETRY_AFTER_SECS);
+    }
+
+    parse_retry_after_http_date(value, now).unwrap_or(DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS)
+}
+
+fn parse_retry_after_http_date(value: &str, now: DateTime<Utc>) -> Option<u64> {
+    let parsed = DateTime::parse_from_rfc2822(value)
+        .map(|date| date.with_timezone(&Utc))
+        .or_else(|_| {
+            NaiveDateTime::parse_from_str(value, "%a, %d %b %Y %H:%M:%S GMT")
+                .map(|date| DateTime::<Utc>::from_naive_utc_and_offset(date, Utc))
+        })
+        .ok()?;
+
+    let seconds = parsed.signed_duration_since(now).num_seconds().max(0) as u64;
+    Some(seconds.min(MAX_RATE_LIMIT_RETRY_AFTER_SECS))
+}
 
 /// Registry client for model resolution and download.
 pub struct RegistryClient {
@@ -300,7 +339,7 @@ impl RegistryClient {
         .and_then(|response| {
             let list_response: ListModelsResponse = response
                 .into_json()
-                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))?;
+                .map_err(|e| SdkError::network_src("Failed to parse response", e))?;
             Ok(list_response.models)
         })
     }
@@ -321,7 +360,7 @@ impl RegistryClient {
         .and_then(|response| {
             response
                 .into_json()
-                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))
+                .map_err(|e| SdkError::network_src("Failed to parse response", e))
         })
     }
 
@@ -350,7 +389,7 @@ impl RegistryClient {
         .and_then(|response| {
             let resolve_response: ResolveResponse = response
                 .into_json()
-                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))?;
+                .map_err(|e| SdkError::network_src("Failed to parse response", e))?;
             Ok(resolve_response.resolved)
         })
     }
@@ -391,9 +430,8 @@ impl RegistryClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            SdkError::NetworkError("All registry URLs failed or circuits open".to_string())
-        }))
+        Err(last_error
+            .unwrap_or_else(|| SdkError::network("All registry URLs failed or circuits open")))
     }
 
     /// Execute an operation with retry for a specific URL.
@@ -443,7 +481,7 @@ impl RegistryClient {
                     // online), and skip the retry loop within this URL since
                     // backoff won't help a DNS failure. Return immediately and
                     // let `execute_with_fallback` try the next URL.
-                    if matches!(&err, SdkError::Offline(_)) {
+                    if matches!(&err, SdkError::Offline { .. }) {
                         return Err(err);
                     }
 
@@ -465,7 +503,7 @@ impl RegistryClient {
         }
 
         Err(last_error.unwrap_or_else(|| {
-            SdkError::NetworkError(format!("All retry attempts exhausted for {}", api_url))
+            SdkError::network(format!("All retry attempts exhausted for {}", api_url))
         }))
     }
 
@@ -480,7 +518,7 @@ impl RegistryClient {
                 if resp.status() == 200 {
                     Ok(resp)
                 } else {
-                    Err(self.status_to_error(resp.status(), operation))
+                    Err(self.response_status_to_error(&resp, operation))
                 }
             }
             Err(e) => Err(self.ureq_error_to_sdk_error(e, operation)),
@@ -504,7 +542,7 @@ impl RegistryClient {
                 } else if resp.status() == 404 {
                     Err(not_found_err())
                 } else {
-                    Err(self.status_to_error(resp.status(), operation))
+                    Err(self.response_status_to_error(&resp, operation))
                 }
             }
             Err(ureq::Error::Status(404, _)) => Err(not_found_err()),
@@ -512,16 +550,18 @@ impl RegistryClient {
         }
     }
 
+    /// Convert an HTTP response status and headers to SdkError.
+    fn response_status_to_error(&self, response: &ureq::Response, operation: &str) -> SdkError {
+        self.status_to_error(response.status(), operation, response.header("Retry-After"))
+    }
+
     /// Convert HTTP status code to SdkError.
-    fn status_to_error(&self, status: u16, operation: &str) -> SdkError {
+    fn status_to_error(&self, status: u16, operation: &str, retry_after: Option<&str>) -> SdkError {
         match status {
-            429 => {
-                // TODO: Parse Retry-After header when available
-                SdkError::RateLimited {
-                    retry_after_secs: 60,
-                }
-            }
-            502..=504 => SdkError::NetworkError(format!(
+            429 => SdkError::RateLimited {
+                retry_after_secs: rate_limit_retry_after_secs(retry_after),
+            },
+            502..=504 => SdkError::network(format!(
                 "Registry {} failed with status {} (server error)",
                 operation, status
             )),
@@ -529,9 +569,7 @@ impl RegistryClient {
                 "Registry {} failed with status {} (client error)",
                 operation, status
             )),
-            _ => {
-                SdkError::NetworkError(format!("Registry {} returned status {}", operation, status))
-            }
+            _ => SdkError::network(format!("Registry {} returned status {}", operation, status)),
         }
     }
 
@@ -544,24 +582,28 @@ impl RegistryClient {
     /// toward the failure threshold (see `execute_with_retry_for_url`).
     fn ureq_error_to_sdk_error(&self, error: ureq::Error, operation: &str) -> SdkError {
         match error {
-            ureq::Error::Status(status, _) => self.status_to_error(status, operation),
+            ureq::Error::Status(status, response) => {
+                self.status_to_error(status, operation, response.header("Retry-After"))
+            }
             ureq::Error::Transport(transport) => {
                 let kind = transport.kind();
                 match kind {
-                    ureq::ErrorKind::Dns => SdkError::Offline(format!(
-                        "Failed to {} (DNS resolution failed)",
-                        operation
-                    )),
-                    ureq::ErrorKind::ConnectionFailed => SdkError::Offline(format!(
-                        "Failed to {} (connection refused or host unreachable)",
-                        operation
-                    )),
-                    ureq::ErrorKind::Io => SdkError::Offline(format!(
-                        "Failed to {} (network I/O error: {})",
-                        operation,
-                        transport.message().unwrap_or("unknown")
-                    )),
-                    _ => SdkError::NetworkError(format!("Failed to {}: {}", operation, transport)),
+                    ureq::ErrorKind::Dns => SdkError::offline_src(
+                        format!("Failed to {} (DNS resolution failed)", operation),
+                        transport,
+                    ),
+                    ureq::ErrorKind::ConnectionFailed => SdkError::offline_src(
+                        format!(
+                            "Failed to {} (connection refused or host unreachable)",
+                            operation
+                        ),
+                        transport,
+                    ),
+                    ureq::ErrorKind::Io => SdkError::offline_src(
+                        format!("Failed to {} (network I/O error)", operation),
+                        transport,
+                    ),
+                    _ => SdkError::network_src(format!("Failed to {}", operation), transport),
                 }
             }
         }
@@ -712,7 +754,7 @@ impl RegistryClient {
             let hash = compute_sha256(&cache_path)?;
             if hash != resolved.sha256 {
                 std::fs::remove_file(&cache_path).ok();
-                return Err(SdkError::CacheError(format!(
+                return Err(SdkError::cache(format!(
                     "SHA256 mismatch: expected {}, got {}",
                     resolved.sha256, hash
                 )));
@@ -758,7 +800,9 @@ impl RegistryClient {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::RegistryClient;
     /// let client = RegistryClient::default_client()?;
     /// let model_dir = client.fetch_extracted("kokoro-82m", None, |p| {
     ///     println!("Downloaded: {:.1}%", p * 100.0);
@@ -766,6 +810,8 @@ impl RegistryClient {
     ///
     /// // model_dir now contains model_metadata.json and all model files
     /// let metadata_path = model_dir.join("model_metadata.json");
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn fetch_extracted<F>(
         &self,
@@ -844,9 +890,8 @@ impl RegistryClient {
         }
 
         // Create extraction directory
-        std::fs::create_dir_all(&extract_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create extraction directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&extract_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
         // Download raw model file directly to extraction dir
         info!(
@@ -880,7 +925,7 @@ impl RegistryClient {
             let hash = compute_sha256(&model_file_path)?;
             if hash != resolved.sha256 {
                 std::fs::remove_file(&model_file_path).ok();
-                return Err(SdkError::CacheError(format!(
+                return Err(SdkError::cache(format!(
                     "Passthrough SHA256 mismatch: expected {}, got {}",
                     resolved.sha256, hash
                 )));
@@ -892,19 +937,17 @@ impl RegistryClient {
 
         // Write model_metadata.json from registry response
         if let Some(ref metadata) = resolved.model_metadata {
-            let metadata_json = serde_json::to_string_pretty(metadata).map_err(|e| {
-                SdkError::CacheError(format!("Failed to serialize model metadata: {}", e))
-            })?;
-            std::fs::write(&metadata_path, metadata_json).map_err(|e| {
-                SdkError::CacheError(format!("Failed to write model_metadata.json: {}", e))
-            })?;
+            let metadata_json = serde_json::to_string_pretty(metadata)
+                .map_err(|e| SdkError::cache_src("Failed to serialize model metadata", e))?;
+            std::fs::write(&metadata_path, metadata_json)
+                .map_err(|e| SdkError::cache_src("Failed to write model_metadata.json", e))?;
             info!(
                 "Wrote model_metadata.json for passthrough model '{}' at {}",
                 mask,
                 metadata_path.display()
             );
         } else {
-            return Err(SdkError::CacheError(format!(
+            return Err(SdkError::cache(format!(
                 "Passthrough variant for '{}' has no model_metadata in registry response",
                 mask
             )));
@@ -1001,9 +1044,8 @@ impl RegistryClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            SdkError::NetworkError("Download failed after all retry attempts".to_string())
-        }))
+        Err(last_error
+            .unwrap_or_else(|| SdkError::network("Download failed after all retry attempts")))
     }
 
     /// Attempt a single download.
@@ -1029,7 +1071,7 @@ impl RegistryClient {
             .map_err(|e| self.ureq_error_to_sdk_error(e, "download bundle"))?;
 
         if response.status() != 200 {
-            return Err(self.status_to_error(response.status(), "download bundle"));
+            return Err(self.response_status_to_error(&response, "download bundle"));
         }
 
         let mut file = File::create(dest)?;
@@ -1040,7 +1082,7 @@ impl RegistryClient {
         loop {
             let bytes_read = reader
                 .read(&mut buffer)
-                .map_err(|e| SdkError::NetworkError(format!("Read error: {}", e)))?;
+                .map_err(|e| SdkError::network_src("Read error", e))?;
 
             if bytes_read == 0 {
                 break;
@@ -1071,9 +1113,7 @@ impl RegistryClient {
 
     /// Clear the entire model cache.
     pub fn clear_all_cache(&mut self) -> Result<(), SdkError> {
-        self.cache
-            .clear()
-            .map_err(|e| SdkError::CacheError(e.to_string()))?;
+        self.cache.clear()?;
         Ok(())
     }
 
@@ -1317,6 +1357,7 @@ impl CacheStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     #[test]
     fn classify_download_source_recognises_r2_hosts() {
@@ -1510,6 +1551,82 @@ mod tests {
     }
 
     #[test]
+    fn retry_after_seconds_header_is_used_for_rate_limit_errors() {
+        let client = RegistryClient::default_client().unwrap();
+        let error = client.status_to_error(429, "list models", Some("120"));
+
+        assert!(matches!(
+            error,
+            SdkError::RateLimited {
+                retry_after_secs: 120
+            }
+        ));
+    }
+
+    #[test]
+    fn retry_after_header_is_read_from_ureq_error_response() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let rate_limited = server.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(429).header("Retry-After", "120");
+        });
+
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+        let response = client
+            .agent
+            .get(&format!("{}/v1/models", server.base_url()))
+            .call();
+
+        assert!(matches!(
+            client.handle_response(response, "list models"),
+            Err(SdkError::RateLimited {
+                retry_after_secs: 120
+            })
+        ));
+        rate_limited.assert();
+    }
+
+    #[test]
+    fn retry_after_http_date_header_is_used_for_rate_limit_errors() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 21, 7, 27, 0).unwrap();
+
+        assert_eq!(
+            rate_limit_retry_after_secs_at(Some("Wed, 21 Oct 2026 07:28:00 GMT"), now),
+            60
+        );
+    }
+
+    #[test]
+    fn retry_after_missing_or_malformed_header_uses_default_delay() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 21, 7, 27, 0).unwrap();
+
+        assert_eq!(
+            rate_limit_retry_after_secs_at(None, now),
+            DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+        assert_eq!(
+            rate_limit_retry_after_secs_at(Some("not a retry date"), now),
+            DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+    }
+
+    #[test]
+    fn retry_after_header_is_capped() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 21, 7, 27, 0).unwrap();
+
+        assert_eq!(
+            rate_limit_retry_after_secs_at(Some("1200"), now),
+            MAX_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+        assert_eq!(
+            rate_limit_retry_after_secs_at(Some("Wed, 21 Oct 2026 07:37:00 GMT"), now),
+            MAX_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+    }
+
+    #[test]
     fn test_cache_path() {
         let client = RegistryClient::default_client().unwrap();
         let resolved = ResolvedVariant {
@@ -1593,12 +1710,12 @@ mod tests {
         assert!(circuit.is_closed(), "breaker starts closed");
 
         let mut op = |_url: &str| -> Result<ureq::Response, SdkError> {
-            Err(SdkError::Offline("simulated offline".to_string()))
+            Err(SdkError::offline("simulated offline"))
         };
 
         let result =
             client.execute_with_retry_for_url("https://primary.example.invalid", &circuit, &mut op);
-        assert!(matches!(result, Err(SdkError::Offline(_))));
+        assert!(matches!(result, Err(SdkError::Offline { .. })));
         assert_eq!(
             circuit.failure_count(),
             0,
@@ -1623,7 +1740,7 @@ mod tests {
 
         let mut op = |_url: &str| -> Result<ureq::Response, SdkError> {
             call_count.fetch_add(1, Ordering::SeqCst);
-            Err(SdkError::Offline("simulated offline".to_string()))
+            Err(SdkError::offline("simulated offline"))
         };
 
         let result =

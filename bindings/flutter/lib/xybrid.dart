@@ -87,7 +87,8 @@ export 'src/model_loader.dart'
         LoadComplete,
         LoadError;
 export 'src/pipeline.dart' show XybridPipeline;
-export 'src/result.dart' show XybridResult;
+export 'src/result.dart'
+    show XybridInferenceMetrics, XybridResult, XybridStageLatency;
 export 'src/run_options.dart' show AbortPolicy, AbortSignal, RunOptions;
 export 'src/utils/utils.dart';
 export 'src/xybrid.dart' show Xybrid;

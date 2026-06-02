@@ -104,4 +104,10 @@ mod tests {
     fn ort_download_branch_is_exercised() {
         assert!(enabled().contains(&"ort-download"));
     }
+
+    #[cfg(feature = "llm-llamacpp")]
+    #[test]
+    fn llamacpp_reports_enabled() {
+        assert!(enabled().contains(&"llm-llamacpp"));
+    }
 }

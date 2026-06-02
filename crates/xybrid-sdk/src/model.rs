@@ -60,7 +60,20 @@ pub enum StreamEvent {
     Error(String),
 }
 
+/// A boxed, thread-safe error cause carried by the wrapping [`SdkError`]
+/// variants so the underlying error stays `source()`-walkable and
+/// downcastable instead of being flattened into a string.
+pub type SdkErrorSource = Box<dyn std::error::Error + Send + Sync>;
+
 /// SDK-level error type.
+///
+/// The variants that wrap an underlying failure (`LoadError`,
+/// `InferenceError`, `NetworkError`, `CacheError`, `PipelineError`,
+/// `Offline`) carry the original error as a `#[source]` cause rather than
+/// pre-formatting it into the message, so callers can walk
+/// [`std::error::Error::source`] and downcast to the real type. Construct
+/// them with the [`SdkError::inference`] / [`SdkError::inference_src`]
+/// family of helpers.
 #[derive(Debug, thiserror::Error)]
 pub enum SdkError {
     #[error("Model not found: {0}")]
@@ -71,10 +84,18 @@ pub enum SdkError {
     MetadataNotFound(String),
     #[error("model_metadata.json is invalid: {0}")]
     MetadataInvalid(String),
-    #[error("Failed to load model: {0}")]
-    LoadError(String),
-    #[error("Inference failed: {0}")]
-    InferenceError(String),
+    #[error("Failed to load model: {message}")]
+    LoadError {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
+    #[error("Inference failed: {message}")]
+    InferenceError {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
     /// Local streaming aborted under resource pressure with the caller's
     /// permission to retry on cloud (`AbortPolicy::fallback_to_cloud`).
     /// `run_streaming_with_fallback` catches this variant; lower-level
@@ -90,21 +111,37 @@ pub enum SdkError {
     NotLoaded,
     #[error("Invalid configuration: {0}")]
     ConfigError(String),
-    #[error("Network error: {0}")]
-    NetworkError(String),
+    #[error("Network error: {message}")]
+    NetworkError {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
     /// The registry could not be reached at all (DNS failure, connection refused,
     /// network unreachable, interface down). This is distinct from `NetworkError`
     /// because it represents *local* unreachability rather than a server-side problem,
     /// and the circuit breaker treats it differently — offline errors don't count
     /// toward the failure threshold so callers aren't punished for being offline.
-    #[error("Registry unreachable: {0}")]
-    Offline(String),
+    #[error("Registry unreachable: {message}")]
+    Offline {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("Cache error: {0}")]
-    CacheError(String),
-    #[error("Pipeline error: {0}")]
-    PipelineError(String),
+    #[error("Cache error: {message}")]
+    CacheError {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
+    #[error("Pipeline error: {message}")]
+    PipelineError {
+        message: String,
+        #[source]
+        source: Option<SdkErrorSource>,
+    },
     #[error("Circuit breaker open: {0}")]
     CircuitOpen(String),
     #[error("Rate limited, retry after {retry_after_secs} seconds")]
@@ -113,28 +150,76 @@ pub enum SdkError {
     Timeout { timeout_ms: u64 },
 }
 
+/// Generates the `message`-only and `_src` (cause-chaining) constructors for
+/// the wrapping `SdkError` variants, so call sites stay terse
+/// (`SdkError::cache_src("…", e)`) while preserving the underlying cause.
+macro_rules! sdk_error_ctors {
+    ($($msg_fn:ident, $src_fn:ident => $variant:ident);+ $(;)?) => {
+        impl SdkError {
+            $(
+                #[doc = concat!("Build [`SdkError::", stringify!($variant), "`] from a message with no underlying cause.")]
+                pub(crate) fn $msg_fn(message: impl Into<String>) -> Self {
+                    SdkError::$variant { message: message.into(), source: None }
+                }
+
+                #[doc = concat!("Build [`SdkError::", stringify!($variant), "`] from a message, chaining `source` as the `#[source]` cause.")]
+                pub(crate) fn $src_fn(
+                    message: impl Into<String>,
+                    source: impl Into<SdkErrorSource>,
+                ) -> Self {
+                    SdkError::$variant { message: message.into(), source: Some(source.into()) }
+                }
+            )+
+        }
+    };
+}
+
+sdk_error_ctors! {
+    load, load_src => LoadError;
+    inference, inference_src => InferenceError;
+    network, network_src => NetworkError;
+    cache, cache_src => CacheError;
+    pipeline, pipeline_src => PipelineError;
+    offline, offline_src => Offline;
+}
+
 /// Result type for SDK operations.
 pub type SdkResult<T> = Result<T, SdkError>;
 
-impl xybrid_core::http::RetryableError for SdkError {
-    fn is_retryable(&self) -> bool {
+impl SdkError {
+    /// Whether retrying the operation that produced this error could
+    /// succeed without the caller changing anything.
+    ///
+    /// Transient failures (`NetworkError`, `RateLimited`, `Timeout`,
+    /// `Offline`) are retryable; everything else — including
+    /// `CircuitOpen`, `ConfigError`, `ModelNotFound`, `LoadError`,
+    /// `InferenceError`, and `AbortedForCloudFallback` — is not. `Offline`
+    /// is retryable only across *different* registry URLs (a fallback
+    /// registry may be reachable when the primary isn't); within a single
+    /// URL the retry loop short-circuits (see `registry_client`).
+    ///
+    /// This is the inherent form of the [`xybrid_core::http::RetryableError`]
+    /// trait method, exposed directly on `SdkError` so callers (and the
+    /// FFI / UniFFI layers) can query retryability without importing the
+    /// trait. The trait impl forwards here.
+    pub fn is_retryable(&self) -> bool {
         match self {
             // Retryable errors (transient failures)
-            SdkError::NetworkError(_) => true,
+            SdkError::NetworkError { .. } => true,
             SdkError::RateLimited { .. } => true,
             SdkError::Timeout { .. } => true,
             // Offline is "retryable" only across URLs — the fallback registry
             // may be reachable even when the primary isn't. Within a single URL
             // the retry loop short-circuits immediately (see registry_client).
-            SdkError::Offline(_) => true,
+            SdkError::Offline { .. } => true,
 
             // Non-retryable errors (permanent failures)
             SdkError::ModelNotFound(_) => false,
             SdkError::DirectoryNotFound(_) => false,
             SdkError::MetadataNotFound(_) => false,
             SdkError::MetadataInvalid(_) => false,
-            SdkError::LoadError(_) => false,
-            SdkError::InferenceError(_) => false,
+            SdkError::LoadError { .. } => false,
+            SdkError::InferenceError { .. } => false,
             // Resource-driven abort is not retryable on the same path; the
             // wrapper redirects to cloud instead.
             SdkError::AbortedForCloudFallback { .. } => false,
@@ -142,13 +227,20 @@ impl xybrid_core::http::RetryableError for SdkError {
             SdkError::NotLoaded => false,
             SdkError::ConfigError(_) => false,
             SdkError::IoError(_) => false,
-            SdkError::CacheError(_) => false,
-            SdkError::PipelineError(_) => false,
+            SdkError::CacheError { .. } => false,
+            SdkError::PipelineError { .. } => false,
             SdkError::CircuitOpen(_) => false, // Don't retry when circuit is open
         }
     }
 
-    fn retry_after(&self) -> Option<std::time::Duration> {
+    /// The minimum delay a caller should wait before retrying, when the
+    /// error itself dictates one. Only `RateLimited` carries a
+    /// server-specified backoff; every other variant returns `None`
+    /// (the caller picks its own backoff if [`Self::is_retryable`]).
+    ///
+    /// Inherent form of [`xybrid_core::http::RetryableError::retry_after`];
+    /// the trait impl forwards here.
+    pub fn retry_after(&self) -> Option<std::time::Duration> {
         match self {
             SdkError::RateLimited { retry_after_secs } => {
                 Some(std::time::Duration::from_secs(*retry_after_secs))
@@ -158,12 +250,22 @@ impl xybrid_core::http::RetryableError for SdkError {
     }
 }
 
+impl xybrid_core::http::RetryableError for SdkError {
+    fn is_retryable(&self) -> bool {
+        SdkError::is_retryable(self)
+    }
+
+    fn retry_after(&self) -> Option<std::time::Duration> {
+        SdkError::retry_after(self)
+    }
+}
+
 fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
     match error {
         xybrid_core::runtime_adapter::AdapterError::AbortedForCloudFallback { reason } => {
             SdkError::AbortedForCloudFallback { reason }
         }
-        other => SdkError::InferenceError(format!("Streaming execution failed: {}", other)),
+        other => SdkError::inference_src("Streaming execution failed", other),
     }
 }
 
@@ -171,7 +273,7 @@ fn streaming_callback_error(error: Box<dyn std::error::Error + Send + Sync>) -> 
     if let Some(reason) = xybrid_core::abort::cloud_fallback_reason_from_error(error.as_ref()) {
         return SdkError::AbortedForCloudFallback { reason };
     }
-    SdkError::InferenceError(format!("Streaming callback failed: {}", error))
+    SdkError::inference_src("Streaming callback failed", error)
 }
 
 fn streaming_pre_run_abort_error(
@@ -183,7 +285,7 @@ fn streaming_pre_run_abort_error(
             reason: reason.to_core_abort_reason(),
         };
     }
-    SdkError::InferenceError(format!("Execution aborted: {reason}"))
+    SdkError::inference(format!("Execution aborted: {reason}"))
 }
 
 /// Information about a local→cloud handoff "seam" surfaced by
@@ -291,6 +393,7 @@ fn local_reliability_hint_after_abort(
         metrics: metrics.clone(),
         resource_monitor: xybrid_core::device::ResourceMonitor::global(),
         explicit_target: None,
+        local_availability: None,
         device_class: Some(metrics.canonical_device_class()),
         device_class_schema_version: Some(xybrid_core::context::DEVICE_CLASS_SCHEMA_VERSION),
     };
@@ -371,7 +474,7 @@ where
                 .as_ref()
                 .is_some_and(CancellationToken::is_cancelled)
             {
-                return Err(SdkError::InferenceError(format!(
+                return Err(SdkError::inference(format!(
                     "Execution aborted: {}",
                     crate::run_options::AbortReason::UserCancelled
                 )));
@@ -425,7 +528,7 @@ where
                         },
                         signal_context,
                     );
-                    return Err(SdkError::InferenceError(format!(
+                    return Err(SdkError::inference(format!(
                         "cloud_denied_by_policy: {}",
                         policy_reason
                     )));
@@ -459,7 +562,7 @@ where
                         },
                         signal_context,
                     );
-                    return Err(SdkError::InferenceError(format!(
+                    return Err(SdkError::inference(format!(
                         "cloud_denied_by_policy: {}",
                         policy_reason
                     )));
@@ -620,20 +723,30 @@ struct ModelHandle {
 ///
 /// # Example (Recommended - Registry-based)
 ///
-/// ```ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # use xybrid_sdk::ModelLoader;
+/// # use xybrid_sdk::ir::Envelope;
+/// # let envelope: Envelope = unimplemented!();
 /// // Load using registry (recommended - auto-resolves to best variant)
 /// let loader = ModelLoader::from_registry("kokoro-82m");
 /// let model = loader.load()?;
-/// let result = model.run(&envelope)?;
+/// let result = model.run(&envelope, None)?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Example (With progress callback)
 ///
-/// ```ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # use xybrid_sdk::ModelLoader;
 /// let loader = ModelLoader::from_registry("kokoro-82m");
 /// let model = loader.load_with_progress(|progress| {
 ///     println!("Download: {:.1}%", progress * 100.0);
 /// })?;
+/// # Ok(())
+/// # }
 /// ```
 /// GGUF quantization preference order for automatic selection.
 /// Q4_K_M is the default — best quality/size tradeoff for edge devices.
@@ -655,7 +768,7 @@ fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<
         {
             return Ok(found.to_string());
         }
-        return Err(SdkError::LoadError(format!(
+        return Err(SdkError::load(format!(
             "No GGUF file matching variant '{}'. Available: {}",
             v,
             gguf_files.join(", ")
@@ -672,7 +785,7 @@ fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<
     // Fallback: pick the smallest file (likely the most quantized)
     Ok(gguf_files
         .first()
-        .ok_or_else(|| SdkError::LoadError("No GGUF files found".to_string()))?
+        .ok_or_else(|| SdkError::load("No GGUF files found"))?
         .to_string())
 }
 
@@ -691,9 +804,13 @@ impl ModelLoader {
     /// caching and SHA256 verification.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_registry("kokoro-82m");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_registry(id: &str) -> Self {
         Self {
@@ -706,9 +823,13 @@ impl ModelLoader {
     /// Create loader from registry with explicit platform.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_registry_with_platform("kokoro-82m", "macos-arm64");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_registry_with_platform(id: &str, platform: &str) -> Self {
         Self {
@@ -815,9 +936,13 @@ impl ModelLoader {
     /// `SdkError::ConfigError` if the feature is not enabled.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_huggingface("xybrid-ai/kokoro-82m");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_huggingface(repo: &str) -> Self {
         Self {
@@ -830,9 +955,13 @@ impl ModelLoader {
     /// Create loader from a HuggingFace Hub repository with explicit revision.
     ///
     /// # Example
-    /// ```ignore
-    /// let loader = ModelLoader::from_huggingface_with_revision("xybrid-ai/kokoro-82m", "v1.0")?;
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// let loader = ModelLoader::from_huggingface_with_revision("xybrid-ai/kokoro-82m", "v1.0");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_huggingface_with_revision(repo: &str, revision: &str) -> Self {
         Self {
@@ -848,9 +977,13 @@ impl ModelLoader {
     /// Without a variant, defaults to Q4_K_M for GGUF repos.
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_huggingface_parsed("LiquidAI/LFM2.5-350M-GGUF:Q8_0");
     /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_huggingface_parsed(input: &str) -> Self {
         let source = ModelSource::parse_huggingface(input);
@@ -897,10 +1030,15 @@ impl ModelLoader {
     /// Only applies to registry-based loading (downloads from HuggingFace).
     ///
     /// # Example
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// # let loader: ModelLoader = unimplemented!();
     /// let model = loader.load_with_progress(|progress| {
     ///     println!("Download: {:.1}%", progress * 100.0);
     /// })?;
+    /// # Ok(())
+    /// # }
     /// ```
     #[allow(deprecated)]
     pub fn load_with_progress<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
@@ -938,7 +1076,7 @@ impl ModelLoader {
         let loader = self.clone();
         tokio::task::spawn_blocking(move || loader.load())
             .await
-            .map_err(|e| SdkError::LoadError(format!("Task join error: {}", e)))?
+            .map_err(|e| SdkError::load_src("Task join error", e))?
     }
 
     /// Load model from registry using RegistryClient.
@@ -992,7 +1130,7 @@ impl ModelLoader {
         // Use blocking HTTP client
         let response = ureq::get(&bundle_url)
             .call()
-            .map_err(|e| SdkError::NetworkError(format!("Failed to download bundle: {}", e)))?;
+            .map_err(|e| SdkError::network_src("Failed to download bundle", e))?;
 
         if response.status() != 200 {
             return Err(SdkError::ModelNotFound(format!(
@@ -1063,9 +1201,8 @@ impl ModelLoader {
         log::info!(target: "xybrid_sdk", "Downloading model from HuggingFace: {}", repo);
 
         // Create HF API client
-        let api = Api::new().map_err(|e| {
-            SdkError::NetworkError(format!("Failed to create HuggingFace API client: {}", e))
-        })?;
+        let api = Api::new()
+            .map_err(|e| SdkError::network_src("Failed to create HuggingFace API client", e))?;
 
         // Create repo reference with optional revision
         let hf_repo = if let Some(rev) = revision {
@@ -1077,15 +1214,15 @@ impl ModelLoader {
 
         // Get repo info to list all files
         let repo_info = repo_api.info().map_err(|e| {
-            SdkError::NetworkError(format!(
-                "Failed to get HuggingFace repo info for '{}': {}",
-                repo, e
-            ))
+            SdkError::network_src(
+                format!("Failed to get HuggingFace repo info for '{}'", repo),
+                e,
+            )
         })?;
 
         let siblings = repo_info.siblings;
         if siblings.is_empty() {
-            return Err(SdkError::LoadError(format!(
+            return Err(SdkError::load(format!(
                 "HuggingFace repo '{}' has no files",
                 repo
             )));
@@ -1153,10 +1290,10 @@ impl ModelLoader {
 
             // Download file (hf-hub caches internally)
             let cached_path = repo_api.get(filename).map_err(|e| {
-                SdkError::NetworkError(format!(
-                    "Failed to download '{}' from '{}': {}",
-                    filename, repo, e
-                ))
+                SdkError::network_src(
+                    format!("Failed to download '{}' from '{}'", filename, repo),
+                    e,
+                )
             })?;
 
             // Create target path in our cache directory
@@ -1252,9 +1389,8 @@ impl ModelLoader {
         let base_cache = if let Some(sdk_cache) = crate::get_sdk_cache_dir() {
             sdk_cache.join("hf")
         } else {
-            let home = dirs::home_dir().ok_or_else(|| {
-                SdkError::CacheError("Cannot determine home directory".to_string())
-            })?;
+            let home = dirs::home_dir()
+                .ok_or_else(|| SdkError::cache("Cannot determine home directory"))?;
             home.join(".xybrid").join("cache").join("hf")
         };
 
@@ -1316,11 +1452,10 @@ impl ModelLoader {
     fn create_model_handle(model_dir: &PathBuf) -> SdkResult<ModelHandle> {
         // Load metadata
         let metadata_path = model_dir.join("model_metadata.json");
-        let metadata_str = std::fs::read_to_string(&metadata_path).map_err(|e| {
-            SdkError::LoadError(format!("Failed to read model_metadata.json: {}", e))
-        })?;
+        let metadata_str = std::fs::read_to_string(&metadata_path)
+            .map_err(|e| SdkError::load_src("Failed to read model_metadata.json", e))?;
         let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
-            .map_err(|e| SdkError::LoadError(format!("Failed to parse metadata: {}", e)))?;
+            .map_err(|e| SdkError::load_src("Failed to parse metadata", e))?;
 
         // Create executor with base path
         let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
@@ -1407,11 +1542,17 @@ impl ModelLoader {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// # use xybrid_sdk::{ModelLoader, StreamConfig};
+/// # use xybrid_sdk::ir::Envelope;
+/// # let loader: ModelLoader = unimplemented!();
+/// # let audio_envelope: Envelope = unimplemented!();
+/// # let samples: Vec<f32> = vec![];
 /// let model = loader.load()?;
 ///
 /// // Batch inference
-/// let result = model.run(&audio_envelope)?;
+/// let result = model.run(&audio_envelope, None)?;
 /// println!("Transcription: {}", result.unwrap_text());
 ///
 /// // Streaming inference (if supported)
@@ -1423,6 +1564,8 @@ impl ModelLoader {
 ///
 /// // Cleanup
 /// model.unload()?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct XybridModel {
     handle: Arc<RwLock<ModelHandle>>,
@@ -1465,13 +1608,18 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::{ModelLoader, ConversationContext};
+    /// # let loader: ModelLoader = unimplemented!();
     /// let model = loader.load()?;
     /// if model.is_llm() {
     ///     // Create conversation context for multi-turn chat
     ///     let mut ctx = ConversationContext::new();
     ///     // ... manage conversation history
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn is_llm(&self) -> bool {
         self.handle
@@ -1506,7 +1654,9 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use xybrid_sdk::XybridModel;
+    /// # let model: XybridModel = unimplemented!();
     /// if let Some(voices) = model.voices() {
     ///     for voice in voices {
     ///         println!("{}: {} ({})", voice.id, voice.name, voice.language.unwrap_or_default());
@@ -1559,12 +1709,19 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// # use xybrid_sdk::ir::Envelope;
+    /// # let loader: ModelLoader = unimplemented!();
+    /// # let envelope: Envelope = unimplemented!();
     /// let model = loader.load()?;
     /// model.warmup()?;  // Pre-load model
     ///
     /// // First inference is now fast
-    /// let result = model.run(&envelope)?;
+    /// let result = model.run(&envelope, None)?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn warmup(&self) -> SdkResult<()> {
         use xybrid_core::ir::EnvelopeKind;
@@ -1596,16 +1753,71 @@ impl XybridModel {
             },
         };
 
-        // Run inference (this loads the model)
+        // Warmup measures model-load + first-token latency, not full
+        // generation. Cap LLM decoding at 1 token so a 2048-token
+        // `GenerationConfig::default()` doesn't turn warmup into a real
+        // inference. `executor::execute_llm` reads this from envelope
+        // metadata when no explicit `GenerationConfig` is passed;
+        // non-LLM paths ignore it.
+        let mut warmup_input = warmup_input;
+        warmup_input
+            .metadata
+            .insert("max_tokens".to_string(), "1".to_string());
+
+        // Run the inference inline (rather than delegating to `self.run`)
+        // so the publish at the end is a `ModelWarmup` event rather than
+        // a `ModelComplete`. Warmups should be visible to billing /
+        // perf-debugging but distinguishable from real inferences on
+        // the Traces dashboard — `ModelWarmup` carries the same
+        // attribution fields (`stage_name`, `target`, `latency_ms`) but
+        // its own event_type so the platform can render with a `warmup`
+        // badge and default-filter it out of cost-attribution rollups.
         let start = Instant::now();
-        let _ = self.run(&warmup_input, None)?;
-        let elapsed = start.elapsed();
+        let resource_guard = crate::telemetry::begin_resource_run();
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
+        {
+            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            if !handle.loaded {
+                return Err(SdkError::NotLoaded);
+            }
+            let metadata = handle.metadata.clone();
+            handle
+                .executor
+                .execute(&metadata, &warmup_input, None)
+                .map_err(|e| SdkError::inference_src("Warmup execution failed", e))?;
+        }
+
+        let latency_ms = start.elapsed().as_millis() as u32;
+
+        let event = crate::telemetry::TelemetryEvent {
+            event_type: "ModelWarmup".to_string(),
+            stage_name: Some(self.model_id.clone()),
+            target: Some("local".to_string()),
+            latency_ms: Some(latency_ms),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": self.model_id,
+                    "version": self.version,
+                    "output_type": format!("{:?}", self.output_type),
+                })
+                .to_string(),
+            ),
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
+        crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
         log::info!(
             target: "xybrid_sdk",
-            "Model {} warmed up in {:?}",
+            "Model {} warmed up in {}ms",
             self.model_id,
-            elapsed
+            latency_ms
         );
 
         Ok(())
@@ -1617,7 +1829,10 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::ModelLoader;
+    /// # let loader: ModelLoader = unimplemented!();
     /// let model = loader.load()?;
     ///
     /// // Start warmup in background
@@ -1629,6 +1844,8 @@ impl XybridModel {
     ///
     /// // Wait for warmup if needed
     /// warmup_handle.await??;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn warmup_async(&self) -> SdkResult<()> {
         let handle = self.handle.clone();
@@ -1662,32 +1879,75 @@ impl XybridModel {
                 },
             };
 
-            let start = Instant::now();
+            // See sync `warmup()` for rationale — cap LLM decoding at
+            // 1 token so warmup doesn't run a full generation.
+            let mut warmup_input = warmup_input;
+            warmup_input
+                .metadata
+                .insert("max_tokens".to_string(), "1".to_string());
 
-            // Run inference
-            let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
-            if !guard.loaded {
-                return Err(SdkError::NotLoaded);
+            let start = Instant::now();
+            let resource_guard = crate::telemetry::begin_resource_run();
+            let trace_id = uuid::Uuid::new_v4();
+            let _telemetry_ctx =
+                crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
+            // Run inference inline and publish a `ModelWarmup` event —
+            // same shape as the sync `warmup()` above. Previously this
+            // path published nothing at all, so async warmups were
+            // silent on the wire (visible only via logs).
+            let version_for_event;
+            let output_type_str;
+            {
+                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                if !guard.loaded {
+                    return Err(SdkError::NotLoaded);
+                }
+
+                let metadata = guard.metadata.clone();
+                guard
+                    .executor
+                    .execute(&metadata, &warmup_input, None)
+                    .map_err(|e| SdkError::inference_src("Warmup failed", e))?;
+
+                version_for_event = metadata.version.clone();
+                output_type_str = format!("{:?}", output_type);
             }
 
-            let metadata = guard.metadata.clone();
-            let _ = guard
-                .executor
-                .execute(&metadata, &warmup_input, None)
-                .map_err(|e| SdkError::InferenceError(format!("Warmup failed: {}", e)))?;
+            let latency_ms = start.elapsed().as_millis() as u32;
 
-            let elapsed = start.elapsed();
+            let event = crate::telemetry::TelemetryEvent {
+                event_type: "ModelWarmup".to_string(),
+                stage_name: Some(model_id.clone()),
+                target: Some("local".to_string()),
+                latency_ms: Some(latency_ms),
+                error: None,
+                data: Some(
+                    serde_json::json!({
+                        "model_id": model_id,
+                        "version": version_for_event,
+                        "output_type": output_type_str,
+                    })
+                    .to_string(),
+                ),
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+            };
+            crate::telemetry::publish_with_resource_summary(event, resource_guard);
+
             log::info!(
                 target: "xybrid_sdk",
-                "Model {} warmed up (async) in {:?}",
+                "Model {} warmed up (async) in {}ms",
                 model_id,
-                elapsed
+                latency_ms
             );
 
             Ok(())
         })
         .await
-        .map_err(|e| SdkError::InferenceError(format!("Task join error: {}", e)))?
+        .map_err(|e| SdkError::inference_src("Task join error", e))?
     }
 
     /// Create a minimal WAV file bytes from samples for warmup.
@@ -1736,6 +1996,7 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
+        crate::telemetry::maybe_emit_dev_nudge();
         let start = Instant::now();
         // Begin a resource-telemetry scope for this run. When
         // `resource_telemetry_mode()` is `Off` the guard is a no-op; otherwise
@@ -1765,7 +2026,7 @@ impl XybridModel {
         let output = handle
             .executor
             .execute(&metadata, envelope, config)
-            .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+            .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
         let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -1806,7 +2067,7 @@ impl XybridModel {
         let mut abort_state = AbortState::new(options);
         abort_state
             .check_before_run()
-            .map_err(|reason| SdkError::InferenceError(format!("Execution aborted: {reason}")))?;
+            .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
         self.run(envelope, options.generation_config.as_ref())
     }
 
@@ -1830,10 +2091,12 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use xybrid_sdk::{ModelLoader, ConversationContext, Envelope, EnvelopeKind, MessageRole};
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use xybrid_sdk::{ModelLoader, ConversationContext};
+    /// use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
     ///
-    /// let model = ModelLoader::from_registry("gemma-3-1b")?.load()?;
+    /// let model = ModelLoader::from_registry("gemma-3-1b").load()?;
     /// let mut ctx = ConversationContext::new();
     ///
     /// // Add user message to context
@@ -1842,12 +2105,14 @@ impl XybridModel {
     /// ctx.push(user_input.clone());
     ///
     /// // Run with context (model sees the full history)
-    /// let result = model.run_with_context(&user_input, &ctx)?;
+    /// let result = model.run_with_context(&user_input, &ctx, None)?;
     ///
     /// // Add assistant response to context
     /// ctx.push(result.envelope().clone());
     ///
     /// println!("{}", result.text().unwrap_or_default());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_with_context(
         &self,
@@ -1880,7 +2145,7 @@ impl XybridModel {
         let output = handle
             .executor
             .execute_with_context(&metadata, envelope, context, config)
-            .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+            .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
         let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -1923,7 +2188,7 @@ impl XybridModel {
         let mut abort_state = AbortState::new(options);
         abort_state
             .check_before_run()
-            .map_err(|reason| SdkError::InferenceError(format!("Execution aborted: {reason}")))?;
+            .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
         self.run_with_context(envelope, context, options.generation_config.as_ref())
     }
 
@@ -1944,7 +2209,11 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::{XybridModel, ConversationContext};
+    /// # use xybrid_sdk::ir::{Envelope, EnvelopeKind, MessageRole};
+    /// # let model: XybridModel = unimplemented!();
     /// let mut ctx = ConversationContext::new();
     ///
     /// // Add user message and run with streaming
@@ -1952,7 +2221,7 @@ impl XybridModel {
     ///     .with_role(MessageRole::User);
     /// ctx.push(input.clone());
     ///
-    /// let result = model.run_streaming_with_context(&input, &ctx, |token| {
+    /// let result = model.run_streaming_with_context(&input, &ctx, None, |token| {
     ///     print!("{}", token.token);
     ///     std::io::Write::flush(&mut std::io::stdout())?;
     ///     Ok(())
@@ -1960,6 +2229,8 @@ impl XybridModel {
     ///
     /// // Add assistant response to context
     /// ctx.push(result.envelope().clone());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_streaming_with_context<F>(
         &self,
@@ -2016,7 +2287,7 @@ impl XybridModel {
             let result = handle
                 .executor
                 .execute_with_context(&metadata, envelope, context, config)
-                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+                .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
             // Extract text from result (if any) and emit as single token
             if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
@@ -2122,13 +2393,20 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::XybridModel;
+    /// # use xybrid_sdk::ir::Envelope;
+    /// # let model: XybridModel = unimplemented!();
+    /// # let envelope: Envelope = unimplemented!();
     /// // Works for both LLM and non-LLM models
-    /// let result = model.run_streaming(&envelope, |token| {
+    /// let result = model.run_streaming(&envelope, None, |token| {
     ///     print!("{}", token.token);
     ///     std::io::Write::flush(&mut std::io::stdout())?;
     ///     Ok(())
     /// })?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_streaming<F>(
         &self,
@@ -2177,7 +2455,7 @@ impl XybridModel {
             let result = handle
                 .executor
                 .execute(&metadata, envelope, config)
-                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+                .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
             // Extract text from result (if any) and emit as single token
             if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
@@ -2376,10 +2654,15 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _example() {
+    /// # use xybrid_sdk::{XybridModel, StreamEvent};
+    /// # use xybrid_sdk::ir::Envelope;
+    /// # let model: XybridModel = unimplemented!();
+    /// # let envelope: Envelope = unimplemented!();
     /// use tokio_stream::StreamExt;
     ///
-    /// let mut stream = model.run_stream(envelope);
+    /// let mut stream = model.run_stream(envelope, None);
     /// while let Some(event) = stream.next().await {
     ///     match event {
     ///         StreamEvent::Token(token) => print!("{}", token.token),
@@ -2387,6 +2670,7 @@ impl XybridModel {
     ///         StreamEvent::Error(e) => eprintln!("Error: {}", e),
     ///     }
     /// }
+    /// # }
     /// ```
     pub fn run_stream(
         &self,
@@ -2461,9 +2745,7 @@ impl XybridModel {
                     let result = guard
                         .executor
                         .execute(&metadata, &envelope, config.as_ref())
-                        .map_err(|e| {
-                            SdkError::InferenceError(format!("Execution failed: {}", e))
-                        })?;
+                        .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
                     // Emit single token with full result
                     if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
@@ -2563,6 +2845,7 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
+        crate::telemetry::maybe_emit_dev_nudge();
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
         let version = self.version.clone();
@@ -2593,7 +2876,7 @@ impl XybridModel {
             let output = guard
                 .executor
                 .execute(&metadata, &envelope, config.as_ref())
-                .map_err(|e| SdkError::InferenceError(format!("Execution failed: {}", e)))?;
+                .map_err(|e| SdkError::inference_src("Execution failed", e))?;
 
             let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -2622,7 +2905,7 @@ impl XybridModel {
             Ok(InferenceResult::new(output, &model_id, latency_ms))
         })
         .await
-        .map_err(|e| SdkError::InferenceError(format!("Task join error: {}", e)))?
+        .map_err(|e| SdkError::inference_src("Task join error", e))?
     }
 
     /// Create a streaming session for real-time ASR.
@@ -2635,7 +2918,11 @@ impl XybridModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::{XybridModel, StreamConfig};
+    /// # let model: XybridModel = unimplemented!();
+    /// # let audio_samples: Vec<f32> = vec![];
     /// let stream = model.stream(StreamConfig::with_vad())?;
     ///
     /// // Feed audio chunks
@@ -2648,6 +2935,8 @@ impl XybridModel {
     ///
     /// // Get final transcript
     /// let transcript = stream.flush()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn stream(&self, config: StreamConfig) -> SdkResult<XybridStream> {
         if !self.supports_streaming {
@@ -2708,6 +2997,75 @@ impl Clone for XybridModel {
 mod tests {
     use super::*;
 
+    /// The inherent `SdkError::is_retryable` / `retry_after` accessors and
+    /// the `RetryableError` trait impl must agree for every variant — the
+    /// trait forwards to the inherent methods, so a divergence would be a
+    /// refactor slip. Covers the four retryable variants, a representative
+    /// non-retryable one, and the `RateLimited` retry-after passthrough.
+    #[test]
+    fn inherent_and_trait_retryability_agree() {
+        use xybrid_core::http::RetryableError;
+
+        let cases = [
+            (SdkError::network("x"), true),
+            (
+                SdkError::RateLimited {
+                    retry_after_secs: 5,
+                },
+                true,
+            ),
+            (SdkError::Timeout { timeout_ms: 100 }, true),
+            (SdkError::offline("x"), true),
+            (SdkError::CircuitOpen("x".into()), false),
+            (SdkError::NotLoaded, false),
+            (SdkError::ConfigError("x".into()), false),
+        ];
+        for (err, expected) in &cases {
+            assert_eq!(err.is_retryable(), *expected, "inherent for {err:?}");
+            assert_eq!(
+                RetryableError::is_retryable(err),
+                *expected,
+                "trait for {err:?}"
+            );
+        }
+
+        // Only RateLimited carries a server-specified backoff.
+        let rl = SdkError::RateLimited {
+            retry_after_secs: 7,
+        };
+        assert_eq!(rl.retry_after(), Some(std::time::Duration::from_secs(7)));
+        assert_eq!(rl.retry_after(), RetryableError::retry_after(&rl));
+        assert_eq!(SdkError::NotLoaded.retry_after(), None);
+    }
+
+    /// The wrapping variants must keep the underlying cause walkable via
+    /// `std::error::Error::source` and downcastable to its concrete type,
+    /// rather than flattening it into the message string. This is the whole
+    /// point of the `#[source]` cause: a consumer can inspect the real error
+    /// instead of string-grepping. Also asserts the message no longer
+    /// embeds the cause (no double-rendering).
+    #[test]
+    fn wrapping_variants_chain_source_cause() {
+        use std::error::Error as _;
+
+        let io = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "boom");
+        let err = SdkError::load_src("metadata unreadable", io);
+
+        // Display shows the variant prefix + context message, not the cause —
+        // the cause is reachable through `source()`, not flattened into the text.
+        assert_eq!(err.to_string(), "Failed to load model: metadata unreadable");
+
+        // The cause is preserved, walkable, and downcasts to the real type.
+        let source = err.source().expect("source cause should be present");
+        let io_cause = source
+            .downcast_ref::<std::io::Error>()
+            .expect("source should downcast to io::Error");
+        assert_eq!(io_cause.kind(), std::io::ErrorKind::PermissionDenied);
+
+        // A message-only constructor carries no source.
+        assert!(SdkError::load("no cause here").source().is_none());
+    }
+
     #[test]
     fn streaming_execution_error_preserves_typed_cloud_fallback_abort() {
         let error = streaming_execution_error(
@@ -2745,9 +3103,12 @@ mod tests {
             streaming_callback_error(Box::new(crate::run_options::AbortReason::UserCancelled));
 
         match error {
-            SdkError::InferenceError(message) => {
+            SdkError::InferenceError { message, source } => {
                 assert!(message.contains("Streaming callback failed"));
-                assert!(message.contains("user_cancelled"));
+                // The callback's cause is now chained as `#[source]`, not
+                // flattened into the message.
+                let cause = source.expect("callback error should chain its cause");
+                assert!(cause.to_string().contains("user_cancelled"));
             }
             other => panic!("expected inference error, got {other:?}"),
         }
@@ -3283,8 +3644,11 @@ mod tests {
         );
 
         match result {
-            Err(SdkError::InferenceError(message)) => {
-                assert!(message.contains("gateway unavailable"), "{message}");
+            Err(SdkError::InferenceError { message, source }) => {
+                // The underlying cause is chained as `#[source]`; reconstruct
+                // the full chain to assert on the original failure text.
+                let full = source.map_or(message.clone(), |s| format!("{message}: {s}"));
+                assert!(full.contains("gateway unavailable"), "{full}");
             }
             other => panic!("expected cloud retry failure, got {other:?}"),
         }
@@ -3397,7 +3761,9 @@ mod tests {
         );
 
         match result {
-            Err(SdkError::InferenceError(message)) => assert!(message.contains("user_cancelled")),
+            Err(SdkError::InferenceError { message, .. }) => {
+                assert!(message.contains("user_cancelled"))
+            }
             other => panic!("expected user_cancelled error, got {other:?}"),
         }
         assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -3438,7 +3804,7 @@ mod tests {
         );
 
         match result {
-            Err(SdkError::InferenceError(message)) => {
+            Err(SdkError::InferenceError { message, .. }) => {
                 assert!(message.contains("cloud_denied_by_policy"));
             }
             other => panic!("expected cloud_denied_by_policy error, got {other:?}"),
@@ -3589,8 +3955,7 @@ mod tests {
             seam_fired_for_cb.store(true, std::sync::atomic::Ordering::SeqCst);
         };
 
-        let local_result: SdkResult<InferenceResult> =
-            Err(SdkError::InferenceError("local failed".to_string()));
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::inference("local failed"));
 
         let result = dispatch_after_local(
             local_result,
@@ -3610,7 +3975,9 @@ mod tests {
         );
 
         match result {
-            Err(SdkError::InferenceError(msg)) => assert!(msg.contains("local failed")),
+            Err(SdkError::InferenceError { message: msg, .. }) => {
+                assert!(msg.contains("local failed"))
+            }
             other => panic!("expected InferenceError, got {:?}", other),
         }
         assert!(!seam_fired.load(std::sync::atomic::Ordering::SeqCst));
@@ -3653,7 +4020,10 @@ mod tests {
         );
 
         match result {
-            Err(SdkError::InferenceError(message)) => assert!(message.contains("user_cancelled")),
+            Err(SdkError::InferenceError { message, source }) => {
+                let full = source.map_or(message.clone(), |s| format!("{message}: {s}"));
+                assert!(full.contains("user_cancelled"), "{full}");
+            }
             other => panic!("expected terminal user_cancelled error, got {other:?}"),
         }
         assert!(!seam_fired.load(std::sync::atomic::Ordering::SeqCst));

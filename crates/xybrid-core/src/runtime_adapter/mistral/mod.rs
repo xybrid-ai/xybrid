@@ -216,7 +216,7 @@ fn emit_final_token_if_needed(
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use xybrid_core::runtime_adapter::mistral::MistralBackend;
 /// use xybrid_core::runtime_adapter::llm::{LlmBackend, LlmConfig};
 ///

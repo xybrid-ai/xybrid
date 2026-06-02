@@ -9,12 +9,16 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
-//! use xybrid_core::preprocessing::mel_spectrogram::{audio_bytes_to_whisper_mel};
+//! ```no_run
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use xybrid_core::preprocessing::mel_spectrogram::audio_bytes_to_whisper_mel;
 //!
-//! let wav_bytes = std::fs::read("audio.wav").unwrap();
+//! let wav_bytes = std::fs::read("audio.wav")?;
 //! let mel_tensor = audio_bytes_to_whisper_mel(&wav_bytes)?;
 //! // mel_tensor has shape [1, 80, 3000]
+//! # let _ = mel_tensor;
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::audio::mel::whisper::{compute_whisper_mel, WhisperMelConfig};

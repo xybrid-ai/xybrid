@@ -70,7 +70,7 @@ pub(crate) fn handle_init_command(dir: &str, flags: InitFlags) -> Result<()> {
 
     let (mut metadata, task_inference) = match result {
         Ok(pair) => pair,
-        Err(SdkError::LoadError(msg)) => {
+        Err(SdkError::LoadError { message: msg, .. }) => {
             if flags.json {
                 print_json_error(1, &msg);
             } else {

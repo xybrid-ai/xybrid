@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use xybrid_sdk::CacheManager;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -69,6 +69,17 @@ enum CacheType {
 /// Cloud model TTL in seconds (24 hours)
 const CLOUD_TTL_SECONDS: u64 = 24 * 60 * 60;
 
+/// Seconds since the Unix epoch, or `0` if the system clock is set before
+/// 1970. Never panics — a pre-epoch clock reads as `now = 0`, which the
+/// `saturating_sub` TTL math handles gracefully (every entry then looks
+/// freshly cached rather than crashing the cache call).
+fn now_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// Model Cache Manager.
 ///
 /// Manages `.xyb` bundle storage with platform-specific paths and cache policies.
@@ -91,9 +102,8 @@ impl CacheManager {
         let cache_dir = Self::get_cache_dir()?;
 
         // Create cache directory if it doesn't exist
-        std::fs::create_dir_all(&cache_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create cache directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&cache_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create cache directory", e))?;
 
         let mut manager = Self {
             cache_dir,
@@ -108,9 +118,8 @@ impl CacheManager {
 
     /// Creates a cache manager with a custom directory.
     pub fn with_dir(cache_dir: PathBuf) -> Result<Self, SdkError> {
-        std::fs::create_dir_all(&cache_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create cache directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&cache_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create cache directory", e))?;
 
         let mut manager = Self {
             cache_dir,
@@ -136,9 +145,8 @@ impl CacheManager {
         // Platform-specific defaults
         #[cfg(target_os = "ios")]
         {
-            let home = std::env::var("HOME").map_err(|_| {
-                SdkError::CacheError("HOME environment variable not set".to_string())
-            })?;
+            let home = std::env::var("HOME")
+                .map_err(|_| SdkError::cache("HOME environment variable not set"))?;
             Ok(PathBuf::from(home)
                 .join("Library")
                 .join("Application Support")
@@ -151,18 +159,17 @@ impl CacheManager {
             // Android apps cannot write to arbitrary paths - they MUST use
             // the app's sandbox directory provided by the platform.
             // The directory must be passed from Flutter using path_provider.
-            Err(SdkError::CacheError(
+            Err(SdkError::cache(
                 "Android requires cache directory to be configured. \
                 Call init_sdk_cache_dir() with a path from path_provider before loading models. \
-                Example: initSdkCacheDir('${appDir.path}/xybrid/models')"
-                    .to_string(),
+                Example: initSdkCacheDir('${appDir.path}/xybrid/models')",
             ))
         }
 
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
         {
-            let home = dirs::home_dir()
-                .ok_or_else(|| SdkError::CacheError("Home directory not found".to_string()))?;
+            let home =
+                dirs::home_dir().ok_or_else(|| SdkError::cache("Home directory not found"))?;
             Ok(home.join(".xybrid").join("cache").join("models"))
         }
     }
@@ -179,20 +186,18 @@ impl CacheManager {
         }
 
         let entries = std::fs::read_dir(&self.cache_dir)
-            .map_err(|e| SdkError::CacheError(format!("Failed to read cache directory: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to read cache directory", e))?;
 
         for entry in entries {
-            let entry = entry
-                .map_err(|e| SdkError::CacheError(format!("Failed to read cache entry: {}", e)))?;
+            let entry = entry.map_err(|e| SdkError::cache_src("Failed to read cache entry", e))?;
 
             let path = entry.path();
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("xyb") {
                 // Extract ID and version from filename (format: id@version.xyb)
                 if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
                     if let Some((id, version)) = file_stem.split_once('@') {
-                        let metadata = std::fs::metadata(&path).map_err(|e| {
-                            SdkError::CacheError(format!("Failed to read metadata: {}", e))
-                        })?;
+                        let metadata = std::fs::metadata(&path)
+                            .map_err(|e| SdkError::cache_src("Failed to read metadata", e))?;
 
                         let cached_at = metadata
                             .modified()
@@ -228,18 +233,26 @@ impl CacheManager {
     ///
     /// Returns information about cached models, sizes, and availability.
     pub fn status(&self) -> Result<CacheStatus, SdkError> {
-        // Filter out expired cloud models
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        // Filter out expired cloud models.
+        //
+        // `unwrap_or(0)` rather than `.unwrap()`: `duration_since(UNIX_EPOCH)`
+        // errors when the system clock is set before 1970 (dead RTC battery,
+        // first-boot embedded, user-set clock). `status()` is an innocuous
+        // query and must not panic on a skewed clock — matches the
+        // `unwrap_or(0)` convention used throughout `model.rs` telemetry.
+        let now = now_unix_secs();
 
         let valid_entries: Vec<_> = self
             .entries
             .values()
             .filter(|entry| match entry.cache_type {
                 CacheType::Local => true,
-                CacheType::Cloud => (now - entry.cached_at) < CLOUD_TTL_SECONDS,
+                // `saturating_sub`: a cache file whose mtime is in the future
+                // (clock moved backward, NTP correction, file copied from a
+                // fast-clock machine) would otherwise underflow `now - cached_at`
+                // — a debug-build panic and a release-build wrap-to-huge that
+                // makes the entry read as never-expired.
+                CacheType::Cloud => now.saturating_sub(entry.cached_at) < CLOUD_TTL_SECONDS,
             })
             .collect();
 
@@ -324,7 +337,7 @@ impl CacheManager {
     pub fn decompress_bundle(&self, bundle_path: &Path) -> Result<PathBuf, SdkError> {
         // Validate bundle exists
         if !bundle_path.exists() {
-            return Err(SdkError::CacheError(format!(
+            return Err(SdkError::cache(format!(
                 "Bundle not found: {}",
                 bundle_path.display()
             )));
@@ -334,35 +347,34 @@ impl CacheManager {
         let file_stem = bundle_path
             .file_stem()
             .and_then(|s| s.to_str())
-            .ok_or_else(|| SdkError::CacheError("Invalid bundle filename".to_string()))?;
+            .ok_or_else(|| SdkError::cache("Invalid bundle filename"))?;
 
-        let (id, version) = file_stem.split_once('@').ok_or_else(|| {
-            SdkError::CacheError("Bundle filename must be in format id@version.xyb".to_string())
-        })?;
+        let (id, version) = file_stem
+            .split_once('@')
+            .ok_or_else(|| SdkError::cache("Bundle filename must be in format id@version.xyb"))?;
 
         // Decompressed bundle directory
         let decompressed_dir = self.cache_dir.join(format!("{}_{}", id, version));
 
         // Create decompressed directory
-        std::fs::create_dir_all(&decompressed_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create decompressed directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&decompressed_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create decompressed directory", e))?;
 
         // Load and extract bundle
         let bundle = XyBundle::load(bundle_path)
-            .map_err(|e| SdkError::CacheError(format!("Failed to load bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to load bundle", e))?;
 
         // Extract bundle contents
         bundle
             .extract_to(&decompressed_dir)
-            .map_err(|e| SdkError::CacheError(format!("Failed to extract bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to extract bundle", e))?;
 
         // Write manifest.json
         let manifest_path = decompressed_dir.join("manifest.json");
         let manifest_json = serde_json::to_string_pretty(bundle.manifest())
-            .map_err(|e| SdkError::CacheError(format!("Failed to serialize manifest: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to serialize manifest", e))?;
         std::fs::write(&manifest_path, manifest_json)
-            .map_err(|e| SdkError::CacheError(format!("Failed to write manifest: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to write manifest", e))?;
 
         Ok(decompressed_dir)
     }
@@ -455,17 +467,23 @@ impl CacheManager {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use xybrid_sdk::CacheManager;
+    /// # use std::path::PathBuf;
+    /// # let xyb_path = PathBuf::from("model.xyb");
     /// let cache = CacheManager::new()?;
     /// let model_dir = cache.ensure_extracted(&xyb_path)?;
     /// // model_dir now contains: model_metadata.json, model.gguf, etc.
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn ensure_extracted(&self, xyb_path: &Path) -> Result<PathBuf, SdkError> {
         use xybrid_core::execution::ModelMetadata;
 
         // Validate bundle exists
         if !xyb_path.exists() {
-            return Err(SdkError::CacheError(format!(
+            return Err(SdkError::cache(format!(
                 "Bundle not found: {}",
                 xyb_path.display()
             )));
@@ -473,16 +491,16 @@ impl CacheManager {
 
         // Load bundle to get metadata
         let bundle = XyBundle::load(xyb_path)
-            .map_err(|e| SdkError::CacheError(format!("Failed to load bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to load bundle", e))?;
 
         // Get model_id from metadata
         let metadata_json = bundle
             .get_metadata_json()
-            .map_err(|e| SdkError::CacheError(format!("Failed to read bundle metadata: {}", e)))?
-            .ok_or_else(|| SdkError::CacheError("Bundle has no model_metadata.json".to_string()))?;
+            .map_err(|e| SdkError::cache_src("Failed to read bundle metadata", e))?
+            .ok_or_else(|| SdkError::cache("Bundle has no model_metadata.json"))?;
 
         let metadata: ModelMetadata = serde_json::from_str(&metadata_json)
-            .map_err(|e| SdkError::CacheError(format!("Failed to parse model metadata: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to parse model metadata", e))?;
 
         let extract_dir = self.extraction_dir(&metadata.model_id);
 
@@ -497,9 +515,8 @@ impl CacheManager {
         }
 
         // Create extraction directory
-        std::fs::create_dir_all(&extract_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create extraction directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&extract_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
         // Extract bundle contents
         log::info!(
@@ -509,7 +526,7 @@ impl CacheManager {
         );
         bundle
             .extract_to(&extract_dir)
-            .map_err(|e| SdkError::CacheError(format!("Failed to extract bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to extract bundle", e))?;
 
         Ok(extract_dir)
     }
@@ -546,19 +563,18 @@ impl CacheManager {
 
         // Need to extract - load bundle
         if !xyb_path.exists() {
-            return Err(SdkError::CacheError(format!(
+            return Err(SdkError::cache(format!(
                 "Bundle not found: {}",
                 xyb_path.display()
             )));
         }
 
         let bundle = XyBundle::load(xyb_path)
-            .map_err(|e| SdkError::CacheError(format!("Failed to load bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to load bundle", e))?;
 
         // Create extraction directory
-        std::fs::create_dir_all(&extract_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create extraction directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&extract_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
         // Extract bundle contents
         log::info!(
@@ -568,7 +584,7 @@ impl CacheManager {
         );
         bundle
             .extract_to(&extract_dir)
-            .map_err(|e| SdkError::CacheError(format!("Failed to extract bundle: {}", e)))?;
+            .map_err(|e| SdkError::cache_src("Failed to extract bundle", e))?;
 
         Ok(extract_dir)
     }
@@ -585,16 +601,17 @@ impl CacheManager {
     ///
     /// Number of entries removed
     pub fn clean_expired(&mut self) -> Result<u32, SdkError> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        // See `status()` for the `unwrap_or(0)` + `saturating_sub` rationale —
+        // both guard against a system clock set before epoch / cache mtimes in
+        // the future, neither of which should panic cache maintenance.
+        let now = now_unix_secs();
 
         let mut removed_count = 0;
         let mut to_remove = Vec::new();
 
         for (key, entry) in &self.entries {
-            if entry.cache_type == CacheType::Cloud && (now - entry.cached_at) >= CLOUD_TTL_SECONDS
+            if entry.cache_type == CacheType::Cloud
+                && now.saturating_sub(entry.cached_at) >= CLOUD_TTL_SECONDS
             {
                 to_remove.push(key.clone());
             }
@@ -604,9 +621,8 @@ impl CacheManager {
             if let Some(entry) = self.entries.remove(&key) {
                 // Remove bundle file
                 if entry.path.exists() {
-                    std::fs::remove_file(&entry.path).map_err(|e| {
-                        SdkError::CacheError(format!("Failed to remove expired bundle: {}", e))
-                    })?;
+                    std::fs::remove_file(&entry.path)
+                        .map_err(|e| SdkError::cache_src("Failed to remove expired bundle", e))?;
                 }
                 removed_count += 1;
             }
@@ -648,6 +664,32 @@ mod tests {
         let status = manager.status().unwrap();
         assert_eq!(status.total_models, 0);
         assert_eq!(status.total_size_bytes, 0);
+    }
+
+    #[test]
+    fn now_unix_secs_is_monotonic_and_nonzero_on_sane_clock() {
+        // On any test host with a clock past 1970 this is well above zero;
+        // the point is it never panics (the `.unwrap()` it replaced would
+        // on a pre-epoch clock).
+        assert!(now_unix_secs() > 0);
+    }
+
+    #[test]
+    fn cloud_ttl_math_does_not_underflow_for_future_cached_at() {
+        // Regression for the `now - cached_at` underflow: a `cached_at`
+        // in the future (clock moved backward, or a cache file copied from
+        // a fast-clock machine) must not panic the TTL comparison. With
+        // `saturating_sub` the elapsed time floors at 0, so a
+        // future-stamped entry reads as freshly cached (not expired),
+        // which is the safe behaviour.
+        let now: u64 = 1_000;
+        let cached_in_future: u64 = 5_000;
+        let elapsed = now.saturating_sub(cached_in_future);
+        assert_eq!(elapsed, 0, "future cached_at must floor to 0 elapsed");
+        assert!(
+            elapsed < CLOUD_TTL_SECONDS,
+            "a future-stamped entry must not be treated as expired"
+        );
     }
 
     #[test]

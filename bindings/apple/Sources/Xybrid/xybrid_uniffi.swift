@@ -591,8 +591,8 @@ public class XybridModelLoader: XybridModelLoaderProtocol {
 
     
 
-    public static func fromBundle(path: String)  -> XybridModelLoader {
-        return XybridModelLoader(unsafeFromRawPointer: try! rustCall() {
+    public static func fromBundle(path: String) throws -> XybridModelLoader {
+        return XybridModelLoader(unsafeFromRawPointer: try rustCallWithError(FfiConverterTypeXybridError.lift) {
     uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_bundle(
         FfiConverterString.lower(path),$0)
 })
@@ -1795,6 +1795,17 @@ public func clearThermalState()  {
 
 
 
+public func configureRuntime(apiKey: String?, gatewayUrl: String?, ingestUrl: String?)  {
+    try! rustCall() {
+    uniffi_xybrid_uniffi_fn_func_configure_runtime(
+        FfiConverterOptionString.lower(apiKey),
+        FfiConverterOptionString.lower(gatewayUrl),
+        FfiConverterOptionString.lower(ingestUrl),$0)
+}
+}
+
+
+
 public func initSdkCacheDir(cacheDir: String)  {
     try! rustCall() {
     uniffi_xybrid_uniffi_fn_func_init_sdk_cache_dir(
@@ -1852,6 +1863,9 @@ private var initializationResult: InitializationResult {
     if (uniffi_xybrid_uniffi_checksum_func_clear_thermal_state() != 36495) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_xybrid_uniffi_checksum_func_configure_runtime() != 13785) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir() != 59754) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1882,7 +1896,7 @@ private var initializationResult: InitializationResult {
     if (uniffi_xybrid_uniffi_checksum_method_xybridmodelloader_load() != 43654) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle() != 7105) {
+    if (uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle() != 38159) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_directory() != 8635) {

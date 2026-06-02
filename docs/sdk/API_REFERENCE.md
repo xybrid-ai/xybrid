@@ -1250,12 +1250,14 @@ The full wire format and the list of enum values for each header field is docume
 | `with_binding(binding)` | ✅ |
 | `binding()` | ✅ |
 
-> **Note**: Dart `Xybrid.initTelemetry(endpoint, apiKey)` ships in xybrid#97 —
-> minimal surface matching the C# `InitializeTelemetry()` shape (endpoint + key).
-> Flush / shutdown / batch configuration are not yet exposed on Dart; events flush
-> on the Rust exporter's default 5 s interval. The C# (Unity) SDK remains the
-> reference implementation of the wider telemetry-config surface; Kotlin and
-> Swift telemetry init are still planned. `SdkConfig.binding` is Rust-only —
+> **Note**: On Dart, prefer passing `apiKey` (and optional `ingestUrl`) to
+> `Xybrid.init()` — that bundles telemetry startup into initialization.
+> `Xybrid.initTelemetry(endpoint, apiKey)` (shipped in xybrid#97) is retained
+> as a legacy entry point for callers that must start telemetry after `init()`;
+> both routes share the same process-wide once-guard. Flush / shutdown / batch
+> configuration are not yet exposed on Dart; events flush on the Rust exporter's
+> default 5 s interval. The C# (Unity) SDK remains the reference implementation
+> of the wider telemetry-config surface. `SdkConfig.binding` is Rust-only —
 > non-Rust bindings register their identifier through the platform-specific
 > entry points listed in [`docs/telemetry/registry.md`](../telemetry/registry.md).
 

@@ -145,7 +145,7 @@ impl Executor {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
     /// use xybrid_core::executor::Executor;
     /// use xybrid_core::runtime_adapter::OnnxRuntimeAdapter;
     /// use std::sync::Arc;
@@ -192,16 +192,20 @@ impl Executor {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
     /// use xybrid_core::executor::Executor;
     /// use xybrid_core::context::StageDescriptor;
     /// use xybrid_core::ir::{Envelope, EnvelopeKind};
     ///
-    /// let executor = Executor::new();
+    /// let mut executor = Executor::new();
     /// let stage = StageDescriptor::new("asr");
     /// let input = Envelope::new(EnvelopeKind::Audio(vec![0u8; 1024]));
     ///
     /// let (output, metadata) = executor.execute_stage(&stage, &input, "local")?;
+    /// # let _ = (output, metadata);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn execute_stage(
         &mut self,
@@ -411,17 +415,18 @@ impl Executor {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # async fn _example() -> Result<(), Box<dyn std::error::Error>> {
     /// use xybrid_core::executor::Executor;
     /// use xybrid_core::context::StageDescriptor;
     /// use xybrid_core::ir::{Envelope, EnvelopeKind};
     ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let executor = Executor::new();
+    /// let mut executor = Executor::new();
     /// let stage = StageDescriptor::new("asr");
     /// let input = Envelope::new(EnvelopeKind::Audio(vec![0u8; 1024]));
     ///
     /// let (output, metadata) = executor.execute_stage_async(&stage, &input, "local").await?;
+    /// # let _ = (output, metadata);
     /// # Ok(())
     /// # }
     /// ```

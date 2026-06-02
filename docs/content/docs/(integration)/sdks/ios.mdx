@@ -15,15 +15,9 @@ Add the Xybrid package via Swift Package Manager:
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.1")
 ]
 ```
-
-<Callout type="info">
-Pin to an exact tag while we're shipping betas — SPM's `from:` excludes
-pre-release identifiers per SemVer. Once `0.1.0` is released, switch to
-`from: "0.1.0"`.
-</Callout>
 
 Or in Xcode: **File > Add Package Dependencies** and enter the repository URL.
 
@@ -55,6 +49,18 @@ if result.success {
 ```
 
 On iOS, `Xybrid.initialize()` enables `UIDevice` battery monitoring and subscribes to `UIDevice.batteryLevelDidChangeNotification`, forwarding readings to the routing engine. Thermal state on Apple platforms is sourced from `NSProcessInfo.thermalState` directly in `xybrid-core`. See [Host Integration](/docs/internals/host-integration) for the per-platform picture.
+
+## Initialization
+
+Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.run(...)` calls automatically emit execution traces:
+
+```swift
+Xybrid.initialize(
+    apiKey: ProcessInfo.processInfo.environment["XYBRID_API_KEY"]
+)
+```
+
+Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`.
 
 ---
 

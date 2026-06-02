@@ -13,17 +13,16 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use xybrid_core::runtime_adapter::onnx::{ExecutionProviderKind, CoreMLConfig, CoreMLComputeUnits};
+//! ```no_run
+//! # fn _example() {
+//! use xybrid_core::runtime_adapter::onnx::ExecutionProviderKind;
 //!
 //! // Use CPU (default)
 //! let cpu_provider = ExecutionProviderKind::Cpu;
 //!
-//! // Use CoreML with Neural Engine
-//! let coreml_provider = ExecutionProviderKind::CoreML(CoreMLConfig {
-//!     compute_units: CoreMLComputeUnits::CpuAndNeuralEngine,
-//!     ..Default::default()
-//! });
+//! // CoreML variant (macOS/iOS, requires `ort-coreml` feature) is gated behind cfg.
+//! # let _ = cpu_provider;
+//! # }
 //! ```
 
 use std::fmt;

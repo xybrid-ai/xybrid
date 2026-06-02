@@ -7,7 +7,7 @@ pub use crate::abort::AbortReason;
 use crate::context::DeviceMetrics;
 use crate::device::{MemoryPressure, ResourceMonitor, ThermalState};
 use crate::ir::{Envelope, EnvelopeKind};
-use crate::orchestrator::routing_engine::LocalReliabilityHint;
+use crate::orchestrator::routing_engine::{LocalAvailability, LocalReliabilityHint};
 use crate::pipeline::ExecutionTarget;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -30,6 +30,12 @@ pub struct StageContext {
     pub resource_monitor: Arc<ResourceMonitor>,
     /// Explicit target from pipeline YAML (if specified).
     pub explicit_target: Option<ExecutionTarget>,
+    /// Caller-computed local model availability, when known.
+    ///
+    /// `Some(false)` means the caller already determined the model is not
+    /// locally executable. `None` means the authority may consult its own cache
+    /// provider fallback.
+    pub local_availability: Option<LocalAvailability>,
     /// Canonical stable hardware-family bucket used by fleet reliability.
     pub device_class: Option<String>,
     /// Schema version for `device_class`.

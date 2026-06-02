@@ -6,6 +6,7 @@
 //! - `topk_step`: Get top-K predictions
 //! - `threshold_step`: Apply threshold to probabilities
 //! - `meanpool_step`: Mean pooling over sequence dimension
+//! - `denormalize_step`: Denormalize tensor values (inverse of Normalize preprocessing)
 
 use super::super::types::{ExecutorResult, RawOutputs};
 use crate::runtime_adapter::AdapterError;
@@ -237,6 +238,60 @@ pub fn meanpool_step(data: RawOutputs, dim: usize) -> ExecutorResult<RawOutputs>
     Ok(RawOutputs::TensorMap(result_map))
 }
 
+/// Denormalize tensor values (inverse of Normalize preprocessing).
+///
+/// Applies `output = (input * std) + mean` element-wise, cycling through
+/// `mean`/`std` by flat index modulo their length. A length-1 slice broadcasts
+/// the single value across all elements; a longer slice applies per-channel.
+///
+/// # Arguments
+/// - `data`: Input data (TensorMap)
+/// - `mean`: Per-channel mean values used during normalization
+/// - `std`: Per-channel standard deviation values used during normalization
+///
+/// # Errors
+/// Returns an error if `mean` and `std` have different lengths, if either is
+/// empty, or if the input is not a TensorMap.
+pub fn denormalize_step(data: RawOutputs, mean: &[f32], std: &[f32]) -> ExecutorResult<RawOutputs> {
+    if mean.len() != std.len() {
+        return Err(AdapterError::InvalidInput(format!(
+            "Denormalize mean length ({}) must match std length ({})",
+            mean.len(),
+            std.len()
+        )));
+    }
+    if mean.is_empty() {
+        return Err(AdapterError::InvalidInput(
+            "Denormalize requires at least one mean/std value".to_string(),
+        ));
+    }
+
+    let mut tensor_map = match data {
+        RawOutputs::TensorMap(map) => map,
+        _ => {
+            return Err(AdapterError::InvalidInput(
+                "Denormalize requires tensor map input".to_string(),
+            ))
+        }
+    };
+
+    for (name, tensor) in tensor_map.iter_mut() {
+        let tensor_slice = tensor.as_slice_mut().ok_or_else(|| {
+            AdapterError::InvalidInput(format!(
+                "Denormalize requires a contiguous tensor (output \"{}\" is non-contiguous)",
+                name
+            ))
+        })?;
+
+        for (i, val) in tensor_slice.iter_mut().enumerate() {
+            let channel = i % mean.len();
+            *val = (*val * std[channel]) + mean[channel];
+        }
+    }
+
+    Ok(RawOutputs::TensorMap(tensor_map))
+}
+
 // ============================================================================
 // Helper functions
 // ============================================================================
@@ -400,4 +455,124 @@ fn top_k_predictions(
     let top_k: Vec<(usize, f32)> = indexed_scores.into_iter().take(k).collect();
 
     Ok(top_k)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::preprocessing::tensor::normalize_step;
+    use crate::execution::types::PreprocessedData;
+
+    #[test]
+    fn test_denormalize_step_round_trip() {
+        let original = vec![1.0f32, 2.0, 3.0, 4.0];
+        let mean = vec![2.5f32];
+        let std_vals = vec![1.0f32];
+
+        let orig_tensor =
+            ArrayD::from_shape_vec(IxDyn(&[4]), original.clone()).expect("valid shape");
+        let norm_data =
+            normalize_step(PreprocessedData::Tensor(orig_tensor), &mean, &std_vals).unwrap();
+
+        let norm_tensor = match norm_data {
+            PreprocessedData::Tensor(t) => t,
+            _ => panic!("Expected Tensor"),
+        };
+
+        let mut map = HashMap::new();
+        map.insert("output".to_string(), norm_tensor);
+
+        let result = denormalize_step(RawOutputs::TensorMap(map), &mean, &std_vals).unwrap();
+
+        match result {
+            RawOutputs::TensorMap(out_map) => {
+                let out = out_map.values().next().unwrap();
+                for (actual, expected) in out.iter().zip(original.iter()) {
+                    assert!(
+                        (actual - expected).abs() < 1e-5,
+                        "round-trip failed: expected {}, got {}",
+                        expected,
+                        actual
+                    );
+                }
+            }
+            _ => panic!("Expected TensorMap output"),
+        }
+    }
+
+    #[test]
+    fn test_denormalize_step_per_channel() {
+        // Flat slice with 3-element cycling: indices 0,1,2 use channels 0,1,2; then repeat.
+        // Pre-normalized values: (-1 * std[c]) + mean[c] should recover the original.
+        let mean = vec![1.0f32, 2.0, 3.0];
+        let std_vals = vec![1.0f32, 1.0, 1.0];
+
+        // Normalized values corresponding to original [0,1,2,3,4,5]:
+        // (0-1)/1=-1, (1-2)/1=-1, (2-3)/1=-1, (3-1)/1=2, (4-2)/1=2, (5-3)/1=2
+        let normalized = vec![-1.0f32, -1.0, -1.0, 2.0, 2.0, 2.0];
+        let expected = [0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0];
+
+        let tensor = ArrayD::from_shape_vec(IxDyn(&[6]), normalized).expect("valid shape");
+        let mut map = HashMap::new();
+        map.insert("output".to_string(), tensor);
+
+        let result = denormalize_step(RawOutputs::TensorMap(map), &mean, &std_vals).unwrap();
+
+        match result {
+            RawOutputs::TensorMap(out_map) => {
+                let out = out_map.values().next().unwrap();
+                for (actual, exp) in out.iter().zip(expected.iter()) {
+                    assert!(
+                        (actual - exp).abs() < 1e-5,
+                        "per-channel failed: expected {}, got {}",
+                        exp,
+                        actual
+                    );
+                }
+            }
+            _ => panic!("Expected TensorMap output"),
+        }
+    }
+
+    #[test]
+    fn test_denormalize_step_scalar_broadcast() {
+        // Single mean/std broadcasts to all elements.
+        let mean = vec![0.5f32];
+        let std_vals = vec![2.0f32];
+
+        // Normalized zeros: (0.0 * 2.0) + 0.5 = 0.5 for every element.
+        let tensor = ArrayD::from_shape_vec(IxDyn(&[4]), vec![0.0f32; 4]).expect("valid shape");
+        let mut map = HashMap::new();
+        map.insert("output".to_string(), tensor);
+
+        let result = denormalize_step(RawOutputs::TensorMap(map), &mean, &std_vals).unwrap();
+
+        match result {
+            RawOutputs::TensorMap(out_map) => {
+                let out = out_map.values().next().unwrap();
+                for &val in out.iter() {
+                    assert!(
+                        (val - 0.5f32).abs() < 1e-5,
+                        "scalar broadcast failed: expected 0.5, got {}",
+                        val
+                    );
+                }
+            }
+            _ => panic!("Expected TensorMap output"),
+        }
+    }
+
+    #[test]
+    fn test_denormalize_step_shape_mismatch() {
+        // mean and std have different lengths — must error, not panic.
+        let mean = vec![0.5f32, 0.5];
+        let std_vals = vec![1.0f32]; // length mismatch
+
+        let tensor = ArrayD::from_shape_vec(IxDyn(&[4]), vec![0.0f32; 4]).expect("valid shape");
+        let mut map = HashMap::new();
+        map.insert("output".to_string(), tensor);
+
+        let result = denormalize_step(RawOutputs::TensorMap(map), &mean, &std_vals);
+        assert!(result.is_err(), "expected error on shape mismatch");
+    }
 }

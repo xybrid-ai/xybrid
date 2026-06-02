@@ -2,12 +2,31 @@
 name = "xybrid-core"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Core runtime for hybrid cloud-edge AI inference: model execution, pipeline orchestration, and routing primitives."
+readme = "README.md"
+# Upstream llama backend source lives at workspace `vendor/llama-cpp/`
+# (see `.gitmodules`), consumed by the `llama-cpp-sys` crate's build
+# script. No tarball-exclude needed here — the source is not under this
+# crate's manifest dir.
 
 [lib]
 name = "xybrid_core"
 path = "src/lib.rs"
 
 [dependencies]
+# Raw FFI bindings + cmake build for llama.cpp. Gated entirely behind the
+# `llm-llamacpp` feature (which activates both `llama-cpp-sys/bindings`
+# and `xybrid-llama/bindings`) so default builds — and any consumer not
+# opting into llama.cpp — pay zero compile cost. The 3-layer shape:
+#   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
+#   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
+#   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
+llama-cpp-sys = { path = "../llama-cpp-sys", optional = true }
+xybrid-llama = { path = "../xybrid-llama", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
@@ -73,13 +92,18 @@ byteorder = { version = "1.5", optional = true }  # For reading mel filter bytes
 num-traits = { version = "0.2", optional = true }  # Required by candle audio
 
 # Mistral.rs - Pure Rust LLM inference (optional, for local LLMs)
-# Enable with: cargo build --features llm-mistral
-# For GPU: cargo build --features llm-mistral-metal (macOS) or llm-mistral-cuda (NVIDIA)
-# Xcode 26 Metal fix merged: https://github.com/EricLBuehler/mistral.rs/pull/1846
-mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", branch = "master", optional = true }
+# DISABLED for the crates.io publish — `mistralrs` is currently a git dep
+# upstream, which cargo publish rejects. To re-enable: switch to the
+# crates.io release (mistralrs 0.8.1 or newer) and restore the
+# `dep:mistralrs` wiring in the `llm-mistral*` features below.
+# mistralrs = { version = "0.8", optional = true }
 
 [features]
-default = ["ort-download", "llm-llamacpp"]
+# `llm-llamacpp` is NOT enabled by default — it requires cmake + a C++
+# toolchain and clones ~180MB of llama.cpp source during build. Downstream
+# users opt in via `cargo add xybrid-core --features llm-llamacpp`
+# or one of the `platform-*` presets on xybrid-sdk.
+default = ["ort-download"]
 
 # JSON Schema generation for model_metadata.json
 schema = ["dep:schemars"]
@@ -97,15 +121,28 @@ candle-metal = ["candle", "candle-core/metal", "candle-nn/metal"]
 candle-cuda = ["candle", "candle-core/cuda"]
 
 # Local LLM inference
-llm-mistral = ["dep:mistralrs"]                             # mistral.rs (CPU)
-llm-mistral-metal = ["llm-mistral", "mistralrs/metal"]      # mistral.rs + Metal (macOS/iOS)
-llm-mistral-cuda = ["llm-mistral", "mistralrs/cuda"]        # mistral.rs + CUDA (NVIDIA)
+# NOTE: marker features only — see the commented-out `mistralrs` dep above.
+# Enabling these on the crates.io build will fail to compile because the
+# `mistralrs` crate is not pulled in. Restore once we move to crates.io
+# mistralrs 0.8.x.
+llm-mistral = []
+llm-mistral-metal = ["llm-mistral"]
+llm-mistral-cuda = ["llm-mistral"]
 
-# llama.cpp backend (Android-compatible, runtime SIMD detection)
-# Note: This is a marker feature - it gates build.rs (compiles llama.cpp via cmake)
-# and source code (#[cfg(feature = "llm-llamacpp")] blocks), not external dependencies.
-# Requires: vendor/llama.cpp directory with cloned llama.cpp source.
-llm-llamacpp = []
+# llama.cpp backend. Enabling `llm-llamacpp` links the llama.cpp runtime:
+# it activates both `llama-cpp-sys/bindings` (cmake build of llama.cpp +
+# wrapper.cpp shim) and `xybrid-llama/bindings` (safe RAII wrappers).
+# All four `platform-*` presets on `xybrid-sdk` depend on it since they
+# ship runtime inference. The 3-layer crate split underneath:
+#   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
+#   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
+#   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
+llm-llamacpp = [
+    "dep:llama-cpp-sys",
+    "llama-cpp-sys/bindings",
+    "dep:xybrid-llama",
+    "xybrid-llama/bindings",
+]
 
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
 # downstream demos, integration tests, and benchmarks. Off by default.
@@ -114,9 +151,9 @@ llm-llamacpp = []
 dev-tools = []
 
 [build-dependencies]
-# For compiling llama.cpp C/C++ source (used by build.rs when llm-llamacpp is enabled)
-cc = "1.0"
-cmake = "0.1"
+# No build-time native dependencies in xybrid-core: the llama.cpp cmake
+# build was relocated to `crates/llama-cpp-sys/build.rs` as Phase 1 of the
+# `llamacpp-crate-split` epic, and `xybrid-core/build.rs` was removed.
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -130,6 +167,7 @@ criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarking fra
 
 [[example]]
 name = "neutts_tts"
+# Real inference — needs llama.cpp linked.
 required-features = ["llm-llamacpp"]
 
 [[bench]]
