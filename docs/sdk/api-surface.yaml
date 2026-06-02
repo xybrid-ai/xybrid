@@ -156,6 +156,7 @@ classes:
           - { name: envelope, type: Envelope }
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
+        notes: "Dart accepts two extra optional named params beyond the contract shape: cancellationToken (issue 10) and preempt (issue 11). preempt defaults to false (drop-if-busy / serialized — the existing behavior). When preempt=true AND a cancellationToken is supplied, the run cancels the model's previously in-flight streaming run before acquiring the model write lock (latest-frame-wins), so a continuous live-capture loop can flip from drop-if-busy to cancel-and-replace without head-of-line blocking. preempt with no token is a no-op. Threaded Dart→FFI→SDK (run_streaming_with_options_preempt); the cancel-and-replace slot is a separate mutex on the model, never held across the handle write lock."
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       runStreamingWithOptions:
         params:
@@ -176,6 +177,7 @@ classes:
           - { name: context, type: ConversationContext }
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
+        notes: "Dart accepts the same two extra optional named params as runStreaming: cancellationToken (issue 10) and preempt (issue 11, default false). preempt=true + a cancellationToken makes this run cancel the model's previously in-flight streaming run before taking the write lock (latest-frame-wins). See runStreaming notes for the full cancel-and-replace contract."
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       runStreamingWithContextOptions:
         params:
@@ -862,7 +864,7 @@ classes:
   CancellationToken:
     type: class
     section: "8. Supporting Types"
-    notes: "Cooperative cancel handle for an in-flight run. In Rust it is paired with a RunOptions via with_cancellation_token; in Dart the caller constructs a CancellationToken and passes it to the streaming run methods (runStreaming / runStreamingWithContext / runStreamingWithFallback) via the optional cancellationToken parameter. Local streaming abort is cooperative: the token's cancelled state is checked before every emitted token, so cancellation takes effect at the next token boundary, not mid-token, and the model write lock is released promptly. The Dart binding surface (cancel handle exposing cancel() / isCancelled, plus sink-close-as-cancel when the Dart stream is unsubscribed mid-run) was wired by issue 10."
+    notes: "Cooperative cancel handle for an in-flight run. In Rust it is paired with a RunOptions via with_cancellation_token; in Dart the caller constructs a CancellationToken and passes it to the streaming run methods (runStreaming / runStreamingWithContext / runStreamingWithFallback) via the optional cancellationToken parameter. Local streaming abort is cooperative: the token's cancelled state is checked before every emitted token, so cancellation takes effect at the next token boundary, not mid-token, and the model write lock is released promptly. The Dart binding surface (cancel handle exposing cancel() / isCancelled, plus sink-close-as-cancel when the Dart stream is unsubscribed mid-run) was wired by issue 10. Issue 11 reuses the same token for preemptive cancel-and-replace: when runStreaming/runStreamingWithContext are called with preempt=true, the token is registered in the model's in-flight slot and a later preempting run cancels it (latest-frame-wins) before acquiring the write lock — so a stale run halts and releases the lock instead of blocking the new one."
     methods:
       cancel:
         notes: "Request cooperative cancellation of the associated run. Takes effect at the next token boundary."

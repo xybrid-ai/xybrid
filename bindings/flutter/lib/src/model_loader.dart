@@ -272,6 +272,14 @@ class XybridModel {
   ///   [CancellationToken.cancel] to halt generation at the next token boundary
   ///   and release the model write lock. Unsubscribing from the returned stream
   ///   also cancels the in-flight Rust run.
+  /// * [preempt] - When `true` (latest-frame-wins) **and** a
+  ///   [cancellationToken] is supplied, this run cancels the model's previously
+  ///   in-flight streaming run before acquiring the model write lock, so a new
+  ///   frame's stream does not head-of-line block behind a still-running one.
+  ///   This is the seam a continuous live-capture loop flips to switch from
+  ///   drop-if-busy to cancel-and-replace. Defaults to `false` (drop-if-busy /
+  ///   serialized) — chat and one-shot callers leave it unset and are
+  ///   unaffected. A `preempt` with no [cancellationToken] is a no-op.
   ///
   /// # Example
   /// ```dart
@@ -291,6 +299,7 @@ class XybridModel {
     XybridEnvelope envelope, {
     GenerationConfig? config,
     CancellationToken? cancellationToken,
+    bool preempt = false,
   }) async* {
     try {
       // Use native streaming from FFI
@@ -298,6 +307,7 @@ class XybridModel {
         envelope: envelope.inner,
         config: config?.toFfi(),
         cancellationToken: cancellationToken?.inner,
+        preempt: preempt,
       );
 
       var emittedFinal = false;
@@ -448,11 +458,18 @@ class XybridModel {
   /// Pass an optional [cancellationToken] to make the run cancellable: calling
   /// [CancellationToken.cancel] (or unsubscribing from the stream) halts
   /// generation at the next token boundary and releases the model write lock.
+  ///
+  /// Pass [preempt] `= true` (latest-frame-wins) together with a
+  /// [cancellationToken] to cancel the model's previously in-flight streaming
+  /// run before acquiring the write lock — see [runStreaming] for the full
+  /// semantics. Defaults to `false` (drop-if-busy / serialized); chat leaves it
+  /// unset and is unaffected.
   Stream<StreamToken> runStreamingWithContext(
     XybridEnvelope envelope,
     ConversationContext context, {
     GenerationConfig? config,
     CancellationToken? cancellationToken,
+    bool preempt = false,
   }) async* {
     try {
       final stream = inner.runStreamWithContext(
@@ -460,6 +477,7 @@ class XybridModel {
         context: context.inner,
         config: config?.toFfi(),
         cancellationToken: cancellationToken?.inner,
+        preempt: preempt,
       );
 
       await for (final event in stream) {

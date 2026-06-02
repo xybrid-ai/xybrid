@@ -1168,6 +1168,32 @@ cancel.cancel();
 await sub.cancel();
 ```
 
+**Preemptive cancel-and-replace (implemented, issue 11).** A continuous
+live-capture loop wants *latest-frame-wins* semantics: when a new frame arrives
+while the previous frame's inference is still running, the new run should cancel
+the old one rather than head-of-line block behind it (every streaming call takes
+the model's write lock for the whole generation). `runStreaming` and
+`runStreamingWithContext` accept an optional `preempt` flag (default `false`).
+When `preempt = true` **and** a `cancellationToken` is supplied, the new run
+registers its token in the model's in-flight slot and cancels the previously
+registered run **before** acquiring the write lock — the displaced run halts at
+its next token, releases the lock, and the new run starts promptly. The
+in-flight slot is a **separate mutex** on the model, held only for the brief
+token swap and never across the write lock, so the two locks cannot deadlock and
+a third concurrent start serializes safely on the slot. `preempt = false` (the
+default for chat and one-shot callers) never touches the slot and is behaviorally
+identical to the pre-preempt path; `preempt` with no token is a no-op.
+
+```dart
+// Live loop: each new frame cancels the in-flight one (latest-frame-wins).
+final cancel = CancellationToken();
+final stream = model.runStreaming(
+  XybridEnvelope.text(frameQuestion),
+  cancellationToken: cancel,
+  preempt: true,
+);
+```
+
 **Live mode / frame session (planned, issue 14).** For continuous live-capture
 loops (e.g. the Flutter vision-live loop), `RunOptions` carries an optional
 `frameSessionId` — a caller-supplied UUID identifying one continuous

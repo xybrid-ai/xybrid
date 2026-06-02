@@ -15,7 +15,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_sdk_with_cancellation`, `to_sdk`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_sdk_with_cancellation`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `fmt`, `from`
 
@@ -64,10 +64,21 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// generation halts at the next token boundary and releases the model write
   /// lock. When `None`, behavior matches the pre-cancellation streaming path
   /// (no `UserCancelled` observation).
+  ///
+  /// Pass `preempt = true` (latest-frame-wins) **together with** a
+  /// `cancellation_token` to make this run cancel the model's previously
+  /// in-flight streaming run *before* it acquires the model write lock — so a
+  /// new frame's stream does not head-of-line block behind a still-running
+  /// one. The displaced run halts at its next token and releases the lock.
+  /// `preempt` defaults to `false`: chat and any caller that wants
+  /// drop-if-busy / serialized semantics passes `false` (or omits it) and the
+  /// behavior is byte-for-byte the pre-preempt path. Preempt with no token is
+  /// a no-op (there is nothing to register/cancel).
   Stream<FfiStreamEvent> runStream(
       {required FfiEnvelope envelope,
       FfiGenerationConfig? config,
-      FfiCancellationToken? cancellationToken});
+      FfiCancellationToken? cancellationToken,
+      required bool preempt});
 
   /// Run inference with streaming output and conversation context.
   ///
@@ -86,11 +97,18 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// the token is cancelled (or the Dart sink is closed mid-stream), Rust
   /// generation halts at the next token boundary and releases the model write
   /// lock. When `None`, behavior matches the pre-cancellation streaming path.
+  ///
+  /// Pass `preempt = true` (latest-frame-wins) together with a
+  /// `cancellation_token` to cancel the model's previously in-flight
+  /// streaming run before acquiring the write lock — see
+  /// [`Self::run_stream`] for the full semantics. Defaults to `false`
+  /// (drop-if-busy / serialized); chat passes `false` and is unaffected.
   Stream<FfiStreamEvent> runStreamWithContext(
       {required FfiEnvelope envelope,
       required FfiConversationContext context,
       FfiGenerationConfig? config,
-      FfiCancellationToken? cancellationToken});
+      FfiCancellationToken? cancellationToken,
+      required bool preempt});
 
   /// Run streaming inference with local abort and Xybrid cloud fallback.
   ///

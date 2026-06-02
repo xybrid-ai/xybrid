@@ -1390,6 +1390,7 @@ fn wire__crate__api__model__FfiModel_run_stream_impl(
                 <Option<crate::api::model::FfiGenerationConfig>>::sse_decode(&mut deserializer);
             let api_cancellation_token =
                 <Option<FfiCancellationToken>>::sse_decode(&mut deserializer);
+            let api_preempt = <bool>::sse_decode(&mut deserializer);
             let api_sink = <StreamSink<
                 crate::api::model::FfiStreamEvent,
                 flutter_rust_bridge::for_generated::SseCodec,
@@ -1417,6 +1418,7 @@ fn wire__crate__api__model__FfiModel_run_stream_impl(
                             api_envelope,
                             api_config,
                             api_cancellation_token,
+                            api_preempt,
                             api_sink,
                         );
                     })?;
@@ -1459,6 +1461,7 @@ fn wire__crate__api__model__FfiModel_run_stream_with_context_impl(
                 <Option<crate::api::model::FfiGenerationConfig>>::sse_decode(&mut deserializer);
             let api_cancellation_token =
                 <Option<FfiCancellationToken>>::sse_decode(&mut deserializer);
+            let api_preempt = <bool>::sse_decode(&mut deserializer);
             let api_sink = <StreamSink<
                 crate::api::model::FfiStreamEvent,
                 flutter_rust_bridge::for_generated::SseCodec,
@@ -1495,6 +1498,7 @@ fn wire__crate__api__model__FfiModel_run_stream_with_context_impl(
                             &*api_context_guard,
                             api_config,
                             api_cancellation_token,
+                            api_preempt,
                             api_sink,
                         );
                     })?;

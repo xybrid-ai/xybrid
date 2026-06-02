@@ -558,11 +558,22 @@ impl FfiModel {
     /// generation halts at the next token boundary and releases the model write
     /// lock. When `None`, behavior matches the pre-cancellation streaming path
     /// (no `UserCancelled` observation).
+    ///
+    /// Pass `preempt = true` (latest-frame-wins) **together with** a
+    /// `cancellation_token` to make this run cancel the model's previously
+    /// in-flight streaming run *before* it acquires the model write lock — so a
+    /// new frame's stream does not head-of-line block behind a still-running
+    /// one. The displaced run halts at its next token and releases the lock.
+    /// `preempt` defaults to `false`: chat and any caller that wants
+    /// drop-if-busy / serialized semantics passes `false` (or omits it) and the
+    /// behavior is byte-for-byte the pre-preempt path. Preempt with no token is
+    /// a no-op (there is nothing to register/cancel).
     pub fn run_stream(
         &self,
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
         cancellation_token: Option<FfiCancellationToken>,
+        preempt: bool,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
@@ -610,7 +621,7 @@ impl FfiModel {
                     }
                     Ok(())
                 };
-                model.run_streaming_with_options(&env, &run_options, on_token)
+                model.run_streaming_with_options_preempt(&env, &run_options, preempt, on_token)
             };
 
             match result {
@@ -682,12 +693,19 @@ impl FfiModel {
     /// the token is cancelled (or the Dart sink is closed mid-stream), Rust
     /// generation halts at the next token boundary and releases the model write
     /// lock. When `None`, behavior matches the pre-cancellation streaming path.
+    ///
+    /// Pass `preempt = true` (latest-frame-wins) together with a
+    /// `cancellation_token` to cancel the model's previously in-flight
+    /// streaming run before acquiring the write lock — see
+    /// [`Self::run_stream`] for the full semantics. Defaults to `false`
+    /// (drop-if-busy / serialized); chat passes `false` and is unaffected.
     pub fn run_stream_with_context(
         &self,
         envelope: super::envelope::FfiEnvelope,
         context: &FfiConversationContext,
         config: Option<FfiGenerationConfig>,
         cancellation_token: Option<FfiCancellationToken>,
+        preempt: bool,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
@@ -720,10 +738,11 @@ impl FfiModel {
                 let reached_terminal = reached_terminal.clone();
                 let cancel_handle = cancel_handle.clone();
                 let token_sink = sink.clone();
-                model.run_streaming_with_context_options(
+                model.run_streaming_with_context_options_preempt(
                     &env,
                     &ctx_guard,
                     &run_options,
+                    preempt,
                     move |token| {
                         let is_final = token.finish_reason.is_some();
                         let ffi_token = FfiStreamToken {

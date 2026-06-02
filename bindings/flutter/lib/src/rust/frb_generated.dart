@@ -187,14 +187,16 @@ abstract class XybridRustLibApi extends BaseApi {
       {required FfiModel that,
       required FfiEnvelope envelope,
       FfiGenerationConfig? config,
-      FfiCancellationToken? cancellationToken});
+      FfiCancellationToken? cancellationToken,
+      required bool preempt});
 
   Stream<FfiStreamEvent> crateApiModelFfiModelRunStreamWithContext(
       {required FfiModel that,
       required FfiEnvelope envelope,
       required FfiConversationContext context,
       FfiGenerationConfig? config,
-      FfiCancellationToken? cancellationToken});
+      FfiCancellationToken? cancellationToken,
+      required bool preempt});
 
   Stream<FfiStreamEvent> crateApiModelFfiModelRunStreamWithFallback(
       {required FfiModel that,
@@ -1181,7 +1183,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       {required FfiModel that,
       required FfiEnvelope envelope,
       FfiGenerationConfig? config,
-      FfiCancellationToken? cancellationToken}) {
+      FfiCancellationToken? cancellationToken,
+      required bool preempt}) {
     final sink = RustStreamSink<FfiStreamEvent>();
     unawaited(handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1193,6 +1196,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_opt_box_autoadd_ffi_generation_config(config, serializer);
         sse_encode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
             cancellationToken, serializer);
+        sse_encode_bool(preempt, serializer);
         sse_encode_StreamSink_ffi_stream_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 32, port: port_);
@@ -1202,7 +1206,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         decodeErrorData: null,
       ),
       constMeta: kCrateApiModelFfiModelRunStreamConstMeta,
-      argValues: [that, envelope, config, cancellationToken, sink],
+      argValues: [that, envelope, config, cancellationToken, preempt, sink],
       apiImpl: this,
     )));
     return sink.stream;
@@ -1211,7 +1215,14 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   TaskConstMeta get kCrateApiModelFfiModelRunStreamConstMeta =>
       const TaskConstMeta(
         debugName: "FfiModel_run_stream",
-        argNames: ["that", "envelope", "config", "cancellationToken", "sink"],
+        argNames: [
+          "that",
+          "envelope",
+          "config",
+          "cancellationToken",
+          "preempt",
+          "sink"
+        ],
       );
 
   @override
@@ -1220,7 +1231,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       required FfiEnvelope envelope,
       required FfiConversationContext context,
       FfiGenerationConfig? config,
-      FfiCancellationToken? cancellationToken}) {
+      FfiCancellationToken? cancellationToken,
+      required bool preempt}) {
     final sink = RustStreamSink<FfiStreamEvent>();
     unawaited(handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1234,6 +1246,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_opt_box_autoadd_ffi_generation_config(config, serializer);
         sse_encode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
             cancellationToken, serializer);
+        sse_encode_bool(preempt, serializer);
         sse_encode_StreamSink_ffi_stream_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 33, port: port_);
@@ -1243,7 +1256,15 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         decodeErrorData: null,
       ),
       constMeta: kCrateApiModelFfiModelRunStreamWithContextConstMeta,
-      argValues: [that, envelope, context, config, cancellationToken, sink],
+      argValues: [
+        that,
+        envelope,
+        context,
+        config,
+        cancellationToken,
+        preempt,
+        sink
+      ],
       apiImpl: this,
     )));
     return sink.stream;
@@ -1258,6 +1279,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
           "context",
           "config",
           "cancellationToken",
+          "preempt",
           "sink"
         ],
       );
@@ -4341,15 +4363,27 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
   /// generation halts at the next token boundary and releases the model write
   /// lock. When `None`, behavior matches the pre-cancellation streaming path
   /// (no `UserCancelled` observation).
+  ///
+  /// Pass `preempt = true` (latest-frame-wins) **together with** a
+  /// `cancellation_token` to make this run cancel the model's previously
+  /// in-flight streaming run *before* it acquires the model write lock — so a
+  /// new frame's stream does not head-of-line block behind a still-running
+  /// one. The displaced run halts at its next token and releases the lock.
+  /// `preempt` defaults to `false`: chat and any caller that wants
+  /// drop-if-busy / serialized semantics passes `false` (or omits it) and the
+  /// behavior is byte-for-byte the pre-preempt path. Preempt with no token is
+  /// a no-op (there is nothing to register/cancel).
   Stream<FfiStreamEvent> runStream(
           {required FfiEnvelope envelope,
           FfiGenerationConfig? config,
-          FfiCancellationToken? cancellationToken}) =>
+          FfiCancellationToken? cancellationToken,
+          required bool preempt}) =>
       XybridRustLib.instance.api.crateApiModelFfiModelRunStream(
           that: this,
           envelope: envelope,
           config: config,
-          cancellationToken: cancellationToken);
+          cancellationToken: cancellationToken,
+          preempt: preempt);
 
   /// Run inference with streaming output and conversation context.
   ///
@@ -4368,17 +4402,25 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
   /// the token is cancelled (or the Dart sink is closed mid-stream), Rust
   /// generation halts at the next token boundary and releases the model write
   /// lock. When `None`, behavior matches the pre-cancellation streaming path.
+  ///
+  /// Pass `preempt = true` (latest-frame-wins) together with a
+  /// `cancellation_token` to cancel the model's previously in-flight
+  /// streaming run before acquiring the write lock — see
+  /// [`Self::run_stream`] for the full semantics. Defaults to `false`
+  /// (drop-if-busy / serialized); chat passes `false` and is unaffected.
   Stream<FfiStreamEvent> runStreamWithContext(
           {required FfiEnvelope envelope,
           required FfiConversationContext context,
           FfiGenerationConfig? config,
-          FfiCancellationToken? cancellationToken}) =>
+          FfiCancellationToken? cancellationToken,
+          required bool preempt}) =>
       XybridRustLib.instance.api.crateApiModelFfiModelRunStreamWithContext(
           that: this,
           envelope: envelope,
           context: context,
           config: config,
-          cancellationToken: cancellationToken);
+          cancellationToken: cancellationToken,
+          preempt: preempt);
 
   /// Run streaming inference with local abort and Xybrid cloud fallback.
   ///

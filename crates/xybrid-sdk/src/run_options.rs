@@ -55,6 +55,18 @@ impl CancellationToken {
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
     }
+
+    /// Whether two tokens share the same underlying cancellation flag.
+    ///
+    /// Cloning a [`CancellationToken`] shares its inner `Arc<AtomicBool>`, so
+    /// `same_token` returns `true` for any clone of the same logical token and
+    /// `false` for an independently-constructed one. The preemptive
+    /// cancel-and-replace slot uses this for its "clear-if-ours" check: a run
+    /// only clears the in-flight slot when the slot still holds *its* token, so
+    /// a newer preempting run that already replaced the slot is never clobbered.
+    pub(crate) fn same_token(&self, other: &CancellationToken) -> bool {
+        Arc::ptr_eq(&self.cancelled, &other.cancelled)
+    }
 }
 
 /// Runtime signals that may abort a local run.
@@ -437,6 +449,19 @@ mod tests {
         assert!(!token.is_cancelled());
         token.cancel();
         assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn cancellation_token_same_token_tracks_arc_identity() {
+        let token = CancellationToken::new();
+        let clone = token.clone();
+        let other = CancellationToken::new();
+
+        // A clone shares the inner Arc<AtomicBool> → same logical token.
+        assert!(token.same_token(&clone));
+        assert!(clone.same_token(&token));
+        // An independently-constructed token is a different logical token.
+        assert!(!token.same_token(&other));
     }
 
     #[test]
