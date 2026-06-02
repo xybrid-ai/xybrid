@@ -214,6 +214,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiStreamToken dco_decode_box_autoadd_ffi_stream_token(dynamic raw);
 
   @protected
+  FfiYuvColorInfo dco_decode_box_autoadd_ffi_yuv_color_info(dynamic raw);
+
+  @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
 
   @protected
@@ -232,6 +235,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiGenerationConfig dco_decode_ffi_generation_config(dynamic raw);
 
   @protected
+  FfiImagePlane dco_decode_ffi_image_plane(dynamic raw);
+
+  @protected
   FfiInferenceMetrics dco_decode_ffi_inference_metrics(dynamic raw);
 
   @protected
@@ -242,6 +248,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole dco_decode_ffi_message_role(dynamic raw);
+
+  @protected
+  FfiPixelFormat dco_decode_ffi_pixel_format(dynamic raw);
 
   @protected
   FfiResourceSnapshot dco_decode_ffi_resource_snapshot(dynamic raw);
@@ -265,6 +274,15 @@ abstract class XybridRustLibApiImplPlatform
   FfiThermalState dco_decode_ffi_thermal_state(dynamic raw);
 
   @protected
+  FfiYuvColorInfo dco_decode_ffi_yuv_color_info(dynamic raw);
+
+  @protected
+  FfiYuvColorMatrix dco_decode_ffi_yuv_color_matrix(dynamic raw);
+
+  @protected
+  FfiYuvColorRange dco_decode_ffi_yuv_color_range(dynamic raw);
+
+  @protected
   int dco_decode_i_32(dynamic raw);
 
   @protected
@@ -277,6 +295,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<FfiImagePlane> dco_decode_list_ffi_image_plane(dynamic raw);
 
   @protected
   List<FfiStageLatency> dco_decode_list_ffi_stage_latency(dynamic raw);
@@ -313,6 +334,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole? dco_decode_opt_box_autoadd_ffi_message_role(dynamic raw);
+
+  @protected
+  FfiYuvColorInfo? dco_decode_opt_box_autoadd_ffi_yuv_color_info(dynamic raw);
 
   @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
@@ -505,6 +529,10 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiYuvColorInfo sse_decode_box_autoadd_ffi_yuv_color_info(
+      SseDeserializer deserializer);
+
+  @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
@@ -524,6 +552,9 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiImagePlane sse_decode_ffi_image_plane(SseDeserializer deserializer);
+
+  @protected
   FfiInferenceMetrics sse_decode_ffi_inference_metrics(
       SseDeserializer deserializer);
 
@@ -536,6 +567,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole sse_decode_ffi_message_role(SseDeserializer deserializer);
+
+  @protected
+  FfiPixelFormat sse_decode_ffi_pixel_format(SseDeserializer deserializer);
 
   @protected
   FfiResourceSnapshot sse_decode_ffi_resource_snapshot(
@@ -560,6 +594,16 @@ abstract class XybridRustLibApiImplPlatform
   FfiThermalState sse_decode_ffi_thermal_state(SseDeserializer deserializer);
 
   @protected
+  FfiYuvColorInfo sse_decode_ffi_yuv_color_info(SseDeserializer deserializer);
+
+  @protected
+  FfiYuvColorMatrix sse_decode_ffi_yuv_color_matrix(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiYuvColorRange sse_decode_ffi_yuv_color_range(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
@@ -572,6 +616,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<FfiImagePlane> sse_decode_list_ffi_image_plane(
+      SseDeserializer deserializer);
 
   @protected
   List<FfiStageLatency> sse_decode_list_ffi_stage_latency(
@@ -609,6 +657,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole? sse_decode_opt_box_autoadd_ffi_message_role(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiYuvColorInfo? sse_decode_opt_box_autoadd_ffi_yuv_color_info(
       SseDeserializer deserializer);
 
   @protected
@@ -805,6 +857,10 @@ abstract class XybridRustLibApiImplPlatform
       FfiStreamToken self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_yuv_color_info(
+      FfiYuvColorInfo self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_i_64(
       PlatformInt64 self, SseSerializer serializer);
 
@@ -825,6 +881,9 @@ abstract class XybridRustLibApiImplPlatform
       FfiGenerationConfig self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_image_plane(FfiImagePlane self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_inference_metrics(
       FfiInferenceMetrics self, SseSerializer serializer);
 
@@ -838,6 +897,10 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_ffi_message_role(
       FfiMessageRole self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_pixel_format(
+      FfiPixelFormat self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_resource_snapshot(
@@ -866,6 +929,18 @@ abstract class XybridRustLibApiImplPlatform
       FfiThermalState self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_yuv_color_info(
+      FfiYuvColorInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_yuv_color_matrix(
+      FfiYuvColorMatrix self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_yuv_color_range(
+      FfiYuvColorRange self, SseSerializer serializer);
+
+  @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
@@ -878,6 +953,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_image_plane(
+      List<FfiImagePlane> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_stage_latency(
@@ -919,6 +998,10 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_opt_box_autoadd_ffi_message_role(
       FfiMessageRole? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_yuv_color_info(
+      FfiYuvColorInfo? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_i_64(

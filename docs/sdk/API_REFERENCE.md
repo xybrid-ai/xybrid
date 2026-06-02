@@ -531,8 +531,9 @@ models — see `Envelope.userMessage` below. The `images` list accepts only imag
 by `Envelope.image` or `Envelope.imageRaw`; text, audio, embedding, or nested multi-part envelopes
 are invalid.
 
-Raw image envelopes are the planned binding surface for camera or canvas frames that already exist
-as pixels. `Envelope.imageRaw` carries owned pixel bytes plus explicit `ImagePlane` descriptors
+Raw image envelopes are the binding surface for camera or canvas frames that already exist
+as pixels (the Dart binding is implemented; Kotlin/Swift/C# remain planned).
+`Envelope.imageRaw` carries owned pixel bytes plus explicit `ImagePlane` descriptors
 rather than a single stride, so packed RGB/BGRA/RGBA, NV12/NV21, and I420 buffers are all
 representable without JPEG re-encoding. YUV inputs require `YuvColorInfo`; RGB-family inputs must
 not carry it. Unsupported v1 raw formats such as P010, 10-bit YUV, premultiplied alpha, or opaque
@@ -562,9 +563,9 @@ class XybridEnvelope {
     required String format, // "png" | "jpeg" | "jpg" | "webp"
   });
 
-  // Raw vision frames (planned)
-  factory XybridEnvelope.imageRaw(
-    List<int> pixels, {
+  // Raw vision frames (camera/canvas pixels, no JPEG re-encoding)
+  factory XybridEnvelope.imageRaw({
+    required List<int> pixels,
     required PixelFormat pixelFormat,
     required int width,
     required int height,
@@ -665,7 +666,7 @@ using var result = model.Run(message);
 | `textWithRole()` | ✅ | — | — | ✅ |
 | `withRole()` | ✅ | — | — | — |
 | `image()` | ✅ | ✅ | ✅ | ✅ |
-| `imageRaw()` | 📋 | 📋 | 📋 | 📋 |
+| `imageRaw()` | ✅ | 📋 | 📋 | 📋 |
 | `userMessage()` | ✅ | ✅ | ✅ | ✅ |
 
 Legend: ✅ implemented · 📋 planned · — not applicable for this binding.
@@ -986,10 +987,10 @@ enum class MessageRole { SYSTEM, USER, ASSISTANT }
 ### Raw-Frame Types (PixelFormat, ImagePlane, YuvColorInfo)
 
 Supporting types for `Envelope.imageRaw` (see §5). The Rust shapes already exist
-in `xybrid-core` (gated by the `vision` feature); the binding surface is **planned**
-and lands with the `imageRaw` bindings (realtime vision Phase B). They let camera or
-canvas frames flow in as raw pixels — packed RGB/BGRA/RGBA, NV12/NV21, and I420 — with
-explicit per-plane descriptors instead of JPEG re-encoding.
+in `xybrid-core` (gated by the `vision` feature); the **Dart** binding surface is
+implemented (realtime vision Phase B) and Kotlin/Swift/C# remain planned. They let
+camera or canvas frames flow in as raw pixels — packed RGB/BGRA/RGBA, NV12/NV21, and
+I420 — with explicit per-plane descriptors instead of JPEG re-encoding.
 
 `PixelFormat` is the set of accepted raw pixel layouts. Unsupported v1 formats (P010,
 10-bit YUV, premultiplied alpha, opaque handles) surface as `UnsupportedPixelFormat`
@@ -1253,9 +1254,9 @@ frame so a continuous live stream stays low-cardinality.
 | `ConversationContext` | ✅ | — | — | ✅ |
 | `MessageRole` | ✅ | — | — | ✅ |
 | `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
-| `PixelFormat` | 📋 | 📋 | 📋 | 📋 |
-| `ImagePlane` | 📋 | 📋 | 📋 | 📋 |
-| `YuvColorInfo` | 📋 | 📋 | 📋 | 📋 |
+| `PixelFormat` | ✅ | 📋 | 📋 | 📋 |
+| `ImagePlane` | ✅ | 📋 | 📋 | 📋 |
+| `YuvColorInfo` | ✅ | 📋 | 📋 | 📋 |
 | `RunOptions` | ✅ | planned | planned | planned |
 | `RunOptions.frameSessionId` / `liveMode` | 📋 | 📋 | 📋 | 📋 |
 | `AbortPolicy` | ✅ | planned | planned | planned |

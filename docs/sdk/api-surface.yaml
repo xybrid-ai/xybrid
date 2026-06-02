@@ -294,8 +294,8 @@ classes:
           - { name: height, type: int }
           - { name: planes, type: "List<ImagePlane>" }
           - { name: color, type: "YuvColorInfo?", default: "null" }
-        notes: "Planned binding surface for camera/canvas frames without JPEG re-encoding. PixelFormat covers rgb8, rgba8, bgra8, nv12, nv21, and i420. Unsupported raw formats such as p010, 10-bit YUV, premultiplied alpha, or opaque handles surface as UnsupportedPixelFormat. Plane validation enforces row stride, pixel stride, extents, and YUV color metadata; diagnostics redact pixel bytes."
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Binding surface for camera/canvas frames without JPEG re-encoding. PixelFormat covers rgb8, rgba8, bgra8, nv12, nv21, and i420. Unsupported raw formats such as p010, 10-bit YUV, premultiplied alpha, or opaque handles surface as UnsupportedPixelFormat. Plane validation enforces row stride, pixel stride, extents, and YUV color metadata; diagnostics redact pixel bytes. Dart binding wires through FRB to Envelope::image_raw."
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       userMessage:
         params:
           - { name: text, type: String }
@@ -434,14 +434,15 @@ classes:
     status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
 
   # Raw-frame supporting types referenced by Envelope.imageRaw (vision feature).
-  # The Rust shapes exist in xybrid-core::ir::envelope; the binding surface is
-  # planned and lands with the imageRaw bindings (realtime vision Phase B).
+  # The Rust shapes exist in xybrid-core::ir::envelope; the Dart binding surface
+  # landed with the imageRaw bindings (realtime vision Phase B). kotlin/swift/csharp
+  # remain planned.
   PixelFormat:
     type: enum
     section: "8. Supporting Types"
     notes: "Raw pixel-buffer formats accepted by Envelope.imageRaw. Serialized lowercase. Unsupported raw formats (p010, 10-bit YUV, premultiplied alpha, opaque handles) surface as UnsupportedPixelFormat before any pixel bytes are read."
     values: [rgb8, rgba8, bgra8, nv12, nv21, i420]
-    status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+    status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
 
   ImagePlane:
     type: data
@@ -451,37 +452,37 @@ classes:
       offset:
         type: int
         notes: "Byte offset into the raw pixel buffer where this plane begins."
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       rowStride:
         type: int
         notes: "Bytes between adjacent rows in this plane (Rust: row_stride)."
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       pixelStride:
         type: int
         notes: "Bytes between adjacent samples in the same row (Rust: pixel_stride)."
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       width:
         type: int
         notes: "Plane width in samples. Chroma planes are usually subsampled."
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       height:
         type: int
         notes: "Plane height in samples. Chroma planes are usually subsampled."
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
 
   YuvColorMatrix:
     type: enum
     section: "8. Supporting Types"
     notes: "YUV color conversion matrix for raw YUV camera frames. Serialized lowercase."
     values: [bt601, bt709, bt2020]
-    status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+    status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
 
   YuvColorRange:
     type: enum
     section: "8. Supporting Types"
     notes: "YUV luma/chroma numeric range. Serialized lowercase."
     values: [limited, full]
-    status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+    status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
 
   YuvColorInfo:
     type: data
@@ -490,10 +491,10 @@ classes:
     properties:
       matrix:
         type: YuvColorMatrix
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       range:
         type: YuvColorRange
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
 
   GenerationConfig:
     type: data
