@@ -983,6 +983,73 @@ enum MessageRole { system, user, assistant }
 enum class MessageRole { SYSTEM, USER, ASSISTANT }
 ```
 
+### Raw-Frame Types (PixelFormat, ImagePlane, YuvColorInfo)
+
+Supporting types for `Envelope.imageRaw` (see §5). The Rust shapes already exist
+in `xybrid-core` (gated by the `vision` feature); the binding surface is **planned**
+and lands with the `imageRaw` bindings (realtime vision Phase B). They let camera or
+canvas frames flow in as raw pixels — packed RGB/BGRA/RGBA, NV12/NV21, and I420 — with
+explicit per-plane descriptors instead of JPEG re-encoding.
+
+`PixelFormat` is the set of accepted raw pixel layouts. Unsupported v1 formats (P010,
+10-bit YUV, premultiplied alpha, opaque handles) surface as `UnsupportedPixelFormat`
+before any pixel bytes are read.
+
+```dart
+enum PixelFormat { rgb8, rgba8, bgra8, nv12, nv21, i420 }
+```
+
+```kotlin
+enum class PixelFormat { RGB8, RGBA8, BGRA8, NV12, NV21, I420 }
+```
+
+`ImagePlane` describes one memory plane inside a raw pixel buffer. Packed RGB-family
+inputs carry a single plane; NV12/NV21 carry two; I420 carries three. Plane validation
+enforces row stride, pixel stride, and extents.
+
+```dart
+class ImagePlane {
+  final int offset;       // byte offset where this plane begins
+  final int rowStride;    // bytes between adjacent rows
+  final int pixelStride;  // bytes between adjacent samples in a row
+  final int width;        // plane width in samples (chroma may be subsampled)
+  final int height;       // plane height in samples (chroma may be subsampled)
+}
+```
+
+```kotlin
+data class ImagePlane(
+  val offset: Int,
+  val rowStride: Int,
+  val pixelStride: Int,
+  val width: Int,
+  val height: Int,
+)
+```
+
+`YuvColorInfo` carries the color metadata required for raw YUV frames (`nv12`, `nv21`,
+`i420`). RGB-family raw inputs must **not** carry it.
+
+```dart
+enum YuvColorMatrix { bt601, bt709, bt2020 }
+enum YuvColorRange { limited, full }
+
+class YuvColorInfo {
+  final YuvColorMatrix matrix;
+  final YuvColorRange range;
+}
+```
+
+```kotlin
+enum class YuvColorMatrix { BT601, BT709, BT2020 }
+enum class YuvColorRange { LIMITED, FULL }
+
+data class YuvColorInfo(
+  val matrix: YuvColorMatrix,
+  val range: YuvColorRange,
+)
+```
+
 ### GenerationConfig (LLM Generation Parameters)
 
 Optional configuration for controlling LLM text generation. All fields are nullable —
@@ -1074,10 +1141,42 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
 
+**User cancellation (Dart binding surface — planned, issue 10).** A caller can
+abort an in-flight local streaming run via a `CancellationToken` cancel handle
+paired with `RunOptions` (`with_cancellation_token`). Cancellation is
+**cooperative**: the token's cancelled state is checked before every emitted
+token, so it takes effect at the next token boundary, not mid-token, and
+surfaces as the `AbortSignal::UserCancelled` policy signal. The Dart surface
+(a cancel handle exposing `cancel()` / `isCancelled`, plus the `userCancelled`
+signal) is implemented by issue 10; it stays **planned** until the
+FFI → FRB → Dart cancel path is wired.
+
+**Live mode / frame session (planned, issue 14).** For continuous live-capture
+loops (e.g. the Flutter vision-live loop), `RunOptions` carries an optional
+`frameSessionId` — a caller-supplied UUID identifying one continuous
+live-capture session — plus a `liveMode` flag. The **caller** generates the id
+(the SDK treats it as an opaque tag); `with_frame_session(frameSessionId)` is a
+convenience that sets the id and `liveMode = true`. This is surfaced on the
+streaming run-options path. On the wire, live-mode inferences carry
+`frame_session_id` and `live_mode` and are **sampled / rolled up per session**
+rather than emitted per frame, keeping telemetry low-cardinality across a live
+stream. Defaults are `frameSessionId = null` and `liveMode = false` (per-run
+telemetry). No implementation exists yet; the entry stays **planned** until the
+telemetry tagging + per-session sampler land in issue 14.
+
+```rust
+// Planned shape — live-capture session tagging on the streaming path.
+let session_id = uuid::Uuid::new_v4().to_string(); // caller-generated
+let options = RunOptions::new()
+    .with_cancellation_token(token.clone())
+    .with_frame_session(session_id); // sets frameSessionId + liveMode = true
+```
+
 `AbortSignal` is the shared policy enum. Rust currently supports
 `UserCancelled`, `MemoryPressureWarn`, `MemoryPressureCritical`, `ThermalHot`,
 and `ThermalCritical`; Flutter currently exposes the customer-facing fallback
-signals `memoryPressureCritical` and `thermalCritical`.
+signals `memoryPressureCritical` and `thermalCritical`. The `userCancelled`
+signal is part of the planned Dart cancellation surface (issue 10).
 
 Flutter exposes the customer opt-in surface as `RunOptions.cloudFallback(...)`
 plus `AbortPolicy.cloudFallback(...)`; plain `RunOptions()` stays neutral and
@@ -1097,7 +1196,10 @@ Routing feedback is recorded inside the core orchestrator using low-cardinality
 resource buckets. The SDK keeps `correlation_id` as an opaque string for
 cross-binding compatibility; telemetry may include flat `routing_source`,
 `routing_reason`, `outcome_category`, `abort_reason`, `fallback_target`,
-`fallback_reason`, and `fallback_outcome` fields.
+`fallback_reason`, and `fallback_outcome` fields. Live-mode runs additionally
+carry the flat `frame_session_id` and `live_mode` fields (planned, issue 14);
+those inferences are sampled / rolled up per session rather than emitted per
+frame so a continuous live stream stays low-cardinality.
 
 ### Implementation Status
 
@@ -1106,9 +1208,14 @@ cross-binding compatibility; telemetry may include flat `routing_source`,
 | `ConversationContext` | ✅ | — | — | ✅ |
 | `MessageRole` | ✅ | — | — | ✅ |
 | `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
+| `PixelFormat` | 📋 | 📋 | 📋 | 📋 |
+| `ImagePlane` | 📋 | 📋 | 📋 | 📋 |
+| `YuvColorInfo` | 📋 | 📋 | 📋 | 📋 |
 | `RunOptions` | ✅ | planned | planned | planned |
+| `RunOptions.frameSessionId` / `liveMode` | 📋 | 📋 | 📋 | 📋 |
 | `AbortPolicy` | ✅ | planned | planned | planned |
 | `AbortSignal` | ✅ | planned | planned | planned |
+| `AbortSignal.userCancelled` (Dart surface) | 📋 | 📋 | 📋 | 📋 |
 | `CancellationToken` | ✅ | planned | planned | planned |
 | `StreamToken` | ✅ | — | — | ✅ |
 
