@@ -2084,6 +2084,82 @@ impl XybridModel {
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
 
+    /// Streaming TTS: synthesize `envelope`'s text sentence-chunk by
+    /// sentence-chunk and hand each chunk's PCM (with its sample rate) to
+    /// `on_chunk` as it is produced, instead of returning one batched WAV. For
+    /// long text this lets playback start after the first sentence.
+    ///
+    /// Audio rides the callback; there is no batched return value. `on_chunk`
+    /// returning `false` stops early, as does a cancelled
+    /// `options.cancellation_token` — both honored at the next chunk boundary
+    /// (one chunk's ONNX forward is uninterruptible). The model write-lock is
+    /// held for the whole synthesis, exactly like [`run`].
+    pub fn run_tts_streaming<F>(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+        mut on_chunk: F,
+    ) -> SdkResult<()>
+    where
+        F: FnMut(Vec<u8>, u32) -> bool,
+    {
+        crate::telemetry::maybe_emit_dev_nudge();
+        let start = Instant::now();
+        let resource_guard = crate::telemetry::begin_resource_run();
+        let trace_id = uuid::Uuid::new_v4();
+        let _telemetry_ctx =
+            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        if !handle.loaded {
+            return Err(SdkError::NotLoaded);
+        }
+        let metadata = handle.metadata.clone();
+
+        // Between-chunk cancellation: a chunk's ONNX forward can't be aborted
+        // mid-way, so the token (and the caller's `on_chunk`) is consulted at
+        // chunk boundaries.
+        let cancel = options.cancellation_token.clone();
+        let mut adapter = |pcm: Vec<u8>, sample_rate: u32| -> bool {
+            if let Some(token) = &cancel {
+                if token.is_cancelled() {
+                    return false;
+                }
+            }
+            on_chunk(pcm, sample_rate)
+        };
+
+        handle
+            .executor
+            .execute_tts_streaming(&metadata, envelope, &mut adapter)
+            .map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
+
+        let latency_ms = start.elapsed().as_millis() as u32;
+        let event = crate::telemetry::TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some(self.model_id.clone()),
+            target: Some("local".to_string()),
+            latency_ms: Some(latency_ms),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": self.model_id,
+                    "version": self.version,
+                    "output_type": format!("{:?}", self.output_type),
+                    "streaming": true,
+                })
+                .to_string(),
+            ),
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
+        crate::telemetry::publish_with_resource_summary(event, resource_guard);
+
+        Ok(())
+    }
+
     /// Run batch inference with per-run controls.
     pub fn run_with_options(
         &self,

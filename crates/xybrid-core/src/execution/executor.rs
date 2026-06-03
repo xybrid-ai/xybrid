@@ -2912,6 +2912,161 @@ impl TemplateExecutor {
             .iter()
             .any(|step| matches!(step, PreprocessingStep::Phonemize { .. }))
     }
+
+    /// Resolve the on-disk model file path for a single-model (TTS) template,
+    /// the same way `execute()` does (`base_path` + the template's `model_file`).
+    fn tts_model_path(&self, metadata: &ModelMetadata) -> ExecutorResult<PathBuf> {
+        let model_file = match &metadata.execution_template {
+            ExecutionTemplate::Onnx { model_file } => model_file.clone(),
+            ExecutionTemplate::CoreMl { model_file } => model_file.clone(),
+            ExecutionTemplate::TfLite { model_file } => model_file.clone(),
+            ExecutionTemplate::SafeTensors { model_file, .. } => model_file.clone(),
+            _ => {
+                return Err(AdapterError::InvalidInput(
+                    "Streaming TTS requires a single-model execution template".to_string(),
+                ))
+            }
+        };
+        Ok(Path::new(&self.base_path).join(model_file))
+    }
+
+    /// Output sample rate of the model's `TTSAudioEncode` step, or 24000 Hz when
+    /// absent. Streamed chunks carry it so the consumer wraps each chunk's PCM in
+    /// a correctly-headed WAV.
+    fn tts_output_sample_rate(metadata: &ModelMetadata) -> u32 {
+        use super::template::PostprocessingStep;
+        metadata
+            .postprocessing
+            .iter()
+            .find_map(|step| match step {
+                PostprocessingStep::TTSAudioEncode { sample_rate, .. } => Some(*sample_rate),
+                _ => None,
+            })
+            .unwrap_or(24000)
+    }
+
+    /// Streaming TTS: synthesize the text sentence-chunk by sentence-chunk and
+    /// hand each chunk's PCM to `on_chunk` as it's produced, instead of
+    /// concatenating the whole utterance (see `execute_tts_chunked`). For long
+    /// text this lets playback start after the first sentence.
+    ///
+    /// `on_chunk(pcm, sample_rate)` returns `false` to stop early (barge-in /
+    /// sink closed) — the next chunk's inference is skipped. Postprocessing runs
+    /// per chunk: `TTSAudioEncode` normalizes each chunk to the same target RMS,
+    /// so chunks stay at a consistent level (no inter-sentence drift); a short
+    /// edge fade masks the per-chunk high-pass startup transient and the seam
+    /// where consecutive chunks are spliced at playback. The crossfade used by
+    /// the batch path is dropped (there is no in-Rust concatenation here).
+    pub fn execute_tts_streaming(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        on_chunk: &mut dyn FnMut(Vec<u8>, u32) -> bool,
+    ) -> ExecutorResult<()> {
+        use crate::ir::EnvelopeKind;
+
+        const DEFAULT_MAX_TTS_CHARS: usize = 350;
+        let max_tts_chars = metadata.max_chunk_chars.unwrap_or(DEFAULT_MAX_TTS_CHARS);
+
+        let text = match &input.kind {
+            EnvelopeKind::Text(t) => t.clone(),
+            _ => {
+                return Err(AdapterError::InvalidInput(
+                    "TTS requires text input".to_string(),
+                ))
+            }
+        };
+        if text.trim().is_empty() {
+            return Ok(());
+        }
+
+        let model_path = self.tts_model_path(metadata)?;
+        let sample_rate = Self::tts_output_sample_rate(metadata);
+        let fade_samples = (sample_rate as usize * 5) / 1000; // ~5ms edge fade
+        let chunks = Self::chunk_text_for_tts(&text, max_tts_chars);
+        let session = self.tts_session(&model_path)?;
+        let speed = extract_tts_speed(input);
+        let output_name = session
+            .output_names()
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "audio".to_string());
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            debug!(target: "xybrid_core", "TTS stream: chunk {}/{} ({} chars)", i + 1, chunks.len(), chunk.len());
+
+            let chunk_input = Envelope {
+                kind: EnvelopeKind::Text(chunk.clone()),
+                metadata: input.metadata.clone(),
+            };
+            let preprocessed = self.run_preprocessing(metadata, &chunk_input)?;
+            let phoneme_ids = preprocessed
+                .as_phoneme_ids()
+                .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
+            // Voice embedding is the same for every chunk; load it per chunk to
+            // mirror the batch path (cheap read from voices.bin).
+            let voice_loader = TtsVoiceLoader::new(&self.base_path);
+            let voice_embedding = voice_loader.load(metadata, input)?;
+            let raw_outputs =
+                execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
+
+            let Some(audio_tensor) = raw_outputs.values().next() else {
+                continue;
+            };
+            let mut chunk_audio: Vec<f32> = audio_tensor.iter().cloned().collect();
+            let trim_count = metadata.trim_trailing_samples.unwrap_or(0);
+            if trim_count > 0 && chunk_audio.len() > trim_count {
+                chunk_audio.truncate(chunk_audio.len() - trim_count);
+            }
+
+            // Per-chunk postprocessing → PCM bytes (mirrors the batch path, but
+            // applied to this chunk rather than the concatenated buffer).
+            let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
+            outputs.insert(output_name.clone(), ndarray::Array1::from_vec(chunk_audio).into_dyn());
+            let env = self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))?;
+            let mut pcm = match env.kind {
+                EnvelopeKind::Audio(bytes) => bytes,
+                _ => {
+                    return Err(AdapterError::InvalidInput(
+                        "TTS postprocessing did not yield audio".to_string(),
+                    ))
+                }
+            };
+            fade_pcm16_edges(&mut pcm, fade_samples);
+
+            if !on_chunk(pcm, sample_rate) {
+                debug!(target: "xybrid_core", "TTS stream: stopped early at chunk {}", i + 1);
+                break;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Apply a short linear fade-in and fade-out over `fade_samples` samples at each
+/// edge of a 16-bit little-endian PCM buffer. In streaming TTS this masks the
+/// per-chunk high-pass-filter startup transient and the seam where consecutive
+/// chunks are spliced gaplessly at playback. No-op for an empty buffer or zero
+/// fade; the fade is clamped so the two ramps never overlap.
+fn fade_pcm16_edges(pcm: &mut [u8], fade_samples: usize) {
+    let total = pcm.len() / 2;
+    let n = fade_samples.min(total / 2);
+    if n == 0 {
+        return;
+    }
+    let scale = |pcm: &mut [u8], idx: usize, gain: f32| {
+        let o = idx * 2;
+        let s = i16::from_le_bytes([pcm[o], pcm[o + 1]]);
+        let v = (s as f32 * gain).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+        let b = v.to_le_bytes();
+        pcm[o] = b[0];
+        pcm[o + 1] = b[1];
+    };
+    for i in 0..n {
+        let gain = (i as f32 + 0.5) / n as f32;
+        scale(pcm, i, gain); // fade-in at the head
+        scale(pcm, total - 1 - i, gain); // fade-out at the tail
+    }
 }
 
 /// `(len, modified)` of the file at `path`, or `None` if the metadata can't be
@@ -4541,6 +4696,30 @@ mod tests {
         let chunks: Vec<Vec<f32>> = vec![];
         let result = crossfade_audio_chunks(&chunks, 480);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_fade_pcm16_edges_ramps_both_ends() {
+        const S: i16 = 1000;
+        let mut pcm: Vec<u8> = (0..20).flat_map(|_| S.to_le_bytes()).collect();
+        fade_pcm16_edges(&mut pcm, 4);
+        let read = |i: usize| i16::from_le_bytes([pcm[i * 2], pcm[i * 2 + 1]]);
+        // Head ramps up.
+        assert!(read(0).abs() < S, "head attenuated");
+        assert!(read(0).abs() < read(3).abs(), "head ramps up");
+        // Middle untouched.
+        assert_eq!(read(10), S);
+        // Tail ramps down.
+        assert!(read(19).abs() < S, "tail attenuated");
+        assert!(read(19).abs() < read(16).abs(), "tail ramps down");
+    }
+
+    #[test]
+    fn test_fade_pcm16_edges_noop_for_tiny_buffer() {
+        // One sample (2 bytes): n clamps to total/2 = 0 → no change.
+        let mut pcm = 1234i16.to_le_bytes().to_vec();
+        fade_pcm16_edges(&mut pcm, 4);
+        assert_eq!(i16::from_le_bytes([pcm[0], pcm[1]]), 1234);
     }
 
     #[test]

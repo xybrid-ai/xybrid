@@ -17,7 +17,7 @@ part 'model.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_sdk_with_cancellation`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `fmt`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiCancellationToken>>
 abstract class FfiCancellationToken implements RustOpaqueInterface {
@@ -130,6 +130,20 @@ abstract class FfiModel implements RustOpaqueInterface {
   Stream<FfiStreamEvent> runStreamWithFallback(
       {required FfiEnvelope envelope,
       required FfiRunOptions options,
+      FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken});
+
+  /// Streaming TTS: synthesize the envelope's text sentence-chunk by
+  /// sentence-chunk and emit each chunk's PCM through `sink` as it is produced
+  /// (instead of one batched WAV), so playback can start after the first
+  /// sentence. Runs on a worker thread.
+  ///
+  /// Cancellation mirrors [`run_stream`]: an optional `cancellation_token`
+  /// stops synthesis at the next chunk boundary, and a closed/unsubscribed
+  /// `sink` (Dart cancelled the stream — i.e. barge-in) drives the same
+  /// cancel via the `should_cancel_on_sink_close` handshake.
+  Stream<FfiTtsStreamEvent> runTtsStream(
+      {required FfiEnvelope envelope,
       FfiGenerationConfig? config,
       FfiCancellationToken? cancellationToken});
 
@@ -397,4 +411,23 @@ class FfiStreamToken {
           index == other.index &&
           cumulativeText == other.cumulativeText &&
           finishReason == other.finishReason;
+}
+
+@freezed
+sealed class FfiTtsStreamEvent with _$FfiTtsStreamEvent {
+  const FfiTtsStreamEvent._();
+
+  /// One synthesized chunk: raw 16-bit LE PCM and its sample rate (Hz).
+  const factory FfiTtsStreamEvent.audioChunk({
+    required Uint8List pcm,
+    required int sampleRate,
+  }) = FfiTtsStreamEvent_AudioChunk;
+
+  /// Synthesis completed.
+  const factory FfiTtsStreamEvent.complete() = FfiTtsStreamEvent_Complete;
+
+  /// An error occurred during synthesis.
+  const factory FfiTtsStreamEvent.error(
+    String field0,
+  ) = FfiTtsStreamEvent_Error;
 }

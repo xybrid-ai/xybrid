@@ -164,6 +164,13 @@ classes:
           - { name: options, type: RunOptions }
         return: "Stream<StreamToken>"
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      runTtsStreaming:
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: options, type: RunOptions }
+        return: "Stream<TtsStreamEvent>"
+        notes: "Streaming TTS (issue: realtime-vision C). Synthesizes the text sentence-chunk by sentence-chunk and emits each chunk's raw 16-bit LE PCM with its sample rate (FfiTtsStreamEvent::AudioChunk { pcm, sample_rate }) as it is produced, instead of one batched WAV — so playback can start after the first sentence. The consumer wraps each chunk into a WAV (the one-shot path's audioAsWav owns the header today). Cancellation mirrors runStreaming's sink-close-as-cancel: unsubscribing the Dart stream (barge-in) closes the FFI sink and stops synthesis at the next chunk boundary (one chunk's ONNX forward is uninterruptible). The batch crossfade is dropped; a short per-chunk edge fade masks the high-pass startup transient and the gapless-splice seam. Reuses the cached TTS ONNX session so chunk N+1 starts immediately."
+        status: { rust: implemented, dart: implemented, kotlin: na, swift: na, csharp: na }
       runStreamingWithFallback:
         params:
           - { name: envelope, type: Envelope }

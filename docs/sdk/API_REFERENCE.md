@@ -320,6 +320,15 @@ class XybridModel {
     GenerationConfig? config,
   });
 
+  // Streaming TTS (audio chunk-by-chunk)
+  // Emits each sentence-chunk's raw PCM (+ sample rate) as it is synthesized,
+  // instead of one batched WAV, so playback can start after the first sentence.
+  // Unsubscribing the stream (barge-in) stops synthesis at the next chunk.
+  Stream<TtsStreamEvent> runTtsStreaming({
+    required Envelope envelope,
+    required RunOptions options,
+  });
+
   // Benchmarking
   Future<BenchmarkResult> benchmark({
     required Envelope envelope,
@@ -394,6 +403,7 @@ impl XybridModel {
 | `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
 | `runStreaming()` | ✅ | — | — | ✅ |
 | `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | planned | planned | planned |
+| `runTtsStreaming()` / `run_tts_streaming()` | ✅ | — | — | — |
 | `runStreamingWithFallback()` | ✅ | planned | planned | planned |
 | `runStreamingWithContext()` | ✅ | — | — | ✅ |
 | `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |

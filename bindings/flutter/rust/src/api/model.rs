@@ -429,6 +429,19 @@ pub enum FfiStreamEvent {
     Error(String),
 }
 
+/// Event emitted during streaming TTS. Audio rides the stream as raw 16-bit LE
+/// PCM chunks (one per sentence-chunk) plus the sample rate, so the Dart side
+/// wraps each chunk into a correctly-headed WAV as it arrives.
+#[derive(Clone)]
+pub enum FfiTtsStreamEvent {
+    /// One synthesized chunk: raw 16-bit LE PCM and its sample rate (Hz).
+    AudioChunk { pcm: Vec<u8>, sample_rate: u32 },
+    /// Synthesis completed.
+    Complete,
+    /// An error occurred during synthesis.
+    Error(String),
+}
+
 /// Token received during streaming inference.
 /// Mirrors the SDK's StreamToken structure for FFI.
 #[derive(Clone)]
@@ -661,6 +674,79 @@ impl FfiModel {
                 }
                 Err(e) => {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                }
+            }
+        });
+    }
+
+    /// Streaming TTS: synthesize the envelope's text sentence-chunk by
+    /// sentence-chunk and emit each chunk's PCM through `sink` as it is produced
+    /// (instead of one batched WAV), so playback can start after the first
+    /// sentence. Runs on a worker thread.
+    ///
+    /// Cancellation mirrors [`run_stream`]: an optional `cancellation_token`
+    /// stops synthesis at the next chunk boundary, and a closed/unsubscribed
+    /// `sink` (Dart cancelled the stream — i.e. barge-in) drives the same
+    /// cancel via the `should_cancel_on_sink_close` handshake.
+    pub fn run_tts_stream(
+        &self,
+        envelope: super::envelope::FfiEnvelope,
+        config: Option<FfiGenerationConfig>,
+        cancellation_token: Option<FfiCancellationToken>,
+        sink: StreamSink<FfiTtsStreamEvent>,
+    ) {
+        let model = self.0.clone();
+        let env = envelope.into_envelope();
+        let sdk_config = config.map(|c| c.to_sdk());
+        let run_options =
+            streaming_run_options(sdk_config, cancellation_token.as_ref(), None);
+        let cancel_handle = cancellation_token;
+
+        std::thread::spawn(move || {
+            let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let result = {
+                let reached_terminal = reached_terminal.clone();
+                let cancel_handle = cancel_handle.clone();
+                // Clone the sink for the per-chunk callback; the original stays
+                // for the terminal Complete/Error emit below.
+                let chunk_sink = sink.clone();
+                let on_chunk = move |pcm: Vec<u8>, sample_rate: u32| -> bool {
+                    if chunk_sink
+                        .add(FfiTtsStreamEvent::AudioChunk { pcm, sample_rate })
+                        .is_err()
+                        && should_cancel_on_sink_close(
+                            reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
+                        )
+                    {
+                        // Dart unsubscribed mid-stream (barge-in): cancel the
+                        // synthesis and stop at this chunk boundary.
+                        if let Some(handle) = cancel_handle.as_ref() {
+                            handle.0.cancel();
+                        }
+                        return false;
+                    }
+                    true
+                };
+                model.run_tts_streaming(&env, &run_options, on_chunk)
+            };
+
+            match result {
+                Ok(()) => {
+                    reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
+                    // A cancelled run (barge-in via sink-close, or the caller
+                    // cancelling the token) stopped early — don't surface it as a
+                    // successful Complete. On sink-close the add would no-op
+                    // anyway, but a token-only cancel keeps the sink open.
+                    let cancelled = cancel_handle
+                        .as_ref()
+                        .map(|h| h.0.is_cancelled())
+                        .unwrap_or(false);
+                    if !cancelled {
+                        let _ = sink.add(FfiTtsStreamEvent::Complete);
+                    }
+                }
+                Err(e) => {
+                    let _ = sink.add(FfiTtsStreamEvent::Error(e.to_string()));
                 }
             }
         });

@@ -184,6 +184,10 @@ abstract class XybridRustLibApiImplPlatform
       dynamic raw);
 
   @protected
+  RustStreamSink<FfiTtsStreamEvent>
+      dco_decode_StreamSink_ffi_tts_stream_event_Sse(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
@@ -274,6 +278,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiThermalState dco_decode_ffi_thermal_state(dynamic raw);
+
+  @protected
+  FfiTtsStreamEvent dco_decode_ffi_tts_stream_event(dynamic raw);
 
   @protected
   FfiYuvColorInfo dco_decode_ffi_yuv_color_info(dynamic raw);
@@ -495,6 +502,11 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  RustStreamSink<FfiTtsStreamEvent>
+      sse_decode_StreamSink_ffi_tts_stream_event_Sse(
+          SseDeserializer deserializer);
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
@@ -594,6 +606,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiThermalState sse_decode_ffi_thermal_state(SseDeserializer deserializer);
+
+  @protected
+  FfiTtsStreamEvent sse_decode_ffi_tts_stream_event(
+      SseDeserializer deserializer);
 
   @protected
   FfiYuvColorInfo sse_decode_ffi_yuv_color_info(SseDeserializer deserializer);
@@ -822,6 +838,10 @@ abstract class XybridRustLibApiImplPlatform
       RustStreamSink<FfiStreamEvent> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_StreamSink_ffi_tts_stream_event_Sse(
+      RustStreamSink<FfiTtsStreamEvent> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
@@ -929,6 +949,10 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_ffi_thermal_state(
       FfiThermalState self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_tts_stream_event(
+      FfiTtsStreamEvent self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_yuv_color_info(
