@@ -1,0 +1,20 @@
+crates/xybrid-core/src/execution/voice_loader.rs
+  s_323a65fe865faa::t_b135019a633386 571-583
+  s_323a65fe865faa::t_06aca95b3c9517 607-633
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c9e0bfd98231a9689e250f38821355cac8c384f5",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
