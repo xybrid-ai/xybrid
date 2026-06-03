@@ -5,6 +5,7 @@
 library;
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'context.dart';
 import 'envelope.dart';
@@ -188,6 +189,16 @@ class XybridModelLoader {
 }
 
 /// A loaded model ready for inference.
+/// One chunk of streamed TTS audio: raw 16-bit little-endian PCM ([pcm]) and
+/// its [sampleRate] in Hz. Wrap into a WAV (header + [pcm]) to play. Emitted by
+/// [XybridModel.runTtsStreaming] one sentence-chunk at a time.
+class TtsAudioChunk {
+  const TtsAudioChunk({required this.pcm, required this.sampleRate});
+
+  final Uint8List pcm;
+  final int sampleRate;
+}
+
 class XybridModel {
   /// The underlying FRB model.
   final FfiModel inner;
@@ -364,6 +375,32 @@ class XybridModel {
         isFinal: true,
         finishReason: 'error: $e',
       );
+    }
+  }
+
+  /// Streaming TTS: synthesize [envelope]'s text sentence-chunk by
+  /// sentence-chunk and yield each chunk's PCM (with its sample rate) as it is
+  /// produced, instead of one batched WAV — so playback can start after the
+  /// first sentence. Pass a [cancellationToken] (or unsubscribe from the
+  /// stream) to stop synthesis at the next chunk boundary (barge-in).
+  Stream<TtsAudioChunk> runTtsStreaming(
+    XybridEnvelope envelope, {
+    CancellationToken? cancellationToken,
+  }) async* {
+    final stream = inner.runTtsStream(
+      envelope: envelope.inner,
+      config: null,
+      cancellationToken: cancellationToken?.inner,
+    );
+    await for (final event in stream) {
+      switch (event) {
+        case FfiTtsStreamEvent_AudioChunk(:final pcm, :final sampleRate):
+          yield TtsAudioChunk(pcm: pcm, sampleRate: sampleRate);
+        case FfiTtsStreamEvent_Complete():
+          return;
+        case FfiTtsStreamEvent_Error(:final field0):
+          throw StateError('TTS streaming failed: $field0');
+      }
     }
   }
 
