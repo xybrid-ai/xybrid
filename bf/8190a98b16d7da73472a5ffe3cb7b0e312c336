@@ -1,0 +1,19 @@
+crates/xybrid-core/src/runtime_adapter/candle/device.rs
+  s_323a65fe865faa::t_838f891bd3f7b6 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bf8190a98b16d7da73472a5ffe3cb7b0e312c336",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
