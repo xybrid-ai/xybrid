@@ -64,7 +64,7 @@ fn is_ios_simulator() -> bool {
             // query). On a `0` (success) return the kernel writes a short,
             // NUL-terminated model string — `hw.model` is ~16 bytes, far under
             // 256 — into the zero-initialized buffer, so `CStr::from_ptr`
-            // always finds a terminator within bounds. The buffer is read only
+            // always finds a terminator within bounds. The buffer is only read
             // on success.
             unsafe {
                 if sysctlbyname(
