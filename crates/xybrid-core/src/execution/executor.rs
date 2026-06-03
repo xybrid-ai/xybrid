@@ -41,7 +41,8 @@ use crate::runtime_adapter::{AdapterError, ModelRuntime};
 use crate::tracing as xybrid_trace;
 use ndarray::ArrayD;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::listener::ExecutionGuard;
 
@@ -256,6 +257,19 @@ use super::voice_loader::TtsVoiceLoader;
 /// # Ok(())
 /// # }
 /// ```
+/// A cached ONNX session for the TTS path, reused across runs to avoid the
+/// per-call graph load + Level-3 optimization that otherwise dominates short-TTS
+/// latency. Keyed by the model file path; the captured `(len, mtime)` identity
+/// self-invalidates the cache if the file at that path is replaced in place.
+struct TtsSessionCache {
+    model_path: PathBuf,
+    /// `(len, modified)` of the model file at build time. `None` when the file
+    /// metadata couldn't be read — treated as "unverifiable", forcing a rebuild
+    /// rather than trusting a possibly-stale session.
+    file_identity: Option<(u64, std::time::SystemTime)>,
+    session: Arc<ONNXSession>,
+}
+
 pub struct TemplateExecutor {
     /// Configured runtimes (e.g., "onnx", "candle")
     runtimes: HashMap<String, Box<dyn ModelRuntime>>,
@@ -272,6 +286,10 @@ pub struct TemplateExecutor {
     /// This ensures the struct has consistent fields regardless of features.
     #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
     llm_adapter_cache: Option<()>,
+    /// Cached ONNX session for the TTS path (see [`TtsSessionCache`]). Lives for
+    /// the executor's lifetime — i.e. the TTS model's load — and drops on unload,
+    /// exactly like `llm_adapter_cache`; no separate eviction needed.
+    tts_session_cache: Option<TtsSessionCache>,
     /// Optional embedding-style vision encoders keyed by metadata `vision_encoder.file`.
     ///
     /// llama.cpp VLMs do not use this registry: they consume raw ordered
@@ -332,6 +350,7 @@ impl TemplateExecutor {
             runtimes,
             base_path: base_path.into(),
             llm_adapter_cache: None,
+            tts_session_cache: None,
             #[cfg(feature = "vision")]
             vision_encoders: HashMap::new(),
         }
@@ -2682,6 +2701,37 @@ impl TemplateExecutor {
     ///
     /// Splits input text into chunks, processes each through preprocessing + TTS,
     /// and concatenates the audio output.
+    /// Returns the cached TTS ONNX session for `model_path`, building and caching
+    /// it on a miss. Caching skips the per-call `commit_from_file` + Level-3 graph
+    /// optimization — the dominant latency for short TTS. The cache invalidates if
+    /// the model file's `(len, mtime)` changes. TTS always runs on CPU with
+    /// default options, so path + file identity is a sufficient key.
+    fn tts_session(&mut self, model_path: &Path) -> ExecutorResult<Arc<ONNXSession>> {
+        let identity = tts_file_identity(model_path);
+        if let Some(cache) = &self.tts_session_cache {
+            // Reuse only when the path matches AND the file identity is both
+            // readable and unchanged — an unreadable identity (`None`) forces a
+            // rebuild rather than trusting a possibly-stale session.
+            if cache.model_path == model_path
+                && identity.is_some()
+                && cache.file_identity == identity
+            {
+                return Ok(Arc::clone(&cache.session));
+            }
+        }
+        let session = Arc::new(OnnxSessionFactory::create_session(
+            model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?);
+        self.tts_session_cache = Some(TtsSessionCache {
+            model_path: model_path.to_path_buf(),
+            file_identity: identity,
+            session: Arc::clone(&session),
+        });
+        Ok(session)
+    }
+
     fn execute_tts_chunked(
         &mut self,
         metadata: &ModelMetadata,
@@ -2732,11 +2782,9 @@ impl TemplateExecutor {
         const CROSSFADE_SAMPLES: usize = 480;
 
         let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
-        let session = OnnxSessionFactory::create_session(
-            model_path,
-            ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
-        )?;
+        // Reuse the cached session across runs (and across chunks within this
+        // run); the graph load is paid once, not per call.
+        let session = self.tts_session(model_path)?;
         let speed = extract_tts_speed(input);
 
         for (i, chunk) in chunks.iter().enumerate() {
@@ -2835,12 +2883,9 @@ impl TemplateExecutor {
         let voice_loader = TtsVoiceLoader::new(&self.base_path);
         let voice_embedding = voice_loader.load(metadata, input)?;
 
-        // Create and run TTS session through the shared factory entry.
-        let session = OnnxSessionFactory::create_session(
-            model_path,
-            ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
-        )?;
+        // Reuse the cached TTS session — the first run builds it, later runs skip
+        // the graph load + Level-3 optimization (the dominant short-TTS latency).
+        let session = self.tts_session(model_path)?;
         let speed = extract_tts_speed(input);
         let mut raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
 
@@ -2867,6 +2912,14 @@ impl TemplateExecutor {
             .iter()
             .any(|step| matches!(step, PreprocessingStep::Phonemize { .. }))
     }
+}
+
+/// `(len, modified)` of the file at `path`, or `None` if the metadata can't be
+/// read. Used as the TTS session-cache identity so a model file replaced in
+/// place invalidates the cached session.
+fn tts_file_identity(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
 }
 
 /// Extract TTS speed from envelope metadata, clamped to [0.5, 2.0].
