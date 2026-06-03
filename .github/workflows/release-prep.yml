@@ -837,6 +837,50 @@ jobs:
             artifacts/*
 
   # =========================================================================
+  # Generate a CycloneDX SBOM for the released crates and attach it to the
+  # draft release. Independent of the release gate: this job is not required
+  # by open-release-pr, and continue-on-error keeps an SBOM-tooling hiccup
+  # from ever marking a release run failed.
+  # =========================================================================
+  attach-sbom:
+    name: Attach SBOM
+    permissions:
+      contents: write   # gh release upload of the SBOM assets
+    needs: [check-release-branch, create-draft-release]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      - name: Generate CycloneDX SBOMs (JSON)
+        # Resolves from Cargo.lock — no project build needed. Emits a
+        # <crate>.cdx.json next to each workspace member's Cargo.toml.
+        run: cargo cyclonedx --format json
+
+      - name: Attach SBOMs for the published artifacts to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Upload the SBOMs for the published library crate and the CLI binary
+          # (each captures its full transitive dependency tree).
+          cp crates/xybrid/xybrid.cdx.json         "xybrid-${TAG}.cdx.json"
+          cp crates/xybrid-cli/xybrid-cli.cdx.json "xybrid-cli-${TAG}.cdx.json"
+          gh release upload "$TAG" \
+            "xybrid-${TAG}.cdx.json" \
+            "xybrid-cli-${TAG}.cdx.json" \
+            --clobber
+
+  # =========================================================================
   # Open the release PR (if not already open).
   # =========================================================================
   open-release-pr:
