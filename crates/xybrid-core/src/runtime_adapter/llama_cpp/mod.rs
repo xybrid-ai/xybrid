@@ -514,7 +514,13 @@ impl LlmBackend for LlamaCppBackend {
     }
 
     fn is_loaded(&self) -> bool {
-        self.model.is_some() && self.context.lock().unwrap().is_some()
+        // A poisoned context lock means an interrupted `llama_decode` may have
+        // left the `LlamaContext` inconsistent, so treat it as "not safely
+        // loaded" rather than panicking on `unwrap`. Matches the graceful
+        // `.ok()` degradation used elsewhere in this backend (e.g.
+        // `last_cached_prefix_len`) instead of `into_inner()` recovery, because
+        // the guarded context must not be reused once poisoned.
+        self.model.is_some() && self.context.lock().map(|c| c.is_some()).unwrap_or(false)
     }
 
     fn unload(&mut self) -> LlmResult<()> {
