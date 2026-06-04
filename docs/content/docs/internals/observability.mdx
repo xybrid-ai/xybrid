@@ -302,11 +302,14 @@ let telemetry = Telemetry::with_enabled(false);
 
 ### Initialize Early
 
+Pass your `apiKey` to `Xybrid.init()` at startup — that single call starts the
+platform telemetry exporter. Anonymous use (no key) runs locally with telemetry
+disabled.
+
 ```dart
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await RustLib.init();
-  initTelemetryStream();
+  await Xybrid.init(apiKey: const String.fromEnvironment('XYBRID_API_KEY'));
   runApp(MyApp());
 }
 ```

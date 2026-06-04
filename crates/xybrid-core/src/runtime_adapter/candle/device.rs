@@ -58,6 +58,14 @@ fn is_ios_simulator() -> bool {
             let mut size = buffer.len();
             let name = b"hw.model\0";
 
+            // SAFETY: `name` is a NUL-terminated C string. `buffer` is a valid,
+            // writable `[u8; 256]` and `size` its length, both live for the
+            // duration of the call; `newp`/`newlen` are null/0 (a read-only
+            // query). On a `0` (success) return the kernel writes a short,
+            // NUL-terminated model string — `hw.model` is ~16 bytes, far under
+            // 256 — into the zero-initialized buffer, so `CStr::from_ptr`
+            // always finds a terminator within bounds. The buffer is only read
+            // on success.
             unsafe {
                 if sysctlbyname(
                     name.as_ptr() as *const c_char,

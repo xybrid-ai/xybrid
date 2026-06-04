@@ -1,6 +1,6 @@
 [package]
 name = "xybrid_flutter"
-version = "0.1.0"  # Hardcoded (not workspace) — cargokit hashes this file to detect changes
+version = "0.1.1"  # Hardcoded (not workspace) — cargokit hashes this file to detect changes
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -63,6 +63,7 @@ ort-download = ["xybrid-sdk/ort-download"]
 ort-dynamic = ["xybrid-sdk/ort-dynamic"]
 ort-coreml = ["xybrid-sdk/ort-coreml"]
 candle = ["xybrid-sdk/candle"]
+candle-hub = ["xybrid-sdk/candle-hub"]
 candle-metal = ["xybrid-sdk/candle-metal"]
 candle-cuda = ["xybrid-sdk/candle-cuda"]
 llm-mistral = ["xybrid-sdk/llm-mistral"]

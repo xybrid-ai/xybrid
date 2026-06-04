@@ -29,7 +29,7 @@ Or add directly to `Packages/manifest.json`:
 To pin a specific version:
 
 ```bash
-https://github.com/xybrid-ai/xybrid.git#upm/v0.1.0-beta5
+https://github.com/xybrid-ai/xybrid.git#upm/v0.1.1
 ```
 
 ### Option 2: Local Development
@@ -90,7 +90,8 @@ public class XybridExample : MonoBehaviour
 
     void Start()
     {
-        // Initialize the SDK
+        // Runs locally with no key. Pass an apiKey to light up the
+        // dashboard: XybridClient.Initialize(apiKey: "xy_live_...")
         XybridClient.Initialize();
 
         // Load a model from the registry

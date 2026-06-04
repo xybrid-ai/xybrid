@@ -4,7 +4,6 @@
   "icon": "Cog",
   "root": true,
   "pages": [
-    "pipelines",
     "---实时推理---",
     "streaming",
     "---基础设施---",

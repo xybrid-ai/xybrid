@@ -53,6 +53,25 @@ flutter run -d ios
 flutter run -d android
 ```
 
+### Setting your API key (optional)
+
+The app reads `XYBRID_API_KEY` (and optionally `XYBRID_PLATFORM_URL`, the
+telemetry ingest endpoint) via `--dart-define`, so neither lands in the repo:
+
+```bash
+flutter run \
+  --dart-define=XYBRID_API_KEY=sk_test_... \
+  --dart-define=XYBRID_PLATFORM_URL=https://your-platform.example.com
+```
+
+Both are optional. Without a key the app runs anonymously (on-device inference,
+telemetry disabled); without a platform URL it uses the default Xybrid
+endpoint. `XYBRID_PLATFORM_URL` is handy for pointing a debug build at a
+self-hosted or tunneled (e.g. ngrok) platform. Get a free key at
+[dashboard.xybrid.dev](https://dashboard.xybrid.dev). The iOS and Android
+native examples use the equivalent Xcode scheme / Gradle `BuildConfig`
+mechanisms — see their READMEs.
+
 ## Project Structure
 
 ```

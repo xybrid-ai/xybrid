@@ -32,6 +32,14 @@ void Awake()
 
 `Initialize()` is thread-safe and idempotent — multiple calls are no-ops.
 
+Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.Run(...)` calls automatically emit execution traces:
+
+```csharp
+XybridClient.Initialize(apiKey: "xy_live_...");
+```
+
+Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`. For advanced telemetry settings (batch size, flush interval, device attributes), build a `TelemetryConfig` and call `XybridClient.InitializeTelemetry` instead.
+
 ## Quick Start
 
 ```csharp

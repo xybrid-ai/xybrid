@@ -13,6 +13,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.1] - 2026-05-30
+
+First patch on the 0.1.0 line. Headline is the new `Xybrid.init()` entry point —
+anonymous-by-default telemetry wired up uniformly across every binding — plus a
+round of FFI soundness/safety hardening across the C ABI.
+
+### Added
+
+- **`Xybrid.init()` builder with anonymous-by-default telemetry** (#188): a single
+  SDK entry point that starts telemetry from an API key, anonymous unless configured
+  otherwise. Brought to every binding in lockstep: Swift `Xybrid.initialize()` (#196),
+  Kotlin `Xybrid.init()` (#201), Unity `XybridClient.Initialize()` (#202), and the
+  Flutter bundled `init()` (#195, which also marks the old `initTelemetry` legacy).
+- **Error retryability across bindings**: inherent `SdkError::is_retryable` /
+  `retry_after` (#198), surfaced to Swift and Kotlin through UniFFI (#200).
+- **Typed `XybridOutputType` enum** for the result output kind in the C FFI (#194).
+- **Telemetry stamps `sdk_version` and `binding`** on every `PlatformEvent` (#183),
+  so events are attributable to the SDK build and language binding that emitted them.
+
+### Changed
+
+- **SDK**: one shared blocking body backs pipeline `run` / `run_async` (#210);
+  platform detection deduplicated to a single `cfg` ladder (#206).
+- **FFI**: handle-lifecycle helpers consolidated behind a macro (#192).
+- **Docs**: READMEs and reference docs aligned with the bundled `init()` telemetry
+  (#204); the Flutter example reads `XYBRID_API_KEY` at init (#207); SAFETY comments
+  added to every `llama_cpp` unsafe block and impl (#191).
+- **CI**: workflow token permissions scoped to least privilege (#211); native build
+  workflows skipped on markdown-only changes (#208); docs deploy only when `docs/`
+  changes (#186); apple release-prep jobs parallelized, NDK cached (#184); verify-release
+  SPM + Flutter version parsing tightened (#182).
+
+### Fixed
+
+- **Redact Xybrid's own api-key prefix in telemetry** (#209): the SDK no longer leaks
+  the leading bytes of its own key into emitted events.
+- **Cache TTL clock handling is now panic-safe** (#203): a backwards clock no longer
+  panics the cache layer.
+- **FFI soundness and panic-safety**:
+  - removed the unsound `unsafe impl Sync` from `StreamCallbackCtx` (#187);
+  - every `extern "C"` body now guards against panics unwinding across the C ABI (#185);
+  - accessor strings are cached in handle state to fix a use-after-free contract (#189).
+
+### Known issues
+
+- **iOS Simulator slice still missing from the published xcframework**
+  ([#179](https://github.com/xybrid-ai/xybrid/issues/179)): unchanged from 0.1.0.
+  Swift consumers building against the iOS Simulator on Apple Silicon still need the
+  `useLocalNatives = true` workaround after vendoring the ORT iOS simulator slice.
+
+### Consumer install lines
+
+```swift
+// Swift Package Manager
+.package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.1")
+```
+
+```yaml
+# Flutter / pub.dev
+xybrid_flutter: ^0.1.1
+```
+
+---
+
 ## [0.1.0] - 2026-05-27
 
 Production release of the 0.1.0 line. No code changes since rc4 — this release closes the rc series and finalizes the release toolchain that was iterated through rc1 → rc4.

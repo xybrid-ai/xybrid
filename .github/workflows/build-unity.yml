@@ -17,8 +17,7 @@ env:
   RUST_BACKTRACE: 1
   NDK_VERSION: "26.1.10909125"
 
-permissions:
-  contents: write
+permissions: read-all
 
 jobs:
   #
@@ -458,6 +457,8 @@ jobs:
   #
   package-unity:
     name: Package Unity SDK
+    permissions:
+      contents: write   # gh release upload of the packaged SDK tarball
     needs: [check-csharp-bindings, build-unity-macos, build-unity-windows, build-unity-linux, build-unity-ios, build-unity-android]
     if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
@@ -549,6 +550,8 @@ jobs:
   #
   publish-upm:
     name: Publish UPM Branch
+    permissions:
+      contents: write   # force-pushes the generated upm branch/tag
     needs: [package-unity]
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_upm == 'true')
     runs-on: ubuntu-latest

@@ -37,7 +37,7 @@ llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
 
 # PLATFORM PRESETS (composed from individual features above)
-# This ensures #[cfg(feature = "...")] checks work correctly in this crate
+# This ensures #[cfg(feature = "...")] checks work correctly in this crate.
 platform-android = ["ort-dynamic", "llm-llamacpp", "candle", "huggingface"]
 platform-ios = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp", "huggingface"]
 platform-macos = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp", "huggingface"]

@@ -938,7 +938,9 @@ impl Default for Orchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::ResourceSnapshot;
     use crate::ir::{Envelope, EnvelopeKind};
+    use crate::orchestrator::authority::test_seams::FixedResourceProvider;
     use crate::pipeline::ExecutionTarget;
     use crate::runtime_adapter::{AdapterError, AdapterResult, RuntimeAdapter};
     use crate::testing::mocks::MockRuntimeAdapter;
@@ -1040,15 +1042,20 @@ mod tests {
 
     /// Helper to create an orchestrator with a pre-loaded mock adapter registered.
     ///
-    /// For `Batch` we deliberately use `with_authority(LocalAuthority::new())`
-    /// instead of `Orchestrator::new()` — the latter bootstraps the real
-    /// ONNX/cloud adapters and wires them as the default for `local`/`cloud`
-    /// targets, so a subsequently-added mock would never be selected. The
-    /// fresh-executor path leaves the mock as the only registered adapter.
+    /// For `Batch` we deliberately use `with_authority(...)` instead of
+    /// `Orchestrator::new()` — the latter bootstraps the real ONNX/cloud
+    /// adapters and wires them as the default for `local`/`cloud` targets,
+    /// so a subsequently-added mock would never be selected. The fixed
+    /// resource provider also keeps local-routing tests independent of the
+    /// machine's live pressure while leaving the mock as the only adapter.
     fn orchestrator_with_mock_adapter(execution_mode: ExecutionMode) -> Orchestrator {
         let mut orchestrator = match execution_mode {
             ExecutionMode::Streaming => Orchestrator::with_streaming(StreamConfig::default()),
-            ExecutionMode::Batch => Orchestrator::with_authority(Box::new(LocalAuthority::new())),
+            ExecutionMode::Batch => Orchestrator::with_authority(Box::new(
+                LocalAuthority::new().with_resource_provider(Arc::new(FixedResourceProvider::new(
+                    ResourceSnapshot::unknown(),
+                ))),
+            )),
         };
 
         // Register a mock adapter that returns text output

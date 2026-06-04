@@ -33,8 +33,8 @@ fn list_models(client: &RegistryClient) -> Result<()> {
     // user still sees something useful instead of a bare error.
     let models = match client.list_models() {
         Ok(models) => models,
-        Err(SdkError::Offline(msg)) => {
-            ui::warning(&format!("Registry unreachable ({}).", msg));
+        Err(SdkError::Offline { message, .. }) => {
+            ui::warning(&format!("Registry unreachable ({}).", message));
             ui::hint("Showing models available offline from local cache:");
             return list_offline_models(client);
         }

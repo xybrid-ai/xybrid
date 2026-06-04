@@ -21,9 +21,13 @@ import 'runtime_config.dart';
 /// Main entry point for the Xybrid SDK.
 ///
 /// Call [Xybrid.init] once before using any other Xybrid functionality.
+/// Inference runs locally whether or not you pass an API key; supplying
+/// one starts the telemetry exporter so your runs show up on the
+/// dashboard. Get a free key at <https://dashboard.xybrid.dev>.
 ///
 /// ```dart
 /// void main() async {
+///   // Anonymous — local inference, telemetry disabled
 ///   await Xybrid.init();
 ///
 ///   // Now you can use Xybrid
@@ -58,13 +62,27 @@ class Xybrid {
   /// This must be called once before using any Xybrid functionality.
   /// It is safe to call this multiple times - subsequent calls are no-ops.
   ///
-  /// Example:
+  /// All parameters are optional. Without an `apiKey`, the SDK runs fully
+  /// on-device and telemetry is disabled — the first inference logs a
+  /// one-shot hint pointing at the dashboard (suppress with the
+  /// `XYBRID_QUIET=1` environment variable). Pass `apiKey` to start the
+  /// platform telemetry exporter automatically; `ingestUrl` overrides the
+  /// destination for a self-hosted dashboard, and `resourceTelemetry`
+  /// enables CPU/memory sampling.
+  ///
   /// ```dart
   /// void main() async {
+  ///   // Anonymous — local inference only
   ///   await Xybrid.init();
-  ///   // SDK is ready to use
+  ///
+  ///   // Authenticated — telemetry flows to the dashboard
+  ///   await Xybrid.init(
+  ///     apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+  ///   );
   /// }
   /// ```
+  ///
+  /// Get a free key at <https://dashboard.xybrid.dev>.
   ///
   /// Throws an exception if initialization fails (e.g., native library not found).
   static Future<void> init({
@@ -168,37 +186,21 @@ class Xybrid {
     return XybridSdkClient.isModelCached(modelId: modelId);
   }
 
-  /// Initialize the platform telemetry exporter.
+  /// Legacy telemetry entry point. Prefer passing `apiKey` (and, for a
+  /// self-hosted dashboard, `ingestUrl`) to [init] — that starts the
+  /// exporter as part of normal initialization.
   ///
-  /// Once initialized, the normal inference paths (`Xybrid.model().run()`,
-  /// `Xybrid.pipeline().run()`, conversation turns) automatically emit
-  /// `ExecutionStarted` / `ExecutionCompleted` / `ExecutionFailed` events
-  /// to the configured endpoint — no per-call wiring required.
+  /// Retained for backward compatibility and advanced callers that must
+  /// start telemetry after [init] has already run. Behaves identically to
+  /// the bundled path: the Rust layer holds a process-wide once-guard, so
+  /// whichever route fires first wins and later calls are safe no-ops.
+  /// There is no reconfigure path — changing `endpoint` or `apiKey`
+  /// requires restarting the process.
   ///
   /// `endpoint` is the platform ingest URL (e.g. `https://ingest.xybrid.dev`
   /// in production, or `http://192.168.1.78:8081` for a local dashboard on
-  /// the host machine). `apiKey` authenticates the sender.
-  ///
-  /// Must be called after [init] has completed. The Rust layer holds a
-  /// process-wide once-guard, so subsequent calls — including across
-  /// Flutter hot-restart or a second Dart isolate — are safe no-ops; the
-  /// HTTP exporter and execution listener are registered exactly once
-  /// per process.
-  ///
-  /// No reconfigure path: changing `endpoint` or `apiKey` requires
-  /// restarting the process.
-  ///
-  /// Example:
-  /// ```dart
-  /// void main() async {
-  ///   await Xybrid.init();
-  ///   Xybrid.initTelemetry(
-  ///     endpoint: const String.fromEnvironment('XYBRID_PLATFORM_URL'),
-  ///     apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
-  ///   );
-  ///   runApp(...);
-  /// }
-  /// ```
+  /// the host machine). `apiKey` authenticates the sender. Must be called
+  /// after [init] has completed.
   static void initTelemetry(
       {required String endpoint, required String apiKey}) {
     if (!_initialized) {
@@ -248,7 +250,11 @@ class Xybrid {
     if (gateway != null) {
       setGatewayUrl(gateway);
     }
-    if (key != null && ingest != null) {
+    // An API key alone starts the exporter; the Rust layer defaults the
+    // ingest URL to the production endpoint when `ingest` is null, so
+    // `Xybrid.init(apiKey: ...)` lights up the dashboard without the caller
+    // needing to know the ingest URL.
+    if (key != null) {
       XybridSdkClient.configurePlatformTelemetry(
         apiKey: key,
         ingestUrl: ingest,

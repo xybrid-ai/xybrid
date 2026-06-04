@@ -10,10 +10,18 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `initialize_telemetry_once`, `parse_resource_telemetry_mode`
+// These functions are ignored because they are not marked as `pub`: `initialize_telemetry_once`, `parse_resource_telemetry_mode`, `resolve_ingest_endpoint`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridSdkClient>>
 abstract class XybridSdkClient implements RustOpaqueInterface {
+  /// Start the platform telemetry exporter from the bundled
+  /// `Xybrid.init(apiKey: ...)` path.
+  ///
+  /// When `ingest_url` is absent or blank the exporter targets
+  /// [`xybrid_sdk::telemetry::DEFAULT_INGEST_URL`], so providing only an
+  /// API key is enough to light up the dashboard — the caller does not
+  /// need to know the ingest endpoint. Shares the process-wide once-guard
+  /// with [`Self::init_telemetry`]; whichever path runs first wins.
   static void configurePlatformTelemetry(
           {required String apiKey,
           String? ingestUrl,

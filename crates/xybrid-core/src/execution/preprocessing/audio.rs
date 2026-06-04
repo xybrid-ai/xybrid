@@ -134,7 +134,8 @@ pub fn decode_audio_step(
             audio_samples.channels as usize,
             target_sample_rate,
             target_channels,
-        );
+        )
+        .map_err(|e| AdapterError::InvalidInput(e.to_string()))?;
         return Ok(PreprocessedData::AudioSamples(prepared));
     }
 

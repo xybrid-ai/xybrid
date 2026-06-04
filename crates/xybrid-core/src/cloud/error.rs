@@ -136,4 +136,11 @@ impl RetryableError for CloudError {
             _ => None,
         }
     }
+
+    fn circuit_open() -> Self {
+        CloudError::CircuitOpen(
+            "gateway circuit breaker stayed open for the entire retry window; no request was sent"
+                .to_string(),
+        )
+    }
 }

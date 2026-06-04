@@ -24,7 +24,12 @@ classes:
           - { name: gatewayUrl, type: "String?" }
           - { name: ingestUrl, type: "String?" }
           - { name: resourceTelemetry, type: "String?" }
-        status: { dart: implemented, kotlin: implemented, swift: planned, csharp: implemented }
+        # apiKey-bundled init shipped across all four bindings: Dart
+        # Xybrid.init, Kotlin Xybrid.init(context, …), Swift
+        # Xybrid.initialize(apiKey:), Unity XybridClient.Initialize(apiKey:).
+        # Param coverage varies by binding (e.g. Unity omits gatewayUrl;
+        # resourceTelemetry is Dart/Rust only) — the apiKey path is universal.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       setApiKey:
         params: [{ name: apiKey, type: String }]
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }

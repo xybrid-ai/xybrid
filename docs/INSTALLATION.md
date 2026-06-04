@@ -73,7 +73,7 @@ The prebuilt binaries from the install script already include the correct featur
 | `candle` | Candle ML backend (Whisper models) |
 | `candle-metal` | Metal GPU acceleration for Candle |
 | `candle-cuda` | CUDA GPU acceleration for Candle |
-| `llm-llamacpp` | llama.cpp LLM backend (recommended) |
+| `llm-llamacpp` | llama.cpp LLM runtime backend (recommended) |
 | `llm-mistral` | mistral.rs LLM backend (alternative) |
 
 </details>
