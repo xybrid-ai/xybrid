@@ -208,8 +208,17 @@ impl AudioEnvelope {
                 .and_then(|step| step.checked_add(pad))
                 .and_then(|step| pos.checked_add(step))
             {
-                Some(next) => next,
-                None => break,
+                // Only continue if the next chunk header is fully in bounds.
+                // This also keeps the `pos + 8` loop guard from overflowing on
+                // 32-bit when `next` lands just below `usize::MAX`.
+                Some(next)
+                    if next
+                        .checked_add(8)
+                        .is_some_and(|end| end <= wav_bytes.len()) =>
+                {
+                    next
+                }
+                _ => break,
             };
         }
 
