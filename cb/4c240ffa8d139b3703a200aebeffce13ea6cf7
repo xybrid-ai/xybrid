@@ -1,0 +1,20 @@
+crates/xybrid-core/src/audio/envelope.rs
+  s_323a65fe865faa::t_b7ef27e4334b80 211-213,221
+  s_323a65fe865faa::t_a6e95ddfe18b49 214-220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "cb4c240ffa8d139b3703a200aebeffce13ea6cf7",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
