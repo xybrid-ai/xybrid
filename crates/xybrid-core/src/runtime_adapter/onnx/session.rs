@@ -465,25 +465,20 @@ impl ONNXSession {
             // Try to extract as f32 first, then as i64 if that fails
             // This handles models with mixed output types
             let array_d = if let Ok(output_array) = output_value.try_extract_array::<f32>() {
-                // Convert ndarray view to owned ArrayD
-                let shape = output_array.shape();
-                let dims: Vec<usize> = shape.to_vec();
-                let owned_array = output_array.to_owned();
-                let data: Vec<f32> = owned_array.as_slice().unwrap().to_vec();
+                // Collect in logical (row-major) order, which matches the
+                // `from_shape_vec` interpretation below. Iterating avoids
+                // `as_slice().unwrap()`, which panics when ORT hands back a
+                // non-standard-layout (e.g. transposed) output view.
+                let dims: Vec<usize> = output_array.shape().to_vec();
+                let data: Vec<f32> = output_array.iter().copied().collect();
                 ArrayD::from_shape_vec(IxDyn(&dims), data).map_err(|e| {
                     AdapterError::RuntimeError(format!("Failed to convert output to ArrayD: {}", e))
                 })?
             } else if let Ok(output_array) = output_value.try_extract_array::<i64>() {
-                // Convert i64 to f32 for uniform handling
-                let shape = output_array.shape();
-                let dims: Vec<usize> = shape.to_vec();
-                let owned_array = output_array.to_owned();
-                let data: Vec<f32> = owned_array
-                    .as_slice()
-                    .unwrap()
-                    .iter()
-                    .map(|&x| x as f32)
-                    .collect();
+                // Convert i64 to f32 for uniform handling (same layout-safe
+                // iteration as the f32 arm above).
+                let dims: Vec<usize> = output_array.shape().to_vec();
+                let data: Vec<f32> = output_array.iter().map(|&x| x as f32).collect();
                 ArrayD::from_shape_vec(IxDyn(&dims), data).map_err(|e| {
                     AdapterError::RuntimeError(format!("Failed to convert output to ArrayD: {}", e))
                 })?
