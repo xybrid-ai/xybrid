@@ -97,18 +97,25 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # Free ~30GB of disk on the ubuntu-latest runner by removing
-      # preinstalled toolchains the build doesn't use (.NET, Haskell,
-      # Android Studio extras, etc.). Required because `build-react-native`
-      # runs build-android sequentially for all three ABIs on a single
-      # runner — each ABI's target/ tree is 3-5 GB, and the default
-      # ~14 GB free disk fills up partway through the third build with
-      # "No space left on device" (see PR #93 CI history).
+      # Free disk on the ubuntu-latest runner by removing preinstalled
+      # toolchains the build doesn't use. Required because
+      # `build-react-native` runs build-android sequentially for all three
+      # ABIs on a single runner — each ABI's target/ tree is 3-5 GB, and
+      # the default ~14 GB free disk fills up partway through the third
+      # build with "No space left on device" (see PR #93 CI history).
       #
-      # The upstream build-android.yml avoids this by sharding per-ABI
-      # across runners via matrix. Doing the same here is the proper
-      # long-term fix but requires xtask refactoring to split bindgen,
-      # per-ABI build, and combine into separate invocations.
+      # IMPORTANT: `large-packages` is left OFF. That reclaimer runs
+      # `apt-get remove '^llvm-.*'`, which deletes the system LLVM whose
+      # clang resource dir provides builtin headers (stdbool.h, stddef.h,
+      # …). llama-cpp-sys's build.rs drives bindgen via that libclang, so
+      # removing LLVM breaks the Android cross-compile with
+      # "'stdbool.h' file not found". dotnet + haskell + swap still free
+      # ~11 GB — more headroom than the upstream per-ABI build-android
+      # jobs get on bare disk, so the disk pressure stays solved.
+      #
+      # The proper long-term fix is to shard per-ABI across runners like
+      # build-android.yml does; that needs xtask refactoring to split
+      # bindgen / per-ABI build / combine into separate invocations.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
         with:
@@ -116,7 +123,7 @@ jobs:
           android: false
           dotnet: true
           haskell: true
-          large-packages: true
+          large-packages: false
           swap-storage: true
 
       - name: Install Rust toolchain
