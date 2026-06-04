@@ -1,0 +1,19 @@
+crates/xybrid-core/src/runtime_adapter/onnx/session.rs
+  s_323a65fe865faa::t_fbcd6026ae74d3 468-472,474-477,482-483,485-488
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "0c579359745c9054af0e1986cd0a621bcf705b92",
+  "prompts": {},
+  "sessions": {
+    "s_323a65fe865faa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4b07ca9-5ba7-4193-91fe-0f59c9bc6677",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
