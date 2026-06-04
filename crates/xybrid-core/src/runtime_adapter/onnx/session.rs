@@ -465,20 +465,27 @@ impl ONNXSession {
             // Try to extract as f32 first, then as i64 if that fails
             // This handles models with mixed output types
             let array_d = if let Ok(output_array) = output_value.try_extract_array::<f32>() {
-                // Collect in logical (row-major) order, which matches the
-                // `from_shape_vec` interpretation below. Iterating avoids
-                // `as_slice().unwrap()`, which panics when ORT hands back a
-                // non-standard-layout (e.g. transposed) output view.
+                // Fast path: a standard-layout output is one contiguous slice
+                // (a memcpy). Fall back to logical-order iteration only when the
+                // output is non-contiguous (e.g. transposed) — which `as_slice`
+                // reports as `None`, where the old `as_slice().unwrap()` panicked.
+                // Either way the data is row-major, matching `from_shape_vec`.
                 let dims: Vec<usize> = output_array.shape().to_vec();
-                let data: Vec<f32> = output_array.iter().copied().collect();
+                let data: Vec<f32> = match output_array.as_slice() {
+                    Some(slice) => slice.to_vec(),
+                    None => output_array.iter().copied().collect(),
+                };
                 ArrayD::from_shape_vec(IxDyn(&dims), data).map_err(|e| {
                     AdapterError::RuntimeError(format!("Failed to convert output to ArrayD: {}", e))
                 })?
             } else if let Ok(output_array) = output_value.try_extract_array::<i64>() {
-                // Convert i64 to f32 for uniform handling (same layout-safe
-                // iteration as the f32 arm above).
+                // Convert i64 to f32 for uniform handling, same fast/safe split
+                // as the f32 arm above.
                 let dims: Vec<usize> = output_array.shape().to_vec();
-                let data: Vec<f32> = output_array.iter().map(|&x| x as f32).collect();
+                let data: Vec<f32> = match output_array.as_slice() {
+                    Some(slice) => slice.iter().map(|&x| x as f32).collect(),
+                    None => output_array.iter().map(|&x| x as f32).collect(),
+                };
                 ArrayD::from_shape_vec(IxDyn(&dims), data).map_err(|e| {
                     AdapterError::RuntimeError(format!("Failed to convert output to ArrayD: {}", e))
                 })?
