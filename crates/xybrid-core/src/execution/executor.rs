@@ -2781,51 +2781,24 @@ impl TemplateExecutor {
         // Crossfade length: 480 samples (~20ms at 24kHz)
         const CROSSFADE_SAMPLES: usize = 480;
 
-        let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
         // Reuse the cached session across runs (and across chunks within this
-        // run); the graph load is paid once, not per call.
+        // run); the graph load is paid once, not per call. The voice embedding is
+        // identical for every chunk, so load it once here.
         let session = self.tts_session(model_path)?;
         let speed = extract_tts_speed(input);
+        let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
 
+        let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(target: "xybrid_core", "TTS: Processing chunk {}/{}: {} chars", i + 1, chunks.len(), chunk.len());
-
-            // Create envelope for this chunk
-            let chunk_input = Envelope {
-                kind: EnvelopeKind::Text(chunk.clone()),
-                metadata: input.metadata.clone(),
-            };
-
-            // Run preprocessing on chunk
-            let preprocessed = self.run_preprocessing(metadata, &chunk_input)?;
-
-            // Get phoneme IDs
-            let phoneme_ids = preprocessed
-                .as_phoneme_ids()
-                .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
-
-            debug!(target: "xybrid_core", "TTS: Chunk {} has {} phoneme IDs", i + 1, phoneme_ids.len());
-
-            // Load voice embedding (same for all chunks)
-            let voice_loader = TtsVoiceLoader::new(&self.base_path);
-            let voice_embedding = voice_loader.load(metadata, input)?;
-
-            // Run TTS inference
-            let raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
-
-            // Extract audio from outputs
-            if let Some(audio_tensor) = raw_outputs.values().next() {
-                let mut chunk_audio: Vec<f32> = audio_tensor.iter().cloned().collect();
-
-                // Trim trailing samples per chunk to remove artifacts
-                // (KittenTTS upstream trims 5000 samples ≈ 208ms at 24kHz per chunk)
-                let trim_count = metadata.trim_trailing_samples.unwrap_or(0);
-                if trim_count > 0 && chunk_audio.len() > trim_count {
-                    chunk_audio.truncate(chunk_audio.len() - trim_count);
-                }
-
-                audio_chunks.push(chunk_audio);
+            let chunk_audio =
+                self.synthesize_chunk(&session, metadata, input, chunk, &voice_embedding, speed)?;
+            // Inference always yields a waveform; guard the degenerate empty case
+            // so it can't enter the crossfade (matches the pre-refactor skip).
+            if chunk_audio.is_empty() {
+                continue;
             }
+            audio_chunks.push(chunk_audio);
         }
 
         // Concatenate chunks with crossfading
@@ -2853,55 +2826,73 @@ impl TemplateExecutor {
         input: &Envelope,
         model_path: &Path,
     ) -> ExecutorResult<Envelope> {
-        // Run preprocessing
-        let preprocessed = self.run_preprocessing(metadata, input)?;
-
-        let phoneme_ids = preprocessed
-            .as_phoneme_ids()
-            .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
-
-        debug!(
-            target: "xybrid_core",
-            "TTS Single: Input text length: {} chars, first 100: {:?}",
-            match &input.kind {
-                crate::ir::EnvelopeKind::Text(t) => t.len(),
-                _ => 0,
-            },
-            match &input.kind {
-                crate::ir::EnvelopeKind::Text(t) => t.chars().take(100).collect::<String>(),
-                _ => "(not text)".to_string(),
-            }
-        );
-        debug!(
-            target: "xybrid_core",
-            "TTS: Phoneme IDs count: {}, first 20: {:?}",
-            phoneme_ids.len(),
-            &phoneme_ids[..phoneme_ids.len().min(20)]
-        );
-
-        // Load voice embedding
-        let voice_loader = TtsVoiceLoader::new(&self.base_path);
-        let voice_embedding = voice_loader.load(metadata, input)?;
-
         // Reuse the cached TTS session — the first run builds it, later runs skip
         // the graph load + Level-3 optimization (the dominant short-TTS latency).
         let session = self.tts_session(model_path)?;
         let speed = extract_tts_speed(input);
-        let mut raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
-
-        // Trim trailing samples to remove artifacts (same logic as chunked path)
-        let trim_count = metadata.trim_trailing_samples.unwrap_or(0);
-        if trim_count > 0 {
-            for audio in raw_outputs.values_mut() {
-                let len = audio.len();
-                if len > trim_count {
-                    audio.slice_collapse(ndarray::s![..len - trim_count]);
-                }
+        let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
+        let text = match &input.kind {
+            crate::ir::EnvelopeKind::Text(t) => t.clone(),
+            _ => {
+                return Err(AdapterError::InvalidInput(
+                    "TTS requires text input".to_string(),
+                ))
             }
-        }
+        };
 
-        // Run postprocessing
-        self.run_postprocessing(metadata, RawOutputs::TensorMap(raw_outputs))
+        // The whole (short) text is one chunk; the synthesis body is shared with
+        // the chunked/streaming paths via synthesize_chunk.
+        let audio = self.synthesize_chunk(&session, metadata, input, &text, &voice_embedding, speed)?;
+
+        // Wrap the already-trimmed waveform for postprocessing (mirrors the
+        // chunked path's single-tensor map keyed by the model's output name).
+        let output_name = session
+            .output_names()
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("audio")
+            .to_string();
+        let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
+        outputs.insert(output_name, ndarray::Array1::from_vec(audio).into_dyn());
+        self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))
+    }
+
+    /// Synthesize one TTS chunk to a trimmed f32 waveform: build the chunk
+    /// envelope, preprocess → phonemes → inference (with the shared voice
+    /// embedding + speed), and trim trailing artifact samples. Postprocessing
+    /// (loudness normalization, PCM encode, crossfade / edge-fade) is left to the
+    /// caller — the batch and streaming paths differ there. Shared by
+    /// `execute_tts_single` / `_chunked` / `_streaming` so the synthesis body
+    /// lives in one place instead of being copy-pasted three ways.
+    fn synthesize_chunk(
+        &mut self,
+        session: &ONNXSession,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        chunk: &str,
+        voice_embedding: &[f32],
+        speed: f32,
+    ) -> ExecutorResult<Vec<f32>> {
+        let chunk_input = Envelope {
+            kind: crate::ir::EnvelopeKind::Text(chunk.to_string()),
+            metadata: input.metadata.clone(),
+        };
+        let preprocessed = self.run_preprocessing(metadata, &chunk_input)?;
+        let phoneme_ids = preprocessed
+            .as_phoneme_ids()
+            .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
+        let raw_outputs =
+            execute_tts_inference(session, phoneme_ids, voice_embedding.to_vec(), speed)?;
+        let mut audio: Vec<f32> = raw_outputs
+            .values()
+            .next()
+            .map(|t| t.iter().cloned().collect())
+            .unwrap_or_default();
+        let trim_count = metadata.trim_trailing_samples.unwrap_or(0);
+        if trim_count > 0 && audio.len() > trim_count {
+            audio.truncate(audio.len() - trim_count);
+        }
+        Ok(audio)
     }
 
     /// Check if this model is a TTS model (has Phonemize preprocessing).
@@ -2986,6 +2977,7 @@ impl TemplateExecutor {
         let chunks = Self::chunk_text_for_tts(&text, max_tts_chars);
         let session = self.tts_session(&model_path)?;
         let speed = extract_tts_speed(input);
+        let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
         let output_name = session
             .output_names()
             .first()
@@ -2994,29 +2986,10 @@ impl TemplateExecutor {
 
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(target: "xybrid_core", "TTS stream: chunk {}/{} ({} chars)", i + 1, chunks.len(), chunk.len());
-
-            let chunk_input = Envelope {
-                kind: EnvelopeKind::Text(chunk.clone()),
-                metadata: input.metadata.clone(),
-            };
-            let preprocessed = self.run_preprocessing(metadata, &chunk_input)?;
-            let phoneme_ids = preprocessed
-                .as_phoneme_ids()
-                .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
-            // Voice embedding is the same for every chunk; load it per chunk to
-            // mirror the batch path (cheap read from voices.bin).
-            let voice_loader = TtsVoiceLoader::new(&self.base_path);
-            let voice_embedding = voice_loader.load(metadata, input)?;
-            let raw_outputs =
-                execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
-
-            let Some(audio_tensor) = raw_outputs.values().next() else {
-                continue;
-            };
-            let mut chunk_audio: Vec<f32> = audio_tensor.iter().cloned().collect();
-            let trim_count = metadata.trim_trailing_samples.unwrap_or(0);
-            if trim_count > 0 && chunk_audio.len() > trim_count {
-                chunk_audio.truncate(chunk_audio.len() - trim_count);
+            let chunk_audio =
+                self.synthesize_chunk(&session, metadata, input, chunk, &voice_embedding, speed)?;
+            if chunk_audio.is_empty() {
+                continue; // degenerate empty inference output — skip (pre-refactor behavior)
             }
 
             // Per-chunk postprocessing → PCM bytes (mirrors the batch path, but
