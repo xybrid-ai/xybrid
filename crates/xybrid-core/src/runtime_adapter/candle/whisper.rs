@@ -212,6 +212,12 @@ impl WhisperModel {
 
         // Load model weights
         let weights_path = model_dir.join("model.safetensors");
+        // SAFETY: `from_mmaped_safetensors` memory-maps the weights file, and
+        // the resulting borrow is sound only while the file is not mutated
+        // underneath the mapping. `weights_path` is inside xybrid's
+        // app-controlled model cache (written once at download, read-only
+        // thereafter), so no concurrent writer aliases the mapping for the
+        // lifetime of the returned `VarBuilder`.
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&[weights_path], candle_core::DType::F32, device)?
         };

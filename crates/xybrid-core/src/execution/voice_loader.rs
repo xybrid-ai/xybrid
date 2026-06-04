@@ -568,7 +568,19 @@ fn read_codes_binary(data: &[u8]) -> ExecutorResult<Vec<i32>> {
         ));
     }
     let count = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
-    let expected = 4 + count * 4;
+    // `count` is bundle-supplied (untrusted). Compute the expected size with
+    // checked arithmetic so a huge count can't overflow `usize` on 32-bit
+    // targets (e.g. armeabi-v7a Android) and silently wrap the bounds check
+    // below — which would otherwise let a tiny file through to a 16 GB
+    // `with_capacity` or an out-of-bounds index.
+    let expected = count
+        .checked_mul(4)
+        .and_then(|body| body.checked_add(4))
+        .ok_or_else(|| {
+            AdapterError::InvalidInput(format!(
+                "Voice codes count {count} overflows addressable size"
+            ))
+        })?;
     if data.len() < expected {
         return Err(AdapterError::InvalidInput(format!(
             "Voice codes file truncated: expected {} bytes for {} codes, got {}",
@@ -591,6 +603,33 @@ fn read_codes_binary(data: &[u8]) -> ExecutorResult<Vec<i32>> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn read_codes_binary_roundtrips_valid_data() {
+        let mut data = 3u32.to_le_bytes().to_vec();
+        for v in [1i32, -2, 3] {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        assert_eq!(read_codes_binary(&data).unwrap(), vec![1, -2, 3]);
+    }
+
+    #[test]
+    fn read_codes_binary_rejects_truncated_data() {
+        // Claims 5 codes but only carries one.
+        let mut data = 5u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&7i32.to_le_bytes());
+        assert!(read_codes_binary(&data).is_err());
+    }
+
+    #[test]
+    fn read_codes_binary_rejects_overflowing_count_without_panicking() {
+        // count = u32::MAX with only a 4-byte body. The naive `4 + count * 4`
+        // overflows `usize` on 32-bit targets; checked arithmetic must turn
+        // this into a clean error rather than a wrap → OOB/OOM panic.
+        let mut data = u32::MAX.to_le_bytes().to_vec();
+        data.extend_from_slice(&[0u8; 4]);
+        assert!(read_codes_binary(&data).is_err());
+    }
 
     // ============================================================================
     // Mock Voice Source for Testing
