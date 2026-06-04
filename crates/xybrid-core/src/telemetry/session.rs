@@ -432,7 +432,10 @@ impl SessionManager {
 
     /// Start a new session.
     pub fn start_session(&self) -> String {
-        let mut session = self.current_session.lock().unwrap();
+        let mut session = self
+            .current_session
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let new_session = SessionMetrics::new(self.device_id.clone());
         let session_id = new_session.session_id.clone();
         *session = Some(new_session);
@@ -441,7 +444,10 @@ impl SessionManager {
 
     /// Get current session metrics (clone).
     pub fn get_session(&self) -> Option<SessionMetrics> {
-        let session = self.current_session.lock().unwrap();
+        let session = self
+            .current_session
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         session.clone()
     }
 
@@ -474,7 +480,10 @@ impl SessionManager {
 
     /// End current session and return export.
     pub fn end_session(&self) -> Option<TelemetryExport> {
-        let mut session = self.current_session.lock().unwrap();
+        let mut session = self
+            .current_session
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         if let Some(ref mut s) = *session {
             s.end_session();
             Some(TelemetryExport::from_session(s))
@@ -485,13 +494,19 @@ impl SessionManager {
 
     /// Export current session without ending it.
     pub fn export_session(&self) -> Option<TelemetryExport> {
-        let session = self.current_session.lock().unwrap();
+        let session = self
+            .current_session
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         session.as_ref().map(TelemetryExport::from_session)
     }
 
     /// Reset session (start fresh).
     pub fn reset(&self) {
-        let mut session = self.current_session.lock().unwrap();
+        let mut session = self
+            .current_session
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         *session = Some(SessionMetrics::new(self.device_id.clone()));
     }
 }
