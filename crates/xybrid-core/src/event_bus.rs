@@ -352,7 +352,11 @@ impl EventBus {
             current_context.merge_missing(self.context.clone())
         };
         let event = event.attach_context(context);
-        let subscribers = self.subscribers.lock().unwrap();
+        // The subscriber registry / id counter are pure in-memory bookkeeping.
+        // `publish` runs on every orchestrator event from multiple threads, so
+        // recover from a poisoned lock (`into_inner`) rather than panicking — a
+        // single panicked subscriber must not wedge all future event delivery.
+        let subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
         let mut failed_ids = Vec::new();
 
         for (id, subscriber) in subscribers.iter() {
@@ -365,7 +369,7 @@ impl EventBus {
         // Remove dead subscribers
         if !failed_ids.is_empty() {
             drop(subscribers);
-            let mut subscribers = self.subscribers.lock().unwrap();
+            let mut subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
             for id in failed_ids {
                 subscribers.remove(&id);
             }
@@ -377,12 +381,12 @@ impl EventBus {
     /// The subscription allows receiving events manually via `recv()` or `try_recv()`.
     pub fn subscribe(&self) -> Subscription {
         let (sender, receiver) = mpsc::channel();
-        let mut next_id = self.next_id.lock().unwrap();
+        let mut next_id = self.next_id.lock().unwrap_or_else(|p| p.into_inner());
         let id = *next_id;
         *next_id += 1;
         drop(next_id);
 
-        let mut subscribers = self.subscribers.lock().unwrap();
+        let mut subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
         subscribers.insert(id, Subscriber { sender });
 
         Subscription { id, receiver }
@@ -398,12 +402,12 @@ impl EventBus {
         F: Fn(&OrchestratorEvent) + Send + Sync + 'static,
     {
         let (sender, receiver) = mpsc::channel();
-        let mut next_id = self.next_id.lock().unwrap();
+        let mut next_id = self.next_id.lock().unwrap_or_else(|p| p.into_inner());
         let id = *next_id;
         *next_id += 1;
         drop(next_id);
 
-        let mut subscribers = self.subscribers.lock().unwrap();
+        let mut subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
         subscribers.insert(id, Subscriber { sender });
         drop(subscribers);
 
@@ -423,13 +427,13 @@ impl EventBus {
 
     /// Unsubscribe by subscription ID.
     pub fn unsubscribe(&self, subscription_id: usize) {
-        let mut subscribers = self.subscribers.lock().unwrap();
+        let mut subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
         subscribers.remove(&subscription_id);
     }
 
     /// Get the number of active subscribers.
     pub fn subscriber_count(&self) -> usize {
-        let subscribers = self.subscribers.lock().unwrap();
+        let subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
         subscribers.len()
     }
 }
