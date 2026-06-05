@@ -1,0 +1,26 @@
+crates/xybrid-ffi-facade/src/lib.rs
+  s_93e9e173c209bc::t_2833b40cb48d6c 158
+  s_93e9e173c209bc::t_a2402589cb64d2 38
+  s_93e9e173c209bc::t_b0720d3c3d3923 6-9
+  s_93e9e173c209bc::t_760f59077dce02 17
+  s_93e9e173c209bc::t_e3de88c28d33e1 381,387,394,399,403,414-426,429
+  s_93e9e173c209bc::t_27e911768833b8 358-360
+crates/xybrid-bolt/src/lib.rs
+  s_93e9e173c209bc::t_8d18190d5fb2d1 67-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "3f4203b1921c662e38a1d7685e05442c0c14ebde",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
