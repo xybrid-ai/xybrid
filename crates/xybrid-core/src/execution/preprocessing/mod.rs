@@ -108,4 +108,3 @@ pub fn apply_preprocessing_step(
         } => image::resize_step(data, *width, *height, interpolation),
     }
 }
-
