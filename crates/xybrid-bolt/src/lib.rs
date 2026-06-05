@@ -64,6 +64,12 @@ use xybrid_ffi_facade as facade;
 /// shadow / collide with Swift's stdlib `Error` protocol, and so the
 /// Kotlin sealed-hierarchy name matches the existing uniffi consumer
 /// expectations.
+///
+/// **Variant order is part of the wire contract.** BoltFFI encodes `#[error]`
+/// (and `#[data]`) enums by ordinal tag, so reordering or inserting a variant
+/// renumbers every variant after it and breaks already-built foreign clients.
+/// Only ever append at the tail, and keep this order in lockstep with
+/// [`facade::Error`] and its `code()` table.
 #[error]
 #[derive(Debug, Clone)]
 pub enum XybridError {

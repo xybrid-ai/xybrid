@@ -3,10 +3,10 @@
 //! This crate exposes only the shapes every popular Rust FFI generator can
 //! describe: owned data, concrete enums, `Arc<Self>` handles, no lifetimes,
 //! no generics, no iterators across the boundary. The generator crates
-//! ([`xybrid-uniffi`], [`xybrid-ffi`], `bindings/flutter/rust`) describe
-//! these types externally (UDL, FRB scan, C ABI) and add their own
-//! scaffolding — they should not need to reach into `xybrid-sdk` directly
-//! for type re-translation.
+//! ([`xybrid-bolt`], [`xybrid-ffi`], `bindings/flutter/rust`) describe
+//! these types externally (BoltFFI macros, C ABI, FRB scan) and add their
+//! own scaffolding — they should not need to reach into `xybrid-sdk`
+//! directly for type re-translation.
 //!
 //! # Design rules
 //!
@@ -14,7 +14,7 @@
 //! 2. **Owned data only** — `String` / `Vec<T>` / `Option<T>`, never
 //!    `&str` / `&[T]` at the boundary.
 //! 3. **`Arc<Self>` handles** for any object that crosses the boundary.
-//!    UniFFI requires it; FRB / BoltFFI tolerate it.
+//!    BoltFFI uses it for handle types; FRB tolerates it.
 //! 4. **Builders collapse into POD options records.** [`RunOptions`] and
 //!    [`GenerationConfig`] are plain structs with `Default`; the facade
 //!    rebuilds the SDK's builder chain internally.
@@ -35,7 +35,7 @@
 //!   binding crates can re-export those directly. A dedicated facade for
 //!   pipelines is a separate concern.
 //!
-//! [`xybrid-uniffi`]: https://docs.rs/xybrid-uniffi
+//! [`xybrid-bolt`]: https://docs.rs/xybrid-bolt
 //! [`xybrid-ffi`]: https://docs.rs/xybrid-ffi
 //! [`FfiPipelineExecutionResult`]: xybrid_sdk::FfiPipelineExecutionResult
 //! [`FfiStageExecutionResult`]: xybrid_sdk::FfiStageExecutionResult
@@ -155,7 +155,7 @@ impl std::error::Error for Error {}
 impl From<sdk::SdkError> for Error {
     fn from(err: sdk::SdkError) -> Self {
         // The whole point of the facade: this `match` is written ONCE, not
-        // duplicated across xybrid-ffi / xybrid-uniffi / flutter bindings.
+        // duplicated across xybrid-ffi / xybrid-bolt / flutter bindings.
         //
         // The message-bearing variants now carry a `#[source]` cause (the SDK
         // stopped pre-formatting it into the message as of the error-source
@@ -355,9 +355,9 @@ impl MessageRole {
 /// `Arc<Self>` for opaque handle semantics.
 ///
 /// The underlying [`sdk::ConversationContext`] is held by value behind a
-/// `Mutex` so foreign callers can call `push` / `clear` through `&self`
-/// (UniFFI's `#[uniffi::Object]` only exposes `&self` methods on object
-/// types). The mutex is uncontended in normal usage — a conversation
+/// `Mutex` so foreign callers can mutate it (`push` / `clear`) through a
+/// shared `&self` — FFI handle methods only ever receive a shared
+/// reference. The mutex is uncontended in normal usage — a conversation
 /// handle is held by one host thread.
 pub struct ConversationContextHandle {
     inner: std::sync::Mutex<sdk::ConversationContext>,
@@ -378,35 +378,29 @@ impl ConversationContextHandle {
 
     /// Append an envelope (typically `MessageRole::User` or `Assistant`).
     pub fn push(&self, envelope: Envelope) {
-        let mut guard = self.inner.lock().expect("conversation mutex poisoned");
+        let mut guard = self.lock();
         guard.push(envelope.into_sdk());
     }
 
     /// Set the persistent system prompt envelope. Survives [`clear`].
     pub fn set_system(&self, envelope: Envelope) {
-        let mut guard = self.inner.lock().expect("conversation mutex poisoned");
+        let mut guard = self.lock();
         let new_ctx = std::mem::take(&mut *guard).with_system(envelope.into_sdk());
         *guard = new_ctx;
     }
 
     /// Drop history; the system envelope (if any) is preserved.
     pub fn clear(&self) {
-        let mut guard = self.inner.lock().expect("conversation mutex poisoned");
+        let mut guard = self.lock();
         guard.clear();
     }
 
     pub fn id(&self) -> String {
-        self.inner
-            .lock()
-            .expect("conversation mutex poisoned")
-            .id()
-            .to_string()
+        self.lock().id().to_string()
     }
 
     pub fn history(&self) -> Vec<Envelope> {
-        self.inner
-            .lock()
-            .expect("conversation mutex poisoned")
+        self.lock()
             .history()
             .iter()
             .cloned()
@@ -417,10 +411,22 @@ impl ConversationContextHandle {
     /// Cheap clone of the inner SDK context for use at the FFI boundary
     /// (e.g. passing into `XybridModel::run_with_context`).
     fn snapshot(&self) -> sdk::ConversationContext {
+        self.lock().clone()
+    }
+
+    /// Lock the inner context, recovering the guard if the mutex is poisoned.
+    ///
+    /// A poisoned mutex means a prior call panicked mid-update. We recover
+    /// rather than re-panic for two reasons: this runs at the FFI boundary,
+    /// where a panic would abort the host app (iOS / Android / Flutter) over a
+    /// recoverable condition; and it matches the codebase-wide convention of
+    /// surviving lock poison instead of propagating it. The conversation state
+    /// is plain message history, so a partially-applied update is at worst
+    /// slightly stale, never unsound.
+    fn lock(&self) -> std::sync::MutexGuard<'_, sdk::ConversationContext> {
         self.inner
             .lock()
-            .expect("conversation mutex poisoned")
-            .clone()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
