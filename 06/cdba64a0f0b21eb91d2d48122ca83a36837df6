@@ -1,0 +1,19 @@
+.github/workflows/discord-notify.yml
+  s_95805b5d25d999::t_662fae051b1a9f 4-10,12,17,27-29,38,47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "06cdba64a0f0b21eb91d2d48122ca83a36837df6",
+  "prompts": {},
+  "sessions": {
+    "s_95805b5d25d999": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f8e184c1-f309-48d2-a35e-f4bc9d18cb59",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
