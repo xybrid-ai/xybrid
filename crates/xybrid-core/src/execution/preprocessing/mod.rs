@@ -16,6 +16,7 @@ pub mod image;
 pub mod tensor;
 pub mod text;
 
+use super::path::resolve_file_path;
 use super::types::{ExecutorResult, PreprocessedData};
 use crate::execution::template::PreprocessingStep;
 use crate::ir::Envelope;
@@ -105,17 +106,5 @@ pub fn apply_preprocessing_step(
             height,
             interpolation,
         } => image::resize_step(data, *width, *height, interpolation),
-    }
-}
-
-/// Resolve a file path relative to base_path.
-fn resolve_file_path(base_path: &str, file: &str) -> String {
-    if base_path.is_empty() {
-        file.to_string()
-    } else {
-        std::path::Path::new(base_path)
-            .join(file)
-            .to_string_lossy()
-            .to_string()
     }
 }
