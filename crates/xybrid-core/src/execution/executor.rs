@@ -1759,14 +1759,7 @@ impl TemplateExecutor {
 
     /// Resolve a file path relative to base_path.
     pub fn resolve_file_path(&self, file: &str) -> String {
-        if self.base_path.is_empty() {
-            file.to_string()
-        } else {
-            Path::new(&self.base_path)
-                .join(file)
-                .to_string_lossy()
-                .to_string()
-        }
+        super::path::resolve_file_path(&self.base_path, file)
     }
 
     /// Break words used as secondary split points for center-break chunking.

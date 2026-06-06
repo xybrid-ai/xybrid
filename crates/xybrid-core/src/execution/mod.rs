@@ -86,6 +86,9 @@ pub(crate) mod session_factory;
 #[allow(unused_imports)]
 pub(crate) use session_factory::{InferenceSession, OnnxSessionFactory, SessionFactory};
 
+// Base-path file resolution (internal)
+pub(crate) mod path;
+
 // Main executor
 mod executor;
 pub use executor::TemplateExecutor;

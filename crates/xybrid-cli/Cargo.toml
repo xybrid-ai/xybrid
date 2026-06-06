@@ -62,7 +62,7 @@ lazy_static = "1.4"
 hostname = "0.4"
 # CLI UI
 indicatif = "0.17"
-console = "0.15"
+console = "0.16"
 dialoguer = "0.11"
 # Tracing
 tracing = "0.1"
