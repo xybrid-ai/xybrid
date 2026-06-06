@@ -1,0 +1,69 @@
+bindings/unity/README.md
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 32
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 14
+bindings/flutter/rust/Cargo.toml
+  s_c33a65359ca5aa::t_3fa1bdc9759662 3
+bindings/flutter/pubspec.yaml
+  s_c33a65359ca5aa::t_3fa1bdc9759662 3
+README.md
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 133,150,168,202
+docs/content/docs/quickstart.zh.mdx
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 15,57,89,128
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 18
+bindings/kotlin/README.md
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 15
+bindings/flutter/README.md
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 18
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 18
+bindings/apple/README.md
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 15,22
+bindings/unity/package.json
+  s_c33a65359ca5aa::t_3fa1bdc9759662 3
+docs/content/docs/quickstart.mdx
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 15,57,89,127
+Cargo.toml
+  s_c33a65359ca5aa::t_3fa1bdc9759662 19
+Package.swift
+  s_c33a65359ca5aa::t_3fa1bdc9759662 39
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 14
+docs/content/docs/(integration)/sdks/android.mdx
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 14
+CHANGELOG.md
+  s_c33a65359ca5aa::t_ec94229842204f 16-85
+tools/README.md
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 282
+docs/FEATURE_MATRIX.md
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 219
+bindings/kotlin/build.gradle.kts
+  s_c33a65359ca5aa::t_3fa1bdc9759662 8
+bindings/flutter/CHANGELOG.md
+  s_c33a65359ca5aa::t_1e0ab984933836 3-9
+.github/ISSUE_TEMPLATE/bug_report.md
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 11
+README.ja-JP.md
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 148,165,183,217
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 14
+README.zh-CN.md
+  s_c33a65359ca5aa::t_a9946d9ebef4cc 148,165,183,217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "6e141a4432338b3ea4b7d5dd4f08ab05ae498630",
+  "prompts": {},
+  "sessions": {
+    "s_c33a65359ca5aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36a41d41-855e-452c-9515-d7efca8eb868",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
