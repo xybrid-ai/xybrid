@@ -67,7 +67,17 @@ class CancellationToken {
   ///
   /// Takes effect at the next token boundary. Safe to call more than once and
   /// safe to call after the run has already finished (a no-op in that case).
-  void cancel() => inner.cancel();
+  void cancel() {
+    try {
+      inner.cancel();
+    } catch (_) {
+      // The run already finished and flutter_rust_bridge reclaimed the opaque
+      // handle, so encoding it for the FFI call throws DroppableDisposedException.
+      // Per the contract above, cancelling a completed run is a no-op — swallow
+      // the use-after-dispose guard rather than surfacing it to callers (e.g. a
+      // stream's `finally`/`onCancel` cleanup that races the run's completion).
+    }
+  }
 
   /// Whether cancellation has been requested on this token.
   bool get isCancelled => inner.isCancelled();
