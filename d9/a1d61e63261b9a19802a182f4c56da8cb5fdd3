@@ -1,0 +1,19 @@
+bindings/flutter/lib/src/model_loader.dart
+  s_d23e21084f7078::t_a9ab7e7d732487 70-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "d9a1d61e63261b9a19802a182f4c56da8cb5fdd3",
+  "prompts": {},
+  "sessions": {
+    "s_d23e21084f7078": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "090e1fd3-b051-4c16-b1fa-e01cbc6887a3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
