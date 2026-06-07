@@ -1,13 +1,20 @@
 name: Discord notify (contributor activity)
 
 on:
+  # Issues fire on `opened` only. GitHub emits a separate `labeled` event for
+  # every label applied (including labels set at creation time), so listening
+  # to `labeled` as well posts one duplicate per qualifying label — that was
+  # the double/triple-post seen during bulk issue filing. Maintainers label at
+  # creation (`gh issue create -l …`), which `opened` already sees. Trade-off:
+  # an issue that gains `good first issue` *after* creation won't auto-post —
+  # announce those few manually.
   issues:
-    types: [opened, labeled]
+    types: [opened]
   pull_request_target:
     types: [opened]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}-${{ github.event.action }}
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: false
 
 permissions:
@@ -17,14 +24,9 @@ jobs:
   notify-issue:
     if: >-
       github.event_name == 'issues' &&
-      (
-        (github.event.action == 'opened' &&
-          (contains(github.event.issue.labels.*.name, 'good first issue') ||
-           contains(github.event.issue.labels.*.name, 'help wanted'))) ||
-        (github.event.action == 'labeled' &&
-          (github.event.label.name == 'good first issue' ||
-           github.event.label.name == 'help wanted'))
-      )
+      github.event.action == 'opened' &&
+      (contains(github.event.issue.labels.*.name, 'good first issue') ||
+       contains(github.event.issue.labels.*.name, 'help wanted'))
     runs-on: ubuntu-latest
     steps:
       - name: Post issue to Discord
@@ -33,7 +35,7 @@ jobs:
           TITLE: ${{ github.event.issue.title }}
           URL: ${{ github.event.issue.html_url }}
           AUTHOR: ${{ github.event.issue.user.login }}
-          LABEL: ${{ github.event.label.name }}
+          LABELS: ${{ join(github.event.issue.labels.*.name, ', ') }}
         run: |
           if [ -z "$WEBHOOK" ]; then
             echo "DISCORD_WEBHOOK_DEV_TESTS is unset — skipping post."
@@ -42,7 +44,7 @@ jobs:
           payload=$(jq -n \
             --arg title "🆕 New contributor issue: $TITLE" \
             --arg url "$URL" \
-            --arg desc "Author: \`$AUTHOR\` • Label: \`${LABEL:-good first issue}\`" \
+            --arg desc "Author: \`$AUTHOR\` • Labels: \`${LABELS:-good first issue}\`" \
             '{
               username: "Xybrid Bot",
               embeds: [{
