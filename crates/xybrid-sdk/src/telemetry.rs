@@ -587,7 +587,10 @@ impl HttpTelemetryExporter {
 
     /// Add an event to the buffer
     pub fn push(&self, event: TelemetryEvent) {
-        let mut buffer = self.buffer.lock().unwrap();
+        // Telemetry is a background concern that must degrade, not crash the
+        // inference path: recover from a poisoned buffer/queue lock instead of
+        // panicking (matches `register_telemetry_sender`'s graceful handling).
+        let mut buffer = self.buffer.lock().unwrap_or_else(|p| p.into_inner());
         buffer.push(event);
         self.ingested.fetch_add(1, Ordering::Release);
 
@@ -707,7 +710,7 @@ impl HttpTelemetryExporter {
 
         thread::spawn(move || {
             for event in rx {
-                let mut buf = buffer.lock().unwrap();
+                let mut buf = buffer.lock().unwrap_or_else(|p| p.into_inner());
                 buf.push(event);
                 ingested.fetch_add(1, Ordering::Release);
 
@@ -754,7 +757,7 @@ fn flush_buffer_with_retry(
     dropped_count: &Arc<AtomicU32>,
 ) {
     let events: Vec<TelemetryEvent> = {
-        let mut buf = buffer.lock().unwrap();
+        let mut buf = buffer.lock().unwrap_or_else(|p| p.into_inner());
         buf.drain(..).collect()
     };
 
@@ -916,7 +919,7 @@ fn queue_failed_events(
     failed_queue: &Arc<Mutex<VecDeque<PlatformEvent>>>,
     dropped_count: &Arc<AtomicU32>,
 ) {
-    let mut queue = failed_queue.lock().unwrap();
+    let mut queue = failed_queue.lock().unwrap_or_else(|p| p.into_inner());
 
     for event in events {
         if queue.len() >= MAX_FAILED_QUEUE_SIZE {
@@ -943,7 +946,7 @@ fn retry_failed_events(
 
     // Take a batch of events from the queue
     let events: Vec<PlatformEvent> = {
-        let mut queue = failed_queue.lock().unwrap();
+        let mut queue = failed_queue.lock().unwrap_or_else(|p| p.into_inner());
         let batch_size = config.batch_size.min(queue.len());
         queue.drain(..batch_size).collect()
     };
@@ -955,7 +958,7 @@ fn retry_failed_events(
     // Try to send the batch
     if let Err(failed_events) = send_batch_inner(&events, config, agent, circuit, retry_policy) {
         // Put them back at the front of the queue
-        let mut queue = failed_queue.lock().unwrap();
+        let mut queue = failed_queue.lock().unwrap_or_else(|p| p.into_inner());
         for event in failed_events.into_iter().rev() {
             queue.push_front(event);
         }

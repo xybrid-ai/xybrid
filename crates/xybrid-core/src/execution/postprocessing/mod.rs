@@ -14,6 +14,7 @@ pub mod codec;
 pub mod decode;
 pub mod tensor_ops;
 
+use super::path::resolve_file_path;
 use super::types::{ExecutorResult, RawOutputs};
 use crate::execution::template::PostprocessingStep;
 
@@ -86,17 +87,5 @@ pub fn apply_postprocessing_step(
                 "CodecDecode is handled by CodecTtsStrategy, not the generic postprocessing dispatcher".into(),
             ),
         ),
-    }
-}
-
-/// Resolve a file path relative to base_path.
-fn resolve_file_path(base_path: &str, file: &str) -> String {
-    if base_path.is_empty() {
-        file.to_string()
-    } else {
-        std::path::Path::new(base_path)
-            .join(file)
-            .to_string_lossy()
-            .to_string()
     }
 }
