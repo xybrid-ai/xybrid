@@ -1,0 +1,71 @@
+bindings/unity/README.md
+  s_93e9e173c209bc::t_157c9d8df8672f 32
+bindings/kotlin/build.gradle.kts
+  s_93e9e173c209bc::t_157c9d8df8672f 8
+bindings/flutter/README.md
+  s_93e9e173c209bc::t_157c9d8df8672f 18
+bindings/unity/package.json
+  s_93e9e173c209bc::t_157c9d8df8672f 3
+docs/content/docs/quickstart.mdx
+  s_93e9e173c209bc::t_157c9d8df8672f 15,57,89,127
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_93e9e173c209bc::t_157c9d8df8672f 18
+README.zh-CN.md
+  s_93e9e173c209bc::t_157c9d8df8672f 148,165,183,217
+bindings/apple/README.md
+  s_93e9e173c209bc::t_157c9d8df8672f 15,22
+bindings/kotlin/README.md
+  s_93e9e173c209bc::t_157c9d8df8672f 15
+Cargo.toml
+  s_93e9e173c209bc::t_157c9d8df8672f 20
+docs/content/docs/(integration)/sdks/android.mdx
+  s_93e9e173c209bc::t_157c9d8df8672f 14
+README.md
+  s_93e9e173c209bc::t_157c9d8df8672f 133,150,168,202
+bindings/flutter/pubspec.yaml
+  s_93e9e173c209bc::t_157c9d8df8672f 3
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_93e9e173c209bc::t_157c9d8df8672f 14
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_93e9e173c209bc::t_157c9d8df8672f 14
+bindings/flutter/rust/Cargo.toml
+  s_93e9e173c209bc::t_157c9d8df8672f 3
+Package.swift
+  s_93e9e173c209bc::t_157c9d8df8672f 39,44
+docs/content/docs/quickstart.zh.mdx
+  s_93e9e173c209bc::t_157c9d8df8672f 15,57,89,128
+README.ja-JP.md
+  s_93e9e173c209bc::t_157c9d8df8672f 148,165,183,217
+Cargo.lock
+  ai_agent 518,521,572,574,624,626,632-650,653,655,664,666,670,672,674-675,877,879,1028,1477,2718,2785,2878,2880,2932,3006-3014,3133,3135,3196,3214,3216,3336,3351,3711,3749,3762,3776,3817,3845,4130,4467,4519,4708,4835,4929,4931,5194,5208,5247,5643,5854,5856,6166,6708,6756,6771,6778,6787,6814,6878,6889,6898,6907,6916,6942,6977,6979,7064,7074
+.github/ISSUE_TEMPLATE/bug_report.md
+  s_93e9e173c209bc::t_157c9d8df8672f 11
+CHANGELOG.md
+  s_93e9e173c209bc::t_157c9d8df8672f 16-85
+docs/FEATURE_MATRIX.md
+  s_93e9e173c209bc::t_157c9d8df8672f 217
+tools/README.md
+  s_93e9e173c209bc::t_157c9d8df8672f 244
+bindings/flutter/CHANGELOG.md
+  s_93e9e173c209bc::t_157c9d8df8672f 3-9
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_93e9e173c209bc::t_157c9d8df8672f 18
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_93e9e173c209bc::t_157c9d8df8672f 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "e30df75cd5850c00662fa4e316bd1a7b6f21a037",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
