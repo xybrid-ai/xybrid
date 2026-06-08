@@ -56,7 +56,7 @@ pub fn inspect_and_generate(
     let model_files = detect_model_files(dir);
 
     if model_files.is_empty() {
-        return Err(SdkError::LoadError(format!(
+        return Err(SdkError::load(format!(
             "No model files (.onnx, .gguf, .safetensors) found in '{}'",
             dir.display()
         )));
@@ -200,7 +200,7 @@ fn list_model_files(dir: &Path) -> Vec<String> {
 /// This enables `--model-file ./path/to/model.gguf` workflows.
 pub fn generate_metadata_for_gguf_file(gguf_path: &Path) -> SdkResult<ModelMetadata> {
     if !gguf_path.exists() {
-        return Err(SdkError::LoadError(format!(
+        return Err(SdkError::load(format!(
             "GGUF file not found: {}",
             gguf_path.display()
         )));
@@ -209,7 +209,7 @@ pub fn generate_metadata_for_gguf_file(gguf_path: &Path) -> SdkResult<ModelMetad
     let filename = gguf_path
         .file_name()
         .and_then(|f| f.to_str())
-        .ok_or_else(|| SdkError::LoadError("Invalid GGUF file path".to_string()))?
+        .ok_or_else(|| SdkError::load("Invalid GGUF file path"))?
         .to_string();
 
     let model_id = filename

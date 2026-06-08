@@ -29,7 +29,7 @@ Or add directly to `Packages/manifest.json`:
 To pin a specific version:
 
 ```bash
-https://github.com/xybrid-ai/xybrid.git#upm/v0.1.0-beta5
+https://github.com/xybrid-ai/xybrid.git#upm/v0.1.1
 ```
 
 ### Option 2: Local Development

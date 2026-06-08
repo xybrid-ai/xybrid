@@ -531,9 +531,17 @@ impl LocalAuthority {
             }
         }
 
-        // Use the stored routing engine (locked for interior mutability)
+        // Use the stored routing engine (locked for interior mutability).
+        // Recover from a poisoned lock rather than panicking: this is the
+        // per-stage routing hot path, so a single panic elsewhere must not
+        // turn every subsequent routing decision into a crash. Matches the
+        // graceful handling used for `hysteresis`/`reliability` in this file
+        // and `target_cache_guard` in `remote.rs`.
         let decision = {
-            let mut routing_engine = self.routing_engine.lock().unwrap();
+            let mut routing_engine = self
+                .routing_engine
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             routing_engine.decide(
                 &context.stage_id,
                 &live_metrics,

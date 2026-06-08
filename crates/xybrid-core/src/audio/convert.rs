@@ -283,31 +283,49 @@ pub enum ConvertError {
 }
 
 /// Prepares audio samples by converting channels and resampling if necessary.
+///
+/// # Errors
+///
+/// Returns [`ConvertError::ConversionFailed`] when upmixing is requested for a
+/// channel layout that is not supported. Only mono→stereo (1→2) upmix is
+/// implemented; all other upmix paths (e.g. mono→5.1, stereo→5.1) require a
+/// dedicated spatial upmix algorithm that is out of scope for this conversion
+/// utility.
 pub fn prepare_audio_samples(
     samples: Vec<f32>,
     source_rate: u32,
     source_channels: usize,
     target_rate: u32,
     target_channels: usize,
-) -> Vec<f32> {
-    // Step 1: Channel Conversion
+) -> Result<Vec<f32>, ConvertError> {
+    // Step 1: Channel conversion
     let samples = if source_channels == target_channels {
         samples
     } else if target_channels == 1 {
         multichannel_to_mono(&samples, source_channels as u32)
+    } else if source_channels == 1 && target_channels == 2 {
+        // Mono→stereo: duplicate each sample to both L and R channels.
+        let mut out = Vec::with_capacity(samples.len() * 2);
+        for s in &samples {
+            out.push(*s);
+            out.push(*s);
+        }
+        out
     } else {
-        // TODO: Support mono -> stereo or other mappings if needed
-        // For now, just clone (or error? But we return Vec<f32>)
-        // Assuming mono->stereo is rare for ASR input which expects mono
-        samples
+        // Upmixing beyond mono→stereo requires a spatial algorithm that is
+        // not implemented here. Callers that need N→M upmix (N < M, M > 2)
+        // must pre-process the audio before passing it to this function.
+        return Err(ConvertError::ConversionFailed(format!(
+            "conversion from {} to {} channels is not supported",
+            source_channels, target_channels
+        )));
     };
 
     // Step 2: Resampling
     if source_rate == target_rate {
-        samples
+        Ok(samples)
     } else {
         resample_audio(&samples, source_rate, target_rate, ResampleMethod::Linear)
-            .unwrap_or(samples) // Fallback to original if resampling fails (shouldn't happen)
     }
 }
 
@@ -356,7 +374,7 @@ pub fn decode_wav_audio(
                 source_channels,
                 target_sample_rate,
                 target_channels,
-            );
+            )?;
 
             Ok(prepared)
         }
@@ -460,5 +478,33 @@ mod tests {
         assert_eq!(mono.len(), 2);
         assert!((mono[0] - 0.25).abs() < 0.001); // (0.1 + 0.2 + 0.3 + 0.4) / 4
         assert!((mono[1] - 0.65).abs() < 0.001); // (0.5 + 0.6 + 0.7 + 0.8) / 4
+    }
+
+    #[test]
+    fn test_prepare_mono_to_stereo() {
+        let samples = vec![0.1f32, 0.2, 0.3];
+        let result = prepare_audio_samples(samples, 16000, 1, 16000, 2).unwrap();
+        assert_eq!(result, vec![0.1, 0.1, 0.2, 0.2, 0.3, 0.3]);
+    }
+
+    #[test]
+    fn test_prepare_mono_passthrough() {
+        let samples = vec![0.1f32, 0.2, 0.3];
+        let result = prepare_audio_samples(samples.clone(), 16000, 1, 16000, 1).unwrap();
+        assert_eq!(result, samples);
+    }
+
+    #[test]
+    fn test_prepare_stereo_passthrough() {
+        let samples = vec![0.1f32, 0.2, 0.3, 0.4];
+        let result = prepare_audio_samples(samples.clone(), 16000, 2, 16000, 2).unwrap();
+        assert_eq!(result, samples);
+    }
+
+    #[test]
+    fn test_prepare_unsupported_upmix_returns_error() {
+        let samples = vec![0.1f32, 0.2, 0.3];
+        let result = prepare_audio_samples(samples, 16000, 1, 16000, 6);
+        assert!(result.is_err(), "mono→5.1 upmix must return an error");
     }
 }
