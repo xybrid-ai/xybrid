@@ -1553,6 +1553,7 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "llm-llamacpp-vision")]
     #[test]
     fn mtmd_prompt_inputs_route_raw_frames_to_packed_rgb() {
         use crate::ir::{Envelope, EnvelopeKind, MessageRole, PixelFormat};
