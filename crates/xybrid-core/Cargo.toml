@@ -25,8 +25,8 @@ path = "src/lib.rs"
 #   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-llama-cpp-sys = { path = "../llama-cpp-sys", optional = true }
-xybrid-llama = { path = "../xybrid-llama", optional = true }
+llama-cpp-sys = { path = "../llama-cpp-sys", version = "0.1.2", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.1.2", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"

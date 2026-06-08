@@ -3,8 +3,8 @@ name = "xybrid-llama"
 version.workspace = true
 edition.workspace = true
 license = "MIT"
+repository.workspace = true
 description = "Safe Rust wrappers over llama-cpp-sys: RAII model/context handles, streaming trampoline, typed errors. Zero `unsafe` on the public surface."
-publish = false
 
 [lib]
 name = "xybrid_llama"
@@ -20,6 +20,6 @@ default = []
 bindings = ["llama-cpp-sys/bindings"]
 
 [dependencies]
-llama-cpp-sys = { path = "../llama-cpp-sys" }
+llama-cpp-sys = { path = "../llama-cpp-sys", version = "0.1.2" }
 thiserror = { workspace = true }
 tracing = "0.1"
