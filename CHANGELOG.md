@@ -13,6 +13,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.2] - 2026-06-06
+
+A robustness and supply-chain hardening release. The headline is a sweeping
+panic-safety pass across `xybrid-core` and `xybrid-sdk` — poisoned locks,
+unchecked arithmetic, and non-contiguous tensors no longer abort the process —
+plus a wider set of audio input formats and a leaner, restructured native build.
+No public API changes.
+
+### Added
+
+- **Audio format detection for MP3, OGG, and FLAC** (#132): `AudioFormat::detect_format`
+  now recognizes these container formats in addition to WAV.
+- **Mono → stereo upmixing** in `prepare_audio_samples` (#141): mono inputs are
+  upmixed to stereo when a model expects two channels.
+
+### Changed
+
+- **`llama.cpp` integration split** into `llama-cpp-sys` + `xybrid-llama` crates (#166),
+  separating the `-sys` build from the higher-level backend.
+- **`resolve_file_path` consolidated** into `execution::path` (#238); the SDK chains
+  error causes via `#[source]` instead of stringizing them (#220).
+- **Generated native libraries (~125MB) are no longer committed** (#226): they are
+  built/downloaded rather than vendored into git.
+- **CI**: each release now ships a CycloneDX SBOM (#230); the release flow unblocks
+  pub.dev publishing, the merge gate, and draft re-creation (#218).
+- **Deps**: `console` 0.15 → 0.16 (#29); `base64` 0.21 → 0.22 (#34).
+
+### Fixed
+
+- **Panic-safety hardening across core and SDK**: poisoned-lock recovery instead of
+  panicking in the llama.cpp `is_loaded` context lock (#237), the telemetry-session
+  lock (#236), the SDK telemetry locks (#234), the event-bus locks (#233), and the
+  routing-engine lock (#228); `with_retry` no longer panics when the circuit is open
+  for every attempt (#227).
+- **Checked arithmetic** in the WAV chunk parser (#232) and the voice-codes length
+  header (#231), and **non-contiguous ONNX output tensors** are now handled without
+  panicking (#235).
+- **Keep the Xybrid API key out of the process environment** (#214).
+- **Keep the test-fixtures fallback out of release builds** (#225).
+- **Honor `Retry-After` on registry `429` responses** (#134).
+
+### Docs
+
+- Added governance, maintainers, dependency, and release-verification docs (#224),
+  plus an OpenSSF Best Practices badge (#221).
+- Documented the two `candle` unsafe blocks with SAFETY comments (#229).
+- Examples inject `apiKey` + `ingestUrl` via platform-native env vars (#219); install
+  versions synced and the stale Pipelines concept page removed (#222).
+
+### Known issues
+
+- **iOS Simulator slice still missing from the published xcframework**
+  ([#179](https://github.com/xybrid-ai/xybrid/issues/179)): unchanged from 0.1.0.
+  Swift consumers building against the iOS Simulator on Apple Silicon still need the
+  `useLocalNatives = true` workaround after vendoring the ORT iOS simulator slice.
+
+### Consumer install lines
+
+```swift
+// Swift Package Manager
+.package(url: "https://github.com/xybrid-ai/xybrid", from: "0.1.2")
+```
+
+```yaml
+# Flutter / pub.dev
+xybrid_flutter: ^0.1.2
+```
+
+---
+
 ## [0.1.1] - 2026-05-30
 
 First patch on the 0.1.0 line. Headline is the new `Xybrid.init()` entry point —

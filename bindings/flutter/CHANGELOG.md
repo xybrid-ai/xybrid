@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+* Audio inputs now detect MP3, OGG, and FLAC in addition to WAV, and mono audio is upmixed to stereo when a model expects two channels (xybrid-ai/xybrid#132, #141)
+* Robustness: the underlying SDK/core no longer panics on poisoned locks, unchecked length headers, or non-contiguous ONNX output tensors — these are recovered or handled gracefully (xybrid-ai/xybrid#233, #234, #235, #231, #232, #237)
+* The Xybrid API key is no longer placed in the process environment (xybrid-ai/xybrid#214)
+* Registry requests now honor `Retry-After` on `429` responses (xybrid-ai/xybrid#134)
+
 ## 0.1.1
 
 * New bundled `init()` entry point starts anonymous-by-default telemetry from an API key; the standalone `initTelemetry` is now legacy (xybrid-ai/xybrid#188, #195)
