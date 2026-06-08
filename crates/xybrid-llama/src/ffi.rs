@@ -450,11 +450,7 @@ pub(crate) unsafe fn mtmd_bitmap_init_from_buf(
 /// bytes (RGBRGB... order, no row-stride padding, no alpha). The caller is
 /// responsible for upholding that invariant before crossing the boundary.
 #[cfg(feature = "vision")]
-pub(crate) unsafe fn mtmd_bitmap_init_rgb(
-    nx: u32,
-    ny: u32,
-    data: *const u8,
-) -> *mut MtmdBitmapRaw {
+pub(crate) unsafe fn mtmd_bitmap_init_rgb(nx: u32, ny: u32, data: *const u8) -> *mut MtmdBitmapRaw {
     sys::mtmd_bitmap_init_rgb_c(nx, ny, data)
 }
 

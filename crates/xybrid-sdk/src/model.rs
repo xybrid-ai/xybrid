@@ -2782,10 +2782,7 @@ impl XybridModel {
     ///    wins instead of head-of-line blocking).
     fn preempt_register(&self, token: CancellationToken) -> Option<CancellationToken> {
         let old = {
-            let mut slot = self
-                .current_run
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut slot = self.current_run.lock().unwrap_or_else(|e| e.into_inner());
             slot.replace(token)
         };
         if let Some(ref old) = old {
@@ -2802,10 +2799,7 @@ impl XybridModel {
     /// cancellation. The Arc-identity check ([`CancellationToken::same_token`])
     /// makes the clear a no-op unless the slot is still ours.
     fn clear_current_run(&self, token: &CancellationToken) {
-        let mut slot = self
-            .current_run
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut slot = self.current_run.lock().unwrap_or_else(|e| e.into_inner());
         if slot.as_ref().is_some_and(|t| t.same_token(token)) {
             *slot = None;
         }
@@ -4243,7 +4237,11 @@ mod tests {
         // (a) The run halts with a user-cancellation error (terminal; never a
         // cloud-fallback marker).
         match err {
-            SdkError::InferenceError { ref message, ref source, .. } => {
+            SdkError::InferenceError {
+                ref message,
+                ref source,
+                ..
+            } => {
                 let full = match source {
                     Some(s) => format!("{message}: {s}"),
                     None => message.clone(),
@@ -4398,7 +4396,11 @@ mod tests {
         // (a) The run halted on user cancellation rather than completing
         // naturally with the runtime's "partial output".
         match result {
-            Err(SdkError::InferenceError { ref message, ref source, .. }) => {
+            Err(SdkError::InferenceError {
+                ref message,
+                ref source,
+                ..
+            }) => {
                 let full = match source {
                     Some(s) => format!("{message}: {s}"),
                     None => message.clone(),
@@ -4591,7 +4593,11 @@ mod tests {
         // A halted on user cancellation (its partial output was discarded),
         // proving latest-frame-wins rather than A completing naturally.
         match result_a {
-            Err(SdkError::InferenceError { ref message, ref source, .. }) => {
+            Err(SdkError::InferenceError {
+                ref message,
+                ref source,
+                ..
+            }) => {
                 let full = match source {
                     Some(s) => format!("{message}: {s}"),
                     None => message.clone(),

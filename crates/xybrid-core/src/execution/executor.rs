@@ -2835,7 +2835,8 @@ impl TemplateExecutor {
 
         // The whole (short) text is one chunk; the synthesis body is shared with
         // the chunked/streaming paths via synthesize_chunk.
-        let audio = self.synthesize_chunk(&session, metadata, input, &text, &voice_embedding, speed)?;
+        let audio =
+            self.synthesize_chunk(&session, metadata, input, &text, &voice_embedding, speed)?;
 
         // Wrap the already-trimmed waveform for postprocessing (mirrors the
         // chunked path's single-tensor map keyed by the model's output name).
@@ -2988,7 +2989,10 @@ impl TemplateExecutor {
             // Per-chunk postprocessing → PCM bytes (mirrors the batch path, but
             // applied to this chunk rather than the concatenated buffer).
             let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
-            outputs.insert(output_name.clone(), ndarray::Array1::from_vec(chunk_audio).into_dyn());
+            outputs.insert(
+                output_name.clone(),
+                ndarray::Array1::from_vec(chunk_audio).into_dyn(),
+            );
             let env = self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))?;
             let mut pcm = match env.kind {
                 EnvelopeKind::Audio(bytes) => bytes,
@@ -3023,7 +3027,9 @@ fn fade_pcm16_edges(pcm: &mut [u8], fade_samples: usize) {
     let scale = |pcm: &mut [u8], idx: usize, gain: f32| {
         let o = idx * 2;
         let s = i16::from_le_bytes([pcm[o], pcm[o + 1]]);
-        let v = (s as f32 * gain).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+        let v = (s as f32 * gain)
+            .round()
+            .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
         let b = v.to_le_bytes();
         pcm[o] = b[0];
         pcm[o + 1] = b[1];

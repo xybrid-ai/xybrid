@@ -2265,7 +2265,8 @@ mod tests {
                 _ => unreachable!(),
             };
             let envelope =
-                Envelope::image_raw(pixels, format, 2, 2, planes, Some(bt601_full_color())).unwrap();
+                Envelope::image_raw(pixels, format, 2, 2, planes, Some(bt601_full_color()))
+                    .unwrap();
             let raw = envelope.as_raw_image().unwrap();
 
             let rgb = raw_image_to_packed_rgb(raw).unwrap();
@@ -2304,9 +2305,15 @@ mod tests {
                 height: 1,
             },
         ];
-        let envelope =
-            Envelope::image_raw(pixels, PixelFormat::Nv12, 2, 2, planes, Some(bt601_full_color()))
-                .unwrap();
+        let envelope = Envelope::image_raw(
+            pixels,
+            PixelFormat::Nv12,
+            2,
+            2,
+            planes,
+            Some(bt601_full_color()),
+        )
+        .unwrap();
         let raw = envelope.as_raw_image().unwrap();
 
         let rgb = raw_image_to_packed_rgb(raw).unwrap();
@@ -2319,7 +2326,11 @@ mod tests {
                 "R expected ~229, got {}",
                 pixel[0]
             );
-            assert!(pixel[1].abs_diff(77) <= 2, "G expected ~77, got {}", pixel[1]);
+            assert!(
+                pixel[1].abs_diff(77) <= 2,
+                "G expected ~77, got {}",
+                pixel[1]
+            );
             assert!(
                 pixel[2].abs_diff(128) <= 2,
                 "B expected ~128, got {}",

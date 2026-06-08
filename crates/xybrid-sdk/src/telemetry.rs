@@ -2900,9 +2900,7 @@ fn should_emit_live_event(
     // Opportunistic eviction: forget sessions idle longer than the TTL. Keep
     // the id under decision regardless so its own freshness check below is not
     // perturbed by eviction ordering.
-    last_emits.retain(|entry_id, &mut last| {
-        entry_id == id || now.duration_since(last) <= ttl
-    });
+    last_emits.retain(|entry_id, &mut last| entry_id == id || now.duration_since(last) <= ttl);
 
     match last_emits.get(id) {
         Some(&last) if now.duration_since(last) < min_interval => false,
@@ -2929,9 +2927,7 @@ fn dispatch_telemetry_event_with_optout(event: TelemetryEvent, opted_out: bool) 
     // unchanged. A poisoned sampler mutex degrades to emitting (recover rather
     // than silently drop real telemetry).
     if let Some(session_id) = live_session_id(&event) {
-        let mut state = LIVE_SAMPLER_STATE
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut state = LIVE_SAMPLER_STATE.lock().unwrap_or_else(|e| e.into_inner());
         if !should_emit_live_event(
             &mut state,
             &session_id,
@@ -3174,7 +3170,9 @@ mod tests {
         let interval = Duration::from_secs(1);
         let ttl = Duration::from_secs(300);
         // First event for a session always emits.
-        assert!(should_emit_live_event(&mut state, "sess-a", t0, interval, ttl));
+        assert!(should_emit_live_event(
+            &mut state, "sess-a", t0, interval, ttl
+        ));
         // A second event 500ms later is within the window → dropped.
         let t1 = t0 + Duration::from_millis(500);
         assert!(!should_emit_live_event(
@@ -3188,10 +3186,14 @@ mod tests {
         let t0 = Instant::now();
         let interval = Duration::from_secs(1);
         let ttl = Duration::from_secs(300);
-        assert!(should_emit_live_event(&mut state, "sess-a", t0, interval, ttl));
+        assert!(should_emit_live_event(
+            &mut state, "sess-a", t0, interval, ttl
+        ));
         // Exactly at the interval boundary → emit (>= comparison).
         let t1 = t0 + Duration::from_secs(1);
-        assert!(should_emit_live_event(&mut state, "sess-a", t1, interval, ttl));
+        assert!(should_emit_live_event(
+            &mut state, "sess-a", t1, interval, ttl
+        ));
         // The recorded time advanced, so the next one right after is dropped.
         let t2 = t1 + Duration::from_millis(10);
         assert!(!should_emit_live_event(
@@ -3205,10 +3207,14 @@ mod tests {
         let t0 = Instant::now();
         let interval = Duration::from_secs(1);
         let ttl = Duration::from_secs(300);
-        assert!(should_emit_live_event(&mut state, "sess-a", t0, interval, ttl));
+        assert!(should_emit_live_event(
+            &mut state, "sess-a", t0, interval, ttl
+        ));
         // A different session at the same instant emits — throttling one
         // session never affects another.
-        assert!(should_emit_live_event(&mut state, "sess-b", t0, interval, ttl));
+        assert!(should_emit_live_event(
+            &mut state, "sess-b", t0, interval, ttl
+        ));
         // Each session keeps its own window.
         let t1 = t0 + Duration::from_millis(200);
         assert!(!should_emit_live_event(
@@ -3227,9 +3233,15 @@ mod tests {
         let ttl = Duration::from_secs(300);
 
         // Two sessions emit at t0.
-        assert!(should_emit_live_event(&mut state, "sess-old", t0, interval, ttl));
         assert!(should_emit_live_event(
-            &mut state, "sess-keep", t0, interval, ttl
+            &mut state, "sess-old", t0, interval, ttl
+        ));
+        assert!(should_emit_live_event(
+            &mut state,
+            "sess-keep",
+            t0,
+            interval,
+            ttl
         ));
         assert_eq!(state.len(), 2);
 
@@ -3238,7 +3250,11 @@ mod tests {
         // > TTL) but retains `sess-keep` (idle <= TTL), bounding the map.
         let t_keep = t0 + Duration::from_secs(10);
         assert!(should_emit_live_event(
-            &mut state, "sess-keep", t_keep, interval, ttl
+            &mut state,
+            "sess-keep",
+            t_keep,
+            interval,
+            ttl
         ));
         let t_new = t0 + ttl + Duration::from_secs(1);
         assert!(should_emit_live_event(

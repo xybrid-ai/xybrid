@@ -152,9 +152,7 @@ impl MtmdBitmap {
         let expected = (width as usize)
             .checked_mul(height as usize)
             .and_then(|pixels| pixels.checked_mul(3))
-            .ok_or_else(|| {
-                LlamaError::InvalidInput("raw RGB bitmap size overflow".to_string())
-            })?;
+            .ok_or_else(|| LlamaError::InvalidInput("raw RGB bitmap size overflow".to_string()))?;
         if rgb.len() != expected {
             return Err(LlamaError::InvalidInput(format!(
                 "raw RGB bitmap requires exactly {expected} packed bytes for {width}x{height}, got {}",

@@ -698,8 +698,7 @@ impl FfiModel {
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let sdk_config = config.map(|c| c.to_sdk());
-        let run_options =
-            streaming_run_options(sdk_config, cancellation_token.as_ref(), None);
+        let run_options = streaming_run_options(sdk_config, cancellation_token.as_ref(), None);
         let cancel_handle = cancellation_token;
 
         std::thread::spawn(move || {
