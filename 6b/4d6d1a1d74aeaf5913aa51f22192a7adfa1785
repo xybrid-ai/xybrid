@@ -1,0 +1,26 @@
+crates/xybrid-core/Cargo.toml
+  s_c33a65359ca5aa::t_6cafecc0a50166 28-29
+crates/xybrid-llama/Cargo.toml
+  s_c33a65359ca5aa::t_317d268dbc34ae 6
+  s_c33a65359ca5aa::t_1932ec5fc2202e 23
+.github/workflows/release-publish.yml
+  s_c33a65359ca5aa::t_392239af13fc11 250-251
+crates/llama-cpp-sys/Cargo.toml
+  s_c33a65359ca5aa::t_c8d6b91d86f1d9 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "6b4d6d1a1d74aeaf5913aa51f22192a7adfa1785",
+  "prompts": {},
+  "sessions": {
+    "s_c33a65359ca5aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36a41d41-855e-452c-9515-d7efca8eb868",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
