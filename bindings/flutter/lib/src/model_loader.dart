@@ -54,6 +54,10 @@ class CancellationToken {
   /// The underlying FRB cancellation handle (shared with the Rust run).
   final FfiCancellationToken inner;
 
+  /// Source of truth once [cancel] is called, so [isCancelled] stays correct
+  /// after the FRB handle is reclaimed.
+  bool _isCancelled = false;
+
   /// Create a fresh, un-cancelled token.
   CancellationToken() : inner = FfiCancellationToken();
 
@@ -68,6 +72,7 @@ class CancellationToken {
   /// Takes effect at the next token boundary. Safe to call more than once and
   /// safe to call after the run has already finished (a no-op in that case).
   void cancel() {
+    _isCancelled = true;
     try {
       inner.cancel();
     } catch (_) {
@@ -79,8 +84,16 @@ class CancellationToken {
     }
   }
 
-  /// Whether cancellation has been requested on this token.
-  bool get isCancelled => inner.isCancelled();
+  /// Whether cancellation has been requested. Safe to read after the run ends:
+  /// a reclaimed handle returns false instead of throwing.
+  bool get isCancelled {
+    if (_isCancelled) return true;
+    try {
+      return inner.isCancelled();
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
 /// Event emitted during model loading with progress tracking.
