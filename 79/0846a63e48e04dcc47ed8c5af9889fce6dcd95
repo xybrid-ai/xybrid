@@ -1,0 +1,22 @@
+CLAUDE.md
+  s_3405d2fd4e51a9::t_3925ab45332532 27
+  s_3405d2fd4e51a9::t_854736f670de3d 30
+crates/xybrid-core/src/lib.rs
+  s_3405d2fd4e51a9::t_28efa60df6fa84 71-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "790846a63e48e04dcc47ed8c5af9889fce6dcd95",
+  "prompts": {},
+  "sessions": {
+    "s_3405d2fd4e51a9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70f205a6-c4f0-4077-a14a-29c5cd177058",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
