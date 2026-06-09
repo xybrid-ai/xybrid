@@ -195,13 +195,13 @@ fn find_nearest_break_word(text: &str, center: usize) -> Option<(usize, usize)> 
         if bytes.len() < word_len + 2 {
             continue;
         }
-        // A literal space at `i - 1` and `i + word_len` guarantees both `i` and
-        // `i + word_len` are char boundaries (space is a single-byte char), so
-        // the slice below never panics on multi-byte input.
+        // The literal-space neighbours at `i - 1` / `i + word_len` ensure we
+        // only match a whole space-delimited token; comparing raw bytes
+        // (ASCII case-insensitive) avoids any UTF-8 slicing of `text`.
         for i in 1..=bytes.len() - word_len - 1 {
             if bytes[i - 1] == b' '
                 && bytes[i + word_len] == b' '
-                && text[i..i + word_len].eq_ignore_ascii_case(word)
+                && bytes[i..i + word_len].eq_ignore_ascii_case(word.as_bytes())
             {
                 let dist = i.abs_diff(center);
                 if best.is_none() || dist < best.unwrap().2 {
