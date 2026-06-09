@@ -140,6 +140,18 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      # The full --workspace debug build compiles llama.cpp from source (hundreds
+      # of model .cpp objects) on top of ort-download's ONNX Runtime and every
+      # crate's test binaries, which exhausts the ~14 GB free on ubuntu-latest
+      # (the libllama.a link fails with "No space left on device"). Reclaim space
+      # from preinstalled toolchains this build never touches.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
