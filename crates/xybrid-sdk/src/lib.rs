@@ -9,10 +9,14 @@
 
 //! Xybrid SDK - Developer-facing API for hybrid cloud-edge AI inference.
 //!
-//! This crate provides high-level abstractions for:
-//! - Loading and running ML models (ASR, TTS, embeddings)
+//! The SDK is **local-first**: model load/run/stream and pipelines work fully
+//! offline with no account. Authenticating with an API key adds an **additive
+//! platform layer** on top of the same runtime — cloud routing, telemetry, and
+//! control-plane sync. This crate provides high-level abstractions for:
+//! - Loading and running ML models (ASR, TTS, embeddings) — local by default
 //! - Streaming inference for real-time applications
-//! - Multi-stage pipelines with intelligent routing
+//! - Multi-stage pipelines with intelligent local→cloud routing
+//! - Platform integration (auth, telemetry export) once a key is provided
 //!
 //! # Architecture
 //!
@@ -27,8 +31,9 @@
 //!
 //! ## Initialization
 //!
-//! Anonymous use works out of the box — every inference path runs locally.
-//! Provide an API key to light up the platform dashboard:
+//! Anonymous use works out of the box — local inference, no account needed.
+//! Provide an API key to layer on the platform (cloud routing + telemetry
+//! dashboard) without changing the local path:
 //!
 //! ```no_run
 //! // Anonymous — local inference, telemetry disabled
