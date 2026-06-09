@@ -9,7 +9,7 @@ documentation.workspace = true
 description = "Core runtime for hybrid cloud-edge AI inference: model execution, pipeline orchestration, and routing primitives."
 readme = "README.md"
 # Upstream llama backend source lives at workspace `vendor/llama-cpp/`
-# (see `.gitmodules`), consumed by the `llama-cpp-sys` crate's build
+# (see `.gitmodules`), consumed by the `xybrid-llama-sys` crate's build
 # script. No tarball-exclude needed here — the source is not under this
 # crate's manifest dir.
 
@@ -19,13 +19,13 @@ path = "src/lib.rs"
 
 [dependencies]
 # Raw FFI bindings + cmake build for llama.cpp. Gated entirely behind the
-# `llm-llamacpp` feature (which activates both `llama-cpp-sys/bindings`
+# `llm-llamacpp` feature (which activates both `xybrid-llama-sys/bindings`
 # and `xybrid-llama/bindings`) so default builds — and any consumer not
 # opting into llama.cpp — pay zero compile cost. The 3-layer shape:
-#   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
+#   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-llama-cpp-sys = { path = "../llama-cpp-sys", version = "0.1.2", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.1.2", optional = true }
 xybrid-llama = { path = "../xybrid-llama", version = "0.1.2", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
@@ -136,16 +136,16 @@ llm-mistral-metal = ["llm-mistral"]
 llm-mistral-cuda = ["llm-mistral"]
 
 # llama.cpp backend. Enabling `llm-llamacpp` links the llama.cpp runtime:
-# it activates both `llama-cpp-sys/bindings` (cmake build of llama.cpp +
+# it activates both `xybrid-llama-sys/bindings` (cmake build of llama.cpp +
 # wrapper.cpp shim) and `xybrid-llama/bindings` (safe RAII wrappers).
 # All four `platform-*` presets on `xybrid-sdk` depend on it since they
 # ship runtime inference. The 3-layer crate split underneath:
-#   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
+#   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
 llm-llamacpp = [
-    "dep:llama-cpp-sys",
-    "llama-cpp-sys/bindings",
+    "dep:xybrid-llama-sys",
+    "xybrid-llama-sys/bindings",
     "dep:xybrid-llama",
     "xybrid-llama/bindings",
 ]

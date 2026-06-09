@@ -3247,15 +3247,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
-name = "llama-cpp-sys"
-version = "0.1.2"
-dependencies = [
- "bindgen",
- "cc",
- "cmake",
-]
-
-[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7081,7 +7072,6 @@ dependencies = [
  "image 0.25.10",
  "lazy_static",
  "libc",
- "llama-cpp-sys",
  "log",
  "mel_spec",
  "ndarray 0.17.2",
@@ -7120,6 +7110,7 @@ dependencies = [
  "windows 0.61.3",
  "windows-sys 0.59.0",
  "xybrid-llama",
+ "xybrid-llama-sys",
  "xybrid-sdk",
  "zstd",
 ]
@@ -7139,9 +7130,18 @@ dependencies = [
 name = "xybrid-llama"
 version = "0.1.2"
 dependencies = [
- "llama-cpp-sys",
  "thiserror 1.0.69",
  "tracing",
+ "xybrid-llama-sys",
+]
+
+[[package]]
+name = "xybrid-llama-sys"
+version = "0.1.2"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cmake",
 ]
 
 [[package]]
