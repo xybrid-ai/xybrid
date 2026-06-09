@@ -1,0 +1,19 @@
+crates/xybrid-core/src/execution/text_chunking.rs
+  s_d63f9b1d7e1016::t_e1ffb55fbea5f8 198-200,204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "4aa38c2ce53d7f324e56b1ef732b498ee33d4c45",
+  "prompts": {},
+  "sessions": {
+    "s_d63f9b1d7e1016": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b31456c6-15e5-4598-bcae-7f120287ae3a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
