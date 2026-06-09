@@ -146,6 +146,11 @@ fn center_break_split(text: &str, max_chars: usize, depth: usize, out: &mut Vec<
 
 /// Find the position nearest to `center` where the predicate matches.
 /// Searches outward from center in both directions simultaneously.
+///
+/// Byte offsets that fall inside a multi-byte UTF-8 character are skipped:
+/// the predicates only match single-byte ASCII characters (comma, whitespace),
+/// so a continuation byte could never match anyway, and slicing at one would
+/// panic. This keeps the byte-offset search identical for ASCII input.
 fn find_nearest<F>(text: &str, center: usize, pred: F) -> Option<usize>
 where
     F: Fn(usize, char) -> bool,
@@ -154,7 +159,7 @@ where
     for offset in 0..len {
         // Check right of center
         let right = center + offset;
-        if right < len {
+        if right < len && text.is_char_boundary(right) {
             if let Some(ch) = text[right..].chars().next() {
                 if pred(right, ch) {
                     return Some(right);
@@ -162,7 +167,7 @@ where
             }
         }
         // Check left of center
-        if offset > 0 && offset <= center {
+        if offset > 0 && offset <= center && text.is_char_boundary(center - offset) {
             let left = center - offset;
             if let Some(ch) = text[left..].chars().next() {
                 if pred(left, ch) {
@@ -175,20 +180,34 @@ where
 }
 
 /// Find the break word nearest to center, returning (start_byte, word_byte_len).
+///
+/// Scans `text` directly with an ASCII case-insensitive comparison, matching a
+/// break word delimited by a literal space on each side. This avoids the byte
+/// offsets drifting against a `to_lowercase()` copy (whose length can differ
+/// from the original under Unicode), and allocates nothing.
 fn find_nearest_break_word(text: &str, center: usize) -> Option<(usize, usize)> {
-    let lower = text.to_lowercase();
+    let bytes = text.as_bytes();
     let mut best: Option<(usize, usize, usize)> = None; // (start, len, distance)
 
     for word in BREAK_WORDS {
-        let pattern = format!(" {} ", word);
-        let mut search_start = 0;
-        while let Some(pos) = lower[search_start..].find(&pattern) {
-            let abs_pos = search_start + pos + 1; // +1 to skip leading space
-            let dist = abs_pos.abs_diff(center);
-            if best.is_none() || dist < best.unwrap().2 {
-                best = Some((abs_pos, word.len(), dist));
+        let word_len = word.len();
+        // Need room for a leading and trailing space around the word.
+        if bytes.len() < word_len + 2 {
+            continue;
+        }
+        // The literal-space neighbours at `i - 1` / `i + word_len` ensure we
+        // only match a whole space-delimited token; comparing raw bytes
+        // (ASCII case-insensitive) avoids any UTF-8 slicing of `text`.
+        for i in 1..=bytes.len() - word_len - 1 {
+            if bytes[i - 1] == b' '
+                && bytes[i + word_len] == b' '
+                && bytes[i..i + word_len].eq_ignore_ascii_case(word.as_bytes())
+            {
+                let dist = i.abs_diff(center);
+                if best.is_none() || dist < best.unwrap().2 {
+                    best = Some((i, word_len, dist));
+                }
             }
-            search_start = search_start + pos + 1;
         }
     }
 
@@ -199,22 +218,12 @@ fn find_nearest_break_word(text: &str, center: usize) -> Option<(usize, usize)> 
 fn migrate_trailing_break_words(chunks: &mut [String]) {
     let mut i = 0;
     while i + 1 < chunks.len() {
-        let ends_with_break = BREAK_WORDS.iter().any(|w| {
-            let chunk = &chunks[i];
-            let lower = chunk.to_lowercase();
-            lower.ends_with(&format!(" {}", w)) || lower == *w
-        });
-
-        if ends_with_break {
-            // Find the break word at the end
-            let chunk = chunks[i].clone();
-            if let Some(last_space) = chunk.rfind(' ') {
-                let word = &chunk[last_space + 1..];
-                let lower_word = word.to_lowercase();
-                if BREAK_WORDS.contains(&lower_word.as_str()) {
-                    chunks[i] = chunk[..last_space].trim().to_string();
-                    chunks[i + 1] = format!("{} {}", word, chunks[i + 1]);
-                }
+        if let Some(last_space) = chunks[i].rfind(' ') {
+            let word = &chunks[i][last_space + 1..];
+            if BREAK_WORDS.iter().any(|w| word.eq_ignore_ascii_case(w)) {
+                let word = word.to_string();
+                chunks[i] = chunks[i][..last_space].trim().to_string();
+                chunks[i + 1] = format!("{} {}", word, chunks[i + 1]);
             }
         }
         i += 1;
@@ -405,5 +414,74 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ============================================================================
+    // UTF-8 safety regression tests
+    // ============================================================================
+
+    #[test]
+    fn chunk_nonascii_long_no_comma_does_not_panic() {
+        // Historical panic: an oversized "sentence" of 2-byte chars drove
+        // center_break_split to slice at non-char-boundary byte offsets.
+        let text = "é".repeat(200); // 400 bytes, no sentence delimiters
+        let chunks = chunk_text_for_tts(&text, 350);
+        assert!(!chunks.is_empty());
+        // Content is preserved (the splitter only ever inserts/strips whitespace).
+        let rejoined: String = chunks
+            .join("")
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        assert_eq!(rejoined, text);
+    }
+
+    #[test]
+    fn chunk_nonascii_with_comma_splits_safely() {
+        // A comma near the center of a long multi-byte string.
+        let half = "café au lait ".repeat(20);
+        let text = format!("{}, {}", half.trim(), half.trim());
+        assert!(text.len() > 350);
+        let chunks = chunk_text_for_tts(&text, 350);
+        assert!(chunks.len() >= 2);
+    }
+
+    #[test]
+    fn chunk_mixed_scripts_does_not_panic() {
+        for sample in [
+            "日本語のテキストをチャンクに分割する。".repeat(30), // CJK, 3-byte chars
+            "Ωμέγα δοκιμή ".repeat(60),                          // Greek, 2-byte
+            "🎉🎊".repeat(150),                                  // emoji, 4-byte
+        ] {
+            let chunks = chunk_text_for_tts(&sample, 100);
+            assert!(!chunks.is_empty());
+        }
+    }
+
+    #[test]
+    fn find_nearest_break_word_offset_safe_with_multibyte_prefix() {
+        // 'İ' (U+0130) is 2 bytes and lowercases to a 3-byte sequence, which
+        // used to drift offsets computed against a lowercased copy. The break
+        // word offset must index the original `text`, not a lowercased clone.
+        let text = "İ word and another phrase here";
+        if let Some((start, len)) = find_nearest_break_word(text, text.len() / 2) {
+            assert_eq!(&text[start..start + len], "and");
+        } else {
+            panic!("expected to locate the break word \"and\"");
+        }
+    }
+
+    #[test]
+    fn find_nearest_skips_continuation_bytes() {
+        // Whitespace search across multi-byte text returns a real char boundary.
+        let text = "café crème"; // space is the only ASCII whitespace
+        let pos = find_nearest(text, text.len() / 2, |i, _| {
+            text.as_bytes()
+                .get(i)
+                .is_some_and(|b| b.is_ascii_whitespace())
+        });
+        let pos = pos.expect("should find the space");
+        assert!(text.is_char_boundary(pos));
+        assert_eq!(text.as_bytes()[pos], b' ');
     }
 }
