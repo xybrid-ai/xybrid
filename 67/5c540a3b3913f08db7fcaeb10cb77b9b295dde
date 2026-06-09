@@ -1,0 +1,36 @@
+crates/llama-cpp-sys/Cargo.toml
+  s_c33a65359ca5aa::t_33b14309b6400b 2
+.github/workflows/release-publish.yml
+  s_c33a65359ca5aa::t_1fe8b244f54476 250
+crates/xybrid-llama/Cargo.toml
+  s_c33a65359ca5aa::t_2719f6d326b3ac 20
+  s_c33a65359ca5aa::t_84014e5e341fd9 23
+  s_c33a65359ca5aa::t_8c77d5d23f5b97 18
+  s_c33a65359ca5aa::t_bf15fcaebb1439 16
+  s_c33a65359ca5aa::t_997a2030c15144 7
+Cargo.lock
+  s_c33a65359ca5aa::t_2760c4522eb931 7113,7135-7144
+crates/xybrid-core/Cargo.toml
+  s_c33a65359ca5aa::t_cde6eaef7e53ca 25,143
+  s_c33a65359ca5aa::t_2b23d466bf65c3 139
+  s_c33a65359ca5aa::t_b3c38c6981ebc9 147-148
+  s_c33a65359ca5aa::t_4bfd660061d700 28
+  s_c33a65359ca5aa::t_7705c9d9a62036 22
+  s_c33a65359ca5aa::t_e8e765799629fd 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "675c540a3b3913f08db7fcaeb10cb77b9b295dde",
+  "prompts": {},
+  "sessions": {
+    "s_c33a65359ca5aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36a41d41-855e-452c-9515-d7efca8eb868",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
