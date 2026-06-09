@@ -2,6 +2,7 @@
 //!
 //! This module provides:
 //! - `tts_audio_encode_step`: Convert TTS waveform tensor to audio bytes
+//! - `crossfade_audio_chunks`: Concatenate audio chunks with linear crossfading
 
 use super::super::types::{ExecutorResult, RawOutputs};
 use crate::runtime_adapter::AdapterError;
@@ -110,6 +111,47 @@ fn samples_to_pcm16(samples: &[f32]) -> Vec<u8> {
     bytes
 }
 
+/// Concatenate audio chunks with linear crossfading at boundaries.
+///
+/// Applies a linear crossfade of `crossfade_len` samples between adjacent chunks.
+/// Single-chunk input is returned as-is. Chunks shorter than `2 * crossfade_len`
+/// skip crossfading for that boundary (safety guard).
+pub(crate) fn crossfade_audio_chunks(chunks: &[Vec<f32>], crossfade_len: usize) -> Vec<f32> {
+    if chunks.is_empty() {
+        return Vec::new();
+    }
+    if chunks.len() == 1 {
+        return chunks[0].clone();
+    }
+
+    // Start with the first chunk
+    let mut result = chunks[0].clone();
+
+    for chunk in &chunks[1..] {
+        // Skip crossfading if either the current result tail or the new chunk head
+        // is too short for the crossfade
+        if result.len() < 2 * crossfade_len || chunk.len() < 2 * crossfade_len {
+            result.extend(chunk);
+            continue;
+        }
+
+        let overlap_start = result.len() - crossfade_len;
+
+        // Apply crossfade in the overlap region
+        for i in 0..crossfade_len {
+            let t = (i + 1) as f32 / (crossfade_len + 1) as f32;
+            let fade_out = 1.0 - t;
+            let fade_in = t;
+            result[overlap_start + i] = result[overlap_start + i] * fade_out + chunk[i] * fade_in;
+        }
+
+        // Append the rest of the new chunk (after the overlap region)
+        result.extend_from_slice(&chunk[crossfade_len..]);
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +194,103 @@ mod tests {
 
         let trimmed = trim_trailing_near_silence(&samples, sample_rate);
         assert_eq!(trimmed.len(), samples.len());
+    }
+
+    #[test]
+    fn test_crossfade_empty_chunks() {
+        let chunks: Vec<Vec<f32>> = vec![];
+        let result = crossfade_audio_chunks(&chunks, 480);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_crossfade_single_chunk_unchanged() {
+        let chunk = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let result = crossfade_audio_chunks(std::slice::from_ref(&chunk), 480);
+        assert_eq!(result, chunk);
+    }
+
+    #[test]
+    fn test_crossfade_two_chunks() {
+        let crossfade_len = 4;
+        // Chunk A: 10 samples of 1.0
+        let chunk_a = vec![1.0; 10];
+        // Chunk B: 10 samples of 0.0
+        let chunk_b = vec![0.0; 10];
+
+        let result = crossfade_audio_chunks(&[chunk_a, chunk_b], crossfade_len);
+
+        // Result length: 10 + 10 - 4 (overlap) = 16
+        assert_eq!(result.len(), 16);
+
+        // First 6 samples: unchanged from chunk_a (before overlap)
+        for &v in &result[..6] {
+            assert!((v - 1.0).abs() < 1e-6);
+        }
+
+        // Overlap region (4 samples): linear blend from 1.0 to 0.0
+        // t = (i+1) / (crossfade_len+1), fade_out = 1-t, fade_in = t
+        // result[6+i] = 1.0 * (1-t) + 0.0 * t = 1-t
+        for i in 0..crossfade_len {
+            let t = (i + 1) as f32 / (crossfade_len + 1) as f32;
+            let expected = 1.0 - t;
+            assert!(
+                (result[6 + i] - expected).abs() < 1e-6,
+                "at overlap index {i}: got {}, expected {expected}",
+                result[6 + i]
+            );
+        }
+
+        // Last 6 samples: from chunk_b after overlap
+        for &v in &result[10..] {
+            assert!((v - 0.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_crossfade_three_chunks() {
+        let crossfade_len = 2;
+        let chunk_a = vec![1.0; 8];
+        let chunk_b = vec![0.5; 8];
+        let chunk_c = vec![0.0; 8];
+
+        let result = crossfade_audio_chunks(&[chunk_a, chunk_b, chunk_c], crossfade_len);
+
+        // Length: 8 + (8 - 2) + (8 - 2) = 20
+        assert_eq!(result.len(), 20);
+    }
+
+    #[test]
+    fn test_crossfade_short_chunk_skips_crossfade() {
+        let crossfade_len = 4;
+        // Chunk too short (len < 2 * crossfade_len = 8)
+        let chunk_a = vec![1.0; 10];
+        let chunk_b = vec![0.5; 6]; // Too short for crossfade
+
+        let result = crossfade_audio_chunks(&[chunk_a, chunk_b], crossfade_len);
+
+        // Should be simple concatenation (no crossfade)
+        assert_eq!(result.len(), 16);
+        assert!((result[9] - 1.0).abs() < 1e-6);
+        assert!((result[10] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_crossfade_preserves_total_energy() {
+        // When both chunks have the same constant value, crossfade should preserve it
+        let crossfade_len = 4;
+        let chunk_a = vec![0.5; 10];
+        let chunk_b = vec![0.5; 10];
+
+        let result = crossfade_audio_chunks(&[chunk_a, chunk_b], crossfade_len);
+
+        // In the overlap region: 0.5 * fade_out + 0.5 * fade_in = 0.5 * (fade_out + fade_in) = 0.5
+        // since fade_out + fade_in = 1.0
+        for &v in &result {
+            assert!(
+                (v - 0.5).abs() < 1e-6,
+                "expected 0.5, got {v} — crossfade should preserve constant signal"
+            );
+        }
     }
 }

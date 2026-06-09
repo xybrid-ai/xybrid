@@ -59,9 +59,17 @@
 //! - [`bundler`] - .xyb bundle creation and extraction
 //!
 //! ### High-Level APIs
-//! - [`cloud`] - Cloud client (third-party API integrations)
 //! - [`tts`] - Text-to-speech client
+//!
+//! ### Platform / control-plane (additive)
+//!
+//! Opt-in capabilities layered on the local engine — they extend the same
+//! runtime, they don't replace the offline path. See `CLAUDE.md` ("What xybrid
+//! is") for the foundation-vs-platform split.
+//! - [`cloud`] - Cloud client + API-key auth (gateway / direct provider routing)
 //! - [`gateway`] - OpenAI-compatible gateway types
+//! - `telemetry` - Observability, session metrics, platform export (internal)
+//! - `control_sync` - Control-plane policy / registry sync (scaffolded, internal)
 //!
 //! ## Public vs Internal Modules
 //!

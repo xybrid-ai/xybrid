@@ -8,9 +8,12 @@ The Xybrid SDK provides high-level abstractions and macros for building hybrid i
 
 ## Initialization
 
-Configure the SDK in one call with the `init()` builder. Inference runs
-on-device whether or not you authenticate; passing an API key starts the
-platform telemetry exporter so your runs show up on the dashboard.
+Configure the SDK in one call with the `init()` builder. The SDK is
+**local-first** — inference runs on-device whether or not you authenticate.
+Passing an API key adds the **platform layer** on top of the same runtime: it
+authenticates the cloud gateway (for local→cloud routing) and starts the
+telemetry exporter so your runs show up on the dashboard. The local path is
+unchanged either way.
 
 ```rust
 // Anonymous — local inference, telemetry disabled

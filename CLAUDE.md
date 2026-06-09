@@ -8,14 +8,46 @@ made a decision.** Read it before writing code.
 
 ---
 
+## What xybrid is (read this first)
+
+xybrid is a **local-first execution engine with a platform layer built on top**.
+Both planes share one codebase, and the platform plane is **additive** — it
+extends the same runtime without replacing the offline path:
+
+1. **Foundation — on-device execution engine.** Model load/run/stream,
+   pipelines, hardware acceleration. Zero-config, offline, no account required.
+   This is the default path and most of the code today.
+2. **Platform / control-plane layer (additive).** Opt-in capabilities layered on
+   the engine — the direction being actively built out. When a developer
+   authenticates, these light up *on top of* the same local runtime:
+   - **Auth / API keys** — `crates/xybrid-core/src/cloud/config.rs`
+     (`set_xybrid_api_key`, `XYBRID_API_KEY`). Gates the cloud gateway *and* the
+     telemetry exporter. Default gateway: `api.xybrid.dev`.
+   - **Cloud routing** — `crates/xybrid-core/src/cloud/` +
+     `crates/xybrid-core/src/orchestrator/routing_engine.rs` (local→cloud fallback under device stress).
+   - **Telemetry / observability** — `crates/xybrid-core/src/telemetry/`;
+     SDK exporter in `crates/xybrid-sdk/src/telemetry.rs`; ingest at `ingest.xybrid.dev`.
+   - **Remote routing authority** — `crates/xybrid-core/src/orchestrator/authority/remote.rs`
+     (`GET /v1/routing/advice`; partial).
+   - **Control sync** — `crates/xybrid-core/src/control_sync.rs` (policy /
+     registry refresh; scaffolded, backend not yet wired).
+
+The public README markets the foundation ("offline, no cloud, no API keys")
+because that's the zero-config default — the platform layer is what you add on
+top once you authenticate. **When touching `xybrid-sdk` or `xybrid-core`, treat
+the platform plane as a first-class, additive surface**, not an afterthought:
+new SDK entry points should consider whether they extend into it too.
+
+---
+
 ## Workspace layout
 
 Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 
 | Crate                          | Role                                                       | Layer    |
 |--------------------------------|------------------------------------------------------------|----------|
-| `crates/xybrid-core`           | ML execution, model inference, pipeline orchestration      | core lib |
-| `crates/xybrid-sdk`            | Public Rust SDK; high-level model load/run/stream API      | lib      |
+| `crates/xybrid-core`           | ML execution + pipelines; **additive platform plane** (cloud routing, telemetry, control sync) | core lib |
+| `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, telemetry) | lib      |
 | `crates/xybrid-cli`            | `xybrid` binary                                            | bin      |
 | `crates/xybrid-ffi`            | C ABI for Unity / C / C++                                  | FFI      |
 | `crates/xybrid-uniffi`         | UniFFI bindings for Swift / Kotlin (Apple/Android SDKs)    | FFI      |
