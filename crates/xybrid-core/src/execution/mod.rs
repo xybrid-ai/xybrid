@@ -92,6 +92,9 @@ pub(crate) use session_factory::{InferenceSession, OnnxSessionFactory, SessionFa
 // Base-path file resolution (internal)
 pub(crate) mod path;
 
+// TTS text chunking (internal)
+pub(crate) mod text_chunking;
+
 // Main executor
 mod executor;
 pub use executor::TemplateExecutor;
