@@ -1,5 +1,5 @@
 [package]
-name = "llama-cpp-sys"
+name = "xybrid-llama-sys"
 version.workspace = true
 edition.workspace = true
 license = "MIT"
