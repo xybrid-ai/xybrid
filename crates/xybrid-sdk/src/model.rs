@@ -806,22 +806,14 @@ pub struct ModelLoader {
     speculative_cloud: Option<bool>,
 }
 
-/// Pure speculation gate for "serve cloud while the model downloads".
-///
-/// Returns `true` only when speculation is enabled, a cloud API key is
-/// resolvable, and a ready-to-run copy is not already cached locally.
-pub(crate) fn speculative_gate(enabled: bool, has_api_key: bool, already_local: bool) -> bool {
-    enabled && has_api_key && !already_local
-}
-
 /// Whether a cloud gateway API key can be resolved right now.
 ///
 /// Covers the in-memory key set via [`crate::set_api_key`] and the
-/// `XYBRID_API_KEY` environment variable.
+/// `XYBRID_API_KEY` environment variable. Forwards to [`crate::has_api_key`],
+/// which checks presence without constructing a `CloudConfig` or cloning the
+/// key.
 fn cloud_api_key_present() -> bool {
-    xybrid_core::cloud::CloudConfig::default()
-        .resolve_api_key()
-        .is_some()
+    crate::has_api_key()
 }
 
 impl ModelLoader {
@@ -1097,11 +1089,9 @@ impl ModelLoader {
     /// }
     /// ```
     pub fn will_speculate(&self) -> bool {
-        speculative_gate(
-            self.speculative_enabled(),
-            cloud_api_key_present(),
-            self.is_extracted_locally(),
-        )
+        // Short-circuit: skip the API-key lookup and the local-cache disk check
+        // when speculation is disabled (the default).
+        self.speculative_enabled() && cloud_api_key_present() && !self.is_extracted_locally()
     }
 
     /// Resolve the speculative-cloud preference: the per-load override if set,
@@ -1118,7 +1108,10 @@ impl ModelLoader {
     fn is_extracted_locally(&self) -> bool {
         match &self.source {
             ModelSource::Registry { id, .. } => {
-                RegistryClient::from_env().is_ok_and(|client| client.is_extracted(id))
+                // A local cache check only — instantiate `CacheManager` directly
+                // rather than `RegistryClient::from_env()`, which would spin up
+                // an HTTP agent and circuit breakers we don't need here.
+                crate::cache::CacheManager::new().is_ok_and(|cache| cache.is_extracted(id))
             }
             _ => true,
         }
@@ -3114,18 +3107,6 @@ mod tests {
     /// Serializes the tests that mutate the process-global speculative flag so
     /// they don't observe each other's writes within the test binary.
     static SPEC_GLOBAL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    #[test]
-    fn speculative_gate_requires_enabled_key_and_not_local() {
-        // enabled && has_key && !already_local
-        assert!(speculative_gate(true, true, false));
-        assert!(!speculative_gate(false, true, false), "disabled");
-        assert!(!speculative_gate(true, false, false), "no api key");
-        assert!(
-            !speculative_gate(true, true, true),
-            "already cached locally"
-        );
-    }
 
     #[test]
     fn with_speculative_cloud_records_override() {
