@@ -24,10 +24,10 @@ extends the same runtime without replacing the offline path:
      (`set_xybrid_api_key`, `XYBRID_API_KEY`). Gates the cloud gateway *and* the
      telemetry exporter. Default gateway: `api.xybrid.dev`.
    - **Cloud routing** — `crates/xybrid-core/src/cloud/` +
-     `orchestrator/routing_engine.rs` (local→cloud fallback under device stress).
+     `crates/xybrid-core/src/orchestrator/routing_engine.rs` (local→cloud fallback under device stress).
    - **Telemetry / observability** — `crates/xybrid-core/src/telemetry/`;
      SDK exporter in `crates/xybrid-sdk/src/telemetry.rs`; ingest at `ingest.xybrid.dev`.
-   - **Remote routing authority** — `orchestrator/authority/remote.rs`
+   - **Remote routing authority** — `crates/xybrid-core/src/orchestrator/authority/remote.rs`
      (`GET /v1/routing/advice`; partial).
    - **Control sync** — `crates/xybrid-core/src/control_sync.rs` (policy /
      registry refresh; scaffolded, backend not yet wired).

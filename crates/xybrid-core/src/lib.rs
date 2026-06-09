@@ -68,8 +68,8 @@
 //! is") for the foundation-vs-platform split.
 //! - [`cloud`] - Cloud client + API-key auth (gateway / direct provider routing)
 //! - [`gateway`] - OpenAI-compatible gateway types
-//! - [`telemetry`] - Observability, session metrics, platform export
-//! - [`control_sync`] - Control-plane policy / registry sync (scaffolded)
+//! - `telemetry` - Observability, session metrics, platform export (internal)
+//! - `control_sync` - Control-plane policy / registry sync (scaffolded, internal)
 //!
 //! ## Public vs Internal Modules
 //!
