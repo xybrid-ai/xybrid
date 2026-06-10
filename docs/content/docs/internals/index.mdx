@@ -15,20 +15,18 @@ The system is built around these key components:
 
 | Component | Purpose |
 |-----------|---------|
-| [Envelope](/docs/internals/envelope) | Universal data container for audio, text, embeddings |
-| [Orchestrator](/docs/internals/orchestrator) | Routes requests to appropriate execution targets |
-| [Pipeline](/docs/internals/pipeline) | Chains multiple stages (ASR → LLM → TTS) |
-| [Executor](/docs/internals/executor) | Runs models via ONNX or Candle runtime |
-| [StreamSession](/docs/internals/stream-session) | Real-time streaming inference |
+| `Envelope` | Universal data container for audio, text, embeddings |
+| `Orchestrator` | Routes requests to appropriate execution targets |
+| [Pipeline](/docs/concepts/pipelines) | Chains multiple stages (ASR → LLM → TTS) |
+| `Executor` | Runs models via ONNX, llama.cpp, or Candle runtimes |
+| `StreamSession` | Real-time streaming inference |
 
 ## Data Flow
 
 1. **Input** arrives as an `Envelope` (audio bytes, text, or embeddings)
-2. **Orchestrator** determines execution target (device, cloud, or fallback)
+2. **Orchestrator** determines execution target (device, cloud, or fallback) — see [Hybrid Execution](/docs/concepts/hybrid-execution)
 3. **Executor** runs the model and produces output
 4. **Output** is wrapped in a new `Envelope` for the next stage
-
-See [Data Flow & Execution](/docs/internals/data-flow-and-execution) for details.
 
 ## Infrastructure
 

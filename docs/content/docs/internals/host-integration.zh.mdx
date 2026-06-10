@@ -1,0 +1,53 @@
+---
+title: 宿主集成
+description: 各平台上电池与散热信号如何到达路由引擎
+---
+
+路由引擎读取 `battery_level` 和 `thermal_state` 来决定某个阶段是在设备端运行还是回退到云端（参见[决策方法](/docs/internals/observability#decision-methods)）。在桌面端，这些信号来自 `xybrid-core` 进程内的轮询器。在移动端，平台的通知 API 位于宿主运行时中，因此由 SDK 包装层订阅并通过 FFI 推送数值。
+
+| 平台 | 电池 | 散热 |
+|------|------|------|
+| Linux    | sysfs（Rust 内部） | sysfs（Rust 内部） |
+| macOS    | IOKit（Rust 内部） | NSProcessInfo（Rust 内部） |
+| Windows  | `GetSystemPowerStatus`（Rust 内部） | WMI，后台线程（Rust 内部） |
+| iOS      | 宿主推送 | NSProcessInfo（Rust 内部） |
+| Android  | 宿主推送 | 宿主推送（API 29+） |
+
+## 初始化时自动接线
+
+每个 SDK 的初始化入口都会注册宿主观察者，应用无需编写平台通道样板代码。
+
+```kotlin
+// Android — Application.onCreate()
+Xybrid.init(this) // BatteryManager + PowerManager（API 29+）
+```
+
+```swift
+// iOS — UIDevice 电池观察者；macOS 无额外操作
+Xybrid.initialize()
+```
+
+```dart
+// Flutter — iOS / Android 使用 battery_plus；桌面端使用 Rust 内部轮询器
+await Xybrid.init();
+```
+
+## 覆盖接口
+
+如果你有自己的观察者基础设施，或想转发 SDK 未自动接线的信号（Flutter Android 散热、自定义电源管理），所有绑定都暴露了推送式状态设置函数：
+
+| 函数 | 效果 |
+|------|------|
+| `setBatteryLevel(percent)` | 替换缓存的电池百分比（0–100）。 |
+| `clearBatteryLevel()` | 将电池标记为未知。 |
+| `setThermalState(state)` | 替换缓存的散热状态。 |
+| `clearThermalState()` | 将散热标记为未知。 |
+
+设置函数是幂等且进程全局的；最近一次推送生效，因此在 SDK 默认接线之上调用它们是安全的。路由引擎将 `None` 视为"无信号"，而不会替换为乐观的默认值。
+
+## 已知缺口
+
+- **Flutter Android 散热**：没有被广泛采用的 Dart 包封装 `PowerManager.OnThermalStatusChangedListener`。如有需要，请通过自己的 `MethodChannel` 推送。
+- **Android API 24–28**：`addThermalStatusListener` 需要 API 29+。旧设备报告 `thermal_state = None`，路由引擎仅基于电池进行节流。
+
+底层 API 参见 [`xybrid_core::device::platform_state`](https://docs.rs/xybrid-core/latest/xybrid_core/device/platform_state/)。
