@@ -873,23 +873,21 @@ mod tests {
         // kokoro-82m ships an NPZ archive named voices.bin with a binary
         // loader label; indexing zip entry order returned the wrong voice
         // (bm_george → bf_emma). The file magic must win over the label.
-        let dir = std::env::temp_dir().join("xybrid-voice-loader-npz-magic-test");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("voices.bin"), b"PK\x03\x04not-a-real-zip").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("voices.bin"), b"PK\x03\x04not-a-real-zip").unwrap();
 
         let by_name = vec![1.0, 1.0];
         let by_index = vec![0.0, 0.0];
         let source = MockVoiceSource::new()
             .with_voice_by_name("voice_b", by_name.clone())
             .with_voice_at_index(1, by_index);
-        let loader = TtsVoiceLoader::with_source(dir.clone(), source);
+        let loader = TtsVoiceLoader::with_source(dir.path().to_path_buf(), source);
         let metadata = create_test_metadata_with_voices();
         let input = create_test_envelope_with_voice("voice_b");
 
         let result = loader.load(&metadata, &input).unwrap();
         assert_eq!(result, by_name);
 
-        std::fs::remove_file(dir.join("voices.bin")).ok();
     }
 
     // ============================================================================
