@@ -1,0 +1,63 @@
+{
+  "name": "react-native-xybrid",
+  "version": "0.1.0-beta12",
+  "description": "On-device + cloud ML inference for React Native (iOS + Android), backed by the Xybrid Rust SDK",
+  "main": "lib/commonjs/index.js",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/src/index.d.ts",
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
+  "files": [
+    "src",
+    "lib",
+    "android/build.gradle",
+    "android/src",
+    "android/libs",
+    "ios",
+    "react-native-xybrid.podspec",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf lib"
+  },
+  "keywords": [
+    "react-native",
+    "ios",
+    "android",
+    "ml",
+    "inference",
+    "asr",
+    "tts",
+    "llm",
+    "xybrid"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xybrid-ai/xybrid.git",
+    "directory": "bindings/react-native"
+  },
+  "author": "Xybrid AI <support@xybrid.dev>",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/xybrid-ai/xybrid/tree/master/bindings/react-native#readme",
+  "peerDependencies": {
+    "react": "*",
+    "react-native": ">=0.74.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "react": "18.3.1",
+    "react-native": "0.76.0",
+    "typescript": "^5.4.0"
+  },
+  "codegenConfig": {
+    "name": "RNXybridSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "ai.xybrid.reactnative"
+    }
+  }
+}
