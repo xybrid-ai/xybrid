@@ -887,7 +887,6 @@ mod tests {
 
         let result = loader.load(&metadata, &input).unwrap();
         assert_eq!(result, by_name);
-
     }
 
     // ============================================================================
