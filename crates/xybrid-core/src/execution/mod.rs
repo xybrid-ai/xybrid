@@ -92,6 +92,10 @@ pub(crate) mod path;
 // TTS text chunking (internal)
 pub(crate) mod text_chunking;
 
+// LLM telemetry span stampers (internal, LLM features only)
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+pub(crate) mod llm_telemetry;
+
 // Main executor
 mod executor;
 pub use executor::TemplateExecutor;
