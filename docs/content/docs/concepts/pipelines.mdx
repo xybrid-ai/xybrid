@@ -119,15 +119,17 @@ final result = await pipeline.run(
 
 ```rust
 use xybrid::Xybrid;
-use xybrid::ir::Envelope;
+use xybrid::ir::{Envelope, EnvelopeKind};
+
+let input = Envelope::new(EnvelopeKind::Audio(audio_bytes));
 
 // One call: parse, resolve, download, execute
-let result = Xybrid::run_pipeline(&yaml, &Envelope::audio(audio_bytes))?;
+let result = Xybrid::run_pipeline(&yaml, &input)?;
 
 // Or staged: inspect and preload first
 let pipeline = Xybrid::pipeline(&yaml)?.load()?;
 pipeline.load_models()?;
-let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+let result = pipeline.run(&input)?;
 ```
 
 ### SDK support

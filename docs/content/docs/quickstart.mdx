@@ -157,14 +157,15 @@ xybrid = "0.1.2"
 
 ```rust
 use xybrid::ModelLoader;
-use xybrid::ir::Envelope;
+use xybrid::ir::{Envelope, EnvelopeKind};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load a model from the registry
     let model = ModelLoader::from_registry("kokoro-82m").load()?;
 
     // Run text-to-speech
-    let result = model.run(&Envelope::text("Hello from Xybrid!"), None)?;
+    let input = Envelope::new(EnvelopeKind::Text("Hello from Xybrid!".into()));
+    let result = model.run(&input, None)?;
 
     // result contains the generated speech audio
     Ok(())

@@ -119,15 +119,17 @@ final result = await pipeline.run(
 
 ```rust
 use xybrid::Xybrid;
-use xybrid::ir::Envelope;
+use xybrid::ir::{Envelope, EnvelopeKind};
+
+let input = Envelope::new(EnvelopeKind::Audio(audio_bytes));
 
 // 一次调用：解析、解析模型、下载、执行
-let result = Xybrid::run_pipeline(&yaml, &Envelope::audio(audio_bytes))?;
+let result = Xybrid::run_pipeline(&yaml, &input)?;
 
 // 或分步：先检查再预加载
 let pipeline = Xybrid::pipeline(&yaml)?.load()?;
 pipeline.load_models()?;
-let result = pipeline.run(&Envelope::audio(audio_bytes))?;
+let result = pipeline.run(&input)?;
 ```
 
 ### SDK 支持情况

@@ -11,8 +11,8 @@ Each stage has a `target`:
 
 | Target | Behavior |
 |--------|----------|
-| `device` | Always run on-device (aliases: `local`, `edge`) |
-| `cloud` | Always run in the cloud (aliases: `server`, `integration`) |
+| `device` | Always run on-device (alias: `local`) |
+| `cloud` | Always run in the cloud (alias: `integration`) |
 | `auto` | Let the runtime decide — the default |
 
 ```yaml
@@ -40,11 +40,7 @@ Preview decisions without executing:
 xybrid run --config pipeline.yaml --input-audio q.wav --dry-run
 ```
 
-You can also force a target at run time without editing the YAML:
-
-```bash
-xybrid run --config pipeline.yaml --input-audio q.wav --target device
-```
+To force a route, set `target: device` or `target: cloud` on the stage in the pipeline YAML.
 
 ## Cloud execution
 

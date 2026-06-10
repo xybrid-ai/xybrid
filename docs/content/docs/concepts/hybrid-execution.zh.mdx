@@ -11,8 +11,8 @@ Xybrid 是一个*混合*运行时：每个流水线阶段都可以在设备端�
 
 | 目标 | 行为 |
 |------|------|
-| `device` | 始终在设备端运行（别名：`local`、`edge`） |
-| `cloud` | 始终在云端运行（别名：`server`、`integration`） |
+| `device` | 始终在设备端运行（别名：`local`） |
+| `cloud` | 始终在云端运行（别名：`integration`） |
 | `auto` | 交由运行时决定 — 默认值 |
 
 ```yaml
@@ -40,11 +40,7 @@ stages:
 xybrid run --config pipeline.yaml --input-audio q.wav --dry-run
 ```
 
-也可以在运行时强制指定目标，无需修改 YAML：
-
-```bash
-xybrid run --config pipeline.yaml --input-audio q.wav --target device
-```
+如需强制指定路由，请在流水线 YAML 的阶段上设置 `target: device` 或 `target: cloud`。
 
 ## 云端执行
 
