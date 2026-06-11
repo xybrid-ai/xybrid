@@ -3044,7 +3044,7 @@ impl XybridModel {
         // token at the end) don't trigger cloud fallback after local
         // inference already succeeded — see helper docs for the full
         // privacy/cost rationale.
-        let supports_streaming = self.supports_token_streaming();
+        let supports_streaming = self.supports_streaming;
         let mut abort_state = AbortState::new(options);
         // Honour pre-run cancellation: without this, a non-streaming model
         // whose `supports_streaming = false` would silently execute the full

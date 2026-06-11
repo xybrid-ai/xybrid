@@ -2218,6 +2218,60 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        format!("{:x}", hasher.finalize())
+    }
+
+    fn linux_llamacpp_selector_cfg() -> SelectorCfg {
+        SelectorCfg {
+            target: "linux-x86_64".to_string(),
+            host_is_apple_arm64: false,
+            mlx_compiled: false,
+            llamacpp_compiled: true,
+            mistral_compiled: false,
+            mlx_runtime_ok: false,
+        }
+    }
+
+    fn macos_all_backends_selector_cfg() -> SelectorCfg {
+        SelectorCfg {
+            target: "macos-aarch64".to_string(),
+            host_is_apple_arm64: true,
+            mlx_compiled: true,
+            llamacpp_compiled: true,
+            mistral_compiled: true,
+            mlx_runtime_ok: true,
+        }
+    }
+
+    fn write_cached_task_metadata(
+        client: &RegistryClient,
+        model_id: &str,
+        format: &str,
+        task: &str,
+    ) {
+        let model_dir = client.extraction_dir_with_format(model_id, format);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        // `CacheManager::extraction_is_ready` only treats a directory as an
+        // offline-usable extraction when model_metadata.json parses as a full
+        // ModelMetadata and every declared file exists, so write a real
+        // (file-less) metadata document instead of a bare task blob.
+        let mut metadata =
+            xybrid_core::execution::ModelMetadata::onnx(model_id, "1.0", "model.onnx");
+        metadata.files = Vec::new();
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!(task));
+        std::fs::write(
+            model_dir.join("model_metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[cfg(feature = "llm-llamacpp-vision")]
     fn create_vlm_bundle(temp_dir: &tempfile::TempDir, model_id: &str) -> PathBuf {
         let model_dir = temp_dir.path().join("bundle_model_files");
         std::fs::create_dir_all(&model_dir).unwrap();

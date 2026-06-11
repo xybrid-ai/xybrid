@@ -1014,6 +1014,10 @@ impl TemplateExecutor {
                 "LLM model detected, converting context to ChatMessages"
             );
 
+            #[cfg(all(
+                feature = "llm-llamacpp-vision",
+                any(feature = "llm-mistral", feature = "llm-llamacpp")
+            ))]
             reject_text_only_model_image_input(metadata, input)?;
 
             // Convert ConversationContext + input to ChatMessages directly.
@@ -1143,7 +1147,10 @@ impl TemplateExecutor {
     ) -> ExecutorResult<Envelope> {
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
         {
-            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            #[cfg(all(
+                feature = "llm-llamacpp-vision",
+                any(feature = "llm-mistral", feature = "llm-llamacpp")
+            ))]
             if let super::template::ExecutionTemplate::VisionLanguage {
                 model_file,
                 chat_template,
@@ -1317,7 +1324,10 @@ impl TemplateExecutor {
 
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
         {
-            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            #[cfg(all(
+                feature = "llm-llamacpp-vision",
+                any(feature = "llm-mistral", feature = "llm-llamacpp")
+            ))]
             if let ExecutionTemplate::VisionLanguage {
                 model_file,
                 chat_template,
@@ -1400,6 +1410,10 @@ impl TemplateExecutor {
                     "LLM model detected, converting context to ChatMessages for streaming"
                 );
 
+                #[cfg(all(
+                    feature = "llm-llamacpp-vision",
+                    any(feature = "llm-mistral", feature = "llm-llamacpp")
+                ))]
                 reject_text_only_model_image_input(metadata, input)?;
 
                 // Convert ConversationContext + input to ChatMessages
@@ -1500,6 +1514,10 @@ impl TemplateExecutor {
         xybrid_trace::add_metadata("streaming", "true");
         stamp_llm_span_cost_attribution(metadata);
 
+        #[cfg(all(
+            feature = "llm-llamacpp-vision",
+            any(feature = "llm-mistral", feature = "llm-llamacpp")
+        ))]
         reject_text_only_model_image_input(metadata, input)?;
 
         // Build full model path
@@ -2066,6 +2084,10 @@ impl TemplateExecutor {
         // entry points.
         stamp_llm_span_cost_attribution(metadata);
 
+        #[cfg(all(
+            feature = "llm-llamacpp-vision",
+            any(feature = "llm-mistral", feature = "llm-llamacpp")
+        ))]
         reject_text_only_model_image_input(metadata, input)?;
 
         // Build full model path
@@ -3844,6 +3866,277 @@ mod tests {
         let executor = TemplateExecutor::with_runtimes("/test", runtimes);
         assert_eq!(executor.base_path, "/test");
         assert!(executor.list_runtimes().is_empty());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+    #[test]
+    fn test_llm_adapter_cache_key_tracks_backend_and_load_config() {
+        let base = llm_adapter_cache_key(
+            "/models",
+            "model.gguf",
+            Some("chat-template.json"),
+            2048,
+            Some("llama_cpp"),
+        );
+        let backend_alias = llm_adapter_cache_key(
+            "/models",
+            "model.gguf",
+            Some("chat-template.json"),
+            2048,
+            Some("llamacpp"),
+        );
+        assert_eq!(
+            base, backend_alias,
+            "backend aliases should share the same cache entry"
+        );
+
+        let auto_backend = llm_adapter_cache_key(
+            "/models",
+            "model.gguf",
+            Some("chat-template.json"),
+            2048,
+            None,
+        );
+        assert_ne!(
+            base, auto_backend,
+            "explicit backend changes must not reuse an auto backend adapter"
+        );
+
+        let other_template = llm_adapter_cache_key(
+            "/models",
+            "model.gguf",
+            Some("other.json"),
+            2048,
+            Some("llamacpp"),
+        );
+        assert_ne!(
+            base, other_template,
+            "chat template changes require a reload"
+        );
+
+        let other_context = llm_adapter_cache_key(
+            "/models",
+            "model.gguf",
+            Some("chat-template.json"),
+            4096,
+            Some("llamacpp"),
+        );
+        assert_ne!(
+            base, other_context,
+            "context length changes require a reload"
+        );
+
+        let config = llm_config_from_cache_key(&base);
+        assert_eq!(config.model_path, "/models/model.gguf");
+        assert_eq!(
+            config.chat_template.as_deref(),
+            Some("/models/chat-template.json")
+        );
+        assert_eq!(config.context_length, 2048);
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx",
+        not(any(feature = "llm-mistral", feature = "llm-llamacpp"))
+    ))]
+    #[test]
+    fn test_llm_execution_spec_does_not_route_gguf_without_gguf_backend() {
+        let metadata = ModelMetadata {
+            model_id: "llama-gguf".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 4096,
+                generation_params: None,
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec!["model.gguf".to_string()],
+            #[cfg(feature = "llm-llamacpp-vision")]
+            vision_encoder: None,
+            description: None,
+            backend: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        assert!(
+            llm_execution_spec(&metadata).is_none(),
+            "non-linking llm-mlx builds must not route GGUF into the MLX adapter"
+        );
+
+        let mut executor = TemplateExecutor::with_runtimes("/missing/model-dir", HashMap::new());
+        let err = executor
+            .execute(
+                &metadata,
+                &Envelope::new(EnvelopeKind::Text("hello".to_string())),
+                None,
+            )
+            .expect_err("GGUF without a GGUF backend feature should fail before model loading");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("'llm-mistral' or 'llm-llamacpp'"),
+            "expected a GGUF backend feature error, got {msg}"
+        );
+        assert!(
+            !msg.contains("config.json"),
+            "GGUF metadata must not be interpreted as an MLX bundle: {msg}"
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn test_llm_execution_spec_routes_gguf_when_gguf_backend_is_compiled() {
+        let metadata = ModelMetadata {
+            model_id: "llama-gguf".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: Some("chat-template.json".to_string()),
+                context_length: 2048,
+                generation_params: None,
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec!["model.gguf".to_string()],
+            #[cfg(feature = "llm-llamacpp-vision")]
+            vision_encoder: None,
+            description: None,
+            backend: Some("llamacpp".to_string()),
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        let (model_file, chat_template, context_length, backend_hint) =
+            llm_execution_spec(&metadata).expect("GGUF should route with a GGUF backend feature");
+
+        assert_eq!(model_file, "model.gguf");
+        assert_eq!(chat_template, Some("chat-template.json"));
+        assert_eq!(context_length, 2048);
+        assert_eq!(backend_hint, Some("llamacpp"));
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_llm_execution_spec_routes_mlx_safetensors_to_bundle_root() {
+        let metadata = ModelMetadata {
+            model_id: "qwen3.5-0.6b-mlx".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::SafeTensors {
+                model_file: "model.safetensors".to_string(),
+                architecture: Some("qwen3".to_string()),
+                config_file: Some("config.json".to_string()),
+                tokenizer_file: Some("tokenizer.json".to_string()),
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec![
+                "config.json".to_string(),
+                "tokenizer.json".to_string(),
+                "model.safetensors".to_string(),
+            ],
+            #[cfg(feature = "llm-llamacpp-vision")]
+            vision_encoder: None,
+            description: None,
+            backend: Some("mlx".to_string()),
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        let (model_file, chat_template, context_length, backend_hint) =
+            llm_execution_spec(&metadata).expect("MLX SafeTensors should route as local LLM");
+
+        assert_eq!(model_file, "");
+        assert_eq!(chat_template, None);
+        assert_eq!(context_length, 4096);
+        assert_eq!(backend_hint, Some("mlx"));
+        assert_eq!(
+            resolve_llm_model_path("/bundle/qwen", model_file),
+            "/bundle/qwen"
+        );
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_llm_execution_spec_routes_auto_qwen_mlx_safetensors() {
+        let metadata = ModelMetadata {
+            model_id: "qwen3.5-0.6b-mlx".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::SafeTensors {
+                model_file: "model.safetensors".to_string(),
+                architecture: Some("qwen3".to_string()),
+                config_file: Some("config.json".to_string()),
+                tokenizer_file: Some("tokenizer.json".to_string()),
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec![
+                "config.json".to_string(),
+                "tokenizer.json".to_string(),
+                "model.safetensors".to_string(),
+            ],
+            #[cfg(feature = "llm-llamacpp-vision")]
+            vision_encoder: None,
+            description: None,
+            backend: Some("auto".to_string()),
+            metadata: HashMap::from([("context_length".to_string(), serde_json::json!(8192))]),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        let (model_file, chat_template, context_length, backend_hint) =
+            llm_execution_spec(&metadata).expect("auto MLX SafeTensors should route as local LLM");
+
+        assert_eq!(model_file, "");
+        assert_eq!(chat_template, None);
+        assert_eq!(context_length, 8192);
+        assert_eq!(backend_hint, Some("mlx"));
+        assert_eq!(
+            resolve_llm_model_path("/bundle/qwen", model_file),
+            "/bundle/qwen"
+        );
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn test_executor_dispatches_mlx_embedding_before_generic_safetensors_runtime() {
+        let mut metadata = ModelMetadata::safetensors(
+            "nomic-embed-text",
+            "1.0",
+            "model.safetensors",
+            "nomic_bert",
+        );
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("text-embedding"));
+        metadata.backend = Some("auto".to_string());
+
+        let mut executor = TemplateExecutor::with_runtimes("/missing/model-dir", HashMap::new());
+        let err = executor
+            .execute(
+                &metadata,
+                &Envelope::new(EnvelopeKind::Text("hello".to_string())),
+                None,
+            )
+            .expect_err("missing MLX bundle should fail inside the MLX embedding strategy");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("config.json"),
+            "expected MLX embedding adapter to validate the bundle root, got {msg}"
+        );
+        assert!(
+            !msg.contains("candle"),
+            "MLX embedding metadata must not fall through to the generic SafeTensors runtime: {msg}"
+        );
     }
 
     #[test]

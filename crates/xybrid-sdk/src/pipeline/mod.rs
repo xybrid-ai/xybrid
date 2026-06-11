@@ -161,6 +161,14 @@ fn pipeline_input_type_from_metadata(metadata: &ModelMetadata) -> PipelineInputT
             PreprocessingStep::Normalize { .. }
             | PreprocessingStep::Resize { .. }
             | PreprocessingStep::CenterCrop { .. } => {}
+            // Image-preprocessing steps don't pin the *pipeline* input type
+            // here: vision input classification rides the VisionLanguage
+            // template / task path below.
+            #[cfg(feature = "llm-llamacpp-vision")]
+            PreprocessingStep::ImageDecode { .. }
+            | PreprocessingStep::ImageResize { .. }
+            | PreprocessingStep::ImageNormalize { .. }
+            | PreprocessingStep::ImageIngress { .. } => {}
         }
     }
 
