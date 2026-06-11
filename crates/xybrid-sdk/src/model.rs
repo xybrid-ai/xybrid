@@ -801,9 +801,19 @@ pub struct ModelLoader {
     source: ModelSource,
     model_id: Option<String>,
     version: Option<String>,
+    cpu_threads: Option<usize>,
 }
 
 impl ModelLoader {
+    fn new(source: ModelSource, model_id: Option<String>, version: Option<String>) -> Self {
+        Self {
+            source,
+            model_id,
+            version,
+            cpu_threads: None,
+        }
+    }
+
     /// Create loader from registry (recommended).
     ///
     /// Uses the registry API to resolve the model ID to the best variant
@@ -820,11 +830,11 @@ impl ModelLoader {
     /// # }
     /// ```
     pub fn from_registry(id: &str) -> Self {
-        Self {
-            source: ModelSource::registry(id),
-            model_id: Some(id.to_string()),
-            version: None, // Version is resolved by registry API
-        }
+        Self::new(
+            ModelSource::registry(id),
+            Some(id.to_string()),
+            None, // Version is resolved by registry API
+        )
     }
 
     /// Create loader from registry with explicit platform.
@@ -839,11 +849,11 @@ impl ModelLoader {
     /// # }
     /// ```
     pub fn from_registry_with_platform(id: &str, platform: &str) -> Self {
-        Self {
-            source: ModelSource::registry_with_platform(id, platform),
-            model_id: Some(id.to_string()),
-            version: None,
-        }
+        Self::new(
+            ModelSource::registry_with_platform(id, platform),
+            Some(id.to_string()),
+            None,
+        )
     }
 
     /// Create loader from legacy registry with direct URL.
@@ -853,11 +863,11 @@ impl ModelLoader {
     #[deprecated(since = "0.0.17", note = "Use ModelLoader::from_registry() instead")]
     #[allow(deprecated)]
     pub fn from_legacy_registry(url: &str, model_id: &str, version: &str) -> Self {
-        Self {
-            source: ModelSource::legacy_registry(url, model_id, version),
-            model_id: Some(model_id.to_string()),
-            version: Some(version.to_string()),
-        }
+        Self::new(
+            ModelSource::legacy_registry(url, model_id, version),
+            Some(model_id.to_string()),
+            Some(version.to_string()),
+        )
     }
 
     /// Create loader from legacy registry with explicit platform.
@@ -875,11 +885,11 @@ impl ModelLoader {
         version: &str,
         platform: &str,
     ) -> Self {
-        Self {
-            source: ModelSource::legacy_registry_with_platform(url, model_id, version, platform),
-            model_id: Some(model_id.to_string()),
-            version: Some(version.to_string()),
-        }
+        Self::new(
+            ModelSource::legacy_registry_with_platform(url, model_id, version, platform),
+            Some(model_id.to_string()),
+            Some(version.to_string()),
+        )
     }
 
     /// Create loader from local bundle file.
@@ -891,11 +901,7 @@ impl ModelLoader {
                 path
             )));
         }
-        Ok(Self {
-            source: ModelSource::bundle(path),
-            model_id: None,
-            version: None,
-        })
+        Ok(Self::new(ModelSource::bundle(path), None, None))
     }
 
     /// Create loader from local model directory.
@@ -924,11 +930,7 @@ impl ModelLoader {
             .map_err(|e| {
                 SdkError::MetadataInvalid(format!("invalid model_metadata.json: {}", e))
             })?;
-        Ok(Self {
-            source: ModelSource::directory(path),
-            model_id: None,
-            version: None,
-        })
+        Ok(Self::new(ModelSource::directory(path), None, None))
     }
 
     /// Create loader from a HuggingFace Hub repository.
@@ -952,11 +954,7 @@ impl ModelLoader {
     /// # }
     /// ```
     pub fn from_huggingface(repo: &str) -> Self {
-        Self {
-            source: ModelSource::huggingface(repo),
-            model_id: Some(repo.to_string()),
-            version: None,
-        }
+        Self::new(ModelSource::huggingface(repo), Some(repo.to_string()), None)
     }
 
     /// Create loader from a HuggingFace Hub repository with explicit revision.
@@ -971,11 +969,11 @@ impl ModelLoader {
     /// # }
     /// ```
     pub fn from_huggingface_with_revision(repo: &str, revision: &str) -> Self {
-        Self {
-            source: ModelSource::huggingface_with_revision(repo, revision),
-            model_id: Some(repo.to_string()),
-            version: Some(revision.to_string()),
-        }
+        Self::new(
+            ModelSource::huggingface_with_revision(repo, revision),
+            Some(repo.to_string()),
+            Some(revision.to_string()),
+        )
     }
 
     /// Create loader from a HuggingFace repo string, parsing optional variant suffix.
@@ -995,11 +993,24 @@ impl ModelLoader {
     pub fn from_huggingface_parsed(input: &str) -> Self {
         let source = ModelSource::parse_huggingface(input);
         let repo = source.model_id().unwrap_or(input).to_string();
-        Self {
-            source,
-            model_id: Some(repo),
-            version: None,
-        }
+        Self::new(source, Some(repo), None)
+    }
+
+    /// Set the CPU thread count used by LLM backends.
+    ///
+    /// Passing `0` clears the override and lets the backend use its default.
+    pub fn with_cpu_threads(mut self, n_threads: usize) -> Self {
+        self.cpu_threads = if n_threads == 0 {
+            None
+        } else {
+            Some(n_threads)
+        };
+        self
+    }
+
+    /// CPU thread override used by LLM backends, if configured.
+    pub fn cpu_threads(&self) -> Option<usize> {
+        self.cpu_threads
     }
 
     /// Get the model ID (if known).
@@ -1162,7 +1173,7 @@ impl ModelLoader {
         let extract_dir = cache.ensure_extracted(path)?;
 
         // Load from extracted directory (extraction is permanent in cache)
-        let handle = Self::create_model_handle(&extract_dir)?;
+        let handle = self.create_model_handle(&extract_dir)?;
 
         let model_id = handle.metadata.model_id.clone();
         let version = handle.metadata.version.clone();
@@ -1440,7 +1451,7 @@ impl ModelLoader {
     }
 
     fn load_from_directory(&self, path: &PathBuf) -> SdkResult<XybridModel> {
-        let handle = Self::create_model_handle(path)?;
+        let handle = self.create_model_handle(path)?;
 
         let model_id = handle.metadata.model_id.clone();
         let version = handle.metadata.version.clone();
@@ -1456,7 +1467,7 @@ impl ModelLoader {
         })
     }
 
-    fn create_model_handle(model_dir: &PathBuf) -> SdkResult<ModelHandle> {
+    fn create_model_handle(&self, model_dir: &PathBuf) -> SdkResult<ModelHandle> {
         // Load metadata
         let metadata_path = model_dir.join("model_metadata.json");
         let metadata_str = std::fs::read_to_string(&metadata_path)
@@ -1465,7 +1476,10 @@ impl ModelLoader {
             .map_err(|e| SdkError::load_src("Failed to parse metadata", e))?;
 
         // Create executor with base path
-        let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
+        let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
+        if let Some(cpu_threads) = self.cpu_threads {
+            executor = executor.with_cpu_threads(cpu_threads);
+        }
 
         Ok(ModelHandle {
             executor,
@@ -3151,6 +3165,33 @@ mod tests {
             "GGUF LLMs stream tokens and must run abort checks between chunks"
         );
         assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Text);
+    }
+
+    #[test]
+    fn model_loader_cpu_threads_reach_template_executor() {
+        let dir = tempfile::tempdir().expect("temp model dir");
+        let metadata = ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
+        std::fs::write(
+            dir.path().join("model_metadata.json"),
+            serde_json::to_string(&metadata).expect("metadata json"),
+        )
+        .expect("write metadata");
+
+        let model = ModelLoader::from_directory(dir.path())
+            .expect("loader")
+            .with_cpu_threads(3)
+            .load()
+            .expect("model load");
+        let handle = model.handle.read().expect("model handle");
+
+        assert_eq!(handle.executor.cpu_threads(), Some(3));
+    }
+
+    #[test]
+    fn model_loader_cpu_threads_zero_uses_backend_default() {
+        let loader = ModelLoader::from_registry("qwen3.5-2b").with_cpu_threads(0);
+
+        assert_eq!(loader.cpu_threads(), None);
     }
 
     #[test]

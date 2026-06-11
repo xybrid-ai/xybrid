@@ -346,6 +346,7 @@ impl RuntimeAdapter for OnnxRuntimeAdapter {
             self.execution_provider,
             SessionOptions {
                 capture_resolved_ep: true,
+                ..Default::default()
             },
         )?;
 

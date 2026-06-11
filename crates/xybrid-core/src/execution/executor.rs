@@ -41,6 +41,7 @@ use crate::runtime_adapter::{AdapterError, ModelRuntime};
 use crate::tracing as xybrid_trace;
 use ndarray::ArrayD;
 use std::collections::HashMap;
+use std::env;
 use std::path::Path;
 
 use super::listener::ExecutionGuard;
@@ -51,6 +52,13 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     } else {
         guard.set_failed(error.to_string());
     }
+}
+
+fn cpu_threads_from_env() -> Option<usize> {
+    env::var("XYBRID_CPU_THREADS")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|threads| *threads > 0)
 }
 
 /// Stamp cost-attribution metadata (`backend`, `quantization`) onto the
@@ -168,6 +176,8 @@ pub struct TemplateExecutor {
     runtimes: HashMap<String, Box<dyn ModelRuntime>>,
     /// Base path for resolving relative model paths
     base_path: String,
+    /// Optional CPU thread count for LLM backends. None keeps backend defaults.
+    cpu_threads: Option<usize>,
     /// Cached LLM adapter to avoid reloading models between executions.
     /// Stores (model_path, adapter) tuple - reused if model_path matches.
     /// This field always exists but is only populated when LLM features are enabled.
@@ -229,8 +239,41 @@ impl TemplateExecutor {
         Self {
             runtimes,
             base_path: base_path.into(),
+            cpu_threads: cpu_threads_from_env(),
             llm_adapter_cache: None,
         }
+    }
+
+    /// Set the CPU thread count used by LLM backends.
+    ///
+    /// Passing `0` clears the override and lets the backend use its default.
+    pub fn with_cpu_threads(mut self, n_threads: usize) -> Self {
+        self.cpu_threads = if n_threads == 0 {
+            None
+        } else {
+            Some(n_threads)
+        };
+        self
+    }
+
+    /// CPU thread override used by LLM backends, if configured.
+    pub fn cpu_threads(&self) -> Option<usize> {
+        self.cpu_threads
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn apply_llm_thread_config(&self, config: LlmConfig) -> LlmConfig {
+        if let Some(n_threads) = self.cpu_threads {
+            config.with_threads(n_threads)
+        } else {
+            config
+        }
+    }
+
+    fn session_options(&self) -> SessionOptions {
+        let mut options = SessionOptions::default();
+        options.intra_threads = self.cpu_threads;
+        options
     }
 
     /// Create the default set of runtimes based on enabled features.
@@ -493,7 +536,7 @@ impl TemplateExecutor {
             let session = OnnxSessionFactory::create_session(
                 &model_full_path,
                 ExecutionProviderKind::Cpu,
-                SessionOptions::default(),
+                self.session_options(),
             )?;
             let raw_outputs =
                 execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
@@ -1066,8 +1109,9 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = self.apply_llm_thread_config(
+                LlmConfig::new(model_path_str.clone()).with_context_length(context_length),
+            );
 
             if let Some(template) = chat_template {
                 let template_path = Path::new(&self.base_path).join(template);
@@ -1208,7 +1252,9 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let config = self.apply_llm_thread_config(
+                LlmConfig::new(model_path_str.clone()).with_context_length(context_length),
+            );
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
@@ -1308,7 +1354,9 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let config = self.apply_llm_thread_config(
+                LlmConfig::new(model_path_str.clone()).with_context_length(context_length),
+            );
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
@@ -1427,8 +1475,9 @@ impl TemplateExecutor {
         // Load model if needed (cache miss or different model)
         if need_load {
             // Create LLM config
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = self.apply_llm_thread_config(
+                LlmConfig::new(model_path_str.clone()).with_context_length(context_length),
+            );
 
             if let Some(template) = chat_template {
                 let template_path = Path::new(&self.base_path).join(template);
@@ -1819,7 +1868,7 @@ impl TemplateExecutor {
         let session = OnnxSessionFactory::create_session(
             model_path,
             ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
+            self.session_options(),
         )?;
         let speed = extract_tts_speed(input);
 
@@ -1924,7 +1973,7 @@ impl TemplateExecutor {
         let session = OnnxSessionFactory::create_session(
             model_path,
             ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
+            self.session_options(),
         )?;
         let speed = extract_tts_speed(input);
         let mut raw_outputs = execute_tts_inference(&session, phoneme_ids, voice_embedding, speed)?;
@@ -2105,6 +2154,26 @@ mod tests {
     fn test_executor_with_base_path() {
         let executor = TemplateExecutor::with_base_path("/path/to/models");
         assert_eq!(executor.base_path, "/path/to/models");
+    }
+
+    #[test]
+    fn test_executor_cpu_threads_option_normalizes_zero() {
+        let executor = TemplateExecutor::with_base_path("/path/to/models").with_cpu_threads(4);
+        assert_eq!(executor.cpu_threads(), Some(4));
+        assert_eq!(executor.session_options().intra_threads, Some(4));
+
+        let executor = executor.with_cpu_threads(0);
+        assert_eq!(executor.cpu_threads(), None);
+        assert_eq!(executor.session_options().intra_threads, None);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn test_executor_applies_cpu_threads_to_llm_config() {
+        let executor = TemplateExecutor::with_base_path("/models").with_cpu_threads(3);
+        let config = executor.apply_llm_thread_config(LlmConfig::new("model.gguf"));
+
+        assert_eq!(config.n_threads, 3);
     }
 
     #[test]
