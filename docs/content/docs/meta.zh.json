@@ -3,6 +3,8 @@
     "---[Book]简介---",
     "introduction",
     "quickstart",
+    "---[BookOpen]指南---",
+    "...guides",
     "---[Puzzle]集成---",
     "...(integration)",
     "---[Cog]核心概念---",
