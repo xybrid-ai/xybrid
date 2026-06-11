@@ -174,6 +174,12 @@ fn check_cmake_available() -> bool {
         .unwrap_or(false)
 }
 
+fn define_from_env_or(cmake_config: &mut cmake::Config, name: &str, default: &str) {
+    println!("cargo:rerun-if-env-changed={name}");
+    let value = env::var(name).unwrap_or_else(|_| default.to_string());
+    cmake_config.define(name, value);
+}
+
 /// Get platform-specific CMake installation instructions
 fn cmake_install_instructions() -> &'static str {
     if cfg!(target_os = "macos") {
@@ -566,6 +572,23 @@ fn compile_llama_cpp() {
         cmake_config
             .define("GGML_METAL", "OFF")
             .define("GGML_CUDA", "OFF");
+        if ctx.target_arch == "x86_64" {
+            define_from_env_or(&mut cmake_config, "GGML_NATIVE", "OFF");
+            define_from_env_or(&mut cmake_config, "GGML_SSE42", "ON");
+            define_from_env_or(&mut cmake_config, "GGML_AVX", "ON");
+            define_from_env_or(&mut cmake_config, "GGML_AVX2", "ON");
+            define_from_env_or(&mut cmake_config, "GGML_FMA", "ON");
+            define_from_env_or(&mut cmake_config, "GGML_F16C", "ON");
+            define_from_env_or(&mut cmake_config, "GGML_BMI2", "ON");
+            define_from_env_or(&mut cmake_config, "GGML_AVX_VNNI", "OFF");
+            define_from_env_or(&mut cmake_config, "GGML_AVX512", "OFF");
+            define_from_env_or(&mut cmake_config, "GGML_AVX512_VBMI", "OFF");
+            define_from_env_or(&mut cmake_config, "GGML_AVX512_VNNI", "OFF");
+            define_from_env_or(&mut cmake_config, "GGML_AVX512_BF16", "OFF");
+            define_from_env_or(&mut cmake_config, "GGML_AMX_TILE", "OFF");
+            define_from_env_or(&mut cmake_config, "GGML_AMX_INT8", "OFF");
+            define_from_env_or(&mut cmake_config, "GGML_AMX_BF16", "OFF");
+        }
     } else if ctx.target_os == "windows" {
         cmake_config
             .define("GGML_METAL", "OFF")
