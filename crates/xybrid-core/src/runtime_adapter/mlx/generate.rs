@@ -635,6 +635,8 @@ mod runtime {
                 inter_chunk_ms: fields.inter_chunk_ms,
                 decode_tps: fields.decode_tps,
                 prefill_tps: fields.prefill_tps,
+                // Text-only MLX path: no image preprocessing leg to time.
+                image_preprocess_ms: None,
             })
         })();
 

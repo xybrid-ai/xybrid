@@ -1943,6 +1943,7 @@ stages:
             dir,
             None,
             Some(prompt),
+            &[],
             None,
             Some(&output_path),
             Some("mlx"),
