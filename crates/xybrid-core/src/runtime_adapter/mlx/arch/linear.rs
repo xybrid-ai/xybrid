@@ -73,8 +73,14 @@ pub struct QuantizedLinear {
 
 impl LinearWeight {
     pub fn dense(weight: MlxArray) -> MlxLlmResult<Self> {
+        // Keep the transpose as a zero-copy *view* (strided), not a
+        // materialised contiguous array. MLX's matmul detects a transposed
+        // RHS and dispatches the row-contiguous GEMV kernel — the same path
+        // `nn.Linear`'s `x @ W.T` takes in mlx-lm. Materialising the
+        // transpose forces the slower column-access GEMV (measured ~2x on
+        // [8192, 2048] decode GEMVs) and doubles resident weight memory.
         let transposed = if weight.ndim() == 2 {
-            Some(transpose(&weight, &[1, 0], None)?.contiguous_on_stream(None)?)
+            Some(transpose(&weight, &[1, 0], None)?)
         } else {
             None
         };
@@ -273,6 +279,7 @@ fn dequantize_weight(
     let (scales_name, biases_name) = quantized_sibling_names(weight_name)?;
     require_tensor(weights, &scales_name)?;
     require_tensor(weights, &biases_name)?;
+    let output_dtype = quantized_dequantize_dtype(weights, &scales_name, &biases_name)?;
     let weight = weights.read_array(weight_name)?;
     let scales = weights.read_array(&scales_name)?;
     let biases = weights.read_array(&biases_name)?;
@@ -283,10 +290,47 @@ fn dequantize_weight(
         quant.group_size,
         quant.bits,
         &quant.mode,
-        Some(MlxDtype::F32),
+        Some(output_dtype),
         None,
     )
     .map_err(Into::into)
+}
+
+fn quantized_dequantize_dtype(
+    weights: &SafeTensorBundle,
+    scales_name: &str,
+    biases_name: &str,
+) -> MlxLlmResult<MlxDtype> {
+    let scales = weights.tensor_info(scales_name)?;
+    let biases = weights.tensor_info(biases_name)?;
+    if scales.dtype != biases.dtype {
+        return Err(MlxLlmError::WeightLoad {
+            path: weights.path_for_error(),
+            reason: format!(
+                "quantized tensor siblings `{scales_name}` and `{biases_name}` must use the same float dtype, got {:?} and {:?}",
+                scales.dtype, biases.dtype
+            ),
+        });
+    }
+    safetensor_float_dtype(scales.dtype, weights, scales_name)
+}
+
+fn safetensor_float_dtype(
+    dtype: StDtype,
+    weights: &SafeTensorBundle,
+    tensor_name: &str,
+) -> MlxLlmResult<MlxDtype> {
+    match dtype {
+        StDtype::F32 => Ok(MlxDtype::F32),
+        StDtype::F16 => Ok(MlxDtype::F16),
+        StDtype::BF16 => Ok(MlxDtype::Bf16),
+        other => Err(MlxLlmError::WeightLoad {
+            path: weights.path_for_error(),
+            reason: format!(
+                "quantized tensor sibling `{tensor_name}` must be F32/F16/BF16, got {other:?}"
+            ),
+        }),
+    }
 }
 
 fn quantized_sibling_names(base_weight_name: &str) -> MlxLlmResult<(String, String)> {
@@ -418,8 +462,47 @@ mod tests {
         target_os = "macos",
         target_arch = "aarch64"
     ))]
+    #[test]
+    fn dequantized_weight_preserves_scale_dtype() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let packed_weight = le_u32_bytes(&[0; 16]);
+        let scales = le_bf16_bytes(&[1.0, 1.0]);
+        let biases = le_bf16_bytes(&[0.0, 0.0]);
+        let tensors = vec![
+            (
+                "embed.weight".to_string(),
+                TensorView::new(Dtype::U32, vec![2, 8], &packed_weight).unwrap(),
+            ),
+            (
+                "embed.scales".to_string(),
+                TensorView::new(Dtype::BF16, vec![2, 1], &scales).unwrap(),
+            ),
+            (
+                "embed.biases".to_string(),
+                TensorView::new(Dtype::BF16, vec![2, 1], &biases).unwrap(),
+            ),
+        ];
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file(tensors, &None, &path).unwrap();
+
+        let bundle = SafeTensorBundle::from_single_file(path);
+        let quant = LinearQuantization::new(4, 64, "affine").unwrap();
+        let weight = load_dense_or_dequantized(&bundle, "embed.weight", Some(&quant)).unwrap();
+
+        assert_eq!(weight.dtype().unwrap(), MlxDtype::Bf16);
+        assert_eq!(weight.shape(), vec![2, 64]);
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
     fn le_u32_bytes(values: &[u32]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(values.len() * std::mem::size_of::<u32>());
+        let mut out = Vec::with_capacity(std::mem::size_of_val(values));
         for value in values {
             out.extend_from_slice(&value.to_le_bytes());
         }
@@ -432,9 +515,23 @@ mod tests {
         target_arch = "aarch64"
     ))]
     fn le_f32_bytes(values: &[f32]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(values.len() * std::mem::size_of::<f32>());
+        let mut out = Vec::with_capacity(std::mem::size_of_val(values));
         for value in values {
             out.extend_from_slice(&value.to_le_bytes());
+        }
+        out
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn le_bf16_bytes(values: &[f32]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(values.len() * 2);
+        for value in values {
+            let bf16 = (value.to_bits() >> 16) as u16;
+            out.extend_from_slice(&bf16.to_le_bytes());
         }
         out
     }
