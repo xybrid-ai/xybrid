@@ -96,7 +96,7 @@ The binding layers expose the same override. Swift and Kotlin take it on the
 loader via UniFFI; Dart takes it as a named argument on `load()`:
 
 ```swift
-let loader = XybridModelLoader.fromRegistry(id: "qwen3-4b")
+let loader = XybridModelLoader.fromRegistry(modelId: "qwen3-4b")
     .withBackend(backend: .mlx)
 let model = try loader.load()
 ```
@@ -108,7 +108,7 @@ val model = XybridModelLoader.fromRegistry("qwen3-4b")
 ```
 
 ```dart
-final loader = await XybridModelLoader.fromRegistry('qwen3-4b');
+final loader = XybridModelLoader.fromRegistry('qwen3-4b');
 final model = await loader.load(backend: XybridBackend.mlx);
 ```
 
