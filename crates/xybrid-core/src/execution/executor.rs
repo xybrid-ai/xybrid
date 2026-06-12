@@ -2893,6 +2893,9 @@ fn build_gen_config_from_input(
         {
             cfg.temperature = temperature;
         }
+        if let Some(seed) = input.metadata.get("seed").and_then(|s| s.parse().ok()) {
+            cfg.seed = Some(seed);
+        }
         cfg
     }
 }

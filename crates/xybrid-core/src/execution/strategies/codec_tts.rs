@@ -143,6 +143,7 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
             top_p: 1.0,
             top_k: 50,
             repetition_penalty: 1.0,
+            seed: None,
             system_prompt: None,
             stop_sequences: vec!["<|SPEECH_GENERATION_END|>".to_string()],
         };

@@ -91,6 +91,8 @@ pub struct LlmGenerationParams {
     /// Repetition penalty (1.0 = disabled). Harmful for codec TTS where
     /// speech tokens legitimately repeat — keep at 1.0 for raw generation.
     pub repetition_penalty: f32,
+    /// Optional deterministic sampling seed. Honored by MLX today.
+    pub seed: Option<u64>,
     /// System prompt (optional)
     pub system_prompt: Option<String>,
     /// Stop sequences - generation stops when any of these are encountered
@@ -105,6 +107,7 @@ impl Default for LlmGenerationParams {
             top_p: 0.9,
             top_k: 40,
             repetition_penalty: 1.1,
+            seed: None,
             system_prompt: None,
             stop_sequences: Vec::new(),
         }
@@ -180,6 +183,7 @@ impl LlmGenerationParams {
     /// - `temperature`: Sampling temperature
     /// - `top_p`: Nucleus sampling threshold
     /// - `top_k`: Top-k sampling
+    /// - `seed`: Deterministic sampling seed (MLX only today)
     /// - `system_prompt`: System prompt text
     /// - `stop_sequences`: Comma-separated list of stop sequences
     /// - `model_id`: Used to auto-detect stop sequences if not explicitly provided
@@ -197,6 +201,9 @@ impl LlmGenerationParams {
         }
         if let Some(val) = metadata.get("top_k").and_then(|s| s.parse().ok()) {
             params.top_k = val;
+        }
+        if let Some(val) = metadata.get("seed").and_then(|s| s.parse().ok()) {
+            params.seed = Some(val);
         }
         if let Some(val) = metadata.get("system_prompt") {
             params.system_prompt = Some(val.clone());
@@ -371,6 +378,7 @@ impl LlmInference for DefaultLlmInference {
             top_p: params.top_p,
             top_k: params.top_k,
             repetition_penalty: params.repetition_penalty,
+            seed: params.seed,
             stop_sequences: params.stop_sequences.clone(),
             ..Default::default()
         };
@@ -402,6 +410,7 @@ impl LlmInference for DefaultLlmInference {
             top_p: params.top_p,
             top_k: params.top_k,
             repetition_penalty: params.repetition_penalty,
+            seed: params.seed,
             stop_sequences: params.stop_sequences.clone(),
             ..Default::default()
         };
@@ -439,6 +448,7 @@ impl LlmInference for DefaultLlmInference {
             top_p: params.top_p,
             top_k: params.top_k,
             repetition_penalty: params.repetition_penalty,
+            seed: params.seed,
             stop_sequences: params.stop_sequences.clone(),
             ..Default::default()
         };

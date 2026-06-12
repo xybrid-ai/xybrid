@@ -88,6 +88,63 @@ fn synthetic_bert_template_executor_routes_to_mlx_embedding_without_external_fix
 }
 
 #[test]
+fn synthetic_bert_template_executor_marks_truncated_embedding() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let prompt = "Hello world from a deliberately clipped embedding prompt";
+    write_synthetic_canonical_bert_bundle(tmp.path(), prompt);
+    let original_tokens = tokenizers::Tokenizer::from_file(tmp.path().join("tokenizer.json"))
+        .expect("load tokenizer")
+        .encode(prompt, true)
+        .expect("encode prompt")
+        .get_ids()
+        .len();
+    assert!(
+        original_tokens > 4,
+        "fixture prompt must exceed truncation cap"
+    );
+
+    let mut metadata =
+        ModelMetadata::safetensors("synthetic-bert-embed", "1.0", "model.safetensors", "bert");
+    metadata.backend = Some("auto".to_string());
+    metadata
+        .metadata
+        .insert("task".to_string(), serde_json::json!("text-embedding"));
+    metadata
+        .metadata
+        .insert("pooling".to_string(), serde_json::json!("mean"));
+    metadata
+        .metadata
+        .insert("normalize".to_string(), serde_json::json!(false));
+    metadata
+        .metadata
+        .insert("max_seq_len".to_string(), serde_json::json!(4));
+
+    let mut executor = TemplateExecutor::with_base_path(&tmp.path().to_string_lossy());
+    let out = executor
+        .execute(
+            &metadata,
+            &Envelope::new(EnvelopeKind::Text(prompt.to_string())),
+            None,
+        )
+        .expect("TemplateExecutor should surface MLX embedding truncation metadata");
+
+    assert_eq!(
+        out.metadata.get("truncated").map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        out.metadata.get("original_token_count").map(String::as_str),
+        Some(original_tokens.to_string().as_str())
+    );
+    assert_eq!(
+        out.metadata.get("clamped_token_count").map(String::as_str),
+        Some("4")
+    );
+    assert!(matches!(out.kind, EnvelopeKind::Embedding(_)));
+}
+
+#[test]
 fn synthetic_bert_indexed_shards_route_to_mlx_embedding_without_external_fixture() {
     let _guard = mlx_test_lock();
     let tmp = tempfile::tempdir().expect("tempdir");

@@ -311,6 +311,7 @@ mod tests {
             min_p: 0.0,
             top_k: 0,
             repetition_penalty: 1.0,
+            seed: None,
             stop_sequences: Vec::new(),
         }
     }
@@ -323,6 +324,7 @@ mod tests {
             min_p: 0.0,
             top_k: 40,
             repetition_penalty: 1.1,
+            seed: None,
             stop_sequences: Vec::new(),
         }
     }

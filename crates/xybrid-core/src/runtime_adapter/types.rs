@@ -333,6 +333,14 @@ pub struct GenerationConfig {
     #[serde(default = "default_repetition_penalty")]
     pub repetition_penalty: f32,
 
+    /// Optional deterministic sampling seed.
+    ///
+    /// The MLX backend currently honors this by constructing its sampler via
+    /// `Sampler::seeded(seed)`. Other local backends may ignore it until their
+    /// runtime wrappers expose stable seed plumbing.
+    #[serde(default)]
+    pub seed: Option<u64>,
+
     /// Stop sequences.
     #[serde(default)]
     pub stop_sequences: Vec<String>,
@@ -375,6 +383,7 @@ impl Default for GenerationConfig {
             min_p: default_min_p(),
             top_k: default_top_k(),
             repetition_penalty: default_repetition_penalty(),
+            seed: None,
             stop_sequences: Vec::new(),
         }
     }
@@ -410,6 +419,12 @@ impl GenerationConfig {
     /// Set temperature.
     pub fn with_temperature(mut self, temp: f32) -> Self {
         self.temperature = temp;
+        self
+    }
+
+    /// Set deterministic sampling seed.
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = Some(seed);
         self
     }
 
@@ -703,6 +718,24 @@ mod tests {
         assert_eq!(config.top_k, 40);
         assert!((config.repetition_penalty - 1.1).abs() < f32::EPSILON);
         assert!(config.stop_sequences.is_empty());
+        assert_eq!(config.seed, None);
+    }
+
+    #[test]
+    fn test_generation_config_seed_defaults_when_deserializing_old_json() {
+        let config: GenerationConfig = serde_json::from_str(r#"{"max_tokens":16}"#).unwrap();
+        assert_eq!(config.max_tokens, 16);
+        assert_eq!(config.seed, None);
+    }
+
+    #[test]
+    fn test_generation_config_seed_round_trips() {
+        let json = r#"{"max_tokens":16,"seed":12345}"#;
+        let config: GenerationConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.seed, Some(12345));
+
+        let encoded = serde_json::to_string(&config).unwrap();
+        assert!(encoded.contains(r#""seed":12345"#), "{encoded}");
     }
 
     #[test]

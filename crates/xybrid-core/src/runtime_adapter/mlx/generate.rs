@@ -34,10 +34,9 @@ use super::chat_template::RenderOptions;
 use super::model::{MlxLlmAdapter, MlxLlmError, MlxLlmResult};
 use super::sampler::Sampler;
 
-/// Default seed used by the non-streaming `generate` path when the caller
-/// hasn't requested a seeded sampler. Matches OpenAI's public seed
-/// convention — callers that need reproducibility should call
-/// [`generate_tokens`] directly with their own `Sampler::seeded(seed)`.
+/// Default seed used by the MLX generate path when the caller has not set
+/// [`GenerationConfig::seed`]. This preserves the historical deterministic
+/// default that streaming-vs-batched parity tests rely on.
 const DEFAULT_SAMPLER_SEED: u64 = 0;
 
 /// Render a chat-message list into the raw prompt string the tokenizer
@@ -66,10 +65,9 @@ pub fn render_prompt(adapter: &MlxLlmAdapter, messages: &[ChatMessage]) -> MlxLl
 #[derive(Debug)]
 pub struct GenerateParams<'cfg> {
     pub config: &'cfg GenerationConfig,
-    /// Pre-constructed sampler. Callers that want a deterministic seed
-    /// construct `Sampler::seeded(N)` themselves; the adapter's default
-    /// `LlmBackend::generate` path uses [`DEFAULT_SAMPLER_SEED`] for
-    /// reproducibility across the streaming-vs-batched parity test.
+    /// Pre-constructed sampler. `GenerateParams::new` honors
+    /// [`GenerationConfig::seed`] and otherwise preserves the historical
+    /// deterministic default; tests may still inject a custom sampler.
     pub sampler: Sampler,
 }
 
@@ -77,7 +75,7 @@ impl<'cfg> GenerateParams<'cfg> {
     pub fn new(config: &'cfg GenerationConfig) -> Self {
         Self {
             config,
-            sampler: Sampler::seeded(DEFAULT_SAMPLER_SEED),
+            sampler: Sampler::seeded(config.seed.unwrap_or(DEFAULT_SAMPLER_SEED)),
         }
     }
 
@@ -891,6 +889,7 @@ mod tests {
             min_p: 0.0,
             repetition_penalty: 1.0,
             max_tokens: 8,
+            seed: None,
             stop_sequences: vec![],
         };
         let mut p1 = GenerateParams::new(&cfg);
@@ -899,6 +898,32 @@ mod tests {
             let t1 = p1.sampler.sample(&logits, p1.config, &[]).unwrap();
             let t2 = p2.sampler.sample(&logits, p2.config, &[]).unwrap();
             assert_eq!(t1, t2);
+        }
+    }
+
+    #[test]
+    fn generate_params_uses_generation_config_seed() {
+        let logits = vec![0.5, 1.0, 1.5, 2.0];
+        let cfg = GenerationConfig {
+            temperature: 0.8,
+            top_k: 0,
+            top_p: 1.0,
+            min_p: 0.0,
+            repetition_penalty: 1.0,
+            max_tokens: 8,
+            stop_sequences: vec![],
+            seed: Some(0x5eed),
+        };
+        let mut from_config = GenerateParams::new(&cfg);
+        let mut explicit = Sampler::seeded(0x5eed);
+
+        for _ in 0..16 {
+            let configured = from_config
+                .sampler
+                .sample(&logits, from_config.config, &[])
+                .unwrap();
+            let seeded = explicit.sample(&logits, &cfg, &[]).unwrap();
+            assert_eq!(configured, seeded);
         }
     }
 

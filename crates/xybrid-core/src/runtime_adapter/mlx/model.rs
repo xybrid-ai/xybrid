@@ -64,17 +64,18 @@ pub enum MlxLlmError {
     /// runtime-selector log line stays useful when a new MLX-LM model
     /// family appears upstream.
     #[error(
-        "unsupported MLX model architecture `{model_type}`. \
-         Supported: Qwen 3 (`qwen3`), Gemma 4 (`gemma4`), LFM 2/2.5/3.5 (`lfm2`, `lfm`, `lfm3`). \
-         Fall back to llama.cpp until the matching builder lands."
+        "unsupported MLX model architecture `{model_type}` — supported MLX architectures are \
+         qwen3, gemma4, and lfm2/lfm/lfm3; run this model through llama.cpp instead \
+         (`--backend llamacpp`, registry format gguf)"
     )]
     UnsupportedArchitecture { model_type: String },
 
     /// The model architecture is known, but its SafeTensors bundle uses a
     /// quantized layout that the MLX adapter cannot execute yet.
     #[error(
-        "unsupported MLX quantization for `{model_type}`: {bits}-bit/group={group_size}. \
-         {reason}. Register a GGUF fallback variant or republish this MLX variant as dequantized SafeTensors."
+        "this bundle cannot run on MLX: unsupported quantization for `{model_type}` \
+         ({bits}-bit/group={group_size}; {reason}) — fetch the GGUF variant and run it \
+         through llama.cpp instead (`--backend llamacpp`, registry format gguf)"
     )]
     UnsupportedQuantization {
         model_type: String,
@@ -1093,6 +1094,43 @@ mod tests {
             }
             other => panic!("expected UnsupportedArchitecture, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn unsupported_architecture_message_names_supported_set_and_fallback() {
+        let err = MlxLlmError::UnsupportedArchitecture {
+            model_type: "unknown".to_string(),
+        };
+        let msg = err.to_string();
+
+        assert!(msg.contains("qwen3"), "got: {msg}");
+        assert!(msg.contains("gemma4"), "got: {msg}");
+        assert!(msg.contains("lfm2/lfm/lfm3"), "got: {msg}");
+        assert!(msg.contains("--backend llamacpp"), "got: {msg}");
+        assert!(msg.contains("gguf"), "got: {msg}");
+        assert!(
+            !msg.ends_with('.'),
+            "message should not end with period: {msg}"
+        );
+    }
+
+    #[test]
+    fn unsupported_quantization_message_names_gguf_llamacpp_fallback() {
+        let err = MlxLlmError::UnsupportedQuantization {
+            model_type: "qwen3".to_string(),
+            bits: 4,
+            group_size: 64,
+            reason: "quantized tensor layout is not implemented",
+        };
+        let msg = err.to_string();
+
+        assert!(msg.contains("cannot run on MLX"), "got: {msg}");
+        assert!(msg.contains("--backend llamacpp"), "got: {msg}");
+        assert!(msg.contains("gguf"), "got: {msg}");
+        assert!(
+            !msg.ends_with('.'),
+            "message should not end with period: {msg}"
+        );
     }
 
     #[test]

@@ -1464,10 +1464,10 @@ mod tests {
             other => panic!("expected UnsupportedQuantization, got {other:?}"),
         }
         let msg = err.to_string();
-        assert!(msg.contains("unsupported MLX quantization"), "got: {msg}");
+        assert!(msg.contains("unsupported quantization"), "got: {msg}");
         assert!(msg.contains("bert"), "got: {msg}");
         assert!(msg.contains("4-bit/group=64"), "got: {msg}");
-        assert!(msg.contains("GGUF fallback"), "got: {msg}");
+        assert!(msg.contains("--backend llamacpp"), "got: {msg}");
     }
 
     #[test]

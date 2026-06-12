@@ -545,6 +545,9 @@ impl LlmRuntimeAdapter {
         if let Some(top_k) = metadata.get("top_k").and_then(|s| s.parse().ok()) {
             config.top_k = top_k;
         }
+        if let Some(seed) = metadata.get("seed").and_then(|s| s.parse().ok()) {
+            config.seed = Some(seed);
+        }
 
         config
     }

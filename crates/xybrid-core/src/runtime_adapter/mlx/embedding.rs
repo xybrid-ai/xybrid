@@ -301,6 +301,17 @@ impl MlxEmbeddingAdapter {
                 "MLX embedding input produced no tokens".into(),
             ));
         }
+        let truncation_metadata = embedding_truncation_metadata(raw_token_ids.len(), truncated_len);
+        if !truncation_metadata.is_empty() {
+            log::warn!(
+                target: "xybrid_core",
+                "MLX embedding input truncated from {} to {} tokens (max_seq_len={}); \
+                 the embedding covers only the clamped prefix",
+                raw_token_ids.len(),
+                truncated_len,
+                self.config.max_seq_len
+            );
+        }
         if attention_mask.len() < truncated_len {
             return Err(MlxLlmError::ConfigInvalid(format!(
                 "tokenizer attention mask length {} is shorter than token length {}",
@@ -326,8 +337,33 @@ impl MlxEmbeddingAdapter {
             l2_normalize(&mut pooled);
         }
 
-        Ok(Envelope::new(EnvelopeKind::Embedding(pooled)))
+        let mut envelope = Envelope::new(EnvelopeKind::Embedding(pooled));
+        envelope.metadata.extend(truncation_metadata);
+        Ok(envelope)
     }
+}
+
+/// Truncation markers for an embedding run: empty when the input fit within
+/// `max_seq_len`; otherwise `truncated=true` plus the original and clamped
+/// token counts so callers can detect that the embedding only covers a
+/// prefix of the input.
+fn embedding_truncation_metadata(
+    original_token_count: usize,
+    clamped_token_count: usize,
+) -> HashMap<String, String> {
+    let mut metadata = HashMap::new();
+    if clamped_token_count < original_token_count {
+        metadata.insert("truncated".to_string(), "true".to_string());
+        metadata.insert(
+            "original_token_count".to_string(),
+            original_token_count.to_string(),
+        );
+        metadata.insert(
+            "clamped_token_count".to_string(),
+            clamped_token_count.to_string(),
+        );
+    }
+    metadata
 }
 
 fn token_ids_to_mlx_i32(
@@ -758,6 +794,28 @@ mod tests {
         let ids = token_ids_to_mlx_i32(&[1, too_large], 1, 2).unwrap();
 
         assert_eq!(ids, vec![1]);
+    }
+
+    #[test]
+    fn truncation_metadata_records_original_and_clamped_counts() {
+        let metadata = embedding_truncation_metadata(17, 5);
+
+        assert_eq!(metadata.get("truncated").map(String::as_str), Some("true"));
+        assert_eq!(
+            metadata.get("original_token_count").map(String::as_str),
+            Some("17")
+        );
+        assert_eq!(
+            metadata.get("clamped_token_count").map(String::as_str),
+            Some("5")
+        );
+    }
+
+    #[test]
+    fn truncation_metadata_is_empty_when_input_fits() {
+        let metadata = embedding_truncation_metadata(5, 5);
+
+        assert!(metadata.is_empty(), "unexpected metadata: {metadata:?}");
     }
 
     // -----------------------------------------------------------------
