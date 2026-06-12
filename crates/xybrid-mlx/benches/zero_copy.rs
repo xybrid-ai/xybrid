@@ -39,7 +39,7 @@ use std::hint::black_box;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use xybrid_mlx::{EnvelopePayload, EnvelopeSource, MlxArray, OwnedEnvelopePayload};
+use xybrid_mlx::{EnvelopePayload, EnvelopeSource, MlxArray};
 
 // --- Counting allocator ---------------------------------------------------
 //

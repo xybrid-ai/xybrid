@@ -456,12 +456,12 @@ mod tests {
     #[test]
     fn drop_round_trip() {
         for _ in 0..16 {
-            let data: Box<[f32]> = vec![3.14; 256].into_boxed_slice();
+            let data: Box<[f32]> = vec![2.5; 256].into_boxed_slice();
             let buf = SharedBuffer::from_box(data).expect("from_box");
             // A harmless read to prove the buffer is usable.
             // SAFETY: `as_ptr` is live for the lifetime of `buf`.
             let first = unsafe { std::ptr::read(buf.as_ptr() as *const f32) };
-            assert_eq!(first, 3.14);
+            assert_eq!(first, 2.5);
             drop(buf);
         }
     }
