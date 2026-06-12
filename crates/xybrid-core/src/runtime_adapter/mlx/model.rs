@@ -74,8 +74,10 @@ pub enum MlxLlmError {
     /// quantized layout that the MLX adapter cannot execute yet.
     #[error(
         "this bundle cannot run on MLX: unsupported quantization for `{model_type}` \
-         ({bits}-bit/group={group_size}; {reason}) — fetch the GGUF variant and run it \
-         through llama.cpp instead (`--backend llamacpp`, registry format gguf)"
+         ({bits}-bit/group={group_size}; {reason}) — for LLM bundles fetch the GGUF \
+         variant and run it through llama.cpp (`--backend llamacpp`, registry format \
+         gguf); embedding bundles need a dequantized SafeTensors republish because \
+         llama.cpp does not serve embeddings here"
     )]
     UnsupportedQuantization {
         model_type: String,

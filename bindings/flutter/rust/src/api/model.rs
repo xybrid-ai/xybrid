@@ -91,7 +91,8 @@ impl FfiGenerationConfig {
 
 /// Local generation or embedding backend override for model loading.
 ///
-/// `Auto` leaves backend selection to the Rust SDK. Concrete values hard-pin
+/// `Auto` leaves backend selection to the Rust SDK (a no-op, not a reset —
+/// it does not clear an override applied earlier). Concrete values hard-pin
 /// the requested backend; unavailable explicit backends fail with the SDK's
 /// selector error message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
