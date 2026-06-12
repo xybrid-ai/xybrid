@@ -302,6 +302,31 @@ pub(crate) unsafe fn set_cache_limit(limit: usize) -> Result<usize, MlxError> {
     Ok(previous)
 }
 
+/// Read the linked MLX library's version string (e.g. `"0.31.1"`).
+///
+/// # Safety
+///
+/// Safe to call from any thread at any time. The temporary `mlx_string`
+/// handle is created and freed within this function; the returned `String`
+/// owns a copy of the data.
+pub(crate) unsafe fn version() -> Result<String, MlxError> {
+    let mut handle = sys::mlx_string_new();
+    let result = check_rc(sys::mlx_version(&mut handle), "mlx_version").and_then(|()| {
+        let data = sys::mlx_string_data(handle);
+        if data.is_null() {
+            Err(MlxError::Internal(
+                "mlx_string_data returned NULL for mlx_version".into(),
+            ))
+        } else {
+            Ok(std::ffi::CStr::from_ptr(data)
+                .to_string_lossy()
+                .into_owned())
+        }
+    });
+    sys::mlx_string_free(handle);
+    result
+}
+
 /// Copy an evaluated array's f32 data into an owned `Vec<f32>`.
 ///
 /// # Safety

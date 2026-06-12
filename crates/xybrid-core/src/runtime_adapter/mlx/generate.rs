@@ -108,7 +108,30 @@ pub fn generate_tokens<'cb>(
         .map_err(|e| MlxLlmError::TokenizerLoad(format!("prompt encode failed: {e}")))?;
     let prompt_ids: Vec<i64> = encoding.get_ids().iter().map(|&u| i64::from(u)).collect();
 
+    generate_tokens_from_ids(adapter, &prompt_ids, params, callback)
+}
+
+/// Generation entry that takes pre-encoded prompt token ids, bypassing the
+/// tokenizer encode step. Used by the golden-token parity oracle so prompt
+/// tokenization differences are isolated from decode-numerics comparison.
+/// Not part of the supported public API.
+#[doc(hidden)]
+pub fn generate_tokens_from_ids<'cb>(
+    adapter: &MlxLlmAdapter,
+    prompt_ids: &[i64],
+    params: GenerateParams<'_>,
+    callback: Option<StreamingCallback<'cb>>,
+) -> MlxLlmResult<GenerationOutput> {
     let arch = adapter.architecture().ok_or(MlxLlmError::NotLoaded)?;
+    let tokenizer = adapter.tokenizer().ok_or(MlxLlmError::NotLoaded)?;
+
+    // A zero-token prompt would reach MLX prefill as a `[1, 0]` tensor with
+    // undefined downstream behavior; reject it as a validation error.
+    if prompt_ids.is_empty() {
+        return Err(MlxLlmError::ConfigInvalid(
+            "prompt encoded to zero tokens; generation requires at least one prompt token".into(),
+        ));
+    }
 
     // Budget check — we require at least 1 token of headroom for generation.
     let ctx_len = adapter.config().max_seq_len;
@@ -141,7 +164,7 @@ pub fn generate_tokens<'cb>(
         target_arch = "aarch64"
     )))]
     {
-        let _ = (params, callback, eos_tokens, max_decode, arch);
+        let _ = (params, callback, eos_tokens, max_decode, arch, tokenizer);
         Err(MlxLlmError::NotImplemented {
             feature:
                 "MLX forward pass (build with `--features llm-mlx-runtime` on Apple Silicon macOS, \
@@ -161,7 +184,7 @@ pub fn generate_tokens<'cb>(
             adapter,
             tokenizer,
             arch,
-            &prompt_ids,
+            prompt_ids,
             max_decode,
             &eos_tokens,
             params,

@@ -25,3 +25,13 @@ pub fn set_cache_limit(limit_bytes: usize) -> MlxResult<usize> {
     // previous value. The safe wrapper keeps it explicit and fallible.
     unsafe { ffi::set_cache_limit(limit_bytes) }
 }
+
+/// Version string of the MLX library this process is linked against.
+///
+/// Reports the *runtime* version (e.g. `"0.31.1"`), which is the
+/// authoritative identity for numerics provenance — golden-token captures
+/// record it and verification asserts it matches before comparing streams.
+pub fn version() -> MlxResult<String> {
+    // SAFETY: queries an immutable process-global string; no preconditions.
+    unsafe { ffi::version() }
+}

@@ -114,6 +114,6 @@ pub use array::{async_eval, perf_counters, reset_perf_counters, MlxArray, MlxPer
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub use buffer::SharedBuffer;
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
-pub use memory::{clear_cache, set_cache_limit};
+pub use memory::{clear_cache, set_cache_limit, version};
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub use stream::{Device, MlxStream};
