@@ -311,6 +311,12 @@ struct LoadedState {
     /// they just can't be called via [`LlmBackend::generate`] (which
     /// requires a rendered prompt).
     chat_template: Option<ChatTemplate>,
+    /// EOS token ids, resolved at load time from `config.json`
+    /// (`eos_token_id`, int or list) and `tokenizer_config.json`
+    /// (`eos_token`, string or added-token object), matching mlx-lm's
+    /// config-driven stop set. Falls back to the historical hardcoded
+    /// token-name scan when the bundle declares nothing.
+    eos_token_ids: Vec<i64>,
 }
 
 /// MLX LLM adapter. The adapter is `Send + Sync` —
@@ -437,6 +443,8 @@ impl MlxLlmAdapter {
             }
         };
 
+        let eos_token_ids = resolve_eos_token_ids(model_dir, &tokenizer);
+
         self.loaded = Some(LoadedState {
             model_dir: model_dir.to_path_buf(),
             config: model_cfg,
@@ -465,8 +473,15 @@ impl MlxLlmAdapter {
             ))]
             lfm35_runtime_weights,
             chat_template,
+            eos_token_ids,
         });
         Ok(())
+    }
+
+    /// EOS token ids resolved at load time (config-driven, with the
+    /// hardcoded name-list fallback). `None` until a model is loaded.
+    pub fn eos_token_ids(&self) -> Option<&[i64]> {
+        self.loaded.as_ref().map(|s| s.eos_token_ids.as_slice())
     }
 
     /// Read-only view of the parsed `config.json`. `None` until a model is
@@ -909,6 +924,84 @@ impl InferenceBackend for MlxLlmAdapter {
         }
         Ok(vec!["logits".to_string()])
     }
+}
+
+/// Resolve the model's EOS token-id set the way mlx-lm does: the union of
+/// `config.json` `eos_token_id` (int or list of ints) and
+/// `tokenizer_config.json` `eos_token` (a plain string or an added-token
+/// object with a `content` field), mapped through the tokenizer vocabulary.
+/// Order-preserving and deduplicated. When the bundle declares neither, the
+/// historical hardcoded token-name scan keeps synthetic/legacy bundles
+/// working.
+fn resolve_eos_token_ids(model_dir: &Path, tokenizer: &Tokenizer) -> Vec<i64> {
+    let mut ids: Vec<i64> = Vec::new();
+
+    if let Some(value) = read_json_value(&model_dir.join("config.json")) {
+        if let Some(declared) = value.get("eos_token_id") {
+            push_eos_id_values(declared, &mut ids, 0);
+        }
+    }
+
+    if let Some(value) = read_json_value(&model_dir.join("tokenizer_config.json")) {
+        let name = match value.get("eos_token") {
+            Some(serde_json::Value::String(s)) => Some(s.clone()),
+            Some(serde_json::Value::Object(map)) => map
+                .get("content")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            _ => None,
+        };
+        if let Some(name) = name {
+            if let Some(id) = tokenizer.token_to_id(&name) {
+                push_eos_id(&mut ids, i64::from(id));
+            }
+        }
+    }
+
+    if ids.is_empty() {
+        super::generate::resolve_eos_tokens_by_name(tokenizer)
+    } else {
+        ids
+    }
+}
+
+fn push_eos_id(ids: &mut Vec<i64>, id: i64) {
+    if !ids.contains(&id) {
+        ids.push(id);
+    }
+}
+
+/// Collect EOS ids from a JSON `eos_token_id` value. Accepts an int, a list
+/// of ints, one level of nested lists (`[[a, b]]` appears in some HF
+/// configs), and integral floats (`7.0`). Logs anything it has to drop —
+/// a silently empty stop set would make generation run to `max_tokens`.
+fn push_eos_id_values(value: &serde_json::Value, ids: &mut Vec<i64>, depth: usize) {
+    match value {
+        serde_json::Value::Number(n) => {
+            if let Some(id) = n.as_i64() {
+                push_eos_id(ids, id);
+            } else if let Some(f) = n.as_f64() {
+                if f.fract() == 0.0 && f.abs() < i64::MAX as f64 {
+                    push_eos_id(ids, f as i64);
+                } else {
+                    tracing::warn!(value = %n, "mlx.eos_resolution.non_integral_id_dropped");
+                }
+            }
+        }
+        serde_json::Value::Array(items) if depth < 2 => {
+            for item in items {
+                push_eos_id_values(item, ids, depth + 1);
+            }
+        }
+        other => {
+            tracing::warn!(value = %other, depth, "mlx.eos_resolution.unrecognized_value_dropped");
+        }
+    }
+}
+
+fn read_json_value(path: &Path) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
 }
 
 // =============================================================================
@@ -1364,5 +1457,112 @@ mod tests {
     fn context_length_reflects_config() {
         let adapter = MlxLlmAdapter::new(MlxLlmConfig::new(8192));
         assert_eq!(adapter.context_length(), Some(8192));
+    }
+
+    fn qwen_test_tokenizer() -> Tokenizer {
+        let tok_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("qwen_tokenizer.json");
+        Tokenizer::from_file(tok_src).expect("load qwen tokenizer fixture")
+    }
+
+    fn write_json(dir: &Path, name: &str, value: serde_json::Value) {
+        std::fs::write(dir.join(name), value.to_string()).unwrap();
+    }
+
+    #[test]
+    fn eos_resolution_reads_config_int() {
+        let tmp = TempDir::new().unwrap();
+        write_json(
+            tmp.path(),
+            "config.json",
+            serde_json::json!({"eos_token_id": 7}),
+        );
+        let ids = resolve_eos_token_ids(tmp.path(), &qwen_test_tokenizer());
+        assert_eq!(ids, vec![7]);
+    }
+
+    #[test]
+    fn eos_resolution_reads_config_list() {
+        let tmp = TempDir::new().unwrap();
+        write_json(
+            tmp.path(),
+            "config.json",
+            serde_json::json!({"eos_token_id": [151645, 151643]}),
+        );
+        let ids = resolve_eos_token_ids(tmp.path(), &qwen_test_tokenizer());
+        assert_eq!(ids, vec![151645, 151643]);
+    }
+
+    #[test]
+    fn eos_resolution_reads_tokenizer_config_string_and_dedupes() {
+        let tokenizer = qwen_test_tokenizer();
+        let im_end = i64::from(tokenizer.token_to_id("<|im_end|>").unwrap());
+
+        let tmp = TempDir::new().unwrap();
+        write_json(
+            tmp.path(),
+            "config.json",
+            serde_json::json!({"eos_token_id": im_end}),
+        );
+        write_json(
+            tmp.path(),
+            "tokenizer_config.json",
+            serde_json::json!({"eos_token": "<|im_end|>"}),
+        );
+        let ids = resolve_eos_token_ids(tmp.path(), &tokenizer);
+        assert_eq!(ids, vec![im_end], "duplicate sources must not double-add");
+    }
+
+    #[test]
+    fn eos_resolution_reads_added_token_object_form() {
+        let tokenizer = qwen_test_tokenizer();
+        let im_end = i64::from(tokenizer.token_to_id("<|im_end|>").unwrap());
+
+        let tmp = TempDir::new().unwrap();
+        write_json(
+            tmp.path(),
+            "tokenizer_config.json",
+            serde_json::json!({"eos_token": {"content": "<|im_end|>", "lstrip": false}}),
+        );
+        let ids = resolve_eos_token_ids(tmp.path(), &tokenizer);
+        assert_eq!(ids, vec![im_end]);
+    }
+
+    #[test]
+    fn eos_resolution_handles_nested_lists_and_integral_floats() {
+        let tmp = TempDir::new().unwrap();
+        write_json(
+            tmp.path(),
+            "config.json",
+            serde_json::json!({"eos_token_id": [[151645, 151643], 7.0]}),
+        );
+        let ids = resolve_eos_token_ids(tmp.path(), &qwen_test_tokenizer());
+        assert_eq!(ids, vec![151645, 151643, 7]);
+    }
+
+    #[test]
+    fn eos_resolution_drops_non_integral_values_without_panicking() {
+        let tmp = TempDir::new().unwrap();
+        write_json(
+            tmp.path(),
+            "config.json",
+            serde_json::json!({"eos_token_id": [7.5, "<|im_end|>", 9]}),
+        );
+        let ids = resolve_eos_token_ids(tmp.path(), &qwen_test_tokenizer());
+        assert_eq!(ids, vec![9], "non-integral and string entries are dropped");
+    }
+
+    #[test]
+    fn eos_resolution_falls_back_to_name_scan_when_undeclared() {
+        let tokenizer = qwen_test_tokenizer();
+        let tmp = TempDir::new().unwrap();
+        write_json(tmp.path(), "config.json", serde_json::json!({}));
+
+        let ids = resolve_eos_token_ids(tmp.path(), &tokenizer);
+        let by_name = super::super::generate::resolve_eos_tokens_by_name(&tokenizer);
+        assert_eq!(ids, by_name);
+        assert!(!ids.is_empty(), "qwen fixture has canonical EOS names");
     }
 }

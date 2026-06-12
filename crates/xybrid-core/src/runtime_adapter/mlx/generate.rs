@@ -125,8 +125,12 @@ pub fn generate_tokens<'cb>(
         .min(ctx_len - prompt_ids.len())
         .max(1);
 
-    // Resolve EOS token(s) from the tokenizer.
-    let eos_tokens = resolve_eos_tokens(tokenizer);
+    // EOS set: config-driven, resolved once at load time (with the
+    // name-list fallback applied there for bundles that declare nothing).
+    let eos_tokens: Vec<i64> = adapter
+        .eos_token_ids()
+        .ok_or(MlxLlmError::NotLoaded)?
+        .to_vec();
 
     // Non-runtime build: surface an actionable error instead of pretending
     // to decode. The rest of the orchestration is still exercised by the
@@ -166,10 +170,11 @@ pub fn generate_tokens<'cb>(
     }
 }
 
-/// Extract EOS token IDs from the loaded tokenizer. Returns every id the
-/// tokenizer marks as EOS — some models (Qwen 3) register multiple (the
-/// primary `<|im_end|>` plus `<|endoftext|>` as a secondary stop).
-fn resolve_eos_tokens(tokenizer: &tokenizers::Tokenizer) -> Vec<i64> {
+/// Extract EOS token IDs from the loaded tokenizer by scanning HF-canonical
+/// token names. Fallback only: the load path prefers config-declared EOS ids
+/// (`config.json` `eos_token_id` / `tokenizer_config.json` `eos_token`) and
+/// uses this scan when a bundle declares neither.
+pub(crate) fn resolve_eos_tokens_by_name(tokenizer: &tokenizers::Tokenizer) -> Vec<i64> {
     // tokenizers 0.19 exposes the EOS token as part of the added-tokens map,
     // not a dedicated accessor. Look for the HF-canonical names.
     const EOS_NAMES: &[&str] = &[
