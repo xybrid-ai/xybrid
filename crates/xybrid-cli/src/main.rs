@@ -135,8 +135,13 @@ enum Commands {
         #[arg(short, long, value_name = "PLATFORM")]
         platform: Option<String>,
 
-        /// Local generation or embedding backend override for registry artifact selection (auto, mlx, llamacpp, mistral)
-        #[arg(long, value_name = "BACKEND", conflicts_with = "huggingface")]
+        /// Local generation or embedding backend override for registry artifact selection
+        #[arg(
+            long,
+            value_name = "BACKEND",
+            conflicts_with = "huggingface",
+            long_help = "Local generation or embedding backend override for registry artifact selection.\n\nValues: auto|mlx|llamacpp|mistral.\n\nMLX requires Apple Silicon macOS with the llm-mlx-runtime build enabled.\n\nExample: xybrid run --model qwen3-4b --backend mlx"
+        )]
         backend: Option<String>,
     },
     /// Manage the local model cache
@@ -209,8 +214,12 @@ enum Commands {
         #[arg(long, value_name = "TARGET")]
         target: Option<String>,
 
-        /// Local generation or embedding backend override (auto, mlx, llamacpp, mistral)
-        #[arg(long, value_name = "BACKEND")]
+        /// Local generation or embedding backend override
+        #[arg(
+            long,
+            value_name = "BACKEND",
+            long_help = "Local generation or embedding backend override.\n\nValues: auto|mlx|llamacpp|mistral.\n\nMLX requires Apple Silicon macOS with the llm-mlx-runtime build enabled.\n\nExample: xybrid run --model qwen3-4b --backend mlx"
+        )]
         backend: Option<String>,
 
         /// Enable detailed execution tracing with flame graph output
@@ -248,8 +257,12 @@ enum Commands {
         #[arg(long, value_name = "TARGET")]
         target: Option<String>,
 
-        /// Local generation or embedding backend override (auto, mlx, llamacpp, mistral)
-        #[arg(long, value_name = "BACKEND")]
+        /// Local generation or embedding backend override
+        #[arg(
+            long,
+            value_name = "BACKEND",
+            long_help = "Local generation or embedding backend override.\n\nValues: auto|mlx|llamacpp|mistral.\n\nMLX requires Apple Silicon macOS with the llm-mlx-runtime build enabled.\n\nExample: xybrid run --model qwen3-4b --backend mlx"
+        )]
         backend: Option<String>,
 
         /// Stream tokens as they are generated (LLM models only)
@@ -717,7 +730,7 @@ fn resolve_config_path(config: Option<PathBuf>, pipeline: Option<String>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
 
     #[test]
     fn run_accepts_backend_override_flag() {
@@ -759,5 +772,35 @@ mod tests {
             Commands::Repl { backend, .. } => assert_eq!(backend.as_deref(), Some("mlx")),
             _ => panic!("expected repl command"),
         }
+    }
+
+    #[test]
+    fn models_list_accepts_backend_filter() {
+        let cli = Cli::try_parse_from(["xybrid", "models", "list", "--backend", "mlx"]).unwrap();
+
+        match cli.command {
+            Commands::Models {
+                command: ModelsCommand::List { backend },
+            } => assert_eq!(backend.as_deref(), Some("mlx")),
+            _ => panic!("expected models list command"),
+        }
+    }
+
+    #[test]
+    fn backend_long_help_documents_mlx_requirements() {
+        let mut cmd = Cli::command();
+        let help = cmd
+            .find_subcommand_mut("run")
+            .expect("run subcommand exists")
+            .render_long_help()
+            .to_string();
+
+        assert!(help.contains("auto|mlx|llamacpp|mistral"), "{help}");
+        assert!(help.contains("Apple Silicon macOS"), "{help}");
+        assert!(help.contains("llm-mlx-runtime"), "{help}");
+        assert!(
+            help.contains("xybrid run --model qwen3-4b --backend mlx"),
+            "{help}"
+        );
     }
 }

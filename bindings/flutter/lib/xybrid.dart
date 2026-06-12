@@ -88,6 +88,7 @@ export 'src/model_loader.dart'
     show
         XybridModelLoader,
         XybridModel,
+        XybridBackend,
         XybridException,
         CancellationToken,
         LoadEvent,

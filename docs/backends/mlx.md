@@ -92,6 +92,30 @@ let model = Xybrid::model("qwen3-4b")
     .load()?;
 ```
 
+The binding layers expose the same override. Swift and Kotlin take it on the
+loader via UniFFI; Dart takes it as a named argument on `load()`:
+
+```swift
+let loader = XybridModelLoader.fromRegistry(id: "qwen3-4b")
+    .withBackend(backend: .mlx)
+let model = try loader.load()
+```
+
+```kotlin
+val model = XybridModelLoader.fromRegistry("qwen3-4b")
+    .withBackend(XybridBackend.MLX)
+    .load()
+```
+
+```dart
+final loader = await XybridModelLoader.fromRegistry('qwen3-4b');
+final model = await loader.load(backend: XybridBackend.mlx);
+```
+
+Passing `auto` (the default) preserves automatic selection; explicit backends
+that are unavailable on the host fail at load time with the selector's
+message (for example requesting `mlx` on Linux).
+
 For registry LLM models this override requests a format-specific registry
 variant before loading (`mlx` -> `safetensors`, `llamacpp` -> `gguf`) and then
 pins the in-memory metadata backend. For known registry embedding tasks, MLX is

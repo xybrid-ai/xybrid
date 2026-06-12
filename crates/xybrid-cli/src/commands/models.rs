@@ -6,8 +6,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use xybrid_core::bundler::XyBundle;
 use xybrid_core::execution_template::ModelMetadata;
+use xybrid_core::runtime_adapter::BackendChoice;
 use xybrid_sdk::model::SdkError;
-use xybrid_sdk::registry_client::RegistryClient;
+use xybrid_sdk::registry_client::{
+    registry_format_for_backend, ModelDetail, ModelSummary, RegistryClient,
+};
 
 use super::types::ModelsCommand;
 use super::utils::{format_params, format_size};
@@ -18,15 +21,121 @@ pub(crate) fn handle_models_command(command: ModelsCommand) -> Result<()> {
     let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
 
     match command {
-        ModelsCommand::List => list_models(&client),
+        ModelsCommand::List { backend } => list_models(&client, backend.as_deref()),
         ModelsCommand::Search { query } => search_models(&client, &query),
         ModelsCommand::Info { model_id } => show_model_info(&client, &model_id),
         ModelsCommand::Voices { model_id } => handle_voices_command(&client, &model_id),
     }
 }
 
-fn list_models(client: &RegistryClient) -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BackendModelFilter {
+    backend: BackendChoice,
+    format: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum VariantDisplay {
+    All {
+        variants: Vec<String>,
+    },
+    Compatible {
+        format: &'static str,
+        variants: Vec<String>,
+    },
+    Unknown {
+        variants: Vec<String>,
+    },
+}
+
+impl VariantDisplay {
+    fn is_empty_known_match(&self) -> bool {
+        matches!(self, VariantDisplay::Compatible { variants, .. } if variants.is_empty())
+    }
+
+    fn line(&self) -> Option<String> {
+        match self {
+            VariantDisplay::All { variants } if variants.is_empty() => None,
+            VariantDisplay::All { variants } => Some(format!("variants: {}", variants.join(", "))),
+            VariantDisplay::Compatible { variants, .. } if variants.is_empty() => None,
+            VariantDisplay::Compatible { format, variants } => Some(format!(
+                "compatible variants ({}): {}",
+                format,
+                variants.join(", ")
+            )),
+            VariantDisplay::Unknown { variants } if variants.is_empty() => {
+                Some("variants: format metadata unavailable; not filtered".to_string())
+            }
+            VariantDisplay::Unknown { variants } => Some(format!(
+                "variants: {} (format metadata unavailable; not filtered)",
+                variants.join(", ")
+            )),
+        }
+    }
+}
+
+fn parse_models_backend_filter(raw: Option<&str>) -> Result<Option<BackendModelFilter>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+
+    let Some(backend) = BackendChoice::parse(raw)
+        .map_err(|err| anyhow::anyhow!("Invalid backend filter: {}", err))?
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some(BackendModelFilter {
+        backend,
+        format: listing_format_for_backend(backend),
+    }))
+}
+
+fn listing_format_for_backend(backend: BackendChoice) -> &'static str {
+    registry_format_for_backend(backend).unwrap_or(match backend {
+        BackendChoice::Mistral => "gguf",
+        BackendChoice::Mlx => "safetensors",
+        BackendChoice::LlamaCpp => "gguf",
+    })
+}
+
+fn compatible_variant_display(
+    summary: &ModelSummary,
+    detail: Option<&ModelDetail>,
+    filter: &BackendModelFilter,
+) -> VariantDisplay {
+    let Some(detail) = detail.filter(|detail| !detail.variants.is_empty()) else {
+        return VariantDisplay::Unknown {
+            variants: summary.variants.clone(),
+        };
+    };
+
+    let mut variants: Vec<String> = detail
+        .variants
+        .iter()
+        .filter(|(_, info)| info.format.eq_ignore_ascii_case(filter.format))
+        .map(|(name, _)| name.clone())
+        .collect();
+    variants.sort();
+
+    VariantDisplay::Compatible {
+        format: filter.format,
+        variants,
+    }
+}
+
+fn list_models(client: &RegistryClient, backend: Option<&str>) -> Result<()> {
     ui::header("Model Registry");
+
+    let backend_filter = parse_models_backend_filter(backend)?;
+    if let Some(filter) = backend_filter {
+        ui::kv("Backend", filter.backend.as_str());
+        ui::hint(&format!(
+            "Showing registry variants compatible with {} artifacts.",
+            filter.format
+        ));
+        println!();
+    }
 
     // If the registry is reachable, show the full catalog. If we're offline,
     // fall back to listing the models that are already cached locally so the
@@ -46,27 +155,57 @@ fn list_models(client: &RegistryClient) -> Result<()> {
         return Ok(());
     }
 
-    let mut by_task: BTreeMap<String, Vec<_>> = BTreeMap::new();
+    let mut by_task: BTreeMap<String, Vec<(&ModelSummary, VariantDisplay)>> = BTreeMap::new();
     for model in &models {
-        by_task.entry(model.task.clone()).or_default().push(model);
+        let display = if let Some(filter) = backend_filter {
+            let detail = client.get_model(&model.id).ok();
+            compatible_variant_display(model, detail.as_ref(), &filter)
+        } else {
+            VariantDisplay::All {
+                variants: model.variants.clone(),
+            }
+        };
+
+        if display.is_empty_known_match() {
+            continue;
+        }
+
+        by_task
+            .entry(model.task.clone())
+            .or_default()
+            .push((model, display));
     }
 
-    for (task, task_models) in by_task {
+    let listed_count: usize = by_task.values().map(Vec::len).sum();
+    if listed_count == 0 {
+        if let Some(filter) = backend_filter {
+            ui::hint(&format!(
+                "No models found with {} variants for backend '{}'.",
+                filter.format,
+                filter.backend.as_str()
+            ));
+        } else {
+            ui::hint("No models found in registry.");
+        }
+        return Ok(());
+    }
+
+    for (task, task_models) in &by_task {
         ui::section(&task.to_uppercase());
         println!();
 
-        for model in task_models {
+        for (model, variant_display) in task_models {
             let params_str = format_params(model.parameters);
             let meta = format!("{} · {} params", model.family, params_str);
             ui::bullet(&model.id, &meta);
             ui::sub(&model.description);
-            if !model.variants.is_empty() {
-                ui::sub(&format!("variants: {}", model.variants.join(", ")));
+            if let Some(line) = variant_display.line() {
+                ui::sub(&line);
             }
         }
     }
 
-    ui::footer(&format!("{} models available", models.len()));
+    ui::footer(&format!("{} models available", listed_count));
 
     Ok(())
 }
@@ -371,5 +510,88 @@ fn print_voices_by_language(voices: &[&xybrid_core::execution_template::VoiceInf
         }
         table.print();
         println!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use xybrid_sdk::registry_client::{ModelDetail, ModelSummary, VariantInfo};
+
+    fn summary() -> ModelSummary {
+        ModelSummary {
+            id: "qwen3-4b".to_string(),
+            family: "qwen".to_string(),
+            task: "text-generation".to_string(),
+            parameters: 4_000_000_000,
+            description: "Qwen".to_string(),
+            variants: vec!["mlx-fp16".to_string(), "q4-k-m".to_string()],
+        }
+    }
+
+    fn variant(format: &str) -> VariantInfo {
+        VariantInfo {
+            platform: "macos-arm64".to_string(),
+            format: format.to_string(),
+            quantization: "fp16".to_string(),
+            size_bytes: 1,
+            hf_repo: "xybrid/qwen".to_string(),
+            file: "model".to_string(),
+        }
+    }
+
+    #[test]
+    fn backend_filter_keeps_matching_format_variants() {
+        let detail = ModelDetail {
+            id: "qwen3-4b".to_string(),
+            family: "qwen".to_string(),
+            task: "text-generation".to_string(),
+            parameters: 4_000_000_000,
+            description: "Qwen".to_string(),
+            default_variant: None,
+            variants: HashMap::from([
+                ("mlx-fp16".to_string(), variant("safetensors")),
+                ("q4-k-m".to_string(), variant("gguf")),
+            ]),
+        };
+        let filter = parse_models_backend_filter(Some("mlx"))
+            .expect("valid backend")
+            .expect("explicit backend");
+
+        let display = compatible_variant_display(&summary(), Some(&detail), &filter);
+
+        assert_eq!(
+            display,
+            VariantDisplay::Compatible {
+                format: "safetensors",
+                variants: vec!["mlx-fp16".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn backend_filter_keeps_unknown_format_metadata_visible() {
+        let filter = parse_models_backend_filter(Some("mlx"))
+            .expect("valid backend")
+            .expect("explicit backend");
+
+        let display = compatible_variant_display(&summary(), None, &filter);
+
+        assert_eq!(
+            display,
+            VariantDisplay::Unknown {
+                variants: vec!["mlx-fp16".to_string(), "q4-k-m".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn mistral_models_filter_lists_gguf_variants() {
+        let filter = parse_models_backend_filter(Some("mistral"))
+            .expect("valid backend")
+            .expect("explicit backend");
+
+        assert_eq!(filter.format, "gguf");
     }
 }

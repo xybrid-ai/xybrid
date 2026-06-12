@@ -17,9 +17,9 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_backend_to_loader`, `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_sdk_with_cancellation`, `to_sdk`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiCancellationToken>>
 abstract class FfiCancellationToken implements RustOpaqueInterface {
@@ -212,7 +212,7 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
           .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);
 
   /// Load the model without progress updates.
-  Future<FfiModel> load();
+  Future<FfiModel> load({FfiBackend? backend});
 
   /// Load the model with download progress updates.
   ///
@@ -222,7 +222,27 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   /// - `Error(String)` if loading fails
   ///
   /// After receiving `Complete`, call `load()` to get the cached model instantly.
-  Stream<FfiLoadEvent> loadWithProgress();
+  Stream<FfiLoadEvent> loadWithProgress({FfiBackend? backend});
+}
+
+/// Local generation or embedding backend override for model loading.
+///
+/// `Auto` leaves backend selection to the Rust SDK. Concrete values hard-pin
+/// the requested backend; unavailable explicit backends fail with the SDK's
+/// selector error message.
+enum FfiBackend {
+  /// Use the SDK's automatic backend selector.
+  auto,
+
+  /// Apple Silicon MLX SafeTensors backend.
+  mlx,
+
+  /// llama.cpp GGUF backend.
+  llamaCpp,
+
+  /// mistral.rs GGUF backend.
+  mistral,
+  ;
 }
 
 /// Structured marker emitted when local inference aborts for cloud fallback.

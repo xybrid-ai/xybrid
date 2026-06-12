@@ -1260,6 +1260,8 @@ fn wire__crate__api__model__FfiModelLoader_load_impl(
             let api_that = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>,
             >>::sse_decode(&mut deserializer);
+            let api_backend =
+                <Option<crate::api::model::FfiBackend>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
@@ -1282,7 +1284,8 @@ fn wire__crate__api__model__FfiModelLoader_load_impl(
                         }
                         let api_that_guard = api_that_guard.unwrap();
                         let output_ok =
-                            crate::api::model::FfiModelLoader::load(&*api_that_guard).await?;
+                            crate::api::model::FfiModelLoader::load(&*api_that_guard, api_backend)
+                                .await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -1316,6 +1319,8 @@ fn wire__crate__api__model__FfiModelLoader_load_with_progress_impl(
             let api_that = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>,
             >>::sse_decode(&mut deserializer);
+            let api_backend =
+                <Option<crate::api::model::FfiBackend>>::sse_decode(&mut deserializer);
             let api_sink = <StreamSink<
                 crate::api::model::FfiLoadEvent,
                 flutter_rust_bridge::for_generated::SseCodec,
@@ -1340,6 +1345,7 @@ fn wire__crate__api__model__FfiModelLoader_load_with_progress_impl(
                     let output_ok = Result::<_, ()>::Ok({
                         crate::api::model::FfiModelLoader::load_with_progress(
                             &*api_that_guard,
+                            api_backend,
                             api_sink,
                         );
                     })?;
@@ -2976,6 +2982,44 @@ impl SseDecode for f64 {
     }
 }
 
+impl SseDecode for crate::api::model::FfiBackend {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::model::FfiBackend::Auto,
+            1 => crate::api::model::FfiBackend::Mlx,
+            2 => crate::api::model::FfiBackend::LlamaCpp,
+            3 => crate::api::model::FfiBackend::Mistral,
+            _ => unreachable!("Invalid variant for FfiBackend: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::model::FfiCloudFallbackAbort {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_reason = <crate::api::model::FfiCloudFallbackReason>::sse_decode(deserializer);
+        return crate::api::model::FfiCloudFallbackAbort { reason: var_reason };
+    }
+}
+
+impl SseDecode for crate::api::model::FfiCloudFallbackReason {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::model::FfiCloudFallbackReason::UserCancelled,
+            1 => crate::api::model::FfiCloudFallbackReason::StressThrottle,
+            2 => crate::api::model::FfiCloudFallbackReason::StressMemory,
+            3 => crate::api::model::FfiCloudFallbackReason::StressThermal,
+            4 => crate::api::model::FfiCloudFallbackReason::StressCpuSustained,
+            5 => crate::api::model::FfiCloudFallbackReason::BudgetExceeded,
+            _ => unreachable!("Invalid variant for FfiCloudFallbackReason: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::model::FfiGenerationConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3438,6 +3482,17 @@ impl SseDecode for Option<f64> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<f64>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::model::FfiBackend> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::model::FfiBackend>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -3952,6 +4007,68 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<XybridSdkClient>> for XybridSd
     }
 }
 
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::model::FfiBackend {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Auto => 0.into_dart(),
+            Self::Mlx => 1.into_dart(),
+            Self::LlamaCpp => 2.into_dart(),
+            Self::Mistral => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::model::FfiBackend {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiBackend>
+    for crate::api::model::FfiBackend
+{
+    fn into_into_dart(self) -> crate::api::model::FfiBackend {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::model::FfiCloudFallbackAbort {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [self.reason.into_into_dart().into_dart()].into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::model::FfiCloudFallbackAbort
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiCloudFallbackAbort>
+    for crate::api::model::FfiCloudFallbackAbort
+{
+    fn into_into_dart(self) -> crate::api::model::FfiCloudFallbackAbort {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::model::FfiCloudFallbackReason {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::UserCancelled => 0.into_dart(),
+            Self::StressThrottle => 1.into_dart(),
+            Self::StressMemory => 2.into_dart(),
+            Self::StressThermal => 3.into_dart(),
+            Self::StressCpuSustained => 4.into_dart(),
+            Self::BudgetExceeded => 5.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::model::FfiCloudFallbackReason
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiCloudFallbackReason>
+    for crate::api::model::FfiCloudFallbackReason
+{
+    fn into_into_dart(self) -> crate::api::model::FfiCloudFallbackReason {
+        self
+    }
+}
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::model::FfiGenerationConfig {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -4621,6 +4738,51 @@ impl SseEncode for f64 {
     }
 }
 
+impl SseEncode for crate::api::model::FfiBackend {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::model::FfiBackend::Auto => 0,
+                crate::api::model::FfiBackend::Mlx => 1,
+                crate::api::model::FfiBackend::LlamaCpp => 2,
+                crate::api::model::FfiBackend::Mistral => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::model::FfiCloudFallbackAbort {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::model::FfiCloudFallbackReason>::sse_encode(self.reason, serializer);
+    }
+}
+
+impl SseEncode for crate::api::model::FfiCloudFallbackReason {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::model::FfiCloudFallbackReason::UserCancelled => 0,
+                crate::api::model::FfiCloudFallbackReason::StressThrottle => 1,
+                crate::api::model::FfiCloudFallbackReason::StressMemory => 2,
+                crate::api::model::FfiCloudFallbackReason::StressThermal => 3,
+                crate::api::model::FfiCloudFallbackReason::StressCpuSustained => 4,
+                crate::api::model::FfiCloudFallbackReason::BudgetExceeded => 5,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::model::FfiGenerationConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5011,6 +5173,16 @@ impl SseEncode for Option<f64> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <f64>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::model::FfiBackend> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::model::FfiBackend>::sse_encode(value, serializer);
         }
     }
 }

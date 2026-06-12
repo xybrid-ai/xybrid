@@ -7,8 +7,8 @@ use xybrid_core::device::{ResourceSnapshot, ResourceSnapshotProvider};
 use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
 use xybrid_ffi_facade as facade;
 use xybrid_sdk::{
-    AbortPolicy, AbortSignal, CancellationToken, GenerationConfig, ModelLoader, RunOptions,
-    SdkError, XybridModel,
+    AbortPolicy, AbortSignal, BackendChoice, CancellationToken, GenerationConfig, ModelLoader,
+    RunOptions, SdkError, XybridModel,
 };
 
 use crate::frb_generated::StreamSink;
@@ -86,6 +86,42 @@ impl FfiGenerationConfig {
 
     pub(crate) fn to_sdk(&self) -> GenerationConfig {
         self.to_facade().to_sdk()
+    }
+}
+
+/// Local generation or embedding backend override for model loading.
+///
+/// `Auto` leaves backend selection to the Rust SDK. Concrete values hard-pin
+/// the requested backend; unavailable explicit backends fail with the SDK's
+/// selector error message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiBackend {
+    /// Use the SDK's automatic backend selector.
+    Auto,
+    /// Apple Silicon MLX SafeTensors backend.
+    Mlx,
+    /// llama.cpp GGUF backend.
+    LlamaCpp,
+    /// mistral.rs GGUF backend.
+    Mistral,
+}
+
+impl FfiBackend {
+    fn to_sdk(self) -> Option<BackendChoice> {
+        match self {
+            FfiBackend::Auto => None,
+            FfiBackend::Mlx => Some(BackendChoice::Mlx),
+            FfiBackend::LlamaCpp => Some(BackendChoice::LlamaCpp),
+            FfiBackend::Mistral => Some(BackendChoice::Mistral),
+        }
+    }
+}
+
+fn apply_backend_to_loader(loader: ModelLoader, backend: Option<FfiBackend>) -> ModelLoader {
+    if let Some(choice) = backend.and_then(FfiBackend::to_sdk) {
+        loader.with_backend(choice)
+    } else {
+        loader
     }
 }
 
@@ -579,8 +615,8 @@ impl FfiModelLoader {
     }
 
     /// Load the model without progress updates.
-    pub async fn load(&self) -> Result<FfiModel, String> {
-        self.0
+    pub async fn load(&self, backend: Option<FfiBackend>) -> Result<FfiModel, String> {
+        apply_backend_to_loader(self.0.clone(), backend)
             .load_async()
             .await
             .map(|m| FfiModel(Arc::new(m)))
@@ -595,8 +631,8 @@ impl FfiModelLoader {
     /// - `Error(String)` if loading fails
     ///
     /// After receiving `Complete`, call `load()` to get the cached model instantly.
-    pub fn load_with_progress(&self, sink: StreamSink<FfiLoadEvent>) {
-        let loader = self.0.clone();
+    pub fn load_with_progress(&self, backend: Option<FfiBackend>, sink: StreamSink<FfiLoadEvent>) {
+        let loader = apply_backend_to_loader(self.0.clone(), backend);
 
         // Run loading in a background thread to not block
         std::thread::spawn(move || {
@@ -1103,6 +1139,23 @@ mod tests {
             max_grace_tokens: None,
             frame_session_id: None,
         }
+    }
+
+    #[test]
+    fn backend_override_maps_to_sdk_choice() {
+        assert_eq!(FfiBackend::Auto.to_sdk(), None);
+        assert_eq!(
+            FfiBackend::Mlx.to_sdk(),
+            Some(xybrid_sdk::BackendChoice::Mlx)
+        );
+        assert_eq!(
+            FfiBackend::LlamaCpp.to_sdk(),
+            Some(xybrid_sdk::BackendChoice::LlamaCpp)
+        );
+        assert_eq!(
+            FfiBackend::Mistral.to_sdk(),
+            Some(xybrid_sdk::BackendChoice::Mistral)
+        );
     }
 
     #[test]
