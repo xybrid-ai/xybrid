@@ -221,6 +221,7 @@ mod active {
             min_p: 0.0,
             repetition_penalty: 1.0,
             stop_sequences: Vec::new(),
+            seed: None,
         }
     }
 
@@ -313,7 +314,7 @@ mod active {
             let _ = measure_abort_latency(&adapter, prompt, &config).expect("warmup abort");
         }
 
-        if std::env::var_os("XYBRID_BENCH_WARMUP_ONLY").is_some() {
+        if std::env::var("XYBRID_BENCH_WARMUP_ONLY").ok().as_deref() == Some("1") {
             eprintln!("XYBRID_BENCH_WARMUP_ONLY=1; skipping benchmark report and p95 gate");
             return;
         }
