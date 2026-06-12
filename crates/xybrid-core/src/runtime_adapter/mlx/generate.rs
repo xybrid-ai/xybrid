@@ -430,11 +430,26 @@ mod runtime {
             let mut generated: Vec<i64> = Vec::with_capacity(max_decode);
             let mut cumulative_text = String::new();
             let mut finish_reason = "length";
-            // Streaming and stop-sequence scans require stable text every token.
-            // The async greedy path is intentionally disabled in that case so
-            // stop sequences keep the same behavior as the synchronous loop.
+            // Streaming callbacks and stop-sequence scans need stable text on
+            // every token. This no longer disables the async greedy path: the
+            // incremental detokenizer below runs on the host *after* the next
+            // token's graph has been dispatched, so text work overlaps GPU
+            // compute (mlx-lm's `stream_generate` ordering).
             let needs_incremental_text =
                 callback.is_some() || !params.config.stop_sequences.is_empty();
+            // Incremental detokenizer: O(1) amortized per token. `step` returns
+            // `None` while the pending bytes don't yet form complete UTF-8
+            // (byte-fallback `<0xNN>` runs, multi-byte scalars split across
+            // ids); the held-back text is emitted once a later token completes
+            // it. Replaces the previous O(tokens²) full-prefix re-decode.
+            let mut detok = needs_incremental_text.then(|| tokenizer.decode_stream(true));
+            let longest_stop = params
+                .config
+                .stop_sequences
+                .iter()
+                .map(String::len)
+                .max()
+                .unwrap_or(0);
 
             info!(
                 model_id = adapter.model_id_or_default(),
@@ -449,10 +464,8 @@ mod runtime {
             let prefill_ids = xybrid_mlx::MlxArray::from_slice_i64(prompt_ids, &prefill_shape)?;
             let mut next_logits = forward.forward(&prefill_ids, 0, stream)?;
             let greedy_decode = params.config.temperature <= 0.0;
-            let use_async_greedy = greedy_decode
-                && !needs_incremental_text
-                && forward.uses_kv_cache()
-                && forward.supports_async_greedy();
+            let use_async_greedy =
+                greedy_decode && forward.uses_kv_cache() && forward.supports_async_greedy();
             let mut next_token_ids = if use_async_greedy {
                 let ids = greedy_argmax_token_ids(&next_logits, stream)?;
                 xybrid_mlx::async_eval(&[&ids])?;
@@ -466,8 +479,9 @@ mod runtime {
                 let next_token = if let Some(token_ids) = current_token_ids.as_ref() {
                     if step + 1 < max_decode {
                         // Queue one token ahead before the host readback. If the
-                        // current token is EOS, this over-prefetches one cache
-                        // entry that is discarded with the per-run cache.
+                        // current token is EOS or completes a stop sequence, this
+                        // over-prefetches one cache entry that is discarded with
+                        // the per-run cache.
                         let position_offset =
                             position_offset_for_history_len(prompt_ids.len() + step + 1)?;
                         let decode_tok =
@@ -493,16 +507,18 @@ mod runtime {
 
                 // Streaming callbacks and text stop-sequences need stable text on
                 // every token. Plain batch generation can defer tokenizer decode
-                // until the end and avoid an O(tokens^2) prefix decode loop.
-                let token_text = if needs_incremental_text {
-                    // Decode the stable generated prefix, then compute a delta for
-                    // streaming. Qwen byte-fallback tokens can form one Unicode
-                    // scalar across multiple token ids; decoding ids one at a time
-                    // turns those partial byte sequences into replacement chars.
-                    let (token_text, decoded_text) =
-                        decode_generated_text(tokenizer, &generated, &cumulative_text)?;
-                    cumulative_text = decoded_text;
-                    token_text
+                // until the end. Either way this host-side work overlaps the GPU
+                // computing the already-dispatched next token.
+                let token_text = if let Some(detok) = detok.as_mut() {
+                    let id = token_id_to_u32("generated", next_token)?;
+                    let segment = detok
+                        .step(id)
+                        .map_err(|e| {
+                            MlxLlmError::TokenizerLoad(format!("streaming decode failed: {e}"))
+                        })?
+                        .unwrap_or_default();
+                    cumulative_text.push_str(&segment);
+                    segment
                 } else {
                     String::new()
                 };
@@ -523,13 +539,23 @@ mod runtime {
                     break;
                 }
 
-                // Stop-sequence check on cumulative text. We don't strip the
-                // stop-sequence from the returned text — matches the llama.cpp
-                // adapter's contract.
+                // Stop-sequence check. We don't strip the stop-sequence from
+                // the returned text — matches the llama.cpp adapter's contract.
+                // Only the tail can contain a *new* match: earlier text was
+                // scanned on previous tokens, so the window is the new segment
+                // plus enough preceding bytes to catch a match spanning the
+                // boundary. Avoids re-scanning the whole text every token.
                 let mut hit_stop = false;
-                if needs_incremental_text {
+                if longest_stop > 0 && !token_text.is_empty() {
+                    let mut tail_start = cumulative_text
+                        .len()
+                        .saturating_sub(token_text.len() + longest_stop);
+                    while !cumulative_text.is_char_boundary(tail_start) {
+                        tail_start -= 1;
+                    }
+                    let tail = &cumulative_text[tail_start..];
                     for stop in &params.config.stop_sequences {
-                        if !stop.is_empty() && cumulative_text.contains(stop) {
+                        if !stop.is_empty() && tail.contains(stop) {
                             hit_stop = true;
                             break;
                         }
@@ -552,6 +578,13 @@ mod runtime {
                     PartialToken::new(token_text, step, cumulative_text.clone())
                         .with_token_id(next_token),
                 )?;
+
+                // Bound MLX's memory-pool growth on long generations. Same
+                // cadence as mlx-lm's decode loop (`mx.clear_cache()` every
+                // 256 tokens); a no-op cost at short budgets.
+                if step > 0 && step % 256 == 0 {
+                    clear_mlx_cache("decode_steady_state");
+                }
 
                 // Decode step: runtime architectures reset their resident
                 // attention/conv caches before prefill, then only forward the
@@ -1069,6 +1102,37 @@ mod tests {
 
         assert_eq!(cumulative, text);
         assert_eq!(streamed_deltas, text);
+    }
+
+    /// The streaming decode path uses `tokenizers::DecodeStream`. It must
+    /// reproduce the same byte-fallback guarantee as the batch-side
+    /// `decode_generated_text`: multi-id Unicode scalars are held back until
+    /// complete instead of surfacing replacement characters.
+    #[test]
+    fn decode_stream_preserves_byte_fallback_sequences() {
+        let tok_src = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("qwen_tokenizer.json");
+        let tokenizer = tokenizers::Tokenizer::from_file(tok_src).expect("load qwen tokenizer");
+        let text = "Hello! 😊";
+        let encoding = tokenizer.encode(text, false).expect("encode text");
+
+        let mut detok = tokenizer.decode_stream(true);
+        let mut streamed = String::new();
+        let mut held_back = 0usize;
+        for &id in encoding.get_ids() {
+            match detok.step(id).expect("decode stream step") {
+                Some(segment) => streamed.push_str(&segment),
+                None => held_back += 1,
+            }
+        }
+
+        assert_eq!(streamed, text);
+        assert!(
+            held_back > 0,
+            "fixture must exercise the held-back partial-scalar path"
+        );
     }
 
     /// Integration-style test of the generate path on a non-runtime build
