@@ -18,6 +18,7 @@ path = "src/lib.rs"
 # green — the heavy build cost lives in `xybrid-llama-sys/build.rs`.
 default = []
 bindings = ["xybrid-llama-sys/bindings"]
+vision = ["bindings", "xybrid-llama-sys/vision"]
 
 [dependencies]
 xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.1.2" }

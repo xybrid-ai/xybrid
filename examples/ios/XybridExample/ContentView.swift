@@ -35,20 +35,29 @@ struct ContentView: View {
     @State private var appState: AppState = .notInitialized
 
     var body: some View {
-        NavigationView {
-            Group {
-                switch appState {
-                case .notInitialized:
-                    WelcomeView(onInitialize: initializeSDK)
-                case .initializing:
-                    LoadingView(message: "Initializing Xybrid SDK...")
-                case .ready:
-                    InferenceView()
-                case .error(let message):
-                    ErrorView(message: message, onRetry: initializeSDK)
-                }
+        switch appState {
+        case .notInitialized:
+            navigation { WelcomeView(onInitialize: initializeSDK) }
+        case .initializing:
+            navigation { LoadingView(message: "Initializing Xybrid SDK...") }
+        case .ready:
+            TabView {
+                navigation { InferenceView() }
+                    .tabItem { Label("Speech", systemImage: "waveform") }
+                navigation { LiveVisionView() }
+                    .tabItem { Label("Vision", systemImage: "camera.viewfinder") }
             }
-            .navigationBarTitleDisplayMode(.inline)
+        case .error(let message):
+            navigation { ErrorView(message: message, onRetry: initializeSDK) }
+        }
+    }
+
+    /// Wraps a screen in the example's standard stacked-navigation chrome.
+    @ViewBuilder
+    private func navigation<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        NavigationView {
+            content()
+                .navigationBarTitleDisplayMode(.inline)
         }
         .navigationViewStyle(.stack)
     }

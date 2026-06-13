@@ -71,7 +71,7 @@ pub use result::{FfiPipelineExecutionResult, FfiStageExecutionResult};
 
 use crate::model::SdkError;
 use crate::registry_client::RegistryClient;
-use crate::result::OutputType;
+use crate::result::{output_type_for_envelope, OutputType};
 use crate::run_options::RunOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -1290,11 +1290,7 @@ fn execute_blocking(
         .collect();
 
     let (output_type, output) = if let Some(last) = results.last() {
-        let output_type = match &last.output.kind {
-            EnvelopeKind::Text(_) => OutputType::Text,
-            EnvelopeKind::Audio(_) => OutputType::Audio,
-            EnvelopeKind::Embedding(_) => OutputType::Embedding,
-        };
+        let output_type = output_type_for_envelope(&last.output);
         (output_type, last.output.clone())
     } else {
         (
@@ -1568,11 +1564,7 @@ impl Xybrid {
                             })?;
                         let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
-                        let output_type = match &output.kind {
-                            EnvelopeKind::Text(_) => OutputType::Text,
-                            EnvelopeKind::Audio(_) => OutputType::Audio,
-                            EnvelopeKind::Embedding(_) => OutputType::Embedding,
-                        };
+                        let output_type = output_type_for_envelope(&output);
 
                         // Publish a `ModelComplete` mirroring the
                         // `XybridModel::run_streaming` SDK path so the

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — real-time vision primitives (`feat/realtime-vision`, code-complete, not yet merged or device-validated)
+
+The following SDK/runtime additions land on the `feat/realtime-vision` branch in
+support of Studio's live camera vision (the app-side live loop lives in the meta
+workstation). They are code-complete and reviewed but **not yet validated on a
+real device**, so they are recorded here as unreleased rather than under a cut
+version. The version bump + `/sync-api` + tag are a merge/release-time action via
+the existing `version-sync.sh` tooling — **not** done in this entry.
+
+- **Reachable streaming cancellation**: cancelling a streaming generation now
+  drives a real runtime abort end-to-end (FFI `FfiCancellationToken` +
+  options-aware streaming routing + sink-closed-as-cancel), so the generation
+  halts at the next token and releases the model lock. Previously the Dart-side
+  "stop" only unsubscribed and the runtime kept generating. `UserCancelled` is the
+  default abort outcome.
+- **Preemptive cancel-and-replace slot** on the model handle: a new run can
+  preempt the in-flight run (latest-frame-wins), so a live loop no longer
+  head-of-line-blocks behind a stale frame.
+- **Raw-frame `mtmd` path + `imageRaw` binding**: a packed-RGB
+  `mtmd_bitmap_init` shim routes `ImageSource::Raw` through `mtmd` without
+  per-frame JPEG re-encoding; the `imageRaw` envelope binding is exposed to Dart/FRB
+  and consumed by Studio behind a default-off flag. The encoded `image` path is
+  unchanged and remains the fallback.
+- **Live-mode telemetry tagging + per-session sampler**: live inferences are
+  tagged (`live_mode` + `frame_session_id`) and rate-limited by a per-session
+  sampler (≈1 row/sec/session, TTL-bounded), so live sessions don't emit a
+  telemetry row per frame.
+
+Multimodal KV-prefix reuse (the per-frame prefill cost lever) is **deferred** —
+not implemented this cycle.
+
 ### Planned (0.1.x)
 
 - **OpenUPM registry**: Publish Unity SDK to [openupm.com](https://openupm.com) for scoped registry install

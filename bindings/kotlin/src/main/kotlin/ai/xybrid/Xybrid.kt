@@ -288,6 +288,10 @@ object Envelope {
     @JvmStatic
     fun embedding(data: FloatArray): XybridEnvelope =
         XybridEnvelope(kind = XybridEnvelopeKind.Embedding(data), metadata = emptyList())
+    // NOTE: the vision envelope helpers (image / multimodal userMessage) added
+    // in #245 are not ported here — the bolt `XybridEnvelopeKind` has no Image
+    // variant yet. They land with the "wire vision through the facade/bolt"
+    // follow-up, alongside the deferred vision CI build-checks.
 }
 
 // -- XybridVoiceInfo Extensions --

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		3B1A00012B0000010000000A /* XybridExampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B1A00002B0000000000000A /* XybridExampleApp.swift */; };
 		3B1A00022B0000020000000A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B1A00012B0000010000000B /* ContentView.swift */; };
+		3B1A00052B0000050000000A /* LiveVision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B1A00052B0000050000000B /* LiveVision.swift */; };
 		3B1A00032B0000030000000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3B1A00022B0000020000000B /* Assets.xcassets */; };
 		E3C7BD052F600DA900A10DD1 /* Xybrid in Frameworks */ = {isa = PBXBuildFile; productRef = E3C7BD042F600DA900A10DD1 /* Xybrid */; };
 /* End PBXBuildFile section */
@@ -16,6 +17,7 @@
 /* Begin PBXFileReference section */
 		3B1A00002B0000000000000A /* XybridExampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XybridExampleApp.swift; sourceTree = "<group>"; };
 		3B1A00012B0000010000000B /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		3B1A00052B0000050000000B /* LiveVision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVision.swift; sourceTree = "<group>"; };
 		3B1A00022B0000020000000B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		3B1A00032B0000030000000B /* XybridExample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XybridExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3B1A00042B0000040000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -46,6 +48,7 @@
 			children = (
 				3B1A00002B0000000000000A /* XybridExampleApp.swift */,
 				3B1A00012B0000010000000B /* ContentView.swift */,
+				3B1A00052B0000050000000B /* LiveVision.swift */,
 				3B1A00022B0000020000000B /* Assets.xcassets */,
 				3B1A00042B0000040000000B /* Info.plist */,
 			);
@@ -134,6 +137,7 @@
 			files = (
 				3B1A00012B0000010000000A /* XybridExampleApp.swift in Sources */,
 				3B1A00022B0000020000000A /* ContentView.swift in Sources */,
+				3B1A00052B0000050000000A /* LiveVision.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

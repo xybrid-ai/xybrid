@@ -62,10 +62,10 @@ The prebuilt binaries from the install script already include the correct featur
 | Feature | Description |
 |---------|-------------|
 | **Platform presets** | |
-| `platform-macos` | ONNX download + CoreML + Metal + llama.cpp |
-| `platform-ios` | ONNX download + CoreML + Metal + llama.cpp |
-| `platform-android` | ONNX dynamic + llama.cpp |
-| `platform-desktop` | ONNX download + llama.cpp |
+| `platform-macos` | ONNX download + CoreML + Metal + text-only llama.cpp |
+| `platform-ios` | ONNX download + CoreML + Metal + text-only llama.cpp |
+| `platform-android` | ONNX dynamic + text-only llama.cpp |
+| `platform-desktop` | ONNX download + text-only llama.cpp |
 | **Individual flags** | |
 | `ort-download` | Download prebuilt ONNX Runtime binaries |
 | `ort-dynamic` | Load ONNX Runtime .so at runtime |
@@ -74,6 +74,8 @@ The prebuilt binaries from the install script already include the correct featur
 | `candle-metal` | Metal GPU acceleration for Candle |
 | `candle-cuda` | CUDA GPU acceleration for Candle |
 | `llm-llamacpp` | llama.cpp LLM runtime backend (recommended) |
+| `vision` | Image envelope and preprocessing support |
+| `llm-llamacpp-vision` | llama.cpp vision-language support (`mmproj` / `mtmd`) |
 | `llm-mistral` | mistral.rs LLM backend (alternative) |
 
 </details>
@@ -138,6 +140,29 @@ xybrid repl --model smollm2-360m --stream
 
 # Single inference
 xybrid run --model smollm2-360m --input-text "What is the capital of France?"
+```
+
+### Vision-Language Input
+
+Vision-language models require a build with `vision` or `llm-llamacpp-vision`
+enabled, plus a model bundle that includes the vision encoder artifact.
+Platform presets alone are text-only; compose a preset with
+`llm-llamacpp-vision` for local VLM generation.
+
+```bash
+cargo build --release -p xybrid-cli --features platform-macos,llm-llamacpp-vision
+```
+
+```bash
+# Single vision turn
+xybrid run --model lfm2-vl-450m \
+  --input-text "Describe this image" \
+  --input-image photo.jpg
+
+# Interactive vision chat
+xybrid repl --model lfm2-vl-450m --stream
+/image photo.jpg
+What is in this image?
 ```
 
 ### Run Any GGUF from HuggingFace
@@ -227,6 +252,7 @@ The `run` command accepts multiple input sources (mutually exclusive):
 |------|-------------|
 | `--input-text <text>` | Text input (for TTS, LLM) |
 | `--input-audio <file>` | Audio input WAV file (for ASR) |
+| `--input-image <file>` | Image input for vision-language models; repeatable |
 | `--voice <id>` | TTS voice ID (e.g., `af_bella`) |
 | `--output <file>` | Output file (.wav for audio, .txt for text) |
 | `--target <format>` | Target format (onnx, coreml, tflite) |

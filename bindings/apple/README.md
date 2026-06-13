@@ -65,7 +65,7 @@ if result.success {
 |------|-------------|
 | `XybridModelLoader` | Loads models from registry or local bundles |
 | `XybridModel` | Represents a loaded model ready for inference |
-| `XybridEnvelope` | Input data container (audio, text, or embedding) |
+| `XybridEnvelope` | Input data container (audio, text, embedding, image, or multi-part user message) |
 | `XybridResult` | Inference result with success status and output data |
 | `XybridError` | Error enum for error handling |
 
@@ -90,7 +90,18 @@ let asrEnvelope = XybridEnvelope.audio(
 let embeddingEnvelope = XybridEnvelope.embedding(
     data: [0.1, 0.2, 0.3, ...]
 )
+
+// Vision-language input
+let image = try XybridEnvelope.image(imageData, format: "jpeg")
+let prompt = try XybridEnvelope.userMessage(
+    "Describe this image",
+    images: [image]
+)
 ```
+
+For larger VLM variants, validate on iPhone 15 Pro or newer. Smaller devices should use
+capability checks before loading a vision bundle so unsupported paths fail with a clear
+runtime error instead of an opaque memory pressure failure.
 
 ## Structure
 

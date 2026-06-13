@@ -205,6 +205,32 @@ impl From<sdk::SdkError> for Error {
                 Error::RateLimited { retry_after_secs }
             }
             sdk::SdkError::Timeout { timeout_ms } => Error::Timeout { timeout_ms },
+            // Capability / artifact errors were added alongside the vision
+            // work. The bolt error surface doesn't carry dedicated variants for
+            // them yet, so flatten onto the closest existing kind, preserving
+            // the full diagnostic message. Revisit when vision lands on bolt.
+            sdk::SdkError::MissingArtifact { artifact, path } => Error::LoadError {
+                message: format!("missing artifact '{artifact}' at {path}"),
+            },
+            sdk::SdkError::UnsupportedModelCapability {
+                model_id,
+                capability,
+                hint,
+            } => Error::ConfigError {
+                message: format!(
+                    "model '{model_id}' does not support {capability}; {hint}"
+                ),
+            },
+            sdk::SdkError::UnsupportedBackendCapability {
+                model_id,
+                backend,
+                capability,
+                hint,
+            } => Error::ConfigError {
+                message: format!(
+                    "model '{model_id}' requires {capability}, but backend/build '{backend}' does not support it; {hint}"
+                ),
+            },
         }
     }
 }
@@ -298,6 +324,16 @@ impl Envelope {
             sdk::ir::EnvelopeKind::Text(text) => EnvelopeKind::Text { text },
             sdk::ir::EnvelopeKind::Audio(bytes) => EnvelopeKind::Audio { bytes },
             sdk::ir::EnvelopeKind::Embedding(values) => EnvelopeKind::Embedding { values },
+            // The SDK's vision envelope kinds (`Image`, `MultiPart`) are
+            // `#[cfg(feature = "vision")]`-gated and have no representation on
+            // the bolt surface yet. They're input kinds — model outputs (what
+            // `from_sdk` sees) are never images — so collapse to a text marker
+            // until vision is wired through the facade. The wildcard keeps this
+            // exhaustive whether or not `vision` is unified on in the build.
+            #[allow(unreachable_patterns)]
+            other => EnvelopeKind::Text {
+                text: format!("[unsupported envelope kind: {other:?}]"),
+            },
         };
         Self {
             kind,

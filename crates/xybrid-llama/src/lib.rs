@@ -66,15 +66,23 @@ mod generation;
 mod log_control;
 #[cfg(feature = "bindings")]
 mod model;
+#[cfg(all(feature = "bindings", feature = "vision"))]
+mod vision;
 
 #[cfg(feature = "bindings")]
 pub use context::LlamaContext;
+#[cfg(all(feature = "bindings", feature = "vision"))]
+pub use generation::generate_from_current_logits_streaming;
 #[cfg(feature = "bindings")]
 pub use generation::{format_chat, generate_streaming, generate_with_stops, StreamingCallback};
 #[cfg(feature = "bindings")]
 pub use log_control::{get_verbosity, set_verbosity};
 #[cfg(feature = "bindings")]
 pub use model::LlamaModel;
+#[cfg(all(feature = "bindings", feature = "vision"))]
+pub use vision::{
+    mtmd_helper_eval_chunks, MtmdBitmap, MtmdChunksSummary, MtmdContext, MtmdInputChunks,
+};
 
 // =========================================================================
 // No-bindings stubs

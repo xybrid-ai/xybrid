@@ -8,7 +8,7 @@ name = "xybrid"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["vision"]
 
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 # These are the atomic features that forward to xybrid-sdk
@@ -35,6 +35,8 @@ llm-mistral = ["xybrid-sdk/llm-mistral"]
 llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
+vision = ["xybrid-core/vision", "xybrid-sdk/vision"]
+llm-llamacpp-vision = ["llm-llamacpp", "vision", "xybrid-sdk/llm-llamacpp-vision"]
 
 # PLATFORM PRESETS (composed from individual features above)
 # This ensures #[cfg(feature = "...")] checks work correctly in this crate.
@@ -69,3 +71,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-flame = "0.2"
 
+[dev-dependencies]
+image = "0.25"

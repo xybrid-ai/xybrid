@@ -262,6 +262,42 @@ public extension XybridEnvelope {
     static func embedding(data: [Float]) -> XybridEnvelope {
         return XybridEnvelope(kind: .embedding(values: data), metadata: [])
     }
+
+    /// Creates an encoded image envelope for vision-language models.
+    /// - Parameters:
+    ///   - bytes: Encoded PNG, JPEG, or WebP data
+    ///   - format: Image format (`png`, `jpeg`, `jpg`, or `webp`)
+    static func image(_ bytes: Data, format: String) throws -> XybridEnvelope {
+        return .image(bytes: bytes, format: try normalizeImageFormat(format))
+    }
+
+    /// Creates a multi-part user message with text and image attachments.
+    /// - Parameters:
+    ///   - text: User prompt text
+    ///   - images: Image envelopes created by `image(_:format:)`
+    static func userMessage(_ text: String, images: [XybridEnvelope] = []) throws -> XybridEnvelope {
+        guard images.allSatisfy({ envelope in
+            if case .image = envelope { return true }
+            return false
+        }) else {
+            throw XybridError.ConfigError(message: "Envelope.userMessage accepts only image envelopes")
+        }
+        return .userMessage(text: text, images: images)
+    }
+
+    private static func normalizeImageFormat(_ format: String) throws -> String {
+        let normalized = format.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "jpg":
+            return "jpeg"
+        case "jpeg", "png", "webp":
+            return normalized
+        default:
+            throw XybridError.ConfigError(
+                message: "Unsupported image format '\(format)'. Supported formats: png, jpeg, jpg, webp"
+            )
+        }
+    }
 }
 
 // MARK: - XybridVoiceInfo Extensions
@@ -317,6 +353,12 @@ extension XybridError: LocalizedError {
             return "Rate limited, retry after \(retryAfterSecs) seconds"
         case .timeout(let timeoutMs):
             return "Request timeout after \(timeoutMs)ms"
+        case .MissingArtifact(let artifact, let path):
+            return "Missing artifact \(artifact) at \(path)"
+        case .UnsupportedModelCapability(let modelId, let capability, let hint):
+            return "Model \(modelId) does not support \(capability)\(hint.isEmpty ? "" : ". Hint: \(hint)")"
+        case .UnsupportedBackendCapability(let modelId, let backend, let capability, let hint):
+            return "Backend \(backend) cannot satisfy \(capability) required by \(modelId)\(hint.isEmpty ? "" : ". Hint: \(hint)")"
         }
     }
 }

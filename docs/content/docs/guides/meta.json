@@ -1,0 +1,7 @@
+{
+  "title": "Guides",
+  "description": "End-to-end implementation guides",
+  "icon": "BookOpen",
+  "root": true,
+  "pages": ["vision-models"]
+}

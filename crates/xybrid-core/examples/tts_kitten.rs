@@ -104,6 +104,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("❌ Unexpected embedding output: {} dimensions", emb.len());
             return Err("Expected audio output, got embedding".into());
         }
+        #[cfg(feature = "vision")]
+        EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
+            println!("❌ Unexpected vision output");
+            return Err("Expected audio output, got vision output".into());
+        }
     }
 
     println!();

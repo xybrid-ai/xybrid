@@ -41,7 +41,19 @@ impl StandardStrategy {
 
     /// Check if this is an LLM model (should be handled by LlmStrategy).
     fn is_llm_model(metadata: &ModelMetadata) -> bool {
-        matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
+        matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. }) || {
+            #[cfg(feature = "vision")]
+            {
+                matches!(
+                    metadata.execution_template,
+                    ExecutionTemplate::VisionLanguage { .. }
+                )
+            }
+            #[cfg(not(feature = "vision"))]
+            {
+                false
+            }
+        }
     }
 
     /// Check if this is a model graph (should be handled by PipelineStrategy).
@@ -64,6 +76,10 @@ impl StandardStrategy {
             )),
             ExecutionTemplate::Gguf { .. } => Err(AdapterError::InvalidInput(
                 "GGUF models should use LlmStrategy".to_string(),
+            )),
+            #[cfg(feature = "vision")]
+            ExecutionTemplate::VisionLanguage { .. } => Err(AdapterError::InvalidInput(
+                "VisionLanguage models should use a multimodal LLM strategy".to_string(),
             )),
         }
     }

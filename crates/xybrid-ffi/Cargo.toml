@@ -17,6 +17,9 @@ xybrid-sdk = { path = "../xybrid-sdk", default-features = false }
 cbindgen = "0.26"
 csbindgen = "1.9"
 
+[dev-dependencies]
+image = "0.25"
+
 [features]
 default = []
 # Generate C# bindings (for Unity)
@@ -40,4 +43,6 @@ llm-mistral = ["xybrid-sdk/llm-mistral"]
 llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
+vision = ["xybrid-sdk/vision"]
+llm-llamacpp-vision = ["vision", "llm-llamacpp", "xybrid-sdk/llm-llamacpp-vision"]
 huggingface = ["xybrid-sdk/huggingface"]

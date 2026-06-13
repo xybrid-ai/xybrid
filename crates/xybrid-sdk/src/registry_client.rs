@@ -866,73 +866,68 @@ impl RegistryClient {
         let metadata_path = extract_dir.join("model_metadata.json");
 
         // Idempotency check: if model file + metadata exist, check cache validity
-        if model_file_path.exists() && metadata_path.exists() {
-            if resolved.sha256.is_empty() {
-                // No hash to verify — trust existing files
-                warn!(
-                    "Passthrough cache hit for '{}' (no hash verification) at {}",
-                    mask,
-                    extract_dir.display()
-                );
-                return Ok(extract_dir);
+        if metadata_path.exists() {
+            let mut cache_valid =
+                self.passthrough_file_is_valid(&model_file_path, &resolved.sha256)?;
+            for artifact in &resolved.artifacts {
+                let artifact_path = extract_dir.join(&artifact.file);
+                cache_valid &= self.passthrough_file_is_valid(&artifact_path, &artifact.sha256)?;
             }
-            if let Some(cached_hash) = read_cached_hash(&model_file_path) {
-                if cached_hash == resolved.sha256 {
+
+            if cache_valid {
+                if resolved.sha256.is_empty()
+                    || resolved
+                        .artifacts
+                        .iter()
+                        .any(|artifact| artifact.sha256.is_empty())
+                {
+                    warn!(
+                        "Passthrough cache hit for '{}' (one or more files lack hash verification) at {}",
+                        mask,
+                        extract_dir.display()
+                    );
+                } else {
                     info!(
                         "Passthrough cache hit for '{}' at {}",
                         mask,
                         extract_dir.display()
                     );
-                    return Ok(extract_dir);
                 }
-                info!("Passthrough hash mismatch for '{}', re-downloading", mask);
+                return Ok(extract_dir);
             }
+            info!(
+                "Passthrough cache incomplete or hash mismatch for '{}', re-downloading",
+                mask
+            );
         }
 
         // Create extraction directory
         std::fs::create_dir_all(&extract_dir)
             .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
-        // Download raw model file directly to extraction dir
-        info!(
-            "Passthrough download '{}' from {}",
-            mask, resolved.download_url
-        );
-        // Same reasoning as the standard fetch path: we time the
-        // network transfer alone so the cost dashboard sees a clean
-        // bytes-on-the-wire signal.
-        let download_started = Instant::now();
-        self.download_with_progress(
+        self.download_passthrough_file(
+            mask,
+            &resolved.file,
             &resolved.download_url,
             &model_file_path,
             resolved.size_bytes,
             &progress_callback,
+            &resolved.sha256,
         )?;
-        let download_duration = download_started.elapsed();
 
-        let bytes_downloaded = std::fs::metadata(&model_file_path)
-            .map(|m| m.len())
-            .unwrap_or(resolved.size_bytes);
-        crate::telemetry::publish_model_download(
-            mask,
-            bytes_downloaded,
-            classify_download_source(&resolved.download_url),
-            download_duration.as_millis().min(u32::MAX as u128) as u32,
-        );
-
-        // Verify SHA256
-        if !resolved.sha256.is_empty() {
-            let hash = compute_sha256(&model_file_path)?;
-            if hash != resolved.sha256 {
-                std::fs::remove_file(&model_file_path).ok();
-                return Err(SdkError::cache(format!(
-                    "Passthrough SHA256 mismatch: expected {}, got {}",
-                    resolved.sha256, hash
-                )));
-            }
-            // Cache the verified hash
-            write_cached_hash(&model_file_path, &hash);
-            info!("Passthrough SHA256 verified for '{}'", mask);
+        // Note: download_passthrough_file already handles telemetry + SHA256 per file.
+        // Download additional artifacts (e.g. mmproj for VLM models)
+        for artifact in &resolved.artifacts {
+            let artifact_path = extract_dir.join(&artifact.file);
+            self.download_passthrough_file(
+                mask,
+                &artifact.file,
+                &artifact.download_url,
+                &artifact_path,
+                artifact.size_bytes,
+                &progress_callback,
+                &artifact.sha256,
+            )?;
         }
 
         // Write model_metadata.json from registry response
@@ -954,6 +949,85 @@ impl RegistryClient {
         }
 
         Ok(extract_dir)
+    }
+
+    fn passthrough_file_is_valid(
+        &self,
+        file_path: &PathBuf,
+        expected_sha256: &str,
+    ) -> Result<bool, SdkError> {
+        if !file_path.exists() {
+            return Ok(false);
+        }
+        if expected_sha256.is_empty() {
+            return Ok(true);
+        }
+        if let Some(cached_hash) = read_cached_hash(file_path) {
+            return Ok(cached_hash == expected_sha256);
+        }
+        let computed = compute_sha256(file_path)?;
+        let matches = computed == expected_sha256;
+        if matches {
+            write_cached_hash(file_path, &computed);
+        }
+        Ok(matches)
+    }
+
+    fn download_passthrough_file<F>(
+        &self,
+        mask: &str,
+        file_name: &str,
+        download_url: &str,
+        dest: &PathBuf,
+        size_bytes: u64,
+        progress_callback: &F,
+        expected_sha256: &str,
+    ) -> Result<(), SdkError>
+    where
+        F: Fn(f32),
+    {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        info!(
+            "Passthrough download '{}' file '{}' from {}",
+            mask, file_name, download_url
+        );
+        // Same reasoning as the standard fetch path: we time the
+        // network transfer alone so the cost dashboard sees a clean
+        // bytes-on-the-wire signal.
+        let download_started = Instant::now();
+        self.download_with_progress(download_url, dest, size_bytes, progress_callback)?;
+        let download_duration = download_started.elapsed();
+
+        let bytes_downloaded = std::fs::metadata(dest)
+            .map(|m| m.len())
+            .unwrap_or(size_bytes);
+        crate::telemetry::publish_model_download(
+            mask,
+            bytes_downloaded,
+            classify_download_source(download_url),
+            download_duration.as_millis().min(u32::MAX as u128) as u32,
+        );
+
+        if !expected_sha256.is_empty() {
+            let hash = compute_sha256(dest)?;
+            if hash != expected_sha256 {
+                std::fs::remove_file(dest).ok();
+                return Err(SdkError::cache(format!(
+                    "Passthrough SHA256 mismatch for '{}': expected {}, got {}",
+                    file_name, expected_sha256, hash
+                )));
+            }
+            write_cached_hash(dest, &hash);
+            info!(
+                "Passthrough SHA256 verified for '{}' file '{}'",
+                mask, file_name
+            );
+        }
+
+        Ok(())
     }
 
     /// Check if a model is already extracted and ready to use.
@@ -1319,12 +1393,29 @@ pub struct ResolvedVariant {
     pub size_bytes: u64,
     /// SHA256 hash for verification
     pub sha256: String,
+    /// Additional files required by this variant, such as VLM mmproj siblings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<ResolvedArtifact>,
     /// Whether this is a passthrough variant (direct download, no .xyb bundle)
     #[serde(default)]
     pub passthrough: bool,
     /// Inline model_metadata.json for passthrough variants
     #[serde(default)]
     pub model_metadata: Option<serde_json::Value>,
+}
+
+/// Additional resolved artifact required alongside the primary variant file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedArtifact {
+    /// Local file path relative to the extracted model directory.
+    pub file: String,
+    /// Direct download URL.
+    pub download_url: String,
+    /// Expected size in bytes.
+    pub size_bytes: u64,
+    /// Expected SHA256 hash. Empty means no hash verification is available.
+    #[serde(default)]
+    pub sha256: String,
 }
 
 /// Cache statistics.
@@ -1358,6 +1449,53 @@ impl CacheStats {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[cfg(feature = "vision")]
+    fn create_vlm_bundle(temp_dir: &tempfile::TempDir, model_id: &str) -> PathBuf {
+        let model_dir = temp_dir.path().join("bundle_model_files");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = format!(
+            r#"{{
+                "model_id": "{}",
+                "version": "1.0",
+                "execution_template": {{
+                    "type": "VisionLanguage",
+                    "model_file": "model.gguf"
+                }},
+                "vision_encoder": {{
+                    "file": "mmproj-model.gguf",
+                    "preprocessing_preset": "gemma3_vision",
+                    "image_size": 896
+                }},
+                "preprocessing": [],
+                "postprocessing": [],
+                "files": ["model.gguf", "mmproj-model.gguf"],
+                "metadata": {{ "task": "vlm" }}
+            }}"#,
+            model_id
+        );
+        std::fs::write(model_dir.join("model_metadata.json"), &metadata).unwrap();
+        std::fs::write(model_dir.join("model.gguf"), b"fake language model").unwrap();
+        std::fs::write(
+            model_dir.join("mmproj-model.gguf"),
+            b"fake vision projector",
+        )
+        .unwrap();
+
+        let mut bundle = xybrid_core::bundler::XyBundle::new(model_id, "1.0", "universal");
+        bundle
+            .add_file(model_dir.join("model_metadata.json"))
+            .unwrap();
+        bundle.add_file(model_dir.join("model.gguf")).unwrap();
+        bundle
+            .add_file(model_dir.join("mmproj-model.gguf"))
+            .unwrap();
+
+        let bundle_path = temp_dir.path().join(format!("{}.xyb", model_id));
+        bundle.write(&bundle_path).unwrap();
+        bundle_path
+    }
 
     #[test]
     fn classify_download_source_recognises_r2_hosts() {
@@ -1404,6 +1542,239 @@ mod tests {
             "other"
         );
         assert_eq!(classify_download_source(""), "other");
+    }
+
+    #[test]
+    fn resolved_variant_preserves_passthrough_sibling_artifacts() {
+        let resolved: ResolvedVariant = serde_json::from_str(
+            r#"
+{
+  "hf_repo": "xybrid-ai/vlm",
+  "file": "model.gguf",
+  "download_url": "https://example.com/model.gguf",
+  "format": "gguf",
+  "quantization": "q4_k_m",
+  "size_bytes": 10,
+  "sha256": "model-hash",
+  "passthrough": true,
+  "artifacts": [
+    {
+      "file": "mmproj-model.gguf",
+      "download_url": "https://example.com/mmproj-model.gguf",
+      "size_bytes": 5,
+      "sha256": "mmproj-hash"
+    }
+  ],
+  "model_metadata": {
+    "model_id": "vlm",
+    "version": "1.0",
+    "execution_template": { "type": "VisionLanguage", "model_file": "model.gguf" },
+    "vision_encoder": {
+      "file": "mmproj-model.gguf",
+      "preprocessing_preset": "gemma3_vision",
+      "image_size": 896
+    },
+    "files": ["model.gguf", "mmproj-model.gguf"],
+    "metadata": {}
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        let roundtrip = serde_json::to_value(&resolved).unwrap();
+        let artifacts = roundtrip
+            .get("artifacts")
+            .and_then(|value| value.as_array())
+            .expect("resolved passthrough variant must keep sibling artifact descriptors");
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0]["file"], "mmproj-model.gguf");
+        assert_eq!(
+            artifacts[0]["download_url"],
+            "https://example.com/mmproj-model.gguf"
+        );
+        assert_eq!(artifacts[0]["sha256"], "mmproj-hash");
+    }
+
+    #[test]
+    fn fetch_extracted_passthrough_downloads_sibling_artifacts() {
+        use httpmock::prelude::*;
+        use sha2::{Digest, Sha256};
+
+        fn sha256_hex(bytes: &[u8]) -> String {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            format!("{:x}", hasher.finalize())
+        }
+
+        let server = MockServer::start();
+        let model_bytes = b"main model";
+        let mmproj_bytes = b"vision projector";
+        let model_hash = sha256_hex(model_bytes);
+        let mmproj_hash = sha256_hex(mmproj_bytes);
+
+        let model_mock = server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(200).body(model_bytes.as_slice());
+        });
+        let mmproj_mock = server.mock(|when, then| {
+            when.method(GET).path("/mmproj-model.gguf");
+            then.status(200).body(mmproj_bytes.as_slice());
+        });
+
+        let resolve_body = serde_json::json!({
+            "mask": "vlm",
+            "platform": "universal",
+            "resolved": {
+                "hf_repo": "xybrid-ai/vlm",
+                "file": "model.gguf",
+                "download_url": server.url("/model.gguf"),
+                "format": "gguf",
+                "quantization": "q4_k_m",
+                "size_bytes": model_bytes.len(),
+                "sha256": model_hash,
+                "passthrough": true,
+                "artifacts": [
+                    {
+                        "file": "mmproj-model.gguf",
+                        "download_url": server.url("/mmproj-model.gguf"),
+                        "size_bytes": mmproj_bytes.len(),
+                        "sha256": mmproj_hash
+                    }
+                ],
+                "model_metadata": {
+                    "model_id": "vlm",
+                    "version": "1.0",
+                    "execution_template": {
+                        "type": "VisionLanguage",
+                        "model_file": "model.gguf"
+                    },
+                    "vision_encoder": {
+                        "file": "mmproj-model.gguf",
+                        "preprocessing_preset": "gemma3_vision",
+                        "image_size": 896
+                    },
+                    "files": ["model.gguf", "mmproj-model.gguf"],
+                    "metadata": {}
+                }
+            }
+        });
+        let resolve_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/vlm/resolve")
+                .query_param_exists("platform");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(resolve_body);
+        });
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        let mut client = RegistryClient::with_url(server.base_url()).unwrap();
+        client.cache = CacheManager::with_dir(cache_dir).unwrap();
+
+        let model_dir = client
+            .fetch_extracted("vlm", Some("universal"), |_| {})
+            .expect("passthrough VLM fetch should materialize all artifacts");
+
+        assert_eq!(
+            std::fs::read(model_dir.join("model.gguf")).unwrap(),
+            model_bytes
+        );
+        assert_eq!(
+            std::fs::read(model_dir.join("mmproj-model.gguf")).unwrap(),
+            mmproj_bytes
+        );
+        assert!(
+            model_dir.join("model_metadata.json").exists(),
+            "metadata must be written next to passthrough artifacts"
+        );
+        assert_eq!(
+            read_cached_hash(&model_dir.join("model.gguf")).as_deref(),
+            Some(model_hash.as_str())
+        );
+        assert_eq!(
+            read_cached_hash(&model_dir.join("mmproj-model.gguf")).as_deref(),
+            Some(mmproj_hash.as_str())
+        );
+
+        resolve_mock.assert();
+        model_mock.assert();
+        mmproj_mock.assert();
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn fetch_extracted_bundle_repairs_partial_multifile_vlm_extraction() {
+        use httpmock::prelude::*;
+        use sha2::{Digest, Sha256};
+
+        fn sha256_hex(bytes: &[u8]) -> String {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            format!("{:x}", hasher.finalize())
+        }
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let bundle_path = create_vlm_bundle(&temp_dir, "vlm-bundle");
+        let bundle_bytes = std::fs::read(&bundle_path).unwrap();
+        let bundle_hash = sha256_hex(&bundle_bytes);
+
+        let server = MockServer::start();
+        let bundle_mock = server.mock(|when, then| {
+            when.method(GET).path("/universal.xyb");
+            then.status(200).body(bundle_bytes.clone());
+        });
+        let resolve_body = serde_json::json!({
+            "mask": "vlm-bundle",
+            "platform": "universal",
+            "resolved": {
+                "hf_repo": "xybrid-ai/vlm-bundle",
+                "file": "universal.xyb",
+                "download_url": server.url("/universal.xyb"),
+                "format": "gguf",
+                "quantization": "q4_k_m",
+                "size_bytes": bundle_bytes.len(),
+                "sha256": bundle_hash
+            }
+        });
+        let resolve_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/vlm-bundle/resolve")
+                .query_param_exists("platform");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(resolve_body);
+        });
+
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        let mut client = RegistryClient::with_url(server.base_url()).unwrap();
+        client.cache = CacheManager::with_dir(cache_dir).unwrap();
+
+        let partial_dir = client.cache.extraction_dir("vlm-bundle");
+        std::fs::create_dir_all(&partial_dir).unwrap();
+        let bundle = xybrid_core::bundler::XyBundle::load(&bundle_path).unwrap();
+        let metadata_json = bundle.get_metadata_json().unwrap().unwrap();
+        std::fs::write(partial_dir.join("model_metadata.json"), metadata_json).unwrap();
+
+        let model_dir = client
+            .fetch_extracted("vlm-bundle", Some("universal"), |_| {})
+            .expect("bundle VLM fetch should repair partial extraction and materialize siblings");
+
+        assert_eq!(model_dir, partial_dir);
+        assert!(model_dir.join("model_metadata.json").exists());
+        assert_eq!(
+            std::fs::read(model_dir.join("model.gguf")).unwrap(),
+            b"fake language model"
+        );
+        assert_eq!(
+            std::fs::read(model_dir.join("mmproj-model.gguf")).unwrap(),
+            b"fake vision projector"
+        );
+        assert!(client.is_extracted("vlm-bundle"));
+
+        resolve_mock.assert_hits(2);
+        bundle_mock.assert();
     }
 
     #[test]
@@ -1637,6 +2008,7 @@ mod tests {
             quantization: "fp16".to_string(),
             size_bytes: 100000,
             sha256: "abc123".to_string(),
+            artifacts: Vec::new(),
             passthrough: false,
             model_metadata: None,
         };

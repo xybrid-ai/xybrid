@@ -103,6 +103,11 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   /// Generation stream subscription.
   StreamSubscription<StreamToken>? _streamSubscription;
 
+  /// Cancel handle for the current generation. Driving [CancellationToken.cancel]
+  /// halts Rust inference at the next token boundary and frees the model write
+  /// lock — unlike merely unsubscribing, which only stops Dart from listening.
+  CancellationToken? _cancellationToken;
+
   /// Load progress stream subscription.
   StreamSubscription<LoadEvent>? _loadSubscription;
 
@@ -125,6 +130,7 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   void dispose() {
     _promptController.dispose();
     _scrollController.dispose();
+    _cancellationToken?.cancel();
     _streamSubscription?.cancel();
     _loadSubscription?.cancel();
     super.dispose();
@@ -261,9 +267,20 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
 
     try {
       final envelope = XybridEnvelope.text(userMessage);
+      // Fresh cancel handle per run; wired into the stream so "Stop" can halt
+      // Rust generation, not just unsubscribe.
+      final cancellationToken = CancellationToken();
+      _cancellationToken = cancellationToken;
       final stream = (_contextEnabled && _conversationContext != null)
-          ? _model!.runStreamingWithContext(envelope, _conversationContext!)
-          : _model!.runStreaming(envelope);
+          ? _model!.runStreamingWithContext(
+              envelope,
+              _conversationContext!,
+              cancellationToken: cancellationToken,
+            )
+          : _model!.runStreaming(
+              envelope,
+              cancellationToken: cancellationToken,
+            );
 
       _streamSubscription = stream.listen(
         (token) {
@@ -320,7 +337,13 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   }
 
   /// Stop the current generation.
+  ///
+  /// Drives the cancellation token first so Rust halts inference at the next
+  /// token boundary and releases the model write lock, then unsubscribes from
+  /// the Dart stream.
   void _stopGeneration() {
+    _cancellationToken?.cancel();
+    _cancellationToken = null;
     _streamSubscription?.cancel();
     _streamSubscription = null;
     _completeGeneration();
@@ -331,6 +354,9 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
   void _completeGeneration() {
     // Guard: only complete if still generating
     if (_state is! LlmGenerating) return;
+
+    // Release the per-run cancel handle; the run is done.
+    _cancellationToken = null;
 
     _calculateInferenceStats();
 

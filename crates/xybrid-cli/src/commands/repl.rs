@@ -2,8 +2,13 @@
 
 #![allow(clippy::too_many_arguments)]
 
+mod targeting;
+mod warmup;
+
 use anyhow::{Context, Result};
 use std::fs;
+#[cfg(feature = "vision")]
+use std::path::Path;
 use std::path::PathBuf;
 use xybrid_core::context::{DeviceMetrics, StageDescriptor};
 use xybrid_core::conversation::ConversationContext;
@@ -11,58 +16,19 @@ use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 use xybrid_core::orchestrator::Orchestrator;
 use xybrid_core::pipeline::ExecutionTarget;
-use xybrid_core::pipeline_config::{PipelineConfig, StageConfig};
+use xybrid_core::pipeline_config::PipelineConfig;
 use xybrid_sdk::model::ModelLoader;
 use xybrid_sdk::registry_client::RegistryClient;
 
 use colored::Colorize;
 
+use targeting::{
+    parse_repl_target, parse_stage_config_target, stage_config_allows_local_cache,
+    stage_is_locally_available, target_allows_local,
+};
+use warmup::warmup_models;
+
 use crate::ui;
-
-fn parse_repl_target(target: Option<&str>) -> Result<Option<ExecutionTarget>> {
-    target
-        .map(|value| {
-            value
-                .parse::<ExecutionTarget>()
-                .map_err(|err| anyhow::anyhow!(err))
-        })
-        .transpose()
-}
-
-fn target_allows_local(target: Option<&ExecutionTarget>) -> bool {
-    match target {
-        Some(target) => target.allows_local(),
-        None => true,
-    }
-}
-
-fn stage_is_locally_available(stage: &StageDescriptor) -> bool {
-    stage.is_locally_runnable()
-}
-
-fn stage_config_allows_local_cache(
-    stage_config: &StageConfig,
-    target: Option<&ExecutionTarget>,
-) -> bool {
-    match target {
-        Some(target) => target_allows_local(Some(target)),
-        None => !stage_config.is_cloud_stage(),
-    }
-}
-
-fn parse_stage_config_target(stage_config: &StageConfig) -> Option<ExecutionTarget> {
-    let value = stage_config.target()?;
-    match value.parse::<ExecutionTarget>() {
-        Ok(target) => Some(target),
-        Err(err) => {
-            ui::warning(&format!(
-                "Ignoring invalid stage target '{}': {}",
-                value, err
-            ));
-            None
-        }
-    }
-}
 
 /// Interactive REPL mode - keeps models loaded for fast repeated inference.
 pub(crate) fn handle_repl_command(
@@ -236,9 +202,12 @@ pub(crate) fn handle_repl_command(
 
     println!();
     ui::hint("Enter text and press Enter to run inference");
+    #[cfg(feature = "vision")]
+    ui::hint("Use '/image <path>' to attach an image to the next message");
     println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
 
     let stdin = io::stdin();
+    let mut pending_images = ReplPendingImages::default();
     loop {
         print!("\n  {} ", "❯".truecolor(120, 180, 255).bold());
         io::stdout().flush()?;
@@ -250,7 +219,12 @@ pub(crate) fn handle_repl_command(
 
         let input_line = input_line.trim();
 
-        let handled = handle_special_command(input_line, &mut conversation_context, verbose);
+        let handled = handle_special_command(
+            input_line,
+            &mut conversation_context,
+            &mut pending_images,
+            verbose,
+        );
 
         match handled {
             SpecialCommandResult::Quit => break,
@@ -258,15 +232,18 @@ pub(crate) fn handle_repl_command(
             SpecialCommandResult::NotSpecial => {}
         }
 
-        let mut input = Envelope::new(EnvelopeKind::Text(input_line.to_string()));
-        if conversation_context.is_some() {
-            input = input.with_role(MessageRole::User);
-        }
-        if let Some(ref voice_id) = voice {
-            input
-                .metadata
-                .insert("voice_id".to_string(), voice_id.clone());
-        }
+        let input = match build_repl_input(
+            input_line,
+            voice.as_deref(),
+            conversation_context.is_some(),
+            &mut pending_images,
+        ) {
+            Ok(input) => input,
+            Err(e) => {
+                ui::err(&format!("{}", e));
+                continue;
+            }
+        };
 
         if let Some(ref mut ctx) = conversation_context {
             ctx.push(input.clone());
@@ -419,90 +396,48 @@ fn ensure_model_cached(
     Ok(())
 }
 
-/// Warm up local stages by constructing an `XybridModel` per stage with
-/// a populated `bundle_path` and calling `model.warmup()`.
-///
-/// Why not just call `orchestrator.execute_pipeline()` (which also runs
-/// a forward pass per stage)? The orchestrator emits a full pipeline
-/// execution event chain (`PipelineStart`, `StageStart`,
-/// `PolicyEvaluated`, `RoutingDecided`, `ExecutionStarted`,
-/// `ExecutionCompleted`, `StageComplete`, `PipelineComplete`). The
-/// SDK→wire bridge filter drops most of those, but `PolicyEvaluated`
-/// and `RoutingDecided` legitimately pass through (they're routing
-/// metadata). On a real inference those events sit behind a
-/// `ModelComplete` / `PipelineComplete` row on the dashboard; on a
-/// warmup pass there's no completion event behind them, so they
-/// render as phantom 0 ms rows.
-///
-/// `XybridModel::warmup` goes directly through the executor — no
-/// orchestrator events fire — and publishes a single `ModelWarmup`
-/// event per stage with measured latency. The Traces dashboard then
-/// sees one labelled warmup row per local stage instead of two phantom
-/// rows per stage.
-///
-/// Stages without a `bundle_path` (remote-only / integration stages)
-/// can't warm locally and are skipped.
-fn warmup_models(stages: &[StageDescriptor]) {
-    let sp = ui::spinner("Warming up models...");
-    let mut warmed = 0_usize;
-    let mut failed: Vec<(String, String)> = Vec::new();
-
-    for stage in stages {
-        if !target_allows_local(stage.target.as_ref()) {
-            continue;
-        }
-
-        let Some(bundle_path_str) = stage.bundle_path.as_ref() else {
-            // Remote / integration stage — nothing to warm locally.
-            continue;
-        };
-        let bundle_path = PathBuf::from(bundle_path_str);
-
-        let loader_result = if bundle_path.extension().is_some_and(|ext| ext == "xyb") {
-            ModelLoader::from_bundle(&bundle_path)
-        } else {
-            ModelLoader::from_directory(&bundle_path)
-        };
-
-        let warmup_result = loader_result
-            .and_then(|loader| loader.load())
-            .and_then(|model| model.warmup());
-
-        match warmup_result {
-            Ok(()) => warmed += 1,
-            Err(e) => failed.push((stage.name.clone(), e.to_string())),
-        }
-    }
-
-    sp.finish_and_clear();
-    if failed.is_empty() {
-        if warmed == 0 {
-            // All stages were remote — nothing to warm; treat as silent OK.
-            ui::ok("No local stages to warm. Ready for input!");
-        } else {
-            ui::ok("Models loaded and warm. Ready for input!");
-        }
-    } else {
-        for (stage_name, err) in &failed {
-            ui::warning(&format!(
-                "Warmup failed for {} ({}), first query may be slow",
-                stage_name, err
-            ));
-        }
-    }
-}
-
 enum SpecialCommandResult {
     Quit,
     Continue,
     NotSpecial,
 }
 
+#[derive(Default)]
+struct ReplPendingImages {
+    paths: Vec<PathBuf>,
+}
+
+impl ReplPendingImages {
+    fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+
+    #[cfg(feature = "vision")]
+    fn len(&self) -> usize {
+        self.paths.len()
+    }
+
+    #[cfg(feature = "vision")]
+    fn push(&mut self, path: PathBuf) {
+        self.paths.push(path);
+    }
+
+    #[cfg(feature = "vision")]
+    fn clear(&mut self) {
+        self.paths.clear();
+    }
+}
+
 fn handle_special_command(
     input: &str,
     conversation_context: &mut Option<ConversationContext>,
+    pending_images: &mut ReplPendingImages,
     verbose: u8,
 ) -> SpecialCommandResult {
+    if let Some(result) = handle_image_command(input, pending_images) {
+        return result;
+    }
+
     match input.to_lowercase().as_str() {
         "quit" | "exit" | "q" => {
             println!();
@@ -514,6 +449,11 @@ fn handle_special_command(
             ui::hint("Commands:");
             println!("    {}  Exit REPL", ui::dim("quit, exit, q"));
             println!("    {}       Show this help", ui::dim("help, ?"));
+            #[cfg(feature = "vision")]
+            println!(
+                "    {}   Attach image to next message",
+                ui::dim("/image <path>")
+            );
             if conversation_context.is_some() {
                 println!("    {}      Show conversation history", ui::dim("history"));
                 println!("    {}        Clear conversation history", ui::dim("clear"));
@@ -565,6 +505,122 @@ fn handle_special_command(
         "" => SpecialCommandResult::Continue,
         _ => SpecialCommandResult::NotSpecial,
     }
+}
+
+fn handle_image_command(
+    input: &str,
+    pending_images: &mut ReplPendingImages,
+) -> Option<SpecialCommandResult> {
+    let trimmed = input.trim();
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let command = parts.next().unwrap_or_default();
+    if !command.eq_ignore_ascii_case("/image") {
+        return None;
+    }
+
+    let Some(path) = parts.next().map(str::trim).filter(|path| !path.is_empty()) else {
+        ui::err("Usage: /image <path>");
+        return Some(SpecialCommandResult::Continue);
+    };
+
+    #[cfg(feature = "vision")]
+    {
+        let path = PathBuf::from(path);
+        if !path.exists() {
+            ui::err(&format!("Image not found: {}", path.display()));
+            return Some(SpecialCommandResult::Continue);
+        }
+
+        pending_images.push(path);
+        ui::ok(&format!(
+            "Image attached to next message ({} pending)",
+            pending_images.len()
+        ));
+    }
+
+    #[cfg(not(feature = "vision"))]
+    {
+        let _ = path;
+        let _ = pending_images;
+        ui::err(
+            "This xybrid binary was built without vision support. Rebuild with --features vision or --features llm-llamacpp-vision to use /image.",
+        );
+    }
+
+    Some(SpecialCommandResult::Continue)
+}
+
+fn build_repl_input(
+    input_line: &str,
+    voice: Option<&str>,
+    conversation_context_enabled: bool,
+    pending_images: &mut ReplPendingImages,
+) -> Result<Envelope> {
+    if !pending_images.is_empty() {
+        if voice.is_some() {
+            return Err(anyhow::anyhow!(
+                "--voice cannot be combined with /image attachments"
+            ));
+        }
+        return build_repl_multimodal_input(input_line, pending_images);
+    }
+
+    let mut input = Envelope::new(EnvelopeKind::Text(input_line.to_string()));
+    if conversation_context_enabled {
+        input = input.with_role(MessageRole::User);
+    }
+    if let Some(voice_id) = voice {
+        input
+            .metadata
+            .insert("voice_id".to_string(), voice_id.to_string());
+    }
+
+    Ok(input)
+}
+
+fn build_repl_multimodal_input(
+    input_line: &str,
+    pending_images: &mut ReplPendingImages,
+) -> Result<Envelope> {
+    #[cfg(feature = "vision")]
+    {
+        let images = read_repl_images(&pending_images.paths)?;
+        let input = Envelope::user_message(input_line, images)
+            .context("Failed to build multimodal REPL input")?;
+        pending_images.clear();
+        Ok(input)
+    }
+
+    #[cfg(not(feature = "vision"))]
+    {
+        let _ = input_line;
+        let _ = pending_images;
+        Err(anyhow::anyhow!(
+            "This xybrid binary was built without vision support. Rebuild with --features vision or --features llm-llamacpp-vision to use /image."
+        ))
+    }
+}
+
+#[cfg(feature = "vision")]
+fn read_repl_images(image_paths: &[PathBuf]) -> Result<Vec<Envelope>> {
+    let mut images = Vec::with_capacity(image_paths.len());
+    for image_path in image_paths {
+        let image_bytes = fs::read(image_path)
+            .with_context(|| format!("Failed to read image file: {}", image_path.display()))?;
+        let format = image_format_hint(image_path)?;
+        images.push(
+            Envelope::image(image_bytes, format)
+                .with_context(|| format!("Invalid image input: {}", image_path.display()))?,
+        );
+    }
+    Ok(images)
+}
+
+#[cfg(feature = "vision")]
+fn image_format_hint(path: &Path) -> Result<&str> {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .ok_or_else(|| anyhow::anyhow!("Image file has no extension: {}", path.display()))
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -768,6 +824,17 @@ fn execute_batch(
                     EnvelopeKind::Embedding(vec) => {
                         ui::ok(&format!("Embedding: {} dimensions", vec.len()));
                     }
+                    #[cfg(feature = "vision")]
+                    EnvelopeKind::Image { .. } => {
+                        ui::ok(&format!(
+                            "Image output: {} bytes",
+                            result.output.payload_size()
+                        ));
+                    }
+                    #[cfg(feature = "vision")]
+                    EnvelopeKind::MultiPart(parts) => {
+                        ui::ok(&format!("Multi-part output: {} parts", parts.len()));
+                    }
                 }
             }
 
@@ -784,45 +851,70 @@ fn execute_batch(
 mod tests {
     use super::*;
 
+    #[cfg(feature = "vision")]
     #[test]
-    fn network_targets_do_not_allow_local_runtime() {
-        assert!(!target_allows_local(Some(&ExecutionTarget::Cloud)));
-        assert!(!target_allows_local(Some(&ExecutionTarget::Server)));
+    fn image_command_is_handled() {
+        let mut conversation_context = None;
+        let mut pending_images = ReplPendingImages::default();
+
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("fixture.png");
+        fs::write(&image_path, png_image(2, 3)).unwrap();
+
+        let result = handle_special_command(
+            &format!("/image {}", image_path.display()),
+            &mut conversation_context,
+            &mut pending_images,
+            0,
+        );
+
+        assert!(matches!(result, SpecialCommandResult::Continue));
+        assert_eq!(pending_images.len(), 1);
+        assert_eq!(pending_images.paths[0], image_path);
     }
 
+    #[cfg(feature = "vision")]
     #[test]
-    fn local_and_auto_targets_allow_local_runtime() {
-        assert!(target_allows_local(None));
-        assert!(target_allows_local(Some(&ExecutionTarget::Device)));
-        assert!(target_allows_local(Some(&ExecutionTarget::Auto)));
+    fn repl_multimodal_input_consumes_pending_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("fixture.png");
+        fs::write(&image_path, png_image(2, 3)).unwrap();
+        let mut pending_images = ReplPendingImages::default();
+        pending_images.push(image_path);
+
+        let input = build_repl_input("describe this", None, true, &mut pending_images).unwrap();
+        let parts = input.as_multipart().expect("REPL input is multipart");
+
+        assert!(pending_images.is_empty());
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].as_text(), Some("describe this"));
+        assert!(parts[1].is_image());
+        assert_eq!(
+            parts[1].image_dimensions(),
+            Some(xybrid_core::ir::ImageDimensions {
+                width: 2,
+                height: 3,
+            })
+        );
+        assert_eq!(input.role(), Some(MessageRole::User));
     }
 
+    #[cfg(feature = "vision")]
     #[test]
-    fn network_target_with_bundle_path_is_not_local_available() {
-        let stage = StageDescriptor::new("test-model")
-            .with_bundle_path("/tmp/test-model")
-            .with_target(ExecutionTarget::Cloud);
+    fn repl_multimodal_input_rejects_corrupt_image_with_redacted_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("corrupt.jpeg");
+        fs::write(&image_path, [42_u8, 42, 42, 42]).unwrap();
+        let mut pending_images = ReplPendingImages::default();
+        pending_images.push(image_path);
 
-        assert!(!stage_is_locally_available(&stage));
-    }
+        let err = build_repl_input("describe this", None, true, &mut pending_images).unwrap_err();
+        let message = format!("{err:#}");
 
-    #[test]
-    fn server_config_stage_skips_local_cache() {
-        let config = PipelineConfig::from_yaml(
-            r#"
-name: test
-stages:
-  - id: llm
-    model: test-model
-    target: server
-"#,
-        )
-        .unwrap();
-
-        assert!(!stage_config_allows_local_cache(
-            &config.stages[0],
-            Some(&ExecutionTarget::Server)
-        ));
+        assert!(message.contains("Invalid image input"));
+        assert!(message.contains("invalid or corrupt jpeg image bytes"));
+        assert!(!message.contains("[42"));
+        assert!(!message.contains("42, 42"));
     }
 
     #[test]
@@ -866,25 +958,17 @@ stages:
         assert!(stages[0].bundle_path.is_none());
     }
 
-    #[test]
-    fn repl_target_accepts_local_execution_aliases() {
-        assert_eq!(
-            parse_repl_target(Some("local")).unwrap(),
-            Some(ExecutionTarget::Device)
-        );
-        assert_eq!(
-            parse_repl_target(Some("device")).unwrap(),
-            Some(ExecutionTarget::Device)
-        );
-    }
-
-    #[test]
-    fn repl_target_rejects_model_format_values() {
-        let err = parse_repl_target(Some("onnx")).unwrap_err();
-
-        assert!(
-            err.to_string().contains("Unknown execution target"),
-            "{err}"
-        );
+    #[cfg(feature = "vision")]
+    fn png_image(width: u32, height: u32) -> Vec<u8> {
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            width,
+            height,
+            image::Rgb([17, 34, 51]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test image encodes");
+        encoded.into_inner()
     }
 }

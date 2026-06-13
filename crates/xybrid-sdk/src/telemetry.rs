@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 pub use xybrid_core::device::DeviceProfile;
 use xybrid_core::device::{ResourceMonitor, ResourceTelemetryMode, ResourceUsageSummary};
@@ -1035,6 +1035,9 @@ fn convert_to_platform_event(
                 "correlation_id",
                 "outcome_category",
                 "abort_reason",
+                // VLM-specific executor timing: image decode / resize /
+                // normalize before local vision-language inference.
+                "image_preprocess_ms",
                 // Per-routing-decision reliability hint (object with
                 // `recent_abort_rate` + `sample_size`). Lives in the SDK
                 // hoist list so the analytics backend can extract it via
@@ -1049,6 +1052,16 @@ fn convert_to_platform_event(
                 // Traces dashboard, distinguishing chat-flow / REPL
                 // turns from batch-style inferences at a glance.
                 "streaming",
+                // Live-capture session tag — the options-aware streaming
+                // path stamps `data.live_mode = true` +
+                // `data.frame_session_id = <uuid>` when a run is tagged via
+                // `RunOptions::with_frame_session`. Hoisting them to the
+                // payload top level lets the Traces dashboard column-extract
+                // a `live_mode` badge and group rows by session. Non-live
+                // events never carry these keys, so the hoist is a no-op for
+                // them (byte-identical to the pre-live-mode payload).
+                "live_mode",
+                "frame_session_id",
             ]
             .iter()
             {
@@ -1223,6 +1236,11 @@ fn convert_to_platform_event(
         if payload.get("prompt_cached_tokens").is_none() {
             if let Some(n) = extract_llm_prompt_cached_tokens(&spans) {
                 payload["prompt_cached_tokens"] = serde_json::json!(n);
+            }
+        }
+        if payload.get("image_preprocess_ms").is_none() {
+            if let Some(n) = extract_u64_attr_from_any_span(&spans, "image_preprocess_ms") {
+                payload["image_preprocess_ms"] = serde_json::json!(n);
             }
         }
         Some(spans)
@@ -1453,6 +1471,24 @@ fn extract_string_attr_from_any_span(stages: &serde_json::Value, key: &str) -> O
         if let Some(v) = meta.and_then(|m| m.get(key)).and_then(|v| v.as_str()) {
             // Same last-span-wins rule as the LLM-gated hoist.
             found = Some(v.to_string());
+        }
+    }
+    found
+}
+
+fn extract_u64_attr_from_any_span(stages: &serde_json::Value, key: &str) -> Option<u64> {
+    let spans = stages.get("spans")?.as_array()?;
+    let mut found: Option<u64> = None;
+    for span in spans {
+        let Some(v) = span.get("metadata").and_then(|meta| meta.get(key)) else {
+            continue;
+        };
+        if let Some(n) = v.as_u64() {
+            found = Some(n);
+        } else if let Some(s) = v.as_str() {
+            if let Ok(n) = s.parse::<u64>() {
+                found = Some(n);
+            }
         }
     }
     found
@@ -2784,7 +2820,125 @@ pub(crate) fn publish_telemetry_event_in_context(
     dispatch_telemetry_event(event);
 }
 
+/// Minimum gap between emitted wire rows for a single live-capture session.
+///
+/// A live-vision loop fires one inference per frame (potentially many per
+/// second); without throttling each would emit its own `ModelComplete` wire
+/// row. The dispatch funnel rate-limits live-mode events to roughly one row per
+/// second per `frame_session_id`, dropping the intervening per-frame rows. This
+/// is the v1 contract (Open Decision #5) — a true summary/rollup row would need
+/// a session-end signal the SDK never receives, so a per-session rate-limit is
+/// what ships.
+const LIVE_EVENT_MIN_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Idle TTL after which a `frame_session_id`'s rate-limit entry is forgotten.
+///
+/// `LIVE_SAMPLER_STATE` keeps one entry per distinct session id; without
+/// eviction the map would grow for the process lifetime, which matters because
+/// this is SDK code that can be embedded in long-running hosts. On each
+/// live-event dispatch we opportunistically drop entries idle longer than this
+/// TTL (no background task needed). The TTL is generous — far longer than the
+/// 1s rate window — so an active session is never evicted mid-stream. A session
+/// idle this long is safe to forget: a later event for a forgotten id simply
+/// emits as "first-seen", which is the correct rate-limit decision anyway.
+const LIVE_SAMPLER_TTL: Duration = Duration::from_secs(300);
+
+/// Per-`frame_session_id` last-emit timestamps for the live-mode rate limiter.
+///
+/// Process-global so the throttle survives across the many short-lived
+/// inference calls that make up one live session. Keyed by the caller-supplied
+/// session UUID; entries are only created for live-mode events, so non-live
+/// telemetry never touches this map.
+static LIVE_SAMPLER_STATE: std::sync::LazyLock<Mutex<std::collections::HashMap<String, Instant>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// Extract the live-capture tag (`live_mode == true` + a non-empty
+/// `frame_session_id`) from a telemetry event's `data` JSON, if present.
+///
+/// Returns `Some(frame_session_id)` only when the event was tagged via the
+/// live-mode streaming path. Every non-live event (no such keys, `live_mode`
+/// absent/false, or no session id) returns `None` and therefore bypasses the
+/// sampler entirely — its dispatch path is byte-for-byte unchanged.
+fn live_session_id(event: &TelemetryEvent) -> Option<String> {
+    let raw = event.data.as_ref()?;
+    let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
+    if parsed.get("live_mode").and_then(serde_json::Value::as_bool) != Some(true) {
+        return None;
+    }
+    parsed
+        .get("frame_session_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// Pure rate-limit decision for a single live-capture session, with
+/// opportunistic TTL eviction to bound the map.
+///
+/// Returns `true` (and records `now` as the new last-emit time) when at least
+/// `min_interval` has elapsed since the session's previous emit, or when the
+/// session has never emitted before. Returns `false` (leaving the recorded
+/// time untouched) when the previous emit was too recent — that event is
+/// dropped. Sessions are independent: throttling one `id` never affects
+/// another.
+///
+/// Before deciding, drops every entry idle longer than `ttl` (`now - last >
+/// ttl`). This bounds the map without a background task: a session quiet far
+/// beyond the rate window is forgotten, and a later event for a forgotten id
+/// correctly emits as "first-seen". `ttl` must be `>= min_interval` (a TTL
+/// shorter than the rate window would evict still-throttled entries); callers
+/// pass [`LIVE_SAMPLER_TTL`], which is far larger. Extracted as a free function
+/// over an explicit `&mut HashMap` so the decision + eviction are unit-testable
+/// without the process-global state.
+fn should_emit_live_event(
+    last_emits: &mut std::collections::HashMap<String, Instant>,
+    id: &str,
+    now: Instant,
+    min_interval: Duration,
+    ttl: Duration,
+) -> bool {
+    // Opportunistic eviction: forget sessions idle longer than the TTL. Keep
+    // the id under decision regardless so its own freshness check below is not
+    // perturbed by eviction ordering.
+    last_emits.retain(|entry_id, &mut last| entry_id == id || now.duration_since(last) <= ttl);
+
+    match last_emits.get(id) {
+        Some(&last) if now.duration_since(last) < min_interval => false,
+        _ => {
+            last_emits.insert(id.to_string(), now);
+            true
+        }
+    }
+}
+
 fn dispatch_telemetry_event(event: TelemetryEvent) {
+    dispatch_telemetry_event_with_optout(event, crate::telemetry_optout::is_telemetry_opted_out());
+}
+
+fn dispatch_telemetry_event_with_optout(event: TelemetryEvent, opted_out: bool) {
+    if opted_out {
+        return;
+    }
+
+    // Live-mode rate limit: a live-capture loop emits one inference per frame.
+    // Throttle to ~1 wire row/sec per session so a long live session doesn't
+    // flood the backend with per-frame rows. NON-LIVE events return `None` from
+    // `live_session_id` and skip this block entirely — their path below is
+    // unchanged. A poisoned sampler mutex degrades to emitting (recover rather
+    // than silently drop real telemetry).
+    if let Some(session_id) = live_session_id(&event) {
+        let mut state = LIVE_SAMPLER_STATE.lock().unwrap_or_else(|e| e.into_inner());
+        if !should_emit_live_event(
+            &mut state,
+            &session_id,
+            Instant::now(),
+            LIVE_EVENT_MIN_INTERVAL,
+            LIVE_SAMPLER_TTL,
+        ) {
+            return;
+        }
+    }
+
     // Use unwrap_or_else to recover from poisoned mutex - this prevents
     // a panic in one component from permanently breaking telemetry
     let Ok(senders) = TELEMETRY_SENDERS.lock() else {
@@ -2988,6 +3142,233 @@ mod tests {
     use std::sync::MutexGuard;
 
     static TELEMETRY_SENDER_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn live_model_complete_event(frame_session_id: &str) -> TelemetryEvent {
+        TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-vl".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(120),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": "qwen2.5-vl",
+                    "streaming": true,
+                    "live_mode": true,
+                    "frame_session_id": frame_session_id,
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 1_700_000_000_000,
+        }
+    }
+
+    #[test]
+    fn live_sampler_drops_second_event_within_min_interval() {
+        let mut state = std::collections::HashMap::new();
+        let t0 = Instant::now();
+        let interval = Duration::from_secs(1);
+        let ttl = Duration::from_secs(300);
+        // First event for a session always emits.
+        assert!(should_emit_live_event(
+            &mut state, "sess-a", t0, interval, ttl
+        ));
+        // A second event 500ms later is within the window → dropped.
+        let t1 = t0 + Duration::from_millis(500);
+        assert!(!should_emit_live_event(
+            &mut state, "sess-a", t1, interval, ttl
+        ));
+    }
+
+    #[test]
+    fn live_sampler_emits_after_min_interval_elapses() {
+        let mut state = std::collections::HashMap::new();
+        let t0 = Instant::now();
+        let interval = Duration::from_secs(1);
+        let ttl = Duration::from_secs(300);
+        assert!(should_emit_live_event(
+            &mut state, "sess-a", t0, interval, ttl
+        ));
+        // Exactly at the interval boundary → emit (>= comparison).
+        let t1 = t0 + Duration::from_secs(1);
+        assert!(should_emit_live_event(
+            &mut state, "sess-a", t1, interval, ttl
+        ));
+        // The recorded time advanced, so the next one right after is dropped.
+        let t2 = t1 + Duration::from_millis(10);
+        assert!(!should_emit_live_event(
+            &mut state, "sess-a", t2, interval, ttl
+        ));
+    }
+
+    #[test]
+    fn live_sampler_treats_sessions_independently() {
+        let mut state = std::collections::HashMap::new();
+        let t0 = Instant::now();
+        let interval = Duration::from_secs(1);
+        let ttl = Duration::from_secs(300);
+        assert!(should_emit_live_event(
+            &mut state, "sess-a", t0, interval, ttl
+        ));
+        // A different session at the same instant emits — throttling one
+        // session never affects another.
+        assert!(should_emit_live_event(
+            &mut state, "sess-b", t0, interval, ttl
+        ));
+        // Each session keeps its own window.
+        let t1 = t0 + Duration::from_millis(200);
+        assert!(!should_emit_live_event(
+            &mut state, "sess-a", t1, interval, ttl
+        ));
+        assert!(!should_emit_live_event(
+            &mut state, "sess-b", t1, interval, ttl
+        ));
+    }
+
+    #[test]
+    fn live_sampler_evicts_idle_entries_past_ttl() {
+        let mut state = std::collections::HashMap::new();
+        let t0 = Instant::now();
+        let interval = Duration::from_secs(1);
+        let ttl = Duration::from_secs(300);
+
+        // Two sessions emit at t0.
+        assert!(should_emit_live_event(
+            &mut state, "sess-old", t0, interval, ttl
+        ));
+        assert!(should_emit_live_event(
+            &mut state,
+            "sess-keep",
+            t0,
+            interval,
+            ttl
+        ));
+        assert_eq!(state.len(), 2);
+
+        // `sess-keep` stays active (re-emits within TTL); a *third* session
+        // fires well past the TTL. The eviction sweep drops `sess-old` (idle
+        // > TTL) but retains `sess-keep` (idle <= TTL), bounding the map.
+        let t_keep = t0 + Duration::from_secs(10);
+        assert!(should_emit_live_event(
+            &mut state,
+            "sess-keep",
+            t_keep,
+            interval,
+            ttl
+        ));
+        let t_new = t0 + ttl + Duration::from_secs(1);
+        assert!(should_emit_live_event(
+            &mut state, "sess-new", t_new, interval, ttl
+        ));
+
+        // `sess-old` evicted; `sess-keep` + `sess-new` retained.
+        assert!(!state.contains_key("sess-old"));
+        assert!(state.contains_key("sess-keep"));
+        assert!(state.contains_key("sess-new"));
+        assert_eq!(state.len(), 2);
+
+        // A subsequent event for the forgotten `sess-old` id correctly emits as
+        // first-seen (not dropped), even immediately — there is no retained
+        // last-emit time to throttle against.
+        let t_revisit = t_new + Duration::from_millis(1);
+        assert!(should_emit_live_event(
+            &mut state, "sess-old", t_revisit, interval, ttl
+        ));
+
+        // Eviction never perturbs the in-window rate limit: a fresh entry
+        // re-firing within `min_interval` is still dropped.
+        let t_throttle = t_revisit + Duration::from_millis(100);
+        assert!(!should_emit_live_event(
+            &mut state, "sess-old", t_throttle, interval, ttl
+        ));
+    }
+
+    #[test]
+    fn live_session_id_extracts_only_tagged_events() {
+        // A live-tagged event yields its session id.
+        let live = live_model_complete_event("frame-sess-123");
+        assert_eq!(live_session_id(&live).as_deref(), Some("frame-sess-123"));
+
+        // A plain streaming (non-live) event has no live tag → None, so it
+        // bypasses the sampler entirely.
+        let non_live = TelemetryEvent {
+            data: Some(
+                serde_json::json!({ "model_id": "qwen2.5-vl", "streaming": true }).to_string(),
+            ),
+            ..live_model_complete_event("ignored")
+        };
+        assert_eq!(live_session_id(&non_live), None);
+
+        // live_mode false (even with an id) is treated as non-live.
+        let disabled = TelemetryEvent {
+            data: Some(
+                serde_json::json!({ "live_mode": false, "frame_session_id": "x" }).to_string(),
+            ),
+            ..live_model_complete_event("ignored")
+        };
+        assert_eq!(live_session_id(&disabled), None);
+
+        // No data at all → None.
+        let no_data = TelemetryEvent {
+            data: None,
+            ..live_model_complete_event("ignored")
+        };
+        assert_eq!(live_session_id(&no_data), None);
+    }
+
+    #[test]
+    fn live_tag_hoists_to_platform_event_top_level() {
+        // A live-tagged ModelComplete must surface `live_mode` +
+        // `frame_session_id` on the wire payload top level (alongside the
+        // existing hoist list) so the Traces dashboard can column-extract them.
+        let event = live_model_complete_event("frame-sess-xyz");
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+
+        assert_eq!(platform.payload["live_mode"], serde_json::json!(true));
+        assert_eq!(
+            platform.payload["frame_session_id"],
+            serde_json::json!("frame-sess-xyz")
+        );
+    }
+
+    #[test]
+    fn non_live_event_payload_is_byte_identical_without_live_keys() {
+        // Regression guard: a non-live (no live tag) ModelComplete event must
+        // convert to a wire payload that carries NEITHER `live_mode` nor
+        // `frame_session_id`. The hoist of those keys is a no-op for non-live
+        // events, so the existing per-run telemetry path is unchanged.
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(420),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": "qwen2.5-0.5b",
+                    "streaming": true,
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let payload_json = serde_json::to_string(&platform.payload).unwrap();
+
+        assert!(
+            !payload_json.contains("live_mode"),
+            "non-live payload must not carry live_mode, got: {payload_json}"
+        );
+        assert!(
+            !payload_json.contains("frame_session_id"),
+            "non-live payload must not carry frame_session_id, got: {payload_json}"
+        );
+        // And the nested data object likewise stays free of the live keys.
+        assert!(platform.payload["data"].get("live_mode").is_none());
+        assert!(platform.payload["data"].get("frame_session_id").is_none());
+    }
 
     #[test]
     fn platform_event_payload_has_no_legacy_cache_keys() {
@@ -4101,6 +4482,36 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_skips_all_senders_when_telemetry_is_opted_out() {
+        let _guard = TelemetrySenderTestGuard::acquire();
+        let (tx, rx) = mpsc::channel();
+        register_telemetry_sender(tx);
+
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("lfm2-vl-450m".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(42),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "task": "vlm",
+                    "image_preprocess_ms": 17
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 0,
+        };
+
+        dispatch_telemetry_event_with_optout(event, true);
+
+        assert!(
+            rx.try_recv().is_err(),
+            "XYBRID_TELEMETRY_OPTOUT must suppress VLM inference events entirely"
+        );
+    }
+
+    #[test]
     fn test_telemetry_config_defaults() {
         let config = TelemetryConfig::default();
         assert_eq!(config.batch_size, 10);
@@ -4756,6 +5167,46 @@ mod tests {
     }
 
     #[test]
+    fn image_preprocess_ms_hoists_to_payload_top_level() {
+        // INF-236: VLM image preprocessing is timed on the executor
+        // span tree, then hoisted so analytics and Studio can show a
+        // dedicated "Image preprocess" row without decoding the full
+        // trace detail client-side.
+        xybrid_core::tracing::init_tracing(true);
+        let data = serde_json::json!({
+            "spans": [
+                {
+                    "name": "vlm_inference_with_messages",
+                    "metadata": { "task": "vlm", "image_count": "1" }
+                },
+                {
+                    "name": "vision_encoder",
+                    "metadata": { "image_preprocess_ms": "17", "image_count": "1" }
+                }
+            ]
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("lfm2-vl-450m".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(900),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert_eq!(
+            parsed["image_preprocess_ms"].as_u64(),
+            Some(17),
+            "image_preprocess_ms must be hoisted: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
     fn streaming_field_hoists_to_payload_top_level() {
         // `XybridModel::run_streaming` and the streaming-fast-path
         // `ModelComplete` (Pipeline) both stamp `data.streaming = true`.
@@ -4791,6 +5242,37 @@ mod tests {
             parsed["streaming"].as_bool(),
             Some(true),
             "streaming must be hoisted to payload top level: {}",
+            serde_json::to_string(&parsed).unwrap()
+        );
+    }
+
+    #[test]
+    fn image_preprocess_ms_omitted_when_span_does_not_carry_it() {
+        xybrid_core::tracing::init_tracing(true);
+        let data = serde_json::json!({
+            "spans": [
+                {
+                    "name": "llm_inference_with_messages",
+                    "metadata": { "task": "chat", "tokens_out": "12" }
+                }
+            ]
+        });
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("qwen2.5-0.5b".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(200),
+            error: None,
+            data: Some(data.to_string()),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+        let parsed: serde_json::Value =
+            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
+        assert!(
+            parsed.get("image_preprocess_ms").is_none(),
+            "text-only inference must omit image_preprocess_ms: {}",
             serde_json::to_string(&parsed).unwrap()
         );
     }

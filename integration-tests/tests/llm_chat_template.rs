@@ -207,6 +207,8 @@ const TEMPLATE_MARKERS: &[&str] = &[
     "<|endoftext|>",
     "<start_of_turn>",
     "<end_of_turn>",
+    "<turn|>",
+    "<end_of_utterance>",
     "<|begin_of_text|>",
     "<|end_of_text|>",
     "<|eot_id|>",

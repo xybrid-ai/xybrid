@@ -320,6 +320,15 @@ class XybridModel {
     GenerationConfig? config,
   });
 
+  // Streaming TTS (audio chunk-by-chunk)
+  // Emits each sentence-chunk's raw PCM (+ sample rate) as it is synthesized,
+  // instead of one batched WAV, so playback can start after the first sentence.
+  // Unsubscribing the stream (barge-in) stops synthesis at the next chunk.
+  Stream<TtsStreamEvent> runTtsStreaming({
+    required Envelope envelope,
+    required RunOptions options,
+  });
+
   // Benchmarking
   Future<BenchmarkResult> benchmark({
     required Envelope envelope,
@@ -394,6 +403,7 @@ impl XybridModel {
 | `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
 | `runStreaming()` | ✅ | — | — | ✅ |
 | `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | planned | planned | planned |
+| `runTtsStreaming()` / `run_tts_streaming()` | ✅ | — | — | — |
 | `runStreamingWithFallback()` | ✅ | planned | planned | planned |
 | `runStreamingWithContext()` | ✅ | — | — | ✅ |
 | `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |
@@ -518,9 +528,27 @@ are passed through to pipeline stages that understand them. Stages that don't ne
 simply ignore them. This allows a single envelope type to flow through multi-stage pipelines
 (e.g., ASR → LLM → TTS) without type changes.
 
-Image envelopes carry raw bytes plus a `format` tag (`"png" | "jpeg" | "webp"`); preprocessing
-pipelines decode and resize them. Multi-part user messages combine a text prompt with one or
-more image envelopes for vision-language models — see `Envelope.userMessage` below.
+Image envelopes carry encoded bytes plus a `format` tag (`"png" | "jpeg" | "webp"`); preprocessing
+pipelines decode and resize them. The shared image constructor validates the encoded payload before
+any binding or CLI surface hands it to model execution. Defaults are capped at 10 MiB encoded bytes
+and 16,777,216 decoded pixels, with PNG, JPEG, and WebP supported. Animated WebP is rejected for v1;
+EXIF orientation is not applied at envelope construction and remains the responsibility of the
+future image preprocessing step. Debug output, human-readable JSON, telemetry summaries, and errors
+must report only low-risk metadata such as format, byte count, width, and height, never image bytes.
+
+Multi-part user messages combine a text prompt with one or more image envelopes for vision-language
+models — see `Envelope.userMessage` below. The `images` list accepts only image envelopes returned
+by `Envelope.image` or `Envelope.imageRaw`; text, audio, embedding, or nested multi-part envelopes
+are invalid.
+
+Raw image envelopes are the binding surface for camera or canvas frames that already exist
+as pixels (the Dart binding is implemented; Kotlin/Swift/C# remain planned).
+`Envelope.imageRaw` carries owned pixel bytes plus explicit `ImagePlane` descriptors
+rather than a single stride, so packed RGB/BGRA/RGBA, NV12/NV21, and I420 buffers are all
+representable without JPEG re-encoding. YUV inputs require `YuvColorInfo`; RGB-family inputs must
+not carry it. Unsupported v1 raw formats such as P010, 10-bit YUV, premultiplied alpha, or opaque
+handles surface as `UnsupportedPixelFormat` before any pixel bytes are read. Debug output and JSON
+summaries report only format, byte count, dimensions, and plane count.
 
 ### Dart
 
@@ -539,13 +567,23 @@ class XybridEnvelope {
   });
   factory XybridEnvelope.embedding(List<double> embedding);
 
-  // Vision (planned)
-  factory XybridEnvelope.image(
-    List<int> imageBytes,
-    String format,        // "png" | "jpeg" | "webp"
-  );
-  factory XybridEnvelope.userMessage(
-    String text, {
+  // Vision
+  factory XybridEnvelope.image({
+    required List<int> bytes,
+    required String format, // "png" | "jpeg" | "jpg" | "webp"
+  });
+
+  // Raw vision frames (camera/canvas pixels, no JPEG re-encoding)
+  factory XybridEnvelope.imageRaw({
+    required List<int> pixels,
+    required PixelFormat pixelFormat,
+    required int width,
+    required int height,
+    required List<ImagePlane> planes,
+    YuvColorInfo? color,
+  });
+  factory XybridEnvelope.userMessage({
+    required String text,
     List<XybridEnvelope> images = const [],
   });
 
@@ -565,15 +603,15 @@ sealed class XybridEnvelope {
     val speed: Double? = null
   ) : XybridEnvelope()
   data class Audio(
-    val audioBytes: ByteArray,
-    val sampleRate: Int = 16000,
-    val channels: Int = 1
+    val bytes: ByteArray,
+    val sampleRate: UInt = 16000u,
+    val channels: UInt = 1u
   ) : XybridEnvelope()
-  data class Embedding(val embedding: FloatArray) : XybridEnvelope()
+  data class Embedding(val data: List<Float>) : XybridEnvelope()
 
-  // Vision (planned)
+  // Vision
   data class Image(
-    val imageBytes: ByteArray,
+    val bytes: ByteArray,
     val format: String,          // "png" | "jpeg" | "webp"
   ) : XybridEnvelope()
   data class UserMessage(
@@ -581,30 +619,50 @@ sealed class XybridEnvelope {
     val images: List<XybridEnvelope> = emptyList(),
   ) : XybridEnvelope()
 
-  companion object {
-    fun text(
-      text: String,
-      voiceId: String? = null,
-      speed: Double? = null
-    ): XybridEnvelope = Text(text, voiceId, speed)
-    fun audio(
-      audioBytes: ByteArray,
-      sampleRate: Int = 16000,
-      channels: Int = 1
-    ): XybridEnvelope = Audio(audioBytes, sampleRate, channels)
-    fun embedding(embedding: FloatArray): XybridEnvelope = Embedding(embedding)
-
-    // Vision (planned)
-    fun image(
-      imageBytes: ByteArray,
-      format: String,
-    ): XybridEnvelope = Image(imageBytes, format)
-    fun userMessage(
-      text: String,
-      images: List<XybridEnvelope> = emptyList(),
-    ): XybridEnvelope = UserMessage(text, images)
-  }
+  // Raw vision frames (planned)
+  data class RawImage(
+    val pixels: ByteArray,
+    val pixelFormat: PixelFormat,
+    val width: Int,
+    val height: Int,
+    val planes: List<ImagePlane>,
+    val color: YuvColorInfo? = null,
+  ) : XybridEnvelope()
 }
+
+object Envelope {
+  fun text(text: String): XybridEnvelope
+  fun text(text: String, voiceId: String, speed: Double = 1.0): XybridEnvelope
+  fun audio(bytes: ByteArray, sampleRate: UInt = 16000u, channels: UInt = 1u): XybridEnvelope
+  fun embedding(data: List<Float>): XybridEnvelope
+  fun image(bytes: ByteArray, format: String): XybridEnvelope
+  fun userMessage(text: String, images: List<XybridEnvelope> = emptyList()): XybridEnvelope
+}
+```
+
+### Swift
+
+```swift
+// Generated enum cases
+let encoded = XybridEnvelope.image(bytes: imageData, format: "jpeg")
+let message = XybridEnvelope.userMessage(text: "describe this", images: [encoded])
+
+// Validated convenience overloads
+let checkedImage = try XybridEnvelope.image(imageData, format: "jpg")
+let checkedMessage = try XybridEnvelope.userMessage("describe this", images: [checkedImage])
+```
+
+### C# (Unity)
+
+```csharp
+// Encoded vision input
+using var image = Envelope.Image(imageBytes, "jpeg");
+using var message = Envelope.UserMessage(
+    "Describe this image",
+    new[] { image }
+);
+
+using var result = model.Run(message);
 ```
 
 ### Implementation Status
@@ -617,8 +675,9 @@ sealed class XybridEnvelope {
 | `embedding()` | ✅ | ✅ | ✅ | — |
 | `textWithRole()` | ✅ | — | — | ✅ |
 | `withRole()` | ✅ | — | — | — |
-| `image()` | 📋 | 📋 | 📋 | 📋 |
-| `userMessage()` | 📋 | 📋 | 📋 | 📋 |
+| `image()` | ✅ | ✅ | ✅ | ✅ |
+| `imageRaw()` | ✅ | 📋 | 📋 | 📋 |
+| `userMessage()` | ✅ | ✅ | ✅ | ✅ |
 
 Legend: ✅ implemented · 📋 planned · — not applicable for this binding.
 
@@ -935,6 +994,73 @@ enum MessageRole { system, user, assistant }
 enum class MessageRole { SYSTEM, USER, ASSISTANT }
 ```
 
+### Raw-Frame Types (PixelFormat, ImagePlane, YuvColorInfo)
+
+Supporting types for `Envelope.imageRaw` (see §5). The Rust shapes already exist
+in `xybrid-core` (gated by the `vision` feature); the **Dart** binding surface is
+implemented (realtime vision Phase B) and Kotlin/Swift/C# remain planned. They let
+camera or canvas frames flow in as raw pixels — packed RGB/BGRA/RGBA, NV12/NV21, and
+I420 — with explicit per-plane descriptors instead of JPEG re-encoding.
+
+`PixelFormat` is the set of accepted raw pixel layouts. Unsupported v1 formats (P010,
+10-bit YUV, premultiplied alpha, opaque handles) surface as `UnsupportedPixelFormat`
+before any pixel bytes are read.
+
+```dart
+enum PixelFormat { rgb8, rgba8, bgra8, nv12, nv21, i420 }
+```
+
+```kotlin
+enum class PixelFormat { RGB8, RGBA8, BGRA8, NV12, NV21, I420 }
+```
+
+`ImagePlane` describes one memory plane inside a raw pixel buffer. Packed RGB-family
+inputs carry a single plane; NV12/NV21 carry two; I420 carries three. Plane validation
+enforces row stride, pixel stride, and extents.
+
+```dart
+class ImagePlane {
+  final int offset;       // byte offset where this plane begins
+  final int rowStride;    // bytes between adjacent rows
+  final int pixelStride;  // bytes between adjacent samples in a row
+  final int width;        // plane width in samples (chroma may be subsampled)
+  final int height;       // plane height in samples (chroma may be subsampled)
+}
+```
+
+```kotlin
+data class ImagePlane(
+  val offset: Int,
+  val rowStride: Int,
+  val pixelStride: Int,
+  val width: Int,
+  val height: Int,
+)
+```
+
+`YuvColorInfo` carries the color metadata required for raw YUV frames (`nv12`, `nv21`,
+`i420`). RGB-family raw inputs must **not** carry it.
+
+```dart
+enum YuvColorMatrix { bt601, bt709, bt2020 }
+enum YuvColorRange { limited, full }
+
+class YuvColorInfo {
+  final YuvColorMatrix matrix;
+  final YuvColorRange range;
+}
+```
+
+```kotlin
+enum class YuvColorMatrix { BT601, BT709, BT2020 }
+enum class YuvColorRange { LIMITED, FULL }
+
+data class YuvColorInfo(
+  val matrix: YuvColorMatrix,
+  val range: YuvColorRange,
+)
+```
+
 ### GenerationConfig (LLM Generation Parameters)
 
 Optional configuration for controlling LLM text generation. All fields are nullable —
@@ -1026,10 +1152,104 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
 
+**User cancellation (Dart binding surface — implemented, issue 10).** A caller
+can abort an in-flight local streaming run via a `CancellationToken` cancel
+handle. In Rust the token is paired with `RunOptions`
+(`with_cancellation_token`); in Dart the caller constructs a
+`CancellationToken` and passes it to the streaming run methods
+(`runStreaming` / `runStreamingWithContext` / `runStreamingWithFallback`) via
+the optional `cancellationToken` parameter. Cancellation is **cooperative**:
+the token's cancelled state is checked before every emitted token, so it takes
+effect at the next token boundary, not mid-token, and surfaces as the
+`AbortSignal::UserCancelled` policy signal. When the token is cancelled — or
+the Dart stream is unsubscribed mid-run (sink-close-as-cancel) — Rust halts
+generation at the next token and **releases the model write lock promptly**, so
+a follow-up run can start. The Dart cancel handle exposes `cancel()` and an
+`isCancelled` getter.
+
+```dart
+final cancel = CancellationToken();
+final stream = model.runStreaming(
+  XybridEnvelope.text('Tell me a long story'),
+  cancellationToken: cancel,
+);
+final sub = stream.listen((token) { /* ... */ });
+// Later, to stop Rust generation (not just unsubscribe):
+cancel.cancel();
+await sub.cancel();
+```
+
+**Preemptive cancel-and-replace (implemented, issue 11).** A continuous
+live-capture loop wants *latest-frame-wins* semantics: when a new frame arrives
+while the previous frame's inference is still running, the new run should cancel
+the old one rather than head-of-line block behind it (every streaming call takes
+the model's write lock for the whole generation). `runStreaming` and
+`runStreamingWithContext` accept an optional `preempt` flag (default `false`).
+When `preempt = true` **and** a `cancellationToken` is supplied, the new run
+registers its token in the model's in-flight slot and cancels the previously
+registered run **before** acquiring the write lock — the displaced run halts at
+its next token, releases the lock, and the new run starts promptly. The
+in-flight slot is a **separate mutex** on the model, held only for the brief
+token swap and never across the write lock, so the two locks cannot deadlock and
+a third concurrent start serializes safely on the slot. `preempt = false` (the
+default for chat and one-shot callers) never touches the slot and is behaviorally
+identical to the pre-preempt path; `preempt` with no token is a no-op.
+
+```dart
+// Live loop: each new frame cancels the in-flight one (latest-frame-wins).
+final cancel = CancellationToken();
+final stream = model.runStreaming(
+  XybridEnvelope.text(frameQuestion),
+  cancellationToken: cancel,
+  preempt: true,
+);
+```
+
+**Live mode / frame session (implemented in Rust + Dart, issue 14).** For
+continuous live-capture loops (e.g. the Flutter vision-live loop), `RunOptions`
+carries an optional `frameSessionId` — a caller-supplied UUID identifying one
+continuous live-capture session — plus a `liveMode` flag. The **caller**
+generates the id (the SDK treats it as an opaque tag);
+`with_frame_session(frameSessionId)` is a convenience that sets the id and
+`liveMode = true`. This is surfaced on the streaming run-options path. On the
+wire, live-mode inferences carry `frame_session_id` and `live_mode` and are
+**rate-limited at the telemetry dispatch funnel to roughly one wire row per
+second per `frame_session_id`** (the intervening per-frame rows are dropped),
+keeping telemetry low-cardinality across a live stream. A true summary/rollup
+row needs a session-end signal the SDK never receives, so the per-session
+rate-limit is the v1 contract (epic Open Decision #5). Defaults are
+`frameSessionId = null` and `liveMode = false` (per-run telemetry, byte-for-byte
+unchanged). In Dart there is no standalone `RunOptions` builder yet; the
+capability is reachable via the optional `frameSessionId` parameter on the
+streaming run methods (`runStreaming` / `runStreamingWithContext`), which wires
+`FfiRunOptions.frame_session_id` → `with_frame_session` under the hood.
+
+```rust
+// Rust — live-capture session tagging on the streaming run-options path.
+let session_id = uuid::Uuid::new_v4().to_string(); // caller-generated
+let options = RunOptions::new()
+    .with_cancellation_token(token.clone())
+    .with_frame_session(session_id); // sets frameSessionId + liveMode = true
+```
+
+```dart
+// Dart — tag a live-capture session via the streaming parameter.
+final sessionId = const Uuid().v4(); // caller-generated, one per live session
+final stream = model.runStreaming(
+  envelope,
+  cancellationToken: token,
+  preempt: true,
+  frameSessionId: sessionId,
+);
+```
+
 `AbortSignal` is the shared policy enum. Rust currently supports
 `UserCancelled`, `MemoryPressureWarn`, `MemoryPressureCritical`, `ThermalHot`,
-and `ThermalCritical`; Flutter currently exposes the customer-facing fallback
-signals `memoryPressureCritical` and `thermalCritical`.
+and `ThermalCritical`; the Flutter `AbortSignal` enum exposes the customer-facing
+fallback signals `memoryPressureCritical` and `thermalCritical`. User
+cancellation is reachable from Dart (issue 10) via the `CancellationToken`
+handle rather than a Dart `AbortSignal.userCancelled` value — passing a
+cancelled token makes the run observe `UserCancelled` under the hood.
 
 Flutter exposes the customer opt-in surface as `RunOptions.cloudFallback(...)`
 plus `AbortPolicy.cloudFallback(...)`; plain `RunOptions()` stays neutral and
@@ -1049,7 +1269,11 @@ Routing feedback is recorded inside the core orchestrator using low-cardinality
 resource buckets. The SDK keeps `correlation_id` as an opaque string for
 cross-binding compatibility; telemetry may include flat `routing_source`,
 `routing_reason`, `outcome_category`, `abort_reason`, `fallback_target`,
-`fallback_reason`, and `fallback_outcome` fields.
+`fallback_reason`, and `fallback_outcome` fields. Live-mode runs additionally
+carry the flat `frame_session_id` and `live_mode` fields (implemented, issue 14);
+those inferences are rate-limited per `frame_session_id` (~1 wire row/sec) at the
+telemetry dispatch funnel rather than emitted per frame, so a continuous live
+stream stays low-cardinality.
 
 ### Implementation Status
 
@@ -1058,9 +1282,14 @@ cross-binding compatibility; telemetry may include flat `routing_source`,
 | `ConversationContext` | ✅ | — | — | ✅ |
 | `MessageRole` | ✅ | — | — | ✅ |
 | `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
+| `PixelFormat` | ✅ | 📋 | 📋 | 📋 |
+| `ImagePlane` | ✅ | 📋 | 📋 | 📋 |
+| `YuvColorInfo` | ✅ | 📋 | 📋 | 📋 |
 | `RunOptions` | ✅ | planned | planned | planned |
+| `RunOptions.frameSessionId` / `liveMode` | ✅ | 📋 | 📋 | 📋 |
 | `AbortPolicy` | ✅ | planned | planned | planned |
 | `AbortSignal` | ✅ | planned | planned | planned |
+| `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | 📋 | 📋 | 📋 |
 | `CancellationToken` | ✅ | planned | planned | planned |
 | `StreamToken` | ✅ | — | — | ✅ |
 

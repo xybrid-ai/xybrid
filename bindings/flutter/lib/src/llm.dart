@@ -3,6 +3,8 @@
 /// This module provides types for streaming token generation.
 library;
 
+import 'result.dart';
+
 /// A single token emitted during streaming generation.
 class StreamToken {
   /// The generated token text.
@@ -20,12 +22,16 @@ class StreamToken {
   /// Finish reason if this is the final token (e.g., "stop", "length", "error").
   final String? finishReason;
 
+  /// Final inference metrics. Present only on the completion token.
+  final XybridInferenceMetrics? metrics;
+
   StreamToken({
     required this.token,
     required this.index,
     required this.cumulativeText,
     required this.isFinal,
     this.finishReason,
+    this.metrics,
   });
 
   /// Check if this token represents an error.

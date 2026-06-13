@@ -7,8 +7,12 @@ on:
       - 'bindings/kotlin/**'
       - 'crates/xybrid-bolt/**'
       - 'crates/xybrid-ffi-facade/**'
+      - 'crates/xybrid-core/**'
+      - 'crates/xybrid-sdk/**'
       - 'tools/scripts/build-android-bolt.sh'
       - 'xtask/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
       - '.github/workflows/build-android.yml'
       # Docs-only changes under the paths above (READMEs, examples) never
       # affect the native build — exclude markdown so they don't trigger it.

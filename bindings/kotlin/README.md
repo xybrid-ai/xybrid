@@ -106,6 +106,24 @@ if (result.success && result.embedding != null) {
 }
 ```
 
+### Vision-Language Input
+
+```kotlin
+import ai.xybrid.Envelope
+
+val imageBytes: ByteArray = loadImageBytes()
+val image = Envelope.image(imageBytes, format = "jpeg")
+val prompt = Envelope.userMessage(
+    text = "Describe this image",
+    images = listOf(image)
+)
+
+val result = model.run(prompt)
+if (result.success) {
+    println(result.text)
+}
+```
+
 ### Error Handling
 
 ```kotlin
@@ -133,7 +151,7 @@ try {
 |------|-------------|
 | `XybridModelLoader` | Factory for loading models from registry or bundle |
 | `XybridModel` | Loaded model ready for inference |
-| `XybridEnvelope` | Input data (Audio, Text, or Embedding) |
+| `XybridEnvelope` | Input data (Audio, Text, Embedding, Image, or UserMessage) |
 | `XybridResult` | Inference output with success/error and result data |
 | `XybridException` | Error types (ModelNotFound, InferenceFailed, etc.) |
 
@@ -152,6 +170,8 @@ try {
 | `Audio` | `bytes: ByteArray`, `sampleRate: UInt`, `channels: UInt` |
 | `Text` | `text: String`, `voiceId: String?`, `speed: Double?` |
 | `Embedding` | `data: List<Float>` |
+| `Image` | `bytes: ByteArray`, `format: String` |
+| `UserMessage` | `text: String`, `images: List<XybridEnvelope>` |
 
 ### XybridResult
 
@@ -183,6 +203,7 @@ kotlin/
 │       ├── libonnxruntime.so            # ORT shared library (symlink → vendor/)
 │       └── libc++_shared.so             # C++ runtime (symlink → vendor/)
 └── src/main/kotlin/ai/xybrid/
+    ├── Xybrid.kt                         # Public convenience API
     └── xybrid_uniffi.kt                 # UniFFI-generated bindings
 ```
 

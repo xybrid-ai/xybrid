@@ -12,6 +12,12 @@
 //! - `LlmConfig` - Configuration for loading a local LLM
 
 use crate::ir::MessageRole;
+#[cfg(feature = "vision")]
+use crate::{
+    conversation::ConversationContext,
+    ir::{Envelope, EnvelopeKind, ImageDimensions, ImageFormat, ImageSource},
+    runtime_adapter::AdapterError,
+};
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -115,6 +121,186 @@ impl ChatMessage {
             role: MessageRole::Assistant,
             content: content.into(),
         }
+    }
+}
+
+// =============================================================================
+// Multimodal Chat Message
+// =============================================================================
+
+/// Image part carried through the backend-neutral multimodal chat contract.
+#[cfg(feature = "vision")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MultimodalImagePart {
+    /// Image source. Debug and human-readable serialization redact bytes.
+    pub source: ImageSource,
+    /// Envelope-local ID for diagnostics and future cache keys.
+    pub local_id: String,
+}
+
+#[cfg(feature = "vision")]
+impl MultimodalImagePart {
+    /// Create an image part from an envelope image source.
+    pub fn new(source: ImageSource, local_id: impl Into<String>) -> Self {
+        Self {
+            source,
+            local_id: local_id.into(),
+        }
+    }
+
+    /// Encoded byte length for diagnostics and marker planning.
+    pub fn byte_len(&self) -> usize {
+        self.source.byte_len()
+    }
+
+    /// Encoded image format, when available.
+    pub fn format(&self) -> Option<ImageFormat> {
+        self.source.encoded_format()
+    }
+
+    /// Validated decoded dimensions, when available.
+    pub fn dimensions(&self) -> Option<ImageDimensions> {
+        self.source.dimensions()
+    }
+}
+
+/// Ordered part in a backend-neutral multimodal chat message.
+#[cfg(feature = "vision")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MultimodalMessagePart {
+    /// Text fragment.
+    Text(String),
+    /// Image fragment. The source may carry bytes, but diagnostics stay redacted.
+    Image(MultimodalImagePart),
+}
+
+#[cfg(feature = "vision")]
+impl MultimodalMessagePart {
+    /// Return the contained text if this is a text part.
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => Some(text),
+            Self::Image(_) => None,
+        }
+    }
+
+    /// Return true when this part is an image.
+    pub fn is_image(&self) -> bool {
+        matches!(self, Self::Image(_))
+    }
+}
+
+/// Backend-neutral multimodal message preserving ordered text and image parts.
+#[cfg(feature = "vision")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MultimodalChatMessage {
+    /// Role of the message sender.
+    pub role: MessageRole,
+    /// Ordered message parts.
+    pub parts: Vec<MultimodalMessagePart>,
+}
+
+#[cfg(feature = "vision")]
+impl MultimodalChatMessage {
+    /// Build a multimodal message from a single envelope.
+    pub fn from_envelope(envelope: &Envelope) -> Result<Self, AdapterError> {
+        let role = envelope.role().unwrap_or(MessageRole::User);
+        let parts = parts_from_envelope(envelope)?;
+        if parts.is_empty() {
+            return Err(AdapterError::InvalidInput(
+                "multimodal message must contain at least one part".to_string(),
+            ));
+        }
+
+        Ok(Self { role, parts })
+    }
+
+    /// Build multimodal messages from a conversation context in replay order.
+    pub fn from_context(context: &ConversationContext) -> Result<Vec<Self>, AdapterError> {
+        context
+            .context_for_llm()
+            .into_iter()
+            .map(Self::from_envelope)
+            .collect()
+    }
+
+    /// Count image parts.
+    pub fn image_count(&self) -> usize {
+        self.parts.iter().filter(|part| part.is_image()).count()
+    }
+
+    /// Convert ordered parts to a marker prompt for backends such as llama.cpp mtmd.
+    ///
+    /// Text fragments must not already contain the reserved marker because that
+    /// would make marker/image-count parity ambiguous at the backend boundary.
+    pub fn marker_prompt(&self, marker: &str) -> Result<String, AdapterError> {
+        if marker.is_empty() {
+            return Err(AdapterError::InvalidInput(
+                "media marker must not be empty".to_string(),
+            ));
+        }
+
+        let mut prompt = String::new();
+        for part in &self.parts {
+            match part {
+                MultimodalMessagePart::Text(text) => {
+                    if text.contains(marker) {
+                        return Err(AdapterError::InvalidInput(
+                            "text part contains reserved media marker; marker/image-count parity would be ambiguous".to_string(),
+                        ));
+                    }
+                    prompt.push_str(text);
+                }
+                MultimodalMessagePart::Image(_) => prompt.push_str(marker),
+            }
+        }
+
+        let marker_count = prompt.matches(marker).count();
+        let image_count = self.image_count();
+        if marker_count != image_count {
+            return Err(AdapterError::InvalidInput(format!(
+                "media marker count {} does not match image count {}",
+                marker_count, image_count
+            )));
+        }
+
+        Ok(prompt)
+    }
+}
+
+#[cfg(feature = "vision")]
+fn parts_from_envelope(envelope: &Envelope) -> Result<Vec<MultimodalMessagePart>, AdapterError> {
+    match &envelope.kind {
+        EnvelopeKind::Text(text) => Ok(vec![MultimodalMessagePart::Text(text.clone())]),
+        EnvelopeKind::Image { source } => Ok(vec![MultimodalMessagePart::Image(
+            MultimodalImagePart::new(source.clone(), envelope.local_id().to_string()),
+        )]),
+        EnvelopeKind::MultiPart(parts) => parts
+            .iter()
+            .map(part_from_multipart_fragment)
+            .collect::<Result<Vec<_>, _>>(),
+        EnvelopeKind::Audio(_) | EnvelopeKind::Embedding(_) => {
+            Err(AdapterError::InvalidInput(format!(
+                "unsupported multimodal envelope kind {}",
+                envelope.kind.as_str()
+            )))
+        }
+    }
+}
+
+#[cfg(feature = "vision")]
+fn part_from_multipart_fragment(
+    envelope: &Envelope,
+) -> Result<MultimodalMessagePart, AdapterError> {
+    match &envelope.kind {
+        EnvelopeKind::Text(text) => Ok(MultimodalMessagePart::Text(text.clone())),
+        EnvelopeKind::Image { source } => Ok(MultimodalMessagePart::Image(
+            MultimodalImagePart::new(source.clone(), envelope.local_id().to_string()),
+        )),
+        other => Err(AdapterError::InvalidInput(format!(
+            "unsupported multimodal part kind {}",
+            other.as_str()
+        ))),
     }
 }
 
@@ -256,6 +442,14 @@ pub struct LlmConfig {
     /// Path to chat template file (optional).
     pub chat_template: Option<String>,
 
+    /// Path to sibling vision encoder / mmproj artifact (optional).
+    ///
+    /// Embedding-style backends may load a separate vision encoder from this
+    /// path. llama.cpp VLMs use it as the mmproj artifact for their backend-owned
+    /// mtmd chunk/eval path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vision_encoder_path: Option<String>,
+
     /// Maximum context length (tokens). Default: 4096
     #[serde(default = "default_context_length")]
     pub context_length: usize,
@@ -348,6 +542,7 @@ impl Default for LlmConfig {
         Self {
             model_path: String::new(),
             chat_template: None,
+            vision_encoder_path: None,
             context_length: default_context_length(),
             gpu_layers: default_gpu_layers(),
             paged_attention: default_paged_attention(),
@@ -371,6 +566,12 @@ impl LlmConfig {
     /// Set the chat template path.
     pub fn with_chat_template(mut self, path: impl Into<String>) -> Self {
         self.chat_template = Some(path.into());
+        self
+    }
+
+    /// Set the sibling vision encoder / mmproj artifact path.
+    pub fn with_vision_encoder(mut self, path: impl Into<String>) -> Self {
+        self.vision_encoder_path = Some(path.into());
         self
     }
 
@@ -550,6 +751,16 @@ mod tests {
     fn test_llm_config_with_chat_template() {
         let config = LlmConfig::new("/path/to/model.gguf").with_chat_template("chatml".to_string());
         assert_eq!(config.chat_template, Some("chatml".to_string()));
+    }
+
+    #[test]
+    fn test_llm_config_with_vision_encoder_path() {
+        let config =
+            LlmConfig::new("/path/to/model.gguf").with_vision_encoder("/path/to/mmproj.gguf");
+        assert_eq!(
+            config.vision_encoder_path.as_deref(),
+            Some("/path/to/mmproj.gguf")
+        );
     }
 
     #[test]

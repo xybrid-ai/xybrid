@@ -12,6 +12,7 @@ import 'context.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `clone_envelope`, `into_envelope`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>>
 abstract class FfiEnvelope implements RustOpaqueInterface {
@@ -27,6 +28,32 @@ abstract class FfiEnvelope implements RustOpaqueInterface {
   static FfiEnvelope embedding({required List<double> data}) =>
       XybridRustLib.instance.api
           .crateApiEnvelopeFfiEnvelopeEmbedding(data: data);
+
+  /// Create an encoded image envelope.
+  static FfiEnvelope image(
+          {required List<int> bytes, required String format}) =>
+      XybridRustLib.instance.api
+          .crateApiEnvelopeFfiEnvelopeImage(bytes: bytes, format: format);
+
+  /// Create a raw pixel image envelope from a camera or canvas frame.
+  ///
+  /// Maps 1:1 to `Envelope::image_raw`: the FFI-facing format, planes, and
+  /// color types are converted to their core counterparts and the core
+  /// constructor performs all plane/dimension/color validation.
+  static FfiEnvelope imageRaw(
+          {required List<int> pixels,
+          required FfiPixelFormat pixelFormat,
+          required int width,
+          required int height,
+          required List<FfiImagePlane> planes,
+          FfiYuvColorInfo? color}) =>
+      XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeImageRaw(
+          pixels: pixels,
+          pixelFormat: pixelFormat,
+          width: width,
+          height: height,
+          planes: planes,
+          color: color);
 
   /// Get the unique local ID of this envelope.
   ///
@@ -51,8 +78,140 @@ abstract class FfiEnvelope implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiEnvelopeFfiEnvelopeTextWithRole(text: text, role: role);
 
+  /// Create a user-role multi-part envelope with image attachments.
+  static FfiEnvelope userMessage(
+          {required String text, required List<FfiEnvelope> images}) =>
+      XybridRustLib.instance.api
+          .crateApiEnvelopeFfiEnvelopeUserMessage(text: text, images: images);
+
   /// Set the message role on this envelope.
   ///
   /// Returns a new envelope with the role set.
   FfiEnvelope withRole({required FfiMessageRole role});
+}
+
+/// One memory plane inside a raw pixel image.
+///
+/// Mirrors `xybrid_core::ir::ImagePlane` 1:1.
+class FfiImagePlane {
+  /// Byte offset into the raw pixel buffer where this plane begins.
+  final BigInt offset;
+
+  /// Bytes between adjacent rows in this plane.
+  final BigInt rowStride;
+
+  /// Bytes between adjacent samples in the same row.
+  final BigInt pixelStride;
+
+  /// Plane width in samples. Chroma planes are usually subsampled.
+  final int width;
+
+  /// Plane height in samples. Chroma planes are usually subsampled.
+  final int height;
+
+  const FfiImagePlane({
+    required this.offset,
+    required this.rowStride,
+    required this.pixelStride,
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  int get hashCode =>
+      offset.hashCode ^
+      rowStride.hashCode ^
+      pixelStride.hashCode ^
+      width.hashCode ^
+      height.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiImagePlane &&
+          runtimeType == other.runtimeType &&
+          offset == other.offset &&
+          rowStride == other.rowStride &&
+          pixelStride == other.pixelStride &&
+          width == other.width &&
+          height == other.height;
+}
+
+/// Raw pixel-buffer format for [`FfiEnvelope::image_raw`].
+///
+/// Mirrors `xybrid_core::ir::PixelFormat` 1:1 so camera/canvas frames can be
+/// sent as raw pixels without JPEG re-encoding.
+enum FfiPixelFormat {
+  /// Packed RGB, 8 bits per channel.
+  rgb8,
+
+  /// Packed RGBA, 8 bits per channel.
+  rgba8,
+
+  /// Packed BGRA, 8 bits per channel.
+  bgra8,
+
+  /// Semi-planar YUV 4:2:0 with interleaved UV chroma.
+  nv12,
+
+  /// Semi-planar YUV 4:2:0 with interleaved VU chroma.
+  nv21,
+
+  /// Tri-planar YUV 4:2:0, also known as I420.
+  i420,
+  ;
+}
+
+/// Color metadata required for raw YUV camera frames.
+///
+/// Mirrors `xybrid_core::ir::YuvColorInfo` 1:1.
+class FfiYuvColorInfo {
+  /// Conversion matrix.
+  final FfiYuvColorMatrix matrix;
+
+  /// Numeric range.
+  final FfiYuvColorRange range;
+
+  const FfiYuvColorInfo({
+    required this.matrix,
+    required this.range,
+  });
+
+  @override
+  int get hashCode => matrix.hashCode ^ range.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiYuvColorInfo &&
+          runtimeType == other.runtimeType &&
+          matrix == other.matrix &&
+          range == other.range;
+}
+
+/// YUV color conversion matrix for raw YUV camera frames.
+///
+/// Mirrors `xybrid_core::ir::YuvColorMatrix` 1:1.
+enum FfiYuvColorMatrix {
+  /// ITU-R BT.601.
+  bt601,
+
+  /// ITU-R BT.709.
+  bt709,
+
+  /// ITU-R BT.2020.
+  bt2020,
+  ;
+}
+
+/// YUV luma/chroma numeric range.
+///
+/// Mirrors `xybrid_core::ir::YuvColorRange` 1:1.
+enum FfiYuvColorRange {
+  /// Video/limited range.
+  limited,
+
+  /// Full range.
+  full,
+  ;
 }

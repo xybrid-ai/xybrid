@@ -24,6 +24,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 // Re-export types from the always-available types module
+#[cfg(feature = "vision")]
+pub use super::types::MultimodalChatMessage;
 pub use super::types::{
     ChatMessage, GenerationConfig, LlmConfig, PartialToken, StreamingCallback, StreamingError,
 };
@@ -93,6 +95,14 @@ fn mistral_execution_provider() -> &'static str {
     "cpu"
 }
 
+#[cfg(feature = "vision")]
+fn unsupported_vision_input_error(backend_name: &str) -> AdapterError {
+    AdapterError::InvalidInput(format!(
+        "LLM backend '{}' does not support vision input",
+        backend_name
+    ))
+}
+
 // =============================================================================
 // Generation Output
 // =============================================================================
@@ -126,6 +136,9 @@ pub struct GenerationOutput {
     pub decode_tps: Option<f32>,
     /// Prefill tokens/sec. Sourced from `Usage.avg_prompt_tok_per_sec`.
     pub prefill_tps: Option<f32>,
+    /// Vision image preprocessing latency in milliseconds. Present only when
+    /// a vision-language run processes one or more images.
+    pub image_preprocess_ms: Option<u32>,
 }
 
 // =============================================================================
@@ -212,6 +225,36 @@ pub trait LlmBackend: Send + Sync {
         callback(partial).map_err(AdapterError::from_streaming_callback_error)?;
 
         Ok(output)
+    }
+
+    /// Check whether this backend accepts multimodal text/image messages.
+    #[cfg(feature = "vision")]
+    fn supports_vision(&self) -> bool {
+        false
+    }
+
+    /// Generate text from backend-neutral multimodal messages.
+    ///
+    /// Text-only backends return the same typed unsupported error from both
+    /// batch and streaming multimodal entry points.
+    #[cfg(feature = "vision")]
+    fn generate_multimodal(
+        &self,
+        _messages: &[MultimodalChatMessage],
+        _config: &GenerationConfig,
+    ) -> LlmResult<GenerationOutput> {
+        Err(unsupported_vision_input_error(self.name()))
+    }
+
+    /// Generate text from backend-neutral multimodal messages with streaming.
+    #[cfg(feature = "vision")]
+    fn generate_multimodal_streaming(
+        &self,
+        _messages: &[MultimodalChatMessage],
+        _config: &GenerationConfig,
+        _on_token: StreamingCallback<'_>,
+    ) -> LlmResult<GenerationOutput> {
+        Err(unsupported_vision_input_error(self.name()))
     }
 
     /// Check if this backend supports true streaming.
@@ -457,6 +500,15 @@ impl LlmRuntimeAdapter {
         if !model_path.exists() {
             return Err(AdapterError::ModelNotFound(path.to_string()));
         }
+        if let Some(vision_encoder_path) = &config.vision_encoder_path {
+            let path = Path::new(vision_encoder_path);
+            if !path.exists() {
+                return Err(AdapterError::MissingArtifact {
+                    artifact: "vision_encoder".to_string(),
+                    path: vision_encoder_path.clone(),
+                });
+            }
+        }
 
         self.backend.load(config)?;
 
@@ -634,6 +686,14 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
             EnvelopeKind::Embedding(_) => Err(AdapterError::InvalidInput(
                 "LLM adapter expects Text input, not Embedding".to_string(),
             )),
+            #[cfg(feature = "vision")]
+            EnvelopeKind::Image { .. } => Err(AdapterError::InvalidInput(
+                "LLM adapter expects Text input, not Image".to_string(),
+            )),
+            #[cfg(feature = "vision")]
+            EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
+                "LLM adapter expects Text input, not MultiPart".to_string(),
+            )),
         }
     }
 }
@@ -720,6 +780,7 @@ mod tests {
             inter_chunk_ms: Vec::new(),
             decode_tps: None,
             prefill_tps: None,
+            image_preprocess_ms: None,
         };
         assert_eq!(output.text, "Hello world");
         assert_eq!(output.tokens_generated, 3);
@@ -768,6 +829,7 @@ mod tests {
                     inter_chunk_ms: Vec::new(),
                     decode_tps: None,
                     prefill_tps: None,
+                    image_preprocess_ms: None,
                 })
             }
             fn generate_raw(
@@ -847,6 +909,7 @@ mod tests {
                     inter_chunk_ms: Vec::new(),
                     decode_tps: None,
                     prefill_tps: None,
+                    image_preprocess_ms: None,
                 })
             }
             fn generate_raw(
@@ -872,5 +935,138 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("callback error") || err_msg.contains("User cancelled"));
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn default_multimodal_generation_errors_match_for_batch_and_streaming() {
+        use crate::runtime_adapter::{MultimodalChatMessage, MultimodalMessagePart};
+
+        struct MockBackend;
+
+        impl LlmBackend for MockBackend {
+            fn name(&self) -> &str {
+                "mock"
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["test"]
+            }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                Ok(())
+            }
+            fn is_loaded(&self) -> bool {
+                true
+            }
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+            fn generate(
+                &self,
+                _messages: &[ChatMessage],
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("multimodal default path must not call text generation")
+            }
+            fn generate_raw(
+                &self,
+                prompt: &str,
+                config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                self.generate(&[ChatMessage::user(prompt)], config)
+            }
+        }
+
+        let backend = MockBackend;
+        let messages = vec![MultimodalChatMessage {
+            role: crate::ir::MessageRole::User,
+            parts: vec![MultimodalMessagePart::Text("describe".to_string())],
+        }];
+        let config = GenerationConfig::default();
+
+        let batch_error = backend
+            .generate_multimodal(&messages, &config)
+            .unwrap_err()
+            .to_string();
+        let streaming_error = backend
+            .generate_multimodal_streaming(&messages, &config, Box::new(|_| Ok(())))
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(batch_error, streaming_error);
+        assert!(batch_error.contains("does not support vision input"));
+    }
+
+    #[test]
+    fn load_model_with_config_rejects_missing_vision_encoder_artifact_before_backend_load() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        struct LoadSpyBackend {
+            load_called: Arc<AtomicBool>,
+        }
+
+        impl LlmBackend for LoadSpyBackend {
+            fn name(&self) -> &str {
+                "load-spy"
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["gguf"]
+            }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                self.load_called.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+            fn is_loaded(&self) -> bool {
+                true
+            }
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+            fn generate(
+                &self,
+                _messages: &[ChatMessage],
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("test only exercises load_model_with_config")
+            }
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("test only exercises load_model_with_config")
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        std::fs::write(&model_path, b"stub").unwrap();
+        let missing_mmproj = dir.path().join("missing-mmproj.gguf");
+        let load_called = Arc::new(AtomicBool::new(false));
+        let backend = LoadSpyBackend {
+            load_called: load_called.clone(),
+        };
+        let mut adapter = LlmRuntimeAdapter::with_backend(Box::new(backend));
+
+        let err = adapter
+            .load_model_with_config(
+                &LlmConfig::new(model_path.to_string_lossy().to_string())
+                    .with_vision_encoder(missing_mmproj.to_string_lossy().to_string()),
+            )
+            .unwrap_err();
+
+        assert!(
+            !load_called.load(Ordering::SeqCst),
+            "missing mmproj should fail before backend.load()"
+        );
+        match err {
+            AdapterError::MissingArtifact { artifact, path } => {
+                assert_eq!(artifact, "vision_encoder");
+                assert!(path.contains("missing-mmproj.gguf"));
+            }
+            other => panic!("expected MissingArtifact for missing mmproj, got {other:?}"),
+        }
     }
 }

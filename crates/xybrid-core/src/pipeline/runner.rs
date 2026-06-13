@@ -446,6 +446,24 @@ impl PipelineRunner {
                     "output": values
                 })
             }
+            #[cfg(feature = "vision")]
+            EnvelopeKind::Image { source } => {
+                let dimensions = source.dimensions();
+                serde_json::json!({
+                    "type": "image",
+                    "bytes_len": source.byte_len(),
+                    "format": source.encoded_format().map(|format| format.as_str()),
+                    "width": dimensions.map(|dimensions| dimensions.width),
+                    "height": dimensions.map(|dimensions| dimensions.height)
+                })
+            }
+            #[cfg(feature = "vision")]
+            EnvelopeKind::MultiPart(parts) => {
+                serde_json::json!({
+                    "type": "multipart",
+                    "parts": parts.iter().map(|part| self.envelope_to_value(part)).collect::<Vec<_>>()
+                })
+            }
         }
     }
 
@@ -497,6 +515,22 @@ impl PipelineRunner {
             EnvelopeKind::Embedding(values) => (
                 OutputResultType::Embedding,
                 OutputResult::Embedding(values.clone()),
+            ),
+            #[cfg(feature = "vision")]
+            EnvelopeKind::Image { source } => (
+                OutputResultType::Image,
+                OutputResult::Image {
+                    bytes: Vec::new(),
+                    format: source
+                        .encoded_format()
+                        .map(|format| format.as_str().to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                },
+            ),
+            #[cfg(feature = "vision")]
+            EnvelopeKind::MultiPart(_) => (
+                OutputResultType::Json,
+                OutputResult::Json(self.envelope_to_value(envelope)),
             ),
         }
     }

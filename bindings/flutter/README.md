@@ -118,6 +118,13 @@ final audioInput = XybridEnvelope.audio(
 
 // Embedding vector
 final embeddingInput = XybridEnvelope.embedding([0.1, 0.2, 0.3]);
+
+// Vision-language prompt with an encoded image
+final image = XybridEnvelope.image(bytes: pngBytes, format: 'png');
+final visionInput = XybridEnvelope.userMessage(
+  text: 'Describe this image.',
+  images: [image],
+);
 ```
 
 ### Inference Results
