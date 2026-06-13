@@ -6,9 +6,6 @@
     "pipelines",
     "hybrid-execution",
     "streaming",
-    "registry",
-    "bundles",
-    "caching",
-    "packaging-and-deployment"
+    "caching"
   ]
 }

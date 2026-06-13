@@ -10,8 +10,6 @@
     "---[Cog]Concepts---",
     "...concepts",
     "---[Terminal]CLI---",
-    "...cli",
-    "---[Wrench]Internals---",
-    "...internals"
+    "...cli"
   ]
 }

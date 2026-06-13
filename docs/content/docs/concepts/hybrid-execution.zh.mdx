@@ -30,8 +30,8 @@ stages:
 对于 `auto` 阶段，编排器会综合权衡：
 
 - **模型可用性** — 模型是否已缓存到本地，或注册表中是否有适合当前平台的版本？
-- **设备能力** — CPU 特性、内存与加速器（参见[可观测性](/docs/internals/observability)）
-- **宿主信号** — 平台上报的电池电量与散热状态（参见[宿主集成](/docs/internals/host-integration)）
+- **设备能力** — CPU 特性、内存与加速器
+- **宿主信号** — 平台上报的电池电量与散热状态
 - **策略** — 用户定义的允许/拒绝路由规则
 
 预览路由决策而不实际执行：
@@ -107,5 +107,3 @@ xybrid run --config pipeline.yaml --input-audio q.wav --policy policy.yaml
 ## 相关阅读
 
 - [流水线](/docs/concepts/pipelines) — 阶段配置参考
-- [宿主集成](/docs/internals/host-integration) — 电池/散热信号如何到达路由器
-- [可观测性](/docs/internals/observability) — 决策方法与遥测事件

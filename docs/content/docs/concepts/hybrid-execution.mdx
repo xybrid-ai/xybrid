@@ -30,8 +30,8 @@ stages:
 For `auto` stages the orchestrator weighs:
 
 - **Model availability** — is the model cached locally, or available in the registry for this platform?
-- **Device capabilities** — CPU features, memory, and accelerators (see [Observability](/docs/internals/observability))
-- **Host signals** — battery level and thermal state reported by the platform (see [Host Integration](/docs/internals/host-integration))
+- **Device capabilities** — CPU features, memory, and accelerators
+- **Host signals** — battery level and thermal state reported by the platform
 - **Policies** — user-defined rules that allow or deny routes
 
 Preview decisions without executing:
@@ -107,5 +107,3 @@ Every routing decision is recorded in telemetry; inspect them with [`xybrid trac
 ## Related
 
 - [Pipelines](/docs/concepts/pipelines) — stage configuration reference
-- [Host Integration](/docs/internals/host-integration) — how battery/thermal signals reach the router
-- [Observability](/docs/internals/observability) — decision methods and telemetry events
