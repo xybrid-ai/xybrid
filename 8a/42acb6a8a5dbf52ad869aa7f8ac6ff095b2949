@@ -1,0 +1,43 @@
+docs/content/docs/concepts/meta.zh.json
+  s_6f4a9da8e00cc0::t_9aefdbba50b052 9
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_6f4a9da8e00cc0::t_432c022d0536d8 41
+docs/content/docs/concepts/hybrid-execution.mdx
+  s_6f4a9da8e00cc0::t_65f8d0757625b2 33-34
+docs/content/docs/meta.json
+  s_6f4a9da8e00cc0::t_d2af0a9fdd1aeb 13
+docs/content/docs/cli/reference/trace.mdx
+  s_6f4a9da8e00cc0::t_a6ebfdbe579769 116
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_6f4a9da8e00cc0::t_feb450f08a8566 51
+docs/content/docs/meta.zh.json
+  s_6f4a9da8e00cc0::t_397aa88d355d3b 13
+docs/content/docs/concepts/hybrid-execution.zh.mdx
+  s_6f4a9da8e00cc0::t_56667200c2b543 33-34
+docs/content/docs/cli/reference/trace.zh.mdx
+  s_6f4a9da8e00cc0::t_4c3e8394ac0321 115
+docs/content/docs/(integration)/sdks/android.mdx
+  s_6f4a9da8e00cc0::t_31c4cfca4e6ede 45
+docs/content/docs/concepts/models.mdx
+  s_6f4a9da8e00cc0::t_c8bfd69a786f89 92
+docs/content/docs/concepts/meta.json
+  s_6f4a9da8e00cc0::t_5bf54c219aea6f 9
+docs/content/docs/concepts/models.zh.mdx
+  s_6f4a9da8e00cc0::t_8dd88d7e02b44f 92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "8a42acb6a8a5dbf52ad869aa7f8ac6ff095b2949",
+  "prompts": {},
+  "sessions": {
+    "s_6f4a9da8e00cc0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "831ba585-478c-43ed-82b7-f4ea75b6915d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
