@@ -221,6 +221,10 @@ jobs:
         run: cargo check -p xybrid-mlx --features bindings
       - name: Test xybrid-mlx bindings
         run: cargo test -p xybrid-mlx --features bindings
+      - name: Clippy mlx-c-sys bindings
+        run: cargo clippy -p mlx-c-sys --features bindings --all-targets -- -D warnings
+      - name: Clippy xybrid-mlx bindings
+        run: cargo clippy -p xybrid-mlx --features bindings --all-targets -- -D warnings
       - name: Check xybrid-core MLX runtime
         run: cargo check -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp
       - name: Test xybrid-core MLX runtime

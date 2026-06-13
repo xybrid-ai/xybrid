@@ -2,7 +2,8 @@
 //!
 //! The PRD (US-004) asks for a test calling `mlx_default_stream()` and
 //! asserting a non-null return. That exact symbol does not exist in mlx-c
-//! v0.6.0: the closest public C entry points are
+//! (as pinned in `vendor/mlx-apple/UPSTREAM_VERSIONS.txt`): the closest
+//! public C entry points are
 //!
 //! ```c
 //! mlx_stream mlx_default_cpu_stream_new(void);

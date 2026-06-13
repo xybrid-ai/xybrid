@@ -87,7 +87,16 @@ fn main() {
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR set by cargo"));
     generate_bindings(&headers, &slice, &out_dir);
+    // Watch the artifacts we consume so an in-place xcframework swap (the
+    // fetch/build scripts replace the whole directory) regenerates bindings
+    // and relinks. The umbrella header is the file bindgen actually parses
+    // through wrapper.h; watching it covers upstream header changes.
     println!("cargo:rerun-if-changed={}", metallib.display());
+    println!("cargo:rerun-if-changed={}", lib_file.display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        headers.join("mlx").join("c").join("mlx.h").display()
+    );
     println!(
         "cargo:rustc-env=XYBRID_MLX_METALLIB_PATH={}",
         metallib.display()
@@ -175,7 +184,11 @@ fn generate_bindings(headers: &Path, slice: &str, out_dir: &Path) {
         .allowlist_function("mlx_.*")
         .allowlist_type("mlx_.*")
         .allowlist_var("MLX_.*")
-        .layout_tests(false)
+        // Layout tests assert size/alignment of every generated type at
+        // `cargo test` time — cheap insurance that the parsed headers match
+        // the ABI of the static library's compiler. Handles cross this
+        // boundary by value, so layout drift would be silent corruption.
+        .layout_tests(true)
         .generate()
         .expect("mlx-c-sys: bindgen failed to generate bindings");
 
