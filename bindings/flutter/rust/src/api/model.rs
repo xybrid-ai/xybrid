@@ -198,15 +198,17 @@ impl FfiRunOptions {
         generation_config: Option<GenerationConfig>,
         cancellation_token: Option<&FfiCancellationToken>,
     ) -> RunOptions {
-        let facade_gc = generation_config.as_ref().map(|cfg| facade::GenerationConfig {
-            max_tokens: Some(cfg.max_tokens as u32),
-            temperature: Some(cfg.temperature),
-            top_p: Some(cfg.top_p),
-            min_p: Some(cfg.min_p),
-            top_k: Some(cfg.top_k as u32),
-            repetition_penalty: Some(cfg.repetition_penalty),
-            stop_sequences: cfg.stop_sequences.clone(),
-        });
+        let facade_gc = generation_config
+            .as_ref()
+            .map(|cfg| facade::GenerationConfig {
+                max_tokens: Some(cfg.max_tokens as u32),
+                temperature: Some(cfg.temperature),
+                top_p: Some(cfg.top_p),
+                min_p: Some(cfg.min_p),
+                top_k: Some(cfg.top_k as u32),
+                repetition_penalty: Some(cfg.repetition_penalty),
+                stop_sequences: cfg.stop_sequences.clone(),
+            });
         let mut options = self.to_facade(facade_gc).to_sdk(None);
 
         // Flutter-specific resource provider; the facade omits this field so it
@@ -216,7 +218,10 @@ impl FfiRunOptions {
         // Observe UserCancelled and attach the token only when one is supplied,
         // so callers that pass no token keep the default abort semantics.
         if let Some(token) = cancellation_token {
-            let policy = options.abort_policy.clone().stop_on(AbortSignal::UserCancelled);
+            let policy = options
+                .abort_policy
+                .clone()
+                .stop_on(AbortSignal::UserCancelled);
             options = options
                 .with_abort_policy(policy)
                 .with_cancellation_token(token.0.clone());
