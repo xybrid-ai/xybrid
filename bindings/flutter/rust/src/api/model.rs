@@ -181,11 +181,6 @@ impl FfiRunOptions {
         }
     }
 
-    /// Build SDK [`RunOptions`] with no cancellation token (chat / one-shot).
-    fn to_sdk(&self, generation_config: Option<GenerationConfig>) -> RunOptions {
-        self.to_sdk_with_cancellation(generation_config, None)
-    }
-
     /// Build SDK [`RunOptions`], optionally wiring a cancellation token.
     ///
     /// The facade owns the base `AbortPolicy` -> SDK assembly (memory/thermal
