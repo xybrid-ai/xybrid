@@ -360,6 +360,26 @@ mod tests {
     }
 
     #[test]
+    fn reshape_mlx_error_returns_recorded_message() {
+        let a = MlxArray::from_slice_f32(&[1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap();
+
+        let err = reshape(&a, &[3, 2], None).expect_err("reshape should fail in MLX");
+
+        let MlxError::Internal(message) = err else {
+            panic!("expected internal MLX error");
+        };
+        assert!(message.starts_with("mlx-c `mlx_reshape` returned rc="));
+        let (_, recorded) = message
+            .split_once(": ")
+            .expect("expected captured MLX diagnostic after rc");
+        let recorded = recorded.to_ascii_lowercase();
+        assert!(
+            recorded.contains("reshape") || recorded.contains("shape") || recorded.contains("size"),
+            "expected reshape diagnostic, got {recorded:?}"
+        );
+    }
+
+    #[test]
     fn transpose_swaps_axes() {
         // 2x3 matrix:
         //   [[0, 1, 2],

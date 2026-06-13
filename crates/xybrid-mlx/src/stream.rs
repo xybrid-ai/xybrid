@@ -73,11 +73,13 @@ impl MlxStream {
 
     /// Return the thread-local default CPU stream.
     pub fn default_cpu() -> MlxResult<Self> {
+        ffi::ensure_error_handler();
         default_for(Device::Cpu)
     }
 
     /// Return the thread-local default GPU stream.
     pub fn default_gpu() -> MlxResult<Self> {
+        ffi::ensure_error_handler();
         default_for(Device::Gpu)
     }
 
