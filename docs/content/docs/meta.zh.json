@@ -1,14 +1,15 @@
 {
-    "pages": [
-      "---[Book]简介---",
-      "introduction",
-      "quickstart",
-      "---[Puzzle]集成---",
-      "...(integration)",
-      "---[Terminal]命令行---",
-      "...cli",
-      "---[Cog]核心概念---",
-      "concepts"
-    ]
-  }
-  
+  "pages": [
+    "---[Book]简介---",
+    "introduction",
+    "quickstart",
+    "---[BookOpen]指南---",
+    "...guides",
+    "---[Puzzle]集成---",
+    "...(integration)",
+    "---[Cog]核心概念---",
+    "...concepts",
+    "---[Terminal]命令行---",
+    "...cli"
+  ]
+}

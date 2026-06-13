@@ -1,0 +1,149 @@
+---
+title: Pipelines
+description: Chain models into multi-stage inference pipelines with YAML
+---
+
+A pipeline chains multiple models into a single inference flow — for example a voice assistant that transcribes speech, generates a reply, and speaks it back. Pipelines are defined in YAML and run through the same engine on every platform.
+
+```yaml
+# voice-assistant.yaml
+name: voice-assistant
+stages:
+  - whisper-tiny          # Speech → text
+  - qwen2.5-0.5b-instruct # Generate a reply
+  - kokoro-82m            # Text → speech
+```
+
+```bash
+xybrid run --config voice-assistant.yaml --input-audio question.wav -o response.wav
+```
+
+The output `Envelope` of each stage becomes the input of the next: audio → text → text → audio.
+
+<Callout type="info">
+Multi-model pipelines (MMP) are **experimental**. Single-stage pipelines are stable and are how the SDKs run individual models internally.
+</Callout>
+
+## Pipeline schema
+
+Only `stages` is required:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | No | Display name used in logs and traces |
+| `registry` | No | Registry URL for model resolution (default `https://api.xybrid.dev`) |
+| `stages` | **Yes** | List of stages — at least one |
+
+## Stage formats
+
+A stage is either a plain string or a full object.
+
+**Simple** — just the model ID, optionally pinned to a version:
+
+```yaml
+stages:
+  - kokoro-82m
+  - qwen2.5-0.5b-instruct@1.0
+```
+
+**Object** — full control over routing and generation options:
+
+```yaml
+stages:
+  - id: assistant
+    model: gpt-4o-mini
+    target: cloud
+    provider: openai
+    system_prompt: "You are a helpful voice assistant. Keep responses concise."
+    max_tokens: 150
+    temperature: 0.7
+```
+
+| Field | Description |
+|-------|-------------|
+| `id` | Stage identifier (defaults to the model ID) |
+| `model` | Model ID from the registry, or a provider model name for cloud stages |
+| `version` | Model version (e.g. `"1.0"`) |
+| `target` | Where to run: `device`, `cloud`, or `auto` (default) — see [Hybrid Execution](/docs/concepts/hybrid-execution) |
+| `provider` | Cloud provider for cloud stages: `openai`, `anthropic`, `google`, `deepseek`, `elevenlabs`, `openrouter`, `custom` |
+| `execution_provider` | ONNX Runtime override: `cpu`, `coreml`, `coreml-ane`, `coreml-gpu` (auto-selected if unset) |
+| *(any other key)* | Passed to the stage as an option — common ones: `system_prompt`, `max_tokens`, `temperature` |
+
+## Mixing device and cloud stages
+
+A pipeline can route each stage independently — keep audio on-device for privacy and latency, and burst to the cloud for a bigger model:
+
+```yaml
+name: voice-assistant
+stages:
+  - whisper-tiny              # on-device ASR
+
+  - model: gpt-4o-mini        # cloud LLM
+    target: cloud
+    provider: openai
+    system_prompt: "You are a helpful voice assistant."
+    max_tokens: 150
+
+  - kokoro-82m                # on-device TTS
+```
+
+## Running pipelines
+
+### CLI
+
+```bash
+# Validate the YAML without running
+xybrid prepare voice-assistant.yaml
+
+# Show the execution plan (models, targets, download status)
+xybrid plan voice-assistant.yaml
+
+# Preview routing decisions without executing
+xybrid run --config voice-assistant.yaml --input-audio q.wav --dry-run
+
+# Run it
+xybrid run --config voice-assistant.yaml --input-audio q.wav -o response.wav
+```
+
+### Flutter
+
+```dart
+final pipeline = await Xybrid.pipeline(yaml: yamlString).load();
+await pipeline.loadModels(); // optional preload
+final result = await pipeline.run(
+  XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000),
+);
+```
+
+### Rust
+
+```rust
+use xybrid::Xybrid;
+use xybrid::ir::{Envelope, EnvelopeKind};
+
+let input = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+
+// One call: parse, resolve, download, execute
+let result = Xybrid::run_pipeline(&yaml, &input)?;
+
+// Or staged: inspect and preload first
+let pipeline = Xybrid::pipeline(&yaml)?.load()?;
+pipeline.load_models()?;
+let result = pipeline.run(&input)?;
+```
+
+### SDK support
+
+| Platform | Pipelines |
+|----------|-----------|
+| Dart (Flutter) | ✅ Available |
+| Rust | ✅ Available |
+| Kotlin | 🚧 Planned |
+| Swift | 🚧 Planned |
+| C# (Unity) | 🚧 Planned |
+
+## Related
+
+- [Hybrid Execution](/docs/concepts/hybrid-execution) — how `target: auto` decides between device and cloud
+- [Models](/docs/concepts/models) — the model catalog
+- [xybrid run](/docs/cli/reference/run) — full CLI reference

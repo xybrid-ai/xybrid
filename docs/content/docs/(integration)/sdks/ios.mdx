@@ -6,7 +6,7 @@ description: Native Swift SDK for on-device ML inference
 The Swift SDK provides native bindings to the Xybrid runtime via UniFFI for iOS and macOS applications.
 
 <Callout type="info">
-The Swift SDK is in early access. The API is stable but the package is not yet published as a release. Install via Swift Package Manager from source, or use the [Flutter SDK](/docs/integrations/sdks/flutter) for cross-platform development.
+The Swift SDK is in early access. Releases ship a prebuilt `XybridFFI` xcframework via Swift Package Manager. Known issue: building for the iOS Simulator on Apple Silicon requires the `useLocalNatives = true` workaround — see [#179](https://github.com/xybrid-ai/xybrid/issues/179). For cross-platform development, see the [Flutter SDK](/docs/sdks/flutter).
 </Callout>
 
 ## Installation
@@ -48,7 +48,7 @@ if result.success {
 }
 ```
 
-On iOS, `Xybrid.initialize()` enables `UIDevice` battery monitoring and subscribes to `UIDevice.batteryLevelDidChangeNotification`, forwarding readings to the routing engine. Thermal state on Apple platforms is sourced from `NSProcessInfo.thermalState` directly in `xybrid-core`. See [Host Integration](/docs/internals/host-integration) for the per-platform picture.
+On iOS, `Xybrid.initialize()` enables `UIDevice` battery monitoring and subscribes to `UIDevice.batteryLevelDidChangeNotification`, forwarding readings to the routing engine. Thermal state on Apple platforms is sourced from `NSProcessInfo.thermalState` directly in `xybrid-core`.
 
 ## Initialization
 

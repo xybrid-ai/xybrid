@@ -21,7 +21,7 @@ xybrid run --pipeline <name> --dry-run
 | `--pipeline` | `-p` | Look up `<name>.yml` under `examples/` |
 | `--bundle` | `-b` | Run a `.xyb` bundle file directly |
 | `--input-text` | | Text input for text-based models (LLM, TTS) |
-| `--input-audio` | | Path to a WAV file for audio-based models (ASR) |
+| `--input-audio` | | Path to an audio file for audio-based models (ASR) — WAV, MP3, OGG, or FLAC |
 | `--target` | | Force model format (`onnx`, `coreml`, `tflite`); auto-detected if omitted |
 | `--dry-run` | | Simulate routing without execution |
 | `--policy` | | Load an additional policy bundle |
@@ -129,6 +129,3 @@ prints an additional metrics block after the output:
 These values are read from the output envelope's metadata, populated by
 the LLM adapter's streaming path. Non-LLM stages (ASR, TTS, embedding)
 do not emit these fields and the block is skipped.
-
-See [LLM Metrics](/docs/internals/llm-metrics) for field definitions and
-the end-to-end emission path.

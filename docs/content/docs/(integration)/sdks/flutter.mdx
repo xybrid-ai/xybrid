@@ -38,7 +38,7 @@ await Xybrid.init(
 
 Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`; for CPU/memory sampling, pass `resourceTelemetry`.
 
-`Xybrid.init()` also subscribes to OS battery state on iOS and Android via `battery_plus` and forwards each reading to the routing engine. See [Host Integration](/docs/internals/host-integration) for what's wired automatically and the override surface.
+`Xybrid.init()` also subscribes to OS battery state on iOS and Android via `battery_plus` and forwards each reading to the routing engine.
 
 ## Core Pattern: Load → Run
 

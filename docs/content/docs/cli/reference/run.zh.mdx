@@ -21,7 +21,7 @@ xybrid run --pipeline <name> --dry-run
 | `--pipeline` | `-p` | 在 `examples/` 目录下查找 `<name>.yml` |
 | `--bundle` | `-b` | 直接运行 `.xyb` Bundle 文件 |
 | `--input-text` | | 文本模型（LLM、TTS）的文本输入 |
-| `--input-audio` | | 音频模型（ASR）的 WAV 文件路径 |
+| `--input-audio` | | 音频模型（ASR）的音频文件路径 — 支持 WAV、MP3、OGG、FLAC |
 | `--target` | | 强制指定模型格式（`onnx`、`coreml`、`tflite`）；省略时自动检测 |
 | `--dry-run` | | 模拟路由决策但不执行推理 |
 | `--policy` | | 加载附加策略 Bundle |
@@ -127,5 +127,3 @@ stages:
 
 这些值从输出 Envelope 的 metadata 中读取，由 LLM 适配器的流式路径填充。
 非 LLM 阶段（ASR、TTS、Embedding）不会输出这些字段，相应块将被跳过。
-
-字段定义与端到端发射路径见 [LLM 指标](/zh/docs/internals/llm-metrics)。
