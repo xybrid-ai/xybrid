@@ -77,6 +77,14 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   static bool isTelemetryInitialized() => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientIsTelemetryInitialized();
 
+  /// Return the xybrid runtime features compiled into this native library.
+  ///
+  /// Studio uses this to decide whether image upload should be enabled for
+  /// VisionLanguage models. Keeping the answer in Rust avoids stale Dart-side
+  /// assumptions about Cargo features.
+  static List<String> runtimeFeatures() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientRuntimeFeatures();
+
   static void setApiKey({required String apiKey}) => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientSetApiKey(apiKey: apiKey);
 

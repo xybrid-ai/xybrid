@@ -21,7 +21,18 @@
 /// Stop markers emitted by common chat templates:
 /// - `<|im_end|>` / `<|im_start|>` / `<|endoftext|>`: ChatML (Qwen, Phi)
 /// - `</s>`: Llama 2 style
-/// - `<end_of_turn>`: Gemma
+/// - `<end_of_turn>`: Gemma 3 / Gemma 3n
+/// - `<turn|>`: Gemma 4. The Gemma 4 GGUFs published as
+///   `ggml-org/gemma-4-E2B-it-GGUF` decode the chat end-of-turn
+///   special token to the literal string `<turn|>` rather than
+///   `<end_of_turn>`. Confirmed against llama.cpp's own vocab table —
+///   `vendor/llama.cpp/src/llama-vocab.cpp` lists `<turn|>` as a
+///   `gemma4` EOG marker. Without this entry the marker leaks as the
+///   trailing tail of caption text.
+/// - `<end_of_utterance>`: SmolVLM / Idefics-style VLM chat templates
+///   use this marker for user and assistant message boundaries. llama.cpp
+///   detects SmolVLM templates from this marker and also treats it as an
+///   EOT token, so Xybrid must filter the decoded literal as well.
 ///
 /// Always check for these in addition to user-supplied stop sequences —
 /// they're emitted by the chat template, not by the user.
@@ -31,6 +42,8 @@ pub(crate) const CHAT_STOP_PATTERNS: &[&str] = &[
     "<|endoftext|>",
     "</s>",
     "<end_of_turn>",
+    "<turn|>",
+    "<end_of_utterance>",
 ];
 
 /// Fallback variants without the leading `<`, for models whose
@@ -39,6 +52,13 @@ pub(crate) const CHAT_STOP_PATTERNS: &[&str] = &[
 /// Only safe to use in **final-text cleanup** — during streaming
 /// these would false-positive on legitimate text that happens to
 /// start with `|`. [`StreamingTextFilter`] does NOT include them.
+///
+/// NOTE: deliberately omits a `turn|>` entry. The marker body starts
+/// with the very common letter `t`, and `trim_partial_stop_suffix`
+/// would then trim any final answer ending in `t`, `tu`, `tur`, or
+/// `turn` — see the test
+/// `trim_partial_stop_suffix_does_not_chop_short_words_with_turn_marker`
+/// below for the regression guard.
 pub(crate) const CHAT_STOP_PATTERNS_BROKEN: &[&str] =
     &["|im_end|>", "|im_start|>", "|endoftext|>", "end_of_turn>"];
 
@@ -398,5 +418,107 @@ mod tests {
         let _ = f.push("<|im_");
         let _ = f.push("end|>");
         assert!(f.is_stopped());
+    }
+
+    /// Gemma 4 E2B VLM regression: the Q8 GGUF at
+    /// `ggml-org/gemma-4-E2B-it-GGUF` decodes its chat end-of-turn
+    /// special token to the literal string `<turn|>` (rather than the
+    /// expected `<end_of_turn>` from Gemma 3 / 3n). Without this
+    /// pattern, the marker leaks as the trailing tail of the VLM
+    /// caption. Confirmed against `vendor/llama.cpp/src/llama-vocab.cpp`
+    /// which lists `<turn|>` as a `gemma4` EOG marker.
+    #[test]
+    fn truncate_at_first_stop_handles_gemma4_turn_marker() {
+        let mut text =
+            String::from("A simple graphic is composed of three colored squares.<turn|>");
+        assert!(truncate_at_first_stop(&mut text, CHAT_STOP_PATTERNS));
+        assert_eq!(
+            text,
+            "A simple graphic is composed of three colored squares."
+        );
+    }
+
+    /// Gemma 4 streaming regression: the `<turn|>` marker should hold
+    /// back the `<` byte until the next chunk arrives, then suppress
+    /// the rest of the stream once the complete marker is seen.
+    #[test]
+    fn streaming_filter_stops_on_gemma4_turn_marker() {
+        let mut f = StreamingTextFilter::new(vec!["<turn|>".to_string()]);
+        assert_eq!(f.push("Three colors. "), Some("Three colors. ".to_string()));
+        // `<turn` is a prefix of `<turn|>` — must be held back.
+        assert_eq!(f.push("<turn"), None);
+        // Completing the marker stops the stream; nothing further emits.
+        assert_eq!(f.push("|>"), None);
+        assert!(f.is_stopped());
+        assert_eq!(f.cumulative_emitted(), "Three colors. ");
+    }
+
+    /// Vision-model catalog regression: each Studio VLM family has a
+    /// chat-template stop marker that must be removed in final text and
+    /// withheld from streaming callbacks.
+    #[test]
+    fn vision_chat_stop_patterns_do_not_leak() {
+        let cases = [
+            ("lfm2-vl-450m", "<|im_end|>"),
+            ("qwen3-vl-2b-instruct", "<|im_end|>"),
+            ("qwen3-vl-4b-instruct", "<|im_end|>"),
+            ("qwen3.5-2b", "<|im_end|>"),
+            ("qwen2.5-vl-3b-instruct", "<|im_end|>"),
+            ("internvl3-2b-instruct", "<|im_end|>"),
+            ("gemma-4-e2b", "<turn|>"),
+            ("gemma-4-e4b", "<turn|>"),
+            ("smolvlm-500m-instruct", "<end_of_utterance>"),
+            ("smolvlm-instruct", "<end_of_utterance>"),
+        ];
+
+        for (model_id, marker) in cases {
+            assert!(
+                CHAT_STOP_PATTERNS.contains(&marker),
+                "{model_id} stop marker {marker:?} must be registered"
+            );
+
+            let mut text = format!("A concise image description.{marker} trailing");
+            assert!(
+                truncate_at_first_stop(&mut text, CHAT_STOP_PATTERNS),
+                "{model_id} final output should stop at {marker:?}"
+            );
+            assert_eq!(text, "A concise image description.");
+
+            let split_at = marker.len() / 2;
+            let mut f = StreamingTextFilter::new(
+                CHAT_STOP_PATTERNS.iter().map(|s| s.to_string()).collect(),
+            );
+            assert_eq!(
+                f.push("A concise image description."),
+                Some("A concise image description.".to_string())
+            );
+            assert_eq!(&f.push(&marker[..split_at]), &None);
+            assert_eq!(&f.push(&marker[split_at..]), &None);
+            assert!(
+                f.is_stopped(),
+                "{model_id} streaming output should stop at {marker:?}"
+            );
+            assert_eq!(f.cumulative_emitted(), "A concise image description.");
+        }
+    }
+
+    /// Regression guard: `CHAT_STOP_PATTERNS_BROKEN` must NOT contain
+    /// `turn|>`. The body starts with the common letter `t`, and
+    /// `trim_partial_stop_suffix` would then trim any final answer
+    /// ending in `t`, `tu`, `tur`, or `turn`. The full marker is in
+    /// `CHAT_STOP_PATTERNS` (`<turn|>`) which is enough — the broken
+    /// variant is too dangerous to ship.
+    #[test]
+    fn trim_partial_stop_suffix_does_not_chop_short_words_with_turn_marker() {
+        for tail in ["yes it is t", "the next turn", "tu", "the answer is tur"] {
+            let mut text = tail.to_string();
+            let trimmed = trim_partial_stop_suffix(&mut text, CHAT_STOP_PATTERNS_BROKEN);
+            assert!(
+                !trimmed,
+                "broken-variant trim must not fire on benign suffix {tail:?} \
+                 — got trimmed text {text:?}"
+            );
+            assert_eq!(text, tail, "broken-variant trim must leave {tail:?} intact");
+        }
     }
 }

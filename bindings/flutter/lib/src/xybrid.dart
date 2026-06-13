@@ -217,6 +217,13 @@ class Xybrid {
   static bool get isTelemetryInitialized =>
       XybridSdkClient.isTelemetryInitialized();
 
+  /// Runtime features compiled into the native xybrid library.
+  static List<String> runtimeFeatures() => XybridSdkClient.runtimeFeatures();
+
+  /// Whether a named runtime feature was compiled into the native library.
+  static bool supportsRuntimeFeature(String feature) =>
+      runtimeFeatures().contains(feature);
+
   /// Read the routing-engine's current view of device state.
   ///
   /// Returns the same [DeviceSnapshot] the engine reads internally on

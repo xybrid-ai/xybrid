@@ -6,9 +6,21 @@ A native iOS example app demonstrating Xybrid SDK integration using SwiftUI.
 
 - **SDK Initialization**: Cache directory setup plus `Xybrid.initialize()` (pass an `apiKey` to enable dashboard telemetry)
 - **Model Loading**: Downloads models from the xybrid registry with async/await
-- **Text-to-Speech**: Run TTS inference with voice selection
-- **Audio Playback**: Play generated audio via AVAudioPlayer
+- **Text-to-Speech** (Speech tab): Run TTS inference with voice selection + audio playback
+- **Live camera vision** (Vision tab): point the camera at a scene and get an on-device VLM caption that refreshes as the scene changes — AVFoundation capture + a cheap luma change-gate firing batch multimodal turns
 - **Error Handling**: User-friendly error messages with retry capability
+
+The two demos live behind a `TabView` once the SDK is initialized.
+
+### Live vision: responsiveness model
+
+The Vision tab is **drop-if-busy**, not cancel-and-replace: while one frame is
+being answered, newly gated frames are dropped rather than preempting the
+in-flight run. That's because the Swift/UniFFI bindings currently expose only the
+batch `model.run(...)`; streaming tokens, cancel-and-replace, and raw-frame
+(`imageRaw`) envelopes — the realtime-vision primitives already in the Flutter
+SDK — are not yet bound for Swift. When that surface lands the loop can move to
+latest-frame-wins. See `LiveVision.swift` for the gate + batch-VLM wiring.
 
 ## Prerequisites
 
@@ -80,12 +92,13 @@ SIMCTL_CHILD_XYBRID_PLATFORM_URL=https://your-platform.example.com \
 
 The app will:
 1. Show a welcome screen with "Initialize SDK" button
-2. After init, show inference demo with:
-   - Model ID input (default: `kokoro-82m`)
-   - Voice picker (populated after model loads)
-   - Text input for TTS
-   - "Run Inference" button
-   - Audio playback of generated speech
+2. After init, show a two-tab demo:
+   - **Speech** — Model ID input (default: `kokoro-82m`), voice picker, text input,
+     "Run Inference", and audio playback of generated speech.
+   - **Vision** — a vision-model ID input (default: `lfm2-vl-450m`, editable — use
+     any registry-resolvable VLM with an mmproj artifact), a question field,
+     "Start live", and a viewfinder with a replace-in-place caption + history.
+     Requires camera access (the app declares `NSCameraUsageDescription`).
 
 ## Project Structure
 
@@ -94,9 +107,10 @@ ios/
 ├── XybridExample.xcodeproj/     # Xcode project
 ├── XybridExample/
 │   ├── XybridExampleApp.swift   # App entry point
-│   ├── ContentView.swift        # Main UI with real SDK integration
+│   ├── ContentView.swift        # SDK init + TabView; the Speech (TTS) demo
+│   ├── LiveVision.swift         # Vision tab: camera service + luma gate + batch VLM
 │   ├── Assets.xcassets/         # App icons and colors
-│   └── Info.plist               # App configuration
+│   └── Info.plist               # App configuration (incl. NSCameraUsageDescription)
 └── README.md                    # This file
 ```
 
@@ -153,6 +167,17 @@ let config = XybridGenerationConfig(
     stopSequences: nil
 )
 let result = try await model.run(envelope: envelope, config: config)
+```
+
+### Vision (image → VLM, batch)
+
+```swift
+// Encode a camera frame (or any image) to JPEG, then send it as a multimodal
+// user turn. Batch only on Swift today — see "responsiveness model" above.
+let image = XybridEnvelope.image(bytes: jpegData, format: "jpeg")
+let envelope = XybridEnvelope.userMessage(text: "What do you see?", images: [image])
+let result = try await model.run(envelope: envelope, config: config)
+let caption = result.text
 ```
 
 ## Troubleshooting

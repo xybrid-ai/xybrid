@@ -1,0 +1,40 @@
+{
+  "model_id": "lfm2-vl-450m",
+  "version": "1.0",
+  "description": "Liquid LFM2-VL 450M compact vision-language model for edge inference.",
+  "execution_template": {
+    "type": "VisionLanguage",
+    "model_file": "LFM2-VL-450M-Q4_0.gguf",
+    "context_length": 4096,
+    "generation_params": {
+      "max_tokens": 256,
+      "temperature": 0.1,
+      "top_p": 0.9,
+      "repetition_penalty": 1.05
+    }
+  },
+  "vision_encoder": {
+    "file": "mmproj-LFM2-VL-450M-Q8_0.gguf",
+    "preprocessing_preset": "siglip",
+    "image_size": 512,
+    "patch_size": 16
+  },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": [
+    "LFM2-VL-450M-Q4_0.gguf",
+    "mmproj-LFM2-VL-450M-Q8_0.gguf"
+  ],
+  "metadata": {
+    "task": "vlm",
+    "architecture": "lfm2_vl",
+    "vision_architecture": "siglip2_vision_model",
+    "backend": "llamacpp",
+    "context_length": 32768,
+    "license_name": "LFM Open License v1.0",
+    "chat_format": "chatml",
+    "quantization": "q4_0",
+    "ram_minimum_mb": 1024,
+    "ram_recommended_mb": 2048
+  }
+}

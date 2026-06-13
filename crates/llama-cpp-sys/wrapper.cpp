@@ -3,10 +3,43 @@
  *
  * This provides the `_c` suffixed functions that our Rust FFI bindings expect.
  * Uses the modern llama.cpp API (llama_model_* functions).
+ *
+ * Vision FFI symbol set (INF-234):
+ * - mtmd_init_from_file_c
+ * - mtmd_free_c
+ * - mtmd_bitmap_init_from_buf_c
+ * - mtmd_bitmap_init_rgb_c
+ * - mtmd_bitmap_free_c
+ * - mtmd_bitmap_get_nx_c
+ * - mtmd_bitmap_get_ny_c
+ * - mtmd_bitmap_get_n_bytes_c
+ * - mtmd_bitmap_get_id_c
+ * - mtmd_bitmap_set_id_c
+ * - mtmd_input_chunks_init_c
+ * - mtmd_input_chunks_size_c
+ * - mtmd_input_chunks_get_c
+ * - mtmd_input_chunks_free_c
+ * - mtmd_input_chunk_get_type_c
+ * - mtmd_input_chunk_get_tokens_text_c
+ * - mtmd_input_chunk_get_tokens_image_c
+ * - mtmd_input_chunk_get_n_tokens_c
+ * - mtmd_input_chunk_get_n_pos_c
+ * - mtmd_image_tokens_get_n_tokens_c
+ * - mtmd_image_tokens_get_n_pos_c
+ * - mtmd_image_tokens_get_decoder_pos_c
+ * - mtmd_helper_get_n_tokens_c
+ * - mtmd_helper_get_n_pos_c
+ * - mtmd_tokenize_c
+ * - mtmd_helper_eval_chunks_c
+ * - llama_generate_from_current_logits_c
  */
 
 #include "wrapper.h"
 #include "ggml.h"
+#ifdef XYBRID_LLAMA_VISION
+#include "mtmd.h"
+#include "mtmd-helper.h"
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <thread>
@@ -110,6 +143,202 @@ void llama_free_model_c(llama_model* model) {
         llama_model_free(model);
     }
 }
+
+#ifdef XYBRID_LLAMA_VISION
+mtmd_context* mtmd_init_from_file_c(
+    const char* mmproj_fname,
+    const llama_model* text_model,
+    bool use_gpu,
+    bool warmup,
+    int n_threads,
+    bool flash_attn
+) {
+    mtmd_context_params params = mtmd_context_params_default();
+    params.use_gpu = use_gpu;
+    params.warmup = warmup;
+    params.n_threads = n_threads;
+    params.flash_attn_type = flash_attn
+        ? LLAMA_FLASH_ATTN_TYPE_ENABLED
+        : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+
+    return mtmd_init_from_file(mmproj_fname, text_model, params);
+}
+
+void mtmd_free_c(mtmd_context* ctx) {
+    if (ctx) {
+        mtmd_free(ctx);
+    }
+}
+
+mtmd_bitmap* mtmd_bitmap_init_from_buf_c(
+    mtmd_context* ctx,
+    const unsigned char* buf,
+    size_t len
+) {
+    return mtmd_helper_bitmap_init_from_buf(ctx, buf, len);
+}
+
+mtmd_bitmap* mtmd_bitmap_init_rgb_c(
+    uint32_t nx,
+    uint32_t ny,
+    const unsigned char* data
+) {
+    // Upstream requires `data` to be exactly nx * ny * 3 packed RGB bytes;
+    // the safe wrapper guarantees that before crossing the FFI boundary.
+    return mtmd_bitmap_init(nx, ny, data);
+}
+
+void mtmd_bitmap_free_c(mtmd_bitmap* bitmap) {
+    if (bitmap) {
+        mtmd_bitmap_free(bitmap);
+    }
+}
+
+uint32_t mtmd_bitmap_get_nx_c(const mtmd_bitmap* bitmap) {
+    return mtmd_bitmap_get_nx(bitmap);
+}
+
+uint32_t mtmd_bitmap_get_ny_c(const mtmd_bitmap* bitmap) {
+    return mtmd_bitmap_get_ny(bitmap);
+}
+
+size_t mtmd_bitmap_get_n_bytes_c(const mtmd_bitmap* bitmap) {
+    return mtmd_bitmap_get_n_bytes(bitmap);
+}
+
+const char* mtmd_bitmap_get_id_c(const mtmd_bitmap* bitmap) {
+    if (!bitmap) {
+        return nullptr;
+    }
+    return mtmd_bitmap_get_id(bitmap);
+}
+
+void mtmd_bitmap_set_id_c(mtmd_bitmap* bitmap, const char* id) {
+    if (bitmap) {
+        mtmd_bitmap_set_id(bitmap, id ? id : "");
+    }
+}
+
+mtmd_input_chunks* mtmd_input_chunks_init_c(void) {
+    return mtmd_input_chunks_init();
+}
+
+size_t mtmd_input_chunks_size_c(const mtmd_input_chunks* chunks) {
+    return chunks ? mtmd_input_chunks_size(chunks) : 0;
+}
+
+const mtmd_input_chunk* mtmd_input_chunks_get_c(
+    const mtmd_input_chunks* chunks,
+    size_t idx
+) {
+    return chunks ? mtmd_input_chunks_get(chunks, idx) : nullptr;
+}
+
+void mtmd_input_chunks_free_c(mtmd_input_chunks* chunks) {
+    if (chunks) {
+        mtmd_input_chunks_free(chunks);
+    }
+}
+
+int mtmd_input_chunk_get_type_c(const mtmd_input_chunk* chunk) {
+    return chunk ? static_cast<int>(mtmd_input_chunk_get_type(chunk)) : -1;
+}
+
+const int32_t* mtmd_input_chunk_get_tokens_text_c(
+    const mtmd_input_chunk* chunk,
+    size_t* n_tokens_output
+) {
+    if (n_tokens_output) {
+        *n_tokens_output = 0;
+    }
+    return chunk ? mtmd_input_chunk_get_tokens_text(chunk, n_tokens_output) : nullptr;
+}
+
+const mtmd_image_tokens* mtmd_input_chunk_get_tokens_image_c(
+    const mtmd_input_chunk* chunk
+) {
+    return chunk ? mtmd_input_chunk_get_tokens_image(chunk) : nullptr;
+}
+
+size_t mtmd_input_chunk_get_n_tokens_c(const mtmd_input_chunk* chunk) {
+    return chunk ? mtmd_input_chunk_get_n_tokens(chunk) : 0;
+}
+
+int32_t mtmd_input_chunk_get_n_pos_c(const mtmd_input_chunk* chunk) {
+    return chunk ? mtmd_input_chunk_get_n_pos(chunk) : 0;
+}
+
+size_t mtmd_image_tokens_get_n_tokens_c(const mtmd_image_tokens* image_tokens) {
+    return image_tokens ? mtmd_image_tokens_get_n_tokens(image_tokens) : 0;
+}
+
+int32_t mtmd_image_tokens_get_n_pos_c(const mtmd_image_tokens* image_tokens) {
+    return image_tokens ? mtmd_image_tokens_get_n_pos(image_tokens) : 0;
+}
+
+mtmd_decoder_pos mtmd_image_tokens_get_decoder_pos_c(
+    const mtmd_image_tokens* image_tokens,
+    int32_t pos_0,
+    size_t i
+) {
+    mtmd_decoder_pos empty{};
+    return image_tokens ? mtmd_image_tokens_get_decoder_pos(image_tokens, pos_0, i) : empty;
+}
+
+size_t mtmd_helper_get_n_tokens_c(const mtmd_input_chunks* chunks) {
+    return chunks ? mtmd_helper_get_n_tokens(chunks) : 0;
+}
+
+int32_t mtmd_helper_get_n_pos_c(const mtmd_input_chunks* chunks) {
+    return chunks ? mtmd_helper_get_n_pos(chunks) : 0;
+}
+
+int32_t mtmd_tokenize_c(
+    mtmd_context* ctx,
+    mtmd_input_chunks* output,
+    const char* text,
+    bool add_special,
+    bool parse_special,
+    const mtmd_bitmap** bitmaps,
+    size_t n_bitmaps
+) {
+    if (!ctx || !output || !text) {
+        return -1;
+    }
+
+    mtmd_input_text input;
+    input.text = text;
+    input.add_special = add_special;
+    input.parse_special = parse_special;
+
+    return mtmd_tokenize(ctx, output, &input, bitmaps, n_bitmaps);
+}
+
+int32_t mtmd_helper_eval_chunks_c(
+    mtmd_context* ctx,
+    llama_context* lctx,
+    const mtmd_input_chunks* chunks,
+    int32_t n_past,
+    int32_t seq_id,
+    int32_t n_batch,
+    bool logits_last,
+    int32_t* new_n_past
+) {
+    if (!ctx || !lctx || !chunks || !new_n_past) {
+        return -1;
+    }
+    return mtmd_helper_eval_chunks(
+        ctx,
+        lctx,
+        chunks,
+        n_past,
+        seq_id,
+        n_batch,
+        logits_last,
+        new_n_past
+    );
+}
+#endif
 
 // =============================================================================
 // Context Management (using new API)
@@ -697,6 +926,156 @@ int llama_generate_c(
  * @param user_data  User-provided context pointer
  * @return 0 to continue, non-zero to stop generation
  */
+/**
+ * Generate tokens from logits already present in the llama context.
+ *
+ * This is the post-prefill half of llama_generate_streaming_c. Multimodal
+ * llama.cpp uses mtmd_helper_eval_chunks() to prefill text/image chunks and
+ * leave logits for the final prompt position, then this function samples from
+ * those logits and continues autoregressive decoding.
+ *
+ * @param n_past Number of positions already prefilled in the KV cache.
+ */
+int llama_generate_from_current_logits_c(
+    llama_context* ctx,
+    const llama_model* model,
+    int32_t* output_tokens,
+    int max_tokens,
+    float temperature,
+    float top_p,
+    float min_p,
+    int top_k,
+    float repeat_penalty,
+    uint32_t seed,
+    const int32_t* stop_seqs,
+    const int* stop_lens,
+    int n_stop_seqs,
+    llama_token_callback_c callback,
+    void* user_data,
+    int n_past
+) {
+    if (!ctx || !model || !output_tokens || max_tokens <= 0 || n_past < 0) {
+        return -1;
+    }
+
+    const int n_ctx = llama_n_ctx(ctx);
+    if (n_past >= n_ctx) {
+        fprintf(stderr, "llama_generate_from_current_logits_c: prefix (%d) >= context window (%d)\n",
+                n_past, n_ctx);
+        return -4;
+    }
+
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+    const int n_vocab = llama_vocab_n_tokens(vocab);
+
+    llama_sampler* sampler = llama_sampler_chain_create_c(
+        temperature, top_p, min_p, top_k, repeat_penalty, 64, seed
+    );
+    if (!sampler) {
+        return -2;
+    }
+
+    const int n_batch = llama_n_batch(ctx);
+    llama_batch batch = llama_batch_init(n_batch > 0 ? n_batch : 512, 0, 1);
+
+    int n_generated = 0;
+    int n_cur = n_past;
+    bool stopped_by_callback = false;
+    bool use_current_context_logits = true;
+    char token_buf[1024];
+
+    llama_token_data* candidates_data = new llama_token_data[n_vocab];
+
+    while (n_generated < max_tokens) {
+        float* logits = use_current_context_logits
+            ? llama_get_logits(ctx)
+            : llama_get_logits_ith(ctx, 0);
+        if (!logits) {
+            delete[] candidates_data;
+            llama_batch_free(batch);
+            llama_sampler_free(sampler);
+            return -5;
+        }
+
+        llama_token_data_array candidates;
+        for (int i = 0; i < n_vocab; i++) {
+            candidates_data[i].id = i;
+            candidates_data[i].logit = logits[i];
+            candidates_data[i].p = 0.0f;
+        }
+
+        candidates.data = candidates_data;
+        candidates.size = n_vocab;
+        candidates.selected = -1;
+        candidates.sorted = false;
+
+        llama_sampler_apply(sampler, &candidates);
+        llama_token new_token = candidates.data[candidates.selected].id;
+        llama_sampler_accept(sampler, new_token);
+
+        output_tokens[n_generated] = new_token;
+        n_generated++;
+
+        if (llama_vocab_is_eog(vocab, new_token)) {
+            break;
+        }
+
+        if (callback) {
+            int len = llama_token_to_piece_c(model, new_token, token_buf, sizeof(token_buf) - 1, 0, true);
+            if (len > 0) {
+                token_buf[len] = '\0';
+            } else {
+                token_buf[0] = '\0';
+            }
+
+            int cb_result = callback(new_token, token_buf, user_data);
+            if (cb_result != 0) {
+                stopped_by_callback = true;
+                break;
+            }
+        }
+
+        if (check_stop_sequences(output_tokens, n_generated, stop_seqs, stop_lens, n_stop_seqs)) {
+            break;
+        }
+
+        if (n_cur >= n_ctx) {
+            delete[] candidates_data;
+            llama_batch_free(batch);
+            llama_sampler_free(sampler);
+            return -4;
+        }
+
+        batch.n_tokens = 0;
+        batch.token[0] = new_token;
+        batch.pos[0] = n_cur;
+        batch.n_seq_id[0] = 1;
+        batch.seq_id[0][0] = 0;
+        batch.logits[0] = 1;
+        batch.n_tokens = 1;
+        n_cur++;
+        use_current_context_logits = false;
+
+        int decode_result = llama_decode(ctx, batch);
+        if (decode_result != 0) {
+            fprintf(stderr,
+                    "llama_generate_from_current_logits_c: llama_decode returned %d "
+                    "for generated token at position %d, n_ctx=%d.\n",
+                    decode_result, n_cur - 1, n_ctx);
+            delete[] candidates_data;
+            llama_batch_free(batch);
+            llama_sampler_free(sampler);
+            return -3;
+        }
+    }
+
+    delete[] candidates_data;
+    llama_batch_free(batch);
+    llama_sampler_free(sampler);
+
+    return stopped_by_callback ? -n_generated : n_generated;
+}
+
 /**
  * Generate tokens with streaming callback.
  *

@@ -5,8 +5,12 @@ on:
     branches: [master]
     paths:
       - 'bindings/kotlin/**'
+      - 'crates/xybrid-core/**'
+      - 'crates/xybrid-sdk/**'
       - 'crates/xybrid-uniffi/**'
       - 'xtask/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
       - '.github/workflows/build-android.yml'
       # Docs-only changes under the paths above (READMEs, examples) never
       # affect the native build — exclude markdown so they don't trigger it.
@@ -115,6 +119,10 @@ jobs:
 
       - name: Build Android .so (${{ matrix.abi }})
         run: cargo xtask build-android --release --abi ${{ matrix.abi }}
+
+      - name: Check Android vision build without model artifacts
+        if: matrix.abi == 'arm64-v8a'
+        run: cargo ndk --target ${{ matrix.rust-target }} --platform 28 check -p xybrid-uniffi --features platform-android,llm-llamacpp-vision
 
       - name: Verify .so file
         run: |

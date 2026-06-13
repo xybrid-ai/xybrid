@@ -443,7 +443,7 @@ public protocol XybridModelProtocol {
     func run(envelope: XybridEnvelope, config: XybridGenerationConfig?) async throws -> XybridResult
     func voice(voiceId: String)   -> XybridVoiceInfo?
     func voices()   -> [XybridVoiceInfo]?
-    
+
 }
 
 public class XybridModel: XybridModelProtocol {
@@ -460,16 +460,16 @@ public class XybridModel: XybridModelProtocol {
         try! rustCall { uniffi_xybrid_uniffi_fn_free_xybridmodel(pointer, $0) }
     }
 
-    
 
-    
-    
+
+
+
 
     public func defaultVoiceId()  -> String? {
         return try!  FfiConverterOptionString.lift(
-            try! 
+            try!
     rustCall() {
-    
+
     uniffi_xybrid_uniffi_fn_method_xybridmodel_default_voice_id(self.pointer, $0
     )
 }
@@ -478,9 +478,9 @@ public class XybridModel: XybridModelProtocol {
 
     public func hasVoices()  -> Bool {
         return try!  FfiConverterBool.lift(
-            try! 
+            try!
     rustCall() {
-    
+
     uniffi_xybrid_uniffi_fn_method_xybridmodel_has_voices(self.pointer, $0
     )
 }
@@ -504,14 +504,14 @@ public class XybridModel: XybridModelProtocol {
         )
     }
 
-    
+
 
     public func voice(voiceId: String)  -> XybridVoiceInfo? {
         return try!  FfiConverterOptionTypeXybridVoiceInfo.lift(
-            try! 
+            try!
     rustCall() {
-    
-    uniffi_xybrid_uniffi_fn_method_xybridmodel_voice(self.pointer, 
+
+    uniffi_xybrid_uniffi_fn_method_xybridmodel_voice(self.pointer,
         FfiConverterString.lower(voiceId),$0
     )
 }
@@ -520,9 +520,9 @@ public class XybridModel: XybridModelProtocol {
 
     public func voices()  -> [XybridVoiceInfo]? {
         return try!  FfiConverterOptionSequenceTypeXybridVoiceInfo.lift(
-            try! 
+            try!
     rustCall() {
-    
+
     uniffi_xybrid_uniffi_fn_method_xybridmodel_voices(self.pointer, $0
     )
 }
@@ -572,7 +572,7 @@ public func FfiConverterTypeXybridModel_lower(_ value: XybridModel) -> UnsafeMut
 
 public protocol XybridModelLoaderProtocol {
     func load() async throws -> XybridModel
-    
+
 }
 
 public class XybridModelLoader: XybridModelLoaderProtocol {
@@ -589,7 +589,7 @@ public class XybridModelLoader: XybridModelLoaderProtocol {
         try! rustCall { uniffi_xybrid_uniffi_fn_free_xybridmodelloader(pointer, $0) }
     }
 
-    
+
 
     public static func fromBundle(path: String) throws -> XybridModelLoader {
         return XybridModelLoader(unsafeFromRawPointer: try rustCallWithError(FfiConverterTypeXybridError.lift) {
@@ -598,7 +598,7 @@ public class XybridModelLoader: XybridModelLoaderProtocol {
 })
     }
 
-    
+
 
     public static func fromDirectory(path: String) throws -> XybridModelLoader {
         return XybridModelLoader(unsafeFromRawPointer: try rustCallWithError(FfiConverterTypeXybridError.lift) {
@@ -607,7 +607,7 @@ public class XybridModelLoader: XybridModelLoaderProtocol {
 })
     }
 
-    
+
 
     public static func fromHuggingface(repo: String)  -> XybridModelLoader {
         return XybridModelLoader(unsafeFromRawPointer: try! rustCall() {
@@ -616,7 +616,7 @@ public class XybridModelLoader: XybridModelLoaderProtocol {
 })
     }
 
-    
+
 
     public static func fromRegistry(modelId: String)  -> XybridModelLoader {
         return XybridModelLoader(unsafeFromRawPointer: try! rustCall() {
@@ -625,10 +625,10 @@ public class XybridModelLoader: XybridModelLoaderProtocol {
 })
     }
 
-    
 
-    
-    
+
+
+
 
     public func load() async throws -> XybridModel {
         return try  await uniffiRustCallAsync(
@@ -645,7 +645,7 @@ public class XybridModelLoader: XybridModelLoaderProtocol {
         )
     }
 
-    
+
 }
 
 public struct FfiConverterTypeXybridModelLoader: FfiConverter {
@@ -752,12 +752,12 @@ extension XybridGenerationConfig: Equatable, Hashable {
 public struct FfiConverterTypeXybridGenerationConfig: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> XybridGenerationConfig {
         return try XybridGenerationConfig(
-            maxTokens: FfiConverterOptionUInt32.read(from: &buf), 
-            temperature: FfiConverterOptionFloat.read(from: &buf), 
-            topP: FfiConverterOptionFloat.read(from: &buf), 
-            minP: FfiConverterOptionFloat.read(from: &buf), 
-            topK: FfiConverterOptionUInt32.read(from: &buf), 
-            repetitionPenalty: FfiConverterOptionFloat.read(from: &buf), 
+            maxTokens: FfiConverterOptionUInt32.read(from: &buf),
+            temperature: FfiConverterOptionFloat.read(from: &buf),
+            topP: FfiConverterOptionFloat.read(from: &buf),
+            minP: FfiConverterOptionFloat.read(from: &buf),
+            topK: FfiConverterOptionUInt32.read(from: &buf),
+            repetitionPenalty: FfiConverterOptionFloat.read(from: &buf),
             stopSequences: FfiConverterOptionSequenceString.read(from: &buf)
         )
     }
@@ -847,12 +847,12 @@ extension XybridInferenceMetrics: Equatable, Hashable {
 public struct FfiConverterTypeXybridInferenceMetrics: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> XybridInferenceMetrics {
         return try XybridInferenceMetrics(
-            totalMs: FfiConverterUInt32.read(from: &buf), 
-            ttftMs: FfiConverterOptionUInt32.read(from: &buf), 
-            tokensPerSecond: FfiConverterOptionFloat.read(from: &buf), 
-            prefillTps: FfiConverterOptionFloat.read(from: &buf), 
-            decodeTps: FfiConverterOptionFloat.read(from: &buf), 
-            tokensOut: FfiConverterOptionUInt32.read(from: &buf), 
+            totalMs: FfiConverterUInt32.read(from: &buf),
+            ttftMs: FfiConverterOptionUInt32.read(from: &buf),
+            tokensPerSecond: FfiConverterOptionFloat.read(from: &buf),
+            prefillTps: FfiConverterOptionFloat.read(from: &buf),
+            decodeTps: FfiConverterOptionFloat.read(from: &buf),
+            tokensOut: FfiConverterOptionUInt32.read(from: &buf),
             stageLatenciesMs: FfiConverterSequenceTypeXybridStageLatency.read(from: &buf)
         )
     }
@@ -936,11 +936,11 @@ extension XybridResult: Equatable, Hashable {
 public struct FfiConverterTypeXybridResult: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> XybridResult {
         return try XybridResult(
-            success: FfiConverterBool.read(from: &buf), 
-            text: FfiConverterOptionString.read(from: &buf), 
-            audioBytes: FfiConverterOptionData.read(from: &buf), 
-            embedding: FfiConverterOptionSequenceFloat.read(from: &buf), 
-            latencyMs: FfiConverterUInt32.read(from: &buf), 
+            success: FfiConverterBool.read(from: &buf),
+            text: FfiConverterOptionString.read(from: &buf),
+            audioBytes: FfiConverterOptionData.read(from: &buf),
+            embedding: FfiConverterOptionSequenceFloat.read(from: &buf),
+            latencyMs: FfiConverterUInt32.read(from: &buf),
             metrics: FfiConverterTypeXybridInferenceMetrics.read(from: &buf)
         )
     }
@@ -999,7 +999,7 @@ extension XybridStageLatency: Equatable, Hashable {
 public struct FfiConverterTypeXybridStageLatency: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> XybridStageLatency {
         return try XybridStageLatency(
-            stageId: FfiConverterString.read(from: &buf), 
+            stageId: FfiConverterString.read(from: &buf),
             latencyMs: FfiConverterUInt32.read(from: &buf)
         )
     }
@@ -1072,10 +1072,10 @@ extension XybridVoiceInfo: Equatable, Hashable {
 public struct FfiConverterTypeXybridVoiceInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> XybridVoiceInfo {
         return try XybridVoiceInfo(
-            id: FfiConverterString.read(from: &buf), 
-            name: FfiConverterString.read(from: &buf), 
-            gender: FfiConverterOptionString.read(from: &buf), 
-            language: FfiConverterOptionString.read(from: &buf), 
+            id: FfiConverterString.read(from: &buf),
+            name: FfiConverterString.read(from: &buf),
+            gender: FfiConverterOptionString.read(from: &buf),
+            language: FfiConverterOptionString.read(from: &buf),
             style: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -1101,10 +1101,12 @@ public func FfiConverterTypeXybridVoiceInfo_lower(_ value: XybridVoiceInfo) -> R
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 public enum XybridEnvelope {
-    
+
     case audio(bytes: Data, sampleRate: UInt32, channels: UInt32)
     case text(text: String, voiceId: String?, speed: Double?)
     case embedding(data: [Float])
+    case image(bytes: Data, format: String)
+    case userMessage(text: String, images: [XybridEnvelope])
 }
 
 public struct FfiConverterTypeXybridEnvelope: FfiConverterRustBuffer {
@@ -1113,49 +1115,71 @@ public struct FfiConverterTypeXybridEnvelope: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> XybridEnvelope {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .audio(
-            bytes: try FfiConverterData.read(from: &buf), 
-            sampleRate: try FfiConverterUInt32.read(from: &buf), 
+            bytes: try FfiConverterData.read(from: &buf),
+            sampleRate: try FfiConverterUInt32.read(from: &buf),
             channels: try FfiConverterUInt32.read(from: &buf)
         )
-        
+
         case 2: return .text(
-            text: try FfiConverterString.read(from: &buf), 
-            voiceId: try FfiConverterOptionString.read(from: &buf), 
+            text: try FfiConverterString.read(from: &buf),
+            voiceId: try FfiConverterOptionString.read(from: &buf),
             speed: try FfiConverterOptionDouble.read(from: &buf)
         )
-        
+
         case 3: return .embedding(
             data: try FfiConverterSequenceFloat.read(from: &buf)
         )
-        
+
+        case 4: return .image(
+            bytes: try FfiConverterData.read(from: &buf),
+            format: try FfiConverterString.read(from: &buf)
+        )
+
+        case 5: return .userMessage(
+            text: try FfiConverterString.read(from: &buf),
+            images: try FfiConverterSequenceTypeXybridEnvelope.read(from: &buf)
+        )
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: XybridEnvelope, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case let .audio(bytes,sampleRate,channels):
             writeInt(&buf, Int32(1))
             FfiConverterData.write(bytes, into: &buf)
             FfiConverterUInt32.write(sampleRate, into: &buf)
             FfiConverterUInt32.write(channels, into: &buf)
-            
-        
+
+
         case let .text(text,voiceId,speed):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(text, into: &buf)
             FfiConverterOptionString.write(voiceId, into: &buf)
             FfiConverterOptionDouble.write(speed, into: &buf)
-            
-        
+
+
         case let .embedding(data):
             writeInt(&buf, Int32(3))
             FfiConverterSequenceFloat.write(data, into: &buf)
-            
+
+
+        case let .image(bytes,format):
+            writeInt(&buf, Int32(4))
+            FfiConverterData.write(bytes, into: &buf)
+            FfiConverterString.write(format, into: &buf)
+
+
+        case let .userMessage(text,images):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(text, into: &buf)
+            FfiConverterSequenceTypeXybridEnvelope.write(images, into: &buf)
+
         }
     }
 }
@@ -1176,14 +1200,17 @@ extension XybridEnvelope: Equatable, Hashable {}
 
 public enum XybridError {
 
-    
-    
+
+
     case ModelNotFound(message: String)
     case DirectoryNotFound(message: String)
     case MetadataNotFound(message: String)
     case MetadataInvalid(message: String)
     case LoadError(message: String)
     case InferenceError(message: String)
+    case MissingArtifact(artifact: String, path: String)
+    case UnsupportedModelCapability(modelId: String, capability: String, hint: String)
+    case UnsupportedBackendCapability(modelId: String, backend: String, capability: String, hint: String)
     case StreamingNotSupported
     case NotLoaded
     case ConfigError(message: String)
@@ -1208,9 +1235,9 @@ public struct FfiConverterTypeXybridError: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
 
-        
 
-        
+
+
         case 1: return .ModelNotFound(
             message: try FfiConverterString.read(from: &buf)
             )
@@ -1229,30 +1256,45 @@ public struct FfiConverterTypeXybridError: FfiConverterRustBuffer {
         case 6: return .InferenceError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 7: return .StreamingNotSupported
-        case 8: return .NotLoaded
-        case 9: return .ConfigError(
+        case 7: return .MissingArtifact(
+            artifact: try FfiConverterString.read(from: &buf),
+            path: try FfiConverterString.read(from: &buf)
+            )
+        case 8: return .UnsupportedModelCapability(
+            modelId: try FfiConverterString.read(from: &buf),
+            capability: try FfiConverterString.read(from: &buf),
+            hint: try FfiConverterString.read(from: &buf)
+            )
+        case 9: return .UnsupportedBackendCapability(
+            modelId: try FfiConverterString.read(from: &buf),
+            backend: try FfiConverterString.read(from: &buf),
+            capability: try FfiConverterString.read(from: &buf),
+            hint: try FfiConverterString.read(from: &buf)
+            )
+        case 10: return .StreamingNotSupported
+        case 11: return .NotLoaded
+        case 12: return .ConfigError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 10: return .NetworkError(
+        case 13: return .NetworkError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 11: return .IoError(
+        case 14: return .IoError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 12: return .CacheError(
+        case 15: return .CacheError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 13: return .PipelineError(
+        case 16: return .PipelineError(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 14: return .CircuitOpen(
+        case 17: return .CircuitOpen(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 15: return .RateLimited(
+        case 18: return .RateLimited(
             retryAfterSecs: try FfiConverterUInt64.read(from: &buf)
             )
-        case 16: return .Timeout(
+        case 19: return .Timeout(
             timeoutMs: try FfiConverterUInt64.read(from: &buf)
             )
 
@@ -1263,87 +1305,108 @@ public struct FfiConverterTypeXybridError: FfiConverterRustBuffer {
     public static func write(_ value: XybridError, into buf: inout [UInt8]) {
         switch value {
 
-        
 
-        
-        
+
+
+
         case let .ModelNotFound(message):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(message, into: &buf)
-            
-        
+
+
         case let .DirectoryNotFound(message):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(message, into: &buf)
-            
-        
+
+
         case let .MetadataNotFound(message):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(message, into: &buf)
-            
-        
+
+
         case let .MetadataInvalid(message):
             writeInt(&buf, Int32(4))
             FfiConverterString.write(message, into: &buf)
-            
-        
+
+
         case let .LoadError(message):
             writeInt(&buf, Int32(5))
             FfiConverterString.write(message, into: &buf)
-            
-        
+
+
         case let .InferenceError(message):
             writeInt(&buf, Int32(6))
             FfiConverterString.write(message, into: &buf)
-            
-        
-        case .StreamingNotSupported:
+
+
+        case let .MissingArtifact(artifact,path):
             writeInt(&buf, Int32(7))
-        
-        
-        case .NotLoaded:
+            FfiConverterString.write(artifact, into: &buf)
+            FfiConverterString.write(path, into: &buf)
+
+
+        case let .UnsupportedModelCapability(modelId,capability,hint):
             writeInt(&buf, Int32(8))
-        
-        
-        case let .ConfigError(message):
+            FfiConverterString.write(modelId, into: &buf)
+            FfiConverterString.write(capability, into: &buf)
+            FfiConverterString.write(hint, into: &buf)
+
+
+        case let .UnsupportedBackendCapability(modelId,backend,capability,hint):
             writeInt(&buf, Int32(9))
-            FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .NetworkError(message):
+            FfiConverterString.write(modelId, into: &buf)
+            FfiConverterString.write(backend, into: &buf)
+            FfiConverterString.write(capability, into: &buf)
+            FfiConverterString.write(hint, into: &buf)
+
+
+        case .StreamingNotSupported:
             writeInt(&buf, Int32(10))
-            FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .IoError(message):
+
+
+        case .NotLoaded:
             writeInt(&buf, Int32(11))
-            FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .CacheError(message):
+
+
+        case let .ConfigError(message):
             writeInt(&buf, Int32(12))
             FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .PipelineError(message):
+
+
+        case let .NetworkError(message):
             writeInt(&buf, Int32(13))
             FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .CircuitOpen(message):
+
+
+        case let .IoError(message):
             writeInt(&buf, Int32(14))
             FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .RateLimited(retryAfterSecs):
+
+
+        case let .CacheError(message):
             writeInt(&buf, Int32(15))
-            FfiConverterUInt64.write(retryAfterSecs, into: &buf)
-            
-        
-        case let .Timeout(timeoutMs):
+            FfiConverterString.write(message, into: &buf)
+
+
+        case let .PipelineError(message):
             writeInt(&buf, Int32(16))
+            FfiConverterString.write(message, into: &buf)
+
+
+        case let .CircuitOpen(message):
+            writeInt(&buf, Int32(17))
+            FfiConverterString.write(message, into: &buf)
+
+
+        case let .RateLimited(retryAfterSecs):
+            writeInt(&buf, Int32(18))
+            FfiConverterUInt64.write(retryAfterSecs, into: &buf)
+
+
+        case let .Timeout(timeoutMs):
+            writeInt(&buf, Int32(19))
             FfiConverterUInt64.write(timeoutMs, into: &buf)
-            
+
         }
     }
 }
@@ -1356,7 +1419,7 @@ extension XybridError: Error { }
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 public enum XybridThermalState {
-    
+
     case normal
     case warm
     case hot
@@ -1369,38 +1432,38 @@ public struct FfiConverterTypeXybridThermalState: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> XybridThermalState {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .normal
-        
+
         case 2: return .warm
-        
+
         case 3: return .hot
-        
+
         case 4: return .critical
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: XybridThermalState, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case .normal:
             writeInt(&buf, Int32(1))
-        
-        
+
+
         case .warm:
             writeInt(&buf, Int32(2))
-        
-        
+
+
         case .hot:
             writeInt(&buf, Int32(3))
-        
-        
+
+
         case .critical:
             writeInt(&buf, Int32(4))
-        
+
         }
     }
 }
@@ -1712,6 +1775,28 @@ fileprivate struct FfiConverterSequenceTypeXybridVoiceInfo: FfiConverterRustBuff
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeXybridVoiceInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+fileprivate struct FfiConverterSequenceTypeXybridEnvelope: FfiConverterRustBuffer {
+    typealias SwiftType = [XybridEnvelope]
+
+    public static func write(_ value: [XybridEnvelope], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeXybridEnvelope.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [XybridEnvelope] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [XybridEnvelope]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeXybridEnvelope.read(from: &buf))
         }
         return seq
     }

@@ -98,6 +98,38 @@ jobs:
       - name: Check platform-desktop
         run: cargo check -p xybrid-sdk --features platform-desktop
 
+  check-vision-platforms:
+    name: check vision (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            features: platform-desktop,llm-llamacpp-vision
+            cache-key: linux-vision-platform
+          - name: macos
+            os: macos-latest
+            features: platform-macos,llm-llamacpp-vision
+            cache-key: macos-vision-platform
+          - name: windows
+            os: windows-latest
+            features: platform-desktop,llm-llamacpp-vision
+            cache-key: windows-vision-platform
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ${{ matrix.cache-key }}
+      - name: Check vision build without model artifacts
+        run: cargo check -p xybrid-sdk --features ${{ matrix.features }}
+
   clippy-llm:
     name: clippy (llm-llamacpp, ubuntu-latest)
     runs-on: ubuntu-latest
@@ -208,6 +240,6 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, clippy-llm, test-llm, test, build-cli, api-contract]
+    needs: [fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, build-cli, api-contract]
     steps:
       - run: echo "All CI checks passed!"

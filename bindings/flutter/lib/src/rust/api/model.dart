@@ -15,9 +15,28 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `to_sdk`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_sdk_with_cancellation`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `current_snapshot`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `fmt`, `from`
+
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiCancellationToken>>
+abstract class FfiCancellationToken implements RustOpaqueInterface {
+  /// Request cooperative cancellation of the associated run.
+  ///
+  /// Takes effect at the next token boundary (cancellation is cooperative,
+  /// not preemptive — it never interrupts mid-token).
+  void cancel();
+
+  static Future<FfiCancellationToken> default_() =>
+      XybridRustLib.instance.api.crateApiModelFfiCancellationTokenDefault();
+
+  /// Whether cancellation has been requested on this token.
+  bool isCancelled();
+
+  /// Create a fresh, un-cancelled token.
+  factory FfiCancellationToken() =>
+      XybridRustLib.instance.api.crateApiModelFfiCancellationTokenNew();
+}
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>
 abstract class FfiModel implements RustOpaqueInterface {
@@ -39,8 +58,33 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
+  ///
+  /// Pass an optional `cancellation_token` to make the run cancellable: when
+  /// the token is cancelled (or the Dart sink is closed mid-stream), Rust
+  /// generation halts at the next token boundary and releases the model write
+  /// lock. When `None`, behavior matches the pre-cancellation streaming path
+  /// (no `UserCancelled` observation).
+  ///
+  /// Pass `preempt = true` (latest-frame-wins) **together with** a
+  /// `cancellation_token` to make this run cancel the model's previously
+  /// in-flight streaming run *before* it acquires the model write lock — so a
+  /// new frame's stream does not head-of-line block behind a still-running
+  /// one. The displaced run halts at its next token and releases the lock.
+  /// `preempt` defaults to `false`: chat and any caller that wants
+  /// drop-if-busy / serialized semantics passes `false` (or omits it) and the
+  /// behavior is byte-for-byte the pre-preempt path. Preempt with no token is
+  /// a no-op (there is nothing to register/cancel).
+  ///
+  /// Pass an optional `frame_session_id` (a caller-supplied UUID) to tag every
+  /// run in a continuous live-capture session. The SDK then rate-limits the
+  /// session's telemetry to ~1 wire row/sec instead of one row per frame.
+  /// `None` (chat and one-shot runs) leaves telemetry as plain per-run rows.
   Stream<FfiStreamEvent> runStream(
-      {required FfiEnvelope envelope, FfiGenerationConfig? config});
+      {required FfiEnvelope envelope,
+      FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken,
+      required bool preempt,
+      String? frameSessionId});
 
   /// Run inference with streaming output and conversation context.
   ///
@@ -54,10 +98,28 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
+  ///
+  /// Pass an optional `cancellation_token` to make the run cancellable: when
+  /// the token is cancelled (or the Dart sink is closed mid-stream), Rust
+  /// generation halts at the next token boundary and releases the model write
+  /// lock. When `None`, behavior matches the pre-cancellation streaming path.
+  ///
+  /// Pass `preempt = true` (latest-frame-wins) together with a
+  /// `cancellation_token` to cancel the model's previously in-flight
+  /// streaming run before acquiring the write lock — see
+  /// [`Self::run_stream`] for the full semantics. Defaults to `false`
+  /// (drop-if-busy / serialized); chat passes `false` and is unaffected.
+  ///
+  /// Pass an optional `frame_session_id` (a caller-supplied UUID) to tag the
+  /// run as part of a continuous live-capture session — see [`Self::run_stream`]
+  /// for the telemetry rate-limit semantics. `None` for chat / one-shot runs.
   Stream<FfiStreamEvent> runStreamWithContext(
       {required FfiEnvelope envelope,
       required FfiConversationContext context,
-      FfiGenerationConfig? config});
+      FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken,
+      required bool preempt,
+      String? frameSessionId});
 
   /// Run streaming inference with local abort and Xybrid cloud fallback.
   ///
@@ -68,7 +130,22 @@ abstract class FfiModel implements RustOpaqueInterface {
   Stream<FfiStreamEvent> runStreamWithFallback(
       {required FfiEnvelope envelope,
       required FfiRunOptions options,
-      FfiGenerationConfig? config});
+      FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken});
+
+  /// Streaming TTS: synthesize the envelope's text sentence-chunk by
+  /// sentence-chunk and emit each chunk's PCM through `sink` as it is produced
+  /// (instead of one batched WAV), so playback can start after the first
+  /// sentence. Runs on a worker thread.
+  ///
+  /// Cancellation mirrors [`run_stream`]: an optional `cancellation_token`
+  /// stops synthesis at the next chunk boundary, and a closed/unsubscribed
+  /// `sink` (Dart cancelled the stream — i.e. barge-in) drives the same
+  /// cancel via the `should_cancel_on_sink_close` handshake.
+  Stream<FfiTtsStreamEvent> runTtsStream(
+      {required FfiEnvelope envelope,
+      FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken});
 
   /// Run inference with conversation context.
   ///
@@ -222,6 +299,13 @@ class FfiRunOptions {
   final bool fallbackToCloud;
   final int? maxGraceTokens;
 
+  /// Caller-supplied UUID identifying one continuous live-capture session
+  /// (e.g. the Flutter vision-live loop). When present, the run is tagged via
+  /// `RunOptions::with_frame_session`, which flips `live_mode = true` and
+  /// makes the SDK rate-limit live telemetry to ~1 wire row/sec per session.
+  /// `None` for one-shot / chat runs (telemetry path unchanged).
+  final String? frameSessionId;
+
   const FfiRunOptions({
     this.cloudProvider,
     this.cloudModel,
@@ -231,6 +315,7 @@ class FfiRunOptions {
     required this.abortOnThermalCritical,
     required this.fallbackToCloud,
     this.maxGraceTokens,
+    this.frameSessionId,
   });
 
   @override
@@ -242,7 +327,8 @@ class FfiRunOptions {
       abortOnMemoryPressureCritical.hashCode ^
       abortOnThermalCritical.hashCode ^
       fallbackToCloud.hashCode ^
-      maxGraceTokens.hashCode;
+      maxGraceTokens.hashCode ^
+      frameSessionId.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -257,7 +343,8 @@ class FfiRunOptions {
               other.abortOnMemoryPressureCritical &&
           abortOnThermalCritical == other.abortOnThermalCritical &&
           fallbackToCloud == other.fallbackToCloud &&
-          maxGraceTokens == other.maxGraceTokens;
+          maxGraceTokens == other.maxGraceTokens &&
+          frameSessionId == other.frameSessionId;
 }
 
 @freezed
@@ -324,4 +411,23 @@ class FfiStreamToken {
           index == other.index &&
           cumulativeText == other.cumulativeText &&
           finishReason == other.finishReason;
+}
+
+@freezed
+sealed class FfiTtsStreamEvent with _$FfiTtsStreamEvent {
+  const FfiTtsStreamEvent._();
+
+  /// One synthesized chunk: raw 16-bit LE PCM and its sample rate (Hz).
+  const factory FfiTtsStreamEvent.audioChunk({
+    required Uint8List pcm,
+    required int sampleRate,
+  }) = FfiTtsStreamEvent_AudioChunk;
+
+  /// Synthesis completed.
+  const factory FfiTtsStreamEvent.complete() = FfiTtsStreamEvent_Complete;
+
+  /// An error occurred during synthesis.
+  const factory FfiTtsStreamEvent.error(
+    String field0,
+  ) = FfiTtsStreamEvent_Error;
 }

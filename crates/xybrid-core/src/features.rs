@@ -16,11 +16,13 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("candle-metal", cfg!(feature = "candle-metal")),
     ("espeak", cfg!(feature = "espeak")),
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
+    ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-mistral", cfg!(feature = "llm-mistral")),
     ("ort-coreml", cfg!(feature = "ort-coreml")),
     ("ort-cuda", cfg!(feature = "ort-cuda")),
     ("ort-download", cfg!(feature = "ort-download")),
     ("ort-dynamic", cfg!(feature = "ort-dynamic")),
+    ("vision", cfg!(feature = "vision")),
 ];
 
 /// Return the sorted list of enabled runtime feature names.
@@ -103,6 +105,18 @@ mod tests {
     #[test]
     fn ort_download_branch_is_exercised() {
         assert!(enabled().contains(&"ort-download"));
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn vision_branch_is_exercised() {
+        assert!(enabled().contains(&"vision"));
+    }
+
+    #[cfg(feature = "llm-llamacpp-vision")]
+    #[test]
+    fn llama_cpp_vision_branch_is_exercised() {
+        assert!(enabled().contains(&"llm-llamacpp-vision"));
     }
 
     #[cfg(feature = "llm-llamacpp")]

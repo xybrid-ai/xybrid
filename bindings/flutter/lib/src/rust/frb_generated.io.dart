@@ -30,6 +30,10 @@ abstract class XybridRustLibApiImplPlatform
   });
 
   CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_FfiCancellationTokenPtr => wire
+          ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationTokenPtr;
+
+  CrossPlatformFinalizerArg
       get rust_arc_decrement_strong_count_FfiConversationContextPtr => wire
           ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiConversationContextPtr;
 
@@ -58,6 +62,11 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw);
+
+  @protected
+  FfiCancellationToken
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          dynamic raw);
 
   @protected
   FfiConversationContext
@@ -95,6 +104,11 @@ abstract class XybridRustLibApiImplPlatform
           dynamic raw);
 
   @protected
+  FfiCancellationToken
+      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          dynamic raw);
+
+  @protected
   FfiConversationContext
       dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiConversationContext(
           dynamic raw);
@@ -117,6 +131,11 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   FfiPipeline
       dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+          dynamic raw);
+
+  @protected
+  FfiCancellationToken
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
           dynamic raw);
 
   @protected
@@ -163,10 +182,19 @@ abstract class XybridRustLibApiImplPlatform
       dynamic raw);
 
   @protected
+  RustStreamSink<FfiTtsStreamEvent>
+      dco_decode_StreamSink_ffi_tts_stream_event_Sse(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
   bool dco_decode_bool(dynamic raw);
+
+  @protected
+  FfiCancellationToken
+      dco_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          dynamic raw);
 
   @protected
   double dco_decode_box_autoadd_f_32(dynamic raw);
@@ -190,6 +218,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiStreamToken dco_decode_box_autoadd_ffi_stream_token(dynamic raw);
 
   @protected
+  FfiYuvColorInfo dco_decode_box_autoadd_ffi_yuv_color_info(dynamic raw);
+
+  @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
 
   @protected
@@ -208,6 +239,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiGenerationConfig dco_decode_ffi_generation_config(dynamic raw);
 
   @protected
+  FfiImagePlane dco_decode_ffi_image_plane(dynamic raw);
+
+  @protected
   FfiInferenceMetrics dco_decode_ffi_inference_metrics(dynamic raw);
 
   @protected
@@ -218,6 +252,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole dco_decode_ffi_message_role(dynamic raw);
+
+  @protected
+  FfiPixelFormat dco_decode_ffi_pixel_format(dynamic raw);
 
   @protected
   FfiResourceSnapshot dco_decode_ffi_resource_snapshot(dynamic raw);
@@ -241,13 +278,33 @@ abstract class XybridRustLibApiImplPlatform
   FfiThermalState dco_decode_ffi_thermal_state(dynamic raw);
 
   @protected
+  FfiTtsStreamEvent dco_decode_ffi_tts_stream_event(dynamic raw);
+
+  @protected
+  FfiYuvColorInfo dco_decode_ffi_yuv_color_info(dynamic raw);
+
+  @protected
+  FfiYuvColorMatrix dco_decode_ffi_yuv_color_matrix(dynamic raw);
+
+  @protected
+  FfiYuvColorRange dco_decode_ffi_yuv_color_range(dynamic raw);
+
+  @protected
   int dco_decode_i_32(dynamic raw);
 
   @protected
   PlatformInt64 dco_decode_i_64(dynamic raw);
 
   @protected
+  List<FfiEnvelope>
+      dco_decode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+          dynamic raw);
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<FfiImagePlane> dco_decode_list_ffi_image_plane(dynamic raw);
 
   @protected
   List<FfiStageLatency> dco_decode_list_ffi_stage_latency(dynamic raw);
@@ -268,6 +325,11 @@ abstract class XybridRustLibApiImplPlatform
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
+  FfiCancellationToken?
+      dco_decode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          dynamic raw);
+
+  @protected
   double? dco_decode_opt_box_autoadd_f_32(dynamic raw);
 
   @protected
@@ -279,6 +341,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole? dco_decode_opt_box_autoadd_ffi_message_role(dynamic raw);
+
+  @protected
+  FfiYuvColorInfo? dco_decode_opt_box_autoadd_ffi_yuv_color_info(dynamic raw);
 
   @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
@@ -317,6 +382,11 @@ abstract class XybridRustLibApiImplPlatform
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
 
   @protected
+  FfiCancellationToken
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          SseDeserializer deserializer);
+
+  @protected
   FfiConversationContext
       sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiConversationContext(
           SseDeserializer deserializer);
@@ -352,6 +422,11 @@ abstract class XybridRustLibApiImplPlatform
           SseDeserializer deserializer);
 
   @protected
+  FfiCancellationToken
+      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          SseDeserializer deserializer);
+
+  @protected
   FfiConversationContext
       sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiConversationContext(
           SseDeserializer deserializer);
@@ -374,6 +449,11 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   FfiPipeline
       sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
+          SseDeserializer deserializer);
+
+  @protected
+  FfiCancellationToken
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
           SseDeserializer deserializer);
 
   @protected
@@ -420,10 +500,20 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  RustStreamSink<FfiTtsStreamEvent>
+      sse_decode_StreamSink_ffi_tts_stream_event_Sse(
+          SseDeserializer deserializer);
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  FfiCancellationToken
+      sse_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          SseDeserializer deserializer);
 
   @protected
   double sse_decode_box_autoadd_f_32(SseDeserializer deserializer);
@@ -451,6 +541,10 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiYuvColorInfo sse_decode_box_autoadd_ffi_yuv_color_info(
+      SseDeserializer deserializer);
+
+  @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
@@ -470,6 +564,9 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiImagePlane sse_decode_ffi_image_plane(SseDeserializer deserializer);
+
+  @protected
   FfiInferenceMetrics sse_decode_ffi_inference_metrics(
       SseDeserializer deserializer);
 
@@ -482,6 +579,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole sse_decode_ffi_message_role(SseDeserializer deserializer);
+
+  @protected
+  FfiPixelFormat sse_decode_ffi_pixel_format(SseDeserializer deserializer);
 
   @protected
   FfiResourceSnapshot sse_decode_ffi_resource_snapshot(
@@ -506,13 +606,36 @@ abstract class XybridRustLibApiImplPlatform
   FfiThermalState sse_decode_ffi_thermal_state(SseDeserializer deserializer);
 
   @protected
+  FfiTtsStreamEvent sse_decode_ffi_tts_stream_event(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiYuvColorInfo sse_decode_ffi_yuv_color_info(SseDeserializer deserializer);
+
+  @protected
+  FfiYuvColorMatrix sse_decode_ffi_yuv_color_matrix(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiYuvColorRange sse_decode_ffi_yuv_color_range(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
 
   @protected
+  List<FfiEnvelope>
+      sse_decode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+          SseDeserializer deserializer);
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<FfiImagePlane> sse_decode_list_ffi_image_plane(
+      SseDeserializer deserializer);
 
   @protected
   List<FfiStageLatency> sse_decode_list_ffi_stage_latency(
@@ -534,6 +657,11 @@ abstract class XybridRustLibApiImplPlatform
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
+  FfiCancellationToken?
+      sse_decode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          SseDeserializer deserializer);
+
+  @protected
   double? sse_decode_opt_box_autoadd_f_32(SseDeserializer deserializer);
 
   @protected
@@ -545,6 +673,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole? sse_decode_opt_box_autoadd_ffi_message_role(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiYuvColorInfo? sse_decode_opt_box_autoadd_ffi_yuv_color_info(
       SseDeserializer deserializer);
 
   @protected
@@ -587,6 +719,11 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          FfiCancellationToken self, SseSerializer serializer);
+
+  @protected
+  void
       sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiConversationContext(
           FfiConversationContext self, SseSerializer serializer);
 
@@ -622,6 +759,11 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void
+      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          FfiCancellationToken self, SseSerializer serializer);
+
+  @protected
+  void
       sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiConversationContext(
           FfiConversationContext self, SseSerializer serializer);
 
@@ -644,6 +786,11 @@ abstract class XybridRustLibApiImplPlatform
   void
       sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
           FfiPipeline self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          FfiCancellationToken self, SseSerializer serializer);
 
   @protected
   void
@@ -689,10 +836,19 @@ abstract class XybridRustLibApiImplPlatform
       RustStreamSink<FfiStreamEvent> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_StreamSink_ffi_tts_stream_event_Sse(
+      RustStreamSink<FfiTtsStreamEvent> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          FfiCancellationToken self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_f_32(double self, SseSerializer serializer);
@@ -721,6 +877,10 @@ abstract class XybridRustLibApiImplPlatform
       FfiStreamToken self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_yuv_color_info(
+      FfiYuvColorInfo self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_i_64(
       PlatformInt64 self, SseSerializer serializer);
 
@@ -741,6 +901,9 @@ abstract class XybridRustLibApiImplPlatform
       FfiGenerationConfig self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_image_plane(FfiImagePlane self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_inference_metrics(
       FfiInferenceMetrics self, SseSerializer serializer);
 
@@ -754,6 +917,10 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_ffi_message_role(
       FfiMessageRole self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_pixel_format(
+      FfiPixelFormat self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_resource_snapshot(
@@ -782,13 +949,38 @@ abstract class XybridRustLibApiImplPlatform
       FfiThermalState self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_tts_stream_event(
+      FfiTtsStreamEvent self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_yuv_color_info(
+      FfiYuvColorInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_yuv_color_matrix(
+      FfiYuvColorMatrix self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_yuv_color_range(
+      FfiYuvColorRange self, SseSerializer serializer);
+
+  @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
 
   @protected
+  void
+      sse_encode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
+          List<FfiEnvelope> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_image_plane(
+      List<FfiImagePlane> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_stage_latency(
@@ -813,6 +1005,11 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void
+      sse_encode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+          FfiCancellationToken? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_box_autoadd_f_32(double? self, SseSerializer serializer);
 
   @protected
@@ -825,6 +1022,10 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_opt_box_autoadd_ffi_message_role(
       FfiMessageRole? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_yuv_color_info(
+      FfiYuvColorInfo? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_i_64(
@@ -876,6 +1077,38 @@ class XybridRustLibWire implements BaseWire {
   /// The symbols are looked up in [dynamicLibrary].
   XybridRustLibWire(ffi.DynamicLibrary dynamicLibrary)
       : _lookup = dynamicLibrary.lookup;
+
+  void
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationTokenPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken');
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken =
+      _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationTokenPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationTokenPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken');
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken =
+      _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationTokenPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
       rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiConversationContext(

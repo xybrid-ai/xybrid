@@ -5,8 +5,12 @@ on:
     branches: [master]
     paths:
       - 'bindings/apple/**'
+      - 'crates/xybrid-core/**'
+      - 'crates/xybrid-sdk/**'
       - 'crates/xybrid-uniffi/**'
       - 'xtask/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
       - '.github/workflows/build-apple.yml'
       # Docs-only changes under the paths above (READMEs, examples) never
       # affect the native build — exclude markdown so they don't trigger it.
@@ -60,6 +64,9 @@ jobs:
 
       - name: Build XCFramework
         run: cargo xtask build-xcframework --release
+
+      - name: Check iOS vision build without model artifacts
+        run: cargo xtask build-uniffi --target aarch64-apple-ios --platform-preset platform-ios,llm-llamacpp-vision
 
       - name: Verify XCFramework
         run: |

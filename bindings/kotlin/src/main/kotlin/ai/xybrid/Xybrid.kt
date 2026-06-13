@@ -251,6 +251,38 @@ object Envelope {
     /** Creates an embedding envelope from raw vector data. */
     @JvmStatic
     fun embedding(data: List<Float>): XybridEnvelope = XybridEnvelope.Embedding(data)
+
+    /**
+     * Creates an encoded image envelope for vision-language models.
+     * @param bytes Encoded PNG, JPEG, or WebP bytes
+     * @param format Image format (`png`, `jpeg`, `jpg`, or `webp`)
+     */
+    @JvmStatic
+    fun image(bytes: ByteArray, format: String): XybridEnvelope =
+        XybridEnvelope.Image(bytes, normalizeImageFormat(format))
+
+    /**
+     * Creates a multi-part user message with text and image attachments.
+     * @param text User prompt text
+     * @param images Image envelopes created by [image]
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun userMessage(text: String, images: List<XybridEnvelope> = emptyList()): XybridEnvelope {
+        require(images.all { it is XybridEnvelope.Image }) {
+            "Envelope.userMessage accepts only image envelopes"
+        }
+        return XybridEnvelope.UserMessage(text, images)
+    }
+
+    private fun normalizeImageFormat(format: String): String =
+        when (val normalized = format.trim().lowercase()) {
+            "jpg" -> "jpeg"
+            "jpeg", "png", "webp" -> normalized
+            else -> throw IllegalArgumentException(
+                "Unsupported image format '$format'. Supported formats: png, jpeg, jpg, webp"
+            )
+        }
 }
 
 // -- XybridVoiceInfo Extensions --

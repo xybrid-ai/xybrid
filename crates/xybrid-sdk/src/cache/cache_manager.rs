@@ -411,7 +411,24 @@ impl CacheManager {
     /// True if the extraction directory exists and contains model_metadata.json
     pub fn is_extracted(&self, model_id: &str) -> bool {
         let extract_dir = self.extraction_dir(model_id);
-        extract_dir.join("model_metadata.json").exists()
+        Self::extraction_is_ready(&extract_dir)
+    }
+
+    fn extraction_is_ready(extract_dir: &Path) -> bool {
+        use xybrid_core::execution::ModelMetadata;
+
+        let metadata_path = extract_dir.join("model_metadata.json");
+        let Ok(metadata_json) = std::fs::read_to_string(&metadata_path) else {
+            return false;
+        };
+        let Ok(metadata) = serde_json::from_str::<ModelMetadata>(&metadata_json) else {
+            return false;
+        };
+
+        metadata
+            .files
+            .iter()
+            .all(|file| extract_dir.join(file).exists())
     }
 
     /// List all model IDs that have been extracted and are ready to run offline.
@@ -434,7 +451,7 @@ impl CacheManager {
 
         let mut ids: Vec<String> = entries
             .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.path().join("model_metadata.json").exists())
+            .filter(|entry| Self::extraction_is_ready(&entry.path()))
             .filter_map(|entry| {
                 entry
                     .file_name()
@@ -504,8 +521,8 @@ impl CacheManager {
 
         let extract_dir = self.extraction_dir(&metadata.model_id);
 
-        // Check if already extracted (model_metadata.json exists)
-        if extract_dir.join("model_metadata.json").exists() {
+        // Check if already extracted and all files declared by metadata exist.
+        if Self::extraction_is_ready(&extract_dir) {
             log::debug!(
                 "Bundle already extracted for '{}' at {}",
                 metadata.model_id,
@@ -551,8 +568,8 @@ impl CacheManager {
     ) -> Result<PathBuf, SdkError> {
         let extract_dir = self.extraction_dir(model_id);
 
-        // Check if already extracted
-        if extract_dir.join("model_metadata.json").exists() {
+        // Check if already extracted and all files declared by metadata exist.
+        if Self::extraction_is_ready(&extract_dir) {
             log::debug!(
                 "Bundle already extracted for '{}' at {}",
                 model_id,
@@ -748,6 +765,54 @@ mod tests {
         bundle_path
     }
 
+    #[cfg(feature = "vision")]
+    fn create_vlm_test_bundle(temp_dir: &TempDir, model_id: &str) -> PathBuf {
+        let model_dir = temp_dir.path().join("vlm_model_files");
+        fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = format!(
+            r#"{{
+                "model_id": "{}",
+                "version": "1.0",
+                "execution_template": {{
+                    "type": "VisionLanguage",
+                    "model_file": "model.gguf"
+                }},
+                "vision_encoder": {{
+                    "file": "mmproj-model.gguf",
+                    "preprocessing_preset": "gemma3_vision",
+                    "image_size": 896
+                }},
+                "preprocessing": [],
+                "postprocessing": [],
+                "files": ["model.gguf", "mmproj-model.gguf"],
+                "metadata": {{ "task": "vlm" }}
+            }}"#,
+            model_id
+        );
+        fs::write(model_dir.join("model_metadata.json"), &metadata).unwrap();
+        fs::write(model_dir.join("model.gguf"), b"fake language model").unwrap();
+        fs::write(
+            model_dir.join("mmproj-model.gguf"),
+            b"fake vision projector",
+        )
+        .unwrap();
+
+        let mut bundle = XyBundle::new(model_id, "1.0", "universal");
+        bundle
+            .add_file(model_dir.join("model_metadata.json"))
+            .unwrap();
+        bundle.add_file(model_dir.join("model.gguf")).unwrap();
+        bundle
+            .add_file(model_dir.join("mmproj-model.gguf"))
+            .unwrap();
+
+        let bundle_path = temp_dir.path().join(format!("{}.xyb", model_id));
+        bundle.write(&bundle_path).unwrap();
+
+        bundle_path
+    }
+
     #[test]
     fn test_extraction_dir_path() {
         let temp_dir = TempDir::new().unwrap();
@@ -790,6 +855,32 @@ mod tests {
         assert!(extract_dir.exists());
         assert!(extract_dir.join("model_metadata.json").exists());
         assert!(extract_dir.join("model.onnx").exists());
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    fn test_ensure_extracted_repairs_partial_vlm_extraction() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let manager = CacheManager::with_dir(cache_dir).unwrap();
+        let bundle_path = create_vlm_test_bundle(&temp_dir, "vlm-bundle-model");
+        let partial_dir = manager.extraction_dir("vlm-bundle-model");
+        fs::create_dir_all(&partial_dir).unwrap();
+
+        let bundle = XyBundle::load(&bundle_path).unwrap();
+        let metadata_json = bundle.get_metadata_json().unwrap().unwrap();
+        fs::write(partial_dir.join("model_metadata.json"), metadata_json).unwrap();
+        assert!(!partial_dir.join("model.gguf").exists());
+        assert!(!partial_dir.join("mmproj-model.gguf").exists());
+
+        let extract_dir = manager.ensure_extracted(&bundle_path).unwrap();
+
+        assert_eq!(extract_dir, partial_dir);
+        assert!(extract_dir.join("model_metadata.json").exists());
+        assert!(extract_dir.join("model.gguf").exists());
+        assert!(extract_dir.join("mmproj-model.gguf").exists());
     }
 
     #[test]

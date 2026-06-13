@@ -42,7 +42,6 @@ const LLAMA_CPP_REPO: &str = "https://github.com/ggml-org/llama.cpp";
 // cache git deps, crates.io tarballs) get a reproducible build instead of
 // upstream HEAD.
 const LLAMA_CPP_COMMIT: &str = "b46812de78f8fbcb6cf0154947e8633ebc78d9ac";
-const ANDROID_API_LEVEL: &str = "28";
 
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.cpp");
@@ -88,10 +87,11 @@ fn main() {
 fn generate_bindings(llama_cpp_dir: &Path, out_dir: &Path, ndk_root: Option<&str>) {
     let include_dir = llama_cpp_dir.join("include");
     let ggml_include = llama_cpp_dir.join("ggml").join("include");
+    let mtmd_include = llama_cpp_dir.join("tools").join("mtmd");
 
-    let target = env::var("TARGET").unwrap_or_default();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let clang_target = bindgen_clang_target(&target);
+    let target = env::var("TARGET").unwrap_or_default();
+    let vision_enabled = env::var_os("CARGO_FEATURE_VISION").is_some();
 
     let mut builder = bindgen::Builder::default()
         .header("wrapper.h")
@@ -118,14 +118,22 @@ fn generate_bindings(llama_cpp_dir: &Path, out_dir: &Path, ndk_root: Option<&str
         .allowlist_type("llama_.*")
         .allowlist_var("LLAMA_.*");
 
+    if vision_enabled {
+        builder = builder
+            .clang_arg(format!("-I{}", mtmd_include.display()))
+            .clang_arg("-DXYBRID_LLAMA_VISION")
+            .allowlist_function("mtmd_.*_c")
+            .allowlist_type("mtmd_.*");
+    }
+
     // Cross-compile sysroot/target plumbing. bindgen drives libclang,
     // which resolves headers (`<stdio.h>` etc.) relative to its own
     // sysroot — wrong on cross-builds without explicit overrides.
     // Mirrors the pattern `mlx-c-sys/build.rs` uses for the macOS slice.
-    builder = builder.clang_arg(format!("--target={clang_target}"));
+    builder = builder.clang_arg(format!("--target={target}"));
     if target_os == "macos" || target_os == "ios" {
         let sdk = if target_os == "ios" {
-            if is_ios_simulator_target(&target) {
+            if target.contains("sim") {
                 "iphonesimulator"
             } else {
                 "iphoneos"
@@ -148,9 +156,16 @@ fn generate_bindings(llama_cpp_dir: &Path, out_dir: &Path, ndk_root: Option<&str
         // Resolve sysroot from the detected NDK. Without this, libclang
         // can't find <stdio.h> on cross-builds.
         if let Some(ndk) = ndk_root {
-            let sysroot = android_prebuilt_root(ndk).join("sysroot");
-            if sysroot.is_dir() {
-                builder = builder.clang_arg(format!("--sysroot={}", sysroot.display()));
+            let host_tag = if cfg!(target_os = "macos") {
+                "darwin-x86_64"
+            } else if cfg!(target_os = "linux") {
+                "linux-x86_64"
+            } else {
+                "windows-x86_64"
+            };
+            let sysroot = format!("{ndk}/toolchains/llvm/prebuilt/{host_tag}/sysroot");
+            if Path::new(&sysroot).is_dir() {
+                builder = builder.clang_arg(format!("--sysroot={}", sysroot));
             }
         }
     }
@@ -185,74 +200,6 @@ fn cmake_install_instructions() -> &'static str {
     } else {
         "Install CMake from https://cmake.org/download/"
     }
-}
-
-fn bindgen_clang_target(rust_target: &str) -> &str {
-    match rust_target {
-        // Rust and clang spell the arm64 iOS simulator target differently.
-        "aarch64-apple-ios-sim" => "aarch64-apple-ios-simulator",
-        // Rust's legacy x86_64 iOS target is also an iOS simulator slice.
-        "x86_64-apple-ios" => "x86_64-apple-ios-simulator",
-        // Android's clang driver uses the armv7a spelling.
-        "armv7-linux-androideabi" => "armv7a-linux-androideabi",
-        _ => rust_target,
-    }
-}
-
-fn is_ios_simulator_target(rust_target: &str) -> bool {
-    matches!(rust_target, "aarch64-apple-ios-sim" | "x86_64-apple-ios")
-}
-
-fn android_host_tag() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "darwin-x86_64"
-    } else if cfg!(target_os = "linux") {
-        "linux-x86_64"
-    } else {
-        "windows-x86_64"
-    }
-}
-
-fn android_prebuilt_root(ndk_root: &str) -> PathBuf {
-    Path::new(ndk_root)
-        .join("toolchains")
-        .join("llvm")
-        .join("prebuilt")
-        .join(android_host_tag())
-}
-
-fn android_toolchain_bin(ndk_root: &str) -> PathBuf {
-    android_prebuilt_root(ndk_root).join("bin")
-}
-
-fn android_clang_prefix(target_arch: &str) -> &'static str {
-    match target_arch {
-        "aarch64" => "aarch64-linux-android",
-        "arm" => "armv7a-linux-androideabi",
-        "x86_64" => "x86_64-linux-android",
-        "x86" => "i686-linux-android",
-        _ => "aarch64-linux-android",
-    }
-}
-
-fn android_clangxx_path(ndk_root: &str, target_arch: &str) -> PathBuf {
-    android_toolchain_bin(ndk_root).join(format!(
-        "{}{}-clang++",
-        android_clang_prefix(target_arch),
-        ANDROID_API_LEVEL
-    ))
-}
-
-fn android_clang_path(ndk_root: &str, target_arch: &str) -> PathBuf {
-    android_toolchain_bin(ndk_root).join(format!(
-        "{}{}-clang",
-        android_clang_prefix(target_arch),
-        ANDROID_API_LEVEL
-    ))
-}
-
-fn android_llvm_ar_path(ndk_root: &str) -> PathBuf {
-    android_toolchain_bin(ndk_root).join("llvm-ar")
 }
 
 /// Result of NDK detection with both found path and list of tried paths
@@ -300,6 +247,12 @@ impl BuildContext {
             target_arch,
             android_ndk,
         }
+    }
+
+    fn android_ndk_path(&self) -> Option<&str> {
+        self.android_ndk
+            .as_ref()
+            .and_then(|result| result.ndk_path.as_deref())
     }
 }
 
@@ -500,6 +453,7 @@ fn workspace_root(manifest_dir: &Path) -> PathBuf {
 fn compile_llama_cpp() {
     let ctx = BuildContext::from_env();
     let wrapper_path = ctx.manifest_dir.join("wrapper.cpp");
+    let vision_enabled = env::var_os("CARGO_FEATURE_VISION").is_some();
 
     // Source-lookup order (see header comment for rationale):
     //   1. workspace/vendor/llama-cpp (canonical, declared in `.gitmodules`)
@@ -511,6 +465,13 @@ fn compile_llama_cpp() {
     } else {
         clone_pinned_commit(&ctx.out_dir)
     };
+
+    // Phase 5: generate the FFI surface from wrapper.h before the cmake
+    // build runs. Bindgen needs the llama.cpp source for include paths,
+    // so this lives after llama_cpp_dir is resolved. NDK detection
+    // happens here too because Android cross-builds need libclang to
+    // resolve `<stdio.h>` through the NDK sysroot.
+    generate_bindings(&llama_cpp_dir, &ctx.out_dir, ctx.android_ndk_path());
 
     if !check_cmake_available() {
         fatal(
@@ -526,30 +487,31 @@ fn compile_llama_cpp() {
         );
     }
 
-    let prevalidated_ndk = if ctx.target_os == "android" {
-        Some(require_android_ndk(&ctx))
-    } else {
-        None
-    };
-
-    // Phase 5: generate the FFI surface from wrapper.h before the cmake
-    // build runs. Bindgen needs the llama.cpp source for include paths,
-    // so this lives after llama_cpp_dir is resolved. Android validates
-    // the NDK first so libclang sees the NDK sysroot instead of failing
-    // on platform headers before the actionable NDK banner.
-    generate_bindings(&llama_cpp_dir, &ctx.out_dir, prevalidated_ndk);
-
     let mut metal_enabled = false;
     let mut ndk_path_used: Option<String> = None;
 
     println!("cargo:rerun-if-changed={}", llama_cpp_dir.display());
     println!("cargo:rerun-if-changed={}", wrapper_path.display());
+    if vision_enabled {
+        println!(
+            "cargo:rerun-if-changed={}",
+            llama_cpp_dir.join("tools/mtmd/mtmd.h").display()
+        );
+        println!(
+            "cargo:rerun-if-changed={}",
+            llama_cpp_dir.join("tools/mtmd/mtmd-helper.h").display()
+        );
+    }
 
     let mut cmake_config = cmake::Config::new(&llama_cpp_dir);
     cmake_config
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("LLAMA_BUILD_EXAMPLES", "OFF")
         .define("LLAMA_BUILD_TESTS", "OFF")
+        .define(
+            "LLAMA_BUILD_TOOLS",
+            if vision_enabled { "ON" } else { "OFF" },
+        )
         .define("LLAMA_BUILD_SERVER", "OFF")
         .define("LLAMA_CURL", "OFF")
         .define("GGML_OPENMP", "OFF");
@@ -591,6 +553,9 @@ fn compile_llama_cpp() {
     println!("cargo:rustc-link-search=native={}/lib64", dst.display());
     println!("cargo:rustc-link-search=native={}", dst.display());
 
+    if vision_enabled {
+        println!("cargo:rustc-link-lib=static=mtmd");
+    }
     println!("cargo:rustc-link-lib=static=llama");
     println!("cargo:rustc-link-lib=static=ggml");
     println!("cargo:rustc-link-lib=static=ggml-base");
@@ -605,12 +570,13 @@ fn compile_llama_cpp() {
         .std("c++17")
         .file(&wrapper_path)
         .include(llama_cpp_dir.join("include"))
-        .include(llama_cpp_dir.join("ggml/include"))
-        .include(dst.join("include"));
-
-    if let Some(ndk) = ndk_path_used.as_deref() {
-        configure_android_wrapper_tools(&mut wrapper_build, &ctx, ndk);
+        .include(llama_cpp_dir.join("ggml/include"));
+    if vision_enabled {
+        wrapper_build
+            .include(llama_cpp_dir.join("tools/mtmd"))
+            .define("XYBRID_LLAMA_VISION", None);
     }
+    wrapper_build.include(dst.join("include"));
 
     // Windows MSVC CRT: Do NOT call static_crt() — let the cc crate auto-detect from
     // CARGO_CFG_TARGET_FEATURE. When crt-static is set (CLI via RUSTFLAGS), cc uses /MT.
@@ -649,7 +615,10 @@ fn configure_android(cmake_config: &mut cmake::Config, ctx: &BuildContext) -> Op
         // armv8.2-a+fp16 which the NDK doesn't enable by default.
         .define("GGML_LLAMAFILE", "OFF");
 
-    let ndk_result = android_ndk_result(ctx);
+    let ndk_result = ctx
+        .android_ndk
+        .as_ref()
+        .expect("android target should resolve NDK detection once");
 
     if let Some(ref ndk) = ndk_result.ndk_path {
         println!("cargo:warning=Android NDK detected: {}", ndk);
@@ -678,89 +647,25 @@ fn configure_android(cmake_config: &mut cmake::Config, ctx: &BuildContext) -> Op
             cmake_config.define("GGML_CPU_ARM_ARCH", "armv8.2-a+dotprod");
         }
 
-        cmake_config.define("ANDROID_PLATFORM", format!("android-{ANDROID_API_LEVEL}"));
+        cmake_config.define("ANDROID_PLATFORM", "android-28");
         cmake_config.define("ANDROID_STL", "c++_shared");
         cmake_config.define("ANDROID_NDK", ndk);
-        configure_android_cmake_tools(cmake_config, ctx, ndk);
         Some(ndk.clone())
     } else {
-        fatal_android_ndk_not_found(ndk_result);
+        let mut body = vec!["Paths tried:".to_string()];
+        for path in &ndk_result.tried_paths {
+            body.push(format!("  - {}", path));
+        }
+        body.extend([
+            String::new(),
+            "To fix this, set one of these environment variables:".to_string(),
+            "  export ANDROID_NDK_HOME=/path/to/android-ndk".to_string(),
+            "  export ANDROID_HOME=/path/to/android-sdk  (with ndk/ subdirectory)".to_string(),
+            String::new(),
+            "Or install Android Studio which sets up the NDK automatically.".to_string(),
+        ]);
+        fatal("Android NDK not found!", &body);
     }
-}
-
-fn configure_android_cmake_tools(cmake_config: &mut cmake::Config, ctx: &BuildContext, ndk: &str) {
-    let c_compiler = android_clang_path(ndk, &ctx.target_arch);
-    let cxx_compiler = android_clangxx_path(ndk, &ctx.target_arch);
-    let archiver = android_llvm_ar_path(ndk);
-
-    require_android_tool("C compiler", &c_compiler, ndk, &ctx.target_arch);
-    require_android_tool("C++ compiler", &cxx_compiler, ndk, &ctx.target_arch);
-    require_android_tool("archiver", &archiver, ndk, &ctx.target_arch);
-
-    let mut c_cfg = cc::Build::new();
-    c_cfg.compiler(&c_compiler).archiver(&archiver);
-    cmake_config.init_c_cfg(c_cfg);
-
-    let mut cxx_cfg = cc::Build::new();
-    cxx_cfg.compiler(&cxx_compiler).archiver(&archiver);
-    cmake_config.init_cxx_cfg(cxx_cfg);
-}
-
-fn configure_android_wrapper_tools(wrapper_build: &mut cc::Build, ctx: &BuildContext, ndk: &str) {
-    let compiler = android_clangxx_path(ndk, &ctx.target_arch);
-    let archiver = android_llvm_ar_path(ndk);
-
-    require_android_tool("C++ compiler", &compiler, ndk, &ctx.target_arch);
-    require_android_tool("archiver", &archiver, ndk, &ctx.target_arch);
-
-    wrapper_build.compiler(&compiler);
-    wrapper_build.archiver(&archiver);
-}
-
-fn require_android_tool(tool: &str, path: &Path, ndk: &str, target_arch: &str) {
-    if path.is_file() {
-        return;
-    }
-
-    let title = format!("Android NDK {tool} not found!");
-    fatal(
-        &title,
-        &[
-            format!("Expected: {}", path.display()),
-            format!("Target arch: {target_arch}"),
-            format!("NDK root: {ndk}"),
-        ],
-    );
-}
-
-fn android_ndk_result(ctx: &BuildContext) -> &NdkDetectionResult {
-    ctx.android_ndk
-        .as_ref()
-        .expect("android target should resolve NDK detection once")
-}
-
-fn require_android_ndk(ctx: &BuildContext) -> &str {
-    let ndk_result = android_ndk_result(ctx);
-    ndk_result
-        .ndk_path
-        .as_deref()
-        .unwrap_or_else(|| fatal_android_ndk_not_found(ndk_result))
-}
-
-fn fatal_android_ndk_not_found(ndk_result: &NdkDetectionResult) -> ! {
-    let mut body = vec!["Paths tried:".to_string()];
-    for path in &ndk_result.tried_paths {
-        body.push(format!("  - {}", path));
-    }
-    body.extend([
-        String::new(),
-        "To fix this, set one of these environment variables:".to_string(),
-        "  export ANDROID_NDK_HOME=/path/to/android-ndk".to_string(),
-        "  export ANDROID_HOME=/path/to/android-sdk  (with ndk/ subdirectory)".to_string(),
-        String::new(),
-        "Or install Android Studio which sets up the NDK automatically.".to_string(),
-    ]);
-    fatal("Android NDK not found!", &body);
 }
 
 /// Pinned-commit clone into $OUT_DIR. Consumer fallback for crates.io

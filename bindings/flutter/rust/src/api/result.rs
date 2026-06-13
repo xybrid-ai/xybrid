@@ -33,6 +33,7 @@ pub struct FfiInferenceMetrics {
     pub prefill_tps: Option<f32>,
     pub decode_tps: Option<f32>,
     pub tokens_out: Option<u32>,
+    pub image_preprocess_ms: Option<u32>,
     pub stage_latencies_ms: Vec<FfiStageLatency>,
 }
 
@@ -45,6 +46,7 @@ impl FfiInferenceMetrics {
             prefill_tps: m.prefill_tps,
             decode_tps: m.decode_tps,
             tokens_out: m.tokens_out,
+            image_preprocess_ms: m.image_preprocess_ms,
             stage_latencies_ms: m
                 .stage_latencies_ms
                 .iter()

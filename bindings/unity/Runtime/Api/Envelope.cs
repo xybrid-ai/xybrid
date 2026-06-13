@@ -2,6 +2,7 @@
 // Wrapper for input data passed to model inference.
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Xybrid.Native;
 
@@ -17,7 +18,16 @@ namespace Xybrid
     /// </remarks>
     public sealed class Envelope : IDisposable
     {
+        private enum PayloadKind
+        {
+            Text,
+            Audio,
+            Image,
+            UserMessage,
+        }
+
         private unsafe XybridEnvelopeHandle* _handle;
+        private readonly PayloadKind _kind;
         private bool _disposed;
 
         /// <summary>
@@ -37,9 +47,10 @@ namespace Xybrid
             }
         }
 
-        private unsafe Envelope(XybridEnvelopeHandle* handle)
+        private unsafe Envelope(XybridEnvelopeHandle* handle, PayloadKind kind)
         {
             _handle = handle;
+            _kind = kind;
         }
 
         /// <summary>
@@ -66,7 +77,7 @@ namespace Xybrid
                     NativeHelpers.ThrowLastError("Failed to create text envelope");
                 }
 
-                return new Envelope(handle);
+                return new Envelope(handle, PayloadKind.Text);
             }
         }
 
@@ -99,7 +110,7 @@ namespace Xybrid
                     NativeHelpers.ThrowLastError("Failed to create text envelope with voice");
                 }
 
-                return new Envelope(handle);
+                return new Envelope(handle, PayloadKind.Text);
             }
         }
 
@@ -128,7 +139,7 @@ namespace Xybrid
                     NativeHelpers.ThrowLastError("Failed to create text envelope with role");
                 }
 
-                return new Envelope(handle);
+                return new Envelope(handle, PayloadKind.Text);
             }
         }
 
@@ -162,7 +173,123 @@ namespace Xybrid
                     NativeHelpers.ThrowLastError("Failed to create audio envelope");
                 }
 
-                return new Envelope(handle);
+                return new Envelope(handle, PayloadKind.Audio);
+            }
+        }
+
+        /// <summary>
+        /// Creates an envelope containing encoded image data for vision-language models.
+        /// </summary>
+        /// <param name="bytes">Encoded PNG, JPEG, or WebP bytes.</param>
+        /// <param name="format">Image format: png, jpeg, jpg, or webp.</param>
+        /// <returns>A new Envelope containing the encoded image.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if bytes or format is null.</exception>
+        /// <exception cref="ArgumentException">Thrown if format is unsupported.</exception>
+        /// <exception cref="XybridException">Thrown if native envelope creation fails.</exception>
+        public static unsafe Envelope Image(byte[] bytes, string format)
+        {
+            if (bytes == null)
+            {
+                throw new ArgumentNullException(nameof(bytes));
+            }
+
+            string normalizedFormat = NormalizeImageFormat(format);
+            byte[] formatBytes = NativeHelpers.ToUtf8Bytes(normalizedFormat);
+
+            fixed (byte* bytesPtr = bytes)
+            fixed (byte* formatPtr = formatBytes)
+            {
+                XybridEnvelopeHandle* handle = NativeMethods.xybrid_envelope_image(
+                    bytesPtr,
+                    (nuint)bytes.Length,
+                    formatPtr
+                );
+
+                if (handle == null)
+                {
+                    NativeHelpers.ThrowLastError("Failed to create image envelope");
+                }
+
+                return new Envelope(handle, PayloadKind.Image);
+            }
+        }
+
+        /// <summary>
+        /// Creates a multi-part user message with text and image attachments.
+        /// </summary>
+        /// <param name="text">The user prompt text.</param>
+        /// <param name="images">Image envelopes created by <see cref="Image(byte[], string)"/>.</param>
+        /// <returns>A new Envelope containing the user message.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if text is null.</exception>
+        /// <exception cref="ArgumentException">Thrown if any attachment is null or not an image envelope.</exception>
+        /// <exception cref="ObjectDisposedException">Thrown if an image attachment has been disposed.</exception>
+        /// <exception cref="XybridException">Thrown if native envelope creation fails.</exception>
+        public static unsafe Envelope UserMessage(string text, IList<Envelope> images = null)
+        {
+            if (text == null)
+            {
+                throw new ArgumentNullException(nameof(text));
+            }
+
+            int imageCount = images?.Count ?? 0;
+            XybridEnvelopeHandle** imageHandles = imageCount == 0
+                ? null
+                : stackalloc XybridEnvelopeHandle*[imageCount];
+
+            for (int i = 0; i < imageCount; i++)
+            {
+                Envelope image = images[i];
+                if (image == null)
+                {
+                    throw new ArgumentException("Image attachment cannot be null.", nameof(images));
+                }
+                if (image._kind != PayloadKind.Image)
+                {
+                    throw new ArgumentException("Envelope.UserMessage accepts only image envelopes.", nameof(images));
+                }
+                imageHandles[i] = image.Handle;
+            }
+
+            byte[] textBytes = NativeHelpers.ToUtf8Bytes(text);
+
+            fixed (byte* textPtr = textBytes)
+            {
+                XybridEnvelopeHandle* handle = NativeMethods.xybrid_envelope_user_message(
+                    textPtr,
+                    imageHandles,
+                    (nuint)imageCount
+                );
+
+                if (handle == null)
+                {
+                    NativeHelpers.ThrowLastError("Failed to create user message envelope");
+                }
+
+                return new Envelope(handle, PayloadKind.UserMessage);
+            }
+        }
+
+        private static string NormalizeImageFormat(string format)
+        {
+            if (format == null)
+            {
+                throw new ArgumentNullException(nameof(format));
+            }
+
+            string normalized = format.Trim().ToLowerInvariant();
+            switch (normalized)
+            {
+                case "jpg":
+                    return "jpeg";
+                case "jpeg":
+                case "png":
+                case "webp":
+                    return normalized;
+                default:
+                    throw new ArgumentException(
+                        "Unsupported image format. Supported formats: png, jpeg, jpg, webp.",
+                        nameof(format)
+                    );
             }
         }
 

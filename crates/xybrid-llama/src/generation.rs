@@ -139,6 +139,23 @@ fn decode_hard_error(code: i32, n_past_in: usize) -> LlamaError {
     }
 }
 
+#[cfg(feature = "vision")]
+fn decode_current_logits_error(code: i32, n_past: usize) -> LlamaError {
+    let detail = match code {
+        -1 => "invalid arguments (null context/model/output, non-positive max_tokens, or negative n_past)",
+        -2 => "sampler chain creation failed",
+        -3 => "llama_decode failed while continuing generation from current logits",
+        -4 => "prefilled context or generated continuation exceeds context window",
+        -5 => "no current logits available; caller must prefill with logits_last=true first",
+        _ => "unknown",
+    };
+    LlamaError::DecodeFailed {
+        code,
+        n_past_in: n_past,
+        detail: detail.to_string(),
+    }
+}
+
 /// Shared prelude for the generation entry points: rejects empty input,
 /// tokenises the stop sequences, and allocates the output buffer. Returns
 /// the owned `(stop_tokens, stop_lens, output_tokens)` triple; the caller
@@ -310,14 +327,95 @@ where
     Ok((output_tokens, stopped_by_callback))
 }
 
+/// Continue generation from logits already present in the llama context.
+///
+/// Multimodal llama.cpp prefills prompt/image chunks through mtmd helper
+/// eval, not through a flat text-token array. After helper eval leaves
+/// logits for the last prompt position, this samples from those logits and
+/// continues regular autoregressive decoding.
+#[allow(clippy::too_many_arguments)]
+#[cfg(feature = "vision")]
+pub fn generate_from_current_logits_streaming<F>(
+    ctx: &LlamaContext,
+    model: &LlamaModel,
+    max_tokens: usize,
+    temperature: f32,
+    top_p: f32,
+    min_p: f32,
+    top_k: usize,
+    repeat_penalty: f32,
+    stop_sequences: &[String],
+    n_past: usize,
+    mut on_token: F,
+) -> LlamaResult<(Vec<i32>, bool)>
+where
+    F: FnMut(i32, &str) -> Result<(), Box<dyn StdError + Send + Sync>>,
+{
+    if max_tokens == 0 {
+        return Err(LlamaError::InvalidInput(
+            "max_tokens must be greater than zero".to_string(),
+        ));
+    }
+
+    let (stop_tokens, stop_lens) = build_stop_token_arrays(model, stop_sequences)?;
+    let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
+    let mut output_tokens = vec![0i32; max_tokens];
+
+    let mut streaming_ctx = StreamingContext {
+        callback: &mut on_token,
+        error: None,
+    };
+
+    let callback: Option<TokenCallback> = Some(streaming_trampoline::<F>);
+
+    // SAFETY: ctx/model are live; output buffer and stop arrays are owned
+    // by this frame; user_data points to a stack-pinned StreamingContext
+    // that outlives the C call.
+    let result = unsafe {
+        ffi::generate_from_current_logits(
+            ctx.as_ptr(),
+            model.as_ptr(),
+            output_tokens.as_mut_ptr(),
+            max_tokens,
+            temperature,
+            top_p,
+            min_p,
+            top_k,
+            repeat_penalty,
+            time_seed(),
+            stop_seqs_ptr,
+            stop_lens_ptr,
+            n_stop_seqs,
+            callback,
+            &mut streaming_ctx as *mut StreamingContext<F> as *mut c_void,
+            n_past,
+        )
+    };
+
+    if (-5..=-1).contains(&result) {
+        return Err(decode_current_logits_error(result, n_past));
+    }
+
+    if let Some(err) = streaming_ctx.error.take() {
+        return Err(LlamaError::StreamingCallbackAborted(err));
+    }
+
+    let (n_generated, stopped_by_callback) = if result < 0 {
+        ((-result) as usize, true)
+    } else {
+        (result as usize, false)
+    };
+
+    output_tokens.truncate(n_generated);
+    Ok((output_tokens, stopped_by_callback))
+}
+
 /// Render role/content slices through `model`'s built-in chat template.
 ///
-/// Returns `Ok(None)` only when the model has no usable embedded template —
-/// either the GGUF metadata key is absent or its value is empty/whitespace
-/// (which the native wrapper rejects anyway) — so the caller can apply its own
-/// model-family fallback policy. If a non-empty template exists but native
-/// rendering fails, this returns [`LlamaError::ChatTemplateFailed`] instead of
-/// silently switching prompt families.
+/// Returns `Ok(None)` only when the model has no embedded template, so the
+/// caller can apply its own model-family fallback policy. If a template exists
+/// but native rendering fails, this returns [`LlamaError::ChatTemplateFailed`]
+/// instead of silently switching prompt families.
 pub fn format_chat(
     model: &LlamaModel,
     roles: &[&str],
@@ -333,11 +431,7 @@ pub fn format_chat(
             contents.len()
         )));
     }
-    if model
-        .chat_template()
-        .filter(|t| !t.trim().is_empty())
-        .is_none()
-    {
+    if model.chat_template().is_none() {
         return Ok(None);
     }
 

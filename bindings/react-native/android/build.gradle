@@ -1,0 +1,91 @@
+// React Native autolinking discovers this module via package.json.
+// Mirrors the layout of community modules (e.g. react-native-mmkv): the
+// module is consumable directly from a yarn install + gradle sync, without
+// publishing to Maven Central first.
+//
+// Native artifacts (libxybrid_uniffi.so, ORT libs) and the UniFFI-generated
+// Kotlin source land under android/libs/ and android/src/main/java/ai/xybrid/
+// respectively, copied in by `cargo xtask build-react-native`. This is
+// gitignored — the npm `prepare` script (or CI) is responsible for staging
+// them before publish.
+
+buildscript {
+  ext.safeExtGet = { prop, fallback ->
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+  }
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath("com.android.tools.build:gradle:8.1.1")
+    classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
+  }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+def isNewArchitectureEnabled() {
+  return rootProject.hasProperty("newArchEnabled") &&
+         rootProject.getProperty("newArchEnabled") == "true"
+}
+
+android {
+  namespace "ai.xybrid.reactnative"
+  compileSdkVersion safeExtGet("compileSdkVersion", 34)
+
+  defaultConfig {
+    minSdkVersion safeExtGet("minSdkVersion", 24)
+    targetSdkVersion safeExtGet("targetSdkVersion", 34)
+
+    // ABIs match what `cargo xtask build-android` produces.
+    ndk {
+      abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+
+  sourceSets {
+    main {
+      // Pre-built .so files staged by xtask. We ship them inside the npm
+      // package so consumers don't need a Rust toolchain.
+      jniLibs.srcDirs("libs")
+    }
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+}
+
+repositories {
+  mavenCentral()
+  google()
+}
+
+dependencies {
+  // RN core. The Maven range `[0.74.0,)` ("0.74.0 or later") matches the
+  // npm peer dependency in package.json — without it a consumer on RN 0.74
+  // or 0.75 satisfies the npm peer check but trips a gradle resolution
+  // error. Note: Gradle's `+` suffix is a prefix wildcard (`0.74.0+` would
+  // ONLY match `0.74.0.*`, not 0.75/0.76/…), which is the opposite of what
+  // a community RN module wants. Real-world resolution: host apps pin RN
+  // to a specific version, which our open range trivially satisfies, and
+  // gradle's conflict resolver picks the host's pin.
+  implementation "com.facebook.react:react-native:[0.74.0,)"
+
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3"
+
+  // JNA is what UniFFI's Kotlin bindings call into. The xybrid-kotlin
+  // module pulls the same dep — keep versions aligned.
+  implementation "net.java.dev.jna:jna:5.13.0@aar"
+}

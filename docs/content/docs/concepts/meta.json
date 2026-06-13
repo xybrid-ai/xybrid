@@ -1,16 +1,11 @@
 {
   "title": "Concepts",
   "description": "Core concepts and how Xybrid works",
-  "icon": "Cog",
-  "root": true,
   "pages": [
-    "---Real-Time---",
+    "models",
+    "pipelines",
+    "hybrid-execution",
     "streaming",
-    "---Infrastructure---",
-    "registry",
-    "bundles",
-    "caching",
-    "---Operations---",
-    "packaging-and-deployment"
+    "caching"
   ]
 }

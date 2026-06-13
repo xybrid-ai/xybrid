@@ -74,7 +74,14 @@ library;
 export 'src/context.dart' show ConversationContext, MessageRole;
 export 'src/device_snapshot.dart'
     show DeviceSnapshot, MemoryPressure, ThermalState;
-export 'src/envelope.dart' show XybridEnvelope;
+export 'src/envelope.dart'
+    show
+        XybridEnvelope,
+        PixelFormat,
+        ImagePlane,
+        YuvColorInfo,
+        YuvColorMatrix,
+        YuvColorRange;
 export 'src/generation_config.dart' show GenerationConfig;
 export 'src/llm.dart' show StreamToken;
 export 'src/model_loader.dart'
@@ -82,6 +89,7 @@ export 'src/model_loader.dart'
         XybridModelLoader,
         XybridModel,
         XybridException,
+        CancellationToken,
         LoadEvent,
         LoadProgress,
         LoadComplete,

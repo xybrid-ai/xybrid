@@ -7036,6 +7036,7 @@ dependencies = [
  "dialoguer",
  "dirs 6.0.0",
  "hostname",
+ "image 0.25.10",
  "indicatif 0.17.11",
  "lazy_static",
  "serde",
@@ -7112,6 +7113,7 @@ dependencies = [
  "xybrid-llama",
  "xybrid-llama-sys",
  "xybrid-sdk",
+ "yuvutils-rs",
  "zstd",
 ]
 
@@ -7121,6 +7123,7 @@ version = "0.1.2"
 dependencies = [
  "cbindgen",
  "csbindgen",
+ "image 0.25.10",
  "libc",
  "serde_json",
  "xybrid-sdk",
@@ -7183,6 +7186,7 @@ dependencies = [
 name = "xybrid-uniffi"
 version = "0.1.2"
 dependencies = [
+ "image 0.25.10",
  "serde_json",
  "thiserror 1.0.69",
  "uniffi",
@@ -7256,6 +7260,15 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "synstructure",
+]
+
+[[package]]
+name = "yuvutils-rs"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b699b6503cd14c70b258eaffedd7ada5a781ea23206eeb9066736b99ba37af1"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

@@ -88,10 +88,10 @@ void*_Nonnull uniffi_xybrid_uniffi_fn_constructor_xybridmodelloader_from_registr
 void* _Nonnull uniffi_xybrid_uniffi_fn_method_xybridmodelloader_load(void*_Nonnull ptr
 );
 void uniffi_xybrid_uniffi_fn_func_clear_battery_level(RustCallStatus *_Nonnull out_status
-    
+
 );
 void uniffi_xybrid_uniffi_fn_func_clear_thermal_state(RustCallStatus *_Nonnull out_status
-    
+
 );
 void uniffi_xybrid_uniffi_fn_func_configure_runtime(RustBuffer api_key, RustBuffer gateway_url, RustBuffer ingest_url, RustCallStatus *_Nonnull out_status
 );
@@ -218,57 +218,57 @@ void ffi_xybrid_uniffi_rust_future_free_void(void* _Nonnull handle
 void ffi_xybrid_uniffi_rust_future_complete_void(void* _Nonnull handle, RustCallStatus *_Nonnull out_status
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_clear_battery_level(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_clear_thermal_state(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_configure_runtime(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_init_sdk_cache_dir(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_set_battery_level(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_set_binding(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_set_thermal_state(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_method_xybridmodel_has_voices(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_method_xybridmodel_run(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_method_xybridmodel_voice(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_method_xybridmodel_voices(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_method_xybridmodelloader_load(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_bundle(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_directory(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_huggingface(void
-    
+
 );
 uint16_t uniffi_xybrid_uniffi_checksum_constructor_xybridmodelloader_from_registry(void
-    
+
 );
 uint32_t ffi_xybrid_uniffi_uniffi_contract_version(void
-    
+
 );
 

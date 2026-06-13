@@ -629,6 +629,34 @@ struct XybridEnvelopeHandle *xybrid_envelope_text_with_voice(const char *text,
                                                              double speed);
 
 /*
+ Create an envelope containing encoded image data.
+
+ # Parameters
+
+ - `bytes`: Pointer to encoded image bytes. May be null only when `len` is 0.
+ - `len`: Length of the encoded byte array.
+ - `format`: Null-terminated image format (`png`, `jpeg`, `jpg`, or `webp`).
+
+ # Returns
+
+ A handle to the envelope, or null on failure.
+ */
+struct XybridEnvelopeHandle *xybrid_envelope_image(const uint8_t *bytes,
+                                                   uintptr_t len,
+                                                   const char *format);
+
+/*
+ Create a user-role multi-part envelope from text and image attachments.
+
+ The `images` array is borrowed for the duration of the call. The returned
+ envelope owns cloned image payloads and does not take ownership of the input
+ handles.
+ */
+struct XybridEnvelopeHandle *xybrid_envelope_user_message(const char *text,
+                                                          struct XybridEnvelopeHandle *const *images,
+                                                          uintptr_t image_count);
+
+/*
  Free an envelope handle.
 
  This function frees the memory associated with an envelope handle.

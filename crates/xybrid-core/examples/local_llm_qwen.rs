@@ -108,6 +108,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::Audio(_) => {
             println!("⚠️  Unexpected: Got audio output instead of text");
         }
+        #[cfg(feature = "vision")]
+        EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
+            println!("⚠️  Unexpected: Got vision output instead of text");
+        }
     }
 
     println!();

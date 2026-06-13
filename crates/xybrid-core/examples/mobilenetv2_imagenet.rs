@@ -4,14 +4,17 @@
 //! a lightweight mobile-optimized architecture. Proves the system works across
 //! different model architectures (ResNet-50 heavy, MobileNet light).
 
-use ndarray::Array4;
-use std::collections::HashMap;
+#[cfg(feature = "vision")]
 use xybrid_core::execution::ModelMetadata;
+#[cfg(feature = "vision")]
 use xybrid_core::execution::TemplateExecutor;
+#[cfg(feature = "vision")]
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+#[cfg(feature = "vision")]
 use xybrid_core::testing::model_fixtures;
 
 // ImageNet class labels (top 10 for demo)
+#[cfg(feature = "vision")]
 const IMAGENET_CLASSES: &[&str] = &[
     "tench, Tinca tinca",
     "goldfish, Carassius auratus",
@@ -25,6 +28,7 @@ const IMAGENET_CLASSES: &[&str] = &[
     "ostrich, Struthio camelus",
 ];
 
+#[cfg(feature = "vision")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
     println!("  MobileNetV2 - Lightweight ImageNet Classification");
@@ -52,48 +56,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ TemplateExecutor created");
     println!();
 
-    // Create a test image (random pattern for now - in real use, load actual image)
-    // Shape: [batch=1, channels=3, height=256, width=256] (will be cropped to 224x224)
-    println!("🎨 Creating test image (256x256 RGB)...");
-    let mut image_data = Array4::<f32>::zeros((1, 3, 256, 256));
-
-    // Create a different pattern than ResNet-50 (diagonal stripes)
-    for c in 0..3 {
-        for h in 0..256 {
-            for w in 0..256 {
-                // Create diagonal stripe pattern
-                let pattern = ((h + w) / 32) % 2;
-                image_data[[0, c, h, w]] = if pattern == 0 {
-                    200.0 + (c * 20) as f32
-                } else {
-                    50.0 + (c * 10) as f32
-                };
-            }
-        }
-    }
-
-    println!("✅ Test image created (256x256x3)");
+    // Create an encoded test image. The metadata pipeline decodes, resizes,
+    // crops, and normalizes it before ONNX Runtime sees the tensor.
+    println!("🎨 Creating encoded test image (320x256 PNG)...");
+    let image_bytes = create_test_image_png()?;
+    println!("✅ Test image created");
     println!("   Pattern: Diagonal stripes");
     println!("   Note: Using synthetic pattern for testing");
     println!("   For real predictions, use actual ImageNet images");
     println!();
 
-    // Convert image_data to flat embedding vector
-    let flattened: Vec<f32> = image_data.iter().cloned().collect();
-
-    // Create input envelope
-    let envelope_metadata = HashMap::new();
-    let input_envelope = Envelope {
-        kind: EnvelopeKind::Embedding(flattened),
-        metadata: envelope_metadata,
-    };
+    let input_envelope = Envelope::image(image_bytes, "png")?;
 
     // Execute inference via TemplateExecutor
     println!("🔄 Running inference via TemplateExecutor...");
     println!("   → Preprocessing:");
-    println!("      1. Reshape to [1, 3, 256, 256]");
-    println!("      2. CenterCrop to 224x224");
-    println!("      3. Normalize (ImageNet mean/std)");
+    println!("      1. ImageDecode PNG to RGB NCHW tensor");
+    println!("      2. ImageResize to 256x256");
+    println!("      3. CenterCrop to 224x224");
+    println!("      4. ImageNormalize (ImageNet preset)");
     println!("   → Model execution: mobilenetv2-12.onnx");
     println!("   → Postprocessing:");
     println!("      1. Softmax (probabilities)");
@@ -138,6 +119,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::Audio(_) => {
             println!("🔊 Audio output (unexpected for MobileNetV2)");
         }
+        EnvelopeKind::Image { .. } => {
+            println!("🖼️ Image output (unexpected for MobileNetV2)");
+        }
+        EnvelopeKind::MultiPart(_) => {
+            println!("📦 Multipart output (unexpected for MobileNetV2)");
+        }
     }
 
     println!();
@@ -146,8 +133,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
     println!();
     println!("🎯 KEY VALIDATION:");
-    println!("   ✅ Metadata-driven preprocessing (Reshape + CenterCrop + Normalize)");
-    println!("   ✅ SimpleMode execution via TemplateExecutor");
+    println!("   ✅ Metadata-driven preprocessing (ImageDecode + ImageResize + CenterCrop + ImageNormalize)");
+    println!("   ✅ ONNX execution via TemplateExecutor");
     println!("   ✅ Metadata-driven postprocessing (Softmax + TopK)");
     println!("   ✅ MobileNetV2 inference from metadata configuration");
     println!("   ✅ Lightweight model (13.3 MB vs ResNet-50's 98 MB)");
@@ -160,9 +147,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("⚠️  NOTE: Using synthetic test image. For real predictions:");
     println!("   - Load actual ImageNet image (.jpg/.png)");
-    println!("   - Decode to RGB values (0-255)");
-    println!("   - Pass to TemplateExecutor");
+    println!("   - Pass encoded bytes to Envelope::image");
+    println!("   - Let model_metadata.json drive decode/resize/crop/normalize");
     println!();
 
     Ok(())
+}
+
+#[cfg(not(feature = "vision"))]
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!("This example requires the `vision` feature.");
+    eprintln!("Run: cargo run --example mobilenetv2_imagenet --features vision");
+    Ok(())
+}
+
+#[cfg(feature = "vision")]
+fn create_test_image_png() -> Result<Vec<u8>, image::ImageError> {
+    let mut image = image::RgbImage::new(320, 256);
+
+    for y in 0..256 {
+        for x in 0..320 {
+            let pattern = ((x + y) / 32) % 2;
+            let pixel = if pattern == 0 {
+                image::Rgb([200, 220, 240])
+            } else {
+                image::Rgb([50, 60, 70])
+            };
+            image.put_pixel(x, y, pixel);
+        }
+    }
+
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut encoded, image::ImageFormat::Png)?;
+    Ok(encoded.into_inner())
 }

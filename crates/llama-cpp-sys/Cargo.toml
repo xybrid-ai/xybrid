@@ -24,6 +24,7 @@ path = "src/lib.rs"
 # can stay green.
 default = []
 bindings = []
+vision = ["bindings"]
 
 [build-dependencies]
 # For compiling the wrapper.cpp shim and llama.cpp source. Carried at the

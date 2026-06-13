@@ -15,8 +15,8 @@ import 'utils/audio.dart';
 /// the pipeline definition.
 class XybridStageLatency {
   XybridStageLatency.fromFfi(FfiStageLatency inner)
-      : stageId = inner.stageId,
-        latencyMs = inner.latencyMs;
+    : stageId = inner.stageId,
+      latencyMs = inner.latencyMs;
 
   final String stageId;
   final int latencyMs;
@@ -34,15 +34,16 @@ class XybridStageLatency {
 /// `pipeline.run()`.
 class XybridInferenceMetrics {
   XybridInferenceMetrics.fromFfi(FfiInferenceMetrics inner)
-      : totalMs = inner.totalMs,
-        ttftMs = inner.ttftMs,
-        tokensPerSecond = inner.tokensPerSecond,
-        prefillTps = inner.prefillTps,
-        decodeTps = inner.decodeTps,
-        tokensOut = inner.tokensOut,
-        stageLatenciesMs = inner.stageLatenciesMs
-            .map(XybridStageLatency.fromFfi)
-            .toList(growable: false);
+    : totalMs = inner.totalMs,
+      ttftMs = inner.ttftMs,
+      tokensPerSecond = inner.tokensPerSecond,
+      prefillTps = inner.prefillTps,
+      decodeTps = inner.decodeTps,
+      tokensOut = inner.tokensOut,
+      imagePreprocessMs = inner.imagePreprocessMs,
+      stageLatenciesMs = inner.stageLatenciesMs
+          .map(XybridStageLatency.fromFfi)
+          .toList(growable: false);
 
   /// Wall-clock latency in ms (mirrors [XybridResult.latencyMs]).
   final int totalMs;
@@ -61,6 +62,9 @@ class XybridInferenceMetrics {
 
   /// Completion tokens produced. LLM only.
   final int? tokensOut;
+
+  /// Image preprocessing latency in ms. Vision-language runs only.
+  final int? imagePreprocessMs;
 
   /// Per-stage wall-clock latencies. Empty for single-model runs.
   final List<XybridStageLatency> stageLatenciesMs;
@@ -127,6 +131,7 @@ class XybridResult {
   ///
   /// LLM-specific fields are null for ASR/TTS/embedding runs;
   /// `stageLatenciesMs` is empty for single-model runs.
-  late final XybridInferenceMetrics metrics =
-      XybridInferenceMetrics.fromFfi(_inner.metrics);
+  late final XybridInferenceMetrics metrics = XybridInferenceMetrics.fromFfi(
+    _inner.metrics,
+  );
 }

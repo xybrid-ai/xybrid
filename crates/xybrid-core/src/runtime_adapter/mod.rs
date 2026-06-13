@@ -55,6 +55,10 @@ pub mod traits;
 // Always-available types for FFI/bindings (NOT feature-gated)
 pub mod types;
 
+// Shared vision contracts for embedding-style multimodal backends.
+#[cfg(feature = "vision")]
+pub mod vision;
+
 // Runtime backends (organized in subdirectories)
 pub mod onnx;
 
@@ -135,12 +139,33 @@ pub use traits::ModelRuntime;
 pub use types::{
     ChatMessage, GenerationConfig, LlmConfig, PartialToken, StreamingCallback, StreamingError,
 };
+#[cfg(feature = "vision")]
+pub use types::{MultimodalChatMessage, MultimodalImagePart, MultimodalMessagePart};
+#[cfg(feature = "vision")]
+pub use vision::{VisionEmbeddings, VisionEncoder, VisionTokenId};
 
 /// Error type for runtime adapter operations.
 #[derive(Error, Debug)]
 pub enum AdapterError {
     #[error("Model not found: {0}")]
     ModelNotFound(String),
+    #[error("Missing artifact: {artifact} at {path}")]
+    MissingArtifact { artifact: String, path: String },
+    #[error(
+        "Unsupported model capability: model '{model_id}' does not support {capability}; {hint}"
+    )]
+    UnsupportedModelCapability {
+        model_id: String,
+        capability: String,
+        hint: String,
+    },
+    #[error("Unsupported backend capability: model '{model_id}' requires {capability}, but backend/build '{backend}' does not support {capability}; {hint}")]
+    UnsupportedBackendCapability {
+        model_id: String,
+        backend: String,
+        capability: String,
+        hint: String,
+    },
     #[error("Model not loaded: {0}")]
     ModelNotLoaded(String),
     #[error("Invalid input: {0}")]

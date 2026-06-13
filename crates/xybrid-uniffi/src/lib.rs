@@ -217,6 +217,23 @@ pub enum XybridError {
     LoadError { message: String },
     #[error("Inference failed: {message}")]
     InferenceError { message: String },
+    #[error("Missing artifact: {artifact} at {path}")]
+    MissingArtifact { artifact: String, path: String },
+    #[error(
+        "Unsupported model capability: model '{model_id}' does not support {capability}; {hint}"
+    )]
+    UnsupportedModelCapability {
+        model_id: String,
+        capability: String,
+        hint: String,
+    },
+    #[error("Unsupported backend capability: model '{model_id}' requires {capability}, but backend/build '{backend}' does not support {capability}; {hint}")]
+    UnsupportedBackendCapability {
+        model_id: String,
+        backend: String,
+        capability: String,
+        hint: String,
+    },
     #[error("Streaming not supported by this model")]
     StreamingNotSupported,
     #[error("Model not loaded")]
@@ -263,6 +280,9 @@ impl XybridError {
             | XybridError::MetadataInvalid { .. }
             | XybridError::LoadError { .. }
             | XybridError::InferenceError { .. }
+            | XybridError::MissingArtifact { .. }
+            | XybridError::UnsupportedModelCapability { .. }
+            | XybridError::UnsupportedBackendCapability { .. }
             | XybridError::StreamingNotSupported
             | XybridError::NotLoaded
             | XybridError::ConfigError { .. }
@@ -292,6 +312,9 @@ impl XybridError {
             | XybridError::MetadataInvalid { .. }
             | XybridError::LoadError { .. }
             | XybridError::InferenceError { .. }
+            | XybridError::MissingArtifact { .. }
+            | XybridError::UnsupportedModelCapability { .. }
+            | XybridError::UnsupportedBackendCapability { .. }
             | XybridError::StreamingNotSupported
             | XybridError::NotLoaded
             | XybridError::ConfigError { .. }
@@ -356,6 +379,29 @@ impl From<SdkError> for XybridError {
             },
             SdkError::InferenceError { message, source } => XybridError::InferenceError {
                 message: flatten_cause(message, source),
+            },
+            SdkError::MissingArtifact { artifact, path } => {
+                XybridError::MissingArtifact { artifact, path }
+            }
+            SdkError::UnsupportedModelCapability {
+                model_id,
+                capability,
+                hint,
+            } => XybridError::UnsupportedModelCapability {
+                model_id,
+                capability,
+                hint,
+            },
+            SdkError::UnsupportedBackendCapability {
+                model_id,
+                backend,
+                capability,
+                hint,
+            } => XybridError::UnsupportedBackendCapability {
+                model_id,
+                backend,
+                capability,
+                hint,
             },
             SdkError::AbortedForCloudFallback { reason } => XybridError::InferenceError {
                 message: format!("Aborted for cloud fallback: {reason}"),
@@ -475,6 +521,20 @@ pub enum XybridEnvelope {
         /// The embedding vector as f32 values.
         data: Vec<f32>,
     },
+    /// Encoded image input for vision-capable models.
+    Image {
+        /// Encoded PNG, JPEG, or WebP bytes.
+        bytes: Vec<u8>,
+        /// Image format hint: "png", "jpeg", "jpg", or "webp".
+        format: String,
+    },
+    /// User-role multi-part message for vision-language models.
+    UserMessage {
+        /// User prompt text.
+        text: String,
+        /// Image envelopes to attach to the user turn.
+        images: Vec<XybridEnvelope>,
+    },
 }
 
 /// Per-stage latency entry for pipeline runs.
@@ -587,9 +647,9 @@ impl From<CoreVoiceInfo> for XybridVoiceInfo {
     }
 }
 
-impl From<XybridEnvelope> for CoreEnvelope {
-    fn from(envelope: XybridEnvelope) -> Self {
-        match envelope {
+impl XybridEnvelope {
+    fn try_into_core(self) -> Result<CoreEnvelope, XybridError> {
+        match self {
             XybridEnvelope::Audio {
                 bytes,
                 sample_rate,
@@ -598,7 +658,10 @@ impl From<XybridEnvelope> for CoreEnvelope {
                 let mut metadata = HashMap::new();
                 metadata.insert("sample_rate".to_string(), sample_rate.to_string());
                 metadata.insert("channels".to_string(), channels.to_string());
-                CoreEnvelope::with_metadata(CoreEnvelopeKind::Audio(bytes.clone()), metadata)
+                Ok(CoreEnvelope::with_metadata(
+                    CoreEnvelopeKind::Audio(bytes),
+                    metadata,
+                ))
             }
             XybridEnvelope::Text {
                 text,
@@ -607,16 +670,125 @@ impl From<XybridEnvelope> for CoreEnvelope {
             } => {
                 let mut metadata = HashMap::new();
                 if let Some(voice) = voice_id {
-                    metadata.insert("voice_id".to_string(), voice.clone());
+                    metadata.insert("voice_id".to_string(), voice);
                 }
                 if let Some(s) = speed {
                     metadata.insert("speed".to_string(), s.to_string());
                 }
-                CoreEnvelope::with_metadata(CoreEnvelopeKind::Text(text.clone()), metadata)
+                Ok(CoreEnvelope::with_metadata(
+                    CoreEnvelopeKind::Text(text),
+                    metadata,
+                ))
             }
             XybridEnvelope::Embedding { data } => {
-                CoreEnvelope::new(CoreEnvelopeKind::Embedding(data.clone()))
+                Ok(CoreEnvelope::new(CoreEnvelopeKind::Embedding(data)))
             }
+            XybridEnvelope::Image { bytes, format } => {
+                CoreEnvelope::image(bytes, format).map_err(|err| XybridError::ConfigError {
+                    message: err.to_string(),
+                })
+            }
+            XybridEnvelope::UserMessage { text, images } => {
+                let images = images
+                    .into_iter()
+                    .map(Self::try_into_core)
+                    .collect::<Result<Vec<_>, _>>()?;
+                CoreEnvelope::user_message(text, images).map_err(|err| XybridError::ConfigError {
+                    message: err.to_string(),
+                })
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod envelope_tests {
+    use super::*;
+    use std::io::Cursor;
+    use xybrid_sdk::ir::MessageRole;
+
+    fn png_1x1() -> Vec<u8> {
+        let image = image::RgbImage::from_pixel(1, 1, image::Rgb([255, 0, 0]));
+        let mut encoded = Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test image should encode");
+        encoded.into_inner()
+    }
+
+    #[test]
+    fn image_envelope_converts_to_core_image() {
+        let core = XybridEnvelope::Image {
+            bytes: png_1x1(),
+            format: "png".to_string(),
+        }
+        .try_into_core()
+        .expect("valid PNG image should convert");
+
+        assert!(core.is_image());
+        assert_eq!(
+            core.as_image().map(|(_, format)| format.as_str()),
+            Some("png")
+        );
+    }
+
+    #[test]
+    fn image_envelope_rejects_corrupt_bytes_with_redacted_error() {
+        let error = XybridEnvelope::Image {
+            bytes: vec![42, 42, 42, 42],
+            format: "jpeg".to_string(),
+        }
+        .try_into_core()
+        .expect_err("corrupt image bytes should be rejected");
+
+        match error {
+            XybridError::ConfigError { message } => {
+                assert!(message.contains("invalid or corrupt jpeg image bytes"));
+                assert!(!message.contains("[42"));
+                assert!(!message.contains("42, 42"));
+            }
+            other => panic!("expected ConfigError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_envelope_rejects_oversized_encoded_payload() {
+        let error = XybridEnvelope::Image {
+            bytes: vec![0; xybrid_sdk::ir::envelope::DEFAULT_MAX_ENCODED_IMAGE_BYTES + 1],
+            format: "png".to_string(),
+        }
+        .try_into_core()
+        .expect_err("oversized image bytes should be rejected");
+
+        match error {
+            XybridError::ConfigError { message } => {
+                assert!(message.contains("Image payload too large"));
+                assert!(!message.contains("[0"));
+            }
+            other => panic!("expected ConfigError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_message_converts_to_user_role_multipart() {
+        let core = XybridEnvelope::UserMessage {
+            text: "Describe this image".to_string(),
+            images: vec![XybridEnvelope::Image {
+                bytes: png_1x1(),
+                format: "png".to_string(),
+            }],
+        }
+        .try_into_core()
+        .expect("valid image user message should convert");
+
+        assert_eq!(core.role(), Some(MessageRole::User));
+        match core.kind {
+            CoreEnvelopeKind::MultiPart(parts) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].as_text(), Some("Describe this image"));
+                assert!(parts[1].is_image());
+            }
+            other => panic!("expected multipart user message, got {other:?}"),
         }
     }
 }
@@ -643,9 +815,10 @@ impl XybridModel {
         config: Option<XybridGenerationConfig>,
     ) -> Result<XybridResult, XybridError> {
         let sdk_config = config.as_ref().map(|c| c.to_sdk());
+        let core_envelope = envelope.try_into_core()?;
         let result = self
             .inner
-            .run_async(&envelope.into(), sdk_config.as_ref())
+            .run_async(&core_envelope, sdk_config.as_ref())
             .await
             .map_err(XybridError::from)?;
         Ok(XybridResult::from_inference_result(&result))

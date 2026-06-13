@@ -25,15 +25,17 @@ log = "0.4"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.15"
-# SDK preset handles: ort-dynamic, llm-llamacpp
-xybrid-sdk = { path = "../../../crates/xybrid-sdk", default-features = false, features = ["platform-android"] }
+# SDK preset handles: ort-dynamic, llm-llamacpp;
+# Studio additionally needs llama.cpp VisionLanguage (mtmd) support for image input.
+xybrid-sdk = { path = "../../../crates/xybrid-sdk", default-features = false, features = ["platform-android", "llm-llamacpp-vision"] }
 # Direct ort dependency for Android initialization (loads .so at runtime)
 ort = { version = "2.0.0-rc.10", default-features = false, features = ["load-dynamic"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 oslog = "0.2"
-# SDK preset handles: ort-download, ort-coreml, candle-metal, llm-llamacpp
-xybrid-sdk = { path = "../../../crates/xybrid-sdk", default-features = false, features = ["platform-ios"] }
+# SDK preset handles: ort-download, ort-coreml, candle-metal, llm-llamacpp;
+# Studio additionally needs llama.cpp VisionLanguage support for image input.
+xybrid-sdk = { path = "../../../crates/xybrid-sdk", default-features = false, features = ["platform-ios", "llm-llamacpp-vision"] }
 # Direct ort dependency - links against custom xcframework with CoreML
 ort = { version = "2.0.0-rc.11", default-features = false, features = ["ndarray", "std", "coreml"] }
 
@@ -50,13 +52,13 @@ xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-deskto
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-desktop"] }
 
 [features]
-default = []
+default = ["vision"]
 
 # PLATFORM PRESETS (forwarded from xybrid-sdk)
-platform-android = ["xybrid-sdk/platform-android"]
-platform-ios = ["xybrid-sdk/platform-ios"]
-platform-macos = ["xybrid-sdk/platform-macos"]
-platform-desktop = ["xybrid-sdk/platform-desktop"]
+platform-android = ["xybrid-sdk/platform-android", "llm-llamacpp-vision"]
+platform-ios = ["xybrid-sdk/platform-ios", "llm-llamacpp-vision"]
+platform-macos = ["xybrid-sdk/platform-macos", "vision"]
+platform-desktop = ["xybrid-sdk/platform-desktop", "vision"]
 
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 ort-download = ["xybrid-sdk/ort-download"]
@@ -70,7 +72,9 @@ llm-mistral = ["xybrid-sdk/llm-mistral"]
 llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
+llm-llamacpp-vision = ["xybrid-sdk/llm-llamacpp-vision"]
 huggingface = ["xybrid-sdk/huggingface"]
+vision = ["xybrid-sdk/vision"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

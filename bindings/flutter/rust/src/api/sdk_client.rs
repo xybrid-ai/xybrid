@@ -146,6 +146,19 @@ impl XybridSdkClient {
         TELEMETRY_INITIALIZED.load(Ordering::Acquire)
     }
 
+    /// Return the xybrid runtime features compiled into this native library.
+    ///
+    /// Studio uses this to decide whether image upload should be enabled for
+    /// VisionLanguage models. Keeping the answer in Rust avoids stale Dart-side
+    /// assumptions about Cargo features.
+    #[frb(sync)]
+    pub fn runtime_features() -> Vec<String> {
+        xybrid_sdk::features::enabled()
+            .iter()
+            .map(|feature| (*feature).to_string())
+            .collect()
+    }
+
     #[frb(sync)]
     pub fn flush_platform_telemetry() {
         xybrid_sdk::telemetry::flush_platform_telemetry();
@@ -223,5 +236,21 @@ mod tests {
             resolve_ingest_endpoint(Some("  https://ingest.example  ")),
             "https://ingest.example"
         );
+    }
+
+    #[test]
+    fn runtime_features_mirror_core_feature_introspection() {
+        let expected: Vec<String> = xybrid_sdk::features::enabled()
+            .iter()
+            .map(|feature| (*feature).to_string())
+            .collect();
+
+        assert_eq!(XybridSdkClient::runtime_features(), expected);
+    }
+
+    #[cfg(feature = "llm-llamacpp-vision")]
+    #[test]
+    fn runtime_features_report_llama_cpp_vision_when_compiled() {
+        assert!(XybridSdkClient::runtime_features().contains(&"llm-llamacpp-vision".to_string()));
     }
 }

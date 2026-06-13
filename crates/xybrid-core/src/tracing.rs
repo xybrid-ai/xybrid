@@ -25,6 +25,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -111,6 +112,18 @@ impl SpanCollector {
         }
 
         let parent_id = self.stack.last().copied();
+        self.start_span_with_parent(name, parent_id)
+    }
+
+    fn start_span_with_parent(
+        &mut self,
+        name: impl Into<String>,
+        parent_id: Option<usize>,
+    ) -> usize {
+        if !self.enabled {
+            return 0;
+        }
+
         let span_id = self.spans.len();
 
         self.spans.push(Span::new(name.into(), parent_id, span_id));
@@ -151,9 +164,22 @@ impl SpanCollector {
         }
 
         if let Some(&span_id) = self.stack.last() {
-            if let Some(span) = self.spans.get_mut(span_id) {
-                span.metadata.insert(key.into(), value.into());
-            }
+            self.add_metadata_to_span(span_id, key, value);
+        }
+    }
+
+    fn add_metadata_to_span(
+        &mut self,
+        span_id: usize,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) {
+        if !self.enabled {
+            return;
+        }
+
+        if let Some(span) = self.spans.get_mut(span_id) {
+            span.metadata.insert(key.into(), value.into());
         }
     }
 
@@ -206,26 +232,47 @@ lazy_static::lazy_static! {
     static ref GLOBAL_COLLECTOR: Arc<Mutex<SpanCollector>> = Arc::new(Mutex::new(SpanCollector::with_enabled(false)));
 }
 
+#[cfg(test)]
+static GLOBAL_TRACE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    GLOBAL_TRACE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+thread_local! {
+    static THREAD_SPAN_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
 /// Initialize the global tracing collector
 pub fn init_tracing(enabled: bool) {
     if let Ok(mut collector) = GLOBAL_COLLECTOR.lock() {
         collector.set_enabled(enabled);
         collector.reset();
     }
+    THREAD_SPAN_STACK.with(|stack| stack.borrow_mut().clear());
 }
 
 /// Start a span in the global collector
 pub fn start_span(name: impl Into<String>) -> usize {
-    GLOBAL_COLLECTOR
+    let parent_id = THREAD_SPAN_STACK.with(|stack| stack.borrow().last().copied());
+    let span_id = GLOBAL_COLLECTOR
         .lock()
-        .map(|mut c| c.start_span(name))
-        .unwrap_or(0)
+        .map(|mut c| c.start_span_with_parent(name, parent_id))
+        .unwrap_or(0);
+    THREAD_SPAN_STACK.with(|stack| stack.borrow_mut().push(span_id));
+    span_id
 }
 
 /// End the current span in the global collector
 pub fn end_span() {
+    let span_id = THREAD_SPAN_STACK.with(|stack| stack.borrow_mut().pop());
     if let Ok(mut collector) = GLOBAL_COLLECTOR.lock() {
-        collector.end_span();
+        if let Some(span_id) = span_id {
+            collector.end_span_by_id(span_id);
+        }
     }
 }
 
@@ -238,8 +285,11 @@ pub fn end_span_by_id(id: usize) {
 
 /// Add metadata to the current span
 pub fn add_metadata(key: impl Into<String>, value: impl Into<String>) {
+    let span_id = THREAD_SPAN_STACK.with(|stack| stack.borrow().last().copied());
     if let Ok(mut collector) = GLOBAL_COLLECTOR.lock() {
-        collector.add_metadata(key, value);
+        if let Some(span_id) = span_id {
+            collector.add_metadata_to_span(span_id, key, value);
+        }
     }
 }
 
@@ -256,6 +306,7 @@ pub fn reset_tracing() {
     if let Ok(mut collector) = GLOBAL_COLLECTOR.lock() {
         collector.reset();
     }
+    THREAD_SPAN_STACK.with(|stack| stack.borrow_mut().clear());
 }
 
 /// Check if global tracing is enabled

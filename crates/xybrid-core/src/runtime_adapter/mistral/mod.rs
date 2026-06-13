@@ -528,6 +528,7 @@ impl LlmBackend for MistralBackend {
             // prompt tokens) are the fallback for any future code path.
             decode_tps: decode_tps_reported.or(fields.decode_tps),
             prefill_tps: prefill_tps_reported.or(fields.prefill_tps),
+            image_preprocess_ms: None,
         })
     }
 
@@ -604,6 +605,7 @@ impl LlmBackend for MistralBackend {
             inter_chunk_ms: fields.inter_chunk_ms,
             decode_tps: decode_tps_reported.or(fields.decode_tps),
             prefill_tps: prefill_tps_reported.or(fields.prefill_tps),
+            image_preprocess_ms: None,
         })
     }
 
