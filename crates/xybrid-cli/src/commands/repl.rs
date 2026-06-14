@@ -32,22 +32,47 @@ use warmup::warmup_models;
 use super::utils::{maybe_warn_thinking_budget, thinking_budget_exhausted, THINKING_BUDGET_HINT};
 use crate::ui;
 
+/// Arguments for the interactive REPL, grouped to keep the entry point legible.
+pub(crate) struct ReplArgs {
+    pub config: Option<PathBuf>,
+    pub model: Option<String>,
+    pub model_file: Option<PathBuf>,
+    pub huggingface: Option<String>,
+    pub voice: Option<String>,
+    pub target: Option<String>,
+    pub stream: bool,
+    pub show_reasoning: bool,
+    pub max_tokens: Option<usize>,
+    pub system_prompt: Option<String>,
+    /// Serve from cloud while the registry model downloads, then switch local.
+    pub speculative_cloud: bool,
+    pub cloud_provider: Option<String>,
+    pub cloud_model: Option<String>,
+    pub no_tools: bool,
+    pub tools_file: Option<PathBuf>,
+    pub verbose: u8,
+}
+
 /// Interactive REPL mode - keeps models loaded for fast repeated inference.
-pub(crate) fn handle_repl_command(
-    config: Option<PathBuf>,
-    model: Option<String>,
-    model_file: Option<PathBuf>,
-    huggingface: Option<String>,
-    voice: Option<String>,
-    target: Option<String>,
-    stream: bool,
-    show_reasoning: bool,
-    max_tokens: Option<usize>,
-    system_prompt: Option<String>,
-    no_tools: bool,
-    tools_file: Option<PathBuf>,
-    verbose: u8,
-) -> Result<()> {
+pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
+    let ReplArgs {
+        config,
+        model,
+        model_file,
+        huggingface,
+        voice,
+        target,
+        stream,
+        show_reasoning,
+        max_tokens,
+        system_prompt,
+        speculative_cloud,
+        cloud_provider,
+        cloud_model,
+        no_tools,
+        tools_file,
+        verbose,
+    } = args;
     use std::io::{self, Write};
 
     ui::brand_with_version(env!("CARGO_PKG_VERSION"));
@@ -62,8 +87,65 @@ pub(crate) fn handle_repl_command(
     }
     println!();
 
+    // Speculative cloud only applies to a bare registry --model (not config /
+    // HuggingFace / GGUF file). When it engages, the model serves from cloud
+    // immediately and the weights download in the background.
+    let want_speculative =
+        speculative_cloud && model.is_some() && config.is_none() && huggingface.is_none();
+
+    // Holds the cloud-backed (or already-local) model produced by the
+    // speculative path, installed into `loaded_model` below.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    let mut speculative_model: Option<xybrid_sdk::model::XybridModel> = None;
+
     // --huggingface: load from HuggingFace repo
-    let stages = if let Some(ref repo) = huggingface {
+    let stages = if want_speculative {
+        let model_id = model.clone().expect("want_speculative implies a model id");
+        let provider = cloud_provider
+            .clone()
+            .unwrap_or_else(|| "openai".to_string());
+        let cloud = cloud_model
+            .clone()
+            .unwrap_or_else(|| "gpt-4o-mini".to_string());
+        let loader = ModelLoader::from_registry(&model_id)
+            .with_speculative_cloud(true)
+            .with_speculative_cloud_model(provider.clone(), cloud.clone());
+
+        if loader.will_speculate() {
+            ui::ok(&format!(
+                "Speculative cloud: serving {}/{} while '{}' downloads in the background",
+                provider, cloud, model_id
+            ));
+        } else if xybrid_sdk::cache::CacheManager::new()
+            .map(|c| c.is_extracted(&model_id))
+            .unwrap_or(false)
+        {
+            ui::hint("Model already cached locally — running on device (no speculation needed)");
+        } else {
+            ui::hint(
+                "Speculative cloud unavailable (no API key?) — downloading, then running locally",
+            );
+        }
+
+        let model_obj = loader
+            .load()
+            .context("Failed to load speculative cloud model")?;
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        {
+            speculative_model = Some(model_obj);
+        }
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        {
+            drop(model_obj);
+        }
+
+        // No bundle_path: the weights aren't on disk yet, so warmup and the
+        // local-load block skip this stage — the speculative model drives the
+        // loop and transparently switches to local once the download lands.
+        let mut stage = StageDescriptor::new(&model_id);
+        stage.target = execution_target.clone();
+        vec![stage]
+    } else if let Some(ref repo) = huggingface {
         let sp = ui::spinner(&format!("Loading from HuggingFace: {}...", repo));
         let loader = ModelLoader::from_huggingface_parsed(repo);
         let _model = loader.load().context(format!(
@@ -184,6 +266,26 @@ pub(crate) fn handle_repl_command(
                     ui::hint("Use 'history' to view conversation, 'clear' to reset");
                 }
             }
+            loaded_model = Some(model);
+        }
+    }
+
+    // Install the speculative model. Its placeholder handle isn't locally
+    // available, so the block above skipped it. Speculation targets LLM/chat,
+    // so enable conversation context up front (the placeholder can't report
+    // `is_llm()` until the local weights land).
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    if loaded_model.is_none() {
+        if let Some(model) = speculative_model.take() {
+            let mut ctx = ConversationContext::new();
+            if let Some(ref prompt) = system_prompt {
+                ui::kv("System", prompt);
+                ctx = ctx.with_system(
+                    Envelope::new(EnvelopeKind::Text(prompt.clone()))
+                        .with_role(MessageRole::System),
+                );
+            }
+            conversation_context = Some(ctx);
             loaded_model = Some(model);
         }
     }

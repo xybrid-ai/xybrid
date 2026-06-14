@@ -269,6 +269,20 @@ enum Commands {
         #[arg(long, value_name = "PROMPT")]
         system: Option<String>,
 
+        /// Serve from the cloud while the registry model downloads in the
+        /// background, then switch to local once ready. Requires --api-key
+        /// (or XYBRID_API_KEY) and a registry --model. LLM/chat only.
+        #[arg(long)]
+        speculative_cloud: bool,
+
+        /// Cloud provider to serve speculatively (default: openai)
+        #[arg(long, value_name = "PROVIDER", requires = "speculative_cloud")]
+        cloud_provider: Option<String>,
+
+        /// Cloud model to serve speculatively (default: gpt-4o-mini)
+        #[arg(long, value_name = "MODEL", requires = "speculative_cloud")]
+        cloud_model: Option<String>,
+
         /// Disable built-in tool calling (web_search, fetch_url, current_time),
         /// which is otherwise on for models whose metadata declares support
         #[arg(long)]
@@ -457,6 +471,12 @@ fn configure_log_level(cli: &Cli) {
 /// Initialize platform telemetry from CLI args.
 fn init_telemetry(cli: &Cli) -> bool {
     if let Some(ref api_key) = cli.api_key {
+        // Make the key resolvable by the cloud gateway too (speculative cloud,
+        // reactive fallback), not just the telemetry exporter. `--api-key` may
+        // arrive by flag rather than the XYBRID_API_KEY env var, so set the
+        // in-memory cell that CloudConfig::resolve_api_key reads.
+        xybrid_sdk::set_api_key(api_key);
+
         let platform = Platform::detect().to_string();
 
         let device_id = cli.device_id.clone().unwrap_or_else(|| {
@@ -654,9 +674,12 @@ fn run_command(cli: Cli) -> Result<()> {
             show_reasoning,
             max_tokens,
             system,
+            speculative_cloud,
+            cloud_provider,
+            cloud_model,
             no_tools,
             tools_file,
-        } => commands::repl::handle_repl_command(
+        } => commands::repl::handle_repl_command(commands::repl::ReplArgs {
             config,
             model,
             model_file,
@@ -666,11 +689,14 @@ fn run_command(cli: Cli) -> Result<()> {
             stream,
             show_reasoning,
             max_tokens,
-            system,
+            system_prompt: system,
+            speculative_cloud,
+            cloud_provider,
+            cloud_model,
             no_tools,
             tools_file,
             verbose,
-        ),
+        }),
         Commands::Trace {
             session,
             latest,
