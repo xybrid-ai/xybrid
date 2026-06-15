@@ -34,6 +34,7 @@
   "pnpm": {
     "overrides": {
       "dompurify": "^3.4.7",
+      "esbuild": "^0.28.1",
       "lodash-es": "^4.18.1",
       "path-to-regexp": "^8.4.2",
       "picomatch": "^4.0.4",
