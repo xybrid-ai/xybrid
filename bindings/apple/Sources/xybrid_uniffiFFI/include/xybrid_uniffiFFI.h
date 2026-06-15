@@ -103,6 +103,10 @@ void uniffi_xybrid_uniffi_fn_func_set_binding(RustBuffer binding, RustCallStatus
 );
 void uniffi_xybrid_uniffi_fn_func_set_thermal_state(RustBuffer state, RustCallStatus *_Nonnull out_status
 );
+int8_t uniffi_xybrid_uniffi_fn_func_xybrid_error_is_retryable(RustBuffer error, RustCallStatus *_Nonnull out_status
+);
+RustBuffer uniffi_xybrid_uniffi_fn_func_xybrid_error_retry_after_secs(RustBuffer error, RustCallStatus *_Nonnull out_status
+);
 RustBuffer ffi_xybrid_uniffi_rustbuffer_alloc(int32_t size, RustCallStatus *_Nonnull out_status
 );
 RustBuffer ffi_xybrid_uniffi_rustbuffer_from_bytes(ForeignBytes bytes, RustCallStatus *_Nonnull out_status
@@ -236,6 +240,12 @@ uint16_t uniffi_xybrid_uniffi_checksum_func_set_binding(void
     
 );
 uint16_t uniffi_xybrid_uniffi_checksum_func_set_thermal_state(void
+    
+);
+uint16_t uniffi_xybrid_uniffi_checksum_func_xybrid_error_is_retryable(void
+    
+);
+uint16_t uniffi_xybrid_uniffi_checksum_func_xybrid_error_retry_after_secs(void
     
 );
 uint16_t uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id(void

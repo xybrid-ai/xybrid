@@ -1440,6 +1440,27 @@ fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
     }
 }
 
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = UInt64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
 fileprivate struct FfiConverterOptionFloat: FfiConverterRustBuffer {
     typealias SwiftType = Float?
 
@@ -1842,6 +1863,24 @@ public func setThermalState(state: XybridThermalState)  {
 
 
 
+public func xybridErrorIsRetryable(error: XybridError)  -> Bool {
+    return try!  FfiConverterBool.lift(
+        try! rustCall() {
+    uniffi_xybrid_uniffi_fn_func_xybrid_error_is_retryable(
+        FfiConverterTypeXybridError.lower(error),$0)
+}
+    )
+}
+
+public func xybridErrorRetryAfterSecs(error: XybridError)  -> UInt64? {
+    return try!  FfiConverterOptionUInt64.lift(
+        try! rustCall() {
+    uniffi_xybrid_uniffi_fn_func_xybrid_error_retry_after_secs(
+        FfiConverterTypeXybridError.lower(error),$0)
+}
+    )
+}
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -1876,6 +1915,12 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xybrid_uniffi_checksum_func_set_thermal_state() != 59048) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xybrid_uniffi_checksum_func_xybrid_error_is_retryable() != 11178) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xybrid_uniffi_checksum_func_xybrid_error_retry_after_secs() != 35950) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xybrid_uniffi_checksum_method_xybridmodel_default_voice_id() != 623) {
