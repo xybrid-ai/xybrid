@@ -1,0 +1,86 @@
+// React Native autolinking discovers this module via package.json.
+// Mirrors the layout of community modules (e.g. react-native-mmkv): the
+// module is consumable directly from a yarn install + gradle sync.
+//
+// The bolt-generated Kotlin binding and its native artifacts come from the
+// published `ai.xybrid:xybrid-kotlin` AAR on Maven Central — it bundles
+// `libxybrid-bolt.so` + the ORT runtime alongside the `ai.xybrid.*`
+// classes that `XybridModule.kt` calls into. No per-package native staging
+// is needed on Android; gradle resolves the AAR like any other dependency.
+
+buildscript {
+  ext.safeExtGet = { prop, fallback ->
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+  }
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath("com.android.tools.build:gradle:8.1.1")
+    classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
+  }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+def isNewArchitectureEnabled() {
+  return rootProject.hasProperty("newArchEnabled") &&
+         rootProject.getProperty("newArchEnabled") == "true"
+}
+
+android {
+  namespace "ai.xybrid.reactnative"
+  compileSdkVersion safeExtGet("compileSdkVersion", 34)
+
+  defaultConfig {
+    minSdkVersion safeExtGet("minSdkVersion", 24)
+    targetSdkVersion safeExtGet("targetSdkVersion", 34)
+
+    // ABIs match what `cargo xtask build-android` produces.
+    ndk {
+      abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+}
+
+repositories {
+  mavenCentral()
+  google()
+}
+
+dependencies {
+  // RN core. The Maven range `[0.74.0,)` ("0.74.0 or later") matches the
+  // npm peer dependency in package.json — without it a consumer on RN 0.74
+  // or 0.75 satisfies the npm peer check but trips a gradle resolution
+  // error. Note: Gradle's `+` suffix is a prefix wildcard (`0.74.0+` would
+  // ONLY match `0.74.0.*`, not 0.75/0.76/…), which is the opposite of what
+  // a community RN module wants. Real-world resolution: host apps pin RN
+  // to a specific version, which our open range trivially satisfies, and
+  // gradle's conflict resolver picks the host's pin.
+  implementation "com.facebook.react:react-native:[0.74.0,)"
+
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3"
+
+  // The bolt Kotlin SDK: provides the `ai.xybrid.*` classes XybridModule.kt
+  // calls (Xybrid, XybridModel, Envelope, XybridError, …) and bundles
+  // `libxybrid-bolt.so` + the ORT runtime in the AAR. Bolt talks to the
+  // native layer over JNI directly, so there is no JNA dependency (unlike
+  // the previous uniffi binding). Keep this version in lockstep with the
+  // workspace SDK version.
+  implementation "ai.xybrid:xybrid-kotlin:0.1.2"
+}

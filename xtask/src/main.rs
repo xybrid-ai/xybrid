@@ -262,6 +262,25 @@ enum Commands {
         version: Option<String>,
     },
 
+    /// Stage the bolt iOS artifacts into bindings/react-native for npm packaging
+    ///
+    /// Builds the XCFramework, then copies it plus the bolt Swift wrapper
+    /// sources into `bindings/react-native/ios/`. Android needs no staging —
+    /// the RN module depends on the `ai.xybrid:xybrid-kotlin` Maven AAR.
+    StageReactNative {
+        /// Build in release mode (default: true)
+        #[arg(long, default_value = "true")]
+        release: bool,
+
+        /// Build in debug mode (overrides --release)
+        #[arg(long)]
+        debug: bool,
+
+        /// Override the version (defaults to Cargo.toml version or git tag)
+        #[arg(long)]
+        version: Option<String>,
+    },
+
     /// Build Android .so files for all ABIs (armeabi-v7a, arm64-v8a, x86_64)
     BuildAndroid {
         /// Build in release mode (default: true)
@@ -505,6 +524,15 @@ fn main() -> Result<()> {
             let is_release = !debug && release;
             let ver = get_version(version.as_deref());
             build_xcframework(is_release, &ver)?;
+        }
+        Commands::StageReactNative {
+            release,
+            debug,
+            version,
+        } => {
+            let is_release = !debug && release;
+            let ver = get_version(version.as_deref());
+            stage_react_native_ios(is_release, &ver)?;
         }
         Commands::BuildAndroid {
             release,
@@ -1137,6 +1165,69 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
     println!("  Versioned:  {}", xcframework_versioned.display());
     println!("  Unversioned: {}", xcframework_latest.display());
     println!("  Swift:      {}", swift_dst.display());
+
+    Ok(())
+}
+
+/// Stage the bolt iOS artifacts into the React Native module for npm packaging.
+///
+/// Builds the XCFramework, then copies it plus the bolt Swift wrapper sources
+/// (`Xybrid.swift`, `xybrid_bolt.swift`) into `bindings/react-native/ios/`,
+/// where `react-native-xybrid.podspec` vendors them. Android needs no
+/// equivalent — the RN module depends on the `ai.xybrid:xybrid-kotlin` AAR.
+fn stage_react_native_ios(release: bool, version: &str) -> Result<()> {
+    if !cfg!(target_os = "macos") {
+        anyhow::bail!("React Native iOS staging is only supported on macOS");
+    }
+
+    // 1. Build the XCFramework (also refreshes bindings/apple's Swift wrapper).
+    build_xcframework(release, version)?;
+
+    let rn_ios = PathBuf::from("bindings/react-native/ios");
+
+    // 2. Stage the XCFramework (unversioned copy) into ios/Frameworks/.
+    let src_xcfw = PathBuf::from("bindings/apple/XCFrameworks/XybridFFI.xcframework");
+    if !src_xcfw.is_dir() {
+        anyhow::bail!(
+            "Expected XCFramework at {} after build — build_xcframework failed silently?",
+            src_xcfw.display()
+        );
+    }
+    let dst_xcfw = rn_ios.join("Frameworks/XybridFFI.xcframework");
+    if dst_xcfw.exists() {
+        std::fs::remove_dir_all(&dst_xcfw)
+            .with_context(|| format!("Failed to remove existing {}", dst_xcfw.display()))?;
+    }
+    std::fs::create_dir_all(rn_ios.join("Frameworks"))?;
+    copy_dir_recursive(&src_xcfw, &dst_xcfw)
+        .context("Failed to copy XCFramework into RN module")?;
+    println!("  ✓ XCFramework -> {}", dst_xcfw.display());
+
+    // 3. Stage the bolt Swift wrapper sources into ios/XybridSwift/. The RN
+    //    Swift glue (XybridModuleImpl.swift) calls into these directly.
+    let dst_swift = rn_ios.join("XybridSwift");
+    if dst_swift.exists() {
+        std::fs::remove_dir_all(&dst_swift)
+            .with_context(|| format!("Failed to clean {}", dst_swift.display()))?;
+    }
+    std::fs::create_dir_all(&dst_swift)?;
+    for fname in ["Xybrid.swift", "xybrid_bolt.swift"] {
+        let src = PathBuf::from("bindings/apple/Sources/Xybrid").join(fname);
+        if !src.is_file() {
+            anyhow::bail!(
+                "Expected {} — run `cargo xtask build-xcframework` first",
+                src.display()
+            );
+        }
+        let dst = dst_swift.join(fname);
+        std::fs::copy(&src, &dst)
+            .with_context(|| format!("Failed to copy {} to {}", src.display(), dst.display()))?;
+        println!("  ✓ {} -> {}", fname, dst.display());
+    }
+
+    println!();
+    println!("✓ React Native iOS staging complete (version {})", version);
+    println!("  Next: cd bindings/react-native && npm pack");
 
     Ok(())
 }

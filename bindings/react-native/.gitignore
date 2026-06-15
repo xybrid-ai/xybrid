@@ -1,0 +1,23 @@
+# Build outputs
+lib/
+node_modules/
+
+# iOS native artifacts staged by `cargo xtask stage-react-native`. These are
+# produced from the Rust core and should not be checked in — the published
+# npm tarball includes them (CI runs the xtask before `npm pack`), but
+# they're regenerated from source on every build, so committing would just
+# create merge friction.
+#
+# Android stages nothing: the module depends on the `ai.xybrid:xybrid-kotlin`
+# Maven AAR (it bundles the bolt .so + ORT + the Kotlin binding), so gradle
+# resolves the natives at consumer build time.
+#
+# HEADS-UP: installing this package from a git ref (e.g.
+# `react-native-xybrid: github:xybrid-ai/xybrid#some-sha`) will NOT pull
+# the iOS native artifacts — there is no `prepare` script that regenerates
+# them at install time, because doing so would force every consumer to
+# have a Rust toolchain. Install from the npm registry (or from the CI
+# tarball artifact) to get a working iOS package.
+ios/Frameworks/
+ios/XybridSwift/Xybrid.swift
+ios/XybridSwift/xybrid_bolt.swift
