@@ -20,6 +20,9 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 
 ```bash
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos
+
+# Vision-language models add the VLM feature to the platform preset:
+cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos,llm-llamacpp-vision
 ```
 
 ## Quick Start
@@ -36,6 +39,9 @@ xybrid run --model whisper-tiny --input-audio recording.wav
 
 # Chat with an LLM (interactive)
 xybrid repl --model smollm2-360m --stream
+
+# Vision-language prompt (requires a vision-capable build and model)
+xybrid run --model lfm2-vl-450m --input-text "Describe this image" --input-image photo.jpg
 
 # Run any GGUF from HuggingFace
 xybrid run --huggingface "unsloth/SmolLM2-360M-Instruct-GGUF:Q4_K_M" --input-text "Hello!"

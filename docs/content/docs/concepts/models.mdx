@@ -1,0 +1,93 @@
+---
+title: Models
+description: Browse the models available in the Xybrid registry
+---
+
+Every model in the Xybrid registry runs fully on-device — no cloud account or API key required. Models are downloaded once, cached locally, and resolved automatically to the best variant for your platform.
+
+<Callout type="info">
+The registry is the source of truth. The tables below are a snapshot — run `xybrid models list` (or `xybrid models search <query>`) for the live catalog.
+</Callout>
+
+## Start with these
+
+| Model | Task | Params | Why start here |
+|-------|------|--------|----------------|
+| `smollm2-360m` | LLM | 360M | Best quality-to-size ratio for any device |
+| `kokoro-82m` | TTS | 82M | High-quality speech, 24 voices, fast |
+| `whisper-tiny` | ASR | 39M | Accurate multilingual transcription |
+
+## Text generation (LLM)
+
+LLMs ship as Q4_K_M-quantized GGUF and run on the llama.cpp backend.
+
+| Model ID | Params | Download | Description |
+|----------|--------|----------|-------------|
+| `smollm2-360m` | 360M | 267 MB | HuggingFace's best tiny LLM, excellent quality/size ratio |
+| `qwen2.5-0.5b-instruct` | 500M | 477 MB | Small but capable instruction-tuned LLM |
+| `lfm2.5-350m` | 354M | — | Liquid LFM2.5, hybrid conv+attention LLM for edge |
+| `qwen3.5-0.8b` | 800M | 520 MB | Lightweight multimodal LLM (text-only mode) |
+| `gemma-3-1b` | 1B | 786 MB | Google's mobile-optimized LLM with 32K context |
+| `gemma3npc-1b` | 1B | 845 MB | NPC roleplay fine-tune of Gemma 3 1B |
+| `llama-3.2-1b` | 1B | 791 MB | Meta's lightweight mobile-optimized LLM |
+| `qwen3.5-2b` | 2B | 1.3 GB | Compact multimodal LLM (text-only mode) |
+| `ministral-3-3b` | 3.4B | 2.1 GB | Mistral AI's edge-optimized instruction model |
+| `phi4-mini` | 3.8B | 8.7 GB | Microsoft's compact reasoning LLM, 128K context |
+| `gemma-4-e2b` | 5.1B | — | Google's compact multimodal LLM (2.3B effective) |
+| `gemma3npc-it` | 7B | 4.1 GB | NPC roleplay fine-tune of Gemma3n-E4B |
+| `mistral-7b` | 7B | 4.3 GB | High-quality desktop LLM with function calling |
+| `gemma-4-e4b` | 8B | — | Google's mid-range multimodal LLM (4.5B effective) |
+
+## Text-to-speech (TTS)
+
+| Model ID | Params | Download | Description |
+|----------|--------|----------|-------------|
+| `kitten-tts-nano-0.2` | 15M | 19 MB | Ultra-lightweight TTS (under 25 MB) |
+| `kitten-tts-nano-0.8` | 15M | 82 MB | Ultra-lightweight StyleTTS 2, 8 named voices |
+| `kitten-tts-micro-0.8` | 40M | 95 MB | Compact StyleTTS 2, 8 named voices |
+| `kitten-tts-mini-0.8` | 80M | 116 MB | High-quality StyleTTS 2, 8 named voices |
+| `kokoro-82m` | 82M | 183 MB | High-quality TTS with 24 voices |
+| `neutts-nano-q4` | 120M | 493 MB | Codec TTS with voice cloning (Q4 GGUF backbone) |
+| `neutts-air-q4` | ~500M | 792 MB | Codec TTS with voice cloning (Q4 GGUF backbone) |
+
+List the voices of any TTS model with `xybrid models voices <model-id>`.
+
+## Speech-to-text (ASR)
+
+| Model ID | Params | Download | Description |
+|----------|--------|----------|-------------|
+| `whisper-tiny` | 39M | 89 MB | Fast multilingual ASR (Candle/SafeTensors runtime) |
+| `wav2vec2-base-960h` | 95M | 231 MB | English ASR with CTC decoding |
+
+## Model naming
+
+Model IDs follow the pattern `{family}-{variant}-{version}`:
+
+- `kitten-tts-nano-0.2` — family, variant, and upstream model version
+- `kokoro-82m` — no version suffix when only one release exists
+- The version is the **upstream model version**, not Xybrid's integration version
+
+Registry entries are immutable once published — a new upstream version becomes a new registry entry.
+
+## Using a model
+
+```bash
+# CLI
+xybrid models info kokoro-82m
+xybrid run --model kokoro-82m --input-text "Hello!" -o hello.wav
+```
+
+```dart
+// Flutter — same model IDs across every SDK
+final model = await Xybrid.model('kokoro-82m').load();
+```
+
+Downloads are cached at `~/.xybrid/cache/` — see [Model Caching](/docs/concepts/caching).
+
+## Models outside the registry
+
+You can run models that aren't in the registry:
+
+- **HuggingFace GGUF**: `xybrid run --huggingface <repo>[:variant]` (or `fromHuggingFace` in the SDKs) downloads a GGUF directly
+- **Local bundles**: load a `.xyb` bundle or model directory
+- **Custom models**: prepare your own `model_metadata.json` — see the [custom models guide](https://github.com/xybrid-ai/xybrid/blob/master/docs/guides/custom-models.md)

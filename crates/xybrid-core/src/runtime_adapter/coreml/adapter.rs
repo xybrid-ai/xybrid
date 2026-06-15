@@ -153,6 +153,12 @@ impl CoreMLRuntimeAdapter {
                 // Embedding similarity or classification
                 Envelope::new(EnvelopeKind::Text("coreml-similarity result".to_string()))
             }
+            EnvelopeKind::Image { .. } => {
+                Envelope::new(EnvelopeKind::Text("coreml-image-output".to_string()))
+            }
+            EnvelopeKind::MultiPart(_) => Envelope::new(EnvelopeKind::Text(
+                "coreml-multimodal-unsupported".to_string(),
+            )),
         }
     }
 }

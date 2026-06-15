@@ -145,6 +145,29 @@ result.ThrowIfFailed();
 Debug.Log($"Player said: {result.Text}");
 ```
 
+### Vision-Language Input
+
+Vision-language envelopes are available in the v0.2.0 development surface and
+require native libraries built with the vision feature.
+
+```csharp
+using Xybrid;
+using UnityEngine;
+
+// Load a VLM bundle built with a language GGUF plus mmproj sibling.
+using var model = XybridClient.LoadModel("lfm2-vl-450m");
+
+// Texture2D assets can be encoded before entering the SDK.
+byte[] imageBytes = texture.EncodeToPNG();
+using var image = Envelope.Image(imageBytes, "png");
+using var prompt = Envelope.UserMessage("Describe this image", new[] { image });
+
+using var result = model.Run(prompt);
+result.ThrowIfFailed();
+
+Debug.Log(result.Text);
+```
+
 ### Inference Metrics
 
 Every `InferenceResult` carries a typed `InferenceMetrics` with TTFT,
@@ -257,7 +280,7 @@ bindings/unity/
 │   │   ├── XybridClient.cs      # SDK entry point (Initialize, LoadModel)
 │   │   ├── Model.cs             # Model inference (Run, RunText, RunAudio)
 │   │   ├── ModelLoader.cs       # Model loading (FromRegistry, FromBundle)
-│   │   ├── Envelope.cs          # Input data (Text, Audio)
+│   │   ├── Envelope.cs          # Input data (Text, Audio, Image, UserMessage)
 │   │   ├── InferenceResult.cs   # Output container (Text, Success, LatencyMs)
 │   │   ├── ConversationContext.cs # Multi-turn LLM state
 │   │   ├── MessageRole.cs       # Role enum (System, User, Assistant)

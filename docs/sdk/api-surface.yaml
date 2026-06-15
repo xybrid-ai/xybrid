@@ -156,6 +156,7 @@ classes:
           - { name: envelope, type: Envelope }
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
+        notes: "Dart accepts two extra optional named params beyond the contract shape: cancellationToken (issue 10) and preempt (issue 11). preempt defaults to false (drop-if-busy / serialized — the existing behavior). When preempt=true AND a cancellationToken is supplied, the run cancels the model's previously in-flight streaming run before acquiring the model write lock (latest-frame-wins), so a continuous live-capture loop can flip from drop-if-busy to cancel-and-replace without head-of-line blocking. preempt with no token is a no-op. Threaded Dart→FFI→SDK (run_streaming_with_options_preempt); the cancel-and-replace slot is a separate mutex on the model, never held across the handle write lock."
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       runStreamingWithOptions:
         params:
@@ -163,6 +164,13 @@ classes:
           - { name: options, type: RunOptions }
         return: "Stream<StreamToken>"
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      runTtsStreaming:
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: options, type: RunOptions }
+        return: "Stream<TtsStreamEvent>"
+        notes: "Streaming TTS (issue: realtime-vision C). Synthesizes the text sentence-chunk by sentence-chunk and emits each chunk's raw 16-bit LE PCM with its sample rate (FfiTtsStreamEvent::AudioChunk { pcm, sample_rate }) as it is produced, instead of one batched WAV — so playback can start after the first sentence. The consumer wraps each chunk into a WAV (the one-shot path's audioAsWav owns the header today). Cancellation mirrors runStreaming's sink-close-as-cancel: unsubscribing the Dart stream (barge-in) closes the FFI sink and stops synthesis at the next chunk boundary (one chunk's ONNX forward is uninterruptible). The batch crossfade is dropped; a short per-chunk edge fade masks the high-pass startup transient and the gapless-splice seam. Reuses the cached TTS ONNX session so chunk N+1 starts immediately."
+        status: { rust: implemented, dart: implemented, kotlin: na, swift: na, csharp: na }
       runStreamingWithFallback:
         params:
           - { name: envelope, type: Envelope }
@@ -176,6 +184,7 @@ classes:
           - { name: context, type: ConversationContext }
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
+        notes: "Dart accepts the same two extra optional named params as runStreaming: cancellationToken (issue 10) and preempt (issue 11, default false). preempt=true + a cancellationToken makes this run cancel the model's previously in-flight streaming run before taking the write lock (latest-frame-wins). See runStreaming notes for the full cancel-and-replace contract."
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       runStreamingWithContextOptions:
         params:
@@ -186,9 +195,9 @@ classes:
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       benchmark:
         async: true
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       unload:
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       executionProviderInfo:
         return: ExecutionProviderInfo
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
@@ -282,12 +291,24 @@ classes:
         params:
           - { name: imageBytes, type: "List<int>" }
           - { name: format, type: String }
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Supports png, jpeg, and webp. Shared constructor enforces 10 MiB encoded-byte and 16,777,216 decoded-pixel defaults, rejects animated WebP for v1, records width/height metadata, and redacts image bytes from human-readable serialization."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      imageRaw:
+        params:
+          - { name: pixels, type: "List<int>" }
+          - { name: pixelFormat, type: PixelFormat }
+          - { name: width, type: int }
+          - { name: height, type: int }
+          - { name: planes, type: "List<ImagePlane>" }
+          - { name: color, type: "YuvColorInfo?", default: "null" }
+        notes: "Binding surface for camera/canvas frames without JPEG re-encoding. PixelFormat covers rgb8, rgba8, bgra8, nv12, nv21, and i420. Unsupported raw formats such as p010, 10-bit YUV, premultiplied alpha, or opaque handles surface as UnsupportedPixelFormat. Plane validation enforces row stride, pixel stride, extents, and YUV color metadata; diagnostics redact pixel bytes. Dart binding wires through FRB to Envelope::image_raw."
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       userMessage:
         params:
           - { name: text, type: String }
-          - { name: images, type: "List<XybridEnvelope>", default: "[]" }
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+          - { name: images, type: "List<ImageEnvelope>", default: "[]" }
+        notes: "Accepts image envelopes from image() or imageRaw(); rejects text/audio/embedding and nested multipart envelopes."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 6. VoiceInfo
@@ -418,6 +439,69 @@ classes:
     section: "8. Supporting Types"
     values: [system, user, assistant]
     status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+
+  # Raw-frame supporting types referenced by Envelope.imageRaw (vision feature).
+  # The Rust shapes exist in xybrid-core::ir::envelope; the Dart binding surface
+  # landed with the imageRaw bindings (realtime vision Phase B). kotlin/swift/csharp
+  # remain planned.
+  PixelFormat:
+    type: enum
+    section: "8. Supporting Types"
+    notes: "Raw pixel-buffer formats accepted by Envelope.imageRaw. Serialized lowercase. Unsupported raw formats (p010, 10-bit YUV, premultiplied alpha, opaque handles) surface as UnsupportedPixelFormat before any pixel bytes are read."
+    values: [rgb8, rgba8, bgra8, nv12, nv21, i420]
+    status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+
+  ImagePlane:
+    type: data
+    section: "8. Supporting Types"
+    notes: "One memory plane inside a raw pixel image. Packed RGB-family inputs carry a single plane; NV12/NV21 carry two; I420 carries three. Plane validation enforces row stride, pixel stride, and extents."
+    properties:
+      offset:
+        type: int
+        notes: "Byte offset into the raw pixel buffer where this plane begins."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      rowStride:
+        type: int
+        notes: "Bytes between adjacent rows in this plane (Rust: row_stride)."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      pixelStride:
+        type: int
+        notes: "Bytes between adjacent samples in the same row (Rust: pixel_stride)."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      width:
+        type: int
+        notes: "Plane width in samples. Chroma planes are usually subsampled."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      height:
+        type: int
+        notes: "Plane height in samples. Chroma planes are usually subsampled."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+
+  YuvColorMatrix:
+    type: enum
+    section: "8. Supporting Types"
+    notes: "YUV color conversion matrix for raw YUV camera frames. Serialized lowercase."
+    values: [bt601, bt709, bt2020]
+    status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+
+  YuvColorRange:
+    type: enum
+    section: "8. Supporting Types"
+    notes: "YUV luma/chroma numeric range. Serialized lowercase."
+    values: [limited, full]
+    status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+
+  YuvColorInfo:
+    type: data
+    section: "8. Supporting Types"
+    notes: "Color metadata required for raw YUV camera frames (nv12, nv21, i420). RGB-family raw inputs must not carry it."
+    properties:
+      matrix:
+        type: YuvColorMatrix
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      range:
+        type: YuvColorRange
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
 
   GenerationConfig:
     type: data
@@ -714,6 +798,18 @@ classes:
       maxGraceTokens:
         type: "int?"
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+      # Live-mode / frame-session concept (realtime vision Phase B, issue 14).
+      # Surfaced on the streaming run-options path for continuous live-capture
+      # loops (e.g. the Flutter vision-live loop). The caller generates the id;
+      # the SDK treats it as an opaque tag. Telemetry note below.
+      frameSessionId:
+        type: "String?"
+        notes: "Caller-supplied UUID identifying one continuous live-capture session. Generated by the caller (the Flutter live loop), opaque to the SDK. Tags every inference in the session so telemetry can roll up per session instead of per frame. Null for one-shot runs. Rust: RunOptions.frame_session_id field. Dart: surfaced as the optional frameSessionId parameter on the streaming run methods (FfiRunOptions.frame_session_id under the hood); there is no standalone Dart RunOptions builder yet (issue 14)."
+        status: { dart: implemented, rust: implemented, kotlin: planned, swift: planned, csharp: planned }
+      liveMode:
+        type: bool
+        notes: "When true, marks the run as part of a continuous live-capture session. Live-mode inferences carry frame_session_id + live_mode on the wire and are rate-limited (~1 wire row/sec per frame_session_id) at the telemetry dispatch funnel rather than emitted per frame. Defaults to false (per-run telemetry, byte-for-byte unchanged). Set implicitly via with_frame_session / the frameSessionId streaming parameter — callers don't toggle it directly (issue 14)."
+        status: { dart: implemented, rust: implemented, kotlin: planned, swift: planned, csharp: planned }
     methods:
       with_generation_config:
         params: [{ name: config, type: GenerationConfig }]
@@ -723,9 +819,15 @@ classes:
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       with_cancellation_token:
         params: [{ name: token, type: CancellationToken }]
+        notes: "Rust builder that attaches a CancellationToken to the run options and makes the AbortPolicy observe UserCancelled. The Dart binding does not expose a with_cancellation_token builder; instead the streaming run methods take an optional cancellationToken parameter that wires the token + UserCancelled observation under the hood (issue 10). dart stays planned for this exact builder shape — the capability is reachable via the streaming parameter."
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       with_correlation_id:
         params: [{ name: correlationId, type: String }]
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      with_frame_session:
+        notes: "Tag this run as part of a live-capture session: sets frameSessionId (caller-supplied UUID) and liveMode=true. Streaming run-options path only; the SDK rate-limits the session's telemetry to ~1 wire row/sec per frame_session_id (issue 14). Rust: RunOptions::with_frame_session builder. Dart does NOT expose this exact builder — the capability is reachable via the frameSessionId parameter on the streaming run methods, which wires FfiRunOptions.frame_session_id -> with_frame_session under the hood (same pattern as with_cancellation_token), so dart stays planned for the builder shape itself."
+        params:
+          - { name: frameSessionId, type: String }
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
 
   AbortPolicy:
@@ -756,7 +858,8 @@ classes:
     section: "8. Supporting Types"
     variants:
       UserCancelled:
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "User-initiated cancellation. Reachable from Dart (issue 10) via the CancellationToken handle passed to the streaming run methods: cancelling the token makes the run's AbortPolicy observe UserCancelled and halts generation at the next token boundary. The Dart AbortSignal enum itself does not expose a userCancelled value — cancellation is driven by the token, not by adding the signal to a Dart policy. Local streaming abort is cooperative and checked per-token before each emitted token."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       MemoryPressureWarn:
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       MemoryPressureCritical:
@@ -769,9 +872,12 @@ classes:
   CancellationToken:
     type: class
     section: "8. Supporting Types"
+    notes: "Cooperative cancel handle for an in-flight run. In Rust it is paired with a RunOptions via with_cancellation_token; in Dart the caller constructs a CancellationToken and passes it to the streaming run methods (runStreaming / runStreamingWithContext / runStreamingWithFallback) via the optional cancellationToken parameter. Local streaming abort is cooperative: the token's cancelled state is checked before every emitted token, so cancellation takes effect at the next token boundary, not mid-token, and the model write lock is released promptly. The Dart binding surface (cancel handle exposing cancel() / isCancelled, plus sink-close-as-cancel when the Dart stream is unsubscribed mid-run) was wired by issue 10. Issue 11 reuses the same token for preemptive cancel-and-replace: when runStreaming/runStreamingWithContext are called with preempt=true, the token is registered in the model's in-flight slot and a later preempting run cancels it (latest-frame-wins) before acquiring the write lock — so a stale run halts and releases the lock instead of blocking the new one."
     methods:
       cancel:
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Request cooperative cancellation of the associated run. Takes effect at the next token boundary."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       is_cancelled:
+        notes: "Whether cancellation has been requested (Dart: isCancelled getter)."
         return: bool
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }

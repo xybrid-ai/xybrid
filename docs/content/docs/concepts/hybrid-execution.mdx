@@ -1,0 +1,109 @@
+---
+title: Hybrid Execution
+description: How Xybrid routes inference between device and cloud
+---
+
+Xybrid is a *hybrid* runtime: every pipeline stage can run on-device, in the cloud, or let the runtime decide. This page explains the routing model and how to configure cloud execution.
+
+## Execution targets
+
+Each stage has a `target`:
+
+| Target | Behavior |
+|--------|----------|
+| `device` | Always run on-device (alias: `local`) |
+| `cloud` | Always run in the cloud (alias: `integration`) |
+| `auto` | Let the runtime decide — the default |
+
+```yaml
+stages:
+  - model: whisper-tiny
+    target: device
+
+  - model: gpt-4o-mini
+    target: cloud
+    provider: openai
+```
+
+## How `auto` decides
+
+For `auto` stages the orchestrator weighs:
+
+- **Model availability** — is the model cached locally, or available in the registry for this platform?
+- **Device capabilities** — CPU features, memory, and accelerators
+- **Host signals** — battery level and thermal state reported by the platform
+- **Policies** — user-defined rules that allow or deny routes
+
+Preview decisions without executing:
+
+```bash
+xybrid run --config pipeline.yaml --input-audio q.wav --dry-run
+```
+
+To force a route, set `target: device` or `target: cloud` on the stage in the pipeline YAML.
+
+## Cloud execution
+
+Cloud stages stream responses over OpenAI-compatible SSE. There are two ways to reach a provider:
+
+### Through the Xybrid gateway (default)
+
+By default cloud stages route through the Xybrid gateway at `https://api.xybrid.dev/v1`. The gateway holds provider credentials for you, so devices never embed provider API keys.
+
+```dart
+// Use a custom or self-hosted gateway
+await Xybrid.init(gatewayUrl: 'https://my-gateway.example.com');
+```
+
+### Directly to a provider
+
+Stages with a `provider` can call the provider API directly. API keys are resolved from environment variables:
+
+| Provider | Environment variable |
+|----------|----------------------|
+| `openai` | `OPENAI_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `google` | `GOOGLE_API_KEY` |
+| `deepseek` | `DEEPSEEK_API_KEY` |
+| `elevenlabs` | `ELEVENLABS_API_KEY` |
+| `openrouter` | `OPENROUTER_API_KEY` |
+| `custom` | `CUSTOM_API_KEY` |
+
+An explicit `api_key` field also accepts an environment reference (`$OPENAI_API_KEY`) — avoid hardcoding raw keys in pipeline files.
+
+## Policies
+
+Policies are YAML rule sets that constrain routing. Rules are evaluated in order; the first match wins:
+
+```yaml
+# policy.yaml
+version: "1.0.0"
+rules:
+  - id: "keep_audio_on_device"
+    expression: "input.kind == \"AudioRaw\""
+    action: "deny"          # deny this route for raw audio input
+
+  - id: "avoid_slow_networks"
+    expression: "metrics.network_rtt > 300"
+    action: "deny"          # don't go to cloud on a slow network
+
+  - id: "allow_all"
+    expression: "true"
+    action: "allow"
+```
+
+```bash
+xybrid run --config pipeline.yaml --input-audio q.wav --policy policy.yaml
+```
+
+Expressions can reference the input envelope (`input.kind`) and live device metrics (`metrics.network_rtt`).
+
+## Fallback
+
+When a preferred route fails — a model fails to load, or the network drops mid-stream — the orchestrator can fall back to the other target. In the Flutter SDK, `runStreamingWithFallback` exposes this directly for LLM streaming.
+
+Every routing decision is recorded in telemetry; inspect them with [`xybrid trace`](/docs/cli/reference/trace).
+
+## Related
+
+- [Pipelines](/docs/concepts/pipelines) — stage configuration reference

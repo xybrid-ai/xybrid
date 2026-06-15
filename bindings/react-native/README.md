@@ -1,14 +1,15 @@
 # react-native-xybrid
 
-React Native binding for the Xybrid SDK. Wraps the same UniFFI-generated
+React Native binding for the Xybrid SDK. Wraps the same BoltFFI-generated
 Swift/Kotlin surface that powers the standalone iOS and Android SDKs, exposed
 to JavaScript through a TurboModule.
 
 ## Status
 
-**Spike / pre-release.** Surface covers loader → `load()` → `run()` plus voice
+**Spike / pre-release.** Surface covers loader → `run()` plus voice
 introspection and platform-state push. Streaming (ASR partials, LLM token
-streams) is not yet wired through — see "Open work" below.
+streams) and per-call generation config are not yet wired through — see
+"Open work" below.
 
 ## Architecture
 
@@ -16,15 +17,22 @@ streams) is not yet wired through — see "Open work" below.
 JS / TS
   └── react-native-xybrid (this package)
         ├── ios/      Swift TurboModule → bundled Xybrid.swift wrapper → XybridFFI.xcframework
-        └── android/  Kotlin TurboModule → bundled ai.xybrid.* wrapper → libxybrid_uniffi.so + ORT
-                                                          └── xybrid-uniffi (Rust)
-                                                                └── xybrid-sdk (Rust)
-                                                                      └── xybrid-core (Rust)
+        └── android/  Kotlin TurboModule → ai.xybrid:xybrid-kotlin AAR (Maven; bundles .so + ORT)
+                                                          └── xybrid-bolt (Rust, BoltFFI)
+                                                                └── xybrid-ffi-facade (Rust)
+                                                                      └── xybrid-sdk → xybrid-core (Rust)
 ```
 
-Native artifacts are staged by `cargo xtask build-react-native` from the
-existing per-platform builds (`build-xcframework`, `build-android`). No new
-Rust code — the bridge is purely a thin layer above the UniFFI bindings.
+The two platforms consume the bolt core differently:
+
+- **iOS** vendors the `XybridFFI.xcframework` + the bolt Swift wrapper sources,
+  staged into this package by `cargo xtask stage-react-native` (from the same
+  `build-xcframework` output the standalone Apple SDK uses).
+- **Android** depends on the published `ai.xybrid:xybrid-kotlin` Maven AAR,
+  which bundles `libxybrid-bolt.so` + the ONNX Runtime alongside the
+  `ai.xybrid.*` Kotlin classes. Nothing is staged per-package.
+
+No new Rust code — the bridge is purely a thin layer above the bolt bindings.
 
 ## Layout
 
@@ -39,31 +47,29 @@ bindings/react-native/
 ├── ios/
 │   ├── XybridModule.{h,mm}  # ObjC++ TurboModule registration
 │   ├── XybridModuleImpl.swift  # Actual work, calls bundled Xybrid.swift
-│   ├── XybridSwift/         # ← staged by xtask: Xybrid.swift + xybrid_uniffi.swift
+│   ├── XybridSwift/         # ← staged by xtask: Xybrid.swift + xybrid_bolt.swift
 │   └── Frameworks/          # ← staged by xtask: XybridFFI.xcframework
 └── android/
-    ├── build.gradle
-    ├── libs/{abi}/          # ← staged by xtask: libxybrid_uniffi.so + ORT libs
-    └── src/main/java/ai/xybrid/
-        ├── Xybrid.kt        # ← staged by xtask: copy of bindings/kotlin Xybrid.kt
-        ├── xybrid_uniffi.kt # ← staged by xtask: UniFFI generated Kotlin
-        └── reactnative/
-            ├── XybridModule.kt
-            └── XybridPackage.kt
+    ├── build.gradle         # depends on ai.xybrid:xybrid-kotlin (Maven AAR)
+    └── src/main/java/ai/xybrid/reactnative/
+        ├── XybridModule.kt  # Kotlin TurboModule → ai.xybrid.* (from the AAR)
+        └── XybridPackage.kt
 ```
 
-The staged paths are gitignored — they're regenerated from the Rust core
-on every build, and shipped vendored inside the npm tarball.
+The staged iOS paths are gitignored — they're regenerated from the Rust core
+on every build and shipped vendored inside the npm tarball. Android pulls its
+binding + natives from Maven, so there is nothing to stage there.
 
 ## Local development
 
 ```bash
-# 1. Build native artifacts (XCFramework on macOS, .so on Linux/macOS)
-cargo xtask build-react-native --release
+# 1. Stage the iOS native artifacts (XCFramework + Swift wrapper). macOS only.
+#    Android needs nothing — gradle resolves the Maven AAR.
+cargo xtask stage-react-native --release
 
 # 2. Use a yarn link or relative path in a sample app
 cd ../my-sample-rn-app
-yarn add ../yangon-v1/bindings/react-native
+yarn add ../xybrid/bindings/react-native
 cd ios && pod install && cd ..
 
 # 3. Wrap the app entry
@@ -75,6 +81,10 @@ const result = await model.run({ kind: 'audio', bytesBase64, sampleRate: 16000, 
 console.log(result.text);
 await model.release();
 ```
+
+> The JS `ModelLoader.fromRegistry(id).load()` facade is preserved for API
+> stability even though the native bolt layer collapsed the loader into the
+> `XybridModel` factories — `index.ts` maps the old shape onto the new calls.
 
 ## Requirements
 
@@ -91,15 +101,18 @@ await model.release();
 
 ## Open work for GA
 
-1. **Streaming.** ASR partial results and LLM token streams currently terminate
-   at the UniFFI boundary's poll-based `XybridStream`. Surfacing them to JS
-   needs an `EventEmitter` (legacy) or a JSI `HostObject` wrapper for low-jitter
-   token delivery. The Rust side already exposes everything required.
-2. **Binary payloads.** Audio bytes ride as base64 strings today. Move to
+1. **Streaming.** ASR partial results and LLM token streams aren't surfaced to
+   JS yet — they need an `EventEmitter` (legacy) or a JSI `HostObject` wrapper
+   for low-jitter token delivery.
+2. **Generation config on `run`.** The bolt `XybridModel.run(envelope)` does
+   not yet accept a per-call `GenerationConfig`; the JS `config` argument is
+   currently ignored. Unblocks once the facade/bolt surface threads config
+   through `run`.
+3. **Binary payloads.** Audio bytes ride as base64 strings today. Move to
    `ArrayBuffer` via JSI to drop the encode/decode hop on every chunk.
-3. **TypeScript codegen.** The `Spec` interface is hand-written; once the
-   surface stabilizes, generate `NativeXybrid.ts` from the same source the
-   UniFFI UDL is derived from to keep all four bindings in lockstep.
-4. **Example app + automated smoke test.** No `example/` directory yet.
+4. **TypeScript codegen.** The `Spec` interface is hand-written; once the
+   surface stabilizes, generate `NativeXybrid.ts` from the same bolt `#[data]`
+   definitions the other bindings derive from, to keep them in lockstep.
+5. **Example app + automated smoke test.** No `example/` directory yet.
    The CI workflow builds and lints the package but does not yet run a
    sample app end-to-end.

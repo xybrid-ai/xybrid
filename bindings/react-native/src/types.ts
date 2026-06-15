@@ -1,4 +1,4 @@
-// Type definitions mirroring the UniFFI surface in crates/xybrid-uniffi/src/lib.rs.
+// Type definitions mirroring the bolt FFI surface in crates/xybrid-bolt/src/lib.rs.
 // These cross the codegen boundary, so only TurboModule-supported primitives are
 // used here: string, number, boolean, arrays of primitives, and plain object
 // records. Binary payloads (audio bytes) ride as base64-encoded strings until

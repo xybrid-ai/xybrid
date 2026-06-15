@@ -5,7 +5,7 @@ description: 几分钟内开始使用 Xybrid
 
 只需几行代码即可在您的应用中运行 Xybrid。选择下方的 SDK 开始。
 
-<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'CLI']}>
+<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Rust', 'CLI']}>
   <Tab value="Flutter">
 **安装**
 
@@ -122,11 +122,7 @@ val result = model.run(envelope)
 https://github.com/xybrid-ai/xybrid.git#upm
 ```
 
-或指定版本：
-
-```
-https://github.com/xybrid-ai/xybrid.git#upm/v0.1.2
-```
+`#upm` 始终指向最新发布的 Unity 构建。如需固定版本，请使用[仓库标签页](https://github.com/xybrid-ai/xybrid/tags)中的 `upm/*` 标签。
 
 **运行推理**
 
@@ -149,12 +145,52 @@ Debug.Log($"延迟: {result.LatencyMs}ms");
 
 **预期输出：** `result.Success == true`，包含来自 TTS 模型的音频输出。
   </Tab>
+  <Tab value="Rust">
+**安装**
+
+```toml
+# Cargo.toml
+[dependencies]
+xybrid = "0.1.2"
+```
+
+**运行推理**
+
+```rust
+use xybrid::ModelLoader;
+use xybrid::ir::{Envelope, EnvelopeKind};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 从注册表加载模型
+    let model = ModelLoader::from_registry("kokoro-82m").load()?;
+
+    // 运行文本转语音
+    let input = Envelope::new(EnvelopeKind::Text("Hello from Xybrid!".into()));
+    let result = model.run(&input, None)?;
+
+    // result 包含生成的语音音频
+    Ok(())
+}
+```
+
+LLM 模型需要 llama.cpp 后端 — 通过 `features = ["llm-llamacpp"]` 启用。
+
+**预期输出：** 包含合成语音音频的结果 Envelope。
+  </Tab>
   <Tab value="CLI">
 **安装**
 
 ```bash
-cargo install xybrid-cli
+# macOS / Linux
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh
 ```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
+```
+
+预编译二进制与源码构建方式参见[命令行指南](/docs/cli)。
 
 **运行推理**
 
@@ -180,6 +216,8 @@ Transcription: "Hello, how can I help you?"
 ## 下一步
 
 <Cards>
-  <Card title="SDK" href="/zh/docs/sdks" description="各平台的详细 SDK 指南" />
-  <Card title="核心概念" href="/zh/docs/concepts" description="Xybrid 的工作原理" />
+  <Card title="SDK" href="/zh/docs/sdks/flutter" description="各平台的详细 SDK 指南" />
+  <Card title="模型目录" href="/zh/docs/concepts/models" description="浏览设备端模型目录" />
+  <Card title="流水线" href="/zh/docs/concepts/pipelines" description="用几行 YAML 串联多个模型" />
+  <Card title="命令行" href="/zh/docs/cli" description="在终端中运行和调试模型" />
 </Cards>

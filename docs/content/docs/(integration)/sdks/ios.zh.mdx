@@ -6,7 +6,7 @@ description: 面向 iOS 和 macOS 的原生 Swift SDK，支持本地 ML 推理
 Swift SDK 通过 UniFFI 为 iOS 和 macOS 应用提供到 Xybrid 运行时的原生绑定。
 
 <Callout type="info">
-Swift SDK 处于早期访问阶段，API 稳定但尚未作为正式版本发布。可通过 Swift Package Manager 从源码安装，或使用 [Flutter SDK](/zh/docs/sdks/flutter) 进行跨平台开发。
+Swift SDK 处于早期访问阶段。正式版本通过 Swift Package Manager 分发预编译的 `XybridFFI` xcframework。已知问题：在 Apple Silicon 上为 iOS 模拟器构建需要 `useLocalNatives = true` 的临时方案 — 详见 [#179](https://github.com/xybrid-ai/xybrid/issues/179)。跨平台开发可使用 [Flutter SDK](/zh/docs/sdks/flutter)。
 </Callout>
 
 ## 安装

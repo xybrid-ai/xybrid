@@ -67,9 +67,11 @@ pub use chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
 
 // Re-export commonly used template types at execution:: level
 pub use template::{
-    ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage, PostprocessingStep,
-    PreprocessingStep, VoiceConfig, VoiceFormat, VoiceInfo, VoiceLoader,
+    ExecutionMode, ExecutionTemplate, ImageNormalizePreset, ImageResizeMode, ImageTensorLayout,
+    ModelMetadata, PipelineStage, PostprocessingStep, PreprocessingStep, VoiceConfig, VoiceFormat,
+    VoiceInfo, VoiceLoader,
 };
+pub use template::{VisionEncoderConfig, VisionPreprocessingPreset};
 
 // Data types (internal)
 pub(crate) mod types;
@@ -102,6 +104,9 @@ pub use executor::TemplateExecutor;
 
 // Preprocessing steps (internal implementation details)
 pub(crate) mod preprocessing;
+
+#[cfg(any(test, feature = "dev-tools"))]
+pub mod test_seams;
 
 // Postprocessing steps (internal implementation details)
 pub(crate) mod postprocessing;

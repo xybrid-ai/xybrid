@@ -66,6 +66,7 @@ mel_spec = "0.2"  # For mel spectrogram computation (audio preprocessing)
 num-complex = "0.4"  # Required by mel_spec for Complex numbers
 rustfft = "6.2"  # For custom Whisper-compatible FFT (Slaney mel scale)
 image = "0.25"  # For image resizing and processing
+yuvutils-rs = { version = "0.8.3", default-features = false }  # For raw YUV camera-frame conversion
 # Disable default features to exclude esaxx_fast (esaxx-rs/cpp) which hardcodes
 # static_crt(true) on MSVC, producing /MT objects that conflict with ORT's /MD.
 # We only run tokenizer models, we don't train them — esaxx-rs is only for BPE training.
@@ -149,6 +150,14 @@ llm-llamacpp = [
     "dep:xybrid-llama",
     "xybrid-llama/bindings",
 ]
+# The Rust vision pipeline (envelopes, preprocessing, strategy dispatch) is
+# always compiled in. This feature gates only the *native* llama multimodal
+# backend (mtmd bindings) on top of `llm-llamacpp`.
+llm-llamacpp-vision = [
+    "llm-llamacpp",
+    "xybrid-llama-sys/vision",
+    "xybrid-llama/vision",
+]
 
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
 # downstream demos, integration tests, and benchmarks. Off by default.
@@ -159,7 +168,7 @@ dev-tools = []
 [build-dependencies]
 # No build-time native dependencies in xybrid-core: the llama.cpp cmake
 # build was relocated to `crates/llama-cpp-sys/build.rs` as Phase 1 of the
-# `llamacpp-crate-split` epic, and `xybrid-core/build.rs` was removed.
+# `llamacpp-crate-split` epic, and `xybrid-core/build.rs` is now a stub.
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -187,6 +196,11 @@ harness = false
 [[bench]]
 name = "routing_feedback"
 harness = false
+
+[[bench]]
+name = "raw_image_ingress"
+harness = false
+required-features = ["dev-tools"]
 
 # Platform-specific ureq dependencies
 # Non-Android: Use default ureq with TLS

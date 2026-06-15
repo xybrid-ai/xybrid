@@ -49,22 +49,27 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 | `crates/xybrid-core`           | ML execution + pipelines; **additive platform plane** (cloud routing, telemetry, control sync) | core lib |
 | `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, telemetry) | lib      |
 | `crates/xybrid-cli`            | `xybrid` binary                                            | bin      |
-| `crates/xybrid-ffi`            | C ABI for Unity / C / C++                                  | FFI      |
-| `crates/xybrid-uniffi`         | UniFFI bindings for Swift / Kotlin (Apple/Android SDKs)    | FFI      |
+| `crates/xybrid-ffi-facade`     | FFI-agnostic POD/Arc facade over the SDK (one canonical translation) | FFI |
+| `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# / WASM + C header (Apple/Android SDKs) | FFI |
+| `crates/xybrid-ffi`            | C ABI for Unity / C / C++ (pre-bolt; Unity migration pending) | FFI    |
 | `bindings/flutter/rust`        | flutter_rust_bridge wrapper for Dart                       | FFI      |
 | `macros`                       | proc-macros (`xybrid-macros`); syn/quote only              | proc     |
 | `xtask`                        | build / codegen automation                                 | tool     |
 | `integration-tests`            | end-to-end tests with real models & fixtures               | test     |
 
+`xybrid-uniffi` was removed once iOS + Android migrated to `xybrid-bolt`;
+the FFI binding crates now route their SDK→foreign-language translation
+through `xybrid-ffi-facade` rather than each re-translating SDK types.
+
 **Dependency direction (do not reverse):**
 
 ```
-xybrid-cli  ─┐
-xybrid-ffi  ─┤
-xybrid-uniffi ─┼─► xybrid-sdk ─► xybrid-core
-flutter rust──┤
-xtask ──────────────────────────► xybrid-core
-integration-tests ──────────────► xybrid-core
+xybrid-cli  ──────────────────────► xybrid-sdk ─► xybrid-core
+xybrid-bolt ──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
+xybrid-ffi  ─┐
+flutter rust─┴────────────────────► xybrid-sdk ─► xybrid-core
+xtask ────────────────────────────► xybrid-core
+integration-tests ────────────────► xybrid-core
 ```
 
 Workspace **package metadata** is inherited via `[workspace.package]` —
@@ -83,15 +88,15 @@ refactor, not a drive-by change.
 
 ## Error handling
 
-Rust-API library crates (`xybrid-core`, `xybrid-sdk`, `xybrid-uniffi`) use
-**`thiserror`** with a single canonical error enum and a `Result` alias per
-crate:
+Rust-API library crates (`xybrid-core`, `xybrid-sdk`, `xybrid-ffi-facade`)
+use **`thiserror`** with a single canonical error enum and a `Result` alias
+per crate:
 
-| Crate           | Error type     | Result alias    | Defined in                        |
-|-----------------|----------------|-----------------|-----------------------------------|
-| `xybrid-core`   | `XybridError`  | `XybridResult`  | `crates/xybrid-core/src/error.rs` |
-| `xybrid-sdk`    | `SdkError`     | `SdkResult`     | `crates/xybrid-sdk/src/model.rs`  |
-| `xybrid-uniffi` | `XybridError`  | —               | `crates/xybrid-uniffi/src/lib.rs` (also derives `uniffi::Error`) |
+| Crate              | Error type     | Result alias    | Defined in                           |
+|--------------------|----------------|-----------------|--------------------------------------|
+| `xybrid-core`      | `XybridError`  | `XybridResult`  | `crates/xybrid-core/src/error.rs`    |
+| `xybrid-sdk`       | `SdkError`     | `SdkResult`     | `crates/xybrid-sdk/src/model.rs`     |
+| `xybrid-ffi-facade`| `Error`        | `Result`        | `crates/xybrid-ffi-facade/src/lib.rs` (one canonical `From<SdkError>`; the FFI generator crates re-decorate it) |
 
 Sub-error enums (`InferenceError`, `PipelineError`, `AdapterError`, …) live
 next to the modules that raise them and convert into the canonical type via

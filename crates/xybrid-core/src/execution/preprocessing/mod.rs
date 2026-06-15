@@ -6,7 +6,7 @@
 //! | Module | Operations |
 //! |--------|-----------|
 //! | [`audio`] | `AudioDecode`, `MelSpectrogram` |
-//! | [`image`] | `Resize`, `CenterCrop` |
+//! | [`image`] | `ImageDecode`, `Resize`, `CenterCrop` |
 //! | [`text`] | `Tokenize`, `Phonemize` |
 //! | [`tensor`] | `Normalize`, `Reshape` |
 
@@ -55,6 +55,14 @@ pub fn apply_preprocessing_step(
             channels,
         } => audio::decode_audio_step(data, input_envelope, *sample_rate, *channels),
 
+        PreprocessingStep::ImageDecode { channels, layout } => {
+            image::image_decode_step(data, *channels, *layout)
+        }
+
+        PreprocessingStep::ImageIngress { channels, layout } => {
+            image::image_ingress_step(data, *channels, *layout)
+        }
+
         PreprocessingStep::Tokenize {
             vocab_file,
             tokenizer_type,
@@ -96,6 +104,27 @@ pub fn apply_preprocessing_step(
         PreprocessingStep::Normalize { mean, std } => tensor::normalize_step(data, mean, std),
 
         PreprocessingStep::Reshape { shape } => tensor::reshape_step(data, shape),
+
+        PreprocessingStep::ImageResize {
+            width,
+            height,
+            mode,
+            interpolation,
+            fill,
+            layout,
+        } => image::image_resize_step(
+            data,
+            *width,
+            *height,
+            *mode,
+            interpolation,
+            fill,
+            *layout,
+        ),
+
+        PreprocessingStep::ImageNormalize { preset, layout } => {
+            image::image_normalize_step(data, preset, *layout)
+        }
 
         PreprocessingStep::CenterCrop { width, height } => {
             image::center_crop_step(data, *width, *height)

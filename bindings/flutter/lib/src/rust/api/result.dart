@@ -25,6 +25,7 @@ class FfiInferenceMetrics {
   final double? prefillTps;
   final double? decodeTps;
   final int? tokensOut;
+  final int? imagePreprocessMs;
   final List<FfiStageLatency> stageLatenciesMs;
 
   const FfiInferenceMetrics({
@@ -34,6 +35,7 @@ class FfiInferenceMetrics {
     this.prefillTps,
     this.decodeTps,
     this.tokensOut,
+    this.imagePreprocessMs,
     required this.stageLatenciesMs,
   });
 
@@ -45,6 +47,7 @@ class FfiInferenceMetrics {
       prefillTps.hashCode ^
       decodeTps.hashCode ^
       tokensOut.hashCode ^
+      imagePreprocessMs.hashCode ^
       stageLatenciesMs.hashCode;
 
   @override
@@ -58,6 +61,7 @@ class FfiInferenceMetrics {
           prefillTps == other.prefillTps &&
           decodeTps == other.decodeTps &&
           tokensOut == other.tokensOut &&
+          imagePreprocessMs == other.imagePreprocessMs &&
           stageLatenciesMs == other.stageLatenciesMs;
 }
 

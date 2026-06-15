@@ -71,7 +71,11 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.4.8"
+        // Bumped from 1.4.8 → 1.5.10 to match Kotlin 1.9.22 (the version
+        // bolt-generated bindings require for the `enum entries` API).
+        // Compose Compiler/Kotlin compatibility table:
+        // https://developer.android.com/jetpack/androidx/releases/compose-kotlin
+        kotlinCompilerExtensionVersion = "1.5.10"
     }
 
     packagingOptions {

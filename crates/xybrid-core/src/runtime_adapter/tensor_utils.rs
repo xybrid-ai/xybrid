@@ -56,6 +56,17 @@ pub fn envelope_to_tensors(
         EnvelopeKind::Audio(audio_data) => audio_to_tensor(audio_data, target_shape)?,
         EnvelopeKind::Text(text) => text_to_tensor(text, target_shape)?,
         EnvelopeKind::Embedding(embedding) => embedding_to_tensor(embedding, target_shape)?,
+        EnvelopeKind::Image { .. } => {
+            return Err(AdapterError::InvalidInput(
+                "Image envelopes require image preprocessing before tensor conversion".to_string(),
+            ))
+        }
+        EnvelopeKind::MultiPart(_) => {
+            return Err(AdapterError::InvalidInput(
+                "MultiPart envelopes require multimodal planning before tensor conversion"
+                    .to_string(),
+            ))
+        }
     };
 
     let mut result = std::collections::HashMap::new();
