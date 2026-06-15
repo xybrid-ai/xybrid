@@ -633,8 +633,23 @@ impl XybridModel {
         self.inner.voice(voice_id).map(XybridVoiceInfo::from)
     }
 
-    pub fn run(&self, envelope: XybridEnvelope) -> Result<XybridResult, XybridError> {
-        let result = self.inner.run(envelope.into()).map_err(XybridError::from)?;
+    /// Run inference, optionally with [`XybridRunOptions`] (generation config,
+    /// abort signals, cloud-fallback). Pass `None` for the model's defaults.
+    ///
+    /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
+    /// forwards `None`, so simple call sites stay ergonomic.
+    pub fn run(
+        &self,
+        envelope: XybridEnvelope,
+        options: Option<XybridRunOptions>,
+    ) -> Result<XybridResult, XybridError> {
+        let result = match options {
+            Some(opts) => self
+                .inner
+                .run_with_options(envelope.into(), opts.into(), None),
+            None => self.inner.run(envelope.into()),
+        }
+        .map_err(XybridError::from)?;
         Ok(result.into())
     }
 

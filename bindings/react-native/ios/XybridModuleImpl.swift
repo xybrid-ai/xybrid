@@ -95,10 +95,7 @@ public final class XybridModuleImpl: NSObject {
       return
     }
     let envelopeOrError = decodeEnvelope(envelope)
-    // NOTE: bolt's `XybridModel.run(envelope:)` does not yet accept a
-    // per-call generation config — `config` is ignored until the facade/bolt
-    // surface threads `GenerationConfig` through `run`. Tracked as a
-    // bolt-binding follow-up.
+    let options = config.map(decodeRunOptions)
 
     Task.detached {
       switch envelopeOrError {
@@ -106,7 +103,7 @@ public final class XybridModuleImpl: NSObject {
         reject("xybrid_envelope", err, nil)
       case .success(let env):
         do {
-          let result = try model.run(envelope: env)
+          let result = try model.run(envelope: env, options: options)
           resolve(self.encodeResult(result))
         } catch let error as XybridError {
           self.rejectXybrid(error, reject)
@@ -255,6 +252,33 @@ public final class XybridModuleImpl: NSObject {
     default:
       return .failure("Unknown envelope kind: \(kind)")
     }
+  }
+
+  // Map the JS generation-config payload onto bolt's XybridRunOptions. The JS
+  // surface only exposes sampling params today, so the abort / cloud-fallback
+  // fields are left at their defaults.
+  private func decodeRunOptions(_ dict: NSDictionary) -> XybridRunOptions {
+    // Guard against negative JS values wrapping around to a huge UInt32.
+    func uint32OrNil(_ key: String) -> UInt32? {
+      guard let n = dict[key] as? NSNumber, n.intValue >= 0 else { return nil }
+      return n.uint32Value
+    }
+    let gc = XybridGenerationConfig(
+      maxTokens: uint32OrNil("maxTokens"),
+      temperature: (dict["temperature"] as? NSNumber)?.floatValue,
+      topP: (dict["topP"] as? NSNumber)?.floatValue,
+      minP: (dict["minP"] as? NSNumber)?.floatValue,
+      topK: uint32OrNil("topK"),
+      repetitionPenalty: (dict["repetitionPenalty"] as? NSNumber)?.floatValue,
+      stopSequences: dict["stopSequences"] as? [String] ?? []
+    )
+    return XybridRunOptions(
+      generationConfig: gc,
+      abortOn: [],
+      fallbackToCloud: false,
+      maxGraceTokens: 0,
+      correlationId: nil
+    )
   }
 
   private func encodeResult(_ r: XybridResult) -> [String: Any] {

@@ -152,6 +152,17 @@ public enum Xybrid {
 /// Call `run(envelope:)` to execute inference on input data.
 public typealias Model = XybridModel
 
+public extension XybridModel {
+    /// Run inference with the model's default options.
+    ///
+    /// Convenience over `run(envelope:options:)` so simple call sites stay
+    /// one-argument; forwards `nil` options. Use the two-arg form to override
+    /// generation config, abort signals, or cloud-fallback behaviour.
+    func run(envelope: XybridEnvelope) throws -> XybridResult {
+        try run(envelope: envelope, options: nil)
+    }
+}
+
 /// Input data for model inference.
 /// Use `.audio(pcmData:sampleRate:channels:)` or `.text(_:voice:speed:)`.
 public typealias Envelope = XybridEnvelope

@@ -578,6 +578,12 @@ internal object WireWriterPool {
  * shadow / collide with Swift's stdlib `Error` protocol, and so the
  * Kotlin sealed-hierarchy name matches the existing uniffi consumer
  * expectations.
+ *
+ * **Variant order is part of the wire contract.** BoltFFI encodes `#[error]`
+ * (and `#[data]`) enums by ordinal tag, so reordering or inserting a variant
+ * renumbers every variant after it and breaks already-built foreign clients.
+ * Only ever append at the tail, and keep this order in lockstep with
+ * [`facade::Error`] and its `code()` table.
  */
 sealed class XybridError : Exception() {
 
@@ -1369,21 +1375,34 @@ class XybridModel private constructor(internal val handle: Long) : AutoCloseable
         return reader.readOptional { XybridVoiceInfo.decode(reader) }
     }
 
+    /**
+     * Run inference, optionally with [`XybridRunOptions`] (generation config,
+     * abort signals, cloud-fallback). Pass `None` for the model's defaults.
+     *
+     * The hand-written wrappers add a one-arg `run(envelope)` convenience that
+     * forwards `None`, so simple call sites stay ergonomic.
+     */
 
     @Throws(XybridError::class)
-    fun run(envelope: XybridEnvelope): XybridResult {
+    fun run(envelope: XybridEnvelope, options: XybridRunOptions?): XybridResult {
         val wire_writer_envelope = WireWriterPool.acquire(envelope.wireEncodedSize())
             kotlin.run {
                 val wire = wire_writer_envelope.writer
                 envelope.wireEncodeTo(wire)
             }
+        val wire_writer_options = WireWriterPool.acquire((options?.let { v -> 1 + v.wireEncodedSize() } ?: 1.toInt()))
+            kotlin.run {
+                val wire = wire_writer_options.writer
+                options?.let { v -> wire.writeU8(1u); v.wireEncodeTo(wire) } ?: wire.writeU8(0u)
+            }
         try {
-            val buf = Native.boltffi_xybrid_model_run(handle, wire_writer_envelope.buffer)
+            val buf = Native.boltffi_xybrid_model_run(handle, wire_writer_envelope.buffer, wire_writer_options.buffer)
                 ?: throw FfiException(-1, "Null buffer returned")
             val reader = WireReader(buf)
             return reader.readResult({ XybridResult.decode(reader) }, { XybridError.decode(reader) }).getOrThrow()
         } finally {
             wire_writer_envelope.close()
+            wire_writer_options.close()
         }
     }
 
@@ -1557,7 +1576,7 @@ private object Native {
     @JvmStatic external fun boltffi_xybrid_model_voices(handle: Long): ByteArray?
     @JvmStatic external fun boltffi_xybrid_model_default_voice(handle: Long): ByteArray?
     @JvmStatic external fun boltffi_xybrid_model_voice(handle: Long, voice_id: ByteArray): ByteArray?
-    @JvmStatic external fun boltffi_xybrid_model_run(handle: Long, envelope: ByteBuffer): ByteArray?
+    @JvmStatic external fun boltffi_xybrid_model_run(handle: Long, envelope: ByteBuffer, options: ByteBuffer): ByteArray?
     @JvmStatic external fun boltffi_xybrid_model_warmup(handle: Long): Unit
     @JvmStatic external fun boltffi_xybrid_model_unload(handle: Long): Unit
 }

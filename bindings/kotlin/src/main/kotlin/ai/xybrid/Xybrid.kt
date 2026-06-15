@@ -155,6 +155,16 @@ object Xybrid {
 /** A loaded model ready for inference. */
 typealias Model = XybridModel
 
+/**
+ * Run inference with the model's default options.
+ *
+ * Convenience over the generated [XybridModel.run] (which takes an
+ * `XybridRunOptions?`) so simple call sites stay one-argument. Forwards
+ * `null` options. Use the two-arg `run(envelope, options)` to override
+ * generation config, abort signals, or cloud-fallback behaviour.
+ */
+fun XybridModel.run(envelope: XybridEnvelope): XybridResult = this.run(envelope, null)
+
 /** The result of a model inference operation. */
 typealias Result = XybridResult
 

@@ -13,8 +13,10 @@ import ai.xybrid.Envelope
 import ai.xybrid.Xybrid
 import ai.xybrid.XybridEnvelope
 import ai.xybrid.XybridError
+import ai.xybrid.XybridGenerationConfig
 import ai.xybrid.XybridModel
 import ai.xybrid.XybridResult
+import ai.xybrid.XybridRunOptions
 import ai.xybrid.XybridThermalState
 import ai.xybrid.XybridVoiceInfo
 import ai.xybrid.audioBytes
@@ -137,14 +139,11 @@ class XybridModule(reactContext: ReactApplicationContext) :
       promise.reject("xybrid_envelope", e.message, e)
       return
     }
-    // NOTE: bolt's `XybridModel.run(envelope)` does not yet accept a
-    // per-call generation config — config is ignored until the facade/bolt
-    // surface threads `GenerationConfig` through `run`. Tracked as a
-    // bolt-binding follow-up.
+    val opts = config?.let(::decodeRunOptions)
 
     scope.launch {
       try {
-        val result = model.run(env)
+        val result = model.run(env, opts)
         promise.resolve(encodeResult(result))
       } catch (e: XybridError) {
         rejectXybrid(promise, e)
@@ -291,6 +290,43 @@ class XybridModule(reactContext: ReactApplicationContext) :
     val out = FloatArray(size())
     for (i in 0 until size()) out[i] = getDouble(i).toFloat()
     return out
+  }
+
+  // Map the JS generation-config payload onto bolt's XybridRunOptions. The JS
+  // surface only exposes sampling params today, so the abort / cloud-fallback
+  // fields are left at their defaults.
+  private fun decodeRunOptions(map: ReadableMap): XybridRunOptions {
+    fun uintOrNull(key: String): UInt? {
+      if (!map.hasKey(key) || map.isNull(key)) return null
+      // Guard against negative JS values wrapping around to a huge UInt.
+      val value = map.getInt(key)
+      return if (value >= 0) value.toUInt() else null
+    }
+    fun floatOrNull(key: String) =
+      if (map.hasKey(key) && !map.isNull(key)) map.getDouble(key).toFloat() else null
+    val stops = if (map.hasKey("stopSequences") && !map.isNull("stopSequences")) {
+      val arr = map.getArray("stopSequences")!!
+      val out = ArrayList<String>(arr.size())
+      for (i in 0 until arr.size()) out.add(arr.getString(i) ?: "")
+      out
+    } else {
+      emptyList()
+    }
+    return XybridRunOptions(
+      generationConfig = XybridGenerationConfig(
+        maxTokens = uintOrNull("maxTokens"),
+        temperature = floatOrNull("temperature"),
+        topP = floatOrNull("topP"),
+        minP = floatOrNull("minP"),
+        topK = uintOrNull("topK"),
+        repetitionPenalty = floatOrNull("repetitionPenalty"),
+        stopSequences = stops,
+      ),
+      abortOn = emptyList(),
+      fallbackToCloud = false,
+      maxGraceTokens = 0u,
+      correlationId = null,
+    )
   }
 
   private fun encodeResult(r: XybridResult): WritableMap {
