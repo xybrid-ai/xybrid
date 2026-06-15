@@ -37,8 +37,8 @@ use crate::runtime_adapter::llm::{
 };
 use crate::runtime_adapter::llm_telemetry::{StreamingTelemetry, StreamingTelemetryFields};
 use crate::runtime_adapter::streaming_postprocess::{
-    merge_stop_patterns, strip_thinking_tags, trim_partial_stop_suffix, truncate_at_first_stop,
-    StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
+    merge_stop_patterns, strip_and_capture_thinking_tags, trim_partial_stop_suffix,
+    truncate_at_first_stop, StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
 };
 use crate::runtime_adapter::AdapterError;
 #[cfg(feature = "llm-llamacpp-vision")]
@@ -600,6 +600,7 @@ fn output_from_fields(
     text: String,
     tokens_generated: usize,
     finish_reason: String,
+    reasoning_content: Option<String>,
     fields: StreamingTelemetryFields,
 ) -> GenerationOutput {
     GenerationOutput {
@@ -616,6 +617,7 @@ fn output_from_fields(
         decode_tps: fields.decode_tps,
         prefill_tps: fields.prefill_tps,
         image_preprocess_ms: None,
+        reasoning_content,
     }
 }
 
@@ -841,7 +843,8 @@ impl LlmBackend for LlamaCppBackend {
             log::debug!(target: "xybrid_core", "Searching for stop patterns: {:?}", final_stop_patterns);
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let text = strip_thinking_tags(&text).trim().to_string();
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let text = clean.trim().to_string();
             // `stopped_by_callback` catches the C layer detecting a stop
             // before the Rust post-scan would — e.g. the user-supplied
             // stop sequences that the C layer sees first. Prior code
@@ -864,6 +867,7 @@ impl LlmBackend for LlamaCppBackend {
                 text,
                 output_tokens.len(),
                 finish_reason,
+                reasoning_content,
                 fields,
             ))
         })
@@ -908,10 +912,13 @@ impl LlmBackend for LlamaCppBackend {
             }
             .to_string();
 
+            // Raw-prompt path: no chat template, so no `<think>` blocks to
+            // surface. Reasoning is always absent here.
             Ok(output_from_fields(
                 text,
                 output_tokens.len(),
                 finish_reason,
+                None,
                 fields,
             ))
         })
@@ -990,7 +997,8 @@ impl LlmBackend for LlamaCppBackend {
             let mut text = model.detokenize(&output_tokens)?;
             let stopped_full = truncate_at_first_stop(&mut text, &final_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_patterns);
-            let text = strip_thinking_tags(&text).trim().to_string();
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let text = clean.trim().to_string();
             // `stopped_by_callback` is an independent signal from the C
             // layer that a stop sequence was hit — previously dropped.
             let finish_reason =
@@ -1015,6 +1023,7 @@ impl LlmBackend for LlamaCppBackend {
                 text,
                 output_tokens.len(),
                 finish_reason,
+                reasoning_content,
                 fields,
             ))
         })
@@ -1158,7 +1167,8 @@ impl LlmBackend for LlamaCppBackend {
             let mut text = model.detokenize(&output_tokens)?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let text = strip_thinking_tags(&text).trim().to_string();
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let text = clean.trim().to_string();
             let finish_reason = if stopped_in_text || trimmed_partial || stopped_by_callback {
                 "stop"
             } else {
@@ -1180,6 +1190,7 @@ impl LlmBackend for LlamaCppBackend {
                 decode_tps: fields.decode_tps,
                 prefill_tps: fields.prefill_tps,
                 image_preprocess_ms,
+                reasoning_content,
             })
         })
     }
@@ -1321,7 +1332,8 @@ impl LlmBackend for LlamaCppBackend {
             let mut text = model.detokenize(&output_tokens)?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let text = strip_thinking_tags(&text).trim().to_string();
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let text = clean.trim().to_string();
             let finish_reason =
                 if filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback {
                     "stop"
@@ -1350,6 +1362,7 @@ impl LlmBackend for LlamaCppBackend {
                 decode_tps: fields.decode_tps,
                 prefill_tps: fields.prefill_tps,
                 image_preprocess_ms,
+                reasoning_content,
             })
         })
     }

@@ -361,6 +361,10 @@ pub(crate) struct ResultData {
     pub output_type: XybridOutputType,
     /// Text output (for ASR/LLM).
     pub text: Option<String>,
+    /// Chain-of-thought / reasoning text (LLM `<think>` blocks). Separate
+    /// from `text`, which always excludes it. `None` when the model emitted
+    /// no reasoning.
+    pub reasoning_content: Option<String>,
     /// Embedding output.
     pub embedding: Option<Vec<f32>>,
     /// Audio bytes (for TTS).
@@ -383,6 +387,7 @@ pub(crate) struct ResultData {
     // construction via [`ResultData::populate_caches`]; never mutated
     // afterward.
     pub text_cache: Option<CString>,
+    pub reasoning_content_cache: Option<CString>,
     pub error_cache: Option<CString>,
     pub output_type_cache: CString,
     /// Parallel to `metrics.stage_latencies_ms` — same length, same order.
@@ -399,6 +404,7 @@ impl ResultData {
     /// uses for token text.
     fn populate_caches(&mut self) {
         self.text_cache = self.text.as_deref().map(cstring_lossy);
+        self.reasoning_content_cache = self.reasoning_content.as_deref().map(cstring_lossy);
         self.error_cache = self.error.as_deref().map(cstring_lossy);
         // `output_type.as_str()` is a `&'static str` with no interior
         // NULs, so `cstring_lossy` is just `CString::new(...).unwrap()`
@@ -426,11 +432,13 @@ impl ResultData {
             error: Some(error),
             output_type: XybridOutputType::Unknown,
             text: None,
+            reasoning_content: None,
             embedding: None,
             audio_bytes: None,
             latency_ms: 0,
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
+            reasoning_content_cache: None,
             error_cache: None,
             output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
@@ -652,11 +660,13 @@ fn inference_result_to_data(result: &xybrid_sdk::InferenceResult) -> ResultData 
             xybrid_sdk::OutputType::Unknown => XybridOutputType::Unknown,
         },
         text: result.text().map(|s| s.to_string()),
+        reasoning_content: result.reasoning_content().map(|s| s.to_string()),
         embedding: result.embedding().map(|e| e.to_vec()),
         audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
         latency_ms: result.latency_ms(),
         metrics: result.metrics().clone(),
         text_cache: None,
+        reasoning_content_cache: None,
         error_cache: None,
         output_type_cache: CString::default(),
         stage_id_cache: Vec::new(),
@@ -3576,6 +3586,49 @@ pub unsafe extern "C" fn xybrid_result_text(result: *mut XybridResultHandle) -> 
     })
 }
 
+/// Get the chain-of-thought / reasoning text from an inference result.
+///
+/// This is the model's `<think>...</think>` reasoning, surfaced separately
+/// from [`xybrid_result_text`] (which always excludes it).
+///
+/// # Parameters
+///
+/// - `result`: A handle to the inference result.
+///
+/// # Returns
+///
+/// A pointer to the reasoning string, or null if the model emitted no
+/// reasoning (or the handle is null/invalid). The pointer is valid until
+/// the result handle is freed.
+///
+/// # Example (C)
+///
+/// ```c
+/// const char* reasoning = xybrid_result_reasoning_content(result);
+/// if (reasoning != NULL) {
+///     printf("Model reasoning: %s\n", reasoning);
+/// }
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_reasoning_content(
+    result: *mut XybridResultHandle,
+) -> *const c_char {
+    // Don't clear last error - this is a read-only accessor
+    if result.is_null() {
+        return std::ptr::null();
+    }
+
+    ffi_guard!("xybrid_result_reasoning_content", std::ptr::null(), {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => data
+                .reasoning_content_cache
+                .as_ref()
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
+            None => std::ptr::null(),
+        }
+    })
+}
+
 /// Get the latency in milliseconds from an inference result.
 ///
 /// Returns the inference latency in milliseconds.
@@ -4971,11 +5024,13 @@ mod tests {
             error: None,
             output_type: XybridOutputType::Text,
             text: Some("hello from result A".to_string()),
+            reasoning_content: None,
             embedding: None,
             audio_bytes: None,
             latency_ms: 10,
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
+            reasoning_content_cache: None,
             error_cache: None,
             output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
@@ -4986,11 +5041,13 @@ mod tests {
             error: None,
             output_type: XybridOutputType::Text,
             text: Some("hello from result B".to_string()),
+            reasoning_content: None,
             embedding: None,
             audio_bytes: None,
             latency_ms: 20,
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
+            reasoning_content_cache: None,
             error_cache: None,
             output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
@@ -5209,11 +5266,13 @@ mod tests {
             error: None,
             output_type: XybridOutputType::Text,
             text: Some("Transcribed text".to_string()),
+            reasoning_content: None,
             embedding: None,
             audio_bytes: None,
             latency_ms: 100,
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
+            reasoning_content_cache: None,
             error_cache: None,
             output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
@@ -6526,11 +6585,13 @@ mod tests {
                 error: None,
                 output_type: variant,
                 text: None,
+                reasoning_content: None,
                 embedding: None,
                 audio_bytes: None,
                 latency_ms: 0,
                 metrics: xybrid_sdk::InferenceMetrics::default(),
                 text_cache: None,
+                reasoning_content_cache: None,
                 error_cache: None,
                 output_type_cache: CString::default(),
                 stage_id_cache: Vec::new(),

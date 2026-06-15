@@ -230,6 +230,20 @@ impl InferenceResult {
         }
     }
 
+    /// Get the model's chain-of-thought / reasoning text, if it emitted any.
+    ///
+    /// This is the pre-strip reasoning the model produced in `<think>...</think>`
+    /// blocks (or, for engines that surface it natively, their reasoning
+    /// channel). It is *not* part of [`text`](Self::text) — the answer text
+    /// always excludes it. Returns `None` when the model produced no reasoning,
+    /// the backend doesn't surface one, or the output isn't text.
+    pub fn reasoning_content(&self) -> Option<&str> {
+        self.envelope
+            .metadata
+            .get("reasoning_content")
+            .map(String::as_str)
+    }
+
     /// Get audio bytes if available.
     ///
     /// Returns `None` if the output is not audio.
@@ -343,6 +357,37 @@ mod tests {
         assert_eq!(result.audio_bytes(), None);
         assert_eq!(result.latency_ms(), 100);
         assert_eq!(result.model_id(), "test-model");
+    }
+
+    #[test]
+    fn test_reasoning_content_from_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "reasoning_content".to_string(),
+            "let me think step by step".to_string(),
+        );
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("the answer".to_string()),
+            metadata,
+        };
+        let result = InferenceResult::new(envelope, "llm-model", 100);
+
+        // Reasoning is surfaced separately from the answer text.
+        assert_eq!(result.text(), Some("the answer"));
+        assert_eq!(
+            result.reasoning_content(),
+            Some("let me think step by step")
+        );
+    }
+
+    #[test]
+    fn test_reasoning_content_absent_is_none() {
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("plain answer".to_string()),
+            metadata: HashMap::new(),
+        };
+        let result = InferenceResult::new(envelope, "llm-model", 10);
+        assert_eq!(result.reasoning_content(), None);
     }
 
     #[test]

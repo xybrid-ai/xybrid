@@ -79,18 +79,54 @@ pub(crate) fn merge_stop_patterns<S: AsRef<str>>(user: &[S], extras: &[&str]) ->
 /// An unclosed opening tag strips from `<think>` to end of string —
 /// this is the partial-stream safety case for Qwen 3.5 and similar
 /// models that emit reasoning blocks before the final answer.
+///
+/// This discards the reasoning text. Use [`strip_and_capture_thinking_tags`]
+/// when the caller wants to surface the chain-of-thought (e.g. populate
+/// `GenerationOutput::reasoning_content`).
 pub(crate) fn strip_thinking_tags(text: &str) -> String {
-    let mut result = text.to_string();
-    while let Some(start) = result.find("<think>") {
-        if let Some(end) = result[start..].find("</think>") {
-            let end_absolute = start + end + "</think>".len();
-            result.replace_range(start..end_absolute, "");
+    strip_and_capture_thinking_tags(text).0
+}
+
+/// Like [`strip_thinking_tags`], but also returns the captured reasoning
+/// text instead of discarding it.
+///
+/// Returns `(clean, reasoning)` where `clean` is `text` with every
+/// `<think>...</think>` block removed and `reasoning` is the concatenated
+/// inner text of those blocks (multiple blocks joined by `\n`), or `None`
+/// when the input contained no reasoning block. The `<think>` / `</think>`
+/// delimiters themselves are not included in `reasoning`.
+///
+/// An unclosed opening tag contributes everything after `<think>` to
+/// `reasoning` and strips it from `clean` — matching the partial-stream
+/// truncation behavior of [`strip_thinking_tags`].
+pub(crate) fn strip_and_capture_thinking_tags(text: &str) -> (String, Option<String>) {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
+
+    let mut clean = text.to_string();
+    let mut reasoning = String::new();
+    while let Some(start) = clean.find(OPEN) {
+        let inner_start = start + OPEN.len();
+        if let Some(end_rel) = clean[inner_start..].find(CLOSE) {
+            let inner_end = inner_start + end_rel;
+            push_reasoning(&mut reasoning, &clean[inner_start..inner_end]);
+            clean.replace_range(start..inner_end + CLOSE.len(), "");
         } else {
-            result.truncate(start);
+            push_reasoning(&mut reasoning, &clean[inner_start..]);
+            clean.truncate(start);
             break;
         }
     }
-    result
+    let reasoning = (!reasoning.is_empty()).then_some(reasoning);
+    (clean, reasoning)
+}
+
+/// Append one reasoning block, separating consecutive blocks with a newline.
+fn push_reasoning(buf: &mut String, block: &str) {
+    if !buf.is_empty() {
+        buf.push('\n');
+    }
+    buf.push_str(block);
 }
 
 /// Truncate `text` at the earliest complete occurrence of any pattern
@@ -152,6 +188,7 @@ pub(crate) struct StreamingTextFilter {
     last_emitted_len: usize,
     inside_think_block: bool,
     hit_stop_pattern: bool,
+    reasoning: String,
 }
 
 impl StreamingTextFilter {
@@ -162,12 +199,26 @@ impl StreamingTextFilter {
             last_emitted_len: 0,
             inside_think_block: false,
             hit_stop_pattern: false,
+            reasoning: String::new(),
         }
     }
 
     /// Whether a complete stop pattern has been observed.
     pub fn is_stopped(&self) -> bool {
         self.hit_stop_pattern
+    }
+
+    /// The reasoning text captured from `<think>...</think>` blocks seen so
+    /// far, or `None` if the stream emitted no closed reasoning block.
+    ///
+    /// Only blocks that have been *closed* (a `</think>` arrived) are
+    /// captured here — an unclosed trailing block is suppressed from the
+    /// emit stream but not surfaced as reasoning, since the streaming filter
+    /// can't tell a still-open block from a malformed one. Backends that run
+    /// a final [`strip_and_capture_thinking_tags`] pass over the full decoded
+    /// text recover the unclosed tail there.
+    pub fn reasoning(&self) -> Option<&str> {
+        (!self.reasoning.is_empty()).then_some(self.reasoning.as_str())
     }
 
     /// Cumulative text up to the last emission point. Use this to
@@ -201,7 +252,11 @@ impl StreamingTextFilter {
         if self.inside_think_block {
             if self.cumulative_text.contains("</think>") {
                 self.inside_think_block = false;
-                self.cumulative_text = strip_thinking_tags(&self.cumulative_text);
+                let (clean, reasoning) = strip_and_capture_thinking_tags(&self.cumulative_text);
+                if let Some(block) = reasoning {
+                    push_reasoning(&mut self.reasoning, &block);
+                }
+                self.cumulative_text = clean;
                 // After stripping, last_emitted_len may point past end.
                 self.last_emitted_len = self.last_emitted_len.min(self.cumulative_text.len());
             }
@@ -280,6 +335,36 @@ mod tests {
     #[test]
     fn strip_thinking_tags_passthrough_no_tags() {
         assert_eq!(strip_thinking_tags("nothing to see"), "nothing to see");
+    }
+
+    #[test]
+    fn capture_thinking_tags_returns_inner_reasoning() {
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags("before<think>hidden</think>after");
+        assert_eq!(clean, "beforeafter");
+        assert_eq!(reasoning.as_deref(), Some("hidden"));
+    }
+
+    #[test]
+    fn capture_thinking_tags_joins_multiple_blocks() {
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags("a<think>x</think>b<think>y</think>c");
+        assert_eq!(clean, "abc");
+        assert_eq!(reasoning.as_deref(), Some("x\ny"));
+    }
+
+    #[test]
+    fn capture_thinking_tags_unclosed_block_captured() {
+        let (clean, reasoning) = strip_and_capture_thinking_tags("visible<think>still reasoning");
+        assert_eq!(clean, "visible");
+        assert_eq!(reasoning.as_deref(), Some("still reasoning"));
+    }
+
+    #[test]
+    fn capture_thinking_tags_none_when_absent() {
+        let (clean, reasoning) = strip_and_capture_thinking_tags("plain answer");
+        assert_eq!(clean, "plain answer");
+        assert_eq!(reasoning, None);
     }
 
     #[test]
@@ -362,6 +447,27 @@ mod tests {
         assert_eq!(f.push("</think>"), None);
         // After closing </think>, emission resumes on next chunk.
         assert_eq!(f.push("answer"), Some("answer".to_string()));
+    }
+
+    #[test]
+    fn streaming_filter_captures_closed_think_reasoning() {
+        let mut f = StreamingTextFilter::new(vec![]);
+        assert_eq!(f.reasoning(), None);
+        assert_eq!(f.push("<think>"), None);
+        assert_eq!(f.push("step one "), None);
+        assert_eq!(f.push("step two</think>"), None);
+        assert_eq!(f.push("answer"), Some("answer".to_string()));
+        assert_eq!(f.reasoning(), Some("step one step two"));
+    }
+
+    #[test]
+    fn streaming_filter_unclosed_think_not_captured() {
+        // An unclosed block is suppressed from emission but NOT surfaced as
+        // reasoning — the backend's final-text pass recovers it instead.
+        let mut f = StreamingTextFilter::new(vec![]);
+        assert_eq!(f.push("<think>"), None);
+        assert_eq!(f.push("still going"), None);
+        assert_eq!(f.reasoning(), None);
     }
 
     /// An unclosed `<think>` must never leak its body upward. The final

@@ -3039,6 +3039,7 @@ impl SseDecode for crate::api::result::FfiResult {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_success = <bool>::sse_decode(deserializer);
         let mut var_text = <Option<String>>::sse_decode(deserializer);
+        let mut var_reasoningContent = <Option<String>>::sse_decode(deserializer);
         let mut var_audioBytes = <Option<Vec<u8>>>::sse_decode(deserializer);
         let mut var_embedding = <Option<Vec<f32>>>::sse_decode(deserializer);
         let mut var_latencyMs = <u32>::sse_decode(deserializer);
@@ -3046,6 +3047,7 @@ impl SseDecode for crate::api::result::FfiResult {
         return crate::api::result::FfiResult {
             success: var_success,
             text: var_text,
+            reasoning_content: var_reasoningContent,
             audio_bytes: var_audioBytes,
             embedding: var_embedding,
             latency_ms: var_latencyMs,
@@ -4060,6 +4062,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::result::FfiResult {
         [
             self.success.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
+            self.reasoning_content.into_into_dart().into_dart(),
             self.audio_bytes.into_into_dart().into_dart(),
             self.embedding.into_into_dart().into_dart(),
             self.latency_ms.into_into_dart().into_dart(),
@@ -4655,6 +4658,7 @@ impl SseEncode for crate::api::result::FfiResult {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.success, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
+        <Option<String>>::sse_encode(self.reasoning_content, serializer);
         <Option<Vec<u8>>>::sse_encode(self.audio_bytes, serializer);
         <Option<Vec<f32>>>::sse_encode(self.embedding, serializer);
         <u32>::sse_encode(self.latency_ms, serializer);
