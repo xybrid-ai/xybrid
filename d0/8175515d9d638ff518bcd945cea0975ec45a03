@@ -1,0 +1,19 @@
+.github/workflows/scorecard.yml
+  s_b8aab199534436::t_cb1e7d728cb7e2 34-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "d08175515d9d638ff518bcd945cea0975ec45a03",
+  "prompts": {},
+  "sessions": {
+    "s_b8aab199534436": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e3d1eb8-b32d-47ba-aaf9-eeefda9f2c39",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
