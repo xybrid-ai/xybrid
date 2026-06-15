@@ -129,6 +129,17 @@ fn unsupported_backend_vision_error(metadata: &ModelMetadata, backend_name: &str
     }
 }
 
+/// Whether the model is a reasoning ("thinking") model, per its metadata
+/// `reasoning` flag. Drives `<think>`-channel priming during chat-prompt
+/// construction so thinking models emit (and we capture) their chain-of-thought.
+fn metadata_reasoning(metadata: &ModelMetadata) -> bool {
+    metadata
+        .metadata
+        .get("reasoning")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
 #[cfg(all(
     feature = "vision",
     any(feature = "llm-mistral", feature = "llm-llamacpp")
@@ -1401,8 +1412,9 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length)
+                .with_reasoning(metadata_reasoning(metadata));
 
             if let Some(template_path) = chat_template_path {
                 config = config.with_chat_template(template_path);
@@ -1549,7 +1561,9 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length)
+                .with_reasoning(metadata_reasoning(metadata));
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
@@ -1640,7 +1654,9 @@ impl TemplateExecutor {
         chat_template: Option<&str>,
         context_length: usize,
     ) -> LlmConfig {
-        let mut llm_config = LlmConfig::new(model_path_str).with_context_length(context_length);
+        let mut llm_config = LlmConfig::new(model_path_str)
+            .with_context_length(context_length)
+            .with_reasoning(metadata_reasoning(metadata));
         if let Some(template) = chat_template {
             let template_path = Path::new(&self.base_path).join(template);
             llm_config = llm_config.with_chat_template(template_path.to_string_lossy().to_string());
@@ -1969,7 +1985,9 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length)
+                .with_reasoning(metadata_reasoning(metadata));
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
@@ -2099,8 +2117,9 @@ impl TemplateExecutor {
         // Load model if needed (cache miss or different model)
         if need_load {
             // Create LLM config
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length)
+                .with_reasoning(metadata_reasoning(metadata));
 
             if let Some(template_path) = chat_template_path {
                 config = config.with_chat_template(template_path);

@@ -495,11 +495,18 @@ impl LlamaCppBackend {
         )
     }
 
+    /// Whether the loaded model is a reasoning ("thinking") model — drives
+    /// `<think>`-channel priming and the streaming filter's primed mode.
+    fn reasoning_enabled(&self) -> bool {
+        self.config.as_ref().map(|c| c.reasoning).unwrap_or(false)
+    }
+
     fn tokenize_chat_prompt(
         model: &xybrid_llama::LlamaModel,
         messages: &[ChatMessage],
+        reasoning: bool,
     ) -> LlmResult<Vec<i32>> {
-        let prompt = chat::format_chat_prompt(model, messages)?;
+        let prompt = chat::format_chat_prompt(model, messages, reasoning)?;
         Ok(model.tokenize_special(&prompt, true)?)
     }
 
@@ -789,7 +796,7 @@ impl LlmBackend for LlamaCppBackend {
             // Tokenize with special token parsing enabled — the chat template contains
             // special tokens like <|im_start|>, <end_of_turn>, etc. that must be
             // recognized as their special token IDs, not as individual characters.
-            let tokens = Self::tokenize_chat_prompt(model, messages)?;
+            let tokens = Self::tokenize_chat_prompt(model, messages, self.reasoning_enabled())?;
             let prepared =
                 self.prepare_generation(model, context, tokens, config, PromptKind::Chat)?;
 
@@ -934,7 +941,7 @@ impl LlmBackend for LlamaCppBackend {
 
         self.with_model_and_context(|model, context| {
             // Tokenize with special token parsing — chat template contains special tokens
-            let tokens = Self::tokenize_chat_prompt(model, messages)?;
+            let tokens = Self::tokenize_chat_prompt(model, messages, self.reasoning_enabled())?;
             let prepared =
                 self.prepare_generation(model, context, tokens, config, PromptKind::Chat)?;
 
@@ -956,7 +963,14 @@ impl LlmBackend for LlamaCppBackend {
             // local leg of every aborted run. Successful runs harmlessly
             // overwrite this with the same value after finalize.
             let stop_patterns = merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
-            let mut filter = StreamingTextFilter::new(stop_patterns.clone());
+            // Thinking models have `<think>` primed into the prompt, so their
+            // output starts mid-reasoning with no opening tag — start the filter
+            // already suppressing so the reasoning never reaches the callback.
+            let mut filter = if self.reasoning_enabled() {
+                StreamingTextFilter::new_reasoning_primed(stop_patterns.clone())
+            } else {
+                StreamingTextFilter::new(stop_patterns.clone())
+            };
             let mut token_index = 0usize;
 
             let (output_tokens, stopped_by_callback, fields) = Self::run_streaming_generation(
@@ -1075,7 +1089,8 @@ impl LlmBackend for LlamaCppBackend {
             .to_string();
 
         self.with_model_and_context(|model, context| {
-            let prompt = chat::format_chat_prompt(model, &inputs.chat_messages)?;
+            let prompt =
+                chat::format_chat_prompt(model, &inputs.chat_messages, self.reasoning_enabled())?;
             let generation_stop_patterns =
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let (_loaded, (output_tokens, stopped_by_callback, fields, image_preprocess_ms)) = self
@@ -1217,7 +1232,8 @@ impl LlmBackend for LlamaCppBackend {
             .to_string();
 
         self.with_model_and_context(|model, context| {
-            let prompt = chat::format_chat_prompt(model, &inputs.chat_messages)?;
+            let prompt =
+                chat::format_chat_prompt(model, &inputs.chat_messages, self.reasoning_enabled())?;
             let generation_stop_patterns =
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let (
@@ -1285,7 +1301,11 @@ impl LlmBackend for LlamaCppBackend {
                 }
 
                 let mut tel = StreamingTelemetry::new(summary.helper_total_tokens);
-                let mut filter = StreamingTextFilter::new(generation_stop_patterns.clone());
+                let mut filter = if self.reasoning_enabled() {
+                    StreamingTextFilter::new_reasoning_primed(generation_stop_patterns.clone())
+                } else {
+                    StreamingTextFilter::new(generation_stop_patterns.clone())
+                };
                 let mut token_index = 0usize;
                 let stream_result = xybrid_llama::generate_from_current_logits_streaming(
                     context,

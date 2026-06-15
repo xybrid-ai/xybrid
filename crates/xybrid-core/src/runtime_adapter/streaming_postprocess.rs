@@ -99,12 +99,36 @@ pub(crate) fn strip_thinking_tags(text: &str) -> String {
 /// An unclosed opening tag contributes everything after `<think>` to
 /// `reasoning` and strips it from `clean` — matching the partial-stream
 /// truncation behavior of [`strip_thinking_tags`].
+///
+/// A **dangling close** — a `</think>` with no `<think>` before it — is also
+/// captured: everything up to that `</think>` becomes reasoning. This is the
+/// shape a thinking model produces when the opening `<think>` was primed into
+/// the prompt (see the llama.cpp adapter's `THINK_PRIME`), so the model's
+/// output is `reasoning</think>answer`. Handling it here means every caller —
+/// streaming and non-streaming — recovers reasoning without knowing whether the
+/// tag was primed.
 pub(crate) fn strip_and_capture_thinking_tags(text: &str) -> (String, Option<String>) {
     const OPEN: &str = "<think>";
     const CLOSE: &str = "</think>";
 
     let mut clean = text.to_string();
     let mut reasoning = String::new();
+
+    // Dangling close: `</think>` precedes any `<think>` (or there is no `<think>`
+    // at all). Peel the leading reasoning before the balanced-block pass.
+    let dangling_close = match (clean.find(OPEN), clean.find(CLOSE)) {
+        (Some(open), Some(close)) => close < open,
+        (None, Some(_)) => true,
+        _ => false,
+    };
+    if dangling_close {
+        let close = clean
+            .find(CLOSE)
+            .expect("dangling_close implies a close exists");
+        push_reasoning(&mut reasoning, &clean[..close]);
+        clean.replace_range(..close + CLOSE.len(), "");
+    }
+
     while let Some(start) = clean.find(OPEN) {
         let inner_start = start + OPEN.len();
         if let Some(end_rel) = clean[inner_start..].find(CLOSE) {
@@ -117,7 +141,11 @@ pub(crate) fn strip_and_capture_thinking_tags(text: &str) -> (String, Option<Str
             break;
         }
     }
-    let reasoning = (!reasoning.is_empty()).then_some(reasoning);
+    // A whitespace-only block (e.g. a thinking model that opened and closed
+    // `<think></think>` with nothing in between) is not reasoning — surface it
+    // as `None` so callers don't show an empty reasoning section.
+    let reasoning = reasoning.trim();
+    let reasoning = (!reasoning.is_empty()).then(|| reasoning.to_string());
     (clean, reasoning)
 }
 
@@ -200,6 +228,20 @@ impl StreamingTextFilter {
             inside_think_block: false,
             hit_stop_pattern: false,
             reasoning: String::new(),
+        }
+    }
+
+    /// Construct a filter for a turn whose `<think>` channel was primed into
+    /// the prompt (thinking models — see the llama.cpp adapter's `THINK_PRIME`).
+    ///
+    /// The model's output begins with reasoning and *no* opening tag, so the
+    /// filter starts already inside the think block: it suppresses the reasoning
+    /// from the emit stream and captures it, resuming emission after the model's
+    /// `</think>`.
+    pub fn new_reasoning_primed(stop_patterns: Vec<String>) -> Self {
+        Self {
+            inside_think_block: true,
+            ..Self::new(stop_patterns)
         }
     }
 
@@ -365,6 +407,51 @@ mod tests {
         let (clean, reasoning) = strip_and_capture_thinking_tags("plain answer");
         assert_eq!(clean, "plain answer");
         assert_eq!(reasoning, None);
+    }
+
+    #[test]
+    fn capture_thinking_tags_dangling_close_is_primed_reasoning() {
+        // Shape a thinking model produces when `<think>` was primed into the
+        // prompt: reasoning, a closing tag, then the answer — no opening tag.
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags("let me work it out</think>The answer is 8.");
+        assert_eq!(clean, "The answer is 8.");
+        assert_eq!(reasoning.as_deref(), Some("let me work it out"));
+    }
+
+    #[test]
+    fn capture_thinking_tags_empty_block_is_none() {
+        // A thinking model can open and immediately close the block with only
+        // whitespace inside — that's not reasoning worth surfacing.
+        let (clean, reasoning) = strip_and_capture_thinking_tags("<think>\n\n</think>\n\nHello!");
+        assert_eq!(clean.trim(), "Hello!");
+        assert_eq!(reasoning, None);
+
+        // Same, primed/dangling shape.
+        let (clean, reasoning) = strip_and_capture_thinking_tags("\n</think>\nHello!");
+        assert_eq!(clean.trim(), "Hello!");
+        assert_eq!(reasoning, None);
+    }
+
+    #[test]
+    fn capture_thinking_tags_no_close_keeps_answer() {
+        // Primed but the model never closed `</think>` (e.g. answered directly).
+        // The answer must NOT be eaten as reasoning.
+        let (clean, reasoning) = strip_and_capture_thinking_tags("The answer is 8.");
+        assert_eq!(clean, "The answer is 8.");
+        assert_eq!(reasoning, None);
+    }
+
+    #[test]
+    fn streaming_filter_reasoning_primed_suppresses_and_captures() {
+        let mut f = StreamingTextFilter::new_reasoning_primed(vec![]);
+        // Reasoning streams in with no opening tag — all suppressed.
+        assert_eq!(f.push("checking divisors "), None);
+        assert_eq!(f.push("none divide it"), None);
+        // Closing tag ends the reasoning; the answer streams normally after.
+        assert_eq!(f.push("</think>"), None);
+        assert_eq!(f.push("97 is prime."), Some("97 is prime.".to_string()));
+        assert_eq!(f.reasoning(), Some("checking divisors none divide it"));
     }
 
     #[test]
