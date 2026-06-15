@@ -43,6 +43,12 @@ export interface GenerationConfig {
 export interface InferenceResult {
   success: boolean;
   text?: string;
+  /**
+   * The model's chain-of-thought / reasoning text (LLM `<think>` blocks),
+   * surfaced separately from `text`, which always excludes it. Absent when
+   * the model emitted no reasoning or the backend doesn't surface one.
+   */
+  reasoningContent?: string;
   /** base64-encoded audio bytes when present. */
   audioBytesBase64?: string;
   embedding?: number[];
