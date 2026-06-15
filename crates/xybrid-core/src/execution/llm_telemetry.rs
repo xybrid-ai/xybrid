@@ -400,6 +400,7 @@ mod tests {
             inter_chunk_ms: Vec::new(),
             decode_tps: None,
             prefill_tps: None,
+            image_preprocess_ms: None,
         }
     }
 
