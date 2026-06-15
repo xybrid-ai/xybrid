@@ -32,7 +32,10 @@ public final class XybridModuleImpl: NSObject {
       initSdkCacheDir(cacheDir: dir)
     } else {
       // Default cache root: <Library>/Caches/xybrid/models
-      let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+      guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+        reject("xybrid_init", "Failed to resolve caches directory", nil)
+        return
+      }
       let xybridCache = caches.appendingPathComponent("xybrid/models", isDirectory: true)
       try? FileManager.default.createDirectory(at: xybridCache, withIntermediateDirectories: true)
       initSdkCacheDir(cacheDir: xybridCache.path)

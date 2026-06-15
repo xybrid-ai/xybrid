@@ -36,9 +36,11 @@ import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
@@ -51,6 +53,17 @@ class XybridModule(reactContext: ReactApplicationContext) :
   private val models = ConcurrentHashMap<String, XybridModel>()
 
   override fun getName(): String = NAME
+
+  // Released when the RN module is torn down (fast refresh, bundle reload,
+  // host teardown). Native model weights are hundreds of MB, so failing to
+  // close them promptly OOMs the device — cancel in-flight work and free
+  // every handle here.
+  override fun invalidate() {
+    super.invalidate()
+    scope.cancel()
+    models.values.forEach { it.close() }
+    models.clear()
+  }
 
   // -- Lifecycle --
 
@@ -136,6 +149,9 @@ class XybridModule(reactContext: ReactApplicationContext) :
       } catch (e: XybridError) {
         rejectXybrid(promise, e)
       } catch (t: Throwable) {
+        // Don't swallow coroutine cancellation (e.g. scope.cancel() on
+        // module invalidation) — let it propagate so the machinery unwinds.
+        if (t is CancellationException) throw t
         promise.reject("xybrid", t.message, t)
       }
     }
@@ -196,7 +212,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun setThermalState(state: String, promise: Promise) {
-    val mapped = when (state.lowercase()) {
+    val mapped = when (state.lowercase(java.util.Locale.ROOT)) {
       "normal" -> XybridThermalState.NORMAL
       "warm" -> XybridThermalState.WARM
       "hot" -> XybridThermalState.HOT
@@ -228,6 +244,9 @@ class XybridModule(reactContext: ReactApplicationContext) :
       } catch (e: XybridError) {
         rejectXybrid(promise, e)
       } catch (t: Throwable) {
+        // Don't swallow coroutine cancellation (e.g. scope.cancel() on
+        // module invalidation) — let it propagate so the machinery unwinds.
+        if (t is CancellationException) throw t
         promise.reject("xybrid", t.message, t)
       }
     }
@@ -244,8 +263,8 @@ class XybridModule(reactContext: ReactApplicationContext) :
         val b64 = map.getString("bytesBase64")
           ?: throw IllegalArgumentException("audio envelope: 'bytesBase64' missing")
         val bytes = Base64.decode(b64, Base64.DEFAULT)
-        val sampleRate = if (map.hasKey("sampleRate")) map.getInt("sampleRate") else 16000
-        val channels = if (map.hasKey("channels")) map.getInt("channels") else 1
+        val sampleRate = if (map.hasKey("sampleRate") && !map.isNull("sampleRate")) map.getInt("sampleRate") else 16000
+        val channels = if (map.hasKey("channels") && !map.isNull("channels")) map.getInt("channels") else 1
         Envelope.audio(bytes, sampleRate.toUInt(), channels.toUInt())
       }
       "text" -> {
