@@ -11,7 +11,6 @@ use crate::ir::Envelope;
 use crate::runtime_adapter::AdapterError;
 
 /// Run the real `ImageIngress` preprocessing step and return its tensor.
-#[cfg(feature = "vision")]
 pub fn image_ingress_tensor(
     input: &Envelope,
     channels: usize,

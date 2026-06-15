@@ -34,7 +34,6 @@ use super::template::{
     stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
 };
 use crate::conversation::ConversationContext;
-#[cfg(any(feature = "vision", feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::ir::EnvelopeKind;
 use crate::ir::{Envelope, MessageRole};
 use crate::runtime_adapter::{AdapterError, ModelRuntime};
@@ -93,10 +92,7 @@ fn resolve_optional_model_path(base_path: &str, path: Option<&str>) -> Option<St
     path.map(|p| Path::new(base_path).join(p).to_string_lossy().to_string())
 }
 
-#[cfg(all(
-    feature = "vision",
-    any(feature = "llm-mistral", feature = "llm-llamacpp")
-))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 fn reject_text_only_model_image_input(
     metadata: &ModelMetadata,
     input: &Envelope,
@@ -116,10 +112,7 @@ fn reject_text_only_model_image_input(
     Ok(())
 }
 
-#[cfg(all(
-    feature = "vision",
-    any(feature = "llm-mistral", feature = "llm-llamacpp")
-))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 fn unsupported_backend_vision_error(metadata: &ModelMetadata, backend_name: &str) -> AdapterError {
     AdapterError::UnsupportedBackendCapability {
         model_id: metadata.model_id.clone(),
@@ -129,10 +122,7 @@ fn unsupported_backend_vision_error(metadata: &ModelMetadata, backend_name: &str
     }
 }
 
-#[cfg(all(
-    feature = "vision",
-    any(feature = "llm-mistral", feature = "llm-llamacpp")
-))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 fn ensure_backend_supports_vision(
     metadata: &ModelMetadata,
     adapter: &LlmRuntimeAdapter,
@@ -145,7 +135,6 @@ fn ensure_backend_supports_vision(
     }
 }
 
-#[cfg(feature = "vision")]
 fn elapsed_millis_floor_one(start: std::time::Instant) -> u32 {
     start.elapsed().as_millis().max(1).min(u32::MAX as u128) as u32
 }
@@ -164,7 +153,6 @@ use crate::runtime_adapter::candle::CandleRuntime;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::runtime_adapter::types::{ChatMessage, LlmConfig};
 use crate::runtime_adapter::types::{GenerationConfig, StreamingCallback};
-#[cfg(feature = "vision")]
 use crate::runtime_adapter::{MultimodalChatMessage, MultimodalMessagePart, VisionEncoder};
 
 // LLM adapter implementation (only available with LLM features)
@@ -253,7 +241,6 @@ pub struct TemplateExecutor {
     /// llama.cpp VLMs do not use this registry: they consume raw ordered
     /// multimodal messages through their backend-owned mtmd path. This registry
     /// exists for backends that expose a separate image-encoder tensor seam.
-    #[cfg(feature = "vision")]
     vision_encoders: HashMap<String, Box<dyn VisionEncoder>>,
 }
 
@@ -309,7 +296,6 @@ impl TemplateExecutor {
             base_path: base_path.into(),
             llm_adapter_cache: None,
             tts_session_cache: None,
-            #[cfg(feature = "vision")]
             vision_encoders: HashMap::new(),
         }
     }
@@ -343,7 +329,6 @@ impl TemplateExecutor {
     /// The key should match `ModelMetadata::vision_encoder.file`. Backends that
     /// own raw multimodal planning internally, such as llama.cpp mtmd, should
     /// leave this registry empty and consume `MultimodalChatMessage` directly.
-    #[cfg(feature = "vision")]
     pub fn register_vision_encoder(
         &mut self,
         encoder_file: impl Into<String>,
@@ -362,7 +347,6 @@ impl TemplateExecutor {
         self.runtimes.keys().map(|s| s.as_str()).collect()
     }
 
-    #[cfg(feature = "vision")]
     fn multimodal_messages_with_context(
         input: &Envelope,
         context: &ConversationContext,
@@ -372,7 +356,6 @@ impl TemplateExecutor {
         Ok(messages)
     }
 
-    #[cfg(feature = "vision")]
     fn encode_registered_vision_inputs(
         &mut self,
         metadata: &ModelMetadata,
@@ -420,7 +403,6 @@ impl TemplateExecutor {
         Ok(Some(image_preprocess_ms))
     }
 
-    #[cfg(feature = "vision")]
     fn preprocess_multimodal_images(
         base_path: &str,
         steps: &[super::template::PreprocessingStep],
@@ -592,10 +574,7 @@ impl TemplateExecutor {
             return strategy.execute(&mut ctx, metadata, input);
         }
 
-        #[cfg(all(
-            feature = "vision",
-            any(feature = "llm-mistral", feature = "llm-llamacpp")
-        ))]
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         if let ExecutionTemplate::VisionLanguage {
             model_file,
             chat_template,
@@ -615,10 +594,7 @@ impl TemplateExecutor {
             );
         }
 
-        #[cfg(all(
-            feature = "vision",
-            not(any(feature = "llm-mistral", feature = "llm-llamacpp"))
-        ))]
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
         if matches!(
             metadata.execution_template,
             ExecutionTemplate::VisionLanguage { .. }
@@ -680,7 +656,6 @@ impl TemplateExecutor {
                         .to_string(),
                 ));
             }
-            #[cfg(feature = "vision")]
             ExecutionTemplate::VisionLanguage { .. } => {
                 return Err(AdapterError::RuntimeError(
                     "VisionLanguage execution should dispatch before the single-model path"
@@ -900,10 +875,7 @@ impl TemplateExecutor {
             }
         }
 
-        #[cfg(all(
-            feature = "vision",
-            any(feature = "llm-mistral", feature = "llm-llamacpp")
-        ))]
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         if let ExecutionTemplate::VisionLanguage {
             model_file,
             chat_template,
@@ -946,7 +918,6 @@ impl TemplateExecutor {
                 "LLM model detected, converting context to ChatMessages"
             );
 
-            #[cfg(feature = "vision")]
             reject_text_only_model_image_input(metadata, input)?;
 
             // Convert ConversationContext + input to ChatMessages directly.
@@ -1076,7 +1047,6 @@ impl TemplateExecutor {
     ) -> ExecutorResult<Envelope> {
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
-            #[cfg(feature = "vision")]
             if let super::template::ExecutionTemplate::VisionLanguage {
                 model_file,
                 chat_template,
@@ -1235,7 +1205,6 @@ impl TemplateExecutor {
 
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
-            #[cfg(feature = "vision")]
             if let ExecutionTemplate::VisionLanguage {
                 model_file,
                 chat_template,
@@ -1277,7 +1246,6 @@ impl TemplateExecutor {
                     "LLM model detected, converting context to ChatMessages for streaming"
                 );
 
-                #[cfg(feature = "vision")]
                 reject_text_only_model_image_input(metadata, input)?;
 
                 // Convert ConversationContext + input to ChatMessages
@@ -1378,7 +1346,6 @@ impl TemplateExecutor {
         xybrid_trace::add_metadata("streaming", "true");
         stamp_llm_span_cost_attribution(metadata);
 
-        #[cfg(feature = "vision")]
         reject_text_only_model_image_input(metadata, input)?;
 
         // Build full model path
@@ -1551,10 +1518,7 @@ impl TemplateExecutor {
         ))
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_vision_language(
         &mut self,
         metadata: &ModelMetadata,
@@ -1577,10 +1541,7 @@ impl TemplateExecutor {
         )
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn vision_language_llm_config(
         &self,
         metadata: &ModelMetadata,
@@ -1601,10 +1562,7 @@ impl TemplateExecutor {
         llm_config
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_llm_multimodal_messages(
         &mut self,
         metadata: &ModelMetadata,
@@ -1702,10 +1660,7 @@ impl TemplateExecutor {
         ))
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_vision_language_streaming(
         &mut self,
         metadata: &ModelMetadata,
@@ -1730,10 +1685,7 @@ impl TemplateExecutor {
         )
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn execute_llm_multimodal_streaming_messages(
         &mut self,
         metadata: &ModelMetadata,
@@ -1960,7 +1912,6 @@ impl TemplateExecutor {
         // entry points.
         stamp_llm_span_cost_attribution(metadata);
 
-        #[cfg(feature = "vision")]
         reject_text_only_model_image_input(metadata, input)?;
 
         // Build full model path
@@ -2832,16 +2783,10 @@ mod tests {
         );
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     struct TextOnlyVisionBoundaryBackend;
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     impl crate::runtime_adapter::LlmBackend for TextOnlyVisionBoundaryBackend {
         fn name(&self) -> &str {
             "text-only"
@@ -2897,10 +2842,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn cache_text_only_boundary_backend(
         executor: &mut TemplateExecutor,
         model_path: &str,
@@ -2956,10 +2898,7 @@ mod tests {
         assert!(runtimes.contains_key("onnx"));
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn vision_language_execute_reaches_multimodal_backend_boundary() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -3018,10 +2957,7 @@ mod tests {
         assert!(!message.contains("missing-model.gguf"));
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp-vision")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp-vision"))]
     #[test]
     fn vision_language_does_not_reuse_text_only_cache_for_same_model_path() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -3081,10 +3017,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn vision_language_text_only_backend_reports_backend_capability_before_generation() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -3167,10 +3100,7 @@ mod tests {
     /// covered here; they are separate call sites that share the
     /// underlying `ensure_backend_supports_vision()` helper and would
     /// benefit from their own dedicated tests as the surface stabilises.
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn vision_language_streaming_text_only_backend_reports_backend_capability_before_tokens() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -3257,7 +3187,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(feature = "vision", feature = "llm-llamacpp-vision"))]
+    #[cfg(feature = "llm-llamacpp-vision")]
     #[test]
     fn vision_language_missing_mmproj_reports_missing_artifact_before_model_parse() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -3319,10 +3249,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn gguf_image_input_returns_text_only_model_error_before_load() {
         let metadata = ModelMetadata {
@@ -3379,10 +3306,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn vision_language_streaming_uses_multimodal_streaming_span() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -3453,10 +3377,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn vision_language_registered_encoder_preprocesses_image_before_llm() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -3661,7 +3582,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn vision_language_context_planning_replays_history_then_current_input() {
         use crate::runtime_adapter::MultimodalMessagePart;
@@ -3709,10 +3629,7 @@ mod tests {
         ));
     }
 
-    #[cfg(all(
-        feature = "vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn vision_language_llm_config_resolves_sibling_mmproj_path() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};

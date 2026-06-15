@@ -197,7 +197,6 @@ impl ONNXMobileRuntimeAdapter {
                 EnvelopeKind::Audio(_) => "onnx-mobile-throttled-transcribed text".to_string(),
                 EnvelopeKind::Text(text) => format!("onnx-mobile-throttled-{}-output", text),
                 EnvelopeKind::Embedding(_) => "onnx-mobile-throttled-similarity result".to_string(),
-                #[cfg(feature = "vision")]
                 EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                     "onnx-mobile-throttled-vision-unsupported".to_string()
                 }
@@ -208,7 +207,6 @@ impl ONNXMobileRuntimeAdapter {
                 EnvelopeKind::Audio(_) => "onnx-mobile-transcribed text".to_string(),
                 EnvelopeKind::Text(text) => format!("onnx-mobile-{}-output", text),
                 EnvelopeKind::Embedding(_) => "onnx-mobile-similarity result".to_string(),
-                #[cfg(feature = "vision")]
                 EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                     "onnx-mobile-vision-unsupported".to_string()
                 }

@@ -1,5 +1,3 @@
-#![cfg(feature = "vision")]
-
 use xybrid_core::{
     conversation::ConversationContext,
     ir::{Envelope, EnvelopeKind, ImageDimensions, ImageFormat, MessageRole},

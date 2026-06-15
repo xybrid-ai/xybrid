@@ -152,13 +152,11 @@ impl DefaultPolicyEngine {
                             return true;
                         }
                     }
-                    #[cfg(feature = "vision")]
                     EnvelopeKind::Image { .. } => {
                         if value.eq_ignore_ascii_case("image") {
                             return true;
                         }
                     }
-                    #[cfg(feature = "vision")]
                     EnvelopeKind::MultiPart(_) => {
                         if value.eq_ignore_ascii_case("multipart") {
                             return true;

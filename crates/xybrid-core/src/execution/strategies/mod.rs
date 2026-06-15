@@ -210,7 +210,6 @@ mod tests {
             preprocessing: vec![],
             postprocessing: vec![],
             files: vec!["model.gguf".to_string()],
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: std::collections::HashMap::new(),
@@ -250,7 +249,6 @@ mod tests {
                 apply_postprocessing: true,
             }],
             files: vec!["model.gguf".to_string()],
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: std::collections::HashMap::new(),
@@ -280,7 +278,6 @@ mod tests {
             preprocessing: vec![],
             postprocessing: vec![],
             files: vec!["model.gguf".to_string()],
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: std::collections::HashMap::new(),

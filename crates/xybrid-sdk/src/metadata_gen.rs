@@ -1022,7 +1022,6 @@ fn build_gguf_metadata(
         preprocessing: Vec::new(),
         postprocessing: Vec::new(),
         files: vec![primary.filename.clone()],
-        #[cfg(feature = "vision")]
         vision_encoder: None,
         description: Some(description),
         metadata: metadata_map,
@@ -1204,7 +1203,6 @@ fn build_onnx_metadata(
         preprocessing,
         postprocessing,
         files,
-        #[cfg(feature = "vision")]
         vision_encoder: None,
         description: Some(description),
         metadata: metadata_map,
@@ -1276,7 +1274,6 @@ fn build_safetensors_metadata(
         preprocessing: Vec::new(),
         postprocessing: Vec::new(),
         files,
-        #[cfg(feature = "vision")]
         vision_encoder: None,
         description: Some(description),
         metadata: metadata_map,

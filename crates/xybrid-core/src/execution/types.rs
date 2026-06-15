@@ -5,7 +5,6 @@
 //! - [`RawOutputs`]: Output from model execution, input to postprocessing
 
 use crate::ir::{Envelope, EnvelopeKind};
-#[cfg(feature = "vision")]
 use crate::ir::{ImageSource, ImageValidationLimits};
 use crate::runtime_adapter::AdapterError;
 use ndarray::{ArrayD, IxDyn};
@@ -55,7 +54,6 @@ pub enum PreprocessedData {
     },
 
     /// Validated image source.
-    #[cfg(feature = "vision")]
     Image { source: ImageSource },
 }
 
@@ -72,7 +70,6 @@ impl PreprocessedData {
                     })?;
                 Ok(PreprocessedData::Tensor(tensor))
             }
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { source } => {
                 match source {
                     ImageSource::Encoded { .. } => {
@@ -90,7 +87,6 @@ impl PreprocessedData {
                     source: source.clone(),
                 })
             }
-            #[cfg(feature = "vision")]
             EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
                 "MultiPart envelopes require multimodal preprocessing".to_string(),
             )),
@@ -206,7 +202,6 @@ impl PreprocessedData {
             PreprocessedData::TokenIds { original_text, .. } => {
                 Ok(Envelope::new(EnvelopeKind::Text(original_text.clone())))
             }
-            #[cfg(feature = "vision")]
             PreprocessedData::Image { .. } => Err(AdapterError::InvalidInput(
                 "Image data must be decoded before converting to an envelope".to_string(),
             )),
@@ -297,11 +292,9 @@ impl RawOutputs {
                 map.insert("output".to_string(), tensor);
                 Ok(RawOutputs::TensorMap(map))
             }
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { .. } => Err(AdapterError::InvalidInput(
                 "Image envelopes cannot be converted directly to raw outputs".to_string(),
             )),
-            #[cfg(feature = "vision")]
             EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
                 "MultiPart envelopes cannot be converted directly to raw outputs".to_string(),
             )),
@@ -327,7 +320,6 @@ mod tests {
         assert!(matches!(data, PreprocessedData::AudioBytes(_)));
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn preprocessed_data_revalidates_image_sources_before_decode() {
         let envelope = Envelope::new(EnvelopeKind::Image {

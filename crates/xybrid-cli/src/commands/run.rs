@@ -227,40 +227,27 @@ fn build_multimodal_input_envelope(
     input_text: Option<&str>,
     input_images: &[PathBuf],
 ) -> Result<Envelope> {
-    #[cfg(feature = "vision")]
-    {
-        let text = input_text.unwrap_or_default();
-        if !text.is_empty() {
-            ui::kv("Input", &format!("\"{}\"", text));
-        }
-
-        let mut images = Vec::with_capacity(input_images.len());
-        for image_path in input_images {
-            ui::kv("Input image", &image_path.display().to_string());
-            let image_bytes = fs::read(image_path)
-                .with_context(|| format!("Failed to read image file: {}", image_path.display()))?;
-            let format = image_format_hint(image_path)?;
-            ui::kv("Image size", &format!("{} bytes", image_bytes.len()));
-            images.push(
-                Envelope::image(image_bytes, format)
-                    .with_context(|| format!("Invalid image input: {}", image_path.display()))?,
-            );
-        }
-
-        Envelope::user_message(text, images).context("Failed to build multimodal user input")
+    let text = input_text.unwrap_or_default();
+    if !text.is_empty() {
+        ui::kv("Input", &format!("\"{}\"", text));
     }
 
-    #[cfg(not(feature = "vision"))]
-    {
-        let _ = input_text;
-        let _ = input_images;
-        Err(anyhow::anyhow!(
-            "This xybrid binary was built without vision support. Rebuild with --features vision or --features llm-llamacpp-vision to use --input-image."
-        ))
+    let mut images = Vec::with_capacity(input_images.len());
+    for image_path in input_images {
+        ui::kv("Input image", &image_path.display().to_string());
+        let image_bytes = fs::read(image_path)
+            .with_context(|| format!("Failed to read image file: {}", image_path.display()))?;
+        let format = image_format_hint(image_path)?;
+        ui::kv("Image size", &format!("{} bytes", image_bytes.len()));
+        images.push(
+            Envelope::image(image_bytes, format)
+                .with_context(|| format!("Invalid image input: {}", image_path.display()))?,
+        );
     }
+
+    Envelope::user_message(text, images).context("Failed to build multimodal user input")
 }
 
-#[cfg(feature = "vision")]
 fn image_format_hint(path: &Path) -> Result<&str> {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -368,7 +355,6 @@ fn run_dry_run(
             EnvelopeKind::Audio(_) => EnvelopeKind::Text("transcribed".to_string()),
             EnvelopeKind::Text(t) => EnvelopeKind::Text(format!("{}-output", t)),
             EnvelopeKind::Embedding(_) => EnvelopeKind::Text("result".to_string()),
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                 EnvelopeKind::Text("vision-output".to_string())
             }
@@ -468,11 +454,9 @@ fn print_pipeline_results(
                     println!("    {:?} ...", &vec[..5]);
                 }
             }
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { .. } => {
                 print_image_summary("  ", &result.output);
             }
-            #[cfg(feature = "vision")]
             EnvelopeKind::MultiPart(parts) => {
                 ui::kv("  Parts", &format!("{}", parts.len()));
             }
@@ -513,11 +497,9 @@ fn save_pipeline_output(
                     })?;
                     ui::ok(&format!("Embedding saved to {}", path.display()));
                 }
-                #[cfg(feature = "vision")]
                 EnvelopeKind::Image { .. } => {
                     save_image_output(path, &last_result.output)?;
                 }
-                #[cfg(feature = "vision")]
                 EnvelopeKind::MultiPart(_) => {
                     save_envelope_json(path, &last_result.output)?;
                 }
@@ -1179,14 +1161,12 @@ fn print_inference_results(
                 ui::ok(&format!("Embedding saved to {}", path.display()));
             }
         }
-        #[cfg(feature = "vision")]
         EnvelopeKind::Image { .. } => {
             print_image_summary("", output);
             if let Some(path) = output_path {
                 save_image_output(path, output)?;
             }
         }
-        #[cfg(feature = "vision")]
         EnvelopeKind::MultiPart(parts) => {
             ui::kv("Parts", &format!("{}", parts.len()));
             if let Some(path) = output_path {
@@ -1202,7 +1182,6 @@ fn print_inference_results(
     Ok(())
 }
 
-#[cfg(feature = "vision")]
 fn print_image_summary(prefix: &str, output: &Envelope) {
     ui::kv(
         &format!("{prefix}Size"),
@@ -1216,7 +1195,6 @@ fn print_image_summary(prefix: &str, output: &Envelope) {
     }
 }
 
-#[cfg(feature = "vision")]
 fn save_image_output(path: &PathBuf, output: &Envelope) -> Result<()> {
     let (bytes, _format) = output
         .as_image()
@@ -1227,7 +1205,6 @@ fn save_image_output(path: &PathBuf, output: &Envelope) -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "vision")]
 fn save_envelope_json(path: &PathBuf, output: &Envelope) -> Result<()> {
     let json = serde_json::to_string_pretty(output).context("Failed to serialize envelope")?;
     fs::write(path, json)
@@ -1288,7 +1265,6 @@ fn emit_pipeline_complete_event(
 mod tests {
     use super::*;
 
-    #[cfg(feature = "vision")]
     fn png_image(width: u32, height: u32) -> Vec<u8> {
         let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
             width,
@@ -1302,7 +1278,6 @@ mod tests {
         encoded.into_inner()
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn build_input_envelope_combines_text_and_image_parts() {
         let dir = tempfile::tempdir().unwrap();
@@ -1324,7 +1299,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn build_input_envelope_rejects_corrupt_image_with_redacted_error() {
         let dir = tempfile::tempdir().unwrap();
@@ -1341,7 +1315,6 @@ mod tests {
         assert!(!message.contains("42, 42"));
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn build_input_envelope_rejects_oversized_image_payload() {
         let dir = tempfile::tempdir().unwrap();
@@ -1359,19 +1332,5 @@ mod tests {
         assert!(message.contains("Invalid image input"));
         assert!(message.contains("Image payload too large"));
         assert!(!message.contains("[0"));
-    }
-
-    #[cfg(not(feature = "vision"))]
-    #[test]
-    fn image_input_requires_vision_feature() {
-        let err = build_input_envelope(
-            None,
-            Some("describe this"),
-            &[PathBuf::from("fixture.png")],
-            None,
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("built without vision support"));
     }
 }

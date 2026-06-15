@@ -1450,7 +1450,6 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    #[cfg(feature = "vision")]
     fn create_vlm_bundle(temp_dir: &tempfile::TempDir, model_id: &str) -> PathBuf {
         let model_dir = temp_dir.path().join("bundle_model_files");
         std::fs::create_dir_all(&model_dir).unwrap();
@@ -1703,7 +1702,6 @@ mod tests {
         mmproj_mock.assert();
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn fetch_extracted_bundle_repairs_partial_multifile_vlm_extraction() {
         use httpmock::prelude::*;

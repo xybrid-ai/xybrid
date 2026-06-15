@@ -56,7 +56,6 @@ pub mod traits;
 pub mod types;
 
 // Shared vision contracts for embedding-style multimodal backends.
-#[cfg(feature = "vision")]
 pub mod vision;
 
 // Runtime backends (organized in subdirectories)
@@ -139,9 +138,7 @@ pub use traits::ModelRuntime;
 pub use types::{
     ChatMessage, GenerationConfig, LlmConfig, PartialToken, StreamingCallback, StreamingError,
 };
-#[cfg(feature = "vision")]
 pub use types::{MultimodalChatMessage, MultimodalImagePart, MultimodalMessagePart};
-#[cfg(feature = "vision")]
 pub use vision::{VisionEmbeddings, VisionEncoder, VisionTokenId};
 
 /// Error type for runtime adapter operations.

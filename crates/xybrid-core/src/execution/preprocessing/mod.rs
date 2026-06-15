@@ -55,12 +55,10 @@ pub fn apply_preprocessing_step(
             channels,
         } => audio::decode_audio_step(data, input_envelope, *sample_rate, *channels),
 
-        #[cfg(feature = "vision")]
         PreprocessingStep::ImageDecode { channels, layout } => {
             image::image_decode_step(data, *channels, *layout)
         }
 
-        #[cfg(feature = "vision")]
         PreprocessingStep::ImageIngress { channels, layout } => {
             image::image_ingress_step(data, *channels, *layout)
         }
@@ -107,7 +105,6 @@ pub fn apply_preprocessing_step(
 
         PreprocessingStep::Reshape { shape } => tensor::reshape_step(data, shape),
 
-        #[cfg(feature = "vision")]
         PreprocessingStep::ImageResize {
             width,
             height,
@@ -125,7 +122,6 @@ pub fn apply_preprocessing_step(
             *layout,
         ),
 
-        #[cfg(feature = "vision")]
         PreprocessingStep::ImageNormalize { preset, layout } => {
             image::image_normalize_step(data, preset, *layout)
         }

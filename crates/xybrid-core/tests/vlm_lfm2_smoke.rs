@@ -1,4 +1,4 @@
-#![cfg(all(feature = "vision", feature = "llm-llamacpp"))]
+#![cfg(feature = "llm-llamacpp")]
 
 use std::path::Path;
 use xybrid_core::{

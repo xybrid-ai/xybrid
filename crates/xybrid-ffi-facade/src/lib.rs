@@ -325,7 +325,7 @@ impl Envelope {
             sdk::ir::EnvelopeKind::Audio(bytes) => EnvelopeKind::Audio { bytes },
             sdk::ir::EnvelopeKind::Embedding(values) => EnvelopeKind::Embedding { values },
             // The SDK's vision envelope kinds (`Image`, `MultiPart`) are
-            // `#[cfg(feature = "vision")]`-gated and have no representation on
+            // ``-gated and have no representation on
             // the bolt surface yet. They're input kinds — model outputs (what
             // `from_sdk` sees) are never images — so collapse to a text marker
             // until vision is wired through the facade. The wildcard keeps this

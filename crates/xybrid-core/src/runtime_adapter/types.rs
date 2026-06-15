@@ -12,7 +12,6 @@
 //! - `LlmConfig` - Configuration for loading a local LLM
 
 use crate::ir::MessageRole;
-#[cfg(feature = "vision")]
 use crate::{
     conversation::ConversationContext,
     ir::{Envelope, EnvelopeKind, ImageDimensions, ImageFormat, ImageSource},
@@ -129,7 +128,6 @@ impl ChatMessage {
 // =============================================================================
 
 /// Image part carried through the backend-neutral multimodal chat contract.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MultimodalImagePart {
     /// Image source. Debug and human-readable serialization redact bytes.
@@ -138,7 +136,6 @@ pub struct MultimodalImagePart {
     pub local_id: String,
 }
 
-#[cfg(feature = "vision")]
 impl MultimodalImagePart {
     /// Create an image part from an envelope image source.
     pub fn new(source: ImageSource, local_id: impl Into<String>) -> Self {
@@ -165,7 +162,6 @@ impl MultimodalImagePart {
 }
 
 /// Ordered part in a backend-neutral multimodal chat message.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MultimodalMessagePart {
     /// Text fragment.
@@ -174,7 +170,6 @@ pub enum MultimodalMessagePart {
     Image(MultimodalImagePart),
 }
 
-#[cfg(feature = "vision")]
 impl MultimodalMessagePart {
     /// Return the contained text if this is a text part.
     pub fn as_text(&self) -> Option<&str> {
@@ -191,7 +186,6 @@ impl MultimodalMessagePart {
 }
 
 /// Backend-neutral multimodal message preserving ordered text and image parts.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MultimodalChatMessage {
     /// Role of the message sender.
@@ -200,7 +194,6 @@ pub struct MultimodalChatMessage {
     pub parts: Vec<MultimodalMessagePart>,
 }
 
-#[cfg(feature = "vision")]
 impl MultimodalChatMessage {
     /// Build a multimodal message from a single envelope.
     pub fn from_envelope(envelope: &Envelope) -> Result<Self, AdapterError> {
@@ -268,7 +261,6 @@ impl MultimodalChatMessage {
     }
 }
 
-#[cfg(feature = "vision")]
 fn parts_from_envelope(envelope: &Envelope) -> Result<Vec<MultimodalMessagePart>, AdapterError> {
     match &envelope.kind {
         EnvelopeKind::Text(text) => Ok(vec![MultimodalMessagePart::Text(text.clone())]),
@@ -288,7 +280,6 @@ fn parts_from_envelope(envelope: &Envelope) -> Result<Vec<MultimodalMessagePart>
     }
 }
 
-#[cfg(feature = "vision")]
 fn part_from_multipart_fragment(
     envelope: &Envelope,
 ) -> Result<MultimodalMessagePart, AdapterError> {

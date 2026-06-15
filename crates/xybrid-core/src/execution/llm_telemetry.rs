@@ -189,7 +189,6 @@ mod tests {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: Vec::new(),
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: bundle_metadata,

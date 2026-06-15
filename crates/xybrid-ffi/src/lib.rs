@@ -298,10 +298,8 @@ pub(crate) enum EnvelopeData {
         role: Option<MessageRole>,
     },
     /// Validated encoded image envelope.
-    #[cfg(feature = "vision")]
     Image { envelope: Envelope },
     /// Validated multi-part user message envelope.
-    #[cfg(feature = "vision")]
     UserMessage { envelope: Envelope },
 }
 
@@ -629,7 +627,6 @@ fn envelope_data_to_sdk(data: &EnvelopeData) -> Envelope {
             }
             envelope
         }
-        #[cfg(feature = "vision")]
         EnvelopeData::Image { envelope } | EnvelopeData::UserMessage { envelope } => {
             envelope.clone()
         }
@@ -1746,14 +1743,6 @@ pub unsafe extern "C" fn xybrid_envelope_image(
 ) -> *mut XybridEnvelopeHandle {
     clear_last_error();
 
-    #[cfg(not(feature = "vision"))]
-    {
-        let _ = (bytes, len, format);
-        set_last_error("vision support is not enabled in this xybrid-ffi build");
-        std::ptr::null_mut()
-    }
-
-    #[cfg(feature = "vision")]
     {
         if len > 0 && bytes.is_null() {
             set_last_error("bytes is null but len is non-zero");
@@ -1804,14 +1793,6 @@ pub unsafe extern "C" fn xybrid_envelope_user_message(
 ) -> *mut XybridEnvelopeHandle {
     clear_last_error();
 
-    #[cfg(not(feature = "vision"))]
-    {
-        let _ = (text, images, image_count);
-        set_last_error("vision support is not enabled in this xybrid-ffi build");
-        std::ptr::null_mut()
-    }
-
-    #[cfg(feature = "vision")]
     {
         if text.is_null() {
             set_last_error("text is null");
@@ -2198,9 +2179,7 @@ pub unsafe extern "C" fn xybrid_context_push(
                 set_last_error("audio envelopes cannot be pushed to context");
                 return -1;
             }
-            #[cfg(feature = "vision")]
             EnvelopeData::UserMessage { envelope } => envelope.clone(),
-            #[cfg(feature = "vision")]
             EnvelopeData::Image { .. } => {
                 set_last_error("image envelopes cannot be pushed directly to context");
                 return -1;
@@ -5840,7 +5819,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     fn tiny_png_bytes() -> Vec<u8> {
         use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
         use std::io::Cursor;
@@ -5852,7 +5830,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "vision")]
     fn test_envelope_image_basic() {
         let image_bytes = tiny_png_bytes();
         let format = CString::new("png").unwrap();
@@ -5883,7 +5860,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "vision")]
     fn test_envelope_image_rejects_invalid_format() {
         let image_bytes = tiny_png_bytes();
         let format = CString::new("gif").unwrap();
@@ -5901,7 +5877,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "vision")]
     fn test_envelope_image_rejects_corrupt_bytes_with_redacted_error() {
         let image_bytes = [42_u8, 42, 42, 42];
         let format = CString::new("jpeg").unwrap();
@@ -5921,7 +5896,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "vision")]
     fn test_envelope_image_rejects_oversized_encoded_payload() {
         let image_bytes = vec![0_u8; xybrid_sdk::ir::envelope::DEFAULT_MAX_ENCODED_IMAGE_BYTES + 1];
         let format = CString::new("png").unwrap();
@@ -5940,7 +5914,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "vision")]
     fn test_envelope_user_message_basic() {
         let image_bytes = tiny_png_bytes();
         let format = CString::new("png").unwrap();
@@ -5970,7 +5943,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "vision")]
     fn test_envelope_user_message_rejects_non_image_attachment() {
         let text = CString::new("describe this").unwrap();
         let attachment_text = CString::new("not an image").unwrap();

@@ -104,7 +104,6 @@ pub enum PreprocessingStep {
     ///
     /// Use for: Vision models that need deterministic stretch, letterbox, or
     /// center-crop resizing after `ImageDecode`.
-    #[cfg(feature = "vision")]
     ImageResize {
         /// Target width.
         width: usize,
@@ -133,7 +132,6 @@ pub enum PreprocessingStep {
     ///
     /// Use for: ImageNet classifiers, CLIP/SigLIP encoders, and VLM
     /// preprocessors that require per-channel mean/std normalization.
-    #[cfg(feature = "vision")]
     ImageNormalize {
         /// Normalization preset or custom per-channel values.
         #[serde(default)]
@@ -170,7 +168,6 @@ pub enum PreprocessingStep {
     ///
     /// Use for: Image classifiers and vision-language models that need
     /// encoded PNG/JPEG/WebP bytes converted before resize/normalize steps.
-    #[cfg(feature = "vision")]
     ImageDecode {
         /// Output channel count. Supported: 1 (grayscale) or 3 (RGB).
         #[serde(default = "default_image_channels")]
@@ -185,7 +182,6 @@ pub enum PreprocessingStep {
     ///
     /// Use for: image classifiers and vision-language models that accept either
     /// encoded PNG/JPEG/WebP bytes or raw camera/canvas frames.
-    #[cfg(feature = "vision")]
     ImageIngress {
         /// Output channel count. Supported: 1 (grayscale) or 3 (RGB).
         #[serde(default = "default_image_channels")]
@@ -263,15 +259,11 @@ impl PreprocessingStep {
             PreprocessingStep::Tokenize { .. } => "Tokenize",
             PreprocessingStep::Normalize { .. } => "Normalize",
             PreprocessingStep::Resize { .. } => "Resize",
-            #[cfg(feature = "vision")]
             PreprocessingStep::ImageResize { .. } => "ImageResize",
-            #[cfg(feature = "vision")]
             PreprocessingStep::ImageNormalize { .. } => "ImageNormalize",
             PreprocessingStep::CenterCrop { .. } => "CenterCrop",
             PreprocessingStep::AudioDecode { .. } => "AudioDecode",
-            #[cfg(feature = "vision")]
             PreprocessingStep::ImageDecode { .. } => "ImageDecode",
-            #[cfg(feature = "vision")]
             PreprocessingStep::ImageIngress { .. } => "ImageIngress",
             PreprocessingStep::Reshape { .. } => "Reshape",
             PreprocessingStep::PhonemeRaw { .. } => "PhonemeRaw",

@@ -15,7 +15,6 @@ use crate::execution::template::{ExecutionTemplate, ModelMetadata};
 use crate::execution::types::ExecutorResult;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::AdapterError;
-#[cfg(feature = "vision")]
 use crate::runtime_adapter::MultimodalChatMessage;
 use crate::tracing as xybrid_trace;
 
@@ -257,7 +256,6 @@ pub trait LlmInference: Send + Sync {
     }
 
     /// Generate text from backend-neutral multimodal messages.
-    #[cfg(feature = "vision")]
     fn generate_multimodal(
         &self,
         _messages: &[MultimodalChatMessage],
@@ -420,7 +418,6 @@ impl LlmInference for DefaultLlmInference {
         Ok(output.text)
     }
 
-    #[cfg(feature = "vision")]
     fn generate_multimodal(
         &self,
         messages: &[MultimodalChatMessage],
@@ -548,19 +545,11 @@ impl<I: LlmInference> LlmStrategy<I> {
 
     /// Check if this is an LLM model (GGUF template).
     fn is_llm_model(metadata: &ModelMetadata) -> bool {
-        matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. }) || {
-            #[cfg(feature = "vision")]
-            {
-                matches!(
-                    metadata.execution_template,
-                    ExecutionTemplate::VisionLanguage { .. }
-                )
-            }
-            #[cfg(not(feature = "vision"))]
-            {
-                false
-            }
-        }
+        matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
+            || matches!(
+                metadata.execution_template,
+                ExecutionTemplate::VisionLanguage { .. }
+            )
     }
 
     /// Extract GGUF config from metadata.
@@ -592,7 +581,6 @@ impl<I: LlmInference> LlmStrategy<I> {
 
                 Ok(config)
             }
-            #[cfg(feature = "vision")]
             ExecutionTemplate::VisionLanguage {
                 model_file,
                 chat_template,
@@ -691,7 +679,6 @@ impl<I: LlmInference + 'static> ExecutionStrategy for LlmStrategy<I> {
             &metadata.model_id,
         );
 
-        #[cfg(feature = "vision")]
         if matches!(
             metadata.execution_template,
             ExecutionTemplate::VisionLanguage { .. }
@@ -768,9 +755,7 @@ mod tests {
         pub should_fail_generate: bool,
         pub last_prompt: std::sync::Mutex<Option<String>>,
         pub last_params: std::sync::Mutex<Option<LlmGenerationParams>>,
-        #[cfg(feature = "vision")]
         pub multimodal_generate_count: AtomicUsize,
-        #[cfg(feature = "vision")]
         pub last_multimodal_messages:
             std::sync::Mutex<Option<Vec<crate::runtime_adapter::MultimodalChatMessage>>>,
     }
@@ -786,9 +771,7 @@ mod tests {
                 should_fail_generate: false,
                 last_prompt: std::sync::Mutex::new(None),
                 last_params: std::sync::Mutex::new(None),
-                #[cfg(feature = "vision")]
                 multimodal_generate_count: AtomicUsize::new(0),
-                #[cfg(feature = "vision")]
                 last_multimodal_messages: std::sync::Mutex::new(None),
             }
         }
@@ -837,7 +820,6 @@ mod tests {
             Ok(self.response.clone())
         }
 
-        #[cfg(feature = "vision")]
         fn generate_multimodal(
             &self,
             messages: &[crate::runtime_adapter::MultimodalChatMessage],
@@ -1115,7 +1097,6 @@ mod tests {
             preprocessing: vec![],
             postprocessing: vec![],
             files: vec!["model.gguf".to_string()],
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
@@ -1129,7 +1110,6 @@ mod tests {
         ModelMetadata::onnx("test-model", "1.0", "model.onnx")
     }
 
-    #[cfg(feature = "vision")]
     fn encoded_test_image(width: u32, height: u32, format: image::ImageFormat) -> Vec<u8> {
         let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
             width,
@@ -1143,7 +1123,6 @@ mod tests {
         encoded.into_inner()
     }
 
-    #[cfg(feature = "vision")]
     fn create_vision_language_metadata() -> ModelMetadata {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
 
@@ -1179,7 +1158,6 @@ mod tests {
         assert!(LlmStrategy::<MockLlmInference>::is_llm_model(&metadata));
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn test_is_llm_model_true_for_vision_language() {
         let metadata = create_vision_language_metadata();
@@ -1233,7 +1211,6 @@ mod tests {
         assert_eq!(config.backend_hint, Some("llamacpp".to_string()));
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn test_extract_vision_language_config_with_vision_encoder_path() {
         let metadata = create_vision_language_metadata();
@@ -1350,7 +1327,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn test_vision_language_strategy_routes_multipart_to_multimodal_inference() {
         use crate::runtime_adapter::{ModelRuntime, MultimodalMessagePart};

@@ -31,14 +31,12 @@
 //! let deserialized = Envelope::from_bytes(&bytes).unwrap();
 //! ```
 
-#[cfg(feature = "vision")]
 use std::sync::Arc;
 use std::{collections::HashMap, fmt};
 use thiserror::Error;
 use uuid::Uuid;
 
 /// Encoded image formats supported by vision envelopes.
-#[cfg(feature = "vision")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageFormat {
@@ -50,7 +48,6 @@ pub enum ImageFormat {
     WebP,
 }
 
-#[cfg(feature = "vision")]
 impl ImageFormat {
     /// Parse an image format from a user-facing hint.
     pub fn from_hint(hint: impl AsRef<str>) -> Result<Self, EnvelopeError> {
@@ -74,14 +71,12 @@ impl ImageFormat {
     }
 }
 
-#[cfg(feature = "vision")]
 impl fmt::Debug for ImageFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-#[cfg(feature = "vision")]
 impl fmt::Display for ImageFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
@@ -89,15 +84,12 @@ impl fmt::Display for ImageFormat {
 }
 
 /// Default encoded image byte cap for public image constructors.
-#[cfg(feature = "vision")]
 pub const DEFAULT_MAX_ENCODED_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Default decoded-pixel cap for public image constructors.
-#[cfg(feature = "vision")]
 pub const DEFAULT_MAX_DECODED_IMAGE_PIXELS: u64 = 16_777_216;
 
 /// Decoded image dimensions discovered during envelope validation.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ImageDimensions {
     /// Image width in pixels.
@@ -106,7 +98,6 @@ pub struct ImageDimensions {
     pub height: u32,
 }
 
-#[cfg(feature = "vision")]
 impl ImageDimensions {
     /// Total decoded pixel count.
     pub fn pixels(self) -> u64 {
@@ -115,7 +106,6 @@ impl ImageDimensions {
 }
 
 /// Raw pixel-buffer formats accepted by `Envelope::image_raw`.
-#[cfg(feature = "vision")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PixelFormat {
@@ -133,7 +123,6 @@ pub enum PixelFormat {
     I420,
 }
 
-#[cfg(feature = "vision")]
 impl PixelFormat {
     /// Parse a raw pixel format from a binding-facing hint.
     pub fn from_hint(hint: impl AsRef<str>) -> Result<Self, EnvelopeError> {
@@ -198,21 +187,18 @@ impl PixelFormat {
     }
 }
 
-#[cfg(feature = "vision")]
 impl fmt::Debug for PixelFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-#[cfg(feature = "vision")]
 impl fmt::Display for PixelFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-#[cfg(feature = "vision")]
 fn bytes_per_packed_pixel(format: PixelFormat) -> u8 {
     match format {
         PixelFormat::Rgb8 => 3,
@@ -221,13 +207,11 @@ fn bytes_per_packed_pixel(format: PixelFormat) -> u8 {
     }
 }
 
-#[cfg(feature = "vision")]
 #[derive(Clone, Copy)]
 enum PlaneDimensionRole {
     Chroma420,
 }
 
-#[cfg(feature = "vision")]
 impl PlaneDimensionRole {
     fn dimensions(self, width: u32, height: u32) -> (u32, u32) {
         match self {
@@ -237,7 +221,6 @@ impl PlaneDimensionRole {
 }
 
 /// One memory plane inside a raw pixel image.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ImagePlane {
     /// Byte offset into the raw pixel buffer where this plane begins.
@@ -253,7 +236,6 @@ pub struct ImagePlane {
 }
 
 /// YUV color conversion matrix for raw YUV camera frames.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum YuvColorMatrix {
@@ -266,7 +248,6 @@ pub enum YuvColorMatrix {
 }
 
 /// YUV luma/chroma numeric range.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum YuvColorRange {
@@ -277,7 +258,6 @@ pub enum YuvColorRange {
 }
 
 /// Color metadata required for raw YUV camera frames.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct YuvColorInfo {
     /// Conversion matrix.
@@ -287,7 +267,6 @@ pub struct YuvColorInfo {
 }
 
 /// Validation limits used by image envelope constructors.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageValidationLimits {
     /// Maximum encoded payload size in bytes.
@@ -298,7 +277,6 @@ pub struct ImageValidationLimits {
     pub reject_animated: bool,
 }
 
-#[cfg(feature = "vision")]
 impl Default for ImageValidationLimits {
     fn default() -> Self {
         Self {
@@ -309,7 +287,6 @@ impl Default for ImageValidationLimits {
     }
 }
 
-#[cfg(feature = "vision")]
 impl ImageValidationLimits {
     /// Override the encoded-byte cap.
     pub fn with_max_encoded_bytes(mut self, max_encoded_bytes: usize) -> Self {
@@ -335,7 +312,6 @@ impl ImageValidationLimits {
 /// INF-230 only constructs encoded images, but this enum leaves the envelope
 /// shape ready for raw camera-frame ingress without another enum-breaking
 /// refactor.
-#[cfg(feature = "vision")]
 #[derive(Clone, PartialEq)]
 pub enum ImageSource {
     /// Container-encoded bytes that still need image decoding.
@@ -363,7 +339,6 @@ pub enum ImageSource {
 }
 
 /// Borrowed view of a raw image payload.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RawImageRef<'a> {
     /// Raw backing pixels.
@@ -379,7 +354,6 @@ pub struct RawImageRef<'a> {
 }
 
 /// Byte-free summary of an image envelope.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ImageSummary {
     /// Number of bytes carried by the image source.
@@ -391,7 +365,6 @@ pub struct ImageSummary {
 }
 
 /// Byte-free source metadata for an image summary.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageSummarySource {
@@ -404,7 +377,6 @@ pub enum ImageSummarySource {
     },
 }
 
-#[cfg(feature = "vision")]
 impl ImageSummarySource {
     /// Encoded image format, when this summary describes encoded bytes.
     pub fn as_encoded(self) -> Option<ImageFormat> {
@@ -426,7 +398,6 @@ impl ImageSummarySource {
     }
 }
 
-#[cfg(feature = "vision")]
 impl ImageSource {
     /// Number of bytes carried by this image source.
     pub fn byte_len(&self) -> usize {
@@ -566,7 +537,6 @@ impl ImageSource {
     }
 }
 
-#[cfg(feature = "vision")]
 impl fmt::Debug for ImageSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -605,7 +575,6 @@ impl fmt::Debug for ImageSource {
     }
 }
 
-#[cfg(feature = "vision")]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ImageSourceWire {
@@ -623,7 +592,6 @@ enum ImageSourceWire {
     },
 }
 
-#[cfg(feature = "vision")]
 impl From<&ImageSource> for ImageSourceWire {
     fn from(source: &ImageSource) -> Self {
         match source {
@@ -653,7 +621,6 @@ impl From<&ImageSource> for ImageSourceWire {
     }
 }
 
-#[cfg(feature = "vision")]
 impl From<ImageSourceWire> for ImageSource {
     fn from(source: ImageSourceWire) -> Self {
         match source {
@@ -683,7 +650,6 @@ impl From<ImageSourceWire> for ImageSource {
     }
 }
 
-#[cfg(feature = "vision")]
 impl serde::Serialize for ImageSource {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -747,7 +713,6 @@ impl serde::Serialize for ImageSource {
     }
 }
 
-#[cfg(feature = "vision")]
 impl<'de> serde::Deserialize<'de> for ImageSource {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -824,7 +789,6 @@ impl<'de> serde::Deserialize<'de> for ImageSource {
     }
 }
 
-#[cfg(feature = "vision")]
 fn validate_encoded_image(
     bytes: &[u8],
     format: ImageFormat,
@@ -856,7 +820,6 @@ fn validate_encoded_image(
     Ok(dimensions)
 }
 
-#[cfg(feature = "vision")]
 fn validate_raw_image(
     pixels: &[u8],
     pixel_format: PixelFormat,
@@ -917,7 +880,6 @@ fn validate_raw_image(
     Ok(dimensions)
 }
 
-#[cfg(feature = "vision")]
 fn validate_raw_plane(
     pixels: &[u8],
     plane: &ImagePlane,
@@ -1013,7 +975,6 @@ fn validate_raw_plane(
     Ok(())
 }
 
-#[cfg(feature = "vision")]
 fn read_encoded_image_dimensions(
     bytes: &[u8],
     format: ImageFormat,
@@ -1029,7 +990,6 @@ fn read_encoded_image_dimensions(
     Ok(ImageDimensions { width, height })
 }
 
-#[cfg(feature = "vision")]
 fn ensure_encoded_image_decodes(bytes: &[u8], format: ImageFormat) -> Result<(), EnvelopeError> {
     image::ImageReader::with_format(std::io::Cursor::new(bytes), image_crate_format(format))
         .decode()
@@ -1037,7 +997,6 @@ fn ensure_encoded_image_decodes(bytes: &[u8], format: ImageFormat) -> Result<(),
         .map_err(|_| EnvelopeError::ImageDecodeFailed { format })
 }
 
-#[cfg(feature = "vision")]
 fn image_crate_format(format: ImageFormat) -> image::ImageFormat {
     match format {
         ImageFormat::Png => image::ImageFormat::Png,
@@ -1046,7 +1005,6 @@ fn image_crate_format(format: ImageFormat) -> image::ImageFormat {
     }
 }
 
-#[cfg(feature = "vision")]
 fn webp_declares_animation(bytes: &[u8]) -> bool {
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WEBP" {
         return false;
@@ -1091,10 +1049,8 @@ pub enum EnvelopeKind {
     /// Embedding vectors (feature vectors, embeddings, etc.)
     Embedding(Vec<f32>),
     /// Image payload for vision-capable models.
-    #[cfg(feature = "vision")]
     Image { source: ImageSource },
     /// Ordered envelope fragments that represent one logical message.
-    #[cfg(feature = "vision")]
     MultiPart(Vec<Envelope>),
 }
 
@@ -1104,7 +1060,6 @@ impl fmt::Debug for EnvelopeKind {
             EnvelopeKind::Audio(data) => f.debug_tuple("Audio").field(data).finish(),
             EnvelopeKind::Text(data) => f.debug_tuple("Text").field(data).finish(),
             EnvelopeKind::Embedding(data) => f.debug_tuple("Embedding").field(data).finish(),
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { source } => match source {
                 ImageSource::Encoded {
                     bytes,
@@ -1138,7 +1093,6 @@ impl fmt::Debug for EnvelopeKind {
                     )
                 }
             },
-            #[cfg(feature = "vision")]
             EnvelopeKind::MultiPart(parts) => f.debug_tuple("MultiPart").field(parts).finish(),
         }
     }
@@ -1155,9 +1109,7 @@ impl EnvelopeKind {
             EnvelopeKind::Audio(_) => "Audio",
             EnvelopeKind::Text(_) => "Text",
             EnvelopeKind::Embedding(_) => "Embedding",
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { .. } => "Image",
-            #[cfg(feature = "vision")]
             EnvelopeKind::MultiPart(_) => "MultiPart",
         }
     }
@@ -1172,9 +1124,7 @@ impl EnvelopeKind {
             EnvelopeKind::Audio(data) => data.len(),
             EnvelopeKind::Text(data) => data.len(),
             EnvelopeKind::Embedding(data) => data.len() * std::mem::size_of::<f32>(),
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { source } => source.byte_len(),
-            #[cfg(feature = "vision")]
             EnvelopeKind::MultiPart(parts) => parts.iter().map(Envelope::payload_size).sum(),
         }
     }
@@ -1247,13 +1197,11 @@ impl Envelope {
     }
 
     /// Creates an encoded image envelope.
-    #[cfg(feature = "vision")]
     pub fn image(bytes: Vec<u8>, format: impl AsRef<str>) -> EnvelopeResult<Self> {
         Self::image_with_limits(bytes, format, ImageValidationLimits::default())
     }
 
     /// Creates an encoded image envelope using explicit validation limits.
-    #[cfg(feature = "vision")]
     pub fn image_with_limits(
         bytes: Vec<u8>,
         format: impl AsRef<str>,
@@ -1271,7 +1219,6 @@ impl Envelope {
     }
 
     /// Creates a raw pixel image envelope using default validation limits.
-    #[cfg(feature = "vision")]
     pub fn image_raw(
         pixels: Vec<u8>,
         pixel_format: PixelFormat,
@@ -1292,7 +1239,6 @@ impl Envelope {
     }
 
     /// Creates a raw pixel image envelope using explicit validation limits.
-    #[cfg(feature = "vision")]
     pub fn image_raw_with_limits(
         pixels: Vec<u8>,
         pixel_format: PixelFormat,
@@ -1316,7 +1262,6 @@ impl Envelope {
     }
 
     /// Creates a user-role multi-part envelope from text and image attachments.
-    #[cfg(feature = "vision")]
     pub fn user_message(text: impl Into<String>, images: Vec<Envelope>) -> EnvelopeResult<Self> {
         if images.iter().any(|image| !image.is_image()) {
             return Err(EnvelopeError::ValidationError(
@@ -1537,13 +1482,11 @@ impl Envelope {
     }
 
     /// Returns `true` if this envelope contains an image.
-    #[cfg(feature = "vision")]
     pub fn is_image(&self) -> bool {
         matches!(self.kind, EnvelopeKind::Image { .. })
     }
 
     /// Returns encoded image bytes and format if this is an encoded image.
-    #[cfg(feature = "vision")]
     pub fn as_image(&self) -> Option<(&[u8], ImageFormat)> {
         match &self.kind {
             EnvelopeKind::Image { source } => source.as_encoded(),
@@ -1552,13 +1495,11 @@ impl Envelope {
     }
 
     /// Returns `true` if this envelope contains raw pixels.
-    #[cfg(feature = "vision")]
     pub fn is_raw_image(&self) -> bool {
         self.as_raw_image().is_some()
     }
 
     /// Returns raw pixels and layout if this is a raw image.
-    #[cfg(feature = "vision")]
     pub fn as_raw_image(&self) -> Option<RawImageRef<'_>> {
         match &self.kind {
             EnvelopeKind::Image { source } => source.as_raw(),
@@ -1567,7 +1508,6 @@ impl Envelope {
     }
 
     /// Returns the image source if this envelope contains an image.
-    #[cfg(feature = "vision")]
     pub fn image_source(&self) -> Option<&ImageSource> {
         match &self.kind {
             EnvelopeKind::Image { source } => Some(source),
@@ -1576,7 +1516,6 @@ impl Envelope {
     }
 
     /// Returns decoded image dimensions discovered during validation.
-    #[cfg(feature = "vision")]
     pub fn image_dimensions(&self) -> Option<ImageDimensions> {
         self.image_source().and_then(ImageSource::dimensions)
     }
@@ -1585,14 +1524,12 @@ impl Envelope {
     ///
     /// For multi-part envelopes, summaries are returned in fragment order and
     /// nested multi-part fragments are traversed depth-first.
-    #[cfg(feature = "vision")]
     pub fn image_summaries(&self) -> Vec<ImageSummary> {
         let mut summaries = Vec::new();
         self.collect_image_summaries(&mut summaries);
         summaries
     }
 
-    #[cfg(feature = "vision")]
     fn collect_image_summaries(&self, summaries: &mut Vec<ImageSummary>) {
         match &self.kind {
             EnvelopeKind::Image { source } => summaries.push(source.summary()),
@@ -1609,13 +1546,11 @@ impl Envelope {
     ///
     /// This is useful for deserialized or manually constructed envelopes where
     /// callers need the same encoded/raw guardrails as the public constructors.
-    #[cfg(feature = "vision")]
     pub fn validate_image_tree(&self) -> EnvelopeResult<()> {
         self.validate_image_tree_with_limits(ImageValidationLimits::default())
     }
 
     /// Revalidates every image contained in this envelope tree with explicit limits.
-    #[cfg(feature = "vision")]
     pub fn validate_image_tree_with_limits(
         &self,
         limits: ImageValidationLimits,
@@ -1643,7 +1578,6 @@ impl Envelope {
     }
 
     /// Returns ordered fragments if this is a multi-part envelope.
-    #[cfg(feature = "vision")]
     pub fn as_multipart(&self) -> Option<&[Envelope]> {
         match &self.kind {
             EnvelopeKind::MultiPart(parts) => Some(parts),
@@ -1883,18 +1817,14 @@ pub enum EnvelopeError {
     SerializationError(String),
     #[error("Deserialization error: {0}")]
     DeserializationError(String),
-    #[cfg(feature = "vision")]
     #[error("Unsupported image format '{format}'; expected png, jpeg, or webp")]
     UnsupportedImageFormat { format: String },
-    #[cfg(feature = "vision")]
     #[error(
         "Unsupported raw pixel format '{format}'; expected rgb8, rgba8, bgra8, nv12, nv21, or i420"
     )]
     UnsupportedPixelFormat { format: String },
-    #[cfg(feature = "vision")]
     #[error("Image payload too large: {byte_len} bytes exceeds max {max_bytes} bytes")]
     ImageEncodedTooLarge { byte_len: usize, max_bytes: usize },
-    #[cfg(feature = "vision")]
     #[error(
         "Image dimensions too large: {width}x{height} ({pixels} pixels) exceeds max {max_pixels} pixels"
     )]
@@ -1904,13 +1834,10 @@ pub enum EnvelopeError {
         pixels: u64,
         max_pixels: u64,
     },
-    #[cfg(feature = "vision")]
     #[error("Image decode failed: invalid or corrupt {format} image bytes")]
     ImageDecodeFailed { format: ImageFormat },
-    #[cfg(feature = "vision")]
     #[error("Animated {format} images are not supported")]
     AnimatedImageUnsupported { format: ImageFormat },
-    #[cfg(feature = "vision")]
     #[error(
         "Raw image plane count mismatch for {pixel_format}: expected {expected}, got {actual}"
     )]
@@ -1919,13 +1846,10 @@ pub enum EnvelopeError {
         expected: usize,
         actual: usize,
     },
-    #[cfg(feature = "vision")]
     #[error("Raw image plane {plane_index} is invalid: {reason}")]
     RawImagePlaneInvalid { plane_index: usize, reason: String },
-    #[cfg(feature = "vision")]
     #[error("Raw YUV image format {pixel_format} requires YUV color metadata")]
     RawImageColorMetadataRequired { pixel_format: PixelFormat },
-    #[cfg(feature = "vision")]
     #[error("Raw RGB image format {pixel_format} must not carry YUV color metadata")]
     RawImageColorMetadataUnsupported { pixel_format: PixelFormat },
     #[error("Validation error: {0}")]

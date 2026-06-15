@@ -22,7 +22,9 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("ort-cuda", cfg!(feature = "ort-cuda")),
     ("ort-download", cfg!(feature = "ort-download")),
     ("ort-dynamic", cfg!(feature = "ort-dynamic")),
-    ("vision", cfg!(feature = "vision")),
+    // Vision (image envelopes + preprocessing pipeline) is always compiled in;
+    // the heavy native VLM backend is reported via `llm-llamacpp-vision`.
+    ("vision", true),
 ];
 
 /// Return the sorted list of enabled runtime feature names.
@@ -107,7 +109,6 @@ mod tests {
         assert!(enabled().contains(&"ort-download"));
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn vision_branch_is_exercised() {
         assert!(enabled().contains(&"vision"));
