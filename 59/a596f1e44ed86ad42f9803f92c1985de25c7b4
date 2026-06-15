@@ -1,0 +1,25 @@
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_93e9e173c209bc::t_5ba27027162280 35-38
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_93e9e173c209bc::t_5f779a762d521a 266-267
+  s_93e9e173c209bc::t_b903f7c79111e7 39,43
+  s_93e9e173c209bc::t_bbd73ef8219a8b 215
+  s_93e9e173c209bc::t_1fe3840167b05b 57-67
+  s_93e9e173c209bc::t_251c9c1a2f0128 152-154,247-249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "59a596f1e44ed86ad42f9803f92c1985de25c7b4",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
