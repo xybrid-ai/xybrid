@@ -274,26 +274,37 @@ public extension XybridEnvelope {
         return XybridEnvelope(kind: .embedding(values: data), metadata: [])
     }
 
-    /// Creates an encoded image envelope for vision-language models.
+    /// Creates an encoded image envelope for vision-language models. The bytes
+    /// are decode-validated on the Rust side at run time (surfacing as a
+    /// `XybridError.invalidImage` for bad/oversized/unsupported input).
     /// - Parameters:
     ///   - bytes: Encoded PNG, JPEG, or WebP data
-    ///   - format: Image format (`png`, `jpeg`, `jpg`, or `webp`)
+    ///   - format: Image format hint (`png`, `jpeg`, `jpg`, or `webp`)
     static func image(_ bytes: Data, format: String) throws -> XybridEnvelope {
-        return .image(bytes: bytes, format: try normalizeImageFormat(format))
+        return XybridEnvelope(
+            kind: .image(bytes: bytes, format: try normalizeImageFormat(format)),
+            metadata: []
+        )
     }
 
-    /// Creates a multi-part user message with text and image attachments.
+    /// Creates a multi-part user message with text and image attachments,
+    /// tagged with the `User` role.
     /// - Parameters:
     ///   - text: User prompt text
     ///   - images: Image envelopes created by `image(_:format:)`
     static func userMessage(_ text: String, images: [XybridEnvelope] = []) throws -> XybridEnvelope {
         guard images.allSatisfy({ envelope in
-            if case .image = envelope { return true }
+            if case .image = envelope.kind { return true }
             return false
         }) else {
-            throw XybridError.ConfigError(message: "Envelope.userMessage accepts only image envelopes")
+            throw XybridError.configError(message: "Envelope.userMessage accepts only image envelopes")
         }
-        return .userMessage(text: text, images: images)
+        var parts = [XybridEnvelope(kind: .text(text: text), metadata: [])]
+        parts.append(contentsOf: images)
+        return XybridEnvelope(
+            kind: .multiPart(parts: parts),
+            metadata: [XybridMetadataEntry(key: "xybrid.role", value: "user")]
+        )
     }
 
     private static func normalizeImageFormat(_ format: String) throws -> String {
@@ -304,7 +315,7 @@ public extension XybridEnvelope {
         case "jpeg", "png", "webp":
             return normalized
         default:
-            throw XybridError.ConfigError(
+            throw XybridError.configError(
                 message: "Unsupported image format '\(format)'. Supported formats: png, jpeg, jpg, webp"
             )
         }

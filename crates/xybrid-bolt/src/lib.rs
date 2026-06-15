@@ -91,6 +91,10 @@ pub enum XybridError {
     CircuitOpen { message: String },
     RateLimited { retry_after_secs: u64 },
     Timeout { timeout_ms: u64 },
+    MissingArtifact { message: String },
+    UnsupportedModelCapability { message: String },
+    UnsupportedBackendCapability { message: String },
+    InvalidImage { message: String },
 }
 
 impl XybridError {
@@ -129,6 +133,14 @@ impl From<XybridError> for facade::Error {
                 facade::Error::RateLimited { retry_after_secs }
             }
             XybridError::Timeout { timeout_ms } => facade::Error::Timeout { timeout_ms },
+            XybridError::MissingArtifact { message } => facade::Error::MissingArtifact { message },
+            XybridError::UnsupportedModelCapability { message } => {
+                facade::Error::UnsupportedModelCapability { message }
+            }
+            XybridError::UnsupportedBackendCapability { message } => {
+                facade::Error::UnsupportedBackendCapability { message }
+            }
+            XybridError::InvalidImage { message } => facade::Error::InvalidImage { message },
         }
     }
 }
@@ -158,6 +170,14 @@ impl From<facade::Error> for XybridError {
                 XybridError::RateLimited { retry_after_secs }
             }
             facade::Error::Timeout { timeout_ms } => XybridError::Timeout { timeout_ms },
+            facade::Error::MissingArtifact { message } => XybridError::MissingArtifact { message },
+            facade::Error::UnsupportedModelCapability { message } => {
+                XybridError::UnsupportedModelCapability { message }
+            }
+            facade::Error::UnsupportedBackendCapability { message } => {
+                XybridError::UnsupportedBackendCapability { message }
+            }
+            facade::Error::InvalidImage { message } => XybridError::InvalidImage { message },
         }
     }
 }
@@ -172,6 +192,8 @@ pub enum XybridEnvelopeKind {
     Text { text: String },
     Audio { bytes: Vec<u8> },
     Embedding { values: Vec<f32> },
+    Image { bytes: Vec<u8>, format: String },
+    MultiPart { parts: Vec<XybridEnvelope> },
 }
 
 impl From<XybridEnvelopeKind> for facade::EnvelopeKind {
@@ -180,6 +202,12 @@ impl From<XybridEnvelopeKind> for facade::EnvelopeKind {
             XybridEnvelopeKind::Text { text } => facade::EnvelopeKind::Text { text },
             XybridEnvelopeKind::Audio { bytes } => facade::EnvelopeKind::Audio { bytes },
             XybridEnvelopeKind::Embedding { values } => facade::EnvelopeKind::Embedding { values },
+            XybridEnvelopeKind::Image { bytes, format } => {
+                facade::EnvelopeKind::Image { bytes, format }
+            }
+            XybridEnvelopeKind::MultiPart { parts } => facade::EnvelopeKind::MultiPart {
+                parts: parts.into_iter().map(Into::into).collect(),
+            },
         }
     }
 }
@@ -190,6 +218,12 @@ impl From<facade::EnvelopeKind> for XybridEnvelopeKind {
             facade::EnvelopeKind::Text { text } => XybridEnvelopeKind::Text { text },
             facade::EnvelopeKind::Audio { bytes } => XybridEnvelopeKind::Audio { bytes },
             facade::EnvelopeKind::Embedding { values } => XybridEnvelopeKind::Embedding { values },
+            facade::EnvelopeKind::Image { bytes, format } => {
+                XybridEnvelopeKind::Image { bytes, format }
+            }
+            facade::EnvelopeKind::MultiPart { parts } => XybridEnvelopeKind::MultiPart {
+                parts: parts.into_iter().map(Into::into).collect(),
+            },
         }
     }
 }
