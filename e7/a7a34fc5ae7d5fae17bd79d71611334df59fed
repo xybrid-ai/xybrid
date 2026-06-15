@@ -1,0 +1,90 @@
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_a619afae87b555::t_219fc75eed295a 2579-2580,2584-2588,3351,3359,4218
+crates/xybrid-ffi/src/lib.rs
+  s_a619afae87b555::t_a6de65066311aa 364-367
+  s_a619afae87b555::t_ce324cebb37383 390
+  s_a619afae87b555::t_d287748c1018f7 5027,5033
+  s_a619afae87b555::t_30868acfc52954 5044,5050
+  s_a619afae87b555::t_b8650d60b89619 3589-3631
+  s_a619afae87b555::t_eb641df3d47b1d 6588,6594
+  s_a619afae87b555::t_1c1920ab661700 663,669
+  s_a619afae87b555::t_98fa62dd459ec7 5269,5275
+  s_a619afae87b555::t_bc7c1bc74ff799 407
+  s_a619afae87b555::t_f09060aab2008f 435,441
+bindings/flutter/lib/src/rust/api/result.dart
+  s_a619afae87b555::t_219fc75eed295a 73-77,86,97,110
+crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs
+  s_a619afae87b555::t_a886933ab075d3 452-472
+  s_a619afae87b555::t_49ee4eb30a6aa2 256-259
+  s_a619afae87b555::t_a786484cf72d37 191,202,211-221
+  s_a619afae87b555::t_779690bc92948a 82-85,87-113,115-116,120-129
+  s_a619afae87b555::t_faa33a01259b47 255
+  s_a619afae87b555::t_86565b74be8ae4 341-369
+crates/xybrid-uniffi/src/lib.rs
+  s_a619afae87b555::t_02ccf9124be5c5 598-601,613
+crates/xybrid-core/src/runtime_adapter/mistral/mod.rs
+  s_a619afae87b555::t_f4dc59b3b2458b 58-62
+  s_a619afae87b555::t_ed7e8a6779bca1 554,633
+  s_a619afae87b555::t_36b5bb9d4fa526 125-134
+  s_a619afae87b555::t_a4c896ab55408b 77,80-83
+  s_a619afae87b555::t_d95d5b487903d7 505,601
+bindings/flutter/rust/src/frb_generated.rs
+  s_a619afae87b555::t_219fc75eed295a 3042,3050,4065,4661
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_a619afae87b555::t_faa33a01259b47 41
+  s_a619afae87b555::t_22b5356960aa5b 40
+  s_a619afae87b555::t_a9818829db39c9 1000-1001
+  s_a619afae87b555::t_59c52f3acc71c2 1026
+  s_a619afae87b555::t_e1290909058ad2 1170-1171,1193
+  s_a619afae87b555::t_bde3fdab80c8f6 870
+  s_a619afae87b555::t_e7846c5c18aae9 846-847
+  s_a619afae87b555::t_20a66538292efe 915-916,921
+  s_a619afae87b555::t_c1edc8193a19a2 1335-1336,1365
+  s_a619afae87b555::t_8fee40fe031a6f 603,620
+crates/xybrid-cli/src/main.rs
+  s_a619afae87b555::t_03b1cf6dfd454e 500,517,533,548,563,578,595
+  s_a619afae87b555::t_d27d73734bdfa7 212-216
+bindings/flutter/rust/src/api/pipeline.rs
+  s_a619afae87b555::t_f3eefea49d4a4d 75
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_a619afae87b555::t_700a93f4ec3391 849,930
+  s_a619afae87b555::t_b0a898583afc4b 142-147
+  s_a619afae87b555::t_56510af421892b 684-692
+  s_a619afae87b555::t_9db5c6da9a87c4 799
+integration-tests/tests/reasoning_capture.rs
+  s_a619afae87b555::t_ead1e0cf9ae15e 1-102
+crates/xybrid-cli/src/commands/run.rs
+  s_a619afae87b555::t_c20ef17450df37 34,396,580,698,833,888,963
+  s_a619afae87b555::t_7934dbb7e96dbb 463-475
+  s_a619afae87b555::t_57a1f46fbf227b 1152
+  s_a619afae87b555::t_d30bb743f5facb 638,811,867,942,1026
+  s_a619afae87b555::t_f440eaac4999ba 73
+  s_a619afae87b555::t_105521f682b533 441
+  s_a619afae87b555::t_eaaeb4e4ddec0d 1221-1238
+  s_a619afae87b555::t_5182cd498db21a 426
+bindings/flutter/rust/src/api/result.rs
+  s_a619afae87b555::t_c84efa9cfce2f2 65-68,80
+crates/xybrid-ffi/include/xybrid.h
+  s_a619afae87b555::t_4634c62cf56c6f 1398-1423
+crates/xybrid-sdk/src/result.rs
+  s_a619afae87b555::t_369789c82d2293 363-392
+  s_a619afae87b555::t_e5c9dcbd21fa73 233-246
+crates/xybrid-core/src/execution/executor.rs
+  s_a619afae87b555::t_5fd050a9286521 3565
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e7a7a34fc5ae7d5fae17bd79d71611334df59fed",
+  "prompts": {},
+  "sessions": {
+    "s_a619afae87b555": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6fe5db3-dfc5-4fa6-b5ce-50fc626aab2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
