@@ -1443,27 +1443,7 @@ impl TemplateExecutor {
         }
         messages.push(ChatMessage::user(&prompt));
 
-        // Build generation config: explicit config wins, then envelope metadata, then defaults
-        let gen_config = if let Some(cfg) = config {
-            cfg.clone()
-        } else {
-            let mut cfg = GenerationConfig::default();
-            if let Some(max_tokens) = input
-                .metadata
-                .get("max_tokens")
-                .and_then(|s| s.parse().ok())
-            {
-                cfg.max_tokens = max_tokens;
-            }
-            if let Some(temperature) = input
-                .metadata
-                .get("temperature")
-                .and_then(|s| s.parse().ok())
-            {
-                cfg.temperature = temperature;
-            }
-            cfg
-        };
+        let gen_config = build_gen_config_from_input(input, config);
 
         // Execute with streaming. Capture the backend name + the prefix
         // length the backend reused from its KV cache so the metric
@@ -1487,28 +1467,12 @@ impl TemplateExecutor {
                 ));
             };
 
-        // Build response envelope
-        let mut response_metadata = std::collections::HashMap::new();
-        response_metadata.insert(
-            "tokens_generated".to_string(),
-            output.tokens_generated.to_string(),
-        );
-        response_metadata.insert(
-            "generation_time_ms".to_string(),
-            output.generation_time_ms.to_string(),
-        );
-        response_metadata.insert(
-            "tokens_per_second".to_string(),
-            format!("{:.2}", output.tokens_per_second),
-        );
-        response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
-        insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
-
-        Ok(Envelope {
-            kind: EnvelopeKind::Text(output.text),
-            metadata: response_metadata,
-        })
+        Ok(build_llm_response_envelope(
+            output,
+            &backend_name,
+            cached_prefix,
+            None,
+        ))
     }
 
     /// Execute LLM inference with pre-built ChatMessages (non-streaming).
@@ -1593,28 +1557,12 @@ impl TemplateExecutor {
                 ));
             };
 
-        // Build response envelope
-        let mut response_metadata = std::collections::HashMap::new();
-        response_metadata.insert(
-            "tokens_generated".to_string(),
-            output.tokens_generated.to_string(),
-        );
-        response_metadata.insert(
-            "generation_time_ms".to_string(),
-            output.generation_time_ms.to_string(),
-        );
-        response_metadata.insert(
-            "tokens_per_second".to_string(),
-            format!("{:.2}", output.tokens_per_second),
-        );
-        response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
-        insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
-
-        Ok(Envelope {
-            kind: EnvelopeKind::Text(output.text),
-            metadata: response_metadata,
-        })
+        Ok(build_llm_response_envelope(
+            output,
+            &backend_name,
+            cached_prefix,
+            None,
+        ))
     }
 
     #[cfg(all(
@@ -1762,28 +1710,12 @@ impl TemplateExecutor {
                 ));
             };
 
-        let mut response_metadata = std::collections::HashMap::new();
-        response_metadata.insert(
-            "tokens_generated".to_string(),
-            output.tokens_generated.to_string(),
-        );
-        response_metadata.insert(
-            "generation_time_ms".to_string(),
-            output.generation_time_ms.to_string(),
-        );
-        response_metadata.insert(
-            "tokens_per_second".to_string(),
-            format!("{:.2}", output.tokens_per_second),
-        );
-        response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
-        insert_llm_streaming_metrics(&mut response_metadata, &output);
-        insert_image_preprocess_metric(&mut response_metadata, registered_image_preprocess_ms);
-        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
-
-        Ok(Envelope {
-            kind: EnvelopeKind::Text(output.text),
-            metadata: response_metadata,
-        })
+        Ok(build_llm_response_envelope(
+            output,
+            &backend_name,
+            cached_prefix,
+            registered_image_preprocess_ms,
+        ))
     }
 
     #[cfg(all(
@@ -1908,28 +1840,12 @@ impl TemplateExecutor {
                 ));
             };
 
-        let mut response_metadata = std::collections::HashMap::new();
-        response_metadata.insert(
-            "tokens_generated".to_string(),
-            output.tokens_generated.to_string(),
-        );
-        response_metadata.insert(
-            "generation_time_ms".to_string(),
-            output.generation_time_ms.to_string(),
-        );
-        response_metadata.insert(
-            "tokens_per_second".to_string(),
-            format!("{:.2}", output.tokens_per_second),
-        );
-        response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
-        insert_llm_streaming_metrics(&mut response_metadata, &output);
-        insert_image_preprocess_metric(&mut response_metadata, registered_image_preprocess_ms);
-        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
-
-        Ok(Envelope {
-            kind: EnvelopeKind::Text(output.text),
-            metadata: response_metadata,
-        })
+        Ok(build_llm_response_envelope(
+            output,
+            &backend_name,
+            cached_prefix,
+            registered_image_preprocess_ms,
+        ))
     }
 
     /// Execute LLM streaming with pre-built ChatMessages.
@@ -2017,28 +1933,12 @@ impl TemplateExecutor {
                 ));
             };
 
-        // Build response envelope
-        let mut response_metadata = std::collections::HashMap::new();
-        response_metadata.insert(
-            "tokens_generated".to_string(),
-            output.tokens_generated.to_string(),
-        );
-        response_metadata.insert(
-            "generation_time_ms".to_string(),
-            output.generation_time_ms.to_string(),
-        );
-        response_metadata.insert(
-            "tokens_per_second".to_string(),
-            format!("{:.2}", output.tokens_per_second),
-        );
-        response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
-        insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
-
-        Ok(Envelope {
-            kind: EnvelopeKind::Text(output.text),
-            metadata: response_metadata,
-        })
+        Ok(build_llm_response_envelope(
+            output,
+            &backend_name,
+            cached_prefix,
+            None,
+        ))
     }
 
     /// Execute LLM inference via LlmRuntimeAdapter.
@@ -2133,27 +2033,7 @@ impl TemplateExecutor {
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
-        // Build generation config: explicit config wins, then envelope metadata, then defaults
-        let gen_config = if let Some(cfg) = config {
-            cfg.clone()
-        } else {
-            let mut cfg = GenerationConfig::default();
-            if let Some(max_tokens) = input
-                .metadata
-                .get("max_tokens")
-                .and_then(|s| s.parse().ok())
-            {
-                cfg.max_tokens = max_tokens;
-            }
-            if let Some(temperature) = input
-                .metadata
-                .get("temperature")
-                .and_then(|s| s.parse().ok())
-            {
-                cfg.temperature = temperature;
-            }
-            cfg
-        };
+        let gen_config = build_gen_config_from_input(input, config);
 
         // Build messages from input
         let prompt = match &input.kind {
@@ -2197,28 +2077,12 @@ impl TemplateExecutor {
             "LLM inference complete"
         );
 
-        // Build response envelope
-        let mut response_metadata = std::collections::HashMap::new();
-        response_metadata.insert(
-            "tokens_generated".to_string(),
-            output.tokens_generated.to_string(),
-        );
-        response_metadata.insert(
-            "generation_time_ms".to_string(),
-            output.generation_time_ms.to_string(),
-        );
-        response_metadata.insert(
-            "tokens_per_second".to_string(),
-            format!("{:.2}", output.tokens_per_second),
-        );
-        response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
-        insert_llm_streaming_metrics(&mut response_metadata, &output);
-        mirror_llm_metrics_to_span(&output, &backend_name, cached_prefix);
-
-        Ok(Envelope {
-            kind: EnvelopeKind::Text(output.text),
-            metadata: response_metadata,
-        })
+        Ok(build_llm_response_envelope(
+            output,
+            &backend_name,
+            cached_prefix,
+            None,
+        ))
     }
 
     /// Run preprocessing steps from metadata.
@@ -2855,11 +2719,137 @@ fn insert_image_preprocess_metric(
     }
 }
 
+/// Build the response envelope shared by every `execute_llm*` path.
+///
+/// Assembles the per-call metadata map (token scalars + streaming metrics +
+/// optional image-preprocess timing) and mirrors the generation metrics onto the
+/// current span. `image_preprocess_ms` is `None` for text-only paths and carries
+/// the vision timing for multimodal paths (the insert is a no-op when `None`).
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn build_llm_response_envelope(
+    output: crate::runtime_adapter::llm::GenerationOutput,
+    backend_name: &str,
+    cached_prefix: Option<usize>,
+    image_preprocess_ms: Option<u32>,
+) -> Envelope {
+    let mut response_metadata = std::collections::HashMap::new();
+    response_metadata.insert(
+        "tokens_generated".to_string(),
+        output.tokens_generated.to_string(),
+    );
+    response_metadata.insert(
+        "generation_time_ms".to_string(),
+        output.generation_time_ms.to_string(),
+    );
+    response_metadata.insert(
+        "tokens_per_second".to_string(),
+        format!("{:.2}", output.tokens_per_second),
+    );
+    insert_llm_streaming_metrics(&mut response_metadata, &output);
+    insert_image_preprocess_metric(&mut response_metadata, image_preprocess_ms);
+    mirror_llm_metrics_to_span(&output, backend_name, cached_prefix);
+
+    // Move `finish_reason` (no clone) now that the borrows of `output` above
+    // have completed.
+    response_metadata.insert("finish_reason".to_string(), output.finish_reason);
+
+    Envelope {
+        kind: EnvelopeKind::Text(output.text),
+        metadata: response_metadata,
+    }
+}
+
+/// Build the generation config for the prompt-based LLM paths: an explicit
+/// config wins, otherwise fall back to envelope metadata (`max_tokens`,
+/// `temperature`), then defaults.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn build_gen_config_from_input(
+    input: &Envelope,
+    config: Option<&GenerationConfig>,
+) -> GenerationConfig {
+    if let Some(cfg) = config {
+        cfg.clone()
+    } else {
+        let mut cfg = GenerationConfig::default();
+        if let Some(max_tokens) = input
+            .metadata
+            .get("max_tokens")
+            .and_then(|s| s.parse().ok())
+        {
+            cfg.max_tokens = max_tokens;
+        }
+        if let Some(temperature) = input
+            .metadata
+            .get("temperature")
+            .and_then(|s| s.parse().ok())
+        {
+            cfg.temperature = temperature;
+        }
+        cfg
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::template::PreprocessingStep;
     use super::*;
     use crate::ir::EnvelopeKind;
+
+    // Characterization tests pinning the response-envelope contract shared by
+    // every execute_llm* path after the in-place dedup into
+    // `build_llm_response_envelope`.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn sample_generation_output(tokens: usize) -> crate::runtime_adapter::llm::GenerationOutput {
+        crate::runtime_adapter::llm::GenerationOutput {
+            text: "hello".to_string(),
+            tokens_generated: tokens,
+            generation_time_ms: 100,
+            tokens_per_second: 12.5,
+            finish_reason: "stop".to_string(),
+            ttft_ms: None,
+            mean_itl_ms: None,
+            p95_itl_ms: None,
+            emitted_chunks: None,
+            inter_chunk_ms: Vec::new(),
+            decode_tps: None,
+            prefill_tps: None,
+            image_preprocess_ms: None,
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_text_path_omits_image_metric() {
+        let env = build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None);
+        match &env.kind {
+            EnvelopeKind::Text(t) => assert_eq!(t, "hello"),
+            _ => panic!("expected a text envelope"),
+        }
+        assert_eq!(
+            env.metadata.get("tokens_generated").map(String::as_str),
+            Some("7")
+        );
+        assert_eq!(
+            env.metadata.get("finish_reason").map(String::as_str),
+            Some("stop")
+        );
+        assert!(
+            !env.metadata.contains_key("image_preprocess_ms"),
+            "text-only paths must not stamp the vision image-preprocess metric"
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_multimodal_path_stamps_image_metric() {
+        let env =
+            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, Some(42));
+        assert_eq!(
+            env.metadata.get("image_preprocess_ms").map(String::as_str),
+            Some("42"),
+            "multimodal paths must surface the image-preprocess timing"
+        );
+    }
 
     #[cfg(all(
         feature = "vision",
