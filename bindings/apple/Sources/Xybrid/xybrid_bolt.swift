@@ -255,6 +255,12 @@ extension XybridVoiceInfo: WireCodable {
 /// shadow / collide with Swift's stdlib `Error` protocol, and so the
 /// Kotlin sealed-hierarchy name matches the existing uniffi consumer
 /// expectations.
+///
+/// **Variant order is part of the wire contract.** BoltFFI encodes `#[error]`
+/// (and `#[data]`) enums by ordinal tag, so reordering or inserting a variant
+/// renumbers every variant after it and breaks already-built foreign clients.
+/// Only ever append at the tail, and keep this order in lockstep with
+/// [`facade::Error`] and its `code()` table.
 public enum XybridError: Hashable, Equatable, Sendable, Error {
     case modelNotFound(id: String)
     case directoryNotFound(path: String)
@@ -719,12 +725,20 @@ public final class XybridModel {
         }
     }
 
-    public func run(envelope: XybridEnvelope) throws -> XybridResult {
+    /// Run inference, optionally with [`XybridRunOptions`] (generation config,
+    /// abort signals, cloud-fallback). Pass `None` for the model's defaults.
+    ///
+    /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
+    /// forwards `None`, so simple call sites stay ergonomic.
+    public func run(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> XybridResult {
         let envelopeBytes = boltffiEncode { writer in envelope.encode(to: &writer) }
+        let optionsBytes = boltffiEncode { writer in writer.writeOptional(options) { writer, v in v.encode(to: &writer) } }
         return try envelopeBytes.withUnsafeBufferPointer { envelopeBuf in
-            let buf = boltffi_xybrid_model_run(handle, envelopeBuf.baseAddress, UInt(envelopeBuf.count))
-            defer { boltffi_free_buf(buf) }
-            return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return XybridResult.decode(from: &reader) } else { throw XybridError.decode(from: &reader) } }() }
+            return try optionsBytes.withUnsafeBufferPointer { optionsBuf in
+                let buf = boltffi_xybrid_model_run(handle, envelopeBuf.baseAddress, UInt(envelopeBuf.count), optionsBuf.baseAddress, UInt(optionsBuf.count))
+                defer { boltffi_free_buf(buf) }
+                return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return XybridResult.decode(from: &reader) } else { throw XybridError.decode(from: &reader) } }() }
+            }
         }
     }
 
