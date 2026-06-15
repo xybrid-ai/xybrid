@@ -1036,6 +1036,27 @@ impl FfiModel {
         });
     }
 
+    /// Open a live (rolling-window) ASR streaming session for this model.
+    ///
+    /// The model's on-disk location is resolved from the already-loaded handle,
+    /// so a model loaded from the registry, Hugging Face, a bundle, or a
+    /// directory all stream the same way — no path is passed here. Feed audio
+    /// with [`FfiStreamSession::feed`] and read partials from
+    /// [`FfiStreamSession::subscribe`].
+    ///
+    /// # Errors
+    ///
+    /// - If `config.sample_rate` is not 16 kHz.
+    /// - If the model does not support streaming, or the stream cannot start.
+    pub fn stream(
+        &self,
+        config: super::streaming::FfiStreamingConfig,
+    ) -> Result<super::streaming::FfiStreamSession, String> {
+        let sdk_config = config.to_sdk()?;
+        let stream = self.0.stream(sdk_config).map_err(|e| e.to_string())?;
+        Ok(super::streaming::FfiStreamSession::spawn(stream))
+    }
+
     /// Warm up the model by running a tiny inference so the first real call
     /// pays no cold-start cost.
     ///

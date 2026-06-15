@@ -13,6 +13,7 @@ import 'envelope.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
+import 'streaming.dart';
 part 'model.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
@@ -170,6 +171,20 @@ abstract class FfiModel implements RustOpaqueInterface {
       {required FfiEnvelope envelope,
       required FfiConversationContext context,
       FfiGenerationConfig? config});
+
+  /// Open a live (rolling-window) ASR streaming session for this model.
+  ///
+  /// The model's on-disk location is resolved from the already-loaded handle,
+  /// so a model loaded from the registry, Hugging Face, a bundle, or a
+  /// directory all stream the same way — no path is passed here. Feed audio
+  /// with [`FfiStreamSession::feed`] and read partials from
+  /// [`FfiStreamSession::subscribe`].
+  ///
+  /// # Errors
+  ///
+  /// - If `config.sample_rate` is not 16 kHz.
+  /// - If the model does not support streaming, or the stream cannot start.
+  Future<FfiStreamSession> stream({required FfiStreamingConfig config});
 
   /// Unload the model, dropping the executor and freeing the underlying
   /// ORT / GGUF inference session.

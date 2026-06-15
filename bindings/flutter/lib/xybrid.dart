@@ -98,5 +98,7 @@ export 'src/pipeline.dart' show XybridPipeline;
 export 'src/result.dart'
     show XybridInferenceMetrics, XybridResult, XybridStageLatency;
 export 'src/run_options.dart' show AbortPolicy, AbortSignal, RunOptions;
+export 'src/streaming.dart'
+    show XybridStreamSession, FfiPartialResult, FfiVadMode;
 export 'src/utils/utils.dart';
 export 'src/xybrid.dart' show Xybrid;

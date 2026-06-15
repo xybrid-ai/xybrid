@@ -43,6 +43,7 @@ pub mod model;
 pub mod pipeline;
 pub mod result;
 pub mod sdk_client;
+pub mod streaming;
 
 // Re-export all public types for convenient access
 pub use context::{FfiConversationContext, FfiMessageRole};
@@ -53,3 +54,4 @@ pub use model::{
 };
 pub use pipeline::FfiPipeline;
 pub use result::FfiResult;
+pub use streaming::{FfiPartialResult, FfiStreamSession, FfiStreamingConfig, FfiVadMode};
