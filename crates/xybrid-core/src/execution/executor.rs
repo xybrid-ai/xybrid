@@ -1431,27 +1431,7 @@ impl TemplateExecutor {
         }
         messages.push(ChatMessage::user(&prompt));
 
-        // Build generation config: explicit config wins, then envelope metadata, then defaults
-        let gen_config = if let Some(cfg) = config {
-            cfg.clone()
-        } else {
-            let mut cfg = GenerationConfig::default();
-            if let Some(max_tokens) = input
-                .metadata
-                .get("max_tokens")
-                .and_then(|s| s.parse().ok())
-            {
-                cfg.max_tokens = max_tokens;
-            }
-            if let Some(temperature) = input
-                .metadata
-                .get("temperature")
-                .and_then(|s| s.parse().ok())
-            {
-                cfg.temperature = temperature;
-            }
-            cfg
-        };
+        let gen_config = build_gen_config_from_input(input, config);
 
         // Execute with streaming. Capture the backend name + the prefix
         // length the backend reused from its KV cache so the metric
@@ -2034,27 +2014,7 @@ impl TemplateExecutor {
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
-        // Build generation config: explicit config wins, then envelope metadata, then defaults
-        let gen_config = if let Some(cfg) = config {
-            cfg.clone()
-        } else {
-            let mut cfg = GenerationConfig::default();
-            if let Some(max_tokens) = input
-                .metadata
-                .get("max_tokens")
-                .and_then(|s| s.parse().ok())
-            {
-                cfg.max_tokens = max_tokens;
-            }
-            if let Some(temperature) = input
-                .metadata
-                .get("temperature")
-                .and_then(|s| s.parse().ok())
-            {
-                cfg.temperature = temperature;
-            }
-            cfg
-        };
+        let gen_config = build_gen_config_from_input(input, config);
 
         // Build messages from input
         let prompt = match &input.kind {
@@ -2774,6 +2734,36 @@ fn build_llm_response_envelope(
     Envelope {
         kind: EnvelopeKind::Text(output.text),
         metadata: response_metadata,
+    }
+}
+
+/// Build the generation config for the prompt-based LLM paths: an explicit
+/// config wins, otherwise fall back to envelope metadata (`max_tokens`,
+/// `temperature`), then defaults.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn build_gen_config_from_input(
+    input: &Envelope,
+    config: Option<&GenerationConfig>,
+) -> GenerationConfig {
+    if let Some(cfg) = config {
+        cfg.clone()
+    } else {
+        let mut cfg = GenerationConfig::default();
+        if let Some(max_tokens) = input
+            .metadata
+            .get("max_tokens")
+            .and_then(|s| s.parse().ok())
+        {
+            cfg.max_tokens = max_tokens;
+        }
+        if let Some(temperature) = input
+            .metadata
+            .get("temperature")
+            .and_then(|s| s.parse().ok())
+        {
+            cfg.temperature = temperature;
+        }
+        cfg
     }
 }
 
