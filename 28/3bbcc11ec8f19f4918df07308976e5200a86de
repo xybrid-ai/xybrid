@@ -1,0 +1,51 @@
+crates/xybrid-ffi-facade/src/lib.rs
+  s_93e9e173c209bc::t_bb448db7d3c3a1 550-557,561-566,568,570
+  s_93e9e173c209bc::t_98a1801e6bcb51 155-158
+  s_93e9e173c209bc::t_6d75a4d5e01b72 345
+  s_93e9e173c209bc::t_bda39c344b71c0 1373
+  s_93e9e173c209bc::t_20f2accf17333c 1472-1475
+  s_93e9e173c209bc::t_af609378cd4b97 1319
+  s_93e9e173c209bc::t_d96d7d3126e7b7 204-211
+  s_93e9e173c209bc::t_b6269d47960fec 1361
+  s_93e9e173c209bc::t_70e402367bcca1 373-394
+  s_93e9e173c209bc::t_43a801c0bee386 1338-1357
+  s_93e9e173c209bc::t_6bafb8790417db 271-274,281-282,289,300-301
+  s_93e9e173c209bc::t_5289240f543442 59-79,82-108,110-112,115-117,120-122,125-127,317-325,330-333,335-337
+  s_93e9e173c209bc::t_c9b4ba0bc9693e 434-438
+  s_93e9e173c209bc::t_1712355e74be14 109,113-114,118-119,123-124
+  s_93e9e173c209bc::t_1bd277381d205a 456
+  s_93e9e173c209bc::t_e5fab15732f7b5 1107,1120,1140,1152
+  s_93e9e173c209bc::t_9a7fc98d20efd2 326-329,334
+  s_93e9e173c209bc::t_728f65120529ad 418-429,433,439-446,448,457-469
+  s_93e9e173c209bc::t_618102c29552d4 298-299
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_93e9e173c209bc::t_fabf90508bd5ee 301-330
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_93e9e173c209bc::t_b8f3f262e1361e 277-279,282,284-287,290-291,297,300,302-307,318
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_93e9e173c209bc::t_629b799cec4dcb 626-633,724-743,768-771,842-857,870-873,893-903,913-914,931-938
+crates/xybrid-bolt/src/lib.rs
+  s_93e9e173c209bc::t_e671e1a1b0bc96 136-143
+  s_93e9e173c209bc::t_62a22527e1e9e2 195-196
+  s_93e9e173c209bc::t_f2ea88c0f8f139 173-180
+  s_93e9e173c209bc::t_6b48699054716d 94-97
+  s_93e9e173c209bc::t_faf1e481cd706a 205-210,221-226
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_93e9e173c209bc::t_629b799cec4dcb 283-286,330-337,397-408,417-418,432-435,452-458
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "283bbcc11ec8f19f4918df07308976e5200a86de",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
