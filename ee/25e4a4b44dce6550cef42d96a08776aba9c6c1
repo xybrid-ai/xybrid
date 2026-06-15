@@ -1,0 +1,45 @@
+integration-tests/tests/reasoning_capture.rs
+  s_a619afae87b555::t_59119308ad2b4d 16-25
+  s_a619afae87b555::t_196bea05b3b4da 86-87,93-114
+crates/xybrid-core/src/runtime_adapter/llama_cpp/chat.rs
+  s_a619afae87b555::t_244ec7f9201f55 6-14,18,29-40,43
+crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs
+  s_a619afae87b555::t_fcec268ec141d6 125-127
+  s_a619afae87b555::t_5c65bb0944d628 102-109,116-124,128-131
+  s_a619afae87b555::t_234097a40e1b43 234-247
+  s_a619afae87b555::t_4aca82f28e3fa5 144-148
+  s_a619afae87b555::t_c7bb07d03e6752 413-422,437-456
+  s_a619afae87b555::t_b492d12c86c1fc 423-436
+crates/xybrid-core/src/execution/llm_telemetry.rs
+  s_a619afae87b555::t_31be337bf1f92c 86-93
+crates/xybrid-core/src/execution/executor.rs
+  s_a619afae87b555::t_269296acf3bc46 1657-1659
+  s_a619afae87b555::t_b309dc6d642431 1416-1417,1564-1566,1988-1990,2121-2122
+  s_a619afae87b555::t_155b68ede4c125 132-142
+  s_a619afae87b555::t_fcec268ec141d6 1415,2120
+crates/xybrid-core/src/runtime_adapter/types.rs
+  s_a619afae87b555::t_e74291697b67cc 561
+  s_a619afae87b555::t_0348ac33b0493a 488-495
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_a619afae87b555::t_e0d820718c08e4 1304-1308
+  s_a619afae87b555::t_64b1b957e753fc 1092-1093,1235-1236
+  s_a619afae87b555::t_7e8ebddd790350 966-973
+  s_a619afae87b555::t_c26878c002a33e 799,944
+  s_a619afae87b555::t_2506a5f8cc864d 498-503,507,509
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "ee25e4a4b44dce6550cef42d96a08776aba9c6c1",
+  "prompts": {},
+  "sessions": {
+    "s_a619afae87b555": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6fe5db3-dfc5-4fa6-b5ce-50fc626aab2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
