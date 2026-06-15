@@ -876,6 +876,19 @@ pub struct ModelLoader {
     source: ModelSource,
     model_id: Option<String>,
     version: Option<String>,
+    /// Per-load speculative-cloud override. `None` inherits the process-global
+    /// default set via [`crate::set_speculative_cloud`].
+    speculative_cloud: Option<bool>,
+}
+
+/// Whether a cloud gateway API key can be resolved right now.
+///
+/// Covers the in-memory key set via [`crate::set_api_key`] and the
+/// `XYBRID_API_KEY` environment variable. Forwards to [`crate::has_api_key`],
+/// which checks presence without constructing a `CloudConfig` or cloning the
+/// key.
+fn cloud_api_key_present() -> bool {
+    crate::has_api_key()
 }
 
 impl ModelLoader {
@@ -899,6 +912,7 @@ impl ModelLoader {
             source: ModelSource::registry(id),
             model_id: Some(id.to_string()),
             version: None, // Version is resolved by registry API
+            speculative_cloud: None,
         }
     }
 
@@ -918,6 +932,7 @@ impl ModelLoader {
             source: ModelSource::registry_with_platform(id, platform),
             model_id: Some(id.to_string()),
             version: None,
+            speculative_cloud: None,
         }
     }
 
@@ -932,6 +947,7 @@ impl ModelLoader {
             source: ModelSource::legacy_registry(url, model_id, version),
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
+            speculative_cloud: None,
         }
     }
 
@@ -954,6 +970,7 @@ impl ModelLoader {
             source: ModelSource::legacy_registry_with_platform(url, model_id, version, platform),
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
+            speculative_cloud: None,
         }
     }
 
@@ -970,6 +987,7 @@ impl ModelLoader {
             source: ModelSource::bundle(path),
             model_id: None,
             version: None,
+            speculative_cloud: None,
         })
     }
 
@@ -1003,6 +1021,7 @@ impl ModelLoader {
             source: ModelSource::directory(path),
             model_id: None,
             version: None,
+            speculative_cloud: None,
         })
     }
 
@@ -1031,6 +1050,7 @@ impl ModelLoader {
             source: ModelSource::huggingface(repo),
             model_id: Some(repo.to_string()),
             version: None,
+            speculative_cloud: None,
         }
     }
 
@@ -1050,6 +1070,7 @@ impl ModelLoader {
             source: ModelSource::huggingface_with_revision(repo, revision),
             model_id: Some(repo.to_string()),
             version: Some(revision.to_string()),
+            speculative_cloud: None,
         }
     }
 
@@ -1074,6 +1095,7 @@ impl ModelLoader {
             source,
             model_id: Some(repo),
             version: None,
+            speculative_cloud: None,
         }
     }
 
@@ -1090,6 +1112,84 @@ impl ModelLoader {
     /// Get the source type.
     pub fn source_type(&self) -> &'static str {
         self.source.source_type()
+    }
+
+    /// Prefer the cloud while this model downloads, for this load only.
+    ///
+    /// Overrides the process-global default set via
+    /// [`crate::set_speculative_cloud`]. When the gate in
+    /// [`Self::will_speculate`] is satisfied, the first run is served from the
+    /// Xybrid gateway while the local weights download in the background,
+    /// instead of blocking on the download. Has no effect for already-local
+    /// sources (bundle/directory).
+    ///
+    /// # Examples
+    /// ```
+    /// use xybrid_sdk::ModelLoader;
+    /// let loader = ModelLoader::from_registry("qwen2.5-0.5b-instruct")
+    ///     .with_speculative_cloud(true);
+    /// assert_eq!(loader.speculative_cloud_override(), Some(true));
+    /// ```
+    pub fn with_speculative_cloud(mut self, enabled: bool) -> Self {
+        self.speculative_cloud = Some(enabled);
+        self
+    }
+
+    /// The per-load speculative-cloud override, if one was set.
+    ///
+    /// `None` means this loader inherits the global default
+    /// ([`crate::is_speculative_cloud_enabled`]).
+    pub fn speculative_cloud_override(&self) -> Option<bool> {
+        self.speculative_cloud
+    }
+
+    /// Whether this load would serve from the cloud while the model downloads.
+    ///
+    /// True only when all three hold: speculation is enabled (per-load override
+    /// or global default), a cloud API key is resolvable, and the model is not
+    /// already extracted in the local cache. Only registry sources can be
+    /// "not yet downloaded"; bundle, directory, and HuggingFace loads are
+    /// treated as already-local and never speculate.
+    ///
+    /// Performs a local cache lookup only — it never touches the network.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use xybrid_sdk::ModelLoader;
+    /// let loader = ModelLoader::from_registry("qwen2.5-0.5b-instruct")
+    ///     .with_speculative_cloud(true);
+    /// if loader.will_speculate() {
+    ///     // Not cached locally and a key is set: this load is served from the
+    ///     // cloud while the download runs in the background.
+    /// }
+    /// ```
+    pub fn will_speculate(&self) -> bool {
+        // Short-circuit: skip the API-key lookup and the local-cache disk check
+        // when speculation is disabled (the default).
+        self.speculative_enabled() && cloud_api_key_present() && !self.is_extracted_locally()
+    }
+
+    /// Resolve the speculative-cloud preference: the per-load override if set,
+    /// otherwise the process-global default.
+    pub(crate) fn speculative_enabled(&self) -> bool {
+        self.speculative_cloud
+            .unwrap_or_else(crate::is_speculative_cloud_enabled)
+    }
+
+    /// Whether a ready-to-run copy of this model is already extracted locally.
+    ///
+    /// Local cache check only; never hits the network. Non-registry sources are
+    /// reported as already-local so they never trigger speculation.
+    fn is_extracted_locally(&self) -> bool {
+        match &self.source {
+            ModelSource::Registry { id, .. } => {
+                // A local cache check only — instantiate `CacheManager` directly
+                // rather than `RegistryClient::from_env()`, which would spin up
+                // an HTTP agent and circuit breakers we don't need here.
+                crate::cache::CacheManager::new().is_ok_and(|cache| cache.is_extracted(id))
+            }
+            _ => true,
+        }
     }
 
     /// Load the model into memory (synchronous).
@@ -3355,6 +3455,51 @@ impl Clone for XybridModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serializes the tests that mutate the process-global speculative flag so
+    /// they don't observe each other's writes within the test binary.
+    static SPEC_GLOBAL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn with_speculative_cloud_records_override() {
+        let loader = ModelLoader::from_registry("m");
+        assert_eq!(loader.speculative_cloud_override(), None);
+        let loader = loader.with_speculative_cloud(true);
+        assert_eq!(loader.speculative_cloud_override(), Some(true));
+        let loader = loader.with_speculative_cloud(false);
+        assert_eq!(loader.speculative_cloud_override(), Some(false));
+    }
+
+    #[test]
+    fn per_load_override_beats_global_default() {
+        let _g = SPEC_GLOBAL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = crate::is_speculative_cloud_enabled();
+
+        // An explicit override wins regardless of the global default.
+        crate::set_speculative_cloud(false);
+        assert!(ModelLoader::from_registry("m")
+            .with_speculative_cloud(true)
+            .speculative_enabled());
+        crate::set_speculative_cloud(true);
+        assert!(!ModelLoader::from_registry("m")
+            .with_speculative_cloud(false)
+            .speculative_enabled());
+
+        crate::set_speculative_cloud(prev);
+    }
+
+    #[test]
+    fn no_override_inherits_global_default() {
+        let _g = SPEC_GLOBAL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = crate::is_speculative_cloud_enabled();
+
+        crate::set_speculative_cloud(true);
+        assert!(ModelLoader::from_registry("m").speculative_enabled());
+        crate::set_speculative_cloud(false);
+        assert!(!ModelLoader::from_registry("m").speculative_enabled());
+
+        crate::set_speculative_cloud(prev);
+    }
 
     /// The inherent `SdkError::is_retryable` / `retry_after` accessors and
     /// the `RetryableError` trait impl must agree for every variant — the

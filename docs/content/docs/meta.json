@@ -2,10 +2,14 @@
   "pages": [
     "---[Book]Introduction---",
     "introduction",
-    "quickstart", 
+    "quickstart",
     "---[BookOpen]Guides---",
     "...guides",
     "---[Puzzle]Integration---",
-    "...(integration)"
+    "...(integration)",
+    "---[Cog]Concepts---",
+    "...concepts",
+    "---[Terminal]CLI---",
+    "...cli"
   ]
 }

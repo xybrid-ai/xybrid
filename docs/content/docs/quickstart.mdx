@@ -5,7 +5,7 @@ description: Get up and running with Xybrid in minutes
 
 Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 
-<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'CLI']}>
+<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Rust', 'CLI']}>
   <Tab value="Flutter">
 **Install**
 
@@ -121,11 +121,7 @@ In Unity, go to **Window > Package Manager > + > Add package from git URL** and 
 https://github.com/xybrid-ai/xybrid.git#upm
 ```
 
-Or pin a specific version:
-
-```
-https://github.com/xybrid-ai/xybrid.git#upm/v0.1.2
-```
+`#upm` tracks the latest published Unity build. To pin a version, use one of the `upm/*` tags from the [repository tags page](https://github.com/xybrid-ai/xybrid/tags).
 
 **Run inference**
 
@@ -148,12 +144,52 @@ Debug.Log($"Latency: {result.LatencyMs}ms");
 
 **Expected output:** `result.Success == true` with audio output from the TTS model.
   </Tab>
+  <Tab value="Rust">
+**Install**
+
+```toml
+# Cargo.toml
+[dependencies]
+xybrid = "0.1.2"
+```
+
+**Run inference**
+
+```rust
+use xybrid::ModelLoader;
+use xybrid::ir::{Envelope, EnvelopeKind};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load a model from the registry
+    let model = ModelLoader::from_registry("kokoro-82m").load()?;
+
+    // Run text-to-speech
+    let input = Envelope::new(EnvelopeKind::Text("Hello from Xybrid!".into()));
+    let result = model.run(&input, None)?;
+
+    // result contains the generated speech audio
+    Ok(())
+}
+```
+
+LLM models need the llama.cpp backend — enable it with `features = ["llm-llamacpp"]`.
+
+**Expected output:** A result envelope containing synthesized speech audio.
+  </Tab>
   <Tab value="CLI">
 **Install**
 
 ```bash
-cargo install xybrid-cli
+# macOS / Linux
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh
 ```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
+```
+
+See the [CLI guide](/docs/cli) for pre-built binaries and building from source.
 
 **Run inference**
 
@@ -179,6 +215,8 @@ Transcription: "Hello, how can I help you?"
 ## Next Steps
 
 <Cards>
-  <Card title="SDKs" href="/docs/integrations/sdks" description="Detailed SDK guides for each platform" />
-  <Card title="Concepts" href="/docs/concepts" description="How Xybrid works under the hood" />
+  <Card title="SDKs" href="/docs/sdks/flutter" description="Detailed SDK guides for each platform" />
+  <Card title="Models" href="/docs/concepts/models" description="Browse the on-device model catalog" />
+  <Card title="Pipelines" href="/docs/concepts/pipelines" description="Chain models with a few lines of YAML" />
+  <Card title="CLI" href="/docs/cli" description="Run and debug models from the terminal" />
 </Cards>

@@ -1,0 +1,109 @@
+---
+title: 混合执行
+description: Xybrid 如何在设备与云端之间路由推理
+---
+
+Xybrid 是一个*混合*运行时：每个流水线阶段都可以在设备端运行、在云端运行，或交由运行时自行决定。本页介绍路由模型以及如何配置云端执行。
+
+## 执行目标
+
+每个阶段都有一个 `target`：
+
+| 目标 | 行为 |
+|------|------|
+| `device` | 始终在设备端运行（别名：`local`） |
+| `cloud` | 始终在云端运行（别名：`integration`） |
+| `auto` | 交由运行时决定 — 默认值 |
+
+```yaml
+stages:
+  - model: whisper-tiny
+    target: device
+
+  - model: gpt-4o-mini
+    target: cloud
+    provider: openai
+```
+
+## `auto` 如何决策
+
+对于 `auto` 阶段，编排器会综合权衡：
+
+- **模型可用性** — 模型是否已缓存到本地，或注册表中是否有适合当前平台的版本？
+- **设备能力** — CPU 特性、内存与加速器
+- **宿主信号** — 平台上报的电池电量与散热状态
+- **策略** — 用户定义的允许/拒绝路由规则
+
+预览路由决策而不实际执行：
+
+```bash
+xybrid run --config pipeline.yaml --input-audio q.wav --dry-run
+```
+
+如需强制指定路由，请在流水线 YAML 的阶段上设置 `target: device` 或 `target: cloud`。
+
+## 云端执行
+
+云端阶段通过 OpenAI 兼容的 SSE 流式返回响应。访问提供商有两种方式：
+
+### 通过 Xybrid 网关（默认）
+
+默认情况下，云端阶段通过 Xybrid 网关（`https://api.xybrid.dev/v1`）路由。网关代为保管提供商凭证，设备端无需内嵌任何提供商 API Key。
+
+```dart
+// 使用自定义或自托管网关
+await Xybrid.init(gatewayUrl: 'https://my-gateway.example.com');
+```
+
+### 直连提供商
+
+带有 `provider` 的阶段可以直接调用提供商 API。API Key 从环境变量解析：
+
+| 提供商 | 环境变量 |
+|--------|----------|
+| `openai` | `OPENAI_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `google` | `GOOGLE_API_KEY` |
+| `deepseek` | `DEEPSEEK_API_KEY` |
+| `elevenlabs` | `ELEVENLABS_API_KEY` |
+| `openrouter` | `OPENROUTER_API_KEY` |
+| `custom` | `CUSTOM_API_KEY` |
+
+显式的 `api_key` 字段也接受环境变量引用（`$OPENAI_API_KEY`）— 避免在流水线文件中硬编码明文密钥。
+
+## 策略
+
+策略是约束路由的 YAML 规则集。规则按顺序求值，首条匹配生效：
+
+```yaml
+# policy.yaml
+version: "1.0.0"
+rules:
+  - id: "keep_audio_on_device"
+    expression: "input.kind == \"AudioRaw\""
+    action: "deny"          # 原始音频输入拒绝走该路由
+
+  - id: "avoid_slow_networks"
+    expression: "metrics.network_rtt > 300"
+    action: "deny"          # 网络慢时不走云端
+
+  - id: "allow_all"
+    expression: "true"
+    action: "allow"
+```
+
+```bash
+xybrid run --config pipeline.yaml --input-audio q.wav --policy policy.yaml
+```
+
+表达式可以引用输入 Envelope（`input.kind`）和实时设备指标（`metrics.network_rtt`）。
+
+## 回退
+
+当首选路由失败时 — 模型加载失败，或流式过程中断网 — 编排器可以回退到另一个目标。在 Flutter SDK 中，`runStreamingWithFallback` 为 LLM 流式输出直接暴露了这一能力。
+
+每个路由决策都会记录到遥测中；使用 [`xybrid trace`](/docs/cli/reference/trace) 查看。
+
+## 相关阅读
+
+- [流水线](/docs/concepts/pipelines) — 阶段配置参考
