@@ -1,0 +1,31 @@
+crates/xybrid-ffi-facade/src/lib.rs
+  s_941d24a89c40b5::t_78804c5ee4a373 1233-1264
+  s_941d24a89c40b5::t_b6c9916f9a6b6d 735-751
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_941d24a89c40b5::t_b435e6a40dd849 235-245
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_941d24a89c40b5::t_2c2b8c83bcf1f8 338
+  s_941d24a89c40b5::t_289c717a89a055 27
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_941d24a89c40b5::t_805653080db1f7 290
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_941d24a89c40b5::t_0bd0d9cd5db801 207-216
+bindings/react-native/src/types.ts
+  s_941d24a89c40b5::t_f88a27505fcccd 46-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "018da4b318ecd6023de5a2fb6b499e6af4ca6744",
+  "prompts": {},
+  "sessions": {
+    "s_941d24a89c40b5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ecbf0d58-b4d3-4f27-9f91-bc3a4f1a5b99",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
