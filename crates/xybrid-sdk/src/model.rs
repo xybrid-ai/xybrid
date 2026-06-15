@@ -1582,12 +1582,23 @@ impl ModelLoader {
             .map(|cache| cache.extraction_dir(id))
             .unwrap_or_else(|_| PathBuf::from(id));
 
+        // Speculation is LLM/chat-only and the gateway streams tokens, so mark
+        // the placeholder as GGUF. Otherwise `is_llm()` / `supports_token_streaming()`
+        // read this metadata and report `false`, dropping the REPL to batch mode
+        // until the real handle swaps in. The background download replaces the
+        // whole handle (with real metadata) once it completes.
+        let mut metadata = ModelMetadata::onnx(id, "", "");
+        metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: String::new(),
+            chat_template: None,
+            context_length: 2048,
+            generation_params: None,
+        };
         let placeholder = ModelHandle {
-            executor: TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or(".")),
-            // Placeholder metadata, never read: runs route to cloud while
-            // `loaded == false`, and the background thread overwrites the whole
-            // handle (with real metadata) once the download completes.
-            metadata: ModelMetadata::onnx(id, "", ""),
+            // Lazy executor over the not-yet-populated extraction dir; never run
+            // while `loaded == false` (runs route to cloud).
+            executor: TemplateExecutor::with_base_path(&model_dir.to_string_lossy()),
+            metadata,
             model_dir,
             loaded: false,
         };
@@ -1598,31 +1609,41 @@ impl ModelLoader {
         let bg_handle = Arc::clone(&handle);
         let id_owned = id.to_string();
         let platform_owned = platform.map(String::from);
-        std::thread::spawn(move || {
-            let built = RegistryClient::from_env().and_then(|client| {
-                let dir = client.fetch_extracted(&id_owned, platform_owned.as_deref(), |_| {})?;
-                Self::create_model_handle(&dir)
-            });
-            match built {
-                Ok(real) => {
-                    *bg_handle.write().unwrap_or_else(|e| e.into_inner()) = real;
+        let thread_name = format!("speculative-download-{id_owned}");
+        if let Err(err) = std::thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || {
+                let built = RegistryClient::from_env().and_then(|client| {
+                    let dir =
+                        client.fetch_extracted(&id_owned, platform_owned.as_deref(), |_| {})?;
+                    Self::create_model_handle(&dir)
+                });
+                match built {
+                    Ok(real) => {
+                        *bg_handle.write().unwrap_or_else(|e| e.into_inner()) = real;
+                    }
+                    Err(e) => {
+                        log::error!("speculative background download failed for '{id_owned}': {e}");
+                        crate::telemetry::publish_telemetry_event(
+                            crate::telemetry::TelemetryEvent {
+                                event_type: "SpeculativeDownloadFailed".to_string(),
+                                stage_name: Some(id_owned.clone()),
+                                target: Some("local".to_string()),
+                                latency_ms: None,
+                                error: Some(e.to_string()),
+                                data: None,
+                                timestamp_ms: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0),
+                            },
+                        );
+                    }
                 }
-                Err(e) => {
-                    crate::telemetry::publish_telemetry_event(crate::telemetry::TelemetryEvent {
-                        event_type: "SpeculativeDownloadFailed".to_string(),
-                        stage_name: Some(id_owned.clone()),
-                        target: Some("local".to_string()),
-                        latency_ms: None,
-                        error: Some(e.to_string()),
-                        data: None,
-                        timestamp_ms: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_millis() as u64)
-                            .unwrap_or(0),
-                    });
-                }
-            }
-        });
+            })
+        {
+            log::error!("failed to spawn speculative download thread for '{id}': {err}");
+        }
 
         XybridModel {
             handle,
