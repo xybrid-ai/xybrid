@@ -1,0 +1,36 @@
+bindings/react-native/example/tsconfig.json
+  s_9f87bfb9c88973::t_5f8845ad5965e3 4-7
+  s_9f87bfb9c88973::t_2860a5edb8baef 1-3,8-9
+bindings/react-native/example/package-lock.json
+  s_9f87bfb9c88973::t_d48c5551eebc16 1-6125
+bindings/react-native/example/README.md
+  s_9f87bfb9c88973::t_25c7acec3280b2 1-65
+bindings/react-native/example/App.tsx
+  s_9f87bfb9c88973::t_2860a5edb8baef 1,12,27,84,120,142-144,159,165
+  s_9f87bfb9c88973::t_243624377905bf 2-11,13-26,28-83,85-119,121-141,145-158,160-164
+bindings/react-native/example/index.ts
+  s_9f87bfb9c88973::t_2860a5edb8baef 1-8
+bindings/react-native/example/app.json
+  s_9f87bfb9c88973::t_2860a5edb8baef 1-25
+bindings/react-native/example/.gitignore
+  s_9f87bfb9c88973::t_2860a5edb8baef 1-41
+bindings/react-native/example/package.json
+  s_9f87bfb9c88973::t_3b771fa1317957 2,9-10,17-20
+  s_9f87bfb9c88973::t_2860a5edb8baef 1,3-8,11-16,21-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "b0c8127ef285a022928f1be4980a2bae8db55662",
+  "prompts": {},
+  "sessions": {
+    "s_9f87bfb9c88973": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "960d065d-74dd-49d6-b24f-b0fd6f06eb14",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
