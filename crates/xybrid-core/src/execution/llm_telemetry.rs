@@ -95,6 +95,12 @@ pub(crate) fn mirror_llm_metrics_to_span(
     // `PlatformEvent.stages[].spans[].metadata` (populated by
     // `xybrid_core::tracing::add_metadata` on the currently active span).
     xybrid_trace::add_metadata("tokens_generated", output.tokens_generated.to_string());
+    // Canonical `tokens_out` key for the analytics backend's span extractor.
+    // Equal to `tokens_generated` by construction — mirrors
+    // `LlmRuntimeAdapter::execute` so the local LLM paths (which bypass it and
+    // call this helper instead) surface the same column the SDK hoist lifts
+    // onto the trace dashboard.
+    xybrid_trace::add_metadata("tokens_out", output.tokens_generated.to_string());
     xybrid_trace::add_metadata("generation_time_ms", output.generation_time_ms.to_string());
     xybrid_trace::add_metadata(
         "tokens_per_second",
@@ -219,7 +225,7 @@ mod tests {
 
     #[test]
     fn unannotated_gguf_stamps_llamacpp_default() {
-        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let captured = capture_span_metadata("execute:test", &gguf_metadata(None));
         assert_eq!(
             captured.get("backend").map(String::as_str),
@@ -230,7 +236,7 @@ mod tests {
 
     #[test]
     fn mistralrs_hint_wins_on_gguf() {
-        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let captured = capture_span_metadata("execute:test", &gguf_metadata(Some("mistralrs")));
         assert_eq!(
             captured.get("backend").map(String::as_str),
@@ -240,7 +246,7 @@ mod tests {
 
     #[test]
     fn legacy_mistral_alias_normalises_to_mistralrs() {
-        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let captured = capture_span_metadata("execute:test", &gguf_metadata(Some("mistral")));
         assert_eq!(
             captured.get("backend").map(String::as_str),
@@ -251,7 +257,7 @@ mod tests {
 
     #[test]
     fn quantization_stamped_from_gguf_filename() {
-        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut metadata = gguf_metadata(None);
         metadata.execution_template = ExecutionTemplate::Gguf {
             model_file: "tinyllama-1.1b-chat-q4_k_m.gguf".into(),
@@ -353,7 +359,7 @@ mod tests {
 
     #[test]
     fn runtime_wire_label_overwrites_template_default() {
-        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Template default for unannotated GGUF is `llamacpp`, but
         // the runtime selected by cargo feature is mistral.rs. The
         // overwrite must flip the stamp to ground truth so the
@@ -368,7 +374,7 @@ mod tests {
 
     #[test]
     fn runtime_overwrite_preserves_template_default_when_label_absent() {
-        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap();
+        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Mock/test backends return None from wire_label so the
         // template-derived stamp survives — anything else would
         // erase ground truth that the template *did* carry.
@@ -377,6 +383,73 @@ mod tests {
             captured.get("backend").map(String::as_str),
             Some("llamacpp"),
             "stub backends without a wire label must not erase the template-derived stamp"
+        );
+    }
+
+    fn sample_output(tokens: usize) -> crate::runtime_adapter::llm::GenerationOutput {
+        crate::runtime_adapter::llm::GenerationOutput {
+            text: "hi".to_string(),
+            tokens_generated: tokens,
+            generation_time_ms: 100,
+            tokens_per_second: 10.0,
+            finish_reason: "stop".to_string(),
+            ttft_ms: None,
+            mean_itl_ms: None,
+            p95_itl_ms: None,
+            emitted_chunks: None,
+            inter_chunk_ms: Vec::new(),
+            decode_tps: None,
+            prefill_tps: None,
+            image_preprocess_ms: None,
+        }
+    }
+
+    fn capture_mirror_metadata(
+        output: &crate::runtime_adapter::llm::GenerationOutput,
+        backend_name: &str,
+    ) -> HashMap<String, String> {
+        tracing::init_tracing(true);
+        tracing::reset_tracing();
+        {
+            let _guard = tracing::SpanGuard::new("execute:test");
+            mirror_llm_metrics_to_span(output, backend_name, None);
+        }
+        let json = tracing::get_stages_json();
+        tracing::reset_tracing();
+
+        let span = json["spans"]
+            .as_array()
+            .and_then(|spans| {
+                spans
+                    .iter()
+                    .find(|s| s["name"].as_str() == Some("execute:test"))
+            })
+            .expect("span recorded by SpanGuard must be present in stages json");
+        span["metadata"]
+            .as_object()
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn mirror_emits_canonical_tokens_out() {
+        let _lock = GLOBAL_TRACE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // The local LLM paths bypass `LlmRuntimeAdapter::execute`, so the
+        // analytics span extractor's canonical `tokens_out` key must be stamped
+        // here too — equal to `tokens_generated` by construction.
+        let captured = capture_mirror_metadata(&sample_output(42), "llamacpp");
+        assert_eq!(
+            captured.get("tokens_generated").map(String::as_str),
+            Some("42")
+        );
+        assert_eq!(
+            captured.get("tokens_out").map(String::as_str),
+            Some("42"),
+            "local LLM telemetry paths must emit the canonical tokens_out span field"
         );
     }
 }
