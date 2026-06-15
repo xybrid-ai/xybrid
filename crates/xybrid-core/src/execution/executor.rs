@@ -2726,10 +2726,13 @@ fn build_llm_response_envelope(
         "tokens_per_second".to_string(),
         format!("{:.2}", output.tokens_per_second),
     );
-    response_metadata.insert("finish_reason".to_string(), output.finish_reason.clone());
     insert_llm_streaming_metrics(&mut response_metadata, &output);
     insert_image_preprocess_metric(&mut response_metadata, image_preprocess_ms);
     mirror_llm_metrics_to_span(&output, backend_name, cached_prefix);
+
+    // Move `finish_reason` (no clone) now that the borrows of `output` above
+    // have completed.
+    response_metadata.insert("finish_reason".to_string(), output.finish_reason);
 
     Envelope {
         kind: EnvelopeKind::Text(output.text),
