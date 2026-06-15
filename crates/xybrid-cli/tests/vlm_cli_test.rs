@@ -1,4 +1,4 @@
-#![cfg(all(feature = "vision", feature = "llm-llamacpp"))]
+#![cfg(feature = "llm-llamacpp")]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

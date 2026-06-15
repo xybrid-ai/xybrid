@@ -765,7 +765,6 @@ mod tests {
         bundle_path
     }
 
-    #[cfg(feature = "vision")]
     fn create_vlm_test_bundle(temp_dir: &TempDir, model_id: &str) -> PathBuf {
         let model_dir = temp_dir.path().join("vlm_model_files");
         fs::create_dir_all(&model_dir).unwrap();
@@ -857,7 +856,6 @@ mod tests {
         assert!(extract_dir.join("model.onnx").exists());
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn test_ensure_extracted_repairs_partial_vlm_extraction() {
         let temp_dir = TempDir::new().unwrap();

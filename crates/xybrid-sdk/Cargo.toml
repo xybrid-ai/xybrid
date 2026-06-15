@@ -89,13 +89,12 @@ llm-mistral = ["xybrid-core/llm-mistral"]
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-core/llm-llamacpp"]
-llm-llamacpp-vision = ["llm-llamacpp", "vision", "xybrid-core/llm-llamacpp-vision"]
+llm-llamacpp-vision = ["llm-llamacpp", "xybrid-core/llm-llamacpp-vision"]
 
 # Dev-tools (test seams for demos and integration tests)
 dev-tools = ["xybrid-core/dev-tools"]
 
 # Vision envelope primitives.
-vision = ["xybrid-core/vision"]
 
 [dev-dependencies]
 httpmock = "0.7"

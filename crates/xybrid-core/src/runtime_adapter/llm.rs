@@ -24,7 +24,6 @@ use std::collections::HashMap;
 use std::path::Path;
 
 // Re-export types from the always-available types module
-#[cfg(feature = "vision")]
 pub use super::types::MultimodalChatMessage;
 pub use super::types::{
     ChatMessage, GenerationConfig, LlmConfig, PartialToken, StreamingCallback, StreamingError,
@@ -95,7 +94,6 @@ fn mistral_execution_provider() -> &'static str {
     "cpu"
 }
 
-#[cfg(feature = "vision")]
 fn unsupported_vision_input_error(backend_name: &str) -> AdapterError {
     AdapterError::InvalidInput(format!(
         "LLM backend '{}' does not support vision input",
@@ -234,7 +232,6 @@ pub trait LlmBackend: Send + Sync {
     }
 
     /// Check whether this backend accepts multimodal text/image messages.
-    #[cfg(feature = "vision")]
     fn supports_vision(&self) -> bool {
         false
     }
@@ -243,7 +240,6 @@ pub trait LlmBackend: Send + Sync {
     ///
     /// Text-only backends return the same typed unsupported error from both
     /// batch and streaming multimodal entry points.
-    #[cfg(feature = "vision")]
     fn generate_multimodal(
         &self,
         _messages: &[MultimodalChatMessage],
@@ -253,7 +249,6 @@ pub trait LlmBackend: Send + Sync {
     }
 
     /// Generate text from backend-neutral multimodal messages with streaming.
-    #[cfg(feature = "vision")]
     fn generate_multimodal_streaming(
         &self,
         _messages: &[MultimodalChatMessage],
@@ -701,11 +696,9 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
             EnvelopeKind::Embedding(_) => Err(AdapterError::InvalidInput(
                 "LLM adapter expects Text input, not Embedding".to_string(),
             )),
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { .. } => Err(AdapterError::InvalidInput(
                 "LLM adapter expects Text input, not Image".to_string(),
             )),
-            #[cfg(feature = "vision")]
             EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
                 "LLM adapter expects Text input, not MultiPart".to_string(),
             )),
@@ -955,7 +948,6 @@ mod tests {
         assert!(err_msg.contains("callback error") || err_msg.contains("User cancelled"));
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn default_multimodal_generation_errors_match_for_batch_and_streaming() {
         use crate::runtime_adapter::{MultimodalChatMessage, MultimodalMessagePart};

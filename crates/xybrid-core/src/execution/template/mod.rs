@@ -18,7 +18,6 @@ pub use metadata::{
     span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate,
     GenerationParams, ModelMetadata, PipelineStage, RefinementSchedule,
 };
-#[cfg(feature = "vision")]
 pub use metadata::{VisionEncoderConfig, VisionPreprocessingPreset};
 
 // Re-export step types

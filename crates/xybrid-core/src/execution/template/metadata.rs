@@ -2,7 +2,6 @@
 //!
 //! This module contains the core types that define how models are executed.
 
-#[cfg(feature = "vision")]
 use super::steps::{ImageNormalizePreset, ImageResizeMode, ImageTensorLayout, InterpolationMethod};
 use super::steps::{PostprocessingStep, PreprocessingStep};
 use super::voice::{VoiceConfig, VoiceInfo};
@@ -91,7 +90,6 @@ pub enum ExecutionTemplate {
     },
 
     /// Vision-language model execution for image+text LLM inputs.
-    #[cfg(feature = "vision")]
     VisionLanguage {
         /// Path to the language model file (usually GGUF) relative to bundle root.
         model_file: String,
@@ -222,7 +220,6 @@ pub enum RefinementSchedule {
 // ============================================================================
 
 /// Named vision preprocessing preset used by sibling vision encoders.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum VisionPreprocessingPreset {
@@ -240,7 +237,6 @@ pub enum VisionPreprocessingPreset {
     SigLip,
 }
 
-#[cfg(feature = "vision")]
 impl VisionPreprocessingPreset {
     /// Resolve this preset into concrete preprocessing steps.
     pub fn resolve_steps(self, image_size: usize) -> Vec<PreprocessingStep> {
@@ -279,7 +275,6 @@ impl VisionPreprocessingPreset {
 }
 
 /// Optional sibling vision encoder declaration in `model_metadata.json`.
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct VisionEncoderConfig {
@@ -294,7 +289,6 @@ pub struct VisionEncoderConfig {
     pub patch_size: Option<usize>,
 }
 
-#[cfg(feature = "vision")]
 impl VisionEncoderConfig {
     /// Resolve the configured preset into concrete preprocessing steps.
     pub fn preprocessing_steps(&self) -> Vec<PreprocessingStep> {
@@ -327,7 +321,6 @@ pub struct ModelMetadata {
     pub files: Vec<String>,
 
     /// Optional sibling vision encoder / mmproj declaration for VLMs.
-    #[cfg(feature = "vision")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vision_encoder: Option<VisionEncoderConfig>,
 
@@ -377,7 +370,6 @@ impl ModelMetadata {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: vec![model_file],
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
@@ -407,7 +399,6 @@ impl ModelMetadata {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: vec![model_file],
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
@@ -434,7 +425,6 @@ impl ModelMetadata {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files,
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
@@ -497,7 +487,6 @@ impl ModelMetadata {
 
     /// Validate cross-field metadata invariants that serde cannot check alone.
     pub fn validate(&self) -> Result<(), String> {
-        #[cfg(feature = "vision")]
         if matches!(
             self.execution_template,
             ExecutionTemplate::VisionLanguage { .. }
@@ -508,7 +497,6 @@ impl ModelMetadata {
             );
         }
 
-        #[cfg(feature = "vision")]
         if let Some(vision_encoder) = &self.vision_encoder {
             if !self.files.iter().any(|file| file == &vision_encoder.file) {
                 return Err(format!(
@@ -624,7 +612,6 @@ pub fn backend_label_from_template(
         ExecutionTemplate::Gguf { .. } => hint
             .and_then(normalize_llm_backend_hint)
             .or(Some("llamacpp")),
-        #[cfg(feature = "vision")]
         ExecutionTemplate::VisionLanguage { .. } => hint
             .and_then(normalize_llm_backend_hint)
             .or(Some("llamacpp")),
@@ -693,7 +680,6 @@ pub fn quantization_label_from_metadata(metadata: &ModelMetadata) -> Option<Stri
     }
     let model_file = match &metadata.execution_template {
         ExecutionTemplate::Gguf { model_file, .. } => Some(model_file),
-        #[cfg(feature = "vision")]
         ExecutionTemplate::VisionLanguage { model_file, .. } => Some(model_file),
         _ => None,
     };
@@ -742,7 +728,6 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
                 "cpu"
             }
         }
-        #[cfg(feature = "vision")]
         ExecutionTemplate::VisionLanguage { .. } => {
             #[cfg(all(
                 any(feature = "llm-mistral-metal", feature = "llm-llamacpp"),
@@ -930,7 +915,6 @@ mod tests {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: Vec::new(),
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
@@ -967,7 +951,6 @@ mod tests {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: Vec::new(),
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: HashMap::new(),
@@ -1011,7 +994,6 @@ mod tests {
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: Vec::new(),
-            #[cfg(feature = "vision")]
             vision_encoder: None,
             description: None,
             metadata: HashMap::new(),

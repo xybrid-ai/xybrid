@@ -109,10 +109,6 @@ default = ["ort-download"]
 # JSON Schema generation for model_metadata.json
 schema = ["dep:schemars"]
 
-# Vision input primitives. Backend implementations, preprocessing, and binding
-# surfaces are layered on top in later feature slices.
-vision = []
-
 # Expose the `testing` module (mocks + model fixtures) to downstream crates.
 # No-op marker today (the module is currently always `pub`); it exists so
 # consumers can depend on `xybrid-core/test-util` now and stay correct once
@@ -154,9 +150,11 @@ llm-llamacpp = [
     "dep:xybrid-llama",
     "xybrid-llama/bindings",
 ]
+# The Rust vision pipeline (envelopes, preprocessing, strategy dispatch) is
+# always compiled in. This feature gates only the *native* llama multimodal
+# backend (mtmd bindings) on top of `llm-llamacpp`.
 llm-llamacpp-vision = [
     "llm-llamacpp",
-    "vision",
     "xybrid-llama-sys/vision",
     "xybrid-llama/vision",
 ]
@@ -174,7 +172,7 @@ dev-tools = []
 
 [dev-dependencies]
 tempfile = "3.8"
-xybrid-sdk = { path = "../xybrid-sdk", features = ["vision"] }
+xybrid-sdk = { path = "../xybrid-sdk" }
 dirs = "6.0"
 filetime = "0.2"
 hound = "3.5"  # WAV file reading for tests
@@ -202,7 +200,7 @@ harness = false
 [[bench]]
 name = "raw_image_ingress"
 harness = false
-required-features = ["vision", "dev-tools"]
+required-features = ["dev-tools"]
 
 # Platform-specific ureq dependencies
 # Non-Android: Use default ureq with TLS

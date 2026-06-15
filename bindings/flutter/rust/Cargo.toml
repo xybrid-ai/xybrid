@@ -58,13 +58,13 @@ xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-deskto
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-desktop"] }
 
 [features]
-default = ["vision"]
+default = []
 
 # PLATFORM PRESETS (forwarded from xybrid-sdk)
 platform-android = ["xybrid-sdk/platform-android", "llm-llamacpp-vision"]
 platform-ios = ["xybrid-sdk/platform-ios", "llm-llamacpp-vision"]
-platform-macos = ["xybrid-sdk/platform-macos", "vision"]
-platform-desktop = ["xybrid-sdk/platform-desktop", "vision"]
+platform-macos = ["xybrid-sdk/platform-macos"]
+platform-desktop = ["xybrid-sdk/platform-desktop"]
 
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 ort-download = ["xybrid-sdk/ort-download"]
@@ -80,7 +80,6 @@ llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
 llm-llamacpp-vision = ["xybrid-sdk/llm-llamacpp-vision"]
 huggingface = ["xybrid-sdk/huggingface"]
-vision = ["xybrid-sdk/vision"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

@@ -9,23 +9,19 @@
 
 use super::super::types::{ExecutorResult, PreprocessedData};
 use crate::execution::template::InterpolationMethod;
-#[cfg(feature = "vision")]
 use crate::execution::template::{ImageNormalizePreset, ImageResizeMode, ImageTensorLayout};
-#[cfg(feature = "vision")]
 use crate::ir::{
     ImageFormat, ImagePlane, ImageSource, ImageValidationLimits, PixelFormat, RawImageRef,
     YuvColorInfo, YuvColorMatrix, YuvColorRange,
 };
 use crate::runtime_adapter::AdapterError;
 use ndarray::{ArrayD, IxDyn};
-#[cfg(feature = "vision")]
 use yuvutils_rs::{
     yuv420_to_rgb, yuv_nv12_to_rgb, yuv_nv21_to_rgb, YuvBiPlanarImage, YuvConversionMode,
     YuvPlanarImage, YuvRange, YuvStandardMatrix,
 };
 
 /// Decode encoded image bytes into a float tensor in [0, 1].
-#[cfg(feature = "vision")]
 pub fn image_decode_step(
     data: PreprocessedData,
     channels: usize,
@@ -62,7 +58,6 @@ pub fn image_decode_step(
 }
 
 /// Ingress encoded or raw image sources into a float tensor in [0, 1].
-#[cfg(feature = "vision")]
 pub fn image_ingress_step(
     data: PreprocessedData,
     channels: usize,
@@ -101,7 +96,6 @@ pub fn image_ingress_step(
     }
 }
 
-#[cfg(feature = "vision")]
 fn raw_image_to_tensor(
     raw: RawImageRef<'_>,
     channels: usize,
@@ -124,7 +118,6 @@ fn raw_image_to_tensor(
     }
 }
 
-#[cfg(feature = "vision")]
 fn raw_packed_to_tensor(
     raw: RawImageRef<'_>,
     channels: usize,
@@ -187,7 +180,6 @@ fn raw_packed_to_tensor(
     Ok(PreprocessedData::Tensor(tensor))
 }
 
-#[cfg(feature = "vision")]
 fn raw_yuv_to_rgb(raw: RawImageRef<'_>) -> ExecutorResult<Vec<u8>> {
     let color = raw.color.ok_or_else(|| {
         AdapterError::InvalidInput(format!(
@@ -287,7 +279,6 @@ fn raw_yuv_to_rgb(raw: RawImageRef<'_>) -> ExecutorResult<Vec<u8>> {
 /// Shared by the tensor path ([`raw_packed_to_tensor`]) and the packed-RGB
 /// byte path ([`raw_packed_to_rgb`]) so the per-format channel ordering and
 /// alpha stripping live in exactly one place.
-#[cfg(feature = "vision")]
 #[inline]
 fn packed_pixel_to_rgb(format: PixelFormat, pixel: &[u8]) -> [u8; 3] {
     match format {
@@ -310,7 +301,6 @@ fn packed_pixel_to_rgb(format: PixelFormat, pixel: &[u8]) -> [u8; 3] {
 /// YUV formats reuse the existing BT.601/BT.709 conversion in
 /// [`raw_yuv_to_rgb`]; RGB-family formats strip row stride and alpha while
 /// honoring each plane's `pixel_stride`.
-#[cfg(feature = "vision")]
 pub fn raw_image_to_packed_rgb(raw: RawImageRef<'_>) -> ExecutorResult<Vec<u8>> {
     match raw.pixel_format {
         PixelFormat::Rgb8 | PixelFormat::Rgba8 | PixelFormat::Bgra8 => raw_packed_to_rgb(raw),
@@ -319,7 +309,6 @@ pub fn raw_image_to_packed_rgb(raw: RawImageRef<'_>) -> ExecutorResult<Vec<u8>> 
 }
 
 /// Strip stride/alpha from a packed RGB-family raw image into tightly-packed RGB.
-#[cfg(feature = "vision")]
 fn raw_packed_to_rgb(raw: RawImageRef<'_>) -> ExecutorResult<Vec<u8>> {
     let plane = raw.planes.first().ok_or_else(|| {
         AdapterError::InvalidInput(format!("{} raw image is missing plane 0", raw.pixel_format))
@@ -350,7 +339,6 @@ fn raw_packed_to_rgb(raw: RawImageRef<'_>) -> ExecutorResult<Vec<u8>> {
     Ok(rgb)
 }
 
-#[cfg(feature = "vision")]
 fn rgb_bytes_to_tensor(
     rgb: &[u8],
     width: usize,
@@ -421,7 +409,6 @@ fn rgb_bytes_to_tensor(
     Ok(PreprocessedData::Tensor(tensor))
 }
 
-#[cfg(feature = "vision")]
 fn sample_offset(plane: &ImagePlane, x: usize, y: usize) -> ExecutorResult<usize> {
     let row_offset = y
         .checked_mul(plane.row_stride)
@@ -436,7 +423,6 @@ fn sample_offset(plane: &ImagePlane, x: usize, y: usize) -> ExecutorResult<usize
         .ok_or_else(|| AdapterError::InvalidInput("raw image plane offset overflow".to_string()))
 }
 
-#[cfg(feature = "vision")]
 fn plane_tail<'a>(
     pixels: &'a [u8],
     plane: &ImagePlane,
@@ -447,7 +433,6 @@ fn plane_tail<'a>(
     })
 }
 
-#[cfg(feature = "vision")]
 fn yuv_range(color: YuvColorInfo) -> YuvRange {
     match color.range {
         YuvColorRange::Limited => YuvRange::Limited,
@@ -455,7 +440,6 @@ fn yuv_range(color: YuvColorInfo) -> YuvRange {
     }
 }
 
-#[cfg(feature = "vision")]
 fn yuv_matrix(color: YuvColorInfo) -> YuvStandardMatrix {
     match color.matrix {
         YuvColorMatrix::Bt601 => YuvStandardMatrix::Bt601,
@@ -464,7 +448,6 @@ fn yuv_matrix(color: YuvColorInfo) -> YuvStandardMatrix {
     }
 }
 
-#[cfg(feature = "vision")]
 fn decode_rgb(decoded: image::DynamicImage, layout: ImageTensorLayout) -> PreprocessedData {
     let image = decoded.to_rgb8();
     let (width, height) = image.dimensions();
@@ -492,7 +475,6 @@ fn decode_rgb(decoded: image::DynamicImage, layout: ImageTensorLayout) -> Prepro
     PreprocessedData::Tensor(tensor)
 }
 
-#[cfg(feature = "vision")]
 fn decode_grayscale(decoded: image::DynamicImage, layout: ImageTensorLayout) -> PreprocessedData {
     let image = decoded.to_luma8();
     let (width, height) = image.dimensions();
@@ -517,7 +499,6 @@ fn decode_grayscale(decoded: image::DynamicImage, layout: ImageTensorLayout) -> 
     PreprocessedData::Tensor(tensor)
 }
 
-#[cfg(feature = "vision")]
 fn image_crate_format(format: ImageFormat) -> image::ImageFormat {
     match format {
         ImageFormat::Png => image::ImageFormat::Png,
@@ -527,7 +508,6 @@ fn image_crate_format(format: ImageFormat) -> image::ImageFormat {
 }
 
 /// Resize an image tensor with explicit aspect-ratio handling.
-#[cfg(feature = "vision")]
 pub fn image_resize_step(
     data: PreprocessedData,
     width: usize,
@@ -580,7 +560,6 @@ pub fn image_resize_step(
 }
 
 /// Normalize image tensors with a named or custom preset.
-#[cfg(feature = "vision")]
 pub fn image_normalize_step(
     data: PreprocessedData,
     preset: &ImageNormalizePreset,
@@ -626,7 +605,6 @@ pub fn image_normalize_step(
     Ok(PreprocessedData::Tensor(tensor))
 }
 
-#[cfg(feature = "vision")]
 #[derive(Debug, Clone, Copy)]
 struct ImageTensorSpec {
     layout: ImageTensorLayout,
@@ -637,7 +615,6 @@ struct ImageTensorSpec {
     width: usize,
 }
 
-#[cfg(feature = "vision")]
 impl ImageTensorSpec {
     fn from_shape(shape: &[usize], layout: ImageTensorLayout) -> ExecutorResult<Self> {
         match (shape.len(), layout) {
@@ -701,7 +678,6 @@ impl ImageTensorSpec {
     }
 }
 
-#[cfg(feature = "vision")]
 fn normalize_params(preset: &ImageNormalizePreset) -> (Vec<f32>, Vec<f32>) {
     match preset {
         ImageNormalizePreset::ImageNet => (vec![0.485, 0.456, 0.406], vec![0.229, 0.224, 0.225]),
@@ -714,7 +690,6 @@ fn normalize_params(preset: &ImageNormalizePreset) -> (Vec<f32>, Vec<f32>) {
     }
 }
 
-#[cfg(feature = "vision")]
 fn filter_type(interpolation: &InterpolationMethod) -> image::imageops::FilterType {
     match interpolation {
         InterpolationMethod::Nearest => image::imageops::FilterType::Nearest,
@@ -723,7 +698,6 @@ fn filter_type(interpolation: &InterpolationMethod) -> image::imageops::FilterTy
     }
 }
 
-#[cfg(feature = "vision")]
 fn resize_dimensions(
     src_width: usize,
     src_height: usize,
@@ -755,7 +729,6 @@ fn resize_dimensions(
     }
 }
 
-#[cfg(feature = "vision")]
 fn resize_rgb_with_mode(
     source: &image::RgbImage,
     target_width: usize,
@@ -797,7 +770,6 @@ fn resize_rgb_with_mode(
     }
 }
 
-#[cfg(feature = "vision")]
 fn resize_gray_with_mode(
     source: &image::GrayImage,
     target_width: usize,
@@ -839,7 +811,6 @@ fn resize_gray_with_mode(
     }
 }
 
-#[cfg(feature = "vision")]
 fn tensor_to_rgb_image(
     tensor: &ArrayD<f32>,
     spec: &ImageTensorSpec,
@@ -859,7 +830,6 @@ fn tensor_to_rgb_image(
     image
 }
 
-#[cfg(feature = "vision")]
 fn tensor_to_gray_image(
     tensor: &ArrayD<f32>,
     spec: &ImageTensorSpec,
@@ -878,7 +848,6 @@ fn tensor_to_gray_image(
     image
 }
 
-#[cfg(feature = "vision")]
 fn fill_output(
     output: &mut ArrayD<f32>,
     spec: &ImageTensorSpec,
@@ -901,7 +870,6 @@ fn fill_output(
     }
 }
 
-#[cfg(feature = "vision")]
 fn write_rgb_image_to_tensor(
     image: &image::RgbImage,
     output: &mut ArrayD<f32>,
@@ -921,7 +889,6 @@ fn write_rgb_image_to_tensor(
     }
 }
 
-#[cfg(feature = "vision")]
 fn write_gray_image_to_tensor(
     image: &image::GrayImage,
     output: &mut ArrayD<f32>,
@@ -938,7 +905,6 @@ fn write_gray_image_to_tensor(
     }
 }
 
-#[cfg(feature = "vision")]
 fn tensor_to_u8(value: f32) -> u8 {
     (value * 255.0).round().clamp(0.0, 255.0) as u8
 }
@@ -1205,7 +1171,6 @@ fn resize_grayscale_image(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "vision")]
     use crate::{
         execution::{
             preprocessing::apply_preprocessing_step,
@@ -1216,7 +1181,6 @@ mod tests {
         ir::{Envelope, ImagePlane, PixelFormat, YuvColorInfo, YuvColorMatrix, YuvColorRange},
     };
 
-    #[cfg(feature = "vision")]
     fn rgb_encoded_2x1(format: image::ImageFormat) -> Vec<u8> {
         let mut image = image::RgbImage::new(2, 1);
         image.put_pixel(0, 0, image::Rgb([255, 0, 0]));
@@ -1229,7 +1193,6 @@ mod tests {
         encoded.into_inner()
     }
 
-    #[cfg(feature = "vision")]
     fn solid_rgb_encoded(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
         let image = image::RgbImage::from_pixel(width, height, image::Rgb(rgb));
         let mut encoded = std::io::Cursor::new(Vec::new());
@@ -1239,7 +1202,6 @@ mod tests {
         encoded.into_inner()
     }
 
-    #[cfg(feature = "vision")]
     fn gradient_rgba_raw(width: u32, height: u32) -> (Vec<u8>, Vec<ImagePlane>) {
         let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
         for y in 0..height {
@@ -1260,7 +1222,6 @@ mod tests {
         (pixels, planes)
     }
 
-    #[cfg(feature = "vision")]
     fn gradient_rgb_png(width: u32, height: u32) -> Vec<u8> {
         let mut image = image::RgbImage::new(width, height);
         for y in 0..height {
@@ -1283,7 +1244,6 @@ mod tests {
         encoded.into_inner()
     }
 
-    #[cfg(feature = "vision")]
     fn packed_raw_envelope(
         format: PixelFormat,
         width: u32,
@@ -1312,7 +1272,6 @@ mod tests {
         .unwrap()
     }
 
-    #[cfg(feature = "vision")]
     fn yuv_color() -> YuvColorInfo {
         YuvColorInfo {
             matrix: YuvColorMatrix::Bt709,
@@ -1320,7 +1279,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     fn yuv420_envelope(format: PixelFormat) -> Envelope {
         let (pixels, planes) = match format {
             PixelFormat::Nv12 => (
@@ -1393,7 +1351,6 @@ mod tests {
         Envelope::image_raw(pixels, format, 2, 2, planes, Some(yuv_color())).unwrap()
     }
 
-    #[cfg(feature = "vision")]
     fn assert_nchw_pixel(tensor: &ArrayD<f32>, x: usize, y: usize, expected: [f32; 3]) {
         for (channel, expected) in expected.iter().enumerate() {
             let actual = tensor[[0, channel, y, x]];
@@ -1404,7 +1361,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     fn assert_tensors_close(left: &ArrayD<f32>, right: &ArrayD<f32>) {
         assert_eq!(left.shape(), right.shape());
         for (index, (left, right)) in left.iter().zip(right.iter()).enumerate() {
@@ -1415,7 +1371,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn mobilenet_fixture_uses_metadata_driven_image_preprocessing() {
         use crate::execution::template::ModelMetadata;
@@ -1473,7 +1428,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn mobilenet_download_manifest_preserves_image_preprocessing_metadata() {
         use crate::execution::template::ModelMetadata;
@@ -1510,7 +1464,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_decode_step_emits_nchw_tensor_from_envelope_image() {
         let envelope = Envelope::image(rgb_encoded_2x1(image::ImageFormat::Png), "png").unwrap();
@@ -1532,7 +1485,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_decode_step_emits_nhwc_tensor_from_envelope_image() {
         let envelope = Envelope::image(rgb_encoded_2x1(image::ImageFormat::Png), "png").unwrap();
@@ -1554,7 +1506,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_decode_preprocessing_step_is_dispatched() {
         let envelope = Envelope::image(rgb_encoded_2x1(image::ImageFormat::Png), "png").unwrap();
@@ -1572,7 +1523,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_ingress_matches_image_decode_for_encoded_image_sources() {
         let envelope = Envelope::image(rgb_encoded_2x1(image::ImageFormat::Png), "png").unwrap();
@@ -1597,7 +1547,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_ingress_step_accepts_raw_rgb_family_sources() {
         let cases = [
@@ -1623,7 +1572,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_ingress_step_accepts_raw_yuv420_sources() {
         for format in [PixelFormat::Nv12, PixelFormat::Nv21, PixelFormat::I420] {
@@ -1653,7 +1601,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_ingress_preprocessing_step_is_dispatched() {
         let envelope = packed_raw_envelope(
@@ -1676,7 +1623,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn raw_image_ingress_matches_encoded_png_preprocessing_chain() {
         let (raw_pixels, raw_planes) = gradient_rgba_raw(4, 4);
@@ -1723,7 +1669,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn raw_image_ingress_trace_preserves_one_pixel_buffer_copy() {
         let _trace_lock = crate::tracing::test_lock();
@@ -1764,7 +1709,6 @@ mod tests {
         assert_eq!(metadata["raw_image_pixel_bytes"], "64");
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn raw_yuv_image_ingress_trace_reports_conversion_buffer_allocation() {
         let _trace_lock = crate::tracing::test_lock();
@@ -1798,7 +1742,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn raw_1920x1080_image_ingress_matches_encoded_png_preprocessing_chain() {
         let (raw_pixels, raw_planes) = gradient_rgba_raw(1920, 1080);
@@ -1845,7 +1788,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_decode_step_accepts_jpeg_and_webp() {
         let cases = [
@@ -1865,7 +1807,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_resize_letterbox_preserves_aspect_ratio_and_pads() {
         let mut data = ndarray::Array4::<f32>::zeros((1, 3, 2, 4));
@@ -1902,7 +1843,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_resize_center_preserves_aspect_ratio_and_crops_center() {
         let mut data = ndarray::Array4::<f32>::zeros((1, 3, 2, 4));
@@ -1936,7 +1876,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_resize_preprocessing_step_dispatches_letterbox() {
         let data = ndarray::Array4::<f32>::zeros((1, 3, 2, 4)).into_dyn();
@@ -1964,7 +1903,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_normalize_presets_match_reference_outputs() {
         let cases = [
@@ -2009,7 +1947,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_normalize_custom_preset_and_dispatcher_work() {
         let data = ndarray::Array4::from_shape_vec((1, 3, 1, 1), vec![0.2, 0.4, 0.6])
@@ -2129,7 +2066,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[cfg(feature = "vision")]
     fn bt601_full_color() -> YuvColorInfo {
         YuvColorInfo {
             matrix: YuvColorMatrix::Bt601,
@@ -2140,7 +2076,6 @@ mod tests {
     /// 2x2 packed RGB-family raw envelope with an intentionally padded row
     /// stride (one trailing byte per row) so the packed converter must honor
     /// `row_stride > width * pixel_stride`.
-    #[cfg(feature = "vision")]
     fn padded_packed_raw_envelope(format: PixelFormat, rows: [[u8; 8]; 2]) -> Envelope {
         let pixel_stride = match format {
             PixelFormat::Rgb8 => 3,
@@ -2170,7 +2105,6 @@ mod tests {
         .unwrap()
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn raw_image_to_packed_rgb_strips_stride_for_rgb8() {
         // Two rows of two RGB pixels, each row padded by one trailing byte.
@@ -2190,7 +2124,6 @@ mod tests {
         assert_eq!(&rgb[9..12], &[9, 8, 7]);
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn raw_image_to_packed_rgb_swaps_channels_and_strips_alpha_for_bgra8() {
         // BGRA pixels: stored B,G,R,A; expect channel-swapped RGB with alpha dropped.
@@ -2210,7 +2143,6 @@ mod tests {
         assert_eq!(&rgb[9..12], &[9, 8, 7]);
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn raw_image_to_packed_rgb_decodes_neutral_gray_yuv_exactly() {
         // Y=U=V=128 is neutral gray; BT.601 full-range maps it back to (128,128,128)
@@ -2281,7 +2213,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn raw_image_to_packed_rgb_applies_bt601_full_range_chroma() {
         // Y=128, U=128, V=200 (NV12 stores U then V). BT.601 full-range:
@@ -2339,7 +2270,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn raw_image_to_packed_rgb_matches_tensor_path_for_packed_sources() {
         // The packed-RGB byte path must agree with the tensor path's per-pixel

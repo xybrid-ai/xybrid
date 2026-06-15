@@ -392,7 +392,6 @@ impl RuntimeAdapter for CloudRuntimeAdapter {
             EnvelopeKind::Audio(_) => EnvelopeKind::Text("cloud-output-transcribed".to_string()),
             EnvelopeKind::Text(t) => EnvelopeKind::Text(format!("cloud-output-{}", t)),
             EnvelopeKind::Embedding(_) => EnvelopeKind::Text("cloud-output".to_string()),
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                 EnvelopeKind::Text("cloud-output-vision-unsupported".to_string())
             }
@@ -441,7 +440,6 @@ impl RuntimeAdapter for MockRuntimeAdapter {
             EnvelopeKind::Audio(_) => EnvelopeKind::Text("mock-output-transcribed".to_string()),
             EnvelopeKind::Text(t) => EnvelopeKind::Text(format!("mock-output-{}", t)),
             EnvelopeKind::Embedding(_) => EnvelopeKind::Text("mock-output".to_string()),
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                 EnvelopeKind::Text("mock-output-vision-unsupported".to_string())
             }

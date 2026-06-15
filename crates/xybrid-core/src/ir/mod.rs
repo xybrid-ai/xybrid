@@ -8,7 +8,6 @@
 pub mod envelope;
 
 pub use envelope::{AudioSamples, Envelope, EnvelopeKind};
-#[cfg(feature = "vision")]
 pub use envelope::{
     ImageDimensions, ImageFormat, ImagePlane, ImageSource, ImageSummary, ImageSummarySource,
     ImageValidationLimits, PixelFormat, RawImageRef, YuvColorInfo, YuvColorMatrix, YuvColorRange,

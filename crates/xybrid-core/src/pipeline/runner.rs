@@ -446,7 +446,6 @@ impl PipelineRunner {
                     "output": values
                 })
             }
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { source } => {
                 let dimensions = source.dimensions();
                 serde_json::json!({
@@ -457,7 +456,6 @@ impl PipelineRunner {
                     "height": dimensions.map(|dimensions| dimensions.height)
                 })
             }
-            #[cfg(feature = "vision")]
             EnvelopeKind::MultiPart(parts) => {
                 serde_json::json!({
                     "type": "multipart",
@@ -516,7 +514,6 @@ impl PipelineRunner {
                 OutputResultType::Embedding,
                 OutputResult::Embedding(values.clone()),
             ),
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { source } => (
                 OutputResultType::Image,
                 OutputResult::Image {
@@ -527,7 +524,6 @@ impl PipelineRunner {
                         .unwrap_or_else(|| "unknown".to_string()),
                 },
             ),
-            #[cfg(feature = "vision")]
             EnvelopeKind::MultiPart(_) => (
                 OutputResultType::Json,
                 OutputResult::Json(self.envelope_to_value(envelope)),

@@ -1,5 +1,3 @@
-#![cfg(feature = "vision")]
-
 use ndarray::{ArrayD, IxDyn};
 use xybrid_core::{
     execution::{

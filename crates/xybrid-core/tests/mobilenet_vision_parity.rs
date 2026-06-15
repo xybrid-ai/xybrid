@@ -1,5 +1,3 @@
-#![cfg(feature = "vision")]
-
 use ndarray::Array4;
 use xybrid_core::{
     execution::{ModelMetadata, PreprocessingStep, TemplateExecutor},

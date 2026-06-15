@@ -7,7 +7,6 @@ mod warmup;
 
 use anyhow::{Context, Result};
 use std::fs;
-#[cfg(feature = "vision")]
 use std::path::Path;
 use std::path::PathBuf;
 use xybrid_core::context::{DeviceMetrics, StageDescriptor};
@@ -202,7 +201,6 @@ pub(crate) fn handle_repl_command(
 
     println!();
     ui::hint("Enter text and press Enter to run inference");
-    #[cfg(feature = "vision")]
     ui::hint("Use '/image <path>' to attach an image to the next message");
     println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
 
@@ -412,17 +410,14 @@ impl ReplPendingImages {
         self.paths.is_empty()
     }
 
-    #[cfg(feature = "vision")]
     fn len(&self) -> usize {
         self.paths.len()
     }
 
-    #[cfg(feature = "vision")]
     fn push(&mut self, path: PathBuf) {
         self.paths.push(path);
     }
 
-    #[cfg(feature = "vision")]
     fn clear(&mut self) {
         self.paths.clear();
     }
@@ -449,7 +444,6 @@ fn handle_special_command(
             ui::hint("Commands:");
             println!("    {}  Exit REPL", ui::dim("quit, exit, q"));
             println!("    {}       Show this help", ui::dim("help, ?"));
-            #[cfg(feature = "vision")]
             println!(
                 "    {}   Attach image to next message",
                 ui::dim("/image <path>")
@@ -523,7 +517,6 @@ fn handle_image_command(
         return Some(SpecialCommandResult::Continue);
     };
 
-    #[cfg(feature = "vision")]
     {
         let path = PathBuf::from(path);
         if !path.exists() {
@@ -536,15 +529,6 @@ fn handle_image_command(
             "Image attached to next message ({} pending)",
             pending_images.len()
         ));
-    }
-
-    #[cfg(not(feature = "vision"))]
-    {
-        let _ = path;
-        let _ = pending_images;
-        ui::err(
-            "This xybrid binary was built without vision support. Rebuild with --features vision or --features llm-llamacpp-vision to use /image.",
-        );
     }
 
     Some(SpecialCommandResult::Continue)
@@ -582,26 +566,13 @@ fn build_repl_multimodal_input(
     input_line: &str,
     pending_images: &mut ReplPendingImages,
 ) -> Result<Envelope> {
-    #[cfg(feature = "vision")]
-    {
-        let images = read_repl_images(&pending_images.paths)?;
-        let input = Envelope::user_message(input_line, images)
-            .context("Failed to build multimodal REPL input")?;
-        pending_images.clear();
-        Ok(input)
-    }
-
-    #[cfg(not(feature = "vision"))]
-    {
-        let _ = input_line;
-        let _ = pending_images;
-        Err(anyhow::anyhow!(
-            "This xybrid binary was built without vision support. Rebuild with --features vision or --features llm-llamacpp-vision to use /image."
-        ))
-    }
+    let images = read_repl_images(&pending_images.paths)?;
+    let input = Envelope::user_message(input_line, images)
+        .context("Failed to build multimodal REPL input")?;
+    pending_images.clear();
+    Ok(input)
 }
 
-#[cfg(feature = "vision")]
 fn read_repl_images(image_paths: &[PathBuf]) -> Result<Vec<Envelope>> {
     let mut images = Vec::with_capacity(image_paths.len());
     for image_path in image_paths {
@@ -616,7 +587,6 @@ fn read_repl_images(image_paths: &[PathBuf]) -> Result<Vec<Envelope>> {
     Ok(images)
 }
 
-#[cfg(feature = "vision")]
 fn image_format_hint(path: &Path) -> Result<&str> {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -824,14 +794,12 @@ fn execute_batch(
                     EnvelopeKind::Embedding(vec) => {
                         ui::ok(&format!("Embedding: {} dimensions", vec.len()));
                     }
-                    #[cfg(feature = "vision")]
                     EnvelopeKind::Image { .. } => {
                         ui::ok(&format!(
                             "Image output: {} bytes",
                             result.output.payload_size()
                         ));
                     }
-                    #[cfg(feature = "vision")]
                     EnvelopeKind::MultiPart(parts) => {
                         ui::ok(&format!("Multi-part output: {} parts", parts.len()));
                     }
@@ -851,7 +819,6 @@ fn execute_batch(
 mod tests {
     use super::*;
 
-    #[cfg(feature = "vision")]
     #[test]
     fn image_command_is_handled() {
         let mut conversation_context = None;
@@ -873,7 +840,6 @@ mod tests {
         assert_eq!(pending_images.paths[0], image_path);
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn repl_multimodal_input_consumes_pending_image() {
         let dir = tempfile::tempdir().unwrap();
@@ -899,7 +865,6 @@ mod tests {
         assert_eq!(input.role(), Some(MessageRole::User));
     }
 
-    #[cfg(feature = "vision")]
     #[test]
     fn repl_multimodal_input_rejects_corrupt_image_with_redacted_error() {
         let dir = tempfile::tempdir().unwrap();
@@ -958,7 +923,6 @@ stages:
         assert!(stages[0].bundle_path.is_none());
     }
 
-    #[cfg(feature = "vision")]
     fn png_image(width: u32, height: u32) -> Vec<u8> {
         let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
             width,

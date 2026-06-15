@@ -4,17 +4,12 @@
 //! a lightweight mobile-optimized architecture. Proves the system works across
 //! different model architectures (ResNet-50 heavy, MobileNet light).
 
-#[cfg(feature = "vision")]
 use xybrid_core::execution::ModelMetadata;
-#[cfg(feature = "vision")]
 use xybrid_core::execution::TemplateExecutor;
-#[cfg(feature = "vision")]
 use xybrid_core::ir::{Envelope, EnvelopeKind};
-#[cfg(feature = "vision")]
 use xybrid_core::testing::model_fixtures;
 
 // ImageNet class labels (top 10 for demo)
-#[cfg(feature = "vision")]
 const IMAGENET_CLASSES: &[&str] = &[
     "tench, Tinca tinca",
     "goldfish, Carassius auratus",
@@ -28,7 +23,6 @@ const IMAGENET_CLASSES: &[&str] = &[
     "ostrich, Struthio camelus",
 ];
 
-#[cfg(feature = "vision")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
     println!("  MobileNetV2 - Lightweight ImageNet Classification");
@@ -154,14 +148,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[cfg(not(feature = "vision"))]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("This example requires the `vision` feature.");
-    eprintln!("Run: cargo run --example mobilenetv2_imagenet --features vision");
-    Ok(())
-}
-
-#[cfg(feature = "vision")]
 fn create_test_image_png() -> Result<Vec<u8>, image::ImageError> {
     let mut image = image::RgbImage::new(320, 256);
 

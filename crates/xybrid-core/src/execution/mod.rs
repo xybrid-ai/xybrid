@@ -71,7 +71,6 @@ pub use template::{
     ModelMetadata, PipelineStage, PostprocessingStep, PreprocessingStep, VoiceConfig, VoiceFormat,
     VoiceInfo, VoiceLoader,
 };
-#[cfg(feature = "vision")]
 pub use template::{VisionEncoderConfig, VisionPreprocessingPreset};
 
 // Data types (internal)
@@ -106,7 +105,7 @@ pub use executor::TemplateExecutor;
 // Preprocessing steps (internal implementation details)
 pub(crate) mod preprocessing;
 
-#[cfg(all(feature = "vision", any(test, feature = "dev-tools")))]
+#[cfg(any(test, feature = "dev-tools"))]
 pub mod test_seams;
 
 // Postprocessing steps (internal implementation details)

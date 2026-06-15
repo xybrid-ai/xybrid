@@ -211,7 +211,6 @@ impl RuntimeAdapter for CandleRuntimeAdapter {
             EnvelopeKind::Text(_) => Err(AdapterError::InvalidInput(
                 "Whisper expects Embedding (mel spectrogram) input, not Text".to_string(),
             )),
-            #[cfg(feature = "vision")]
             EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                 Err(AdapterError::UnsupportedModelCapability {
                     model_id: model_id.clone(),
