@@ -1,6 +1,10 @@
 /**
  * Xybrid SDK for Android
- * Convenience wrappers and extensions for the UniFFI-generated bindings.
+ *
+ * Hand-written wrappers + compatibility shims over the BoltFFI-generated
+ * bindings in `XybridBolt.kt`. Both files live in the same `ai.xybrid`
+ * package so consumers `import ai.xybrid.…` and see a single surface.
+ *
  * For full API documentation, see https://docs.xybrid.dev/sdk/kotlin
  */
 @file:Suppress("unused")
@@ -46,8 +50,8 @@ object Xybrid {
     /**
      * Initialize the Xybrid runtime.
      *
-     * This must be called once before using any Xybrid functionality.
-     * It is safe to call multiple times — subsequent calls are no-ops.
+     * Idempotent and thread-safe — subsequent calls after a successful
+     * initialization are no-ops.
      *
      * Typically called from `Application.onCreate()` or `Activity.onCreate()`.
      *
@@ -102,9 +106,6 @@ object Xybrid {
     val isInitialized: Boolean get() = initialized
 
     private fun registerPlatformObservers(appContext: Context) {
-        // Sticky-broadcast registration delivers the latest battery state
-        // synchronously, so the receiver's first onReceive seeds the value
-        // without a separate read.
         val batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(received: Context, intent: Intent) {
                 val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
@@ -113,21 +114,14 @@ object Xybrid {
                     clearBatteryLevel()
                     return
                 }
-                // Scale to 0..=100; clamp so a brief sensor blip can't
-                // overflow the UByte the FFI expects.
                 val pct = ((level * 100) / scale).coerceIn(0, 100)
                 setBatteryLevel(pct.toUByte())
             }
         }
         appContext.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
 
-        // Thermal status listener is API 29+ — older devices simply
-        // don't get a thermal signal, which the routing engine treats
-        // as `thermal_state = None`.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
-            // Push the current status immediately so first cache miss isn't
-            // blind, then keep updating on every transition.
             setThermalState(thermalStatusToXybrid(pm.currentThermalStatus))
             pm.addThermalStatusListener { status ->
                 setThermalState(thermalStatusToXybrid(status))
@@ -137,13 +131,9 @@ object Xybrid {
 
     /**
      * Map Android's 7-bucket thermal status to xybrid's 4-band
-     * [`XybridThermalState`].
-     *
-     * Android (API 29+) reports `THERMAL_STATUS_NONE`/`LIGHT`/`MODERATE`/
-     * `SEVERE`/`CRITICAL`/`EMERGENCY`/`SHUTDOWN`. The last three all
-     * indicate the device is on the verge of forced throttling or shutdown,
-     * so they collapse to `Critical` — the routing engine should treat
-     * them identically (pause heavy work).
+     * [`XybridThermalState`]. The last three bands (CRITICAL, EMERGENCY,
+     * SHUTDOWN) all collapse to `CRITICAL` — the routing engine should
+     * treat them identically (pause heavy work).
      */
     private fun thermalStatusToXybrid(status: Int): XybridThermalState = when (status) {
         PowerManager.THERMAL_STATUS_NONE,
@@ -156,9 +146,11 @@ object Xybrid {
 }
 
 // -- Public Type Aliases --
-
-/** Loads ML models from the registry or local bundles. */
-typealias ModelLoader = XybridModelLoader
+//
+// Bolt collapsed `XybridModelLoader.fromRegistry(id).load()` into the
+// `XybridModel.fromRegistry(id)` companion-object factory — there is no
+// loader type anymore. The Model / Result / Envelope / VoiceInfo /
+// GenerationConfig aliases stay for convenience.
 
 /** A loaded model ready for inference. */
 typealias Model = XybridModel
@@ -166,8 +158,15 @@ typealias Model = XybridModel
 /** The result of a model inference operation. */
 typealias Result = XybridResult
 
-/** Errors that can occur during model loading or inference. */
-typealias XybridError = XybridException
+/**
+ * Errors that can occur during model loading or inference.
+ *
+ * Backwards-compat alias — the previous uniffi binding emitted
+ * `XybridException`. Bolt emits the same hierarchy under the
+ * `XybridError` name; this alias keeps `catch (e: XybridException)`
+ * compiling against the bolt surface.
+ */
+typealias XybridException = XybridError
 
 /** Voice metadata for TTS models. */
 typealias VoiceInfo = XybridVoiceInfo
@@ -179,11 +178,7 @@ typealias GenerationConfig = XybridGenerationConfig
 
 /** Preset factory methods for [GenerationConfig]. */
 object GenerationConfigs {
-    /**
-     * Greedy decoding preset (deterministic, temperature=0).
-     *
-     * Produces the same output every time for the same input.
-     */
+    /** Greedy decoding preset (deterministic, temperature=0). */
     @JvmStatic
     fun greedy() = XybridGenerationConfig(
         maxTokens = null,
@@ -192,14 +187,10 @@ object GenerationConfigs {
         minP = null,
         topK = 0u,
         repetitionPenalty = null,
-        stopSequences = null,
+        stopSequences = emptyList(),
     )
 
-    /**
-     * Creative generation preset (higher temperature).
-     *
-     * Produces more varied and creative output.
-     */
+    /** Creative generation preset (higher temperature). */
     @JvmStatic
     fun creative() = XybridGenerationConfig(
         maxTokens = null,
@@ -208,81 +199,99 @@ object GenerationConfigs {
         minP = null,
         topK = 50u,
         repetitionPenalty = null,
-        stopSequences = null,
+        stopSequences = emptyList(),
     )
 }
 
-// -- XybridResult Extensions --
+// -- XybridResult compatibility shim --
+//
+// The bolt-generated `XybridResult` carries an `envelope` whose `kind` is
+// a sealed-class hierarchy (`Text`, `Audio`, `Embedding`). The previous
+// uniffi-generated `XybridResult` flattened these into nullable fields
+// (`text`, `audioBytes`, `embedding`) plus a `success` flag. Consumers
+// (the Android example, anything downstream) read those flat fields, so
+// we mirror them as extension properties on the bolt type.
 
-/** Returns `true` if inference failed. */
-val XybridResult.isFailure: Boolean get() = !success
+/** `true` for any result returned from [XybridModel.run]. */
+val XybridResult.success: Boolean get() = true
+
+/** `true` if the result carries no output (`OutputType.UNKNOWN`). */
+val XybridResult.isFailure: Boolean get() = outputType == XybridOutputType.UNKNOWN
+
+/** Text payload, if the result is `.Text`. `null` otherwise. */
+val XybridResult.text: String?
+    get() = (envelope.kind as? XybridEnvelopeKind.Text)?.text
+
+/** Audio bytes, if the result is `.Audio`. `null` otherwise. */
+val XybridResult.audioBytes: ByteArray?
+    get() = (envelope.kind as? XybridEnvelopeKind.Audio)?.bytes
+
+/** Embedding vector, if the result is `.Embedding`. `null` otherwise. */
+val XybridResult.embedding: FloatArray?
+    get() = (envelope.kind as? XybridEnvelopeKind.Embedding)?.values
 
 /** The latency in seconds as a Double. */
 val XybridResult.latencySeconds: Double get() = latencyMs.toDouble() / 1000.0
 
 // -- XybridEnvelope Factory Methods --
+//
+// Bolt's `XybridEnvelope` is a flat struct with `kind: XybridEnvelopeKind`
+// and `metadata: List<XybridMetadataEntry>`. The previous uniffi factories
+// (`XybridEnvelope.Text(...)`, `.Audio(...)`) were enum-variant
+// constructors. Reproduce those factories here, folding the well-known
+// TTS / ASR metadata keys into entries.
 
 /** Factory methods for creating [XybridEnvelope] instances. */
 object Envelope {
     /**
      * Creates an audio envelope from raw PCM data.
-     * @param bytes Raw PCM audio bytes
-     * @param sampleRate Sample rate in Hz (default: 16000)
-     * @param channels Number of audio channels (default: 1)
+     * @param bytes Raw PCM audio bytes.
+     * @param sampleRate Sample rate in Hz (default 16000).
+     * @param channels Number of channels (default 1).
+     *
+     * Drop `@JvmOverloads` here: `UInt` is an inline value class and the
+     * `@JvmOverloads` annotation can't be applied to functions that the
+     * value-class-mangling rules touch. Kotlin callers still get the
+     * default-argument ergonomics; Java callers would need to pass all
+     * three explicitly anyway (UInt isn't a first-class Java type).
      */
     @JvmStatic
     fun audio(bytes: ByteArray, sampleRate: UInt = 16000u, channels: UInt = 1u): XybridEnvelope =
-        XybridEnvelope.Audio(bytes, sampleRate, channels)
+        XybridEnvelope(
+            kind = XybridEnvelopeKind.Audio(bytes),
+            metadata = listOf(
+                XybridMetadataEntry("sample_rate", sampleRate.toString()),
+                XybridMetadataEntry("channels", channels.toString()),
+            ),
+        )
 
     /** Creates a text envelope for TTS with default voice. */
     @JvmStatic
-    fun text(text: String): XybridEnvelope = XybridEnvelope.Text(text, null, null)
+    fun text(text: String): XybridEnvelope =
+        XybridEnvelope(kind = XybridEnvelopeKind.Text(text), metadata = emptyList())
 
     /**
      * Creates a text envelope for TTS with voice and speed options.
-     * @param voiceId Voice ID (e.g., "af_heart" for Kokoro)
-     * @param speed Speed multiplier (1.0 = normal, default)
+     * @param voiceId Voice ID (e.g. "af_heart" for Kokoro).
+     * @param speed Speed multiplier (1.0 = normal, default).
      */
     @JvmStatic
     @JvmOverloads
-    fun text(text: String, voiceId: String, speed: Double = 1.0): XybridEnvelope =
-        XybridEnvelope.Text(text, voiceId, speed)
+    fun text(text: String, voiceId: String, speed: Double = 1.0): XybridEnvelope {
+        val metadata = mutableListOf<XybridMetadataEntry>()
+        metadata.add(XybridMetadataEntry("voice_id", voiceId))
+        metadata.add(XybridMetadataEntry("speed", speed.toString()))
+        return XybridEnvelope(kind = XybridEnvelopeKind.Text(text), metadata = metadata)
+    }
 
     /** Creates an embedding envelope from raw vector data. */
     @JvmStatic
-    fun embedding(data: List<Float>): XybridEnvelope = XybridEnvelope.Embedding(data)
-
-    /**
-     * Creates an encoded image envelope for vision-language models.
-     * @param bytes Encoded PNG, JPEG, or WebP bytes
-     * @param format Image format (`png`, `jpeg`, `jpg`, or `webp`)
-     */
-    @JvmStatic
-    fun image(bytes: ByteArray, format: String): XybridEnvelope =
-        XybridEnvelope.Image(bytes, normalizeImageFormat(format))
-
-    /**
-     * Creates a multi-part user message with text and image attachments.
-     * @param text User prompt text
-     * @param images Image envelopes created by [image]
-     */
-    @JvmStatic
-    @JvmOverloads
-    fun userMessage(text: String, images: List<XybridEnvelope> = emptyList()): XybridEnvelope {
-        require(images.all { it is XybridEnvelope.Image }) {
-            "Envelope.userMessage accepts only image envelopes"
-        }
-        return XybridEnvelope.UserMessage(text, images)
-    }
-
-    private fun normalizeImageFormat(format: String): String =
-        when (val normalized = format.trim().lowercase()) {
-            "jpg" -> "jpeg"
-            "jpeg", "png", "webp" -> normalized
-            else -> throw IllegalArgumentException(
-                "Unsupported image format '$format'. Supported formats: png, jpeg, jpg, webp"
-            )
-        }
+    fun embedding(data: FloatArray): XybridEnvelope =
+        XybridEnvelope(kind = XybridEnvelopeKind.Embedding(data), metadata = emptyList())
+    // NOTE: the vision envelope helpers (image / multimodal userMessage) added
+    // in #245 are not ported here — the bolt `XybridEnvelopeKind` has no Image
+    // variant yet. They land with the "wire vision through the facade/bolt"
+    // follow-up, alongside the deferred vision CI build-checks.
 }
 
 // -- XybridVoiceInfo Extensions --
@@ -293,8 +302,28 @@ val XybridVoiceInfo.isMale: Boolean get() = gender == "male"
 /** Returns `true` if the voice gender is female. */
 val XybridVoiceInfo.isFemale: Boolean get() = gender == "female"
 
-// -- XybridException Extensions --
+// -- XybridError Extensions --
 
-/** User-friendly error message for display. */
-val XybridException.displayMessage: String
-    get() = message ?: "Unknown error"
+/** User-friendly error message for display. Falls back to a category
+ * label when the variant has no embedded message. */
+val XybridError.displayMessage: String
+    get() = message ?: when (this) {
+        is XybridError.ModelNotFound -> "Model not found: $id"
+        is XybridError.DirectoryNotFound -> "Directory not found: $path"
+        is XybridError.MetadataNotFound -> "Model metadata not found at $path"
+        is XybridError.MetadataInvalid -> message
+        is XybridError.LoadError -> message
+        is XybridError.InferenceError -> message
+        is XybridError.AbortedForCloudFallback -> "Aborted for cloud fallback: $reason"
+        is XybridError.StreamingNotSupported -> "Streaming is not supported by this model"
+        is XybridError.NotLoaded -> "Model not loaded"
+        is XybridError.ConfigError -> message
+        is XybridError.NetworkError -> message
+        is XybridError.Offline -> message
+        is XybridError.IoError -> message
+        is XybridError.CacheError -> message
+        is XybridError.PipelineError -> message
+        is XybridError.CircuitOpen -> message
+        is XybridError.RateLimited -> "Rate limited, retry after $retryAfterSecs seconds"
+        is XybridError.Timeout -> "Request timeout after $timeoutMs ms"
+    }

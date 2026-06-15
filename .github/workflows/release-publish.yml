@@ -517,8 +517,8 @@ jobs:
           # Stage files we want on the `swift` branch.
           mkdir -p staging/Sources/Xybrid
           cp Package.swift staging/
-          cp bindings/apple/Sources/Xybrid/Xybrid.swift        staging/Sources/Xybrid/
-          cp bindings/apple/Sources/Xybrid/xybrid_uniffi.swift staging/Sources/Xybrid/
+          cp bindings/apple/Sources/Xybrid/Xybrid.swift      staging/Sources/Xybrid/
+          cp bindings/apple/Sources/Xybrid/xybrid_bolt.swift staging/Sources/Xybrid/
 
           git checkout --orphan swift
           git rm -rf . 2>/dev/null || true

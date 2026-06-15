@@ -5,9 +5,11 @@ on:
     branches: [master]
     paths:
       - 'bindings/kotlin/**'
+      - 'crates/xybrid-bolt/**'
+      - 'crates/xybrid-ffi-facade/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-uniffi/**'
+      - 'tools/scripts/build-android-bolt.sh'
       - 'xtask/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
@@ -26,26 +28,21 @@ permissions: read-all
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # NDK version - r26b is stable and widely supported
-  NDK_VERSION: "26.1.10909125"
+  # NDK r27: build-android-bolt.sh resolves the API-suffixed clang
+  # binaries this NDK ships (r26 had a different toolchain layout that
+  # cc-rs couldn't drive for the llama.cpp CMake build). Keep in sync
+  # with the version build-android-bolt.sh prefers (27.*).
+  NDK_VERSION: "27.0.12077973"
 
 jobs:
+  # Single job (no per-ABI matrix): the bolt build
+  # (tools/scripts/build-android-bolt.sh, invoked by `cargo xtask
+  # build-android`) always builds every ABI in one `boltffi pack android`
+  # invocation, so a matrix would just re-run the full ~all-ABI build N
+  # times. Build once, verify the ABIs the Kotlin AAR ships.
   build-android:
-    name: Build Android .so (${{ matrix.abi }})
+    name: Build Android .so (all ABIs)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - abi: armeabi-v7a
-            rust-target: armv7-linux-androideabi
-            has-ort: false
-          - abi: arm64-v8a
-            rust-target: aarch64-linux-android
-            has-ort: true
-          - abi: x86_64
-            rust-target: x86_64-linux-android
-            has-ort: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -53,7 +50,13 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
-          targets: ${{ matrix.rust-target }}
+          # All four ABIs the bolt config builds (the AAR ships the first
+          # three; i686/x86 is built but not packaged).
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android,
+            i686-linux-android
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -66,20 +69,21 @@ jobs:
           echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
           echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
 
-      # Per-ABI rust-cache so the three matrix shards don't clobber each
-      # other's target/ directories (each shard has a distinct cross-compile
-      # target tree).
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           prefix-key: "v1-rust"
-          shared-key: "android-ndk-${{ matrix.abi }}"
+          shared-key: "android-bolt"
           cache-all-crates: "true"
           save-if: "true"
 
-      # Cache Android NDK to avoid ~1.5GB download on every build
-      # Expected cache hit rate: ~99% (NDK version changes rarely)
-      # Cache size: ~1.5GB compressed
+      # patchelf is required by build-android-bolt.sh to add the
+      # libc++_shared.so DT_NEEDED entry (boltffi 0.25's android pack
+      # drops it).
+      - name: Install patchelf
+        run: sudo apt-get update && sudo apt-get install -y patchelf
+
+      # Cache Android NDK to avoid the ~1.5GB download on every build.
       - name: Cache Android NDK
         id: cache-ndk
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -92,72 +96,73 @@ jobs:
 
       - name: Install NDK
         if: steps.cache-ndk.outputs.cache-hit != 'true'
-        run: |
-          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Set NDK environment
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
-      # Cache cargo-ndk binary to avoid compilation on every build
-      # Expected cache hit rate: ~95% (cargo-ndk version changes rarely)
-      - name: Cache cargo-ndk
-        id: cache-cargo-ndk
+      # boltffi CLI provides the `boltffi pack android` the build script
+      # calls. Cache the installed binary across runs.
+      - name: Cache boltffi CLI
+        id: cache-boltffi
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: ~/.cargo/bin/cargo-ndk
-          key: cargo-ndk-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-ndk-${{ runner.os }}-
+          path: ~/.cargo/bin/boltffi
+          key: boltffi-cli-${{ runner.os }}-0.25
 
-      - name: Install cargo-ndk
-        # actions/cache sets cache-hit only on EXACT key match; with
-        # restore-keys, a fallback can populate ~/.cargo/bin/cargo-ndk while
-        # leaving cache-hit empty, which made the previous `if:`-gated
-        # `cargo install` re-run and fail with "binary already exists".
-        # `which || install` is idempotent in both states.
-        run: which cargo-ndk || cargo install cargo-ndk
+      - name: Install boltffi CLI
+        # `which || install` is idempotent whether or not the cache
+        # populated the binary (actions/cache only sets cache-hit on an
+        # exact key match).
+        # `--locked` is required: boltffi_cli 0.25.0 fails to compile against
+        # the newer 0.25.1 of its own lib crates (boltffi_bindgen added
+        # required `KotlinOptions` fields in a non-additive minor bump). The
+        # bundled Cargo.lock pins those libs to 0.25.0.
+        run: which boltffi || cargo install boltffi_cli --version 0.25.0 --locked
 
-      - name: Build Android .so (${{ matrix.abi }})
-        run: cargo xtask build-android --release --abi ${{ matrix.abi }}
+      - name: Build Android .so files (all ABIs)
+        run: cargo xtask build-android --release
 
-      - name: Check Android vision build without model artifacts
-        if: matrix.abi == 'arm64-v8a'
-        run: cargo ndk --target ${{ matrix.rust-target }} --platform 28 check -p xybrid-uniffi --features platform-android,llm-llamacpp-vision
-
-      - name: Verify .so file
+      - name: Verify .so files
         run: |
-          SO_PATH="bindings/kotlin/libs/${{ matrix.abi }}/libxybrid_uniffi.so"
-          if [ ! -f "$SO_PATH" ]; then
-            echo "Error: .so file not found at $SO_PATH"
-            exit 1
-          fi
-          echo "Verifying $SO_PATH..."
-          file "$SO_PATH"
-          ls -la "$SO_PATH"
-
-      - name: Verify ORT libraries
-        if: matrix.has-ort
-        run: |
-          SO_BASE_PATH="bindings/kotlin/libs/${{ matrix.abi }}"
-          ORT_LIBS=("libonnxruntime.so" "libc++_shared.so")
-
-          echo "Checking ORT libraries for ${{ matrix.abi }}..."
-          for lib in "${ORT_LIBS[@]}"; do
-            LIB_PATH="$SO_BASE_PATH/$lib"
-            if [ ! -f "$LIB_PATH" ]; then
-              echo "Error: ORT library not found at $LIB_PATH"
+          SO_BASE="bindings/kotlin/libs"
+          # The AAR ships these three ABIs (abiFilters in
+          # bindings/kotlin/build.gradle.kts). i686/x86 is built but not
+          # packaged, so it's not verified here.
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            SO="$SO_BASE/$abi/libxybrid-bolt.so"
+            if [ ! -f "$SO" ]; then
+              echo "Error: $SO not found"
               exit 1
             fi
-            echo "OK: $LIB_PATH"
-            file "$LIB_PATH"
+            echo "OK: $SO ($(du -h "$SO" | cut -f1))"
+            # libc++_shared must be a declared dependency (the patchelf
+            # step in build-android-bolt.sh adds it). Guard against a
+            # regression that would dlopen-fail on device.
+            if ! readelf -d "$SO" | grep -q 'libc++_shared.so'; then
+              echo "Error: $SO is missing libc++_shared.so in DT_NEEDED"
+              exit 1
+            fi
+            echo "  DT_NEEDED libc++_shared.so: present"
           done
 
-          echo ""
-          ls -la "$SO_BASE_PATH"
+      - name: Verify ORT runtime bundled (arm64-v8a, x86_64)
+        run: |
+          SO_BASE="bindings/kotlin/libs"
+          for abi in arm64-v8a x86_64; do
+            for lib in libonnxruntime.so libc++_shared.so; do
+              LIB="$SO_BASE/$abi/$lib"
+              if [ ! -f "$LIB" ]; then
+                echo "Error: $LIB not found"
+                exit 1
+              fi
+              echo "OK: $LIB"
+            done
+          done
 
-      - name: Upload Android .so artifact
+      - name: Upload Android .so artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: android-so-files-${{ matrix.abi }}
-          path: bindings/kotlin/libs/${{ matrix.abi }}/
+          name: android-so-files
+          path: bindings/kotlin/libs/
           if-no-files-found: error

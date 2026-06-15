@@ -3,6 +3,12 @@
 **/*.rs.bk
 *.pdb
 
+# Build-time vendored llama.cpp clone. The llama-cpp vendoring moved to
+# crates/llama-cpp-sys as of the llama-cpp-sys/xybrid-llama split (#166);
+# any vendor/ here is a stale pre-split build-time clone (carries its own
+# .git), never source to track.
+/vendor/
+
 # Cargo
 # Note: For library crates, Cargo.lock is typically ignored
 # For binary crates or workspaces, you may want to commit it

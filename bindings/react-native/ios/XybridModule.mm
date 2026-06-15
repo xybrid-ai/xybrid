@@ -4,9 +4,9 @@
 // ObjC++ shim that forwards every TurboModule call to the Swift
 // `XybridModuleImpl` actor. The split exists because:
 //   1. RCT_EXPORT_MODULE / codegen need an ObjC class on the registration path.
-//   2. The xybrid-uniffi APIs are Swift-native (async functions, `Arc<T>`
-//      surfaces as Swift class instances) — calling them from ObjC++ is
-//      possible but loses the `async`/`throws` ergonomics. Keeping the bridge
+//   2. The bolt Swift APIs are Swift-native (`throws` functions, handles
+//      surface as Swift class instances) — calling them from ObjC++ is
+//      possible but loses the `throws` ergonomics. Keeping the bridge
 //      thin in ObjC and the work in Swift mirrors how the Apple SDK wrapper
 //      is structured (see bindings/apple/Sources/Xybrid/Xybrid.swift).
 

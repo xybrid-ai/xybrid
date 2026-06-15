@@ -5,6 +5,7 @@ use std::time::Duration;
 use url::Url;
 use xybrid_core::device::{ResourceSnapshot, ResourceSnapshotProvider};
 use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
+use xybrid_ffi_facade as facade;
 use xybrid_sdk::{
     AbortPolicy, AbortSignal, CancellationToken, GenerationConfig, ModelLoader, RunOptions,
     XybridModel,
@@ -66,30 +67,25 @@ impl FfiGenerationConfig {
         }
     }
 
+    /// Re-shape into the facade POD. The facade owns the single canonical
+    /// mapping into [`xybrid_sdk::GenerationConfig`] (`Option` overrides →
+    /// SDK defaults); calling [`to_sdk`](Self::to_sdk) delegates through
+    /// it instead of duplicating the 20-line `if let Some(...)` chain we
+    /// used to maintain here.
+    pub(crate) fn to_facade(&self) -> facade::GenerationConfig {
+        facade::GenerationConfig {
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            min_p: self.min_p,
+            top_k: self.top_k,
+            repetition_penalty: self.repetition_penalty,
+            stop_sequences: self.stop_sequences.clone().unwrap_or_default(),
+        }
+    }
+
     pub(crate) fn to_sdk(&self) -> GenerationConfig {
-        let mut config = GenerationConfig::default();
-        if let Some(v) = self.max_tokens {
-            config.max_tokens = v as usize;
-        }
-        if let Some(v) = self.temperature {
-            config.temperature = v;
-        }
-        if let Some(v) = self.top_p {
-            config.top_p = v;
-        }
-        if let Some(v) = self.min_p {
-            config.min_p = v;
-        }
-        if let Some(v) = self.top_k {
-            config.top_k = v as usize;
-        }
-        if let Some(v) = self.repetition_penalty {
-            config.repetition_penalty = v;
-        }
-        if let Some(ref v) = self.stop_sequences {
-            config.stop_sequences = v.clone();
-        }
-        config
+        self.to_facade().to_sdk()
     }
 }
 
@@ -165,50 +161,73 @@ pub struct FfiRunOptions {
 }
 
 impl FfiRunOptions {
+    /// Re-shape into the facade POD. Drops cloud_provider/cloud_model/
+    /// cloud_gateway_url (those ride on the envelope metadata via
+    /// [`apply_cloud_fallback_metadata`], not on `RunOptions`).
+    fn to_facade(&self, generation_config: Option<facade::GenerationConfig>) -> facade::RunOptions {
+        let mut abort_on = Vec::new();
+        if self.abort_on_memory_pressure_critical {
+            abort_on.push(facade::AbortSignal::MemoryPressureCritical);
+        }
+        if self.abort_on_thermal_critical {
+            abort_on.push(facade::AbortSignal::ThermalCritical);
+        }
+        facade::RunOptions {
+            generation_config,
+            abort_on,
+            fallback_to_cloud: self.fallback_to_cloud,
+            max_grace_tokens: self.max_grace_tokens.unwrap_or(0),
+            correlation_id: non_empty(self.correlation_id.as_deref()).map(str::to_string),
+        }
+    }
+
     /// Build SDK [`RunOptions`], optionally wiring a cancellation token.
     ///
-    /// When `cancellation_token` is `Some`, the resulting [`AbortPolicy`] is
-    /// extended to observe [`AbortSignal::UserCancelled`] and the token is
-    /// attached so `AbortState::check_before_token` halts generation when the
-    /// token is cancelled. When `None`, the policy is left untouched — the
-    /// default chat / cloud-fallback semantics (which never observe
-    /// `UserCancelled`) are preserved exactly.
+    /// The facade owns the base `AbortPolicy` -> SDK assembly (memory/thermal
+    /// signals, cloud fallback, grace tokens, correlation id). On top of the
+    /// canonical SDK options it returns, we layer the bits the facade keeps out
+    /// of its FFI-safe surface: the Flutter resource provider, the cancellation
+    /// token (plus `UserCancelled`, which the facade's `AbortSignal` omits by
+    /// design because cancellation is expressed through the token), and the
+    /// vision live-mode frame session.
+    ///
+    /// When `cancellation_token` is `None` the abort policy is left untouched,
+    /// preserving the default chat / cloud-fallback semantics exactly.
     fn to_sdk_with_cancellation(
         &self,
         generation_config: Option<GenerationConfig>,
         cancellation_token: Option<&FfiCancellationToken>,
     ) -> RunOptions {
-        let mut policy = AbortPolicy::default()
-            .with_cloud_fallback(self.fallback_to_cloud)
-            .with_max_grace_tokens(self.max_grace_tokens.unwrap_or(0));
-        if self.abort_on_memory_pressure_critical {
-            policy = policy.stop_on(AbortSignal::MemoryPressureCritical);
-        }
-        if self.abort_on_thermal_critical {
-            policy = policy.stop_on(AbortSignal::ThermalCritical);
-        }
-        // Only observe UserCancelled when a token is actually supplied so the
-        // default abort policy for callers that pass no token is unchanged.
-        if cancellation_token.is_some() {
-            policy = policy.stop_on(AbortSignal::UserCancelled);
-        }
+        let facade_gc = generation_config
+            .as_ref()
+            .map(|cfg| facade::GenerationConfig {
+                max_tokens: Some(cfg.max_tokens as u32),
+                temperature: Some(cfg.temperature),
+                top_p: Some(cfg.top_p),
+                min_p: Some(cfg.min_p),
+                top_k: Some(cfg.top_k as u32),
+                repetition_penalty: Some(cfg.repetition_penalty),
+                stop_sequences: cfg.stop_sequences.clone(),
+            });
+        let mut options = self.to_facade(facade_gc).to_sdk(None);
 
-        let mut options = RunOptions::new()
-            .with_abort_policy(policy)
-            .with_resource_provider(Arc::new(FlutterFallbackResourceProvider));
+        // Flutter-specific resource provider; the facade omits this field so it
+        // stays FFI-safe (the trait object isn't portable across generators).
+        options = options.with_resource_provider(Arc::new(FlutterFallbackResourceProvider));
 
-        if let Some(config) = generation_config {
-            options = options.with_generation_config(config);
-        }
-
+        // Observe UserCancelled and attach the token only when one is supplied,
+        // so callers that pass no token keep the default abort semantics.
         if let Some(token) = cancellation_token {
-            options = options.with_cancellation_token(token.0.clone());
+            let policy = options
+                .abort_policy
+                .clone()
+                .stop_on(AbortSignal::UserCancelled);
+            options = options
+                .with_abort_policy(policy)
+                .with_cancellation_token(token.0.clone());
         }
 
-        if let Some(correlation_id) = non_empty(self.correlation_id.as_deref()) {
-            options = options.with_correlation_id(correlation_id.to_string());
-        }
-
+        // Vision live-mode: flips live_mode and rate-limits live telemetry.
         if let Some(frame_session_id) = non_empty(self.frame_session_id.as_deref()) {
             options = options.with_frame_session(frame_session_id.to_string());
         }

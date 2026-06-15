@@ -1,0 +1,113 @@
+experimental = []
+
+[cargo]
+global_args = []
+
+[cargo.command_args]
+
+[package]
+name = "xybrid-bolt"
+
+[targets.apple]
+enabled = true
+output = "dist/apple"
+deployment_target = "16.0"
+include_macos = false
+# Skip the x86_64-apple-ios simulator slice: `ort-sys` (ONNX Runtime
+# bindings transitively pulled in via `xybrid-sdk/platform-ios`) doesn't
+# ship prebuilt binaries for that target. Apple-Silicon Macs run the
+# iOS simulator on the arm64 slice anyway; the x86_64 slice would only
+# matter for Intel-Mac developers, who would need to compile ONNX
+# Runtime from source.
+simulator_architectures = ["arm64"]
+
+[targets.apple.swift]
+# Matches the existing `import Xybrid` line in
+# examples/ios/XybridExample/ContentView.swift so the migration to
+# bolt-generated bindings doesn't require touching the example's imports.
+module_name = "Xybrid"
+tools_version = "5.9"
+error_style = "throwing"
+
+[targets.apple.swift.type_mappings]
+
+[targets.apple.header]
+
+[targets.apple.xcframework]
+
+[targets.apple.spm]
+distribution = "local"
+layout = "ffi-only"
+skip_package_swift = false
+
+[targets.apple.debug_symbols]
+enabled = false
+format = "zip"
+bundle = "unstripped"
+
+[targets.android]
+enabled = true
+output = "dist/android"
+min_sdk = 24
+
+[targets.android.kotlin]
+# Matches the existing `import ai.xybrid.…` lines in
+# examples/android and bindings/kotlin so the migration to
+# bolt-generated bindings doesn't force the consumer to re-import.
+package = "ai.xybrid"
+desktop_loader = "bundled"
+api_style = "top_level"
+error_style = "throwing"
+factory_style = "constructors"
+
+[targets.android.kotlin.type_mappings]
+
+[targets.android.header]
+
+[targets.android.pack]
+
+[targets.android.debug_symbols]
+enabled = false
+format = "zip"
+bundle = "unstripped"
+
+[targets.wasm]
+enabled = true
+triple = "wasm32-unknown-unknown"
+profile = "release"
+output = "dist/wasm"
+
+[targets.wasm.optimize]
+
+[targets.wasm.typescript.type_mappings]
+
+[targets.wasm.npm]
+
+[targets.java.jvm]
+enabled = false
+output = "dist/java"
+strip_symbols = false
+
+[targets.java.jvm.debug_symbols]
+enabled = false
+format = "zip"
+bundle = "unstripped"
+
+[targets.java.android]
+enabled = false
+output = "dist/java/android"
+min_sdk = 24
+
+[targets.dart]
+output = "dist/dart"
+enabled = false
+
+[targets.python]
+output = "dist/python"
+enabled = false
+
+[targets.python.wheel]
+
+[targets.csharp]
+output = "dist/csharp"
+enabled = false

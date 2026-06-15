@@ -5,7 +5,7 @@ on:
     branches: [master]
     paths:
       - 'bindings/flutter/**'
-      - 'crates/xybrid-uniffi/**'
+      - 'crates/xybrid-ffi-facade/**'
       - 'xtask/**'
       - '.github/workflows/build-flutter.yml'
       # Docs-only changes under the paths above (READMEs, examples) never

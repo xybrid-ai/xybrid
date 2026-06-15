@@ -17,10 +17,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 // Xybrid SDK imports
-import ai.xybrid.XybridModelLoader
-import ai.xybrid.XybridException
+import ai.xybrid.XybridModel
+import ai.xybrid.XybridError
 import ai.xybrid.Envelope
 import ai.xybrid.displayMessage
+// XybridResult compatibility extensions — bolt's struct exposes
+// envelope.kind rather than the flat `success`/`text`/`audioBytes`
+// fields uniffi emitted; the extensions in Xybrid.kt restore that shape.
+import ai.xybrid.success
+import ai.xybrid.text
+import ai.xybrid.audioBytes
 
 // State and component imports
 import ai.xybrid.example.audio.AudioRecorder
@@ -97,16 +103,22 @@ fun XybridExampleApp() {
                 coroutineScope.launch {
                     try {
                         val loaded = withContext(Dispatchers.IO) {
-                            val loader = XybridModelLoader.fromRegistry(model.id)
-                            loader.load()
+                            // Bolt collapsed the loader-then-load 2-step into a
+                            // single XybridModel constructor. (The Kotlin
+                            // emitter exposes from_registry as the primary
+                            // secondary constructor; from_directory /
+                            // from_bundle / from_huggingface remain on the
+                            // companion object.)
+                            XybridModel(model.id)
                         }
                         modelState = ModelState.Loaded(loaded)
 
-                        // Pick default voice for TTS models
+                        // Pick default voice for TTS models. Bolt returns the
+                        // full VoiceInfo; extract `.id` for the picker state.
                         if (model.task == ModelTask.TTS) {
-                            selectedVoiceId = loaded.defaultVoiceId()
+                            selectedVoiceId = loaded.defaultVoice()?.id
                         }
-                    } catch (e: XybridException) {
+                    } catch (e: XybridError) {
                         modelState = ModelState.Error(e.displayMessage)
                     } catch (e: Exception) {
                         modelState = ModelState.Error(
@@ -178,7 +190,11 @@ fun XybridExampleApp() {
                                     Envelope.audio(audio, 16000u, 1u)
                                 }
                             }
-                            model.run(envelope, null)
+                            // Bolt's `run` is single-arg (no separate config
+                            // parameter in the current scaffold); the optional
+                            // GenerationConfig is folded into the envelope or a
+                            // future `runWithOptions` overload.
+                            model.run(envelope)
                         }
 
                         if (result.success) {
@@ -194,7 +210,7 @@ fun XybridExampleApp() {
                                 result.text ?: "Inference returned unsuccessful result"
                             )
                         }
-                    } catch (e: XybridException) {
+                    } catch (e: XybridError) {
                         inferenceState = InferenceState.Error(e.displayMessage)
                     } catch (e: Exception) {
                         inferenceState = InferenceState.Error(

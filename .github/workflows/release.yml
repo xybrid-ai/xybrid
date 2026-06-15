@@ -861,7 +861,7 @@ jobs:
           mkdir -p staging/Sources/Xybrid
           cp Package.swift staging/
           cp bindings/apple/Sources/Xybrid/Xybrid.swift staging/Sources/Xybrid/
-          cp bindings/apple/Sources/Xybrid/xybrid_uniffi.swift staging/Sources/Xybrid/
+          cp bindings/apple/Sources/Xybrid/xybrid_bolt.swift staging/Sources/Xybrid/
 
           # Switch to clean branch
           git checkout --orphan swift || git checkout swift

@@ -1,0 +1,35 @@
+[package]
+name = "xybrid-bolt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "BoltFFI bindings (Swift / Kotlin / Java / C# / WASM / C) over the xybrid-ffi-facade — the single source for foreign-language SDKs"
+publish = false
+
+[lib]
+# `lib` keeps the crate usable from regular Rust workflows (`cargo test`,
+# downstream Rust callers). `staticlib` + `cdylib` produce the artifacts
+# that `boltffi pack` consumes when emitting Swift / Kotlin / Java / C# /
+# WASM / C bindings.
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[dependencies]
+xybrid-ffi-facade = { path = "../xybrid-ffi-facade" }
+xybrid-sdk = { path = "../xybrid-sdk", default-features = false }
+# `default-features = false` drops the `uuid` / `url` newtypes BoltFFI
+# wires in by default — we describe identifiers as plain `String` to
+# stay consistent with the facade and the FRB/uniffi crates.
+boltffi = { version = "0.25", default-features = false }
+
+[features]
+default = []
+
+# PLATFORM PRESETS (forwarded from xybrid-sdk). Mirrors the convention
+# every other binding crate uses; lets `cargo build -p xybrid-bolt
+# --features platform-macos` link the right ORT / Candle / llama.cpp
+# backends without per-target Cargo.toml additions.
+platform-android = ["xybrid-sdk/platform-android"]
+platform-ios = ["xybrid-sdk/platform-ios"]
+platform-macos = ["xybrid-sdk/platform-macos"]
+platform-desktop = ["xybrid-sdk/platform-desktop"]

@@ -5,9 +5,10 @@ on:
     branches: [master]
     paths:
       - 'bindings/apple/**'
+      - 'crates/xybrid-bolt/**'
+      - 'crates/xybrid-ffi-facade/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-uniffi/**'
       - 'xtask/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
@@ -62,11 +63,27 @@ jobs:
           cache-all-crates: "true"
           save-if: "true"
 
+      # boltffi CLI provides the `boltffi pack apple` that
+      # `cargo xtask build-xcframework` shells out to. Cache the installed
+      # binary across runs.
+      - name: Cache boltffi CLI
+        id: cache-boltffi
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/boltffi
+          key: boltffi-cli-${{ runner.os }}-0.25
+
+      - name: Install boltffi CLI
+        # `which || install` is idempotent whether or not the cache populated
+        # the binary. `--locked` is required: boltffi_cli 0.25.0 fails to
+        # compile against the newer 0.25.1 of its own lib crates
+        # (boltffi_bindgen added required `KotlinOptions` fields in a
+        # non-additive minor bump). The bundled Cargo.lock pins those libs to
+        # 0.25.0.
+        run: which boltffi || cargo install boltffi_cli --version 0.25.0 --locked
+
       - name: Build XCFramework
         run: cargo xtask build-xcframework --release
-
-      - name: Check iOS vision build without model artifacts
-        run: cargo xtask build-uniffi --target aarch64-apple-ios --platform-preset platform-ios,llm-llamacpp-vision
 
       - name: Verify XCFramework
         run: |
@@ -79,12 +96,16 @@ jobs:
           ls -la "$XCFW_PATH"
           echo ""
           echo "Verifying architectures..."
-          # Check iOS device library
-          file "$XCFW_PATH/ios-arm64/libxybrid_uniffi.a" || true
-          # Check iOS simulator library (arm64)
-          file "$XCFW_PATH/ios-arm64-simulator/libxybrid_uniffi.a" || true
-          # Check macOS library (arm64)
-          file "$XCFW_PATH/macos-arm64/libxybrid_uniffi.a" || true
+          # boltffi names the slice static lib libxybrid-bolt.a and lays
+          # out one dir per slice (ios-arm64, ios-arm64-simulator; macOS is
+          # excluded via boltffi.toml). Glob rather than hard-code so this
+          # survives naming/slice changes.
+          found=$(find "$XCFW_PATH" -name '*.a')
+          if [ -z "$found" ]; then
+            echo "Error: no static libraries found inside the XCFramework"
+            exit 1
+          fi
+          echo "$found" | while read -r lib; do file "$lib"; done
 
       - name: Upload XCFramework artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

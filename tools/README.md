@@ -56,19 +56,6 @@ cargo xtask setup-test-env --registry <custom-registry-url>
 **Options:**
 - `--registry <url>` - Custom registry URL for model downloads (default: api.xybrid.dev)
 
-### `build-uniffi` - Build UniFFI Library
-
-Builds the xybrid-uniffi library for Swift/Kotlin FFI via UniFFI.
-
-```bash
-cargo xtask build-uniffi
-cargo xtask build-uniffi --target aarch64-apple-darwin --release
-```
-
-**Options:**
-- `--target <triple>` - Target triple (e.g., `aarch64-apple-darwin`, `aarch64-linux-android`)
-- `--release` - Build in release mode
-
 ### `build-ffi` - Build C ABI Library
 
 Builds the xybrid-ffi library for Unity/C++ integration.
@@ -87,33 +74,12 @@ cargo xtask build-ffi --target x86_64-unknown-linux-gnu --release
 - Static library: `target/<target>/<profile>/libxybrid_ffi.a`
 - C header: `crates/xybrid-ffi/include/xybrid.h`
 
-### `generate-bindings` - Generate Swift/Kotlin Bindings
-
-Generates platform-specific bindings from xybrid-uniffi using uniffi-bindgen.
-
-```bash
-cargo xtask generate-bindings
-cargo xtask generate-bindings --language swift
-cargo xtask generate-bindings --language kotlin
-cargo xtask generate-bindings --language kotlin --out-dir ./my-bindings
-```
-
-**Options:**
-- `--language <lang>` - Language to generate: `swift`, `kotlin`, or `all` (default: `all`)
-- `--out-dir <path>` - Output directory (default: platform-specific paths in `bindings/`)
-
-**Default output locations:**
-- Swift: `bindings/apple/Sources/Xybrid/`
-- Kotlin: `bindings/kotlin/src/main/kotlin/ai/xybrid/uniffi/xybrid_uniffi/`
-
-**Kotlin post-processing** (automatic when `--out-dir` is not specified):
-- Renames `message` fields to `msg` in exception classes (avoids conflict with `Exception.message`)
-- Removes `@JvmOverloads` annotations (incompatible with UInt parameters)
-- Copies binding to `bindings/kotlin/src/main/kotlin/ai/xybrid/` with rewritten package declaration
-
 ### `build-xcframework` - Build Apple XCFramework (macOS only)
 
-Builds universal XCFramework for iOS and macOS platforms.
+Builds the Apple XCFramework via `boltffi pack apple` — compiles
+`xybrid-bolt` for every Apple slice in `crates/xybrid-bolt/boltffi.toml`,
+generates the Swift wrapper (`bindings/apple/Sources/Xybrid/xybrid_bolt.swift`),
+and packs the slices into an xcframework.
 
 ```bash
 cargo xtask build-xcframework --release
@@ -127,49 +93,45 @@ cargo xtask build-xcframework --debug --version 1.0.0
 
 **Requirements:**
 - macOS host
-- Optional: `ORT_IOS_XCFWK_LOCATION` for iOS targets (if not set, builds macOS-only)
+- `boltffi` CLI (`cargo install boltffi_cli`)
+- iOS ORT is fetched at build time via `xybrid-core/ort-download` (the
+  `platform-ios` feature) — no manual ORT vendoring needed.
 
-**Architectures:**
-- iOS arm64 (device)
-- iOS Simulator arm64 + x86_64 (universal)
-- macOS arm64 + x86_64 (universal)
+**Slices** (driven by `boltffi.toml`): iOS arm64 (device) + iOS
+Simulator arm64. macOS is excluded by config.
 
-**Output:** `bindings/apple/XCFrameworks/XybridFFI.xcframework`
+**Output:**
+- `bindings/apple/XCFrameworks/XybridFFI.xcframework` (unversioned)
+- `bindings/apple/XCFrameworks/XybridFFI-<version>.xcframework` (versioned)
+- `bindings/apple/Sources/Xybrid/xybrid_bolt.swift` (generated Swift wrapper)
 
 ### `build-android` - Build Android .so Files
 
-Builds native .so files for Android ABIs. With `--bindgen`, also generates Kotlin bindings first (one-command workflow).
+Delegates to `tools/scripts/build-android-bolt.sh`, which runs
+`boltffi pack android --release --features platform-android`, bundles the
+ORT runtime + `libc++_shared.so`, and patches DT_NEEDED. Builds every ABI
+configured in `bindings/kotlin/build.gradle.kts` (the `--abi` filter is
+accepted for interface compatibility but the script always builds the
+full set).
 
 ```bash
-# Cross-compile only (bindings already generated)
 cargo xtask build-android --release
-
-# Full workflow: generate Kotlin bindings + cross-compile (recommended)
-cargo xtask build-android --release --bindgen
-
-# Specific ABIs
-cargo xtask build-android --abi arm64-v8a --abi x86_64
-
 cargo xtask build-android --debug --version 1.0.0
 ```
 
 **Options:**
 - `--release` - Build in release mode (default: true)
-- `--debug` - Build in debug mode (overrides --release)
-- `--abi <abi>` - Build specific ABI(s): `armeabi-v7a`, `arm64-v8a`, `x86_64` (default: all)
+- `--debug` - Build in debug mode (the script always builds release; a warning is printed)
+- `--abi <abi>` - Accepted but informational (the script builds all ABIs)
 - `--version <ver>` - Override version
-- `--bindgen` - Generate Kotlin bindings before cross-compiling. This:
-  1. Builds the host dylib (`xybrid-uniffi` with `platform-macos`)
-  2. Runs `uniffi-bindgen` to generate `.kt` files
-  3. Applies Kotlin compatibility fixes (renames conflicting `message` fields, removes `@JvmOverloads`)
-  4. Copies bindings to the package location with correct package declaration
 
 **Requirements:**
-- cargo-ndk (`cargo install cargo-ndk`) or `ANDROID_NDK_HOME` environment variable
+- Android NDK r27 (`ANDROID_NDK_HOME`, or installed under `$ANDROID_HOME/ndk/`)
+- `patchelf` (`brew install patchelf` / `apt-get install patchelf`)
 
 **Output:**
-- `bindings/kotlin/libs/<abi>/libxybrid_uniffi.so` (native libraries)
-- With `--bindgen`: also generates `bindings/kotlin/src/main/kotlin/ai/xybrid/` (Kotlin sources)
+- `bindings/kotlin/libs/<abi>/libxybrid-bolt.so` (native library)
+- `bindings/kotlin/libs/<abi>/{libonnxruntime.so,libc++_shared.so}` (bundled runtime)
 
 ### `build-flutter` - Build Flutter Native Libraries
 

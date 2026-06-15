@@ -4,7 +4,7 @@ import React
 // `XybridModuleImpl` does the actual work of every TurboModule call. It
 // holds the `id -> XybridModel` map (model handles are opaque strings on
 // the JS side) and translates between RN's NSDictionary payloads and the
-// Swift-native UniFFI types in the bundled `Xybrid.swift` wrapper.
+// Swift-native BoltFFI types in the bundled `Xybrid.swift` wrapper.
 //
 // All long-running operations (load, run) hop onto a detached Task so the
 // React Native module thread isn't blocked. Errors map to NSError with the
@@ -22,11 +22,9 @@ public final class XybridModuleImpl: NSObject {
                                            reject: @escaping RCTPromiseRejectBlock) {
     // The Swift Xybrid.initialize() registers the binding identifier and
     // wires up UIDevice battery observers. We override the binding right
-    // after to "react-native" — Xybrid.initialize() registers "swift" by
+    // before to "react-native" — Xybrid.initialize() registers "swift" by
     // default, but the registry's first-set-wins OnceLock means we have to
-    // call set_binding *first* if we want a different value. So: do that
-    // here directly and skip the convenience initializer's binding step
-    // by relying on its idempotency guard.
+    // call set_binding *first* if we want a different value.
     setBinding(binding: "react-native")
     Xybrid.initialize()
 
@@ -34,7 +32,10 @@ public final class XybridModuleImpl: NSObject {
       initSdkCacheDir(cacheDir: dir)
     } else {
       // Default cache root: <Library>/Caches/xybrid/models
-      let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+      guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+        reject("xybrid_init", "Failed to resolve caches directory", nil)
+        return
+      }
       let xybridCache = caches.appendingPathComponent("xybrid/models", isDirectory: true)
       try? FileManager.default.createDirectory(at: xybridCache, withIntermediateDirectories: true)
       initSdkCacheDir(cacheDir: xybridCache.path)
@@ -43,39 +44,34 @@ public final class XybridModuleImpl: NSObject {
   }
 
   // -- Loaders --
+  //
+  // Bolt collapsed `XybridModelLoader.fromX(...).load()` into throwing
+  // `XybridModel` convenience initializers; the primary registry path is
+  // `init(fromRegistry:)`. Each initializer loads eagerly (synchronously),
+  // so we run it on a detached Task to keep the RN thread free.
 
   @objc public func loadFromRegistry(_ modelId: String,
                                      resolve: @escaping RCTPromiseResolveBlock,
                                      reject: @escaping RCTPromiseRejectBlock) {
-    let loader = XybridModelLoader.fromRegistry(modelId: modelId)
-    runAsyncLoad(loader: loader, resolve: resolve, reject: reject)
+    runAsyncLoad(resolve: resolve, reject: reject) { try XybridModel(fromRegistry: modelId) }
   }
 
   @objc public func loadFromBundle(_ path: String,
                                    resolve: @escaping RCTPromiseResolveBlock,
                                    reject: @escaping RCTPromiseRejectBlock) {
-    let loader = XybridModelLoader.fromBundle(path: path)
-    runAsyncLoad(loader: loader, resolve: resolve, reject: reject)
+    runAsyncLoad(resolve: resolve, reject: reject) { try XybridModel(fromBundle: path) }
   }
 
   @objc public func loadFromDirectory(_ path: String,
                                       resolve: @escaping RCTPromiseResolveBlock,
                                       reject: @escaping RCTPromiseRejectBlock) {
-    do {
-      let loader = try XybridModelLoader.fromDirectory(path: path)
-      runAsyncLoad(loader: loader, resolve: resolve, reject: reject)
-    } catch let error as XybridError {
-      rejectXybrid(error, reject)
-    } catch {
-      reject("xybrid", error.localizedDescription, error)
-    }
+    runAsyncLoad(resolve: resolve, reject: reject) { try XybridModel(fromDirectory: path) }
   }
 
   @objc public func loadFromHuggingface(_ repo: String,
                                         resolve: @escaping RCTPromiseResolveBlock,
                                         reject: @escaping RCTPromiseRejectBlock) {
-    let loader = XybridModelLoader.fromHuggingface(repo: repo)
-    runAsyncLoad(loader: loader, resolve: resolve, reject: reject)
+    runAsyncLoad(resolve: resolve, reject: reject) { try XybridModel(fromHuggingface: repo) }
   }
 
   @objc public func releaseModel(_ handle: String,
@@ -99,7 +95,10 @@ public final class XybridModuleImpl: NSObject {
       return
     }
     let envelopeOrError = decodeEnvelope(envelope)
-    let cfg = config.flatMap(decodeGenerationConfig)
+    // NOTE: bolt's `XybridModel.run(envelope:)` does not yet accept a
+    // per-call generation config — `config` is ignored until the facade/bolt
+    // surface threads `GenerationConfig` through `run`. Tracked as a
+    // bolt-binding follow-up.
 
     Task.detached {
       switch envelopeOrError {
@@ -107,7 +106,7 @@ public final class XybridModuleImpl: NSObject {
         reject("xybrid_envelope", err, nil)
       case .success(let env):
         do {
-          let result = try await model.run(envelope: env, config: cfg)
+          let result = try model.run(envelope: env)
           resolve(self.encodeResult(result))
         } catch let error as XybridError {
           self.rejectXybrid(error, reject)
@@ -127,7 +126,7 @@ public final class XybridModuleImpl: NSObject {
       reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
       return
     }
-    let voices = model.voices()?.map { encodeVoice($0) }
+    let voices = model.hasVoices() ? model.voices().map { encodeVoice($0) } : nil
     resolve(voices as Any)
   }
 
@@ -138,7 +137,7 @@ public final class XybridModuleImpl: NSObject {
       reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
       return
     }
-    resolve(model.defaultVoiceId() as Any)
+    resolve(model.defaultVoice()?.id as Any)
   }
 
   @objc public func hasVoices(_ handle: String,
@@ -157,7 +156,7 @@ public final class XybridModuleImpl: NSObject {
                                     resolve: @escaping RCTPromiseResolveBlock,
                                     reject: @escaping RCTPromiseRejectBlock) {
     let bounded = max(0, min(100, Int(percent.rounded())))
-    // Free function from xybrid_uniffi.swift; overload resolution distinguishes
+    // Free function from xybrid_bolt.swift; overload resolution distinguishes
     // it from the @objc member above by the `percent:` UInt8 label.
     setBatteryLevel(percent: UInt8(bounded))
     resolve(nil)
@@ -208,12 +207,12 @@ public final class XybridModuleImpl: NSObject {
     return id
   }
 
-  private func runAsyncLoad(loader: XybridModelLoader,
-                            resolve: @escaping RCTPromiseResolveBlock,
-                            reject: @escaping RCTPromiseRejectBlock) {
+  private func runAsyncLoad(resolve: @escaping RCTPromiseResolveBlock,
+                            reject: @escaping RCTPromiseRejectBlock,
+                            _ factory: @escaping () throws -> XybridModel) {
     Task.detached {
       do {
-        let model = try await loader.load()
+        let model = try factory()
         let id = self.store(model)
         resolve(id)
       } catch let error as XybridError {
@@ -224,6 +223,10 @@ public final class XybridModuleImpl: NSObject {
     }
   }
 
+  // Build a bolt [XybridEnvelope] via the `XybridEnvelope` factories in
+  // Xybrid.swift, which fold the well-known TTS / ASR options (sample_rate,
+  // channels, voice_id, speed) into envelope metadata entries — the bolt
+  // `XybridEnvelopeKind` variants themselves only carry the raw payload.
   private func decodeEnvelope(_ dict: NSDictionary) -> Result<XybridEnvelope, String> {
     guard let kind = dict["kind"] as? String else {
       return .failure("Envelope missing 'kind' field")
@@ -236,7 +239,7 @@ public final class XybridModuleImpl: NSObject {
       }
       let sampleRate = (dict["sampleRate"] as? NSNumber)?.uint32Value ?? 16000
       let channels = (dict["channels"] as? NSNumber)?.uint32Value ?? 1
-      return .success(.audio(bytes: bytes, sampleRate: sampleRate, channels: channels))
+      return .success(.audio(pcmData: bytes, sampleRate: sampleRate, channels: channels))
     case "text":
       guard let text = dict["text"] as? String else {
         return .failure("text envelope: 'text' missing")
@@ -252,18 +255,6 @@ public final class XybridModuleImpl: NSObject {
     default:
       return .failure("Unknown envelope kind: \(kind)")
     }
-  }
-
-  private func decodeGenerationConfig(_ dict: NSDictionary) -> XybridGenerationConfig {
-    return XybridGenerationConfig(
-      maxTokens: (dict["maxTokens"] as? NSNumber)?.uint32Value,
-      temperature: (dict["temperature"] as? NSNumber)?.floatValue,
-      topP: (dict["topP"] as? NSNumber)?.floatValue,
-      minP: (dict["minP"] as? NSNumber)?.floatValue,
-      topK: (dict["topK"] as? NSNumber)?.uint32Value,
-      repetitionPenalty: (dict["repetitionPenalty"] as? NSNumber)?.floatValue,
-      stopSequences: dict["stopSequences"] as? [String]
-    )
   }
 
   private func encodeResult(_ r: XybridResult) -> [String: Any] {
@@ -290,24 +281,25 @@ public final class XybridModuleImpl: NSObject {
   private func rejectXybrid(_ error: XybridError, _ reject: RCTPromiseRejectBlock) {
     let code: String
     switch error {
-    case .ModelNotFound: code = "xybrid_model_not_found"
-    case .DirectoryNotFound: code = "xybrid_directory_not_found"
-    case .MetadataNotFound: code = "xybrid_metadata_not_found"
-    case .MetadataInvalid: code = "xybrid_metadata_invalid"
-    case .LoadError: code = "xybrid_load_error"
-    case .InferenceError: code = "xybrid_inference_error"
-    case .StreamingNotSupported: code = "xybrid_streaming_unsupported"
-    case .NotLoaded: code = "xybrid_not_loaded"
-    case .ConfigError: code = "xybrid_config_error"
-    case .NetworkError: code = "xybrid_network_error"
-    case .IoError: code = "xybrid_io_error"
-    case .CacheError: code = "xybrid_cache_error"
-    case .PipelineError: code = "xybrid_pipeline_error"
-    case .CircuitOpen: code = "xybrid_circuit_open"
-    case .RateLimited: code = "xybrid_rate_limited"
-    case .Timeout: code = "xybrid_timeout"
+    case .modelNotFound: code = "xybrid_model_not_found"
+    case .directoryNotFound: code = "xybrid_directory_not_found"
+    case .metadataNotFound: code = "xybrid_metadata_not_found"
+    case .metadataInvalid: code = "xybrid_metadata_invalid"
+    case .loadError: code = "xybrid_load_error"
+    case .inferenceError: code = "xybrid_inference_error"
+    case .abortedForCloudFallback: code = "xybrid_aborted_cloud_fallback"
+    case .streamingNotSupported: code = "xybrid_streaming_unsupported"
+    case .notLoaded: code = "xybrid_not_loaded"
+    case .configError: code = "xybrid_config_error"
+    case .networkError: code = "xybrid_network_error"
+    case .offline: code = "xybrid_offline"
+    case .ioError: code = "xybrid_io_error"
+    case .cacheError: code = "xybrid_cache_error"
+    case .pipelineError: code = "xybrid_pipeline_error"
+    case .circuitOpen: code = "xybrid_circuit_open"
+    case .rateLimited: code = "xybrid_rate_limited"
+    case .timeout: code = "xybrid_timeout"
     }
     reject(code, error.errorDescription ?? "Xybrid error", error)
   }
 }
-

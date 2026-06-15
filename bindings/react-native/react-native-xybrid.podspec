@@ -13,20 +13,21 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => "13.0" }
   s.source       = { :git => "https://github.com/xybrid-ai/xybrid.git", :tag => "v#{s.version}" }
 
-  # Swift wrapper sources (`Xybrid.swift`, `xybrid_uniffi.swift`) ride along
+  # Swift wrapper sources (`Xybrid.swift`, `xybrid_bolt.swift`) ride along
   # with this pod rather than being pulled from SPM. This keeps consumer
   # setup to a single `npm install` + `pod install` and avoids resolving two
   # parallel package managers for the same Rust core. The files are copied
-  # in by `cargo xtask build-react-native`; they live under
+  # in by `cargo xtask stage-react-native`; they live under
   # `ios/XybridSwift/` so the `.swift` files are discovered alongside the
   # TurboModule glue.
   s.source_files = "ios/**/*.{h,m,mm,swift}"
   s.requires_arc = true
   s.swift_version = "5.0"
 
-  # Pre-built static lib bundled as an XCFramework. Copied in from
-  # `bindings/apple/XCFrameworks/XybridFFI.xcframework` by the xtask
-  # — see android/build.gradle for the symmetric Android side.
+  # Pre-built bolt static lib bundled as an XCFramework. Copied in from
+  # `bindings/apple/XCFrameworks/XybridFFI.xcframework` by
+  # `cargo xtask stage-react-native`. (Android pulls its natives from the
+  # Maven AAR instead — see android/build.gradle.)
   s.vendored_frameworks = "ios/Frameworks/XybridFFI.xcframework"
 
   # System frameworks the Rust core links against (mirrors Package.swift).

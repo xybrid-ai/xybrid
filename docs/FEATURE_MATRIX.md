@@ -296,10 +296,8 @@ The `xtask` crate provides build automation commands. Run `cargo xtask --help` f
 | Command | Purpose | Platform | Example |
 |---------|---------|----------|---------|
 | `setup-test-env` | Download models for integration tests | Any | `cargo xtask setup-test-env` |
-| `build-uniffi` | Build xybrid-uniffi library | Any | `cargo xtask build-uniffi --release` |
 | `build-ffi` | Build xybrid-ffi library (C ABI) | Any | `cargo xtask build-ffi --release` |
-| `generate-bindings` | Generate Swift/Kotlin bindings | Any | `cargo xtask generate-bindings --language swift` |
-| `build-xcframework` | Build Apple XCFramework | macOS only | `cargo xtask build-xcframework --release` |
+| `build-xcframework` | Build Apple XCFramework via boltffi (Swift bindings + xcframework) | macOS only | `cargo xtask build-xcframework --release` |
 | `build-android` | Build Android .so files | Any | `cargo xtask build-android --release` |
 | `build-flutter` | Build Flutter native libraries | Varies | `cargo xtask build-flutter --platform macos` |
 | `setup-targets` | Install Rust cross-compilation targets | Any | `cargo xtask setup-targets` |
