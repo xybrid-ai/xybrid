@@ -1,0 +1,55 @@
+crates/xybrid-cli/src/commands/run.rs
+  s_c7f07cda4712df::t_2ffc017527e8dc 804-822,826-827,832-871
+  s_d67ab5389ed620::t_1f56f3938503b3 823-825,828-831
+crates/xybrid-sdk/src/model.rs
+  s_d67ab5389ed620::t_1e2513eb20dc83 3810-3818
+  s_d67ab5389ed620::t_29b471d7d17e64 3886
+  s_d67ab5389ed620::t_5e0b13577dc6ed 1579,1859,4280,4884
+  s_d67ab5389ed620::t_78228e98e8060b 1509
+  s_d67ab5389ed620::t_c918245a4a9612 2808-2809,3016-3017
+  s_d67ab5389ed620::t_e65a94f32b14e5 3599,3604
+  s_d67ab5389ed620::t_bcf849ef117ca1 3829
+  s_d67ab5389ed620::t_9d70e6758f280b 3836
+  s_d67ab5389ed620::t_fbe7a8264aa30b 3858
+  s_d67ab5389ed620::t_00bde1b89d8f39 2068-2074
+  s_d67ab5389ed620::t_088df3fdef98fd 567-582,584-588
+  s_d67ab5389ed620::t_e51cb56a21c106 995
+  s_d67ab5389ed620::t_07a18c6e23144a 1020
+  s_d67ab5389ed620::t_a75b50eea0782f 2446-2447,2652-2653
+  s_d67ab5389ed620::t_d7d56843d7355a 3433
+  s_d67ab5389ed620::t_07f916fcbb8188 3755
+  s_d67ab5389ed620::t_09c219585125b0 3888,3897,3902
+  s_d67ab5389ed620::t_e504eb1da6d5b8 2002,2004-2007
+  s_d67ab5389ed620::t_0c2b875cba5fc7 894-916,919-920,923-924,926
+crates/xybrid-cli/src/main.rs
+  s_c7f07cda4712df::t_525b3a056bfa07 284-286
+  s_c7f07cda4712df::t_2726d921ad9080 215-220
+  s_c7f07cda4712df::t_f35a30bd4d5720 458-466
+  s_c7f07cda4712df::t_a785913d3e60f8 525,545-558
+crates/xybrid-cli/src/commands/repl.rs
+  s_d67ab5389ed620::t_f9a3ecb0199b40 90-92,96-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "057cdd67573acd58c6c88dc8be1ea2f2ea0ea817",
+  "prompts": {},
+  "sessions": {
+    "s_c7f07cda4712df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b35dc2-9f8b-4a71-81e1-4f7709a67d08",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_d67ab5389ed620": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6da553e1-7594-40a7-afa4-f47c611638a5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
