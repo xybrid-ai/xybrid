@@ -559,19 +559,28 @@ where
             on_seam(seam);
 
             // FR-6: reuse the original prompt; no partial-token reuse.
-            let cloud_envelope = envelope.clone();
+            let mut cloud_envelope = envelope.clone();
+            // Default the cloud-leg routing to the registry model when the caller
+            // didn't pick an explicit hosted override: the platform gateway routes
+            // an id it doesn't recognise as a hosted provider's model through to
+            // xycloud (the CPU cluster that runs the same edge LLM), so the
+            // fallback serves the *same* model rather than erroring or silently
+            // defaulting to `gpt-4o-mini`. `provider` is a benign validation label
+            // — the gateway dispatches on `model` alone.
+            cloud_envelope
+                .metadata
+                .entry("model".to_string())
+                .or_insert_with(|| model_id.to_string());
+            cloud_envelope
+                .metadata
+                .entry("provider".to_string())
+                .or_insert_with(|| "openai".to_string());
             let cloud_provider = cloud_envelope.metadata.get("provider").cloned();
-            // The cloud leg almost always runs a different model than the
-            // local leg (e.g. local `qwen2.5-0.5b-instruct` falling back to
-            // cloud `deepseek-chat`). The dashboard reads `model_id` off
-            // the published event, so passing the local `model_id` through
-            // to the cloud event makes the trace lie about which model
-            // actually produced the cloud tokens. Pull the cloud model from
-            // the envelope's `model` metadata (the same field the gateway
-            // dispatches on) and fall back to the local id only when the
-            // caller didn't set one — in that case the dispatch would have
-            // failed at the gateway anyway, so the local id is a fine
-            // last-resort label.
+            // The cloud leg runs a different model than the local leg only when the
+            // caller set an explicit override (e.g. local `qwen2.5-0.5b-instruct` →
+            // cloud `deepseek-chat`); otherwise it is the registry id defaulted
+            // above, routed to xycloud. Read it back off the envelope so the
+            // published event names the model that actually produced the tokens.
             let cloud_model_id = cloud_envelope
                 .metadata
                 .get("model")
@@ -1005,63 +1014,41 @@ pub struct ModelLoader {
     /// Per-load speculative-cloud override. `None` inherits the process-global
     /// default set via [`crate::set_speculative_cloud`].
     speculative_cloud: Option<bool>,
-    /// Cloud model identity to serve from while the local weights download.
-    /// `None` uses [`SpeculativeCloud::default`] (`openai`/`gpt-4o-mini`).
-    speculative_cloud_model: Option<SpeculativeCloud>,
 }
 
-/// Cloud model identity used to serve inference *while a local model is still
-/// downloading* (speculative cloud fallback).
-///
-/// The Xybrid gateway dispatches OpenAI-style `provider` + `model` (it cannot
-/// serve an arbitrary registry id), so a speculating load answers with this
-/// configured cloud model until the local weights are extracted and ready —
-/// at which point subsequent runs transparently switch to local. Mirrors the
-/// envelope metadata the reactive fallback path (`dispatch_after_local`) and
-/// the Flutter binding's `apply_cloud_fallback_metadata` already use.
-#[derive(Debug, Clone)]
-pub(crate) struct SpeculativeCloud {
-    provider: String,
-    model: String,
-}
-
-impl Default for SpeculativeCloud {
-    fn default() -> Self {
-        Self {
-            provider: "openai".to_string(),
-            model: "gpt-4o-mini".to_string(),
-        }
+/// Build the cloud-bound envelope for serving a not-yet-local model from the
+/// gateway. Sets `model` to the registry id so the gateway routes it to xycloud
+/// (the CPU cluster that runs the edge model) — an id it doesn't recognise as a
+/// hosted provider's model falls through there. `provider` is a benign
+/// validation/trace label, never sent on the wire (the gateway routes on
+/// `model` alone). `backend`/`max_tokens`/`temperature` defer to caller values.
+fn build_speculative_cloud_envelope(
+    model_id: &str,
+    envelope: &Envelope,
+    config: Option<&GenerationConfig>,
+) -> Envelope {
+    let mut cloud = envelope.clone();
+    cloud
+        .metadata
+        .insert("provider".to_string(), "openai".to_string());
+    cloud
+        .metadata
+        .insert("model".to_string(), model_id.to_string());
+    cloud
+        .metadata
+        .entry("backend".to_string())
+        .or_insert_with(|| "gateway".to_string());
+    if let Some(cfg) = config {
+        cloud
+            .metadata
+            .entry("max_tokens".to_string())
+            .or_insert_with(|| cfg.max_tokens.to_string());
+        cloud
+            .metadata
+            .entry("temperature".to_string())
+            .or_insert_with(|| cfg.temperature.to_string());
     }
-}
-
-impl SpeculativeCloud {
-    /// Build the cloud-bound envelope by overlaying the cloud routing metadata
-    /// the gateway dispatches on. `provider`/`model` are forced to this config;
-    /// `backend`/`max_tokens`/`temperature` defer to caller-supplied values.
-    fn build_envelope(&self, envelope: &Envelope, config: Option<&GenerationConfig>) -> Envelope {
-        let mut cloud = envelope.clone();
-        cloud
-            .metadata
-            .insert("provider".to_string(), self.provider.clone());
-        cloud
-            .metadata
-            .insert("model".to_string(), self.model.clone());
-        cloud
-            .metadata
-            .entry("backend".to_string())
-            .or_insert_with(|| "gateway".to_string());
-        if let Some(cfg) = config {
-            cloud
-                .metadata
-                .entry("max_tokens".to_string())
-                .or_insert_with(|| cfg.max_tokens.to_string());
-            cloud
-                .metadata
-                .entry("temperature".to_string())
-                .or_insert_with(|| cfg.temperature.to_string());
-        }
-        cloud
-    }
+    cloud
 }
 
 /// Privacy gate for the speculative cloud leg: run the orchestrator policy over
@@ -1125,13 +1112,12 @@ fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: b
 /// Serve a batch inference from the cloud gateway because the local model is
 /// not ready yet. Shared by `run` and `run_async`.
 fn cloud_serve_batch(
-    spec: &SpeculativeCloud,
     model_id: &str,
     envelope: &Envelope,
     config: Option<&GenerationConfig>,
 ) -> SdkResult<InferenceResult> {
     let start = Instant::now();
-    let cloud_envelope = spec.build_envelope(envelope, config);
+    let cloud_envelope = build_speculative_cloud_envelope(model_id, envelope, config);
     speculative_cloud_policy_gate(&cloud_envelope)?;
     let output = CloudRuntimeAdapter::new()
         .execute(&cloud_envelope)
@@ -1144,7 +1130,6 @@ fn cloud_serve_batch(
 /// Serve a streaming inference from the cloud gateway because the local model
 /// is not ready yet. Shared by the streaming entry points.
 fn cloud_serve_streaming<F>(
-    spec: &SpeculativeCloud,
     model_id: &str,
     envelope: &Envelope,
     config: Option<&GenerationConfig>,
@@ -1157,7 +1142,7 @@ where
         + Send,
 {
     let start = Instant::now();
-    let cloud_envelope = spec.build_envelope(envelope, config);
+    let cloud_envelope = build_speculative_cloud_envelope(model_id, envelope, config);
     speculative_cloud_policy_gate(&cloud_envelope)?;
     let callback: xybrid_core::runtime_adapter::types::StreamingCallback<'_> = Box::new(on_token);
     let output = CloudRuntimeAdapter::new()
@@ -1200,7 +1185,6 @@ impl ModelLoader {
             model_id: Some(id.to_string()),
             version: None, // Version is resolved by registry API
             speculative_cloud: None,
-            speculative_cloud_model: None,
         }
     }
 
@@ -1221,7 +1205,6 @@ impl ModelLoader {
             model_id: Some(id.to_string()),
             version: None,
             speculative_cloud: None,
-            speculative_cloud_model: None,
         }
     }
 
@@ -1237,7 +1220,6 @@ impl ModelLoader {
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
             speculative_cloud: None,
-            speculative_cloud_model: None,
         }
     }
 
@@ -1261,7 +1243,6 @@ impl ModelLoader {
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
             speculative_cloud: None,
-            speculative_cloud_model: None,
         }
     }
 
@@ -1279,7 +1260,6 @@ impl ModelLoader {
             model_id: None,
             version: None,
             speculative_cloud: None,
-            speculative_cloud_model: None,
         })
     }
 
@@ -1314,7 +1294,6 @@ impl ModelLoader {
             model_id: None,
             version: None,
             speculative_cloud: None,
-            speculative_cloud_model: None,
         })
     }
 
@@ -1346,7 +1325,6 @@ impl ModelLoader {
             model_id: Some(repo.to_string()),
             version: None,
             speculative_cloud: None,
-            speculative_cloud_model: None,
         }
     }
 
@@ -1367,7 +1345,6 @@ impl ModelLoader {
             model_id: Some(repo.to_string()),
             version: Some(revision.to_string()),
             speculative_cloud: None,
-            speculative_cloud_model: None,
         }
     }
 
@@ -1393,7 +1370,6 @@ impl ModelLoader {
             model_id: Some(repo),
             version: None,
             speculative_cloud: None,
-            speculative_cloud_model: None,
         }
     }
 
@@ -1430,33 +1406,6 @@ impl ModelLoader {
     /// ```
     pub fn with_speculative_cloud(mut self, enabled: bool) -> Self {
         self.speculative_cloud = Some(enabled);
-        self
-    }
-
-    /// Choose the cloud model that serves inference while the local weights
-    /// download, for this load only.
-    ///
-    /// The Xybrid gateway dispatches OpenAI-style `provider` + `model`, so this
-    /// is the model that answers speculatively (e.g. `"openai"` / `"gpt-4o-mini"`)
-    /// until the local model is ready. Defaults to `openai`/`gpt-4o-mini` when
-    /// not set. Only takes effect when [`Self::will_speculate`] holds.
-    ///
-    /// # Examples
-    /// ```
-    /// use xybrid_sdk::ModelLoader;
-    /// let loader = ModelLoader::from_registry("qwen2.5-0.5b-instruct")
-    ///     .with_speculative_cloud(true)
-    ///     .with_speculative_cloud_model("anthropic", "claude-haiku-4-5");
-    /// ```
-    pub fn with_speculative_cloud_model(
-        mut self,
-        provider: impl Into<String>,
-        model: impl Into<String>,
-    ) -> Self {
-        self.speculative_cloud_model = Some(SpeculativeCloud {
-            provider: provider.into(),
-            model: model.into(),
-        });
         self
     }
 
@@ -1625,8 +1574,6 @@ impl ModelLoader {
     /// run routes to cloud via [`XybridModel::speculative`] until the download
     /// thread installs the extracted local handle. Never blocks the caller.
     fn load_speculative(&self, id: &str, platform: Option<&str>) -> XybridModel {
-        let spec = self.speculative_cloud_model.clone().unwrap_or_default();
-
         // The future extraction directory for the placeholder executor. The
         // executor is lazy (no weights touched until `execute`), so pointing it
         // at a not-yet-populated path is fine — it is never executed while the
@@ -1686,7 +1633,7 @@ impl ModelLoader {
             output_type: OutputType::Text,
             supports_streaming: true,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: Some(Arc::new(spec)),
+            speculative: true,
         }
     }
 
@@ -1756,7 +1703,7 @@ impl ModelLoader {
             output_type,
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: None,
+            speculative: false,
         })
     }
 
@@ -2018,7 +1965,7 @@ impl ModelLoader {
             output_type,
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: None,
+            speculative: false,
         })
     }
 
@@ -2179,12 +2126,12 @@ pub struct XybridModel {
     /// must see the previous concurrent run's token even though it ran on a
     /// different clone.
     current_run: Arc<Mutex<Option<CancellationToken>>>,
-    /// Speculative cloud backing. `Some` while this model was loaded under
+    /// Speculative cloud backing. `true` while this model was loaded under
     /// speculative cloud fallback: until the background download installs a
-    /// `loaded` local handle, every run is routed to the gateway via this
-    /// config (see [`Self::cloud_serve`]). `None` for ordinary local models.
-    /// `Arc`-shared so clones observe the same routing config.
-    speculative: Option<Arc<SpeculativeCloud>>,
+    /// `loaded` local handle, every run is routed to the gateway (which serves
+    /// the registry model via xycloud — see [`Self::cloud_serve`]). `false` for
+    /// ordinary local models.
+    speculative: bool,
 }
 
 struct WarmupEventFields {
@@ -2259,16 +2206,13 @@ impl XybridModel {
 
     /// Whether this run should be served speculatively from the cloud.
     ///
-    /// Returns the cloud routing config when this model was loaded under
-    /// speculative cloud fallback *and* the local handle isn't ready yet. Once
-    /// the background download swaps in a `loaded` handle this returns `None`
-    /// and runs go local. Checked without holding the handle write lock so the
-    /// cloud round-trip never blocks a concurrent local promotion.
-    fn cloud_serve(&self) -> Option<Arc<SpeculativeCloud>> {
-        match &self.speculative {
-            Some(spec) if !self.is_loaded() => Some(Arc::clone(spec)),
-            _ => None,
-        }
+    /// `true` when this model was loaded under speculative cloud fallback *and*
+    /// the local handle isn't ready yet. Once the background download swaps in a
+    /// `loaded` handle this returns `false` and runs go local. Checked without
+    /// holding the handle write lock so the cloud round-trip never blocks a
+    /// concurrent local promotion.
+    fn cloud_serve(&self) -> bool {
+        self.speculative && !self.is_loaded()
     }
 
     /// Check if this model supports streaming.
@@ -2656,8 +2600,8 @@ impl XybridModel {
         crate::telemetry::maybe_emit_dev_nudge();
         // Speculative cloud: serve from the gateway until the local handle is
         // ready (see `cloud_serve`).
-        if let Some(spec) = self.cloud_serve() {
-            return cloud_serve_batch(&spec, &self.model_id, envelope, config);
+        if self.cloud_serve() {
+            return cloud_serve_batch(&self.model_id, envelope, config);
         }
         let start = Instant::now();
         // Begin a resource-telemetry scope for this run. When
@@ -2862,8 +2806,8 @@ impl XybridModel {
         // ready. The gateway leg is stateless — `context` is not replayed (the
         // reactive fallback behaves the same) — full history resumes once the
         // local model takes over.
-        if let Some(spec) = self.cloud_serve() {
-            return cloud_serve_batch(&spec, &self.model_id, envelope, config);
+        if self.cloud_serve() {
+            return cloud_serve_batch(&self.model_id, envelope, config);
         }
         let start = Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
@@ -3017,8 +2961,8 @@ impl XybridModel {
         // Speculative cloud: stream from the gateway until the local handle is
         // ready. The gateway leg is stateless (`context` not replayed, matching
         // the reactive fallback); full history resumes once local takes over.
-        if let Some(spec) = self.cloud_serve() {
-            return cloud_serve_streaming(&spec, &self.model_id, envelope, config, &mut on_token);
+        if self.cloud_serve() {
+            return cloud_serve_streaming(&self.model_id, envelope, config, &mut on_token);
         }
 
         let start = Instant::now();
@@ -3224,8 +3168,8 @@ impl XybridModel {
 
         // Speculative cloud: stream from the gateway until the local handle is
         // ready (see `cloud_serve`).
-        if let Some(spec) = self.cloud_serve() {
-            return cloud_serve_streaming(&spec, &self.model_id, envelope, config, &mut on_token);
+        if self.cloud_serve() {
+            return cloud_serve_streaming(&self.model_id, envelope, config, &mut on_token);
         }
 
         let start = Instant::now();
@@ -3649,10 +3593,9 @@ impl XybridModel {
 
                 // Speculative cloud: stream from the gateway until the local
                 // handle is ready, forwarding each token as a StreamEvent.
-                if let Some(spec) = speculative {
+                if speculative {
                     let tx_token = tx.clone();
                     return cloud_serve_streaming(
-                        &spec,
                         &model_id,
                         &envelope,
                         config.as_ref(),
@@ -3806,12 +3749,12 @@ impl XybridModel {
         crate::telemetry::maybe_emit_dev_nudge();
         // Speculative cloud: serve from the gateway (off the runtime via
         // spawn_blocking, like the local path) until the local handle is ready.
-        if let Some(spec) = self.cloud_serve() {
+        if self.cloud_serve() {
             let model_id = self.model_id.clone();
             let envelope = envelope.clone();
             let config = config.cloned();
             return tokio::task::spawn_blocking(move || {
-                cloud_serve_batch(&spec, &model_id, &envelope, config.as_ref())
+                cloud_serve_batch(&model_id, &envelope, config.as_ref())
             })
             .await
             .map_err(|e| SdkError::inference_src("Task join error", e))?;
@@ -3962,7 +3905,7 @@ impl Clone for XybridModel {
             // Share the in-flight slot so all clones coordinate preemption
             // through one mutex (see field docs).
             current_run: self.current_run.clone(),
-            speculative: self.speculative.clone(),
+            speculative: self.speculative,
         }
     }
 }
@@ -4224,38 +4167,33 @@ mod tests {
     }
 
     #[test]
-    fn speculative_cloud_default_is_openai_gpt4o_mini() {
-        let spec = SpeculativeCloud::default();
-        assert_eq!(spec.provider, "openai");
-        assert_eq!(spec.model, "gpt-4o-mini");
-    }
-
-    #[test]
-    fn with_speculative_cloud_model_overrides_identity() {
-        let loader = ModelLoader::from_registry("m")
-            .with_speculative_cloud_model("anthropic", "claude-haiku-4-5");
-        let spec = loader.speculative_cloud_model.expect("model set");
-        assert_eq!(spec.provider, "anthropic");
-        assert_eq!(spec.model, "claude-haiku-4-5");
+    fn speculative_envelope_sends_registry_id_to_gateway() {
+        // The registry id goes out as the gateway `model`, so the gateway routes
+        // it to xycloud (runs the real edge model) instead of a hosted provider.
+        let input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, None);
+        assert_eq!(
+            cloud.metadata.get("model").map(String::as_str),
+            Some("lfm2.5-350m")
+        );
     }
 
     #[test]
     fn build_envelope_overlays_cloud_routing_metadata() {
-        let spec = SpeculativeCloud::default();
         let input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
         let config = GenerationConfig {
             max_tokens: 64,
             temperature: 0.3,
             ..Default::default()
         };
-        let cloud = spec.build_envelope(&input, Some(&config));
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
         assert_eq!(
             cloud.metadata.get("provider").map(String::as_str),
             Some("openai")
         );
         assert_eq!(
             cloud.metadata.get("model").map(String::as_str),
-            Some("gpt-4o-mini")
+            Some("lfm2.5-350m")
         );
         assert_eq!(
             cloud.metadata.get("backend").map(String::as_str),
@@ -4273,12 +4211,11 @@ mod tests {
 
     #[test]
     fn build_envelope_does_not_clobber_caller_backend() {
-        let spec = SpeculativeCloud::default();
         let mut input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
         input
             .metadata
             .insert("backend".to_string(), "direct".to_string());
-        let cloud = spec.build_envelope(&input, None);
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, None);
         // provider/model are forced; backend defers to the caller's value.
         assert_eq!(
             cloud.metadata.get("provider").map(String::as_str),
@@ -4306,9 +4243,9 @@ mod tests {
             output_type: OutputType::Text,
             supports_streaming: true,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: Some(Arc::new(SpeculativeCloud::default())),
+            speculative: true,
         };
-        assert!(speculating.cloud_serve().is_some(), "not loaded -> cloud");
+        assert!(speculating.cloud_serve(), "not loaded -> cloud");
 
         // Flip the placeholder to loaded: the local handle is now ready.
         speculating
@@ -4317,12 +4254,12 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner())
             .loaded = true;
         assert!(
-            speculating.cloud_serve().is_none(),
+            !speculating.cloud_serve(),
             "loaded local handle -> no speculation"
         );
 
         // A plain local model with no speculative config never routes to cloud.
-        assert!(test_loaded_model(true).cloud_serve().is_none());
+        assert!(!test_loaded_model(true).cloud_serve());
     }
 
     /// The inherent `SdkError::is_retryable` / `retry_after` accessors and
@@ -4726,7 +4663,7 @@ mod tests {
             output_type: OutputType::Text,
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: None,
+            speculative: false,
         }
     }
 
@@ -5536,7 +5473,7 @@ mod tests {
             output_type: OutputType::Text,
             supports_streaming: true,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: None,
+            speculative: false,
         }
     }
 

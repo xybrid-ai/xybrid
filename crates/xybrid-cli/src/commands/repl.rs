@@ -46,8 +46,6 @@ pub(crate) struct ReplArgs {
     pub system_prompt: Option<String>,
     /// Serve from cloud while the registry model downloads, then switch local.
     pub speculative_cloud: bool,
-    pub cloud_provider: Option<String>,
-    pub cloud_model: Option<String>,
     pub no_tools: bool,
     pub tools_file: Option<PathBuf>,
     pub verbose: u8,
@@ -67,8 +65,6 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         max_tokens,
         system_prompt,
         speculative_cloud,
-        cloud_provider,
-        cloud_model,
         no_tools,
         tools_file,
         verbose,
@@ -101,20 +97,14 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
     // --huggingface: load from HuggingFace repo
     let stages = if want_speculative {
         let model_id = model.clone().expect("want_speculative implies a model id");
-        let provider = cloud_provider
-            .clone()
-            .unwrap_or_else(|| "openai".to_string());
-        let cloud = cloud_model
-            .clone()
-            .unwrap_or_else(|| "gpt-4o-mini".to_string());
-        let loader = ModelLoader::from_registry(&model_id)
-            .with_speculative_cloud(true)
-            .with_speculative_cloud_model(provider.clone(), cloud.clone());
+        // Serve the registry model itself: the gateway routes its id to xycloud
+        // (the CPU cluster that runs the edge model) while it downloads locally.
+        let loader = ModelLoader::from_registry(&model_id).with_speculative_cloud(true);
 
         if loader.will_speculate() {
             ui::ok(&format!(
-                "Speculative cloud: serving {}/{} while '{}' downloads in the background",
-                provider, cloud, model_id
+                "Speculative cloud: serving '{}' via xycloud while it downloads in the background",
+                model_id
             ));
         } else if xybrid_sdk::cache::CacheManager::new()
             .map(|c| c.is_extracted(&model_id))

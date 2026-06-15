@@ -223,6 +223,12 @@ enum Commands {
         /// Export trace to JSON file (Chrome trace format)
         #[arg(long, value_name = "FILE")]
         trace_export: Option<PathBuf>,
+
+        /// Serve from the cloud while the registry model downloads, instead of
+        /// blocking on the download. Requires --api-key (or XYBRID_API_KEY) and
+        /// a registry --model. LLM/chat only.
+        #[arg(long)]
+        speculative_cloud: bool,
     },
     /// Interactive REPL mode - keeps models loaded for fast repeated inference
     Repl {
@@ -274,14 +280,6 @@ enum Commands {
         /// (or XYBRID_API_KEY) and a registry --model. LLM/chat only.
         #[arg(long)]
         speculative_cloud: bool,
-
-        /// Cloud provider to serve speculatively (default: openai)
-        #[arg(long, value_name = "PROVIDER", requires = "speculative_cloud")]
-        cloud_provider: Option<String>,
-
-        /// Cloud model to serve speculatively (default: gpt-4o-mini)
-        #[arg(long, value_name = "MODEL", requires = "speculative_cloud")]
-        cloud_model: Option<String>,
 
         /// Disable built-in tool calling (web_search, fetch_url, current_time),
         /// which is otherwise on for models whose metadata declares support
@@ -500,6 +498,15 @@ fn init_telemetry(cli: &Cli) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn run_command(cli: Cli) -> Result<()> {
     let verbose = cli.verbose;
+    // Propagate --platform-url into the env var the SDK's CloudConfig reads, so
+    // cloud gateway calls (speculative cloud, reactive fallback) target the same
+    // endpoint as telemetry. clap's `env =` only *reads* this var as a fallback;
+    // passing the flag does not write it, so without this the gateway falls back
+    // to the production default (`api.xybrid.dev`) and a staging key 401s.
+    // XYBRID_GATEWAY_URL (explicit, /v1-suffixed) still takes precedence if set.
+    if std::env::var_os("XYBRID_PLATFORM_URL").is_none() {
+        std::env::set_var("XYBRID_PLATFORM_URL", &cli.platform_url);
+    }
     match cli.command {
         Commands::Init {
             directory,
@@ -560,6 +567,7 @@ fn run_command(cli: Cli) -> Result<()> {
             show_reasoning,
             max_tokens,
             trace_export,
+            speculative_cloud,
         } => {
             if trace {
                 tracing_viz::reset_collector();
@@ -579,6 +587,23 @@ fn run_command(cli: Cli) -> Result<()> {
                     max_tokens,
                     trace_export.as_ref(),
                 );
+            }
+
+            if speculative_cloud {
+                if let Some(model_id) = model.as_deref() {
+                    return commands::run::run_model_speculative(
+                        model_id,
+                        input_audio.as_ref(),
+                        input_text.as_deref(),
+                        &input_images,
+                        voice.as_deref(),
+                        output.as_ref(),
+                        max_tokens,
+                    );
+                }
+                return Err(anyhow::anyhow!(
+                    "--speculative-cloud requires a registry --model"
+                ));
             }
 
             if let Some(model_id) = model {
@@ -675,8 +700,6 @@ fn run_command(cli: Cli) -> Result<()> {
             max_tokens,
             system,
             speculative_cloud,
-            cloud_provider,
-            cloud_model,
             no_tools,
             tools_file,
         } => commands::repl::handle_repl_command(commands::repl::ReplArgs {
@@ -691,8 +714,6 @@ fn run_command(cli: Cli) -> Result<()> {
             max_tokens,
             system_prompt: system,
             speculative_cloud,
-            cloud_provider,
-            cloud_model,
             no_tools,
             tools_file,
             verbose,
