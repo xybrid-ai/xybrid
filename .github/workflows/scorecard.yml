@@ -31,6 +31,12 @@ jobs:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
+          # The default GITHUB_TOKEN cannot read branch-protection settings, so
+          # the Branch-Protection check errors out. Supply a PAT with
+          # Administration:read (secret SCORECARD_TOKEN) to score it fully.
+          # Falls back to the default token when the secret is absent, so this
+          # is safe to land before the secret exists.
+          repo_token: ${{ secrets.SCORECARD_TOKEN || github.token }}
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
