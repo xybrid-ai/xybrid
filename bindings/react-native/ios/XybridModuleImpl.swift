@@ -258,12 +258,17 @@ public final class XybridModuleImpl: NSObject {
   // surface only exposes sampling params today, so the abort / cloud-fallback
   // fields are left at their defaults.
   private func decodeRunOptions(_ dict: NSDictionary) -> XybridRunOptions {
+    // Guard against negative JS values wrapping around to a huge UInt32.
+    func uint32OrNil(_ key: String) -> UInt32? {
+      guard let n = dict[key] as? NSNumber, n.intValue >= 0 else { return nil }
+      return n.uint32Value
+    }
     let gc = XybridGenerationConfig(
-      maxTokens: (dict["maxTokens"] as? NSNumber)?.uint32Value,
+      maxTokens: uint32OrNil("maxTokens"),
       temperature: (dict["temperature"] as? NSNumber)?.floatValue,
       topP: (dict["topP"] as? NSNumber)?.floatValue,
       minP: (dict["minP"] as? NSNumber)?.floatValue,
-      topK: (dict["topK"] as? NSNumber)?.uint32Value,
+      topK: uint32OrNil("topK"),
       repetitionPenalty: (dict["repetitionPenalty"] as? NSNumber)?.floatValue,
       stopSequences: dict["stopSequences"] as? [String] ?? []
     )

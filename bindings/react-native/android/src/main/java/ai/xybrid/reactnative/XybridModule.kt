@@ -296,8 +296,12 @@ class XybridModule(reactContext: ReactApplicationContext) :
   // surface only exposes sampling params today, so the abort / cloud-fallback
   // fields are left at their defaults.
   private fun decodeRunOptions(map: ReadableMap): XybridRunOptions {
-    fun uintOrNull(key: String) =
-      if (map.hasKey(key) && !map.isNull(key)) map.getInt(key).toUInt() else null
+    fun uintOrNull(key: String): UInt? {
+      if (!map.hasKey(key) || map.isNull(key)) return null
+      // Guard against negative JS values wrapping around to a huge UInt.
+      val value = map.getInt(key)
+      return if (value >= 0) value.toUInt() else null
+    }
     fun floatOrNull(key: String) =
       if (map.hasKey(key) && !map.isNull(key)) map.getDouble(key).toFloat() else null
     val stops = if (map.hasKey("stopSequences") && !map.isNull("stopSequences")) {
