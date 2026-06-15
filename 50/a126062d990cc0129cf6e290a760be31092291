@@ -1,0 +1,69 @@
+bindings/react-native/react-native-xybrid.podspec
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-15,17-19,21-26,31-57
+  s_93e9e173c209bc::t_2e54793e28d7cb 16,20
+  s_93e9e173c209bc::t_ab883fa7b79fb4 27-30
+bindings/react-native/README.md
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-2,4-8,10,13-19,24-25,27,37-49,51-52,57-58,62-65,69-71,73-84,89-103,112,117-118
+  s_93e9e173c209bc::t_50eec00ea3792a 3,9,11-12,20-23,26,28-36,50,53-56,59-61,66-68,72,85-88,104-111,113-116
+bindings/react-native/src/index.ts
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-147
+xtask/src/main.rs
+  s_93e9e173c209bc::t_f5f7fba19d4ea7 1172-1201,1204-1234
+  s_93e9e173c209bc::t_0745a3e7f68ae3 1202-1203
+  s_93e9e173c209bc::t_4b8344bb636787 528-536
+  s_93e9e173c209bc::t_6bfb459c718783 265-283
+bindings/react-native/package.json
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-63
+bindings/react-native/ios/XybridModule.h
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-14
+bindings/react-native/android/build.gradle
+  s_93e9e173c209bc::t_265b5dc50e7a09 79-85
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-2,4,10-78,86
+  s_93e9e173c209bc::t_dbeedfa7c6e17f 3,5-9
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridPackage.kt
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-14
+bindings/react-native/.npmignore
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-9
+bindings/react-native/android/src/main/AndroidManifest.xml
+  s_93e9e173c209bc::t_bece9ce09e8de5 1
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_93e9e173c209bc::t_ebb52938003440 5,8-12,15,20,23,28-29,80-84,88,93,98,103,108,127-130,134,136,153,158,169,228,236-239,249,256-260,265,271-273,301,303-320
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-4,6-7,13-14,16-19,21-22,24-27,30-79,85-87,89-92,94-97,99-102,104-107,109-126,131-133,135,137-152,154-157,159-168,170-227,229-235,240-248,250-255,261-264,266-270,274-300,302,321-328
+bindings/react-native/tsconfig.build.json
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-10
+bindings/react-native/src/types.ts
+  s_93e9e173c209bc::t_735c6b596d6aaa 1
+  s_93e9e173c209bc::t_bece9ce09e8de5 2-58
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_93e9e173c209bc::t_59a938dff9031b 7,25,27,44-48,53,59,65,71,95-98,106,126,137,156,207-209,212,223-226,239,281-298
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-6,8-24,26,28-43,49-52,54-58,60-64,66-70,72-94,99-105,107-125,127-136,138-155,157-206,210-211,213-222,227-238,240-280,299-302
+bindings/react-native/.gitignore
+  s_93e9e173c209bc::t_88656e0444ad25 5,11-14,17,20,23
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-4,6-10,15-16,18-19,21-22
+.github/workflows/build-react-native.yml
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-9,12-26,31-63,77,79-84,86-103,105-160,167-173
+  s_93e9e173c209bc::t_9586c61f0ccb97 10-11,27-30,64-76,78,85,104,161-166
+bindings/react-native/src/NativeXybrid.ts
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-49
+bindings/react-native/ios/XybridModule.mm
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-6,10-143
+  s_93e9e173c209bc::t_e56d18a2991301 7-9
+bindings/react-native/tsconfig.json
+  s_93e9e173c209bc::t_bece9ce09e8de5 1-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "50a126062d990cc0129cf6e290a760be31092291",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
