@@ -319,6 +319,9 @@ object Envelope {
     @JvmStatic
     @JvmOverloads
     fun userMessage(text: String, images: List<XybridEnvelope> = emptyList()): XybridEnvelope {
+        if (!images.all { it.kind is XybridEnvelopeKind.Image }) {
+            throw XybridError.ConfigError("Envelope.userMessage accepts only image envelopes")
+        }
         val parts = mutableListOf(
             XybridEnvelope(kind = XybridEnvelopeKind.Text(text), metadata = emptyList()),
         )

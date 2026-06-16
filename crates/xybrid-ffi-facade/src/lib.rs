@@ -431,11 +431,12 @@ impl Envelope {
             EnvelopeKind::Audio { bytes } => sdk::ir::EnvelopeKind::Audio(bytes),
             EnvelopeKind::Embedding { values } => sdk::ir::EnvelopeKind::Embedding(values),
             EnvelopeKind::Image { bytes, format } => {
-                // Decode-validates the bytes and derives dimensions; carry
-                // over this envelope's metadata onto the validated result.
-                let mut env = sdk::ir::Envelope::image(bytes, format)?;
-                env.metadata = metadata;
-                return Ok(env);
+                // Decode-validates the bytes and derives dimensions, then carry
+                // this envelope's metadata onto the validated kind via
+                // `with_metadata` so a `local_id` is always preserved/minted —
+                // matching the non-image branches below.
+                let env = sdk::ir::Envelope::image(bytes, format)?;
+                return Ok(sdk::ir::Envelope::with_metadata(env.kind, metadata));
             }
             EnvelopeKind::MultiPart { parts } => {
                 let sdk_parts = parts
