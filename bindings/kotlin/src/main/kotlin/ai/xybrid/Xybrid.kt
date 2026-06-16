@@ -300,15 +300,20 @@ object Envelope {
         XybridEnvelope(kind = XybridEnvelopeKind.Embedding(data), metadata = emptyList())
 
     /**
-     * Creates an encoded image envelope for vision-language models. The bytes
-     * are decode-validated on the Rust side at run time (surfacing as a
-     * [XybridError.InvalidImage] for bad/oversized/unsupported input).
+     * Creates an encoded image envelope for vision-language models. The format
+     * hint is normalized and validated up front (`jpg` -> `jpeg`; unsupported
+     * formats throw [XybridError.ConfigError], mirroring the Swift binding);
+     * the bytes themselves are decode-validated on the Rust side at run time
+     * (surfacing as a [XybridError.InvalidImage] for bad or oversized input).
      * @param bytes Encoded PNG, JPEG, or WebP bytes.
      * @param format Image format hint (`png`, `jpeg`, `jpg`, or `webp`).
      */
     @JvmStatic
     fun image(bytes: ByteArray, format: String): XybridEnvelope =
-        XybridEnvelope(kind = XybridEnvelopeKind.Image(bytes, format), metadata = emptyList())
+        XybridEnvelope(
+            kind = XybridEnvelopeKind.Image(bytes, normalizeImageFormat(format)),
+            metadata = emptyList(),
+        )
 
     /**
      * Creates a multimodal user message: prompt text plus image attachments,
@@ -331,6 +336,22 @@ object Envelope {
             metadata = listOf(XybridMetadataEntry("xybrid.role", "user")),
         )
     }
+
+    /**
+     * Normalizes an image format hint to the canonical lowercase form the
+     * Rust core expects (`jpg` -> `jpeg`), rejecting unsupported formats early
+     * with [XybridError.ConfigError] rather than deferring to a run-time
+     * [XybridError.InvalidImage]. Mirrors the Swift binding's
+     * `normalizeImageFormat`.
+     */
+    private fun normalizeImageFormat(format: String): String =
+        when (val normalized = format.trim().lowercase()) {
+            "jpg" -> "jpeg"
+            "jpeg", "png", "webp" -> normalized
+            else -> throw XybridError.ConfigError(
+                "Unsupported image format '$format'. Supported formats: png, jpeg, jpg, webp",
+            )
+        }
 }
 
 // -- XybridVoiceInfo Extensions --
