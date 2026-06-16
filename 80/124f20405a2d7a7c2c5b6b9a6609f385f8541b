@@ -1,0 +1,24 @@
+bindings/kotlin/src/test/kotlin/ai/xybrid/EnvelopeTest.kt
+  s_93e9e173c209bc::t_2e4eca9321d6d9 16,36-39
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_93e9e173c209bc::t_b32e1d6e519d65 378-385
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_93e9e173c209bc::t_18203938d3c59e 303-307,313-316
+  s_93e9e173c209bc::t_ea2dcd3dcc68f6 327-329,339-353
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "80124f20405a2d7a7c2c5b6b9a6609f385f8541b",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
