@@ -375,12 +375,14 @@ extension XybridError: LocalizedError {
             return "Rate limited, retry after \(retryAfterSecs) seconds"
         case .timeout(let timeoutMs):
             return "Request timeout after \(timeoutMs)ms"
-        case .MissingArtifact(let artifact, let path):
-            return "Missing artifact \(artifact) at \(path)"
-        case .UnsupportedModelCapability(let modelId, let capability, let hint):
-            return "Model \(modelId) does not support \(capability)\(hint.isEmpty ? "" : ". Hint: \(hint)")"
-        case .UnsupportedBackendCapability(let modelId, let backend, let capability, let hint):
-            return "Backend \(backend) cannot satisfy \(capability) required by \(modelId)\(hint.isEmpty ? "" : ". Hint: \(hint)")"
+        case .missingArtifact(let message):
+            return "Missing artifact: \(message)"
+        case .unsupportedModelCapability(let message):
+            return "Model does not support requested capability: \(message)"
+        case .unsupportedBackendCapability(let message):
+            return "Backend cannot satisfy required capability: \(message)"
+        case .invalidImage(let message):
+            return "Invalid image: \(message)"
         }
     }
 }

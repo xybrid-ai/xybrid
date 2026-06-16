@@ -13,8 +13,7 @@ class EnvelopeTest {
 
         val envelope = Envelope.image(bytes, "JPG")
 
-        assertTrue(envelope is XybridEnvelope.Image)
-        val image = envelope as XybridEnvelope.Image
+        val image = envelope.kind as XybridEnvelopeKind.Image
         assertArrayEquals(bytes, image.bytes)
         assertEquals("jpeg", image.format)
     }
@@ -34,10 +33,10 @@ class EnvelopeTest {
 
         val envelope = Envelope.userMessage("describe this", listOf(image))
 
-        assertTrue(envelope is XybridEnvelope.UserMessage)
-        val message = envelope as XybridEnvelope.UserMessage
-        assertEquals("describe this", message.text)
-        assertEquals(listOf(image), message.images)
+        val multipart = envelope.kind as XybridEnvelopeKind.MultiPart
+        assertEquals("describe this", (multipart.parts.first().kind as XybridEnvelopeKind.Text).text)
+        assertEquals(listOf(image), multipart.parts.drop(1))
+        assertTrue(envelope.metadata.any { it.key == "xybrid.role" && it.value == "user" })
     }
 
     @Test
