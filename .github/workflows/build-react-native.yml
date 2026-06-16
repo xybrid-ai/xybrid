@@ -52,6 +52,15 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
           echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          # The GHA-backed sccache server occasionally needs more than the
+          # default 10s to complete its first handshake with the cache
+          # service, which surfaces as "Timed out waiting for server startup"
+          # and aborts the build. There is no env var for this, so write a
+          # minimal config file (it coexists with the env-based GHA settings
+          # above) bumping the startup timeout. https://github.com/mozilla/sccache
+          SCCACHE_CONF="$RUNNER_TEMP/sccache-config.toml"
+          echo "server_startup_timeout_ms = 60000" > "$SCCACHE_CONF"
+          echo "SCCACHE_CONF=$SCCACHE_CONF" >> $GITHUB_ENV
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2

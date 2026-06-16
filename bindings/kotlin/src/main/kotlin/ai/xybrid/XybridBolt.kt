@@ -623,6 +623,14 @@ sealed class XybridError : Exception() {
 
     data class Timeout(val timeoutMs: ULong) : XybridError()
 
+    data class MissingArtifact(override val message: String) : XybridError()
+
+    data class UnsupportedModelCapability(override val message: String) : XybridError()
+
+    data class UnsupportedBackendCapability(override val message: String) : XybridError()
+
+    data class InvalidImage(override val message: String) : XybridError()
+
     companion object {
         fun decode(reader: WireReader): XybridError {
             val tag = reader.readI32()
@@ -713,6 +721,26 @@ sealed class XybridError : Exception() {
                         reader.readU64()
                     )
                 }
+                18 -> {
+                    MissingArtifact(
+                        reader.readString()
+                    )
+                }
+                19 -> {
+                    UnsupportedModelCapability(
+                        reader.readString()
+                    )
+                }
+                20 -> {
+                    UnsupportedBackendCapability(
+                        reader.readString()
+                    )
+                }
+                21 -> {
+                    InvalidImage(
+                        reader.readString()
+                    )
+                }
                 else -> throw FfiException(-1, "Unknown XybridError tag: $tag")
             }
         }
@@ -737,6 +765,10 @@ sealed class XybridError : Exception() {
         is CircuitOpen -> (4 + Utf8Codec.maxBytes(message))
         is RateLimited -> 8
         is Timeout -> 8
+        is MissingArtifact -> (4 + Utf8Codec.maxBytes(message))
+        is UnsupportedModelCapability -> (4 + Utf8Codec.maxBytes(message))
+        is UnsupportedBackendCapability -> (4 + Utf8Codec.maxBytes(message))
+        is InvalidImage -> (4 + Utf8Codec.maxBytes(message))
     }
 
     fun wireEncodeTo(wire: WireWriter) {
@@ -807,6 +839,22 @@ sealed class XybridError : Exception() {
                 wire.writeI32(17)
                 wire.writeU64(timeoutMs)
             }
+            is MissingArtifact -> {
+                wire.writeI32(18)
+                wire.writeString(message)
+            }
+            is UnsupportedModelCapability -> {
+                wire.writeI32(19)
+                wire.writeString(message)
+            }
+            is UnsupportedBackendCapability -> {
+                wire.writeI32(20)
+                wire.writeString(message)
+            }
+            is InvalidImage -> {
+                wire.writeI32(21)
+                wire.writeString(message)
+            }
         }
     }
 }
@@ -818,6 +866,10 @@ sealed class XybridEnvelopeKind {
     data class Audio(val bytes: ByteArray) : XybridEnvelopeKind()
 
     data class Embedding(val values: FloatArray) : XybridEnvelopeKind()
+
+    data class Image(val bytes: ByteArray, val format: String) : XybridEnvelopeKind()
+
+    data class MultiPart(val parts: List<XybridEnvelope>) : XybridEnvelopeKind()
 
     companion object {
         fun decode(reader: WireReader): XybridEnvelopeKind {
@@ -838,6 +890,17 @@ sealed class XybridEnvelopeKind {
                         reader.readFloatArray()
                     )
                 }
+                3 -> {
+                    Image(
+                        reader.readBytes(),
+                        reader.readString()
+                    )
+                }
+                4 -> {
+                    MultiPart(
+                        reader.readList { XybridEnvelope.decode(reader) }
+                    )
+                }
                 else -> throw FfiException(-1, "Unknown XybridEnvelopeKind tag: $tag")
             }
         }
@@ -847,6 +910,8 @@ sealed class XybridEnvelopeKind {
         is Text -> (4 + Utf8Codec.maxBytes(text))
         is Audio -> (4 + bytes.size)
         is Embedding -> (4 + values.size * 4)
+        is Image -> (4 + bytes.size) + (4 + Utf8Codec.maxBytes(format))
+        is MultiPart -> (4 + parts.sumOf { item -> item.wireEncodedSize() })
     }
 
     fun wireEncodeTo(wire: WireWriter) {
@@ -862,6 +927,15 @@ sealed class XybridEnvelopeKind {
             is Embedding -> {
                 wire.writeI32(2)
                 wire.writePrimitiveList(values)
+            }
+            is Image -> {
+                wire.writeI32(3)
+                wire.writePrimitiveList(bytes)
+                wire.writeString(format)
+            }
+            is MultiPart -> {
+                wire.writeI32(4)
+                wire.writeU32(parts.size.toUInt()); parts.forEach { item -> item.wireEncodeTo(wire) }
             }
         }
     }

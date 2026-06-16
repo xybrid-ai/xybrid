@@ -298,10 +298,39 @@ object Envelope {
     @JvmStatic
     fun embedding(data: FloatArray): XybridEnvelope =
         XybridEnvelope(kind = XybridEnvelopeKind.Embedding(data), metadata = emptyList())
-    // NOTE: the vision envelope helpers (image / multimodal userMessage) added
-    // in #245 are not ported here — the bolt `XybridEnvelopeKind` has no Image
-    // variant yet. They land with the "wire vision through the facade/bolt"
-    // follow-up, alongside the deferred vision CI build-checks.
+
+    /**
+     * Creates an encoded image envelope for vision-language models. The bytes
+     * are decode-validated on the Rust side at run time (surfacing as a
+     * [XybridError.InvalidImage] for bad/oversized/unsupported input).
+     * @param bytes Encoded PNG, JPEG, or WebP bytes.
+     * @param format Image format hint (`png`, `jpeg`, `jpg`, or `webp`).
+     */
+    @JvmStatic
+    fun image(bytes: ByteArray, format: String): XybridEnvelope =
+        XybridEnvelope(kind = XybridEnvelopeKind.Image(bytes, format), metadata = emptyList())
+
+    /**
+     * Creates a multimodal user message: prompt text plus image attachments,
+     * tagged with the `User` role.
+     * @param text User prompt text.
+     * @param images Image envelopes created by [image].
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun userMessage(text: String, images: List<XybridEnvelope> = emptyList()): XybridEnvelope {
+        if (!images.all { it.kind is XybridEnvelopeKind.Image }) {
+            throw XybridError.ConfigError("Envelope.userMessage accepts only image envelopes")
+        }
+        val parts = mutableListOf(
+            XybridEnvelope(kind = XybridEnvelopeKind.Text(text), metadata = emptyList()),
+        )
+        parts.addAll(images)
+        return XybridEnvelope(
+            kind = XybridEnvelopeKind.MultiPart(parts),
+            metadata = listOf(XybridMetadataEntry("xybrid.role", "user")),
+        )
+    }
 }
 
 // -- XybridVoiceInfo Extensions --
