@@ -1,0 +1,25 @@
+examples/ios/XybridExample/LiveVision.swift
+  s_93e9e173c209bc::t_d456b0ffe01ae4 347-361,363-369,373,375,389-395,397
+  s_93e9e173c209bc::t_bb0b4b3a2f8cc7 9-10,13-18
+examples/ios/README.md
+  s_93e9e173c209bc::t_aee872357f16cc 152,154
+  s_93e9e173c209bc::t_aedbb96c547588 142-145
+  s_93e9e173c209bc::t_2de3312d3c53df 168-177
+  s_93e9e173c209bc::t_70f66590e8cb8e 186-196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "6e6d8d7b07c8adad4fb4b09932aba3c3041a54e9",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
