@@ -298,10 +298,60 @@ object Envelope {
     @JvmStatic
     fun embedding(data: FloatArray): XybridEnvelope =
         XybridEnvelope(kind = XybridEnvelopeKind.Embedding(data), metadata = emptyList())
-    // NOTE: the vision envelope helpers (image / multimodal userMessage) added
-    // in #245 are not ported here — the bolt `XybridEnvelopeKind` has no Image
-    // variant yet. They land with the "wire vision through the facade/bolt"
-    // follow-up, alongside the deferred vision CI build-checks.
+
+    /**
+     * Creates an encoded image envelope for vision-language models. The format
+     * hint is normalized and validated up front (`jpg` -> `jpeg`; unsupported
+     * formats throw [XybridError.ConfigError], mirroring the Swift binding);
+     * the bytes themselves are decode-validated on the Rust side at run time
+     * (surfacing as a [XybridError.InvalidImage] for bad or oversized input).
+     * @param bytes Encoded PNG, JPEG, or WebP bytes.
+     * @param format Image format hint (`png`, `jpeg`, `jpg`, or `webp`).
+     */
+    @JvmStatic
+    fun image(bytes: ByteArray, format: String): XybridEnvelope =
+        XybridEnvelope(
+            kind = XybridEnvelopeKind.Image(bytes, normalizeImageFormat(format)),
+            metadata = emptyList(),
+        )
+
+    /**
+     * Creates a multimodal user message: prompt text plus image attachments,
+     * tagged with the `User` role.
+     * @param text User prompt text.
+     * @param images Image envelopes created by [image].
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun userMessage(text: String, images: List<XybridEnvelope> = emptyList()): XybridEnvelope {
+        if (!images.all { it.kind is XybridEnvelopeKind.Image }) {
+            throw XybridError.ConfigError("Envelope.userMessage accepts only image envelopes")
+        }
+        val parts = mutableListOf(
+            XybridEnvelope(kind = XybridEnvelopeKind.Text(text), metadata = emptyList()),
+        )
+        parts.addAll(images)
+        return XybridEnvelope(
+            kind = XybridEnvelopeKind.MultiPart(parts),
+            metadata = listOf(XybridMetadataEntry("xybrid.role", "user")),
+        )
+    }
+
+    /**
+     * Normalizes an image format hint to the canonical lowercase form the
+     * Rust core expects (`jpg` -> `jpeg`), rejecting unsupported formats early
+     * with [XybridError.ConfigError] rather than deferring to a run-time
+     * [XybridError.InvalidImage]. Mirrors the Swift binding's
+     * `normalizeImageFormat`.
+     */
+    private fun normalizeImageFormat(format: String): String =
+        when (val normalized = format.trim().lowercase()) {
+            "jpg" -> "jpeg"
+            "jpeg", "png", "webp" -> normalized
+            else -> throw XybridError.ConfigError(
+                "Unsupported image format '$format'. Supported formats: png, jpeg, jpg, webp",
+            )
+        }
 }
 
 // -- XybridVoiceInfo Extensions --

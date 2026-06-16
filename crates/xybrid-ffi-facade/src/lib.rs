@@ -56,24 +56,75 @@ use xybrid_sdk as sdk;
 /// `message` string plus a stable [`Error::code`].
 #[derive(Debug, Clone)]
 pub enum Error {
-    ModelNotFound { id: String },
-    DirectoryNotFound { path: String },
-    MetadataNotFound { path: String },
-    MetadataInvalid { message: String },
-    LoadError { message: String },
-    InferenceError { message: String },
-    AbortedForCloudFallback { reason: String },
+    ModelNotFound {
+        id: String,
+    },
+    DirectoryNotFound {
+        path: String,
+    },
+    MetadataNotFound {
+        path: String,
+    },
+    MetadataInvalid {
+        message: String,
+    },
+    LoadError {
+        message: String,
+    },
+    InferenceError {
+        message: String,
+    },
+    AbortedForCloudFallback {
+        reason: String,
+    },
     StreamingNotSupported,
     NotLoaded,
-    ConfigError { message: String },
-    NetworkError { message: String },
-    Offline { message: String },
-    IoError { message: String },
-    CacheError { message: String },
-    PipelineError { message: String },
-    CircuitOpen { message: String },
-    RateLimited { retry_after_secs: u64 },
-    Timeout { timeout_ms: u64 },
+    ConfigError {
+        message: String,
+    },
+    NetworkError {
+        message: String,
+    },
+    Offline {
+        message: String,
+    },
+    IoError {
+        message: String,
+    },
+    CacheError {
+        message: String,
+    },
+    PipelineError {
+        message: String,
+    },
+    CircuitOpen {
+        message: String,
+    },
+    RateLimited {
+        retry_after_secs: u64,
+    },
+    Timeout {
+        timeout_ms: u64,
+    },
+    /// A required model artifact (weights, tokenizer, …) was missing.
+    MissingArtifact {
+        message: String,
+    },
+    /// The model can't satisfy the request (e.g. image input to a text-only
+    /// model).
+    UnsupportedModelCapability {
+        message: String,
+    },
+    /// The active backend/build can't satisfy the request (e.g. vision input
+    /// without a vision-capable backend).
+    UnsupportedBackendCapability {
+        message: String,
+    },
+    /// An image envelope failed decode/validation (bad bytes, unsupported
+    /// format, oversized payload).
+    InvalidImage {
+        message: String,
+    },
 }
 
 impl Error {
@@ -101,6 +152,10 @@ impl Error {
             Error::CircuitOpen { .. } => 16,
             Error::RateLimited { .. } => 17,
             Error::Timeout { .. } => 18,
+            Error::MissingArtifact { .. } => 19,
+            Error::UnsupportedModelCapability { .. } => 20,
+            Error::UnsupportedBackendCapability { .. } => 21,
+            Error::InvalidImage { .. } => 22,
         }
     }
 
@@ -146,6 +201,14 @@ impl std::fmt::Display for Error {
                 write!(f, "Rate limited, retry after {retry_after_secs} seconds")
             }
             Error::Timeout { timeout_ms } => write!(f, "Request timeout after {timeout_ms}ms"),
+            Error::MissingArtifact { message } => write!(f, "Missing artifact: {message}"),
+            Error::UnsupportedModelCapability { message } => {
+                write!(f, "Unsupported model capability: {message}")
+            }
+            Error::UnsupportedBackendCapability { message } => {
+                write!(f, "Unsupported backend capability: {message}")
+            }
+            Error::InvalidImage { message } => write!(f, "Invalid image input: {message}"),
         }
     }
 }
@@ -205,32 +268,37 @@ impl From<sdk::SdkError> for Error {
                 Error::RateLimited { retry_after_secs }
             }
             sdk::SdkError::Timeout { timeout_ms } => Error::Timeout { timeout_ms },
-            // Capability / artifact errors were added alongside the vision
-            // work. The bolt error surface doesn't carry dedicated variants for
-            // them yet, so flatten onto the closest existing kind, preserving
-            // the full diagnostic message. Revisit when vision lands on bolt.
-            sdk::SdkError::MissingArtifact { artifact, path } => Error::LoadError {
+            // Capability / artifact errors (vision-era). First-class typed
+            // variants so foreign consumers can branch on them; the structured
+            // SDK fields are flattened into the diagnostic message.
+            sdk::SdkError::MissingArtifact { artifact, path } => Error::MissingArtifact {
                 message: format!("missing artifact '{artifact}' at {path}"),
             },
             sdk::SdkError::UnsupportedModelCapability {
                 model_id,
                 capability,
                 hint,
-            } => Error::ConfigError {
-                message: format!(
-                    "model '{model_id}' does not support {capability}; {hint}"
-                ),
+            } => Error::UnsupportedModelCapability {
+                message: format!("model '{model_id}' does not support {capability}; {hint}"),
             },
             sdk::SdkError::UnsupportedBackendCapability {
                 model_id,
                 backend,
                 capability,
                 hint,
-            } => Error::ConfigError {
+            } => Error::UnsupportedBackendCapability {
                 message: format!(
                     "model '{model_id}' requires {capability}, but backend/build '{backend}' does not support it; {hint}"
                 ),
             },
+        }
+    }
+}
+
+impl From<xybrid_core::ir::envelope::EnvelopeError> for Error {
+    fn from(e: xybrid_core::ir::envelope::EnvelopeError) -> Self {
+        Error::InvalidImage {
+            message: e.to_string(),
         }
     }
 }
@@ -246,9 +314,27 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// [`xybrid_core::ir::EnvelopeKind`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnvelopeKind {
-    Text { text: String },
-    Audio { bytes: Vec<u8> },
-    Embedding { values: Vec<f32> },
+    Text {
+        text: String,
+    },
+    Audio {
+        bytes: Vec<u8>,
+    },
+    Embedding {
+        values: Vec<f32>,
+    },
+    /// Encoded image input (PNG/JPEG/WebP) for vision-capable models. The
+    /// bytes are decode-validated and the dimensions derived when this is
+    /// lowered to the SDK in [`Envelope::into_sdk`] — so construction is
+    /// cheap and validation surfaces as an [`Error::InvalidImage`] at run.
+    Image {
+        bytes: Vec<u8>,
+        format: String,
+    },
+    /// Ordered parts of one logical multimodal message (e.g. text + images).
+    MultiPart {
+        parts: Vec<Envelope>,
+    },
 }
 
 /// Owned envelope carrying a typed payload plus string metadata.
@@ -256,7 +342,7 @@ pub enum EnvelopeKind {
 /// Construct via [`Envelope::text`] / [`Envelope::audio`] /
 /// [`Envelope::embedding`]; the SDK form is reconstructed at the FFI
 /// boundary inside the facade.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Envelope {
     pub kind: EnvelopeKind,
     pub metadata: HashMap<String, String>,
@@ -284,6 +370,28 @@ impl Envelope {
         }
     }
 
+    /// Encoded image envelope (PNG/JPEG/WebP). Construction is infallible;
+    /// the bytes are decode-validated when lowered in [`into_sdk`], surfacing
+    /// as [`Error::InvalidImage`].
+    ///
+    /// [`into_sdk`]: Self::into_sdk
+    pub fn image(bytes: Vec<u8>, format: String) -> Self {
+        Self {
+            kind: EnvelopeKind::Image { bytes, format },
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Multi-part message (e.g. text + image attachments) tagged with the
+    /// `User` role, mirroring `xybrid_sdk::ir::Envelope::user_message`.
+    pub fn multipart(parts: Vec<Envelope>) -> Self {
+        Self {
+            kind: EnvelopeKind::MultiPart { parts },
+            metadata: HashMap::new(),
+        }
+        .with_role(MessageRole::User)
+    }
+
     /// Set the LLM message role on this envelope. Stored under
     /// `xybrid.role` metadata — matches the SDK's own convention so the
     /// envelope is interchangeable with `xybrid_sdk::ir::Envelope::with_role`.
@@ -307,16 +415,38 @@ impl Envelope {
             .and_then(|raw| MessageRole::parse(raw))
     }
 
-    /// Consuming conversion to the SDK type — moves owned payload fields
-    /// into [`sdk::ir::Envelope`] without cloning. `pub` so binding crates
-    /// with their own Ffi envelope POD can convert through the facade.
-    pub fn into_sdk(self) -> sdk::ir::Envelope {
-        let kind = match self.kind {
+    /// Consuming conversion to the SDK type. `pub` so binding crates with
+    /// their own Ffi envelope POD can convert through the facade.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidImage`] if an image envelope (here or nested in
+    /// a [`MultiPart`]) fails decode/validation. Text/audio/embedding never
+    /// fail.
+    ///
+    /// [`MultiPart`]: EnvelopeKind::MultiPart
+    pub fn into_sdk(self) -> Result<sdk::ir::Envelope> {
+        let Envelope { kind, metadata } = self;
+        let sdk_kind = match kind {
             EnvelopeKind::Text { text } => sdk::ir::EnvelopeKind::Text(text),
             EnvelopeKind::Audio { bytes } => sdk::ir::EnvelopeKind::Audio(bytes),
             EnvelopeKind::Embedding { values } => sdk::ir::EnvelopeKind::Embedding(values),
+            EnvelopeKind::Image { bytes, format } => {
+                // Decode-validates the bytes and derives dimensions, then carry
+                // this envelope's metadata onto the validated kind via
+                // `with_metadata` so a `local_id` is always preserved/minted —
+                // matching the non-image branches below.
+                let env = sdk::ir::Envelope::image(bytes, format)?;
+                return Ok(sdk::ir::Envelope::with_metadata(env.kind, metadata));
+            }
+            EnvelopeKind::MultiPart { parts } => {
+                let sdk_parts = parts
+                    .into_iter()
+                    .map(Envelope::into_sdk)
+                    .collect::<Result<Vec<_>>>()?;
+                sdk::ir::EnvelopeKind::MultiPart(sdk_parts)
+            }
         };
-        sdk::ir::Envelope::with_metadata(kind, self.metadata)
+        Ok(sdk::ir::Envelope::with_metadata(sdk_kind, metadata))
     }
 
     pub fn from_sdk(env: sdk::ir::Envelope) -> Self {
@@ -324,13 +454,20 @@ impl Envelope {
             sdk::ir::EnvelopeKind::Text(text) => EnvelopeKind::Text { text },
             sdk::ir::EnvelopeKind::Audio(bytes) => EnvelopeKind::Audio { bytes },
             sdk::ir::EnvelopeKind::Embedding(values) => EnvelopeKind::Embedding { values },
-            // The SDK's vision envelope kinds (`Image`, `MultiPart`) have no
-            // representation on the bolt surface yet. They're input kinds —
-            // model outputs (what `from_sdk` sees) are never images — so
-            // collapse to a text marker until vision is wired through the
-            // facade (follow-up PR).
-            other => EnvelopeKind::Text {
-                text: format!("[unsupported envelope kind: {other:?}]"),
+            sdk::ir::EnvelopeKind::Image { source } => match source.as_encoded() {
+                Some((bytes, format)) => EnvelopeKind::Image {
+                    bytes: bytes.to_vec(),
+                    format: format.as_str().to_string(),
+                },
+                // Raw (camera) images aren't representable on the facade
+                // surface yet; outputs are never raw images, so this is a
+                // defensive marker rather than a real path.
+                None => EnvelopeKind::Text {
+                    text: "[raw image]".to_string(),
+                },
+            },
+            sdk::ir::EnvelopeKind::MultiPart(parts) => EnvelopeKind::MultiPart {
+                parts: parts.into_iter().map(Envelope::from_sdk).collect(),
             },
         };
         Self {
@@ -411,16 +548,27 @@ impl ConversationContextHandle {
     }
 
     /// Append an envelope (typically `MessageRole::User` or `Assistant`).
-    pub fn push(&self, envelope: Envelope) {
-        let mut guard = self.lock();
-        guard.push(envelope.into_sdk());
+    ///
+    /// # Errors
+    /// [`Error::InvalidImage`] if the envelope carries an image that fails
+    /// decode/validation (so multimodal history can't store a bad image).
+    pub fn push(&self, envelope: Envelope) -> Result<()> {
+        let sdk_env = envelope.into_sdk()?;
+        self.lock().push(sdk_env);
+        Ok(())
     }
 
     /// Set the persistent system prompt envelope. Survives [`clear`].
-    pub fn set_system(&self, envelope: Envelope) {
+    ///
+    /// # Errors
+    /// [`Error::InvalidImage`] if the envelope carries an image that fails
+    /// decode/validation.
+    pub fn set_system(&self, envelope: Envelope) -> Result<()> {
+        let sdk_env = envelope.into_sdk()?;
         let mut guard = self.lock();
-        let new_ctx = std::mem::take(&mut *guard).with_system(envelope.into_sdk());
+        let new_ctx = std::mem::take(&mut *guard).with_system(sdk_env);
         *guard = new_ctx;
+        Ok(())
     }
 
     /// Drop history; the system envelope (if any) is preserved.
@@ -957,7 +1105,7 @@ impl XybridModel {
 
     /// Run inference with no overrides.
     pub fn run(&self, envelope: Envelope) -> Result<InferenceResult> {
-        let env = envelope.into_sdk();
+        let env = envelope.into_sdk()?;
         let result = self.inner.run(&env, None).map_err(Error::from)?;
         Ok(InferenceResult::from_sdk(result))
     }
@@ -970,7 +1118,7 @@ impl XybridModel {
         options: RunOptions,
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
-        let env = envelope.into_sdk();
+        let env = envelope.into_sdk()?;
         let opts = options.to_sdk(cancel.as_deref());
         let result = self
             .inner
@@ -990,7 +1138,7 @@ impl XybridModel {
         context: Arc<ConversationContextHandle>,
         generation_config: Option<GenerationConfig>,
     ) -> Result<InferenceResult> {
-        let env = envelope.into_sdk();
+        let env = envelope.into_sdk()?;
         let ctx = context.snapshot();
         let gc = generation_config.as_ref().map(GenerationConfig::to_sdk);
         let result = self
@@ -1002,7 +1150,7 @@ impl XybridModel {
 
     /// Async inference. The SDK offloads to `spawn_blocking` internally.
     pub async fn run_async(&self, envelope: Envelope) -> Result<InferenceResult> {
-        let env = envelope.into_sdk();
+        let env = envelope.into_sdk()?;
         let result = self
             .inner
             .run_async(&env, None)
@@ -1169,7 +1317,7 @@ mod tests {
     #[test]
     fn envelope_roundtrip_preserves_text_and_metadata() {
         let env = Envelope::text("hello".into()).with_role(MessageRole::User);
-        let sdk_env = env.clone().into_sdk();
+        let sdk_env = env.clone().into_sdk().unwrap();
         let back = Envelope::from_sdk(sdk_env);
 
         assert_eq!(
@@ -1188,9 +1336,30 @@ mod tests {
     }
 
     #[test]
+    fn image_envelope_invalid_bytes_surfaces_typed_invalid_image() {
+        // Garbage bytes can't be decoded → fallible `into_sdk` yields the
+        // typed `InvalidImage` (code 22), never a panic across the boundary.
+        let err = Envelope::image(vec![0xde, 0xad, 0xbe, 0xef], "png".into())
+            .into_sdk()
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidImage { .. }));
+        assert_eq!(err.code(), 22);
+    }
+
+    #[test]
+    fn multipart_envelope_propagates_nested_image_error() {
+        // A bad image nested in a multipart message must surface, not panic.
+        let msg = Envelope::multipart(vec![
+            Envelope::text("describe".into()),
+            Envelope::image(vec![0x00, 0x01], "jpeg".into()),
+        ]);
+        assert!(matches!(msg.into_sdk(), Err(Error::InvalidImage { .. })));
+    }
+
+    #[test]
     fn envelope_roundtrip_audio() {
         let env = Envelope::audio(vec![1, 2, 3, 4]);
-        let back = Envelope::from_sdk(env.into_sdk());
+        let back = Envelope::from_sdk(env.into_sdk().unwrap());
         assert_eq!(
             back.kind,
             EnvelopeKind::Audio {
@@ -1202,7 +1371,7 @@ mod tests {
     #[test]
     fn envelope_roundtrip_embedding() {
         let env = Envelope::embedding(vec![0.1, 0.2, 0.3]);
-        let back = Envelope::from_sdk(env.into_sdk());
+        let back = Envelope::from_sdk(env.into_sdk().unwrap());
         assert_eq!(
             back.kind,
             EnvelopeKind::Embedding {
@@ -1301,8 +1470,10 @@ mod tests {
     #[test]
     fn conversation_context_push_history_clear() {
         let ctx = ConversationContextHandle::new();
-        ctx.push(Envelope::text("hi".into()).with_role(MessageRole::User));
-        ctx.push(Envelope::text("hello".into()).with_role(MessageRole::Assistant));
+        ctx.push(Envelope::text("hi".into()).with_role(MessageRole::User))
+            .unwrap();
+        ctx.push(Envelope::text("hello".into()).with_role(MessageRole::Assistant))
+            .unwrap();
 
         let hist = ctx.history();
         assert_eq!(hist.len(), 2);

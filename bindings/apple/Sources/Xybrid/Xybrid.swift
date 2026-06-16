@@ -152,6 +152,15 @@ public enum Xybrid {
 /// Call `run(envelope:)` to execute inference on input data.
 public typealias Model = XybridModel
 
+// The bolt handle wraps a thread-safe, `Arc`-backed Rust model (the facade's
+// types are `Send + Sync`), so the handle is safe to move across threads and
+// actors — e.g. loading or running on a `Task.detached` background executor,
+// which is the recommended pattern since bolt's `load`/`run` are blocking.
+// boltffi does not emit `Sendable` on generated handle types yet, so declare it
+// here in the hand-written wrapper (regen-safe — never overwritten by
+// `boltffi generate`, unlike `xybrid_bolt.swift`).
+extension XybridModel: @unchecked Sendable {}
+
 public extension XybridModel {
     /// Run inference with the model's default options.
     ///
@@ -274,26 +283,37 @@ public extension XybridEnvelope {
         return XybridEnvelope(kind: .embedding(values: data), metadata: [])
     }
 
-    /// Creates an encoded image envelope for vision-language models.
+    /// Creates an encoded image envelope for vision-language models. The bytes
+    /// are decode-validated on the Rust side at run time (surfacing as a
+    /// `XybridError.invalidImage` for bad/oversized/unsupported input).
     /// - Parameters:
     ///   - bytes: Encoded PNG, JPEG, or WebP data
-    ///   - format: Image format (`png`, `jpeg`, `jpg`, or `webp`)
+    ///   - format: Image format hint (`png`, `jpeg`, `jpg`, or `webp`)
     static func image(_ bytes: Data, format: String) throws -> XybridEnvelope {
-        return .image(bytes: bytes, format: try normalizeImageFormat(format))
+        return XybridEnvelope(
+            kind: .image(bytes: bytes, format: try normalizeImageFormat(format)),
+            metadata: []
+        )
     }
 
-    /// Creates a multi-part user message with text and image attachments.
+    /// Creates a multi-part user message with text and image attachments,
+    /// tagged with the `User` role.
     /// - Parameters:
     ///   - text: User prompt text
     ///   - images: Image envelopes created by `image(_:format:)`
     static func userMessage(_ text: String, images: [XybridEnvelope] = []) throws -> XybridEnvelope {
         guard images.allSatisfy({ envelope in
-            if case .image = envelope { return true }
+            if case .image = envelope.kind { return true }
             return false
         }) else {
-            throw XybridError.ConfigError(message: "Envelope.userMessage accepts only image envelopes")
+            throw XybridError.configError(message: "Envelope.userMessage accepts only image envelopes")
         }
-        return .userMessage(text: text, images: images)
+        var parts = [XybridEnvelope(kind: .text(text: text), metadata: [])]
+        parts.append(contentsOf: images)
+        return XybridEnvelope(
+            kind: .multiPart(parts: parts),
+            metadata: [XybridMetadataEntry(key: "xybrid.role", value: "user")]
+        )
     }
 
     private static func normalizeImageFormat(_ format: String) throws -> String {
@@ -304,7 +324,7 @@ public extension XybridEnvelope {
         case "jpeg", "png", "webp":
             return normalized
         default:
-            throw XybridError.ConfigError(
+            throw XybridError.configError(
                 message: "Unsupported image format '\(format)'. Supported formats: png, jpeg, jpg, webp"
             )
         }
@@ -364,12 +384,14 @@ extension XybridError: LocalizedError {
             return "Rate limited, retry after \(retryAfterSecs) seconds"
         case .timeout(let timeoutMs):
             return "Request timeout after \(timeoutMs)ms"
-        case .MissingArtifact(let artifact, let path):
-            return "Missing artifact \(artifact) at \(path)"
-        case .UnsupportedModelCapability(let modelId, let capability, let hint):
-            return "Model \(modelId) does not support \(capability)\(hint.isEmpty ? "" : ". Hint: \(hint)")"
-        case .UnsupportedBackendCapability(let modelId, let backend, let capability, let hint):
-            return "Backend \(backend) cannot satisfy \(capability) required by \(modelId)\(hint.isEmpty ? "" : ". Hint: \(hint)")"
+        case .missingArtifact(let message):
+            return "Missing artifact: \(message)"
+        case .unsupportedModelCapability(let message):
+            return "Unsupported model capability: \(message)"
+        case .unsupportedBackendCapability(let message):
+            return "Unsupported backend capability: \(message)"
+        case .invalidImage(let message):
+            return "Invalid image: \(message)"
         }
     }
 }
