@@ -1,0 +1,23 @@
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_638ba5b64118a2::t_84791dd09193db 378-385
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_638ba5b64118a2::t_1b434667cdd581 322-324
+crates/xybrid-ffi-facade/src/lib.rs
+  s_638ba5b64118a2::t_fafe10f092949d 434-439
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "f474cf06c399ad0d00fe8c6b85f32d8a3be3a082",
+  "prompts": {},
+  "sessions": {
+    "s_638ba5b64118a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b4b54ac-f053-400e-9d6a-7036cbfc497e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
