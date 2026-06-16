@@ -1,0 +1,25 @@
+.github/workflows/build-flutter.yml
+  s_1d904eb4890722::t_3aa8b7a0e85e9c 14-28
+.github/workflows/build-apple.yml
+  s_1d904eb4890722::t_7a016d165fee2f 19-38
+.github/workflows/build-android.yml
+  s_1d904eb4890722::t_539a1ca7559c9c 20-40
+.github/workflows/build-react-native.yml
+  s_1d904eb4890722::t_e700cd4485ed58 14-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "2a6765fd48d70805d09be26fd7e36f938c75038b",
+  "prompts": {},
+  "sessions": {
+    "s_1d904eb4890722": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab0aab25-08f1-4d50-b66e-2f5814ae50c1",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
