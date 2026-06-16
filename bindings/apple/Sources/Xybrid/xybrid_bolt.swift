@@ -280,6 +280,10 @@ public enum XybridError: Hashable, Equatable, Sendable, Error {
     case circuitOpen(message: String)
     case rateLimited(retryAfterSecs: UInt64)
     case timeout(timeoutMs: UInt64)
+    case missingArtifact(message: String)
+    case unsupportedModelCapability(message: String)
+    case unsupportedBackendCapability(message: String)
+    case invalidImage(message: String)
 
 }
 
@@ -323,6 +327,14 @@ extension XybridError: WireCodable {
             return .rateLimited(retryAfterSecs: reader.readU64())
         case 17:
             return .timeout(timeoutMs: reader.readU64())
+        case 18:
+            return .missingArtifact(message: reader.readString())
+        case 19:
+            return .unsupportedModelCapability(message: reader.readString())
+        case 20:
+            return .unsupportedBackendCapability(message: reader.readString())
+        case 21:
+            return .invalidImage(message: reader.readString())
         default:
             fatalError("Invalid XybridError tag: \(tag)")
         }
@@ -382,6 +394,18 @@ extension XybridError: WireCodable {
         case let .timeout(timeoutMs):
             writer.writeI32(17)
             writer.writeU64(timeoutMs)
+        case let .missingArtifact(message):
+            writer.writeI32(18)
+            writer.writeString(message)
+        case let .unsupportedModelCapability(message):
+            writer.writeI32(19)
+            writer.writeString(message)
+        case let .unsupportedBackendCapability(message):
+            writer.writeI32(20)
+            writer.writeString(message)
+        case let .invalidImage(message):
+            writer.writeI32(21)
+            writer.writeString(message)
         }
     }
 }
@@ -390,6 +414,8 @@ public enum XybridEnvelopeKind: Hashable, Equatable, Sendable {
     case text(text: String)
     case audio(bytes: Data)
     case embedding(values: [Float])
+    case image(bytes: Data, format: String)
+    case multiPart(parts: [XybridEnvelope])
 
 }
 
@@ -403,6 +429,10 @@ extension XybridEnvelopeKind: WireCodable {
             return .audio(bytes: reader.readBytes())
         case 2:
             return .embedding(values: reader.readBlittableArray() as [Float])
+        case 3:
+            return .image(bytes: reader.readBytes(), format: reader.readString())
+        case 4:
+            return .multiPart(parts: reader.readArray { reader in XybridEnvelope.decode(from: &reader) })
         default:
             fatalError("Invalid XybridEnvelopeKind tag: \(tag)")
         }
@@ -419,6 +449,13 @@ extension XybridEnvelopeKind: WireCodable {
         case let .embedding(values):
             writer.writeI32(2)
             writer.writeBlittableArray(values)
+        case let .image(bytes, format):
+            writer.writeI32(3)
+            writer.writeBytes(bytes)
+            writer.writeString(format)
+        case let .multiPart(parts):
+            writer.writeI32(4)
+            writer.writeArray(parts) { writer, item in item.encode(to: &writer) }
         }
     }
 }
