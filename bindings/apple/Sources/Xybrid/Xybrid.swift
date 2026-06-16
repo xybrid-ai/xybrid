@@ -152,6 +152,15 @@ public enum Xybrid {
 /// Call `run(envelope:)` to execute inference on input data.
 public typealias Model = XybridModel
 
+// The bolt handle wraps a thread-safe, `Arc`-backed Rust model (the facade's
+// types are `Send + Sync`), so the handle is safe to move across threads and
+// actors — e.g. loading or running on a `Task.detached` background executor,
+// which is the recommended pattern since bolt's `load`/`run` are blocking.
+// boltffi does not emit `Sendable` on generated handle types yet, so declare it
+// here in the hand-written wrapper (regen-safe — never overwritten by
+// `boltffi generate`, unlike `xybrid_bolt.swift`).
+extension XybridModel: @unchecked Sendable {}
+
 public extension XybridModel {
     /// Run inference with the model's default options.
     ///
