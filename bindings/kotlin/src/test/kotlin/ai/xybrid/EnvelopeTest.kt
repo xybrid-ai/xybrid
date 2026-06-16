@@ -34,8 +34,9 @@ class EnvelopeTest {
         val envelope = Envelope.userMessage("describe this", listOf(image))
 
         val multipart = envelope.kind as XybridEnvelopeKind.MultiPart
-        assertEquals("describe this", (multipart.parts.first().kind as XybridEnvelopeKind.Text).text)
-        assertEquals(listOf(image), multipart.parts.drop(1))
+        assertEquals(2, multipart.parts.size)
+        assertEquals("describe this", (multipart.parts[0].kind as XybridEnvelopeKind.Text).text)
+        assertEquals(image, multipart.parts[1])
         assertTrue(envelope.metadata.any { it.key == "xybrid.role" && it.value == "user" })
     }
 
