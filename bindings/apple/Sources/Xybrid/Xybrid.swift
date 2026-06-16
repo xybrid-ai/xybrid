@@ -172,6 +172,52 @@ public extension XybridModel {
     }
 }
 
+// MARK: - Async conveniences
+//
+// bolt's `load` and `run` are synchronous + blocking. These wrappers restore the
+// pre-migration `async` API shape: each runs the blocking call on a detached
+// background executor (`Task.detached`), so callers `await` without blocking the
+// calling thread or actor — exactly what UI code wants for model load / inference.
+//
+// (boltffi *can* export `async fn` natively, but the SDK's async path uses tokio
+// `spawn_blocking`, which panics without an ambient tokio runtime context that
+// boltffi's own future driver does not establish. Wrapping the synchronous call
+// off-thread is therefore the correct, low-risk way to surface async today.)
+public extension XybridModel {
+    /// Load a model from the xybrid registry without blocking the caller.
+    static func fromRegistryAsync(_ id: String) async throws -> XybridModel {
+        try await Task.detached { try XybridModel(fromRegistry: id) }.value
+    }
+
+    /// Load a model from a local directory without blocking the caller.
+    static func fromDirectoryAsync(_ path: String) async throws -> XybridModel {
+        try await Task.detached { try XybridModel(fromDirectory: path) }.value
+    }
+
+    /// Load a model from a local `.xyb` bundle without blocking the caller.
+    static func fromBundleAsync(_ path: String) async throws -> XybridModel {
+        try await Task.detached { try XybridModel(fromBundle: path) }.value
+    }
+
+    /// Resolve and load a model from a HuggingFace repo without blocking the caller.
+    static func fromHuggingfaceAsync(_ repo: String) async throws -> XybridModel {
+        try await Task.detached { try XybridModel(fromHuggingface: repo) }.value
+    }
+
+    /// Run inference without blocking the calling thread or actor.
+    func runAsync(
+        envelope: XybridEnvelope,
+        options: XybridRunOptions? = nil
+    ) async throws -> XybridResult {
+        try await Task.detached { try self.run(envelope: envelope, options: options) }.value
+    }
+
+    /// Warm up the model without blocking the calling thread or actor.
+    func warmupAsync() async throws {
+        try await Task.detached { try self.warmup() }.value
+    }
+}
+
 /// Input data for model inference.
 /// Use `.audio(pcmData:sampleRate:channels:)` or `.text(_:voice:speed:)`.
 public typealias Envelope = XybridEnvelope

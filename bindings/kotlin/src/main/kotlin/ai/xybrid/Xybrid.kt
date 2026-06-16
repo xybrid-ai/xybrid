@@ -19,6 +19,8 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 // -- SDK Initialization --
 
@@ -164,6 +166,43 @@ typealias Model = XybridModel
  * generation config, abort signals, or cloud-fallback behaviour.
  */
 fun XybridModel.run(envelope: XybridEnvelope): XybridResult = this.run(envelope, null)
+
+// -- Async (suspend) conveniences --
+//
+// bolt's load/run are synchronous + blocking. These suspend wrappers restore the
+// pre-migration suspend API shape: each runs the blocking call on
+// `Dispatchers.IO`, so coroutine callers `suspend` without blocking the calling
+// thread (e.g. the main/UI thread).
+//
+// (boltffi *can* export `async fn` natively, but the SDK's async path uses tokio
+// `spawn_blocking`, which needs an ambient tokio runtime context that boltffi's
+// future driver does not establish. Wrapping the synchronous call on a worker
+// dispatcher is therefore the correct, low-risk way to surface suspend today.)
+
+/** Load a model from the xybrid registry off the caller's thread. */
+suspend fun XybridModel.Companion.fromRegistryAsync(id: String): XybridModel =
+    withContext(Dispatchers.IO) { XybridModel(id) }
+
+/** Load a model from a local directory off the caller's thread. */
+suspend fun XybridModel.Companion.fromDirectoryAsync(path: String): XybridModel =
+    withContext(Dispatchers.IO) { fromDirectory(path) }
+
+/** Load a model from a local `.xyb` bundle off the caller's thread. */
+suspend fun XybridModel.Companion.fromBundleAsync(path: String): XybridModel =
+    withContext(Dispatchers.IO) { fromBundle(path) }
+
+/** Resolve and load a model from a HuggingFace repo off the caller's thread. */
+suspend fun XybridModel.Companion.fromHuggingfaceAsync(repo: String): XybridModel =
+    withContext(Dispatchers.IO) { fromHuggingface(repo) }
+
+/** Run inference off the caller's thread (on [Dispatchers.IO]). */
+suspend fun XybridModel.runAsync(
+    envelope: XybridEnvelope,
+    options: XybridRunOptions? = null,
+): XybridResult = withContext(Dispatchers.IO) { this@runAsync.run(envelope, options) }
+
+/** Warm up the model off the caller's thread (on [Dispatchers.IO]). */
+suspend fun XybridModel.warmupAsync() = withContext(Dispatchers.IO) { this@warmupAsync.warmup() }
 
 /** The result of a model inference operation. */
 typealias Result = XybridResult
