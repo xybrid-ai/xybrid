@@ -1,0 +1,19 @@
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_93e9e173c209bc::t_d06bd2ae058209 428-431
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "ef182447d5c90ca5e2506df0fdc62cd545da0ca8",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
