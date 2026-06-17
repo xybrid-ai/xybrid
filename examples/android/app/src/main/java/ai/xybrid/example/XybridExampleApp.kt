@@ -38,6 +38,7 @@ import ai.xybrid.example.state.InferenceState
 import ai.xybrid.example.components.ModelLoadingCard
 import ai.xybrid.example.components.InferenceCard
 import ai.xybrid.example.components.AboutCard
+import ai.xybrid.run
 
 /**
  * Main Xybrid Example App composable.
