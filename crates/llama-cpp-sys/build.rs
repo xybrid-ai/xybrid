@@ -130,7 +130,20 @@ fn generate_bindings(llama_cpp_dir: &Path, out_dir: &Path, ndk_root: Option<&str
     // which resolves headers (`<stdio.h>` etc.) relative to its own
     // sysroot — wrong on cross-builds without explicit overrides.
     // Mirrors the pattern `mlx-c-sys/build.rs` uses for the macOS slice.
-    builder = builder.clang_arg(format!("--target={target}"));
+    // clang 21+ rejects Rust's iOS *simulator* triple `aarch64-apple-ios-sim`
+    // verbatim ("error: version 'sim' in target triple ... is invalid") and
+    // wants the canonical `arm64-apple-ios-simulator` form. Older clang (e.g.
+    // the Xcode on the CI runners) accepted `-sim`, which is why this only bites
+    // on newer Xcode locally. Translate just the simulator triple for libclang;
+    // device/other triples pass through unchanged. The deployment-version and
+    // codegen target are set elsewhere (rustflags / cc), so the version is
+    // intentionally omitted here — bindgen only needs a triple clang will parse.
+    let clang_target = if target == "aarch64-apple-ios-sim" {
+        "arm64-apple-ios-simulator"
+    } else {
+        target.as_str()
+    };
+    builder = builder.clang_arg(format!("--target={clang_target}"));
     if target_os == "macos" || target_os == "ios" {
         let sdk = if target_os == "ios" {
             if target.contains("sim") {
