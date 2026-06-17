@@ -1,0 +1,21 @@
+tools/scripts/measure-binary-size.sh
+  s_93e9e173c209bc::t_8bb1208d67a36e 1-87
+crates/xybrid-bolt/Cargo.toml
+  s_93e9e173c209bc::t_13c0210e6c0662 36-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "da5ad2ec687ffb82f50b12211dfe117b5bfec2e9",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
