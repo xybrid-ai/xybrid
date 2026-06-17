@@ -30,6 +30,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PRESET="${PRESET:-platform-macos}"
 PKG="xybrid-bolt"
 LIB="libxybrid_bolt"   # crate lib name (xybrid-bolt -> underscored)
+# cdylib extension is .dylib on macOS, .so on Linux (e.g. PRESET=platform-desktop).
+SO_EXT="so"; [ "$(uname)" = "Darwin" ] && SO_EXT="dylib"
 
 # Separate target dirs: the two builds differ only by the mtmd cmake target;
 # a shared dir would let cargo reuse the wrong native objects across the flip.
@@ -59,7 +61,7 @@ fi
 
 bytes () { stat -f%z "$1" 2>/dev/null || stat -c%s "$1"; }   # macOS | Linux
 stripped_bytes () {
-  local src="$1" tmp; tmp="$(mktemp)"; cp "$src" "$tmp"
+  local src="$1" tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/binary-size.XXXXXX")"; cp "$src" "$tmp"
   if   command -v llvm-strip >/dev/null 2>&1; then llvm-strip -x "$tmp" 2>/dev/null || true
   elif command -v strip      >/dev/null 2>&1; then strip      -x "$tmp" 2>/dev/null || true; fi
   bytes "$tmp"; rm -f "$tmp"
@@ -81,7 +83,7 @@ echo "Native vision (mtmd) size delta — all figures MiB"
 printf '%-30s %10s %10s %9s %12s %12s %10s\n' \
   artifact base vision delta base-strip vision-strip delta-strip
 row "$LIB.a  (staticlib ~ iOS .a)"   "$BASE_TGT/release/$LIB.a"     "$VIS_TGT/release/$LIB.a"
-row "$LIB.dylib (cdylib ~ Android .so)" "$BASE_TGT/release/$LIB.dylib" "$VIS_TGT/release/$LIB.dylib"
+row "$LIB.$SO_EXT (cdylib ~ Android .so)" "$BASE_TGT/release/$LIB.$SO_EXT" "$VIS_TGT/release/$LIB.$SO_EXT"
 echo
 echo "Preset: $PRESET   Host: $(rustc -vV | sed -n 's/^host: //p')"
 echo "Note: host proxy, not the shipped per-platform delta (see header)."
