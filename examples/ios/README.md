@@ -139,18 +139,19 @@ Xybrid.initialize(
 ### Load Model
 
 ```swift
-let loader = XybridModelLoader.fromRegistry(modelId: "kokoro-82m")
-let model = try await loader.load()
-let voices = model.voices()  // [XybridVoiceInfo]?
+// Loading is synchronous + blocking — call it off the main thread
+// (e.g. inside `Task.detached`) so the UI stays responsive.
+let model = try Model(fromRegistry: "kokoro-82m")
+let voices = model.voices()  // [XybridVoiceInfo]
 ```
 
 ### Run Inference
 
 ```swift
 let envelope = XybridEnvelope.text(text: "Hello!", voiceId: "af", speed: 1.0)
-let result = try await model.run(envelope: envelope, config: nil)
+let result = try model.run(envelope: envelope)
 
-if result.success, let audio = result.audioBytes {
+if let audio = result.audioBytes {
     // Play audio (wrap in WAV header for AVAudioPlayer)
 }
 ```
@@ -164,9 +165,17 @@ let config = XybridGenerationConfig(
     topP: 0.9,
     minP: nil, topK: nil,
     repetitionPenalty: nil,
-    stopSequences: nil
+    stopSequences: []
 )
-let result = try await model.run(envelope: envelope, config: config)
+let result = try model.run(
+    envelope: envelope,
+    options: XybridRunOptions(
+        generationConfig: config,
+        abortOn: [],
+        fallbackToCloud: false,
+        maxGraceTokens: 0
+    )
+)
 ```
 
 ### Vision (image → VLM, batch)
@@ -174,9 +183,17 @@ let result = try await model.run(envelope: envelope, config: config)
 ```swift
 // Encode a camera frame (or any image) to JPEG, then send it as a multimodal
 // user turn. Batch only on Swift today — see "responsiveness model" above.
-let image = XybridEnvelope.image(bytes: jpegData, format: "jpeg")
-let envelope = XybridEnvelope.userMessage(text: "What do you see?", images: [image])
-let result = try await model.run(envelope: envelope, config: config)
+let image = try XybridEnvelope.image(jpegData, format: "jpeg")
+let envelope = try XybridEnvelope.userMessage("What do you see?", images: [image])
+let result = try model.run(
+    envelope: envelope,
+    options: XybridRunOptions(
+        generationConfig: config,
+        abortOn: [],
+        fallbackToCloud: false,
+        maxGraceTokens: 0
+    )
+)
 let caption = result.text
 ```
 

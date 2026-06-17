@@ -16,6 +16,26 @@ on:
       # Docs-only changes under the paths above (READMEs, examples) never
       # affect the native build — exclude markdown so they don't trigger it.
       - '!**.md'
+  # Run on master merges too, so each merge saves a default-branch-scoped
+  # cache (sccache + rust-cache). GitHub Actions caches are branch-scoped:
+  # a PR run can only restore caches from its own branch or the default
+  # branch. Without this trigger master never builds, so master has no
+  # cache, so every new PR branch's first run is cold (~30 min). Warming
+  # master here lets new branches start warm (~5 min). Keep these paths in
+  # sync with the pull_request trigger above.
+  push:
+    branches: [master]
+    paths:
+      - 'bindings/apple/**'
+      - 'crates/xybrid-bolt/**'
+      - 'crates/xybrid-ffi-facade/**'
+      - 'crates/xybrid-core/**'
+      - 'crates/xybrid-sdk/**'
+      - 'xtask/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - '.github/workflows/build-apple.yml'
+      - '!**.md'
   workflow_dispatch:
 
 concurrency:

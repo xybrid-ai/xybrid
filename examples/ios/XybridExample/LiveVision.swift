@@ -6,16 +6,16 @@
 //  change-gate wakes the VLM only when the scene changes; each gated frame is
 //  sent as a single *batch* multimodal turn:
 //
-//      XybridEnvelope.userMessage(text: prompt, images: [.image(jpeg, "jpeg")])
-//          → model.run(envelope:config:)  →  caption
+//      try XybridEnvelope.userMessage(prompt, images: [.image(jpeg, format: "jpeg")])
+//          → model.run(envelope:options:)  →  caption
 //
 //  Responsiveness model — drop-if-busy (not cancel-and-replace):
-//  The Swift / UniFFI bindings currently expose only the batch `run`. Streaming
-//  tokens, cancel-and-replace, and raw-frame (`imageRaw`) envelopes — the
-//  realtime-vision primitives already in the Flutter SDK — are not yet bound for
-//  Swift. So while one frame is being answered, newly gated frames are *dropped*
-//  rather than preempting the in-flight run. When the streaming/cancellation
-//  surface lands for Swift this loop can move to latest-frame-wins.
+//  The Swift bindings currently expose only the batch, synchronous `run`.
+//  Streaming tokens, cancel-and-replace, and raw-frame (`imageRaw`) envelopes —
+//  the realtime-vision primitives already in the Flutter SDK — are not yet bound
+//  for Swift. So while one frame is being answered, newly gated frames are
+//  *dropped* rather than preempting the in-flight run. When the streaming/
+//  cancellation surface lands for Swift this loop can move to latest-frame-wins.
 //
 
 import AVFoundation
@@ -344,24 +344,35 @@ final class LiveVisionViewModel: ObservableObject {
     private func infer(frame: LiveVisionFrame, prompt: String) async -> LiveVisionHistoryItem {
         do {
             let model = try await ensureModel()
-            let image = XybridEnvelope.image(bytes: frame.jpegData, format: "jpeg")
-            let envelope = XybridEnvelope.userMessage(text: prompt, images: [image])
-            let config = XybridGenerationConfig(
-                maxTokens: 96,
-                temperature: 0.0,
-                topP: 0.9,
-                minP: 0.05,
-                topK: 40,
-                repetitionPenalty: 1.05,
-                stopSequences: []
+            let image = try XybridEnvelope.image(frame.jpegData, format: "jpeg")
+            let envelope = try XybridEnvelope.userMessage(prompt, images: [image])
+            let options = XybridRunOptions(
+                generationConfig: XybridGenerationConfig(
+                    maxTokens: 96,
+                    temperature: 0.0,
+                    topP: 0.9,
+                    minP: 0.05,
+                    topK: 40,
+                    repetitionPenalty: 1.05,
+                    stopSequences: []
+                ),
+                abortOn: [],
+                fallbackToCloud: false,
+                maxGraceTokens: 0
             )
-            let result = try await model.run(envelope: envelope, config: config)
+            // bolt's `run` is synchronous + blocking; execute it OFF the main
+            // actor so the camera feed and UI stay responsive (the realtime gate
+            // already drops frames while a run is in flight).
+            let result = try await Task.detached {
+                try model.run(envelope: envelope, options: options)
+            }.value
+            // Errors throw (caught below), so a returned result is a success.
             let text = result.text?.trimmingCharacters(in: .whitespacesAndNewlines)
             return LiveVisionHistoryItem(
                 question: prompt,
-                answer: (text?.isEmpty == false) ? text! : (result.success ? "(no text returned)" : "Inference failed"),
+                answer: (text?.isEmpty == false) ? text! : "(no text returned)",
                 latencyMs: result.latencyMs,
-                isError: !result.success
+                isError: false
             )
         } catch {
             return LiveVisionHistoryItem(
@@ -375,10 +386,15 @@ final class LiveVisionViewModel: ObservableObject {
 
     private func ensureModel() async throws -> XybridModel {
         if let model, loadedModelId == modelId { return model }
-        status = "Loading \(modelId)…"
-        let loaded = try await XybridModelLoader.fromRegistry(modelId: modelId).load()
+        let targetId = modelId
+        status = "Loading \(targetId)…"
+        // bolt collapsed the loader into a synchronous, blocking
+        // `XybridModel(fromRegistry:)`; load OFF the main actor (see `infer`).
+        let loaded = try await Task.detached {
+            try XybridModel(fromRegistry: targetId)
+        }.value
         model = loaded
-        loadedModelId = modelId
+        loadedModelId = targetId
         return loaded
     }
 
