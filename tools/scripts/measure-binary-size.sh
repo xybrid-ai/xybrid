@@ -52,7 +52,12 @@ build "$VIS_TGT"  "$PRESET,llm-llamacpp-vision"
 # robust to build caching (it inspects the artifact, not the build log).
 VIS_A="$VIS_TGT/release/$LIB.a"
 if command -v nm >/dev/null 2>&1 && [ -f "$VIS_A" ]; then
-  if ! nm "$VIS_A" 2>/dev/null | grep -qi 'mtmd'; then
+  # Use `grep -c`, NOT `grep -q`: under `set -o pipefail`, `grep -q` closes the
+  # pipe on the first match, which makes the (still-running) `nm` die with
+  # SIGPIPE and reports the whole pipeline as failed — a false FATAL even when
+  # mtmd IS present. `grep -c` consumes all of nm's output, so nm exits 0.
+  mtmd_syms="$(nm "$VIS_A" 2>/dev/null | grep -ci 'mtmd' || true)"
+  if [ "${mtmd_syms:-0}" -eq 0 ]; then
     echo "FATAL: vision build linked no mtmd symbols — the llm-llamacpp-vision" >&2
     echo "       feature chain is broken; the measured delta is meaningless." >&2
     exit 1
