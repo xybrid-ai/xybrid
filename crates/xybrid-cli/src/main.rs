@@ -29,6 +29,7 @@ mod commands;
 mod tracing_viz;
 pub mod ui;
 
+use commands::eval::EvalCommand;
 use commands::{CacheCommand, ModelsCommand, TelemetryCommand};
 
 use anyhow::{Context, Result};
@@ -298,6 +299,38 @@ enum Commands {
     Telemetry {
         #[command(subcommand)]
         command: TelemetryCommand,
+    },
+    /// Eval-driven development: score, compare, and gate candidates on evalsets
+    Eval {
+        #[command(subcommand)]
+        command: Option<EvalCommand>,
+    },
+    /// Lint a prompt against a model profile and suggest model-aware rewrites
+    PromptOpt {
+        /// Path to a file containing the prompt.
+        #[arg(value_name = "PROMPT_FILE")]
+        prompt: PathBuf,
+
+        /// Target model id (selects the lint profile; defaults to generic).
+        #[arg(long, value_name = "ID")]
+        model: Option<String>,
+
+        /// Path to a file containing the system prompt, if separate.
+        #[arg(long, value_name = "FILE")]
+        system: Option<PathBuf>,
+
+        /// Write the prompt back to the library as a new version under this id
+        /// (a remote backend hosts the shared library; a local store stands in).
+        #[arg(long, value_name = "PROMPT_ID")]
+        write: Option<String>,
+
+        /// Note recorded with the written version.
+        #[arg(long, value_name = "NOTE")]
+        note: Option<String>,
+
+        /// Prompt library directory (defaults to `~/.xybrid/prompts`).
+        #[arg(long, value_name = "DIR")]
+        library: Option<PathBuf>,
     },
 }
 
@@ -633,6 +666,22 @@ fn run_command(cli: Cli) -> Result<()> {
             platform,
         } => commands::bundle::handle_bundle_command(&model, output, platform.as_deref()),
         Commands::Telemetry { command } => commands::telemetry::handle_telemetry_command(command),
+        Commands::Eval { command } => commands::eval::handle_eval_command(command),
+        Commands::PromptOpt {
+            prompt,
+            model,
+            system,
+            write,
+            note,
+            library,
+        } => commands::prompt_opt::handle_prompt_opt(
+            &prompt,
+            model.as_deref(),
+            system.as_deref(),
+            write.as_deref(),
+            note.as_deref(),
+            library.as_deref(),
+        ),
     }
 }
 

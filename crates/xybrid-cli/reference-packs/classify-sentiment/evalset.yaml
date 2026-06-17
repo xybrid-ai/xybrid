@@ -1,0 +1,7 @@
+name: classify-sentiment
+task: classify
+version: 1
+kind: quality
+labels: [positive, negative, neutral]
+gate:
+  min_quality: 0.8

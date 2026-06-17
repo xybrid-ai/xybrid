@@ -153,6 +153,7 @@ use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 pub mod benchmark;
 pub mod cache;
 pub mod device;
+pub mod eval;
 pub mod llm;
 pub mod metadata_gen;
 pub mod model;
@@ -229,6 +230,7 @@ pub use run_options::{AbortPolicy, AbortReason, AbortSignal, CancellationToken, 
 // without any import.
 pub use xybrid_core::http::RetryableError;
 // Pipeline API (PipelineRef → Pipeline)
+pub use eval::monitor::{BehavioralSignal, StructuralSignals};
 pub use pipeline::{
     // Config types for FFI bindings (Flutter, Kotlin, Swift)
     AudioInputConfig,
@@ -252,7 +254,7 @@ pub use pipeline::{
     TextInputConfig,
     Xybrid,
 };
-pub use result::{InferenceMetrics, InferenceResult, OutputType, StageLatency};
+pub use result::{Feedback, InferenceMetrics, InferenceResult, OutputType, Rating, StageLatency};
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)

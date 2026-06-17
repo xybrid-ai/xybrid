@@ -2786,6 +2786,294 @@ pub fn publish_model_download(
     publish_telemetry_event(event);
 }
 
+/// Max bytes captured per `Feedback` payload field (correction / note).
+const FEEDBACK_PAYLOAD_MAX_BYTES: usize = 8192;
+
+/// Truncate a payload string to the size cap on a UTF-8 boundary.
+fn truncate_feedback_payload(s: &str) -> String {
+    if s.len() <= FEEDBACK_PAYLOAD_MAX_BYTES {
+        return s.to_string();
+    }
+    let mut end = FEEDBACK_PAYLOAD_MAX_BYTES;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
+}
+
+/// Build a `Feedback` telemetry event — the eval-harness "flag" verb.
+///
+/// **Metadata-only by default.** The event always carries `trace_id`,
+/// `model_id`, `task`, and `rating` (all attribution, no user content). The
+/// `expected` correction and `note` are **payload** and are included ONLY when
+/// `capture` is `true` (the per-call opt-in). Payload fields are size-capped.
+///
+/// Pure builder — does not publish, so the privacy default is unit-testable
+/// (a canary string in `expected` must never appear in the serialized event
+/// when `capture` is false). Anonymous mode is enforced structurally elsewhere:
+/// with no exporter configured, [`publish_telemetry_event`] has no subscribers
+/// and the event is dropped.
+fn build_feedback_event(
+    trace_id: Option<&str>,
+    model_id: &str,
+    task: Option<&str>,
+    rating: Option<&str>,
+    expected: Option<&str>,
+    note: Option<&str>,
+    capture: bool,
+) -> TelemetryEvent {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    let mut data = serde_json::Map::new();
+    if let Some(t) = trace_id {
+        data.insert("trace_id".to_string(), serde_json::json!(t));
+    }
+    data.insert("model_id".to_string(), serde_json::json!(model_id));
+    if let Some(t) = task {
+        data.insert("task".to_string(), serde_json::json!(t));
+    }
+    if let Some(r) = rating {
+        data.insert("rating".to_string(), serde_json::json!(r));
+    }
+    // Payload — gated entirely behind the explicit per-call opt-in.
+    if capture {
+        if let Some(e) = expected {
+            data.insert(
+                "expected".to_string(),
+                serde_json::json!(truncate_feedback_payload(e)),
+            );
+        }
+        if let Some(n) = note {
+            data.insert(
+                "note".to_string(),
+                serde_json::json!(truncate_feedback_payload(n)),
+            );
+        }
+        data.insert("payload_captured".to_string(), serde_json::json!(true));
+    }
+
+    TelemetryEvent {
+        event_type: "Feedback".to_string(),
+        stage_name: None,
+        target: None,
+        latency_ms: None,
+        error: None,
+        data: Some(serde_json::Value::Object(data).to_string()),
+        timestamp_ms: now_ms,
+    }
+}
+
+/// Publish a `Feedback` event for a flagged inference result.
+///
+/// Honors [`crate::telemetry_optout::is_telemetry_opted_out`] (no event when
+/// opted out — the same attribution-surface argument as `ModelDownload`). When
+/// `capture` is false the event is metadata-only.
+#[allow(clippy::too_many_arguments)]
+pub fn publish_feedback_event(
+    trace_id: Option<&str>,
+    model_id: &str,
+    task: Option<&str>,
+    rating: Option<&str>,
+    expected: Option<&str>,
+    note: Option<&str>,
+    capture: bool,
+) {
+    if crate::telemetry_optout::is_telemetry_opted_out() {
+        return;
+    }
+    let event = build_feedback_event(trace_id, model_id, task, rating, expected, note, capture);
+    publish_telemetry_event(event);
+}
+
+/// Build a continuous-monitoring `Signal` event — the implicit complement to
+/// `Feedback` (continuous quality monitoring). `kind` is `"behavioral"`
+/// (regenerate/edit/…) or `"structural"` (truncation/repetition/…); `name` is
+/// the specific signal. **Always metadata-only** — signals never carry payload;
+/// any structural detail in `extra` is derived metadata (counts/flags), not user
+/// content. Pure builder so the metadata-only property is unit-testable.
+fn build_signal_event(
+    trace_id: Option<&str>,
+    model_id: &str,
+    task: Option<&str>,
+    kind: &str,
+    name: &str,
+    extra: Option<serde_json::Value>,
+) -> TelemetryEvent {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    let mut data = serde_json::Map::new();
+    if let Some(t) = trace_id {
+        data.insert("trace_id".to_string(), serde_json::json!(t));
+    }
+    data.insert("model_id".to_string(), serde_json::json!(model_id));
+    if let Some(t) = task {
+        data.insert("task".to_string(), serde_json::json!(t));
+    }
+    data.insert("signal_kind".to_string(), serde_json::json!(kind));
+    data.insert("signal".to_string(), serde_json::json!(name));
+    // Derived structural metadata (flags/scores) only — never output text.
+    if let Some(serde_json::Value::Object(fields)) = extra {
+        for (k, v) in fields {
+            if matches!(v, serde_json::Value::Bool(_) | serde_json::Value::Number(_)) {
+                data.insert(k, v);
+            }
+        }
+    }
+
+    TelemetryEvent {
+        event_type: "Signal".to_string(),
+        stage_name: None,
+        target: None,
+        latency_ms: None,
+        error: None,
+        data: Some(serde_json::Value::Object(data).to_string()),
+        timestamp_ms: now_ms,
+    }
+}
+
+/// Publish a monitoring `Signal` event (opt-out gated, metadata-only).
+pub fn publish_signal_event(
+    trace_id: Option<&str>,
+    model_id: &str,
+    task: Option<&str>,
+    kind: &str,
+    name: &str,
+    extra: Option<serde_json::Value>,
+) {
+    if crate::telemetry_optout::is_telemetry_opted_out() {
+        return;
+    }
+    let event = build_signal_event(trace_id, model_id, task, kind, name, extra);
+    publish_telemetry_event(event);
+}
+
+#[cfg(test)]
+mod signal_event_tests {
+    use super::*;
+
+    #[test]
+    fn behavioral_signal_is_metadata_only_and_joinable() {
+        let event = build_signal_event(
+            Some("tr_9"),
+            "qwen3.5-0.8b",
+            Some("chat"),
+            "behavioral",
+            "regenerated",
+            None,
+        );
+        assert_eq!(event.event_type, "Signal");
+        let data = event.data.unwrap();
+        assert!(data.contains("tr_9")); // trace_id joinable
+        assert!(data.contains("regenerated"));
+        assert!(data.contains("behavioral"));
+    }
+
+    #[test]
+    fn structural_extra_keeps_only_flags_and_numbers_no_text() {
+        // Even if a caller passes a stray string field, it is dropped — the
+        // Signal event can never carry output text.
+        let extra = serde_json::json!({
+            "truncated": true,
+            "repetition_score": 0.83,
+            "leaked_text": "CANARY_should_not_appear",
+        });
+        let event = build_signal_event(
+            Some("tr"),
+            "m",
+            None,
+            "structural",
+            "truncated",
+            Some(extra),
+        );
+        let data = event.data.unwrap();
+        assert!(data.contains("truncated"));
+        assert!(data.contains("repetition_score"));
+        assert!(
+            !data.contains("CANARY_should_not_appear"),
+            "string fields must be dropped: {data}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod feedback_event_tests {
+    use super::*;
+
+    const CANARY: &str = "CANARY_PII_7f3a91";
+
+    #[test]
+    fn metadata_only_by_default_never_leaks_payload() {
+        // A correction AND a note, both carrying the canary, with capture=false.
+        let event = build_feedback_event(
+            Some("tr_1"),
+            "qwen3.5-0.8b",
+            Some("classify"),
+            Some("down"),
+            Some(CANARY),
+            Some(CANARY),
+            false,
+        );
+        // The strongest assertion: the canary appears in ZERO bytes of the
+        // fully-serialized wire event.
+        let wire = serde_json::to_string(&event).unwrap();
+        assert!(
+            !wire.contains(CANARY),
+            "payload leaked without opt-in: {wire}"
+        );
+        // Attribution metadata is still present (the event is useful for
+        // failure-rate counters).
+        assert!(wire.contains("tr_1"));
+        assert!(wire.contains("classify"));
+        assert!(wire.contains("down"));
+        assert_eq!(event.event_type, "Feedback");
+    }
+
+    #[test]
+    fn opt_in_capture_includes_payload() {
+        // The companion test: with capture=true the canary IS present — proving
+        // the leak test above can actually detect a leak (non-tautological).
+        let event = build_feedback_event(
+            Some("tr_1"),
+            "m",
+            None,
+            Some("down"),
+            Some(CANARY),
+            None,
+            true,
+        );
+        let wire = serde_json::to_string(&event).unwrap();
+        assert!(
+            wire.contains(CANARY),
+            "opt-in capture should include payload"
+        );
+    }
+
+    #[test]
+    fn payload_is_size_capped() {
+        let big = "x".repeat(FEEDBACK_PAYLOAD_MAX_BYTES * 2);
+        let event = build_feedback_event(None, "m", None, Some("up"), Some(&big), None, true);
+        let data = event.data.unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&data).unwrap();
+        let captured = parsed["expected"].as_str().unwrap();
+        assert!(captured.len() <= FEEDBACK_PAYLOAD_MAX_BYTES);
+    }
+
+    #[test]
+    fn rating_only_feedback_has_no_payload_keys() {
+        let event =
+            build_feedback_event(Some("tr"), "m", Some("chat"), Some("up"), None, None, true);
+        let data = event.data.unwrap();
+        assert!(!data.contains("expected"));
+        assert!(!data.contains("note"));
+    }
+}
+
 /// Publish a telemetry event to all registered subscribers
 pub fn publish_telemetry_event(event: TelemetryEvent) {
     // Span snapshot: capture spans synchronously at publish time.

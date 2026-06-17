@@ -7,6 +7,87 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 
+use crate::model::SdkError;
+
+/// A thumbs rating on a result (result flagging).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Rating {
+    /// Keep this good result as a regression anchor.
+    Up,
+    /// "That's wrong" — mint a failure case.
+    Down,
+}
+
+impl Rating {
+    /// Wire label (`"up"` / `"down"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Rating::Up => "up",
+            Rating::Down => "down",
+        }
+    }
+}
+
+/// Developer/user feedback on a result — the "flag" verb of the eval harness.
+///
+/// **Privacy default:** the `expected` correction and `note` are payload and are
+/// only emitted with an explicit per-call opt-in ([`Feedback::capture`]). Without
+/// it, [`InferenceResult::report`] emits a metadata-only event (trace id, model,
+/// task, rating).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Feedback {
+    /// Thumbs rating, if any.
+    pub rating: Option<Rating>,
+    /// A correction — the output that should have happened (payload).
+    pub expected: Option<String>,
+    /// A free-text note (payload).
+    pub note: Option<String>,
+    /// Per-call opt-in to capture `expected` / `note`. Default `false`
+    /// (metadata-only).
+    pub capture_payload: bool,
+}
+
+impl Feedback {
+    /// A bare "that's wrong" flag (thumbs down, metadata-only).
+    pub fn down() -> Self {
+        Self {
+            rating: Some(Rating::Down),
+            ..Self::default()
+        }
+    }
+
+    /// A "that's good" flag (thumbs up — keep as a regression anchor).
+    pub fn up() -> Self {
+        Self {
+            rating: Some(Rating::Up),
+            ..Self::default()
+        }
+    }
+
+    /// A correction: thumbs down plus the expected output. The correction is a
+    /// payload — it is only captured if [`Feedback::capture`] is also set.
+    pub fn correction(expected: impl Into<String>) -> Self {
+        Self {
+            rating: Some(Rating::Down),
+            expected: Some(expected.into()),
+            ..Self::default()
+        }
+    }
+
+    /// Attach a free-text note (payload — capture-gated).
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = Some(note.into());
+        self
+    }
+
+    /// Opt in to capturing the payload (`expected` / `note`) on this call.
+    pub fn capture(mut self) -> Self {
+        self.capture_payload = true;
+        self
+    }
+}
+
 /// Per-stage latency entry for pipeline runs.
 ///
 /// One entry per executed stage; the `stage_id` matches the stage name in the
@@ -148,6 +229,9 @@ pub struct InferenceResult {
     model_id: String,
     /// Typed metrics parsed from `envelope.metadata`
     metrics: InferenceMetrics,
+    /// Originating inference `trace_id`, when known. Lets `report()` join a
+    /// `Feedback` event back to the trace that produced this result.
+    trace_id: Option<String>,
 }
 
 impl InferenceResult {
@@ -162,6 +246,7 @@ impl InferenceResult {
             latency_ms,
             model_id: model_id.into(),
             metrics,
+            trace_id: None,
         }
     }
 
@@ -179,7 +264,15 @@ impl InferenceResult {
             latency_ms,
             model_id: model_id.into(),
             metrics,
+            trace_id: None,
         }
+    }
+
+    /// Attach the originating inference `trace_id` (builder). Used by the run
+    /// paths so `report()` can join a `Feedback` event to the trace.
+    pub fn with_trace_id(mut self, trace_id: impl Into<String>) -> Self {
+        self.trace_id = Some(trace_id.into());
+        self
     }
 
     // ========================================================================
@@ -310,6 +403,144 @@ impl InferenceResult {
     /// Get all metadata.
     pub fn all_metadata(&self) -> &std::collections::HashMap<String, String> {
         &self.envelope.metadata
+    }
+
+    /// The originating inference `trace_id`, if known.
+    pub fn trace_id(&self) -> Option<&str> {
+        self.trace_id.as_deref()
+    }
+
+    /// Flag this result for the eval harness — the "flag" verb of
+    /// flag → collect → compare → gate → ship.
+    ///
+    /// Emits a `Feedback` telemetry event on the existing exporter (batching /
+    /// circuit-breaker / retry for free). The event is **metadata-only**
+    /// (`trace_id`, `model_id`, `task`, `rating`) unless `feedback` opts in to
+    /// payload capture ([`Feedback::capture`]), and is suppressed entirely when
+    /// telemetry is opted out / anonymous (no exporter → no emission).
+    ///
+    /// ```no_run
+    /// # use xybrid_sdk::{result::InferenceResult, Feedback};
+    /// # fn _ex(result: InferenceResult) -> Result<(), xybrid_sdk::SdkError> {
+    /// result.report(Feedback::down())?;                   // "that's wrong"
+    /// result.report(Feedback::correction("refund"))?;     // wrong + the fix
+    /// result.report(Feedback::up())?;                     // keep good cases
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn report(&self, feedback: Feedback) -> Result<(), SdkError> {
+        let task = self.envelope.metadata.get("task").map(String::as_str);
+        crate::telemetry::publish_feedback_event(
+            self.trace_id.as_deref(),
+            &self.model_id,
+            task,
+            feedback.rating.map(Rating::as_str),
+            feedback.expected.as_deref(),
+            feedback.note.as_deref(),
+            feedback.capture_payload,
+        );
+        Ok(())
+    }
+
+    // ========================================================================
+    // Continuous monitoring (continuous quality monitoring)
+    // ========================================================================
+
+    /// Compute the cheap structural quality guards (Tier A) for this result:
+    /// empty, truncated, repetition loop, refusal, format validity. Reads only
+    /// the output text + the backend finish reason — no judge, no user input.
+    /// Non-text results yield the default (no issue).
+    pub fn structural_signals(&self) -> crate::eval::monitor::StructuralSignals {
+        match self.text() {
+            Some(text) => {
+                let finish_reason = self
+                    .envelope
+                    .metadata
+                    .get("finish_reason")
+                    .map(String::as_str);
+                crate::eval::monitor::structural_signals(text, finish_reason, false)
+            }
+            None => crate::eval::monitor::StructuralSignals::default(),
+        }
+    }
+
+    /// Auto-flag this result if any structural guard tripped — emits a
+    /// metadata-only `Signal` telemetry event (the proactive complement to
+    /// `report()`). Returns whether an issue was flagged. No-op when clean.
+    pub fn flag_structural(&self) -> Result<bool, SdkError> {
+        let signals = self.structural_signals();
+        if !signals.has_issue() {
+            return Ok(false);
+        }
+        let name = if signals.empty {
+            "empty"
+        } else if signals.truncated {
+            "truncated"
+        } else if signals.refusal_suspected {
+            "refusal_suspected"
+        } else if signals.format_valid == Some(false) {
+            "format_invalid"
+        } else {
+            "repetition"
+        };
+        let extra = serde_json::json!({
+            "empty": signals.empty,
+            "truncated": signals.truncated,
+            "repetition_score": signals.repetition_score,
+            "refusal_suspected": signals.refusal_suspected,
+        });
+        let task = self.envelope.metadata.get("task").map(String::as_str);
+        crate::telemetry::publish_signal_event(
+            self.trace_id.as_deref(),
+            &self.model_id,
+            task,
+            "structural",
+            name,
+            Some(extra),
+        );
+        Ok(true)
+    }
+
+    /// Record an implicit behavioral signal against this result (Tier B) — emits
+    /// a metadata-only, `trace_id`-joinable `Signal` event. A `Regenerated`
+    /// signal is treated as a soft 👎. See [`mark_regenerated`](Self::mark_regenerated)
+    /// etc. for the per-signal shorthands.
+    pub fn mark(&self, signal: crate::eval::monitor::BehavioralSignal) -> Result<(), SdkError> {
+        let task = self.envelope.metadata.get("task").map(String::as_str);
+        crate::telemetry::publish_signal_event(
+            self.trace_id.as_deref(),
+            &self.model_id,
+            task,
+            "behavioral",
+            signal.as_str(),
+            None,
+        );
+        Ok(())
+    }
+
+    /// The user accepted/consumed this result (a soft positive).
+    pub fn mark_used(&self) -> Result<(), SdkError> {
+        self.mark(crate::eval::monitor::BehavioralSignal::Used)
+    }
+
+    /// The user asked to regenerate (a soft negative — feeds the inbox).
+    pub fn mark_regenerated(&self) -> Result<(), SdkError> {
+        self.mark(crate::eval::monitor::BehavioralSignal::Regenerated)
+    }
+
+    /// The user edited this result before using it.
+    pub fn mark_edited(&self) -> Result<(), SdkError> {
+        self.mark(crate::eval::monitor::BehavioralSignal::Edited)
+    }
+
+    /// The user copied this result.
+    pub fn mark_copied(&self) -> Result<(), SdkError> {
+        self.mark(crate::eval::monitor::BehavioralSignal::Copied)
+    }
+
+    /// The user dismissed this result (a soft negative).
+    pub fn mark_dismissed(&self) -> Result<(), SdkError> {
+        self.mark(crate::eval::monitor::BehavioralSignal::Dismissed)
     }
 }
 
@@ -469,5 +700,107 @@ mod tests {
             EnvelopeKind::Text(text) => assert_eq!(text, "test"),
             _ => panic!("Expected Text"),
         }
+    }
+
+    #[test]
+    fn feedback_constructors_set_expected_fields() {
+        assert_eq!(Feedback::down().rating, Some(Rating::Down));
+        assert_eq!(Feedback::up().rating, Some(Rating::Up));
+        let c = Feedback::correction("refund");
+        assert_eq!(c.rating, Some(Rating::Down));
+        assert_eq!(c.expected.as_deref(), Some("refund"));
+        // Corrections are metadata-only until explicitly captured.
+        assert!(!c.capture_payload);
+        assert!(c.clone().capture().capture_payload);
+        assert_eq!(c.with_note("n").note.as_deref(), Some("n"));
+    }
+
+    #[test]
+    fn with_trace_id_threads_onto_result() {
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("hi".to_string()),
+            metadata: HashMap::new(),
+        };
+        let result = InferenceResult::new(envelope, "m", 10).with_trace_id("tr_42");
+        assert_eq!(result.trace_id(), Some("tr_42"));
+    }
+
+    #[test]
+    fn report_returns_ok_without_an_exporter() {
+        // No exporter is registered in unit tests, so publish is a no-op; report
+        // must still succeed for every feedback shape.
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("hi".to_string()),
+            metadata: HashMap::new(),
+        };
+        let result = InferenceResult::new(envelope, "m", 10).with_trace_id("tr_1");
+        assert!(result.report(Feedback::down()).is_ok());
+        assert!(result.report(Feedback::up()).is_ok());
+        assert!(result
+            .report(Feedback::correction("refund").capture())
+            .is_ok());
+    }
+
+    #[test]
+    fn rating_wire_labels() {
+        assert_eq!(Rating::Up.as_str(), "up");
+        assert_eq!(Rating::Down.as_str(), "down");
+    }
+
+    fn text_result(text: &str, finish_reason: Option<&str>) -> InferenceResult {
+        let mut metadata = HashMap::new();
+        if let Some(fr) = finish_reason {
+            metadata.insert("finish_reason".to_string(), fr.to_string());
+        }
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text(text.to_string()),
+            metadata,
+        };
+        InferenceResult::new(envelope, "m", 10).with_trace_id("tr_1")
+    }
+
+    #[test]
+    fn structural_signals_detect_truncation_and_repetition() {
+        let truncated = text_result("a partial answer", Some("length"));
+        assert!(truncated.structural_signals().truncated);
+
+        let looping = text_result("go go go go go go", Some("stop"));
+        assert!(looping.structural_signals().has_issue());
+
+        let clean = text_result("The capital of France is Paris.", Some("stop"));
+        assert!(!clean.structural_signals().has_issue());
+    }
+
+    #[test]
+    fn flag_structural_returns_true_only_on_issue() {
+        // No exporter in tests → publish is a no-op; we assert the detection
+        // decision (the boolean), which is what drives the auto-flag.
+        assert!(text_result("go go go go go go", Some("stop"))
+            .flag_structural()
+            .unwrap());
+        assert!(!text_result("All good here.", Some("stop"))
+            .flag_structural()
+            .unwrap());
+    }
+
+    #[test]
+    fn behavioral_marks_return_ok() {
+        let r = text_result("hello", Some("stop"));
+        assert!(r.mark_regenerated().is_ok());
+        assert!(r.mark_used().is_ok());
+        assert!(r.mark_edited().is_ok());
+        assert!(r.mark_copied().is_ok());
+        assert!(r.mark_dismissed().is_ok());
+    }
+
+    #[test]
+    fn structural_signals_default_for_non_text() {
+        let envelope = Envelope {
+            kind: EnvelopeKind::Audio(vec![1, 2, 3]),
+            metadata: HashMap::new(),
+        };
+        let r = InferenceResult::new(envelope, "tts", 5);
+        assert!(!r.structural_signals().has_issue());
+        assert!(!r.flag_structural().unwrap());
     }
 }

@@ -865,6 +865,72 @@ public sealed class InferenceResult : IDisposable
 public enum OutputType { Text, Audio, Embedding, Unknown }
 ```
 
+### `report()` — the eval-harness flag verb
+
+Mark a result good or bad to feed the eval harness (the "flag" of
+flag → collect → compare → gate → ship). Emits a `Feedback` telemetry event on
+the **existing** exporter (batching / circuit-breaker / retry for free).
+
+```rust
+// Rust (implemented)
+let result = model.run(&envelope, None)?;
+result.report(Feedback::down())?;                      // "that's wrong"
+result.report(Feedback::correction("refund"))?;        // wrong + the right answer
+result.report(Feedback::up())?;                         // keep good cases as anchors
+```
+
+**Privacy is the default.** Without explicit opt-in the event is
+**metadata-only** — `trace_id`, `model_id`, `task`, `rating` — and produces no
+case payload. The correction in `Feedback::correction(...)` is captured only when
+`capture_payload` is set (per-call opt-in via `Feedback::capture()`), and never
+when telemetry is opted out / anonymous (no exporter → no emission). Payload
+events are size-capped.
+
+```rust
+pub struct Feedback {
+    pub rating: Option<Rating>,   // Up | Down
+    pub expected: Option<String>, // a correction (payload — opt-in only)
+    pub note: Option<String>,
+    pub capture_payload: bool,    // per-call opt-in; default false (metadata-only)
+}
+pub enum Rating { Up, Down }
+```
+
+Bindings (Flutter / Swift / Kotlin / Unity): **planned** — the Rust surface is
+the spec-first canonical entry; binding parity follows.
+
+### Continuous monitoring — implicit signals
+
+The proactive complement to `report()`: always-on signals that auto-flag
+candidate failures with no user interaction (continuous quality monitoring).
+Both tiers emit **metadata-only**, `trace_id`-joinable `Signal` telemetry
+events (opt-out respected); they never carry output payload.
+
+```rust
+// Tier B — behavioral hooks the app wires (a regenerate ≈ a soft 👎):
+result.mark_regenerated()?;   // soft negative — feeds the inbox
+result.mark_used()?;          // soft positive
+result.mark_edited()?; result.mark_copied()?; result.mark_dismissed()?;
+
+// Tier A — structural guards, derived on-device from the output:
+let s = result.structural_signals();   // empty / truncated / repetition / refusal / format
+if result.flag_structural()? { /* an issue was auto-flagged */ }
+```
+
+```rust
+pub struct StructuralSignals {
+    pub empty: bool,
+    pub truncated: bool,          // hit the token budget (finish reason = length)
+    pub repetition_score: f64,    // 0..1; >0.5 ⇒ degenerate loop
+    pub refusal_suspected: bool,
+    pub format_valid: Option<bool>, // Some only when a format was expected
+}
+pub enum BehavioralSignal { Used, Regenerated, Edited, Copied, Dismissed }
+```
+
+Bindings: **planned** (Rust implemented). Reference-free judge sampling (Tier C)
+and drift detection (Tier D) are platform-side and tracked separately.
+
 ### InferenceMetrics
 
 Typed inference metrics surfaced on every `XybridResult`. LLM-specific fields

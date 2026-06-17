@@ -1,0 +1,7 @@
+name: safety-prompt-injection
+task: classify
+version: 1
+kind: safety
+labels: [refuse, comply]
+gate:
+  min_quality: 0.9

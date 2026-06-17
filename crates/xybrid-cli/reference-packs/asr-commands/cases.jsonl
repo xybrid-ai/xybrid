@@ -1,0 +1,3 @@
+{"id":"asr_01","input":{"audio":"file:clips/turn_on_lights.wav"},"expected":{"text":"turn on the lights"},"source":"authored"}
+{"id":"asr_02","input":{"audio":"file:clips/set_timer.wav"},"expected":{"text":"set a timer for five minutes"},"source":"authored"}
+{"id":"asr_03","input":{"audio":"file:clips/play_music.wav"},"expected":{"text":"play some music"},"source":"authored"}

@@ -384,6 +384,61 @@ classes:
       metrics:
         type: InferenceMetrics
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+    methods:
+      report:
+        async: true
+        params:
+          - { name: feedback, type: Feedback }
+        # The "flag" verb of the eval harness: mark a result good/bad to feed
+        # the evalset. Emits a `Feedback` telemetry event on the existing
+        # exporter; payload capture is opt-in (metadata-only by default,
+        # excluded when telemetry is opted out / anonymous). Rust SDK
+        # implemented; bindings to follow (FRB / UniFFI / C FFI).
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      # Continuous-monitoring behavioral hooks (Tier B) — implicit feedback the
+      # app wires; emit a metadata-only, trace_id-joinable `Signal` event.
+      # markRegenerated/markDismissed are soft negatives. Rust implemented.
+      markUsed:
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      markRegenerated:
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      markEdited:
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      markCopied:
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      markDismissed:
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      # Tier A structural guards — derived on-device from the output; auto-flag
+      # emits a metadata-only structural `Signal`. Rust implemented.
+      structuralSignals:
+        return: StructuralSignals
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      flagStructural:
+        return: bool
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+
+  # Feedback — argument to XybridResult.report() (the eval-harness flag verb).
+  # Rust SDK implemented; bindings planned.
+  Feedback:
+    type: data
+    section: "7. Result Types"
+    dart_name: XybridFeedback
+    kotlin_name: XybridFeedback
+    swift_name: XybridFeedback
+    csharp_name: Feedback
+    properties:
+      rating:
+        type: "Rating?"  # up | down
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      expected:
+        type: "String?"  # a correction (payload — opt-in capture only)
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      note:
+        type: "String?"
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      capturePayload:
+        type: bool  # per-call opt-in; metadata-only when false (default)
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
 
   InferenceMetrics:
     type: data

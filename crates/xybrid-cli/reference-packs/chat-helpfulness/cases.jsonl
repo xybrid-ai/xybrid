@@ -1,0 +1,5 @@
+{"id":"chat_01","input":{"text":"What is the capital of France?"},"expected":{"text":"The capital of France is Paris."},"source":"authored"}
+{"id":"chat_02","input":{"text":"Convert 10 kilometers to miles."},"expected":{"text":"10 kilometers is about 6.21 miles."},"source":"authored"}
+{"id":"chat_03","input":{"text":"Give me a one-sentence summary of photosynthesis."},"expected":{"text":"Photosynthesis is how plants convert sunlight, water, and carbon dioxide into energy and oxygen."},"source":"authored"}
+{"id":"chat_04","input":{"text":"What does HTTP stand for?"},"expected":{"text":"HTTP stands for HyperText Transfer Protocol."},"source":"authored"}
+{"id":"chat_05","input":{"text":"Name a primary color."},"expected":{"text":"Red is a primary color."},"source":"authored"}

@@ -2253,9 +2253,11 @@ impl XybridModel {
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
         // `_telemetry_ctx` drops here, clearing the pipeline context after
-        // the publish — same ordering as `run_with_context`.
-
-        Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+        // the publish — same ordering as `run_with_context`. Thread the same
+        // `trace_id` onto the result so `result.report()` can join a Feedback
+        // event back to this inference.
+        Ok(InferenceResult::new(output, &self.model_id, latency_ms)
+            .with_trace_id(trace_id.to_string()))
     }
 
     /// Streaming TTS: synthesize `envelope`'s text sentence-chunk by

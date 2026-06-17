@@ -1,0 +1,6 @@
+name: asr-commands
+task: asr
+version: 1
+kind: quality
+gate:
+  min_quality: 0.8

@@ -19,11 +19,13 @@
 
 pub mod bundle;
 pub mod cache;
+pub mod eval;
 pub mod fetch;
 pub mod init;
 pub mod models;
 pub mod pack;
 pub mod pipeline;
+pub mod prompt_opt;
 pub mod repl;
 pub mod run;
 pub mod telemetry;

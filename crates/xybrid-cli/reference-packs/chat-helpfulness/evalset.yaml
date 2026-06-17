@@ -1,0 +1,6 @@
+name: chat-helpfulness
+task: chat
+version: 1
+kind: quality
+gate:
+  min_quality: 0.5

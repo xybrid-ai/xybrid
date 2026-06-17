@@ -1,0 +1,9 @@
+{"id":"sent_01","input":{"text":"This is the best purchase I have made all year."},"expected":{"label":"positive"},"source":"authored"}
+{"id":"sent_02","input":{"text":"The product broke after a single day. Total waste of money."},"expected":{"label":"negative"},"source":"authored"}
+{"id":"sent_03","input":{"text":"It arrived on Tuesday in a cardboard box."},"expected":{"label":"neutral"},"source":"authored"}
+{"id":"sent_04","input":{"text":"Absolutely love it, would recommend to anyone."},"expected":{"label":"positive"},"source":"authored"}
+{"id":"sent_05","input":{"text":"Customer service ignored my emails for a week."},"expected":{"label":"negative"},"source":"authored"}
+{"id":"sent_06","input":{"text":"The meeting is scheduled for 3pm on Thursday."},"expected":{"label":"neutral"},"source":"authored"}
+{"id":"sent_07","input":{"text":"Exceeded my expectations in every way."},"expected":{"label":"positive"},"source":"authored"}
+{"id":"sent_08","input":{"text":"Disappointing quality for the price."},"expected":{"label":"negative"},"source":"authored"}
+{"id":"sent_09","input":{"text":"The invoice lists three line items."},"expected":{"label":"neutral"},"source":"authored"}
