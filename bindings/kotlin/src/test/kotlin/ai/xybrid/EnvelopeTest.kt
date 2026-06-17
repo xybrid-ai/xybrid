@@ -13,19 +13,18 @@ class EnvelopeTest {
 
         val envelope = Envelope.image(bytes, "JPG")
 
-        assertTrue(envelope is XybridEnvelope.Image)
-        val image = envelope as XybridEnvelope.Image
+        val image = envelope.kind as XybridEnvelopeKind.Image
         assertArrayEquals(bytes, image.bytes)
         assertEquals("jpeg", image.format)
     }
 
     @Test
     fun imageRejectsUnsupportedFormat() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
+        val error = assertThrows(XybridError.ConfigError::class.java) {
             Envelope.image(byteArrayOf(1), "gif")
         }
 
-        assertTrue(error.message!!.contains("Unsupported image format"))
+        assertTrue(error.message.contains("Unsupported image format"))
     }
 
     @Test
@@ -34,18 +33,19 @@ class EnvelopeTest {
 
         val envelope = Envelope.userMessage("describe this", listOf(image))
 
-        assertTrue(envelope is XybridEnvelope.UserMessage)
-        val message = envelope as XybridEnvelope.UserMessage
-        assertEquals("describe this", message.text)
-        assertEquals(listOf(image), message.images)
+        val multipart = envelope.kind as XybridEnvelopeKind.MultiPart
+        assertEquals(2, multipart.parts.size)
+        assertEquals("describe this", (multipart.parts[0].kind as XybridEnvelopeKind.Text).text)
+        assertEquals(image, multipart.parts[1])
+        assertTrue(envelope.metadata.any { it.key == "xybrid.role" && it.value == "user" })
     }
 
     @Test
     fun userMessageRejectsNonImageAttachments() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
+        val error = assertThrows(XybridError.ConfigError::class.java) {
             Envelope.userMessage("describe this", listOf(Envelope.text("not an image")))
         }
 
-        assertTrue(error.message!!.contains("only image envelopes"))
+        assertTrue(error.message.contains("only image envelopes"))
     }
 }
