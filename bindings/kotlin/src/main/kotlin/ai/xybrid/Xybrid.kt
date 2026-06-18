@@ -425,4 +425,8 @@ val XybridError.displayMessage: String
         is XybridError.CircuitOpen -> message
         is XybridError.RateLimited -> "Rate limited, retry after $retryAfterSecs seconds"
         is XybridError.Timeout -> "Request timeout after $timeoutMs ms"
+        is XybridError.InvalidImage -> message
+        is XybridError.MissingArtifact -> message
+        is XybridError.UnsupportedModelCapability -> message
+        is XybridError.UnsupportedBackendCapability -> message
     }

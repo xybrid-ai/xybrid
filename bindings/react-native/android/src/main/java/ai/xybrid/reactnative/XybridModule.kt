@@ -373,6 +373,10 @@ class XybridModule(reactContext: ReactApplicationContext) :
       is XybridError.CircuitOpen -> "xybrid_circuit_open"
       is XybridError.RateLimited -> "xybrid_rate_limited"
       is XybridError.Timeout -> "xybrid_timeout"
+      is XybridError.InvalidImage -> "xybrid_invalid_image"
+      is XybridError.MissingArtifact -> "xybrid_missing_artifact"
+      is XybridError.UnsupportedModelCapability -> "xybrid_unsupported_model_capability"
+      is XybridError.UnsupportedBackendCapability -> "xybrid_unsupported_backend_capability"
     }
     promise.reject(code, e.message ?: "Xybrid error", e)
   }

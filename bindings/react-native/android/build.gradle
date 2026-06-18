@@ -24,6 +24,15 @@ buildscript {
 
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
+// Apply the React Native gradle plugin so this library runs codegen for its
+// TurboModule spec (`codegenConfig` in package.json). Without it, RN
+// autolinking references the generated `react_codegen_RNXybridSpec` JNI
+// target but nothing produces it, and any New-Architecture host app fails
+// at CMake with "react_codegen_RNXybridSpec is not built by this project".
+// The plugin itself is made available to every subproject by the host app's
+// settings.gradle (`pluginManagement { includeBuild(reactNativeGradlePlugin) }`).
+// RN 0.80+ is New-Architecture-only, so this is applied unconditionally.
+apply plugin: "com.facebook.react"
 
 def isNewArchitectureEnabled() {
   return rootProject.hasProperty("newArchEnabled") &&
