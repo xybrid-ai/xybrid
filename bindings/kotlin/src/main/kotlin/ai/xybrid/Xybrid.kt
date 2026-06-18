@@ -406,7 +406,7 @@ val XybridVoiceInfo.isFemale: Boolean get() = gender == "female"
 /** User-friendly error message for display. Falls back to a category
  * label when the variant has no embedded message. */
 val XybridError.displayMessage: String
-    get() = message ?: when (this) {
+    get() = when (this) {
         is XybridError.ModelNotFound -> "Model not found: $id"
         is XybridError.DirectoryNotFound -> "Directory not found: $path"
         is XybridError.MetadataNotFound -> "Model metadata not found at $path"
