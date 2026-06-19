@@ -1,6 +1,24 @@
 [alias]
 xtask = "run --package xtask --"
 
+# Network resilience for registry fetches.
+#
+# CI intermittently fails a crate download with curl's
+# `[16] Error in the HTTP2 framing layer` (e.g. fetching `dispatch2`
+# during dependency resolution). That error is a known crates.io CDN /
+# HTTP/2 multiplexing flake — multiple in-flight requests share one
+# HTTP/2 connection and a mid-stream framing hiccup aborts the whole
+# download. Disabling multiplexing makes curl use one request per
+# connection (HTTP/1.1-style), which sidesteps the framing-layer abort,
+# and a higher retry count absorbs the remaining transient blips.
+# Repo-wide so every cargo invocation (CI cross-compiles, local builds)
+# inherits it.
+[net]
+retry = 10
+
+[http]
+multiplexing = false
+
 # Windows MSVC: esaxx-rs (via tokenizers) hardcodes static_crt(true) producing /MT objects.
 # For cdylib (DLL) targets where everything else is /MD, the linker tolerates the metadata
 # mismatch but having both LIBCMT.lib (static) and MSVCRT.lib (dynamic) causes symbol

@@ -14,9 +14,9 @@ import java.time.Instant
 import java.util.UUID
 import java.net.URI
 
-class FfiException(val code: Int, message: String) : Exception(message)
+class FfiException(val code: kotlin.Int, message: kotlin.String) : kotlin.Exception(message)
 
-private fun takeLastErrorMessage(): String =
+private fun takeLastErrorMessage(): kotlin.String =
     Native.boltffi_last_error_message().toString(Charsets.UTF_8)
 
 private inline fun <T> useWireBytes(bytes: ByteArray, block: (java.nio.ByteBuffer) -> T): T {
@@ -267,16 +267,16 @@ class WireReader {
 }
 
 sealed class BoltFFIResult<out T, out E> {
-    data class Ok<T>(val value: T) : BoltFFIResult<T, Nothing>()
-    data class Err<E>(val error: E) : BoltFFIResult<Nothing, E>()
+    data class Ok<T>(val value: T) : BoltFFIResult<T, kotlin.Nothing>()
+    data class Err<E>(val error: E) : BoltFFIResult<kotlin.Nothing, E>()
 
-    val isSuccess: Boolean get() = this is Ok
-    val isFailure: Boolean get() = this is Err
+    val isSuccess: kotlin.Boolean get() = this is Ok
+    val isFailure: kotlin.Boolean get() = this is Err
 
     fun getOrThrow(): T = when (this) {
         is Ok -> value
         is Err -> throw when (error) {
-            is Throwable -> error
+            is kotlin.Throwable -> error
             else -> FfiException(-1, error.toString())
         }
     }
@@ -286,10 +286,10 @@ sealed class BoltFFIResult<out T, out E> {
         is Err -> null
     }
 
-    fun exceptionOrNull(): Throwable? = when (this) {
+    fun exceptionOrNull(): kotlin.Throwable? = when (this) {
         is Ok -> null
         is Err -> when (error) {
-            is Throwable -> error
+            is kotlin.Throwable -> error
             else -> FfiException(-1, error.toString())
         }
     }
@@ -585,7 +585,7 @@ internal object WireWriterPool {
  * Only ever append at the tail, and keep this order in lockstep with
  * [`facade::Error`] and its `code()` table.
  */
-sealed class XybridError : Exception() {
+sealed class XybridError : kotlin.Exception() {
 
     data class ModelNotFound(val id: String) : XybridError()
 
@@ -1481,13 +1481,21 @@ class XybridModel private constructor(internal val handle: Long) : AutoCloseable
     }
 
 
-    fun warmup() {
-        Native.boltffi_xybrid_model_warmup(handle)
+    @Throws(XybridError::class)
+    fun warmup(): Unit {
+        val buf = Native.boltffi_xybrid_model_warmup(handle)
+            ?: throw FfiException(-1, "Null buffer returned")
+        val reader = WireReader(buf)
+        return reader.readResult({ Unit }, { XybridError.decode(reader) }).getOrThrow()
     }
 
 
-    fun unload() {
-        Native.boltffi_xybrid_model_unload(handle)
+    @Throws(XybridError::class)
+    fun unload(): Unit {
+        val buf = Native.boltffi_xybrid_model_unload(handle)
+            ?: throw FfiException(-1, "Null buffer returned")
+        val reader = WireReader(buf)
+        return reader.readResult({ Unit }, { XybridError.decode(reader) }).getOrThrow()
     }
 }
 
@@ -1651,6 +1659,6 @@ private object Native {
     @JvmStatic external fun boltffi_xybrid_model_default_voice(handle: Long): ByteArray?
     @JvmStatic external fun boltffi_xybrid_model_voice(handle: Long, voice_id: ByteArray): ByteArray?
     @JvmStatic external fun boltffi_xybrid_model_run(handle: Long, envelope: ByteBuffer, options: ByteBuffer): ByteArray?
-    @JvmStatic external fun boltffi_xybrid_model_warmup(handle: Long): Unit
-    @JvmStatic external fun boltffi_xybrid_model_unload(handle: Long): Unit
+    @JvmStatic external fun boltffi_xybrid_model_warmup(handle: Long): ByteArray?
+    @JvmStatic external fun boltffi_xybrid_model_unload(handle: Long): ByteArray?
 }
