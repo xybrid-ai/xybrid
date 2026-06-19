@@ -122,6 +122,14 @@ jobs:
       - name: Set NDK environment
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
+      # cargo-ndk drives a single-target Android cross-compile that accepts a
+      # `--features` arg (the bolt pack script the shipped build uses can't).
+      # Same idempotent `which || install` pattern as test-ci.yml /
+      # release.yml / build-unity.yml. Used only by the vision compile-check
+      # below — it does not touch the shipped AAR build path.
+      - name: Install cargo-ndk
+        run: which cargo-ndk || cargo install cargo-ndk
+
       # boltffi CLI provides the `boltffi pack android` the build script
       # calls. Cache the installed binary across runs.
       - name: Cache boltffi CLI
@@ -180,6 +188,22 @@ jobs:
               echo "OK: $LIB"
             done
           done
+
+      - name: Check Android vision build (compile-only, not shipped)
+        # Compile-only gate for the OPT-IN native llama.cpp vision backend
+        # (mtmd) — in NO platform preset and NOT packaged in the AAR above.
+        # Proves the `llm-llamacpp-vision` (mtmd) chain still cross-compiles
+        # for Android, the gate the UniFFI->bolt migration dropped (it pointed
+        # at the deleted `xybrid-uniffi`; retargeted here at `xybrid-sdk`:
+        # platform-android + llm-llamacpp-vision -> xybrid-core/llm-llamacpp-vision
+        # -> xybrid-llama-sys/vision; -sys crate at crates/llama-cpp-sys/).
+        # One ABI (arm64-v8a) exercises the C++/mtmd cmake build, matching the
+        # baseline. `check` is sufficient: crates/llama-cpp-sys/build.rs
+        # compiles llama.cpp + mtmd via cmake on `check` (gated on
+        # CARGO_FEATURE_VISION). cargo-ndk uses ANDROID_NDK_HOME (set above)
+        # for the NDK toolchain; llama.cpp source comes from build.rs's
+        # OUT_DIR clone, same as the shipped llm-llamacpp build.
+        run: cargo ndk --target aarch64-linux-android --platform 28 check -p xybrid-sdk --features platform-android,llm-llamacpp-vision
 
       - name: Upload Android .so artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
