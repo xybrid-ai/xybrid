@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0-alpha] - 2026-06-19
+
+Prerelease of `0.2.0` cut to validate the release pipeline and exercise the
+new BoltFFI binding surface across every distribution channel (crates.io,
+pub.dev, Maven Central, SPM) ahead of the stable tag. No functional changes
+from the `0.2.0` candidate — see the [0.2.0] entry below for the full change
+set.
+
+---
+
 ## [0.2.0] - 2026-06-17
 
 The vision release. xybrid gains an on-device multimodal stack — VLM inference,
