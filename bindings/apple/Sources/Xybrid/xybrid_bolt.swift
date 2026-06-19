@@ -779,12 +779,16 @@ public final class XybridModel {
         }
     }
 
-    public func warmup() {
-        boltffi_xybrid_model_warmup(handle)
+    public func warmup() throws {
+        let buf = boltffi_xybrid_model_warmup(handle)
+        defer { boltffi_free_buf(buf) }
+        return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return () } else { throw XybridError.decode(from: &reader) } }() }
     }
 
-    public func unload() {
-        boltffi_xybrid_model_unload(handle)
+    public func unload() throws {
+        let buf = boltffi_xybrid_model_unload(handle)
+        defer { boltffi_free_buf(buf) }
+        return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return () } else { throw XybridError.decode(from: &reader) } }() }
     }
 
 }

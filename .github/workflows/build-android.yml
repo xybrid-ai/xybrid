@@ -137,17 +137,18 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/bin/boltffi
-          key: boltffi-cli-${{ runner.os }}-0.25
+          key: boltffi-cli-${{ runner.os }}-0.25.3
 
       - name: Install boltffi CLI
         # `which || install` is idempotent whether or not the cache
         # populated the binary (actions/cache only sets cache-hit on an
         # exact key match).
-        # `--locked` is required: boltffi_cli 0.25.0 fails to compile against
-        # the newer 0.25.1 of its own lib crates (boltffi_bindgen added
-        # required `KotlinOptions` fields in a non-additive minor bump). The
-        # bundled Cargo.lock pins those libs to 0.25.0.
-        run: which boltffi || cargo install boltffi_cli --version 0.25.0 --locked
+        # Pinned to 0.25.3 to MATCH the runtime `boltffi` crate (Cargo.lock):
+        # a CLI/runtime version skew mis-generates unit-ok `Result<(), E>`
+        # exports (model warmup/unload) as a `void` foreign function that drops
+        # the error and leaks the result buffer. `--locked` installs against
+        # the CLI's own bundled Cargo.lock for reproducibility.
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
       - name: Build Android .so files (all ABIs)
         run: cargo xtask build-android --release
