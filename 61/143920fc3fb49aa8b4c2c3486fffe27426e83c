@@ -1,0 +1,22 @@
+crates/xybrid-bolt/boltffi.toml
+  s_6c4a61d075bb26::t_8c9be53d623aec 52-56
+tools/scripts/build-android-bolt.sh
+  s_6c4a61d075bb26::t_cbb3dc56711ed7 130,152,190
+  s_6c4a61d075bb26::t_3b9025880b2281 107-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "61143920fc3fb49aa8b4c2c3486fffe27426e83c",
+  "prompts": {},
+  "sessions": {
+    "s_6c4a61d075bb26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13401704-d1ec-41eb-b861-61af60f64916",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
