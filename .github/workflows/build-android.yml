@@ -211,3 +211,43 @@ jobs:
           name: android-so-files
           path: bindings/kotlin/libs/
           if-no-files-found: error
+
+  # Compiles the Kotlin binding wrapper (hand-written Xybrid.kt + the
+  # bolt-generated XybridBolt.kt) and runs the pure-Kotlin unit tests — the
+  # gate that catches wrapper-level breaks (a non-exhaustive `when`, an
+  # enum-shape change, a missing import) that the native .so build above does
+  # NOT, and that no PR-to-master job compiles today (test-ci.yml's
+  # assembleRelease is workflow_dispatch-only; release-dryrun.yml's
+  # bundleReleaseAar fires only on PRs to `main`, filtered to build.gradle.kts —
+  # not the wrapper .kt sources). Standalone (no `needs:`) so it runs in
+  # parallel and stays cheap: JDK + Android SDK + gradle, no ~35-min
+  # cross-compile. The .so is a runtime-only artifact (loaded lazily in
+  # `Native`'s init{}), so compile + JVM unit test need neither it nor Rust.
+  kotlin-wrapper:
+    name: Compile + test Kotlin wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # AGP 8.2.2 requires JDK 17+. `cache: gradle` caches the Gradle user home
+      # (resolved deps + wrapper distribution) across runs.
+      - name: Set up JDK 17
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: bindings/kotlin/**/*.gradle*
+
+      # Provides ANDROID_HOME so AGP resolves the SDK; AGP auto-downloads the
+      # compileSdk=34 platform on first build (same as release-publish.yml).
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      # compile* type-checks Xybrid.kt + XybridBolt.kt (both variants, so an
+      # enum-shape break that only trips one buildType is still caught);
+      # testDebugUnitTest runs the pure-Kotlin EnvelopeTest. No native .so is
+      # present on a fresh checkout and none is needed.
+      - name: Compile wrapper + run unit tests
+        working-directory: bindings/kotlin
+        run: ./gradlew compileReleaseKotlin compileDebugKotlin testDebugUnitTest --console=plain --stacktrace

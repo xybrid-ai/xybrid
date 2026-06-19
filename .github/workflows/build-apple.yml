@@ -127,6 +127,31 @@ jobs:
           fi
           echo "$found" | while read -r lib; do file "$lib"; done
 
+      - name: Compile Swift binding wrapper (iOS Simulator)
+        # Compiles the hand-written Xybrid.swift + the bolt-generated
+        # xybrid_bolt.swift into the SPM `Xybrid` library, so a wrapper break
+        # (non-exhaustive errorDescription switch, a missing import, an
+        # enum-shape mismatch vs the regenerated bindings) fails CI here instead
+        # of only when a human builds the example app. Uses the xcframework
+        # just built above (root Package.swift has useLocalNatives = true).
+        #
+        # Targets the iOS Simulator for two reasons: (1) the xcframework ships
+        # only ios-arm64 + ios-arm64-simulator (boltffi.toml include_macos=false),
+        # so a host/macOS build has no slice to link; (2) Xybrid.swift gates
+        # `import UIKit` behind `#if os(iOS)`, so only an iOS build type-checks
+        # the UIKit-conditional code — the code most likely to break. Compiles
+        # the wrapper library ONLY (the example .xcodeproj has no shared scheme;
+        # ContentView/LiveVision aren't built) and boots no simulator (generic
+        # destination = compile + link, no run, no signing).
+        run: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies
+          xcodebuild build \
+            -scheme Xybrid \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
+
       - name: Check iOS vision build (compile-only, not shipped)
         # Compile-only gate for the OPT-IN native llama.cpp vision backend
         # (mtmd). This backend is in NO platform preset and is NOT shipped in
