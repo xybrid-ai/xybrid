@@ -1,0 +1,25 @@
+.github/workflows/build-apple.yml
+  s_b67e739aa79399::t_d44206b66b2f79 130-149
+crates/llama-cpp-sys/build.rs
+  s_b67e739aa79399::t_d44206b66b2f79 133-147
+.github/workflows/build-android.yml
+  s_b67e739aa79399::t_d44206b66b2f79 125-132,192-206
+examples/android/app/src/main/java/ai/xybrid/example/XybridExampleApp.kt
+  s_b67e739aa79399::t_d44206b66b2f79 41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "cf33cff4a713f92c1fa83d2269553caabfae46a8",
+  "prompts": {},
+  "sessions": {
+    "s_b67e739aa79399": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d32a41c-8d35-44d3-89e7-faa96eaa3bd0",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
