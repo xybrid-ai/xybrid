@@ -1,0 +1,19 @@
+CLAUDE.md
+  s_6c4a61d075bb26::t_f9aa3b232b8a0a 214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "aeae3a466af4836b233b9a1db7e6324367e01af8",
+  "prompts": {},
+  "sessions": {
+    "s_6c4a61d075bb26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13401704-d1ec-41eb-b861-61af60f64916",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
