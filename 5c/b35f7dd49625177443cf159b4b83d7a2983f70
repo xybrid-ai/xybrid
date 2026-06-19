@@ -1,0 +1,31 @@
+.github/workflows/build-android.yml
+  s_93e9e173c209bc::t_90a4c3ebca0a1e 140,146-151
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_93e9e173c209bc::t_de4f15c8a49ec4 17,19,270-271,273-274,279,289,292,588,1484-1489,1493-1498,1662-1663
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_93e9e173c209bc::t_37e8cb6dadc362 216-217
+.github/workflows/build-react-native.yml
+  s_93e9e173c209bc::t_c94823029a0afe 91-93,99,102
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_93e9e173c209bc::t_de4f15c8a49ec4 782-785,788-791
+.github/workflows/build-apple.yml
+  s_93e9e173c209bc::t_9e5f21c00b656c 94,98-103
+.github/workflows/test-ci.yml
+  s_93e9e173c209bc::t_37867cf1e8fbdf 386-391
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "5cb35f7dd49625177443cf159b4b83d7a2983f70",
+  "prompts": {},
+  "sessions": {
+    "s_93e9e173c209bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "704b171b-e59a-4f2e-ab2d-2572e8975ef3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
