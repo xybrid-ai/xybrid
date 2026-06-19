@@ -127,6 +127,26 @@ jobs:
           fi
           echo "$found" | while read -r lib; do file "$lib"; done
 
+      - name: Check iOS vision build (compile-only, not shipped)
+        # Compile-only gate for the OPT-IN native llama.cpp vision backend
+        # (mtmd). This backend is in NO platform preset and is NOT shipped in
+        # the XCFramework above — this step only proves the
+        # `llm-llamacpp-vision` (mtmd) chain still cross-compiles for iOS, the
+        # gate the UniFFI->bolt migration dropped (it pointed at the deleted
+        # `xybrid-uniffi`; retargeted here at `xybrid-sdk`, which now carries
+        # both `platform-ios` and `llm-llamacpp-vision`: xybrid-sdk ->
+        # xybrid-core/llm-llamacpp-vision -> xybrid-llama-sys/vision; the -sys
+        # crate lives at crates/llama-cpp-sys/, package `xybrid-llama-sys`).
+        #
+        # `check` (not `build`) is sufficient and matches the old gate: the
+        # crates/llama-cpp-sys/build.rs runs on `check` and is what compiles
+        # llama.cpp + the mtmd C++ via cmake and bindgens the mtmd FFI (gated
+        # on CARGO_FEATURE_VISION). Like the shipped llm-llamacpp build above,
+        # it sources llama.cpp through build.rs's pinned-commit OUT_DIR clone
+        # (vendor/llama-cpp is an un-checked-out submodule), so no extra
+        # checkout is needed.
+        run: cargo check -p xybrid-sdk --features platform-ios,llm-llamacpp-vision --target aarch64-apple-ios
+
       - name: Upload XCFramework artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
