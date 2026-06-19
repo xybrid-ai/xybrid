@@ -1,0 +1,19 @@
+.cargo/config.toml
+  s_edbdea849447d8::t_c6ceebae21c2d6 4-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "e75ecd8b0c51c41aa20e278616d6738bb4b5468d",
+  "prompts": {},
+  "sessions": {
+    "s_edbdea849447d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "07159220-ac1d-4b69-8284-b467e90b549c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
