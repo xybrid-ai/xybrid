@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0-alpha
+
+Prerelease of `0.2.0`, published to validate the release pipeline ahead of the
+stable tag. No functional changes from `0.2.0` — see the `0.2.0` entry below
+for the full change set.
+
 ## 0.2.0
 
 The vision release. The binding gains on-device multimodal input and the
