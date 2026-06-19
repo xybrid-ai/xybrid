@@ -279,7 +279,7 @@ jobs:
           which cargo-ndk || cargo install cargo-ndk
 
       - name: Install boltffi CLI
-        run: which boltffi || cargo install boltffi_cli --version 0.25.0 --locked
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
       # 1. Build the bolt .so for all ABIs (staged into bindings/kotlin/libs).
       - name: Build Android native libs
