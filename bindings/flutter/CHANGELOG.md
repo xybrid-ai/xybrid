@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.0-alpha
+
+Prerelease of `0.2.0`, published to validate the release pipeline ahead of the
+stable tag. No functional changes from `0.2.0` — see the `0.2.0` entry below
+for the full change set.
+
+## 0.2.0
+
+The vision release. The binding gains on-device multimodal input and the
+real-time camera vision primitives behind Studio's live loop.
+
+* On-device vision (VLM): new `XybridEnvelope.image` (encoded PNG/JPEG/WebP), `XybridEnvelope.imageRaw` (raw camera/canvas pixel frames), and `XybridEnvelope.multiPart` (user-role message with image attachments) for running vision-language models from Dart (xybrid-ai/xybrid#245, #265)
+* Reachable streaming cancellation: new `CancellationToken` whose `cancel()` drives a real runtime abort end-to-end — the generation halts at the next token and releases the model lock, instead of the old behavior where "stop" only unsubscribed while the runtime kept generating (xybrid-ai/xybrid#245)
+* Live-loop run options on the model handle: `preempt` (latest-frame-wins — a new run preempts the in-flight one so a live loop no longer head-of-line-blocks behind a stale frame) and `frameSessionId` for tagging live inferences (xybrid-ai/xybrid#245)
+* Raw-frame path avoids per-frame JPEG re-encoding: `imageRaw` packs RGB pixel buffers straight through to the multimodal runtime; the encoded `image` path remains the fallback (xybrid-ai/xybrid#245)
+* Streaming TTS support on top of the new audio generation path (xybrid-ai/xybrid#245)
+* Live-mode telemetry is rate-limited by a per-session sampler (≈1 row/sec/session), so live camera sessions no longer emit a telemetry row per frame (xybrid-ai/xybrid#245)
+* Fixed: TTS text chunking is now UTF-8-safe — multi-byte codepoints are no longer split mid-character (xybrid-ai/xybrid#249)
+* Fixed: `.npz` voice files are detected by magic header rather than file extension (xybrid-ai/xybrid#252)
+* Fixed: `tokens_out` is now emitted on local LLM telemetry paths (xybrid-ai/xybrid#253)
+
 ## 0.1.2
 
 * Audio inputs now detect MP3, OGG, and FLAC in addition to WAV, and mono audio is upmixed to stereo when a model expects two channels (xybrid-ai/xybrid#132, #141)

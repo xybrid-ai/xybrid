@@ -88,17 +88,18 @@ jobs:
           save-if: "true"
 
       # boltffi CLI provides the `boltffi pack apple` that build-xcframework
-      # (invoked by stage-react-native) shells out to. `--locked` pins the
-      # 0.25.0 lib crates (see build-apple.yml for the rationale).
+      # (invoked by stage-react-native) shells out to. Pinned to 0.25.3 to
+      # match the runtime `boltffi` crate (see build-apple.yml for why the
+      # CLI/runtime versions must match).
       - name: Cache boltffi CLI
         id: cache-boltffi
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/bin/boltffi
-          key: boltffi-cli-${{ runner.os }}-0.25
+          key: boltffi-cli-${{ runner.os }}-0.25.3
 
       - name: Install boltffi CLI
-        run: which boltffi || cargo install boltffi_cli --version 0.25.0 --locked
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
       - name: Stage iOS artifacts
         run: cargo xtask stage-react-native --release

@@ -21,6 +21,6 @@ bindings = ["xybrid-llama-sys/bindings"]
 vision = ["bindings", "xybrid-llama-sys/vision"]
 
 [dependencies]
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.1.2" }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.2.0-alpha" }
 thiserror = { workspace = true }
 tracing = "0.1"

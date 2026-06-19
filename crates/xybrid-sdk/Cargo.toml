@@ -14,7 +14,7 @@ name = "xybrid_sdk"
 path = "src/lib.rs"
 
 [dependencies]
-xybrid-macros = { version = "0.1.0-rc3", path = "../../macros" }
+xybrid-macros = { version = "0.2.0-alpha", path = "../../macros" }
 anyhow = "1.0"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
@@ -34,12 +34,12 @@ ort = { version = "=2.0.0-rc.11", default-features = false, features = ["ndarray
 # Platform-specific dependencies (NOT features - those are in presets)
 # Android: rustls with ring backend (aws-lc-rs uses getentropy unavailable on API 24)
 [target.'cfg(target_os = "android")'.dependencies]
-xybrid-core = { version = "0.1.0-rc3", path = "../xybrid-core", default-features = false, features = ["ort-dynamic"] }
+xybrid-core = { version = "0.2.0-alpha", path = "../xybrid-core", default-features = false, features = ["ort-dynamic"] }
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
-xybrid-core = { version = "0.1.0-rc3", path = "../xybrid-core", default-features = false, features = ["ort-download"] }
+xybrid-core = { version = "0.2.0-alpha", path = "../xybrid-core", default-features = false, features = ["ort-download"] }
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 
 [features]
