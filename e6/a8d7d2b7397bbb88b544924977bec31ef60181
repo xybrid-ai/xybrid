@@ -1,0 +1,22 @@
+bindings/flutter/pubspec.yaml
+  s_70ccc422d786ca::t_4194b5225bc26b 20-28
+.github/workflows/release-dryrun.yml
+  s_70ccc422d786ca::t_644d0ff0dd54b6 278-296
+  s_70ccc422d786ca::t_3366baf93e20c2 411-430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "e6a8d7d2b7397bbb88b544924977bec31ef60181",
+  "prompts": {},
+  "sessions": {
+    "s_70ccc422d786ca": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "287bd64e-16ba-4572-bd58-fc5b9b4e3f8f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
