@@ -719,6 +719,13 @@ fn resolve_prebuilt(ctx: &BuildContext, vision_enabled: bool) -> Option<PathBuf>
         return None;
     }
     let dir = base.join(&ctx.target);
+    // A missing per-target slice dir is a normal cold miss (e.g. the other
+    // Android ABIs when only arm64 was pulled) — degrade silently. The
+    // per-archive warnings below are reserved for a *present but incomplete*
+    // slice, which is the case actually worth surfacing.
+    if !dir.is_dir() {
+        return None;
+    }
 
     for archive in required_archives(&ctx.target_os, vision_enabled) {
         if !archive_present(&dir, &archive) {
