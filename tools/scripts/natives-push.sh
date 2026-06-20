@@ -23,7 +23,9 @@ PKG="${XYBRID_NATIVES_PKG:-ghcr.io/xybrid-ai/llama-natives}"
 command -v oras >/dev/null 2>&1 || { echo "natives-push: oras not found" >&2; exit 1; }
 
 FP="$("$ROOT/tools/scripts/natives-fingerprint.sh" "$TARGET" "$FEATURES")"
-LLAMA_SHA="$(grep -E 'const LLAMA_CPP_COMMIT' "$ROOT/crates/llama-cpp-sys/build.rs" | grep -oE '[0-9a-f]{40}')"
+# `|| true`: the SHA is only a human-readable annotation, so a future reformat
+# of the const line should degrade it gracefully rather than abort the publish.
+LLAMA_SHA="$(grep -E 'const LLAMA_CPP_COMMIT' "$ROOT/crates/llama-cpp-sys/build.rs" | grep -oE '[0-9a-f]{40}' || true)"
 echo "natives-push: target=$TARGET features=$FEATURES fingerprint=$FP"
 
 # Write-once: skip if this fingerprint is already published.
