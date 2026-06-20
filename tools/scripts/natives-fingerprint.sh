@@ -61,17 +61,24 @@ case "$TARGET" in
       NDK_REV="$(grep -E '^Pkg.Revision' "$NDK/source.properties" | cut -d= -f2 | tr -d ' ')"
     fi
     ;;
-  *apple-ios-sim*)
-    # Mirror build.rs generate_bindings: iOS simulator -> iphonesimulator SDK.
-    # This arm MUST precede the bare *apple-ios* arm (build.rs checks
-    # contains("sim") first); reversing them tags a sim slice with the device SDK.
-    SDK_VER="$(xcrun --sdk iphonesimulator --show-sdk-version 2>/dev/null || true)/$(xcrun clang --version 2>/dev/null | head -1 || true)"
-    ;;
-  *apple-ios*)
-    SDK_VER="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || true)/$(xcrun clang --version 2>/dev/null | head -1 || true)"
-    ;;
-  *apple-darwin*)
-    SDK_VER="$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || true)/$(xcrun clang --version 2>/dev/null | head -1 || true)"
+  *apple-ios-sim*|*apple-ios*|*apple-darwin*)
+    # Mirror build.rs generate_bindings SDK selection: iOS sim -> iphonesimulator,
+    # iOS device -> iphoneos, macOS -> macosx. The -sim case MUST be checked
+    # before the bare ios case (build.rs checks contains("sim") first); reversing
+    # them tags a sim slice with the device SDK.
+    case "$TARGET" in
+      *apple-ios-sim*) sdk="iphonesimulator" ;;
+      *apple-ios*)     sdk="iphoneos" ;;
+      *)               sdk="macosx" ;;
+    esac
+    sdk_v="$(xcrun --sdk "$sdk" --show-sdk-version 2>/dev/null || true)"
+    clang_v="$(xcrun clang --version 2>/dev/null | head -1 || true)"
+    # Leave SDK_VER empty (no sdk= dim) when xcrun is unavailable, rather than a
+    # meaningless literal "/". On the real Apple parity path both publisher and
+    # consumer run macOS, so this is populated identically on both sides.
+    if [ -n "$sdk_v" ] || [ -n "$clang_v" ]; then
+      SDK_VER="${sdk_v}/${clang_v}"
+    fi
     ;;
   *windows-msvc*)
     # The publisher builds xybrid-llama-sys WITHOUT crt-static, so cc-rs + CMake
