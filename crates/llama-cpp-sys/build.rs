@@ -668,14 +668,26 @@ fn emit_link_and_wrapper(
 /// must stay in sync with the `rustc-link-lib=static=` directives in
 /// [`emit_link_and_wrapper`]. Used to validate a prebuilt slice before
 /// trusting it.
-fn required_archives(target_os: &str, vision_enabled: bool) -> Vec<&'static str> {
-    let mut libs = vec!["libllama.a", "libggml.a", "libggml-base.a", "libggml-cpu.a"];
+fn required_archives(target_os: &str, vision_enabled: bool) -> Vec<String> {
+    // MSVC names static libs `<name>.lib` (no `lib` prefix); every other target
+    // we build for is Unix-style `lib<name>.a`.
+    let (prefix, suffix) = if target_os == "windows" {
+        ("", ".lib")
+    } else {
+        ("lib", ".a")
+    };
+    let mut libs = vec![
+        format!("{prefix}llama{suffix}"),
+        format!("{prefix}ggml{suffix}"),
+        format!("{prefix}ggml-base{suffix}"),
+        format!("{prefix}ggml-cpu{suffix}"),
+    ];
     if target_os == "macos" || target_os == "ios" {
         // Apple links ggml-metal unconditionally (see emit_link_and_wrapper).
-        libs.push("libggml-metal.a");
+        libs.push(format!("{prefix}ggml-metal{suffix}"));
     }
     if vision_enabled {
-        libs.push("libmtmd.a");
+        libs.push(format!("{prefix}mtmd{suffix}"));
     }
     libs
 }
@@ -709,7 +721,7 @@ fn resolve_prebuilt(ctx: &BuildContext, vision_enabled: bool) -> Option<PathBuf>
     let dir = base.join(&ctx.target);
 
     for archive in required_archives(&ctx.target_os, vision_enabled) {
-        if !archive_present(&dir, archive) {
+        if !archive_present(&dir, &archive) {
             println!(
                 "cargo:warning=llama.cpp: prebuilt slice for {} incomplete (missing {archive}); compiling from source",
                 ctx.target
@@ -743,6 +755,8 @@ fn export_prebuilt(ctx: &BuildContext, dst: &Path) {
         return;
     }
     let out = base.join(&ctx.target);
+    let mut exported_any = false;
+    let mut had_error = false;
     for sub in ["lib", "lib64", "include"] {
         let src = dst.join(sub);
         if src.is_dir() {
@@ -751,14 +765,19 @@ fn export_prebuilt(ctx: &BuildContext, dst: &Path) {
                     "cargo:warning=llama.cpp: failed to export {sub} for {}: {e}",
                     ctx.target
                 );
+                had_error = true;
+            } else {
+                exported_any = true;
             }
         }
     }
-    println!(
-        "cargo:warning=llama.cpp: exported prebuilt slice for {} to {}",
-        ctx.target,
-        out.display()
-    );
+    if exported_any && !had_error {
+        println!(
+            "cargo:warning=llama.cpp: exported prebuilt slice for {} to {}",
+            ctx.target,
+            out.display()
+        );
+    }
 }
 
 /// Recursively copy a directory tree (portable; no extra deps). Used only by

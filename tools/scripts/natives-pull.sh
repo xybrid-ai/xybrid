@@ -12,7 +12,7 @@
 #
 # Usage: natives-pull.sh <target-triple> <feature-set> <dest-base-dir>
 # Requires: oras on PATH (public package pulls anonymously).
-set -uo pipefail
+set -euo pipefail
 
 TARGET="${1:?usage: natives-pull.sh <target-triple> <feature-set> <dest-base-dir>}"
 FEATURES="${2:?}"

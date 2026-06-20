@@ -25,7 +25,18 @@ FEATURES="${2:-base}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SYS="$ROOT/crates/llama-cpp-sys"
 
-sha256() { sha256sum "$1" | cut -d' ' -f1; }
+# Portable SHA-256: Linux has `sha256sum`, macOS has `shasum`. Hashes a file
+# argument, or stdin when called with none.
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$@" | cut -d' ' -f1
+  else
+    echo "natives-fingerprint: no sha256sum/shasum found" >&2
+    exit 1
+  fi
+}
 
 # 1. llama.cpp source identity. CI does not init the submodule, so build.rs's
 #    clone-at-const is the source of record; key on that pinned commit.
@@ -58,4 +69,4 @@ esac
 #    so old caches invalidate cleanly.
 US=$'\x1f'
 PAYLOAD="v1${US}llama=${LLAMA_SHA}${US}wrapper_cpp=${WRAPPER_CPP}${US}wrapper_h=${WRAPPER_H}${US}build_rs=${BUILD_RS}${US}target=${TARGET}${US}features=${FEATURES}${US}profile=release${US}cmake=${CMAKE_VER}${US}cc=${CC_VER}${US}ndk=${NDK_REV}"
-printf '%s' "$PAYLOAD" | sha256sum | cut -d' ' -f1
+printf '%s' "$PAYLOAD" | sha256
