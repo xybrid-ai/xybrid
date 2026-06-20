@@ -1,0 +1,24 @@
+crates/llama-cpp-sys/build.rs
+  s_52851a1d1cb1d6::t_1b159ba62baeff 722-728
+tools/scripts/natives-fingerprint.sh
+  s_52851a1d1cb1d6::t_ef2c4b5e46fbba 63-66
+tools/scripts/natives-push.sh
+  s_52851a1d1cb1d6::t_d967b8546fa021 38-47
+  s_52851a1d1cb1d6::t_d4415e4a67e9ac 23-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "6a247ec08efcf096e3eb5c8d284f58bf8cd9cbdc",
+  "prompts": {},
+  "sessions": {
+    "s_52851a1d1cb1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cccf6c4-8326-4314-8bb9-1403c4a6a1b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
