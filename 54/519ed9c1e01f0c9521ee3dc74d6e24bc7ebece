@@ -1,0 +1,19 @@
+tools/scripts/natives-fingerprint.sh
+  s_52851a1d1cb1d6::t_8a12556c265cb4 64-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "54519ed9c1e01f0c9521ee3dc74d6e24bc7ebece",
+  "prompts": {},
+  "sessions": {
+    "s_52851a1d1cb1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cccf6c4-8326-4314-8bb9-1403c4a6a1b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
