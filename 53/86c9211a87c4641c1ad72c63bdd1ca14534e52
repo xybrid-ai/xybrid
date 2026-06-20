@@ -1,0 +1,19 @@
+tools/scripts/natives-push.sh
+  s_52851a1d1cb1d6::t_b03185a74f88a9 26-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "5386c9211a87c4641c1ad72c63bdd1ca14534e52",
+  "prompts": {},
+  "sessions": {
+    "s_52851a1d1cb1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cccf6c4-8326-4314-8bb9-1403c4a6a1b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
