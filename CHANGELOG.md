@@ -7,40 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — real-time vision primitives (`feat/realtime-vision`, code-complete, not yet merged or device-validated)
-
-The following SDK/runtime additions land on the `feat/realtime-vision` branch in
-support of Studio's live camera vision (the app-side live loop lives in the meta
-workstation). They are code-complete and reviewed but **not yet validated on a
-real device**, so they are recorded here as unreleased rather than under a cut
-version. The version bump + `/sync-api` + tag are a merge/release-time action via
-the existing `version-sync.sh` tooling — **not** done in this entry.
-
-- **Reachable streaming cancellation**: cancelling a streaming generation now
-  drives a real runtime abort end-to-end (FFI `FfiCancellationToken` +
-  options-aware streaming routing + sink-closed-as-cancel), so the generation
-  halts at the next token and releases the model lock. Previously the Dart-side
-  "stop" only unsubscribed and the runtime kept generating. `UserCancelled` is the
-  default abort outcome.
-- **Preemptive cancel-and-replace slot** on the model handle: a new run can
-  preempt the in-flight run (latest-frame-wins), so a live loop no longer
-  head-of-line-blocks behind a stale frame.
-- **Raw-frame `mtmd` path + `imageRaw` binding**: a packed-RGB
-  `mtmd_bitmap_init` shim routes `ImageSource::Raw` through `mtmd` without
-  per-frame JPEG re-encoding; the `imageRaw` envelope binding is exposed to Dart/FRB
-  and consumed by Studio behind a default-off flag. The encoded `image` path is
-  unchanged and remains the fallback.
-- **Live-mode telemetry tagging + per-session sampler**: live inferences are
-  tagged (`live_mode` + `frame_session_id`) and rate-limited by a per-session
-  sampler (≈1 row/sec/session, TTL-bounded), so live sessions don't emit a
-  telemetry row per frame.
-
-Multimodal KV-prefix reuse (the per-frame prefill cost lever) is **deferred** —
-not implemented this cycle.
-
-### Planned (0.1.x)
+### Planned
 
 - **OpenUPM registry**: Publish Unity SDK to [openupm.com](https://openupm.com) for scoped registry install
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.2.0-alpha] - 2026-06-19
+
+Prerelease of `0.2.0` cut to validate the release pipeline and exercise the
+new BoltFFI binding surface across every distribution channel (crates.io,
+pub.dev, Maven Central, SPM) ahead of the stable tag. No functional changes
+from the `0.2.0` candidate — see the [0.2.0] entry below for the full change
+set.
+
+---
+
+## [0.2.0] - 2026-06-17
+
+The vision release. xybrid gains an on-device multimodal stack — VLM inference,
+real-time camera vision primitives, and streaming TTS — and the FFI surface is
+re-platformed from UniFFI onto BoltFFI through a single shared facade. This is a
+**breaking release** for binding consumers: the Swift / Kotlin / Java / C# / RN
+bindings are now generated through `xybrid-bolt` + `xybrid-ffi-facade` rather
+than UniFFI, and the run/envelope call shapes changed accordingly.
+
+### Added
+
+- **On-device vision foundation** (#245): VLM inference, real-time camera vision
+  primitives, and streaming TTS land in the runtime. The vision pipeline is now
+  unconditional rather than feature-gated (#263).
+- **Vision envelopes through bolt** (#265): `Image` / `MultiPart` envelopes and
+  typed capability errors are threaded through the BoltFFI bindings; generation
+  config is now plumbed through `XybridModel.run` (#262).
+- **Reachable streaming cancellation**: cancelling a streaming generation drives a
+  real runtime abort end-to-end (`FfiCancellationToken` + options-aware streaming
+  routing + sink-closed-as-cancel), so generation halts at the next token and
+  releases the model lock. `UserCancelled` is the default abort outcome.
+- **Preemptive cancel-and-replace slot** on the model handle: a new run can preempt
+  the in-flight run (latest-frame-wins), so a live loop no longer head-of-line-blocks
+  behind a stale frame.
+- **Raw-frame `mtmd` path + `imageRaw` binding**: a packed-RGB `mtmd_bitmap_init`
+  shim routes `ImageSource::Raw` through `mtmd` without per-frame JPEG re-encoding;
+  the `imageRaw` envelope binding is exposed to Dart/FRB. The encoded `image` path
+  is unchanged and remains the fallback.
+- **Live-mode telemetry tagging + per-session sampler**: live inferences are tagged
+  (`live_mode` + `frame_session_id`) and rate-limited by a per-session sampler
+  (≈1 row/sec/session, TTL-bounded), so live sessions don't emit a telemetry row
+  per frame.
+- **Speculative cloud loader decision layer** (#250): `set_speculative_cloud` +
+  `ModelLoader::with_speculative_cloud` / `will_speculate` let the loader begin a
+  cloud execution while the local model is still downloading.
+- **React Native binding** (#93, #260): a React Native binding, now ported onto
+  BoltFFI alongside the other foreign-language bindings.
+- **Async/suspend conveniences restored** (#269) for Swift and Kotlin load + run.
+
+### Changed
+
+- **FFI bindings migrated from UniFFI to BoltFFI** (#205) via a shared
+  `xybrid-ffi-facade` — one canonical SDK→foreign-language translation feeding the
+  Swift / Kotlin / Java / C# / WASM bindings. **Breaking** for binding consumers.
+- **Executor decomposition**: LLM envelope and gen-config helpers deduped (#261),
+  LLM telemetry extracted into `execution::llm_telemetry` (#251), and TTS chunking
+  + audio crossfade extracted from the executor (#239).
+- **iOS LiveVision example** migrated to the bolt `run()` shape (#267).
+- **Docs**: docs site refreshed — restored deploys, surfaced hidden nav, added
+  missing pages (#254); local-first foundation vs additive platform layer
+  clarified (#248).
+- **Release/CI**: `llama-cpp-sys` renamed to `xybrid-llama-sys` (#247) and both
+  `xybrid-llama-sys` + `xybrid-llama` now publish to crates.io (#246); native
+  build cache is warmed on master pushes (#268).
+
+### Fixed
+
+- **Kotlin image format validation** restored and `EnvelopeTest` fixed for the bolt
+  envelope shape (#266).
+- **`tokens_out` emitted** on local LLM telemetry paths (#253).
+- **`.npz` voice files detected** by magic header rather than extension (#252).
+- **TTS text chunking is UTF-8-safe** (#249) — no longer splits multi-byte
+  codepoints mid-character.
 
 ---
 

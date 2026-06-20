@@ -2929,7 +2929,7 @@ dependencies = [
 
 [[package]]
 name = "integration-tests"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "dirs 6.0.0",
@@ -6744,7 +6744,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap 4.6.1",
@@ -6759,14 +6759,14 @@ dependencies = [
 
 [[package]]
 name = "xybrid"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "xybrid-sdk",
 ]
 
 [[package]]
 name = "xybrid-bolt"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "boltffi",
  "xybrid-ffi-facade",
@@ -6775,7 +6775,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-cli"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6803,7 +6803,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-core"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6868,7 +6868,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-ffi"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "cbindgen",
  "csbindgen",
@@ -6880,7 +6880,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-ffi-facade"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "tokio",
  "xybrid-core",
@@ -6889,7 +6889,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-llama"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -6898,7 +6898,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-llama-sys"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "bindgen",
  "cc",
@@ -6907,7 +6907,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-macros"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6916,7 +6916,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-sdk"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6942,7 +6942,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid_flutter"
-version = "0.1.2"
+version = "0.2.0-alpha"
 dependencies = [
  "android_logger",
  "flutter_rust_bridge",

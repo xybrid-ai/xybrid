@@ -104,10 +104,9 @@ export CXX_x86_64_linux_android="$BIN/x86_64-linux-android${ANDROID_API}-clang++
 export AR_x86_64_linux_android="$BIN/llvm-ar"
 export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$CC_x86_64_linux_android"
 
-export CC_i686_linux_android="$BIN/i686-linux-android${ANDROID_API}-clang"
-export CXX_i686_linux_android="$BIN/i686-linux-android${ANDROID_API}-clang++"
-export AR_i686_linux_android="$BIN/llvm-ar"
-export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="$CC_i686_linux_android"
+# NOTE: 32-bit x86 (i686-linux-android) is intentionally not built — see the
+# `architectures` note in crates/xybrid-bolt/boltffi.toml. Emulator-only,
+# ORT-less, and the 0.2.0 native vision backend doesn't compile for it.
 
 echo "==> Packing Android bolt artifact"
 echo "    NDK:      $ANDROID_NDK_HOME"
@@ -128,7 +127,7 @@ boltffi pack android $PROFILE_FLAG \
     --cargo-arg=--features --cargo-arg=platform-android
 
 echo "==> Copying libxybrid-bolt.so into bindings/kotlin/libs/"
-for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+for abi in arm64-v8a armeabi-v7a x86_64; do
     src="$BOLT_CRATE/dist/android/jniLibs/$abi/libxybrid-bolt.so"
     dst_dir="$KOTLIN_LIBS/$abi"
     if [ -f "$src" ]; then
@@ -150,7 +149,7 @@ echo "==> Patching DT_NEEDED to include libc++_shared.so"
 # Fix: add DT_NEEDED post-link via patchelf. Works regardless of which
 # linker boltffi invoked; treats the .so as an opaque ELF artifact.
 if command -v patchelf > /dev/null 2>&1; then
-    for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+    for abi in arm64-v8a armeabi-v7a x86_64; do
         so="$KOTLIN_LIBS/$abi/libxybrid-bolt.so"
         if [ -f "$so" ]; then
             patchelf --add-needed libc++_shared.so "$so"
@@ -188,11 +187,10 @@ echo "==> Bundling libc++_shared.so from NDK for every ABI"
 # A `case` map (not an associative array) keeps this working on the stock
 # macOS /bin/bash 3.2 that local dev may pick up, where `declare -A` errors.
 NDK_SYSROOT_LIB="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST/sysroot/usr/lib"
-for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+for abi in arm64-v8a armeabi-v7a x86_64; do
     case "$abi" in
         arm64-v8a)   triple=aarch64-linux-android ;;
         armeabi-v7a) triple=arm-linux-androideabi ;;
-        x86)         triple=i686-linux-android ;;
         x86_64)      triple=x86_64-linux-android ;;
     esac
     src="$NDK_SYSROOT_LIB/$triple/libc++_shared.so"

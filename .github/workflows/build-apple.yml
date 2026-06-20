@@ -133,7 +133,11 @@ jobs:
         # (non-exhaustive errorDescription switch, a missing import, an
         # enum-shape mismatch vs the regenerated bindings) fails CI here instead
         # of only when a human builds the example app. Uses the xcframework
-        # just built above (root Package.swift has useLocalNatives = true).
+        # just built above: the committed state is useLocalNatives = false (so
+        # SPM consumers resolve the published release asset), so this step flips
+        # to local mode at CI runtime before resolving — otherwise it would try
+        # to download the remote asset, which 404s on a release PR while the
+        # v<version> release is still a draft. The flip is CI-only, never committed.
         #
         # Targets the iOS Simulator for two reasons: (1) the xcframework ships
         # only ios-arm64 + ios-arm64-simulator (boltffi.toml include_macos=false),
@@ -145,6 +149,8 @@ jobs:
         # destination = compile + link, no run, no signing).
         run: |
           set -euo pipefail
+          # CI-runtime flip to the locally-built xcframework. Do NOT commit this.
+          ./bindings/apple/scripts/set-natives-mode.sh --set-local
           xcodebuild -resolvePackageDependencies
           xcodebuild build \
             -scheme Xybrid \
