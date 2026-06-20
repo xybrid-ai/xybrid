@@ -1,0 +1,19 @@
+tools/scripts/verify-release.sh
+  s_b3f4f59c27aea8::t_deb34987cd5c1f 177-184,190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "d5aef235f733a8d9f06dc549cfeeade3c2cb43d2",
+  "prompts": {},
+  "sessions": {
+    "s_b3f4f59c27aea8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e66f9b69-9b22-4a00-b996-9a2c722e86e7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
