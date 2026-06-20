@@ -159,6 +159,19 @@ jobs:
       # ABIs (no slice for them yet) fall through to source automatically.
       - name: Setup oras
         uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      # Best-effort ghcr login for SAME-REPO runs (not forks — they have no
+      # token): lets the consumer pull the natives package even while it is
+      # private and survives a visibility reset. `read-all` already grants
+      # packages:read. Forks skip this and rely on anonymous (public) pull;
+      # either way a miss falls through to a source compile.
+      - name: Log in to ghcr (best-effort, same-repo)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull prebuilt natives (arm64, best-effort)
         continue-on-error: true
         env:

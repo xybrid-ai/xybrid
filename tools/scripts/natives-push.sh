@@ -31,19 +31,36 @@ if oras manifest fetch --descriptor "$PKG:$FP" >/dev/null 2>&1; then
 fi
 
 SLICE="$EXPORT/$TARGET"
-[ -d "$SLICE/lib" ] || { echo "natives-push: no built slice at $SLICE/lib" >&2; exit 1; }
 [ -d "$SLICE/include" ] || { echo "natives-push: no headers at $SLICE/include" >&2; exit 1; }
+
+# Never poison the write-once tag with an incomplete slice: verify the core
+# archives build.rs requires (resolve_prebuilt) are present and non-empty in
+# lib/ OR lib64/ before publishing. (base feature set; apple adds ggml-metal
+# and vision adds mtmd — extend this list when those targets are published.)
+for a in libllama.a libggml.a libggml-base.a libggml-cpu.a; do
+  [ -s "$SLICE/lib/$a" ] || [ -s "$SLICE/lib64/$a" ] || {
+    echo "natives-push: required archive $a missing — refusing to publish incomplete slice" >&2
+    exit 1
+  }
+done
 
 slice_dirs=(lib include)
 [ -d "$SLICE/lib64" ] && slice_dirs+=(lib64)
 tar -C "$SLICE" -czf "$SLICE/native.tar.gz" "${slice_dirs[@]}"
 
-oras push "$PKG:$FP" \
-  --artifact-type application/vnd.xybrid.natives.layer.v1+gzip \
-  --annotation "org.opencontainers.image.source=https://github.com/xybrid-ai/xybrid" \
-  --annotation "dev.xybrid.triple=$TARGET" \
-  --annotation "dev.xybrid.features=$FEATURES" \
-  --annotation "dev.xybrid.llama-sha=$LLAMA_SHA" \
-  "$SLICE/native.tar.gz:application/vnd.xybrid.natives.layer.v1.tar+gzip"
+# Push from INSIDE the slice dir so the layer reference is a RELATIVE path:
+# oras rejects absolute file paths (path-validation), and a bare
+# `native.tar.gz` title is exactly what natives-pull.sh expects from
+# `oras pull -o <dir>` (it writes <dir>/native.tar.gz).
+(
+  cd "$SLICE"
+  oras push "$PKG:$FP" \
+    --artifact-type application/vnd.xybrid.natives.layer.v1+gzip \
+    --annotation "org.opencontainers.image.source=https://github.com/xybrid-ai/xybrid" \
+    --annotation "dev.xybrid.triple=$TARGET" \
+    --annotation "dev.xybrid.features=$FEATURES" \
+    --annotation "dev.xybrid.llama-sha=$LLAMA_SHA" \
+    "native.tar.gz:application/vnd.xybrid.natives.layer.v1.tar+gzip"
+)
 
 echo "natives-push: pushed $PKG:$FP"
