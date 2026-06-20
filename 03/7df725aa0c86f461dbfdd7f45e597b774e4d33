@@ -1,0 +1,26 @@
+.github/workflows/build-android.yml
+  s_79b36a82a74b12::t_12815ab4b3d94c 232
+tools/scripts/android-dlopen-gate.sh
+  s_79b36a82a74b12::t_99dee5f1bd1956 33-35,37,41
+tools/scripts/android-dlopen-probe.c
+  s_79b36a82a74b12::t_d9d2152d9790bc 29-32
+tools/scripts/build-android-bolt.sh
+  s_79b36a82a74b12::t_08b95d9e53a1f6 317
+  s_79b36a82a74b12::t_05caf29821b125 300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "037df725aa0c86f461dbfdd7f45e597b774e4d33",
+  "prompts": {},
+  "sessions": {
+    "s_79b36a82a74b12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a615093-8473-4674-aedd-bd450493223e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
