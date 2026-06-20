@@ -53,7 +53,7 @@ jobs:
     name: Build XCFramework
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
@@ -65,7 +65,7 @@ jobs:
             aarch64-apple-darwin
 
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Configure sccache environment
         shell: bash
@@ -88,7 +88,7 @@ jobs:
       # binary across runs.
       - name: Cache boltffi CLI
         id: cache-boltffi
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.cargo/bin/boltffi
           key: boltffi-cli-${{ runner.os }}-0.25.3
@@ -115,7 +115,7 @@ jobs:
       - name: Log in to ghcr (best-effort, same-repo)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -220,7 +220,7 @@ jobs:
         run: cargo check -p xybrid-sdk --features platform-ios,llm-llamacpp-vision --target aarch64-apple-ios
 
       - name: Upload XCFramework artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: XybridFFI-xcframework
           path: bindings/apple/XCFrameworks/XybridFFI.xcframework
