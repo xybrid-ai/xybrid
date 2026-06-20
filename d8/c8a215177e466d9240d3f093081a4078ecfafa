@@ -1,0 +1,21 @@
+tools/scripts/natives-push.sh
+  s_52851a1d1cb1d6::t_f91a4770127957 43-44,46-47,49-53
+tools/scripts/natives-fingerprint.sh
+  s_52851a1d1cb1d6::t_7fab76e1668988 55-56,64-83,85-86,93-96,98-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "d8c8a215177e466d9240d3f093081a4078ecfafa",
+  "prompts": {},
+  "sessions": {
+    "s_52851a1d1cb1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cccf6c4-8326-4314-8bb9-1403c4a6a1b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
