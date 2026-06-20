@@ -7,8 +7,10 @@ name: Build Natives (prebuilt llama.cpp)
 # the slice instead of recompiling it (~25 min on Android). See
 # .context/natives-prebuilt-plan.md.
 #
-# PILOT SCOPE: aarch64-linux-android, baseline (non-vision) only. Other
-# targets/feature columns are added incrementally once this leg is proven.
+# SCOPE: the three shipped Android ABIs (aarch64/armv7/x86_64-linux-android),
+# baseline (non-vision). Apple/Linux/Windows rows land in later stages once the
+# fingerprint gains the Apple-SDK + Windows-CRT dimensions and natives-push.sh
+# learns MSVC `.lib` naming.
 
 on:
   # Primary trigger: anything that feeds the fingerprint changed, so the cache
@@ -38,13 +40,23 @@ env:
   CARGO_TERM_COLOR: always
   XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
   # Match build-android.yml so the publisher's NDK revision (folded into the
-  # fingerprint) equals the consumer's.
+  # fingerprint) equals the consumer's. PARITY-CRITICAL: a one-sided bump here
+  # or in build-android.yml silently invalidates every Android slice.
   NDK_VERSION: "27.0.12077973"
 
 jobs:
-  android-arm64:
-    name: Publish native (aarch64-linux-android, base)
+  publish-native:
+    name: Publish native (${{ matrix.target }}, base)
     runs-on: ubuntu-latest
+    strategy:
+      # One slice miss must not abort the others — write-once makes every row
+      # idempotent, so let them attempt independently.
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-linux-android
+          - armv7-linux-androideabi
+          - x86_64-linux-android
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -52,7 +64,7 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
-          targets: aarch64-linux-android
+          targets: ${{ matrix.target }}
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -69,7 +81,8 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           prefix-key: "v1-rust"
-          shared-key: "natives-android-arm64"
+          # Per-target shared-key: the rows must not stomp each other's cache.
+          shared-key: "natives-${{ matrix.target }}"
           cache-all-crates: "true"
           save-if: "true"
 
@@ -103,24 +116,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build the llama-cpp-sys static slice for arm64 ONLY (the -sys crate's
+      # Build the llama-cpp-sys static slice for this ABI (the -sys crate's
       # `bindings` feature triggers the cmake compile in build.rs). The export
       # env makes build.rs copy the produced lib/ + include/ to a known dir;
       # natives-push.sh then tars + uploads it tagged by fingerprint. We build
-      # the -sys crate directly (not the full SDK) because the android cmake
+      # the -sys crate directly (not the full SDK) because the Android cmake
       # defines are a deterministic function of target+vision, so this slice is
-      # byte-equivalent to what the shipped build's arm64 ABI produces.
+      # byte-equivalent to what the shipped bolt build's ABI produces.
       - name: Build + publish native slice (best-effort skip if already present)
         env:
           XYBRID_NATIVES_EXPORT_DIR: ${{ runner.temp }}/natives-export
         run: |
           set -euo pipefail
-          FP="$(tools/scripts/natives-fingerprint.sh aarch64-linux-android base)"
+          FP="$(tools/scripts/natives-fingerprint.sh ${{ matrix.target }} base)"
           echo "fingerprint=$FP"
           if oras manifest fetch --descriptor "$XYBRID_NATIVES_PKG:$FP" >/dev/null 2>&1; then
             echo "already published — nothing to build"
             exit 0
           fi
-          cargo ndk --target aarch64-linux-android --platform 28 \
+          cargo ndk --target ${{ matrix.target }} --platform 28 \
             build --release -p xybrid-llama-sys --features bindings
-          tools/scripts/natives-push.sh aarch64-linux-android base "$XYBRID_NATIVES_EXPORT_DIR"
+          tools/scripts/natives-push.sh ${{ matrix.target }} base "$XYBRID_NATIVES_EXPORT_DIR"

@@ -150,13 +150,14 @@ jobs:
         # the CLI's own bundled Cargo.lock for reproducibility.
         run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
-      # Prebuilt-natives fast path (pilot: arm64 only). Best-effort: pull the
-      # prebuilt llama.cpp slice for aarch64-linux-android from ghcr and point
-      # build.rs at it so the arm64 ABI skips the ~25-min cmake compile. On ANY
-      # miss/error this is a silent no-op (continue-on-error) and every ABI
-      # compiles from source exactly as before — it can never break the build.
-      # build.rs keys on XYBRID_NATIVES_PREBUILT_DIR/<target>, so the other
-      # ABIs (no slice for them yet) fall through to source automatically.
+      # Prebuilt-natives fast path. Best-effort: pull the prebuilt llama.cpp
+      # slice for each shipped ABI from ghcr and point build.rs at it so that
+      # ABI skips the ~25-min cmake compile. On ANY miss/error this is a silent
+      # no-op (continue-on-error) and the affected ABI compiles from source
+      # exactly as before — it can never break the build. build.rs keys on
+      # XYBRID_NATIVES_PREBUILT_DIR/<target>, so each ABI in the single
+      # `cargo xtask build-android` invocation resolves its own slice (or falls
+      # through to source on a miss).
       - name: Setup oras
         uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
       # Best-effort ghcr login for SAME-REPO runs (not forks — they have no
@@ -172,17 +173,28 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull prebuilt natives (arm64, best-effort)
+      - name: Pull prebuilt natives (all shipped ABIs, best-effort)
         continue-on-error: true
         env:
           XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
         run: |
+          # One base dir holds a per-triple subdir for each ABI that has a
+          # published slice. The i686/x86 ABI is built but not packaged, so it
+          # is not pulled.
           DEST="$RUNNER_TEMP/natives"
-          if tools/scripts/natives-pull.sh aarch64-linux-android base "$DEST"; then
+          got_any=0
+          for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
+            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+              echo "prebuilt natives staged for $triple (will skip cmake)"
+              got_any=1
+            else
+              echo "no prebuilt natives for $triple — compiles from source"
+            fi
+          done
+          if [ "$got_any" = 1 ]; then
             echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
-            echo "prebuilt natives staged at $DEST (arm64 will skip cmake)"
           else
-            echo "no prebuilt natives — all ABIs compile from source (unchanged)"
+            echo "no prebuilt natives for any ABI — all compile from source (unchanged)"
           fi
 
       - name: Build Android .so files (all ABIs)
