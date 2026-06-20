@@ -26,7 +26,10 @@ int main(int argc, char **argv) {
     }
     void *h = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
     if (h == NULL) {
-        fprintf(stderr, "DLOPEN-FAIL: %s\n", dlerror());
+        // dlerror() can be NULL (no pending error / OOM); passing NULL to
+        // %s is UB, so fall back to a literal.
+        const char *err = dlerror();
+        fprintf(stderr, "DLOPEN-FAIL: %s\n", err ? err : "unknown error");
         return 1;
     }
     fprintf(stdout, "DLOPEN-OK: %s\n", argv[1]);

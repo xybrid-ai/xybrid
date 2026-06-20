@@ -229,7 +229,7 @@ jobs:
                 bad=0
                 while read -r al; do
                   [ "$((al))" -lt 16384 ] && { echo "  LOAD align $al < 16 KB"; bad=1; }
-                done < <("$READELF" -l "$SO" | awk '$1=="LOAD"{print $NF}')
+                done < <("$READELF" -l "$SO" | awk '$1=="LOAD"{if(NF>4){print $NF}else{getline;print $NF}}')
                 if [ "$bad" != 0 ]; then
                   echo "Error: $SO has a LOAD segment aligned below 16 KB"
                   exit 1

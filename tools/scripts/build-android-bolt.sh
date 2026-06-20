@@ -297,7 +297,7 @@ validate_so() {
                 echo "    [$abi] FAIL: LOAD segment align $align < 16 KB (0x4000)" >&2
                 return 1
             fi
-        done < <("$READELF" -l "$so" | awk '$1=="LOAD"{print $NF}')
+        done < <("$READELF" -l "$so" | awk '$1=="LOAD"{if(NF>4){print $NF}else{getline;print $NF}}')
     fi
     # Strip a copy exactly as a consumer's AGP would, then re-check the loader
     # invariants. A patchelf-style appended segment would break congruence here.
@@ -314,7 +314,7 @@ validate_so() {
                  "(off=$off vaddr=$vaddr align=$align)" >&2
             rm -f "$stripped"; return 1
         fi
-    done < <("$READELF" -l "$stripped" | awk '$1=="LOAD"{print $2, $3, $NF}')
+    done < <("$READELF" -l "$stripped" | awk '$1=="LOAD"{if(NF>4){print $2,$3,$NF}else{off=$2;vaddr=$3;getline;print off,vaddr,$NF}}')
     rm -f "$stripped"
     local align_note=""
     [ "$want16k" = "1" ] && align_note="16 KB align, "

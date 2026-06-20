@@ -30,12 +30,15 @@ done
 probe() {
     local lib="$1" label="$2"
     "$ADB" push "$GATE_DIR/$lib" "$DEVICE_DIR/libxybrid-bolt.so" > /dev/null
+    # Capture stderr too (the probe prints DLOPEN-FAIL there) and `|| true` so
+    # a failing probe doesn't trip `set -e` before we can report it — we want
+    # the formatted message + an explicit `return 1`, not an abrupt exit.
     local out
-    out="$("$ADB" shell "cd $DEVICE_DIR && LD_LIBRARY_PATH=$DEVICE_DIR ./android-dlopen-probe $DEVICE_DIR/libxybrid-bolt.so" | tr -d '\r')"
+    out="$("$ADB" shell "cd $DEVICE_DIR && LD_LIBRARY_PATH=$DEVICE_DIR ./android-dlopen-probe $DEVICE_DIR/libxybrid-bolt.so" 2>&1 | tr -d '\r')" || true
     echo "    [$label] $out"
     case "$out" in
         DLOPEN-OK*) return 0 ;;
-        *) echo "    [$label] FAILED — see output above" >&2; return 1 ;;
+        *) echo "    [$label] FAILED" >&2; return 1 ;;
     esac
 }
 
