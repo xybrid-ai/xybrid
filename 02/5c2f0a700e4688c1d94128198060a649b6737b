@@ -1,0 +1,23 @@
+.github/workflows/build-apple.yml
+  s_52851a1d1cb1d6::t_b59f8b90dc7b13 115-116,120-122
+.github/workflows/build-react-native.yml
+  s_52851a1d1cb1d6::t_a9b62e2f0a8c54 111-112,116-118
+.github/workflows/build-natives.yml
+  s_52851a1d1cb1d6::t_ab863655cca657 141-144,146-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "025c2f0a700e4688c1d94128198060a649b6737b",
+  "prompts": {},
+  "sessions": {
+    "s_52851a1d1cb1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cccf6c4-8326-4314-8bb9-1403c4a6a1b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
