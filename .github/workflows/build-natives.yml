@@ -138,12 +138,14 @@ jobs:
       - name: Setup oras
         uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
 
+      # Log in via `oras login`, not docker/login-action: the macOS runners have
+      # no docker binary (the action errors there). oras (set up above) needs no
+      # docker and works on every runner OS. Token passed via env (not the
+      # command line) and --password-stdin so it never lands in argv/logs.
       - name: Log in to ghcr
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       # Build the llama-cpp-sys static slice for this target (the -sys crate's
       # `bindings` feature triggers the cmake compile in build.rs). The export

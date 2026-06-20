@@ -108,14 +108,14 @@ jobs:
       # never break the build.
       - name: Setup oras
         uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      # `oras login`, not docker/login-action: macOS runners have no docker.
+      # Best-effort + same-repo only (forks have no token → anonymous pull).
       - name: Log in to ghcr (best-effort, same-repo)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Pull prebuilt natives (iOS device + sim, best-effort)
         continue-on-error: true
         env:
