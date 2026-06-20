@@ -60,7 +60,10 @@ case "$TARGET" in
     fi
     ;;
   *)
-    CC_VER="$({ "${CC:-cc}" --version 2>/dev/null || true; } | head -1)"
+    # Split CC so a wrapper/args form (e.g. "ccache clang") isn't treated as a
+    # single executable name.
+    read -r -a cc_cmd <<< "${CC:-cc}"
+    CC_VER="$({ "${cc_cmd[0]}" --version 2>/dev/null || true; } | head -1)"
     ;;
 esac
 

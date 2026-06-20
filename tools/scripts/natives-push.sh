@@ -20,6 +20,8 @@ EXPORT="${3:?}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PKG="${XYBRID_NATIVES_PKG:-ghcr.io/xybrid-ai/llama-natives}"
 
+command -v oras >/dev/null 2>&1 || { echo "natives-push: oras not found" >&2; exit 1; }
+
 FP="$("$ROOT/tools/scripts/natives-fingerprint.sh" "$TARGET" "$FEATURES")"
 LLAMA_SHA="$(grep -E 'const LLAMA_CPP_COMMIT' "$ROOT/crates/llama-cpp-sys/build.rs" | grep -oE '[0-9a-f]{40}')"
 echo "natives-push: target=$TARGET features=$FEATURES fingerprint=$FP"
@@ -33,11 +35,16 @@ fi
 SLICE="$EXPORT/$TARGET"
 [ -d "$SLICE/include" ] || { echo "natives-push: no headers at $SLICE/include" >&2; exit 1; }
 
-# Never poison the write-once tag with an incomplete slice: verify the core
-# archives build.rs requires (resolve_prebuilt) are present and non-empty in
-# lib/ OR lib64/ before publishing. (base feature set; apple adds ggml-metal
-# and vision adds mtmd — extend this list when those targets are published.)
-for a in libllama.a libggml.a libggml-base.a libggml-cpu.a; do
+# Never poison the write-once tag with an incomplete slice: verify the
+# archives build.rs's resolve_prebuilt requires are present and non-empty in
+# lib/ OR lib64/ before publishing. Mirror required_archives() in build.rs:
+# the base set, plus ggml-metal on Apple targets and mtmd under vision.
+archives=(libllama.a libggml.a libggml-base.a libggml-cpu.a)
+case "$TARGET" in
+  *apple*) archives+=(libggml-metal.a) ;;
+esac
+[ "$FEATURES" = "vision" ] && archives+=(libmtmd.a)
+for a in "${archives[@]}"; do
   [ -s "$SLICE/lib/$a" ] || [ -s "$SLICE/lib64/$a" ] || {
     echo "natives-push: required archive $a missing — refusing to publish incomplete slice" >&2
     exit 1
