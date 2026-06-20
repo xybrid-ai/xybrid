@@ -1,0 +1,21 @@
+.github/workflows/build-android.yml
+  s_52851a1d1cb1d6::t_3c82e62dd273bf 153-160,176,181-183,185-194,197
+.github/workflows/build-natives.yml
+  s_52851a1d1cb1d6::t_53686d06c6abdf 10-13,43-44,48-49,51-59,67,84-85,119,123,125,131,137,139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "3c1a8f7471dd68e1d95b875d614279e27d1d5746",
+  "prompts": {},
+  "sessions": {
+    "s_52851a1d1cb1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cccf6c4-8326-4314-8bb9-1403c4a6a1b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
