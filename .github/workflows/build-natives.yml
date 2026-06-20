@@ -1,0 +1,126 @@
+name: Build Natives (prebuilt llama.cpp)
+
+# Publisher for the prebuilt-natives cache: compiles the llama.cpp static
+# slice ONCE per (target, feature-set) and pushes it to ghcr, tagged by the
+# fingerprint that crates/llama-cpp-sys/build.rs + the consumer pre-step
+# compute. Every binding build (build-android, build-apple, ...) then DOWNLOADS
+# the slice instead of recompiling it (~25 min on Android). See
+# .context/natives-prebuilt-plan.md.
+#
+# PILOT SCOPE: aarch64-linux-android, baseline (non-vision) only. Other
+# targets/feature columns are added incrementally once this leg is proven.
+
+on:
+  # Primary trigger: anything that feeds the fingerprint changed, so the cache
+  # is now stale and must be (re)built. Keep in sync with the inputs hashed by
+  # tools/scripts/natives-fingerprint.sh.
+  push:
+    branches: [master]
+    paths:
+      - 'vendor/llama-cpp'
+      - '.gitmodules'
+      - 'crates/llama-cpp-sys/**'
+      - 'tools/scripts/natives-*.sh'
+      - '.github/workflows/build-natives.yml'
+  workflow_dispatch:
+
+# Do NOT cancel in-progress publishes: a half-finished push leaves the cache
+# cold (correct, just slow), and write-once means a re-run is idempotent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+  XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
+  # Match build-android.yml so the publisher's NDK revision (folded into the
+  # fingerprint) equals the consumer's.
+  NDK_VERSION: "27.0.12077973"
+
+jobs:
+  android-arm64:
+    name: Publish native (aarch64-linux-android, base)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "natives-android-arm64"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          key: android-ndk-${{ env.NDK_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install NDK
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Set NDK environment
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Install cargo-ndk
+        run: which cargo-ndk || cargo install cargo-ndk
+
+      - name: Setup oras
+        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+
+      - name: Log in to ghcr
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build the llama-cpp-sys static slice for arm64 ONLY (the -sys crate's
+      # `bindings` feature triggers the cmake compile in build.rs). The export
+      # env makes build.rs copy the produced lib/ + include/ to a known dir;
+      # natives-push.sh then tars + uploads it tagged by fingerprint. We build
+      # the -sys crate directly (not the full SDK) because the android cmake
+      # defines are a deterministic function of target+vision, so this slice is
+      # byte-equivalent to what the shipped build's arm64 ABI produces.
+      - name: Build + publish native slice (best-effort skip if already present)
+        env:
+          XYBRID_NATIVES_EXPORT_DIR: ${{ runner.temp }}/natives-export
+        run: |
+          set -euo pipefail
+          FP="$(tools/scripts/natives-fingerprint.sh aarch64-linux-android base)"
+          echo "fingerprint=$FP"
+          if oras manifest fetch --descriptor "$XYBRID_NATIVES_PKG:$FP" >/dev/null 2>&1; then
+            echo "already published — nothing to build"
+            exit 0
+          fi
+          cargo ndk --target aarch64-linux-android --platform 28 \
+            build --release -p xybrid-llama-sys --features bindings
+          tools/scripts/natives-push.sh aarch64-linux-android base "$XYBRID_NATIVES_EXPORT_DIR"

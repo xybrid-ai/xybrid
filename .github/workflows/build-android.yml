@@ -150,6 +150,28 @@ jobs:
         # the CLI's own bundled Cargo.lock for reproducibility.
         run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
+      # Prebuilt-natives fast path (pilot: arm64 only). Best-effort: pull the
+      # prebuilt llama.cpp slice for aarch64-linux-android from ghcr and point
+      # build.rs at it so the arm64 ABI skips the ~25-min cmake compile. On ANY
+      # miss/error this is a silent no-op (continue-on-error) and every ABI
+      # compiles from source exactly as before — it can never break the build.
+      # build.rs keys on XYBRID_NATIVES_PREBUILT_DIR/<target>, so the other
+      # ABIs (no slice for them yet) fall through to source automatically.
+      - name: Setup oras
+        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      - name: Pull prebuilt natives (arm64, best-effort)
+        continue-on-error: true
+        env:
+          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
+        run: |
+          DEST="$RUNNER_TEMP/natives"
+          if tools/scripts/natives-pull.sh aarch64-linux-android base "$DEST"; then
+            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
+            echo "prebuilt natives staged at $DEST (arm64 will skip cmake)"
+          else
+            echo "no prebuilt natives — all ABIs compile from source (unchanged)"
+          fi
+
       - name: Build Android .so files (all ABIs)
         run: cargo xtask build-android --release
 
