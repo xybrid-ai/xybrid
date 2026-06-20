@@ -52,6 +52,8 @@ BUILD_RS="$(sha256 "$SYS/build.rs")"
 CMAKE_VER="$(cmake --version 2>/dev/null | head -1 || true)"
 CC_VER=""
 NDK_REV=""
+SDK_VER=""   # Apple: xcrun SDK version + active clang banner (codegen ABI)
+CRT=""       # Windows: CRT flavor the -sys slice links (MD = dynamic)
 case "$TARGET" in
   *android*)
     NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
@@ -59,17 +61,42 @@ case "$TARGET" in
       NDK_REV="$(grep -E '^Pkg.Revision' "$NDK/source.properties" | cut -d= -f2 | tr -d ' ')"
     fi
     ;;
+  *apple-ios-sim*)
+    # Mirror build.rs generate_bindings: iOS simulator -> iphonesimulator SDK.
+    # This arm MUST precede the bare *apple-ios* arm (build.rs checks
+    # contains("sim") first); reversing them tags a sim slice with the device SDK.
+    SDK_VER="$(xcrun --sdk iphonesimulator --show-sdk-version 2>/dev/null || true)/$(xcrun clang --version 2>/dev/null | head -1 || true)"
+    ;;
+  *apple-ios*)
+    SDK_VER="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || true)/$(xcrun clang --version 2>/dev/null | head -1 || true)"
+    ;;
+  *apple-darwin*)
+    SDK_VER="$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || true)/$(xcrun clang --version 2>/dev/null | head -1 || true)"
+    ;;
+  *windows-msvc*)
+    # The publisher builds xybrid-llama-sys WITHOUT crt-static, so cc-rs + CMake
+    # (forced Release on Windows) both emit /MD; the cdylib consumers (Flutter,
+    # Unity) are also /MD. Fold the CRT flavor as a literal — cl.exe has no
+    # portable --version, and MSVC toolset drift is ABI-tolerant within one CRT.
+    # A future /MT consumer would need its own crt=MT dimension + slice.
+    CRT="MD"
+    ;;
   *)
-    # Split CC so a wrapper/args form (e.g. "ccache clang") isn't treated as a
-    # single executable name.
+    # Generic host (linux gnu, etc). Split CC so a wrapper/args form
+    # (e.g. "ccache clang") isn't treated as a single executable name.
     read -r -a cc_cmd <<< "${CC:-cc}"
     CC_VER="$({ "${cc_cmd[0]}" --version 2>/dev/null || true; } | head -1)"
     ;;
 esac
 
 # 4. Combine with a record separator (0x1f) so no two values can collide by
-#    concatenation. Bump the leading schema version when this formula changes
-#    so old caches invalidate cleanly.
+#    concatenation. The android/linux payload is INTENTIONALLY byte-identical to
+#    the original formula so their already-published slices stay valid; apple
+#    and windows append a target-specific dimension (sdk/crt). Those targets
+#    have no published slices yet, so adding the dim costs no cache churn.
 US=$'\x1f'
-PAYLOAD="v1${US}llama=${LLAMA_SHA}${US}wrapper_cpp=${WRAPPER_CPP}${US}wrapper_h=${WRAPPER_H}${US}build_rs=${BUILD_RS}${US}target=${TARGET}${US}features=${FEATURES}${US}profile=release${US}cmake=${CMAKE_VER}${US}cc=${CC_VER}${US}ndk=${NDK_REV}"
+SUFFIX=""
+[ -n "$SDK_VER" ] && SUFFIX="${US}sdk=${SDK_VER}"
+[ -n "$CRT" ] && SUFFIX="${US}crt=${CRT}"
+PAYLOAD="v1${US}llama=${LLAMA_SHA}${US}wrapper_cpp=${WRAPPER_CPP}${US}wrapper_h=${WRAPPER_H}${US}build_rs=${BUILD_RS}${US}target=${TARGET}${US}features=${FEATURES}${US}profile=release${US}cmake=${CMAKE_VER}${US}cc=${CC_VER}${US}ndk=${NDK_REV}${SUFFIX}"
 printf '%s' "$PAYLOAD" | sha256

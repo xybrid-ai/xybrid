@@ -40,12 +40,17 @@ SLICE="$EXPORT/$TARGET"
 # Never poison the write-once tag with an incomplete slice: verify the
 # archives build.rs's resolve_prebuilt requires are present and non-empty in
 # lib/ OR lib64/ before publishing. Mirror required_archives() in build.rs:
-# the base set, plus ggml-metal on Apple targets and mtmd under vision.
-archives=(libllama.a libggml.a libggml-base.a libggml-cpu.a)
+# MSVC names static libs `<name>.lib` (no prefix); every other target is
+# Unix-style `lib<name>.a`. Base set, plus ggml-metal on Apple and mtmd on vision.
 case "$TARGET" in
-  *apple*) archives+=(libggml-metal.a) ;;
+  *windows-msvc*) pfx=''; sfx='.lib' ;;
+  *) pfx='lib'; sfx='.a' ;;
 esac
-[ "$FEATURES" = "vision" ] && archives+=(libmtmd.a)
+archives=("${pfx}llama${sfx}" "${pfx}ggml${sfx}" "${pfx}ggml-base${sfx}" "${pfx}ggml-cpu${sfx}")
+case "$TARGET" in
+  *apple*) archives+=("${pfx}ggml-metal${sfx}") ;;
+esac
+[ "$FEATURES" = "vision" ] && archives+=("${pfx}mtmd${sfx}")
 for a in "${archives[@]}"; do
   [ -s "$SLICE/lib/$a" ] || [ -s "$SLICE/lib64/$a" ] || {
     echo "natives-push: required archive $a missing — refusing to publish incomplete slice" >&2
