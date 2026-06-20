@@ -7,10 +7,11 @@ name: Build Natives (prebuilt llama.cpp)
 # the slice instead of recompiling it (~25 min on Android). See
 # .context/natives-prebuilt-plan.md.
 #
-# SCOPE: the three shipped Android ABIs (aarch64/armv7/x86_64-linux-android),
-# baseline (non-vision). Apple/Linux/Windows rows land in later stages once the
-# fingerprint gains the Apple-SDK + Windows-CRT dimensions and natives-push.sh
-# learns MSVC `.lib` naming.
+# SCOPE: the three shipped Android ABIs + the two iOS slices the xcframework
+# ships (device + arm64 simulator), baseline (non-vision). macOS/Linux/Windows
+# rows land once a consumer pulls them. NOTE: apple/host slices fold the runner
+# image's toolchain (Xcode SDK, gcc) into their fingerprint, so the weekly cron
+# re-warms them across GitHub image rotations.
 
 on:
   # Primary trigger: anything that feeds the fingerprint changed, so the cache
@@ -24,6 +25,13 @@ on:
       - 'crates/llama-cpp-sys/**'
       - 'tools/scripts/natives-*.sh'
       - '.github/workflows/build-natives.yml'
+  # Weekly re-publish: GitHub rotates the macOS/Linux runner images, changing
+  # the host toolchain (Xcode SDK, gcc) folded into apple/host fingerprints.
+  # Re-running weekly re-warms those slices under the current image so the cache
+  # doesn't sit cold after a rotation. Write-once keeps it cheap — unchanged
+  # slices short-circuit on the oras exists-check.
+  schedule:
+    - cron: "17 6 * * 1"
   workflow_dispatch:
 
 # Do NOT cancel in-progress publishes: a half-finished push leaves the cache
@@ -47,16 +55,32 @@ env:
 jobs:
   publish-native:
     name: Publish native (${{ matrix.target }}, base)
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       # One slice miss must not abort the others — write-once makes every row
       # idempotent, so let them attempt independently.
       fail-fast: false
       matrix:
-        target:
-          - aarch64-linux-android
-          - armv7-linux-androideabi
-          - x86_64-linux-android
+        include:
+          # --- Android (cross-compiled on Linux via cargo-ndk + NDK) ---
+          - target: aarch64-linux-android
+            runner: ubuntu-latest
+            needs-ndk: true
+          - target: armv7-linux-androideabi
+            runner: ubuntu-latest
+            needs-ndk: true
+          - target: x86_64-linux-android
+            runner: ubuntu-latest
+            needs-ndk: true
+          # --- Apple iOS (native build on macOS; device + arm64 simulator only.
+          #     boltffi's xcframework sets include_macos=false, so aarch64-apple-
+          #     darwin / x86_64 are not consumed and are not published here). ---
+          - target: aarch64-apple-ios
+            runner: macos-14
+            needs-ndk: false
+          - target: aarch64-apple-ios-sim
+            runner: macos-14
+            needs-ndk: false
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -86,7 +110,9 @@ jobs:
           cache-all-crates: "true"
           save-if: "true"
 
+      # --- Android toolchain (NDK + cargo-ndk), only on the android rows ---
       - name: Cache Android NDK
+        if: matrix.needs-ndk
         id: cache-ndk
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -94,16 +120,19 @@ jobs:
           key: android-ndk-${{ env.NDK_VERSION }}
 
       - name: Setup Android SDK
+        if: matrix.needs-ndk
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
       - name: Install NDK
-        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        if: matrix.needs-ndk && steps.cache-ndk.outputs.cache-hit != 'true'
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Set NDK environment
+        if: matrix.needs-ndk
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
       - name: Install cargo-ndk
+        if: matrix.needs-ndk
         run: which cargo-ndk || cargo install cargo-ndk
 
       - name: Setup oras
@@ -116,13 +145,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build the llama-cpp-sys static slice for this ABI (the -sys crate's
+      # Build the llama-cpp-sys static slice for this target (the -sys crate's
       # `bindings` feature triggers the cmake compile in build.rs). The export
       # env makes build.rs copy the produced lib/ + include/ to a known dir;
       # natives-push.sh then tars + uploads it tagged by fingerprint. We build
-      # the -sys crate directly (not the full SDK) because the Android cmake
-      # defines are a deterministic function of target+vision, so this slice is
-      # byte-equivalent to what the shipped bolt build's ABI produces.
+      # the -sys crate directly (not the full SDK) because the cmake defines are
+      # a deterministic function of target+vision, so this slice is
+      # byte-equivalent to what the shipped binding build produces.
       - name: Build + publish native slice (best-effort skip if already present)
         env:
           XYBRID_NATIVES_EXPORT_DIR: ${{ runner.temp }}/natives-export
@@ -134,6 +163,11 @@ jobs:
             echo "already published — nothing to build"
             exit 0
           fi
-          cargo ndk --target ${{ matrix.target }} --platform 28 \
-            build --release -p xybrid-llama-sys --features bindings
+          if [ "${{ matrix.needs-ndk }}" = "true" ]; then
+            cargo ndk --target ${{ matrix.target }} --platform 28 \
+              build --release -p xybrid-llama-sys --features bindings
+          else
+            cargo build --release -p xybrid-llama-sys --features bindings \
+              --target ${{ matrix.target }}
+          fi
           tools/scripts/natives-push.sh ${{ matrix.target }} base "$XYBRID_NATIVES_EXPORT_DIR"

@@ -102,6 +102,47 @@ jobs:
         # installs against the CLI's own bundled Cargo.lock for reproducibility.
         run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
+      # Prebuilt-natives fast path (iOS device + arm64 simulator — the two
+      # slices boltffi's xcframework builds). Best-effort: pull the prebuilt
+      # llama.cpp slices and point build.rs at them so the xcframework build
+      # skips the llama.cpp cmake compile per slice. On ANY miss/error this is a
+      # silent no-op (continue-on-error) and the slice compiles from source — it
+      # can never break the build. build.rs keys on
+      # XYBRID_NATIVES_PREBUILT_DIR/<target>, so each slice in the single
+      # `boltffi pack apple` invocation resolves its own (or falls through).
+      - name: Setup oras
+        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      - name: Log in to ghcr (best-effort, same-repo)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull prebuilt natives (iOS device + sim, best-effort)
+        continue-on-error: true
+        env:
+          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
+        run: |
+          # Use the Rust TARGET spelling aarch64-apple-ios-sim (with -sim);
+          # build.rs keys the slice dir on it.
+          DEST="$RUNNER_TEMP/natives"
+          got_any=0
+          for triple in aarch64-apple-ios aarch64-apple-ios-sim; do
+            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+              echo "prebuilt natives staged for $triple (will skip cmake)"
+              got_any=1
+            else
+              echo "no prebuilt natives for $triple — compiles from source"
+            fi
+          done
+          if [ "$got_any" = 1 ]; then
+            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
+          else
+            echo "no prebuilt natives — compiles from source (unchanged)"
+          fi
+
       - name: Build XCFramework
         run: cargo xtask build-xcframework --release
 
