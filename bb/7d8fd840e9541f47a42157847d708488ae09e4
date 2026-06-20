@@ -1,0 +1,34 @@
+tools/scripts/natives-push.sh
+  s_52851a1d1cb1d6::t_6cab0f4e60b852 1-36,40-49
+  s_52851a1d1cb1d6::t_0488a2cab84b30 37-39
+crates/llama-cpp-sys/build.rs
+  s_52851a1d1cb1d6::t_f26e299d7e03a9 687-689
+  s_52851a1d1cb1d6::t_809e1289b7e5f3 490-535,553
+  s_52851a1d1cb1d6::t_b9de3ef8ebe2f9 598-600,602-611,631,667-686,690-779
+  s_52851a1d1cb1d6::t_d684d662a2b282 567
+tools/scripts/natives-fingerprint.sh
+  s_52851a1d1cb1d6::t_effabd54c77ba8 1-61
+tools/scripts/natives-pull.sh
+  s_52851a1d1cb1d6::t_d5188124f348d0 1-47
+.github/workflows/build-natives.yml
+  s_52851a1d1cb1d6::t_7660eabd37a780 100
+  s_52851a1d1cb1d6::t_af770449f06559 1-99,101-126
+.github/workflows/build-android.yml
+  s_52851a1d1cb1d6::t_d427245be48450 153-174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "bb7d8fd840e9541f47a42157847d708488ae09e4",
+  "prompts": {},
+  "sessions": {
+    "s_52851a1d1cb1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cccf6c4-8326-4314-8bb9-1403c4a6a1b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
