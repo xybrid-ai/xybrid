@@ -1,0 +1,41 @@
+bindings/flutter/CHANGELOG.md
+  s_0587946b7a32aa::t_3804015d4f8d1e 3-8
+crates/xybrid-core/Cargo.toml
+  s_0587946b7a32aa::t_6897a0ae35ba71 28-29
+Package.swift
+  s_0587946b7a32aa::t_c5e6bf52f4c984 39
+bindings/kotlin/build.gradle.kts
+  s_0587946b7a32aa::t_c5e6bf52f4c984 8
+bindings/unity/package.json
+  s_0587946b7a32aa::t_c5e6bf52f4c984 3
+Cargo.toml
+  s_0587946b7a32aa::t_c5e6bf52f4c984 20
+crates/xybrid/Cargo.toml
+  s_0587946b7a32aa::t_6897a0ae35ba71 17
+crates/xybrid-sdk/Cargo.toml
+  s_0587946b7a32aa::t_6897a0ae35ba71 17,37,42
+crates/xybrid-llama/Cargo.toml
+  s_0587946b7a32aa::t_6897a0ae35ba71 24
+bindings/flutter/rust/Cargo.toml
+  s_0587946b7a32aa::t_c5e6bf52f4c984 3
+bindings/flutter/pubspec.yaml
+  s_0587946b7a32aa::t_c5e6bf52f4c984 3
+CHANGELOG.md
+  s_0587946b7a32aa::t_5963cadd4cb9f7 17-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "b717d3dd25c9f1ea9cab7b591ac6987a2070c165",
+  "prompts": {},
+  "sessions": {
+    "s_0587946b7a32aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "90bf1087-e0c2-42ea-b400-1e7d785e30e5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
