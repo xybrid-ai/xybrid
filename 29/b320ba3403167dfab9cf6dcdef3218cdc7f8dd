@@ -1,0 +1,21 @@
+.github/workflows/build-natives.yml
+  s_52851a1d1cb1d6::t_10dda18bc07cd5 84-87
+.github/workflows/build-flutter.yml
+  s_52851a1d1cb1d6::t_3c8eafd07eff4c 156-186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "29b320ba3403167dfab9cf6dcdef3218cdc7f8dd",
+  "prompts": {},
+  "sessions": {
+    "s_52851a1d1cb1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cccf6c4-8326-4314-8bb9-1403c4a6a1b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
