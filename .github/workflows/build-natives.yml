@@ -81,6 +81,10 @@ jobs:
           - target: aarch64-apple-ios-sim
             runner: macos-14
             needs-ndk: false
+          # --- Linux (host build; consumed by the Flutter linux leg) ---
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            needs-ndk: false
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 

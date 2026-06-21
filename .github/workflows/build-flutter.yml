@@ -153,6 +153,37 @@ jobs:
           fi
           echo "FRB bindings are up-to-date."
 
+      # Prebuilt-natives fast path (Linux x86_64). Best-effort: pull the prebuilt
+      # llama.cpp slice and point build.rs at it so the Linux Flutter build skips
+      # the llama.cpp cmake compile. On ANY miss/error this is a silent no-op
+      # (continue-on-error) and it compiles from source — it can never break the
+      # build. Only the linux leg pulls (the only published non-android slice a
+      # Flutter build consumes today; macOS/Windows legs build at release time).
+      - name: Setup oras
+        if: matrix.platform == 'linux'
+        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      # `oras login` (not docker/login-action) for cross-platform consistency.
+      # Best-effort + same-repo only (forks have no token → anonymous pull).
+      - name: Log in to ghcr (best-effort, same-repo)
+        if: matrix.platform == 'linux' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Pull prebuilt natives (linux x86_64, best-effort)
+        if: matrix.platform == 'linux'
+        continue-on-error: true
+        env:
+          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
+        run: |
+          DEST="$RUNNER_TEMP/natives"
+          if tools/scripts/natives-pull.sh x86_64-unknown-linux-gnu base "$DEST"; then
+            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
+            echo "prebuilt natives staged at $DEST (linux will skip cmake)"
+          else
+            echo "no prebuilt natives — compiles from source (unchanged)"
+          fi
+
       - name: Build Flutter native library
         run: cargo xtask build-flutter --platform ${{ matrix.platform }} --release --skip-frb-codegen
 
