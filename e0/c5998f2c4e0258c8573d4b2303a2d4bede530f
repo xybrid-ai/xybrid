@@ -1,0 +1,20 @@
+bindings/react-native/example/App.tsx
+  s_9f87bfb9c88973::t_420267b7031964 90
+  s_9f87bfb9c88973::t_0e79ce900324d0 47-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "e0c5998f2c4e0258c8573d4b2303a2d4bede530f",
+  "prompts": {},
+  "sessions": {
+    "s_9f87bfb9c88973": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "960d065d-74dd-49d6-b24f-b0fd6f06eb14",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
