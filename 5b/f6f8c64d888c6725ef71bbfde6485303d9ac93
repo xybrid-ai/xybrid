@@ -1,0 +1,23 @@
+bindings/flutter/CHANGELOG.md
+  s_6c4a61d075bb26::t_eea4ec9cf7a8c1 26
+CHANGELOG.md
+  s_6c4a61d075bb26::t_6860422ab8bf29 94-98
+  s_6c4a61d075bb26::t_3263176ad0e800 102-108,110-113
+  s_6c4a61d075bb26::t_9e5a3c1c8158a5 74-75,77-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "5bf6f8c64d888c6725ef71bbfde6485303d9ac93",
+  "prompts": {},
+  "sessions": {
+    "s_6c4a61d075bb26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13401704-d1ec-41eb-b861-61af60f64916",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
