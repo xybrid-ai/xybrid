@@ -127,10 +127,11 @@ cargo xtask build-android --debug --version 1.0.0
 
 **Requirements:**
 - Android NDK r27 (`ANDROID_NDK_HOME`, or installed under `$ANDROID_HOME/ndk/`)
-- `patchelf` (`brew install patchelf` / `apt-get install patchelf`)
 
 **Output:**
-- `bindings/kotlin/libs/<abi>/libxybrid-bolt.so` (native library)
+- `bindings/kotlin/libs/<abi>/libxybrid-bolt.so` (native library; 16 KB-aligned,
+  `libc++_shared` linked in — a clean linker output that survives a consumer's
+  AGP strip, no patchelf)
 - `bindings/kotlin/libs/<abi>/{libonnxruntime.so,libc++_shared.so}` (bundled runtime)
 
 ### `build-flutter` - Build Flutter Native Libraries

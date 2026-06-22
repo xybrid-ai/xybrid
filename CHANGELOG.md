@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0-rc1] - 2026-06-21
+
+Release candidate for `0.2.0`. This is the stable `0.2.0` tree under a
+prerelease tag — published across every distribution channel (crates.io,
+pub.dev, Maven Central, SPM) so consumers can validate the vision/BoltFFI
+release against real integrations before the final tag. No functional changes
+from the `0.2.0` candidate — see the [0.2.0] entry below for the full change
+set.
+
+---
+
 ## [0.2.0-alpha] - 2026-06-19
 
 Prerelease of `0.2.0` cut to validate the release pipeline and exercise the

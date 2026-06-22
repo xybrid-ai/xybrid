@@ -10,6 +10,8 @@ on:
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
       - 'tools/scripts/build-android-bolt.sh'
+      - 'tools/scripts/android-dlopen-gate.sh'
+      - 'tools/scripts/android-dlopen-probe.c'
       - 'xtask/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
@@ -33,6 +35,8 @@ on:
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
       - 'tools/scripts/build-android-bolt.sh'
+      - 'tools/scripts/android-dlopen-gate.sh'
+      - 'tools/scripts/android-dlopen-probe.c'
       - 'xtask/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
@@ -97,12 +101,6 @@ jobs:
           shared-key: "android-bolt"
           cache-all-crates: "true"
           save-if: "true"
-
-      # patchelf is required by build-android-bolt.sh to add the
-      # libc++_shared.so DT_NEEDED entry (boltffi 0.25's android pack
-      # drops it).
-      - name: Install patchelf
-        run: sudo apt-get update && sudo apt-get install -y patchelf
 
       # Cache Android NDK to avoid the ~1.5GB download on every build.
       - name: Cache Android NDK
@@ -203,6 +201,7 @@ jobs:
       - name: Verify .so files
         run: |
           SO_BASE="bindings/kotlin/libs"
+          READELF="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
           # The AAR ships these three ABIs (abiFilters in
           # bindings/kotlin/build.gradle.kts). i686/x86 is built but not
           # packaged, so it's not verified here.
@@ -213,14 +212,31 @@ jobs:
               exit 1
             fi
             echo "OK: $SO ($(du -h "$SO" | cut -f1))"
-            # libc++_shared must be a declared dependency (the patchelf
-            # step in build-android-bolt.sh adds it). Guard against a
-            # regression that would dlopen-fail on device.
-            if ! readelf -d "$SO" | grep -q 'libc++_shared.so'; then
+            # libc++_shared must be a declared dependency. It's added at link
+            # time by the clang shim in build-android-bolt.sh (no patchelf), so
+            # the .so is a clean linker output that survives a consumer's strip.
+            # Guard against a shim regression that would dlopen-fail on device.
+            if ! "$READELF" -d "$SO" | grep -q 'libc++_shared.so'; then
               echo "Error: $SO is missing libc++_shared.so in DT_NEEDED"
               exit 1
             fi
             echo "  DT_NEEDED libc++_shared.so: present"
+            # The 64-bit ABIs must be 16 KB-aligned or they won't load on
+            # Android 15+ (16 KB-page) devices. A LOAD segment aligned below
+            # 0x4000 means the shim's -Wl,-z,max-page-size=16384 didn't land.
+            case "$abi" in
+              arm64-v8a | x86_64)
+                bad=0
+                while read -r al; do
+                  [ "$((al))" -lt 16384 ] && { echo "  LOAD align $al < 16 KB"; bad=1; }
+                done < <("$READELF" -l "$SO" | awk '$1=="LOAD"{if(NF>4){print $NF}else{getline;print $NF}}')
+                if [ "$bad" != 0 ]; then
+                  echo "Error: $SO has a LOAD segment aligned below 16 KB"
+                  exit 1
+                fi
+                echo "  16 KB LOAD alignment: present"
+                ;;
+            esac
           done
 
       - name: Verify ORT runtime bundled (arm64-v8a, x86_64)
@@ -258,6 +274,31 @@ jobs:
         with:
           name: android-so-files
           path: bindings/kotlin/libs/
+          if-no-files-found: error
+
+      # Stage everything the dlopen-gate job needs (x86_64 — the ABI the CI
+      # emulator runs). Done here because this job has the NDK; the gate job
+      # is then a cheap emulator-only step with no toolchain.
+      - name: Stage dlopen-gate artifacts (x86_64)
+        run: |
+          NDKBIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          SRC="bindings/kotlin/libs/x86_64"
+          mkdir -p dlopen-gate
+          cp "$SRC/libxybrid-bolt.so" "$SRC/libc++_shared.so" "$SRC/libonnxruntime.so" dlopen-gate/
+          # AGP-style strip — the exact step that corrupted the old patchelf'd
+          # .so. The fixed clean .so must still dlopen after it.
+          cp "$SRC/libxybrid-bolt.so" dlopen-gate/libxybrid-bolt.stripped.so
+          "$NDKBIN/llvm-strip" --strip-all dlopen-gate/libxybrid-bolt.stripped.so
+          # Probe executable for the emulator's x86_64 ABI.
+          "$NDKBIN/x86_64-linux-android24-clang" \
+            tools/scripts/android-dlopen-probe.c -o dlopen-gate/android-dlopen-probe
+          ls -la dlopen-gate
+
+      - name: Upload dlopen-gate artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-dlopen-gate
+          path: dlopen-gate/
           if-no-files-found: error
 
   # Compiles the Kotlin binding wrapper (hand-written Xybrid.kt + the
@@ -299,3 +340,47 @@ jobs:
       - name: Compile wrapper + run unit tests
         working-directory: bindings/kotlin
         run: ./gradlew compileReleaseKotlin compileDebugKotlin testDebugUnitTest --console=plain --stacktrace
+
+  # The authoritative gate: actually dlopen the shipped libxybrid-bolt.so on an
+  # emulator — as built AND after an AGP-style strip. This is the regression
+  # guard the strip-fragility bug needed and never had: nothing in CI ever
+  # loaded the bolt .so in a process, so a .so that passed `readelf` but failed
+  # bionic's loader (the "empty/missing DT_HASH/DT_GNU_HASH" crash) shipped
+  # silently. readelf reads section headers; the loader reads program headers —
+  # only an on-device dlopen proves a load. Runs the x86_64 slice (the ABI a
+  # GitHub KVM runner can emulate); the build job's static checks + the clean
+  # (patchelf-free) link cover the other ABIs.
+  dlopen-gate:
+    name: dlopen gate (x86_64 emulator)
+    needs: build-android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # KVM is required for a usable (hardware-accelerated) x86_64 emulator on
+      # the Linux runner; without it boot times out.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Download dlopen-gate artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-dlopen-gate
+          path: dlopen-gate
+
+      # api-level 35 = Android 15 bionic, which is strict enough to reject the
+      # DT_GNU_HASH corruption this gate guards against.
+      - name: dlopen libxybrid-bolt.so (as built + after AGP strip)
+        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: bash tools/scripts/android-dlopen-gate.sh dlopen-gate
