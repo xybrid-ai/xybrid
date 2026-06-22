@@ -1,0 +1,173 @@
+# A/B: Build Apple XCFramework on GitHub vs WarpBuild runners.
+#
+# ISOLATED EXPERIMENT — does not touch production CI. It triggers ONLY on push
+# to the `theGlenn/ci-warpbuild-ab` branch (and manual dispatch once on master).
+# Why push and not pure workflow_dispatch: GitHub only registers a
+# workflow_dispatch entry once the file lives on the DEFAULT branch, so a
+# dispatch-only workflow on a feature branch is un-runnable (the same wall we
+# hit with build-natives.yml). A branch-scoped push trigger keeps it isolated
+# AND runnable.
+#
+# It builds the SAME commit on both runners, in parallel, with identical steps —
+# the only variable is `runs-on`. Each arm has its OWN cache namespace so
+# warm-vs-warm is a per-runner measurement and the production apple-xcframework
+# cache is never touched.
+#
+# Methodology:
+#   - Run #1 (the push): COLD vs COLD (each arm's cache is empty).
+#   - Re-run the jobs from the Actions UI (or push again): WARM vs WARM (each arm
+#     restored the cache it saved). Do this 2-3x and compare the named steps
+#     `Build XCFramework`, `Check iOS vision build`, `Install boltffi CLI`.
+#   - Pull per-step timings with:
+#       gh api repos/<owner>/<repo>/actions/jobs/<JOBID> \
+#         --jq '.steps[] | "\(.name)\t\(.started_at)\t\(.completed_at)"'
+#
+# IMPORTANT parity check: the natives fingerprint folds xcrun SDK + clang. The
+# "Runner fingerprint" step below prints it on each arm. If the two arms print
+# DIFFERENT fingerprints, the WarpBuild arm will MISS the published ios/ios-sim
+# prebuilt slices and source-compile llama.cpp — making the comparison
+# apples-to-oranges. Confirm the fingerprints match before trusting the numbers.
+name: AB WarpBuild Apple
+
+on:
+  push:
+    branches: [theGlenn/ci-warpbuild-ab]
+  workflow_dispatch:
+
+concurrency:
+  group: ab-warp-apple-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  xcframework:
+    name: XCFramework (${{ matrix.label }})
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, label: github-macos-14 }
+          - { runner: warp-macos-14-arm64-12x, label: warp-macos-14-12x }
+          # Optional extra arm — uncomment to also test the 6-vCPU box:
+          # - { runner: warp-macos-14-arm64-6x, label: warp-macos-14-6x }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Image-parity / core-count diagnostic. The natives fingerprint MUST match
+      # across arms or the WarpBuild arm misses the prebuilt cache (see header).
+      - name: Runner fingerprint (image parity check)
+        run: |
+          echo "::group::${{ matrix.label }} on ${{ matrix.runner }}"
+          sw_vers || true
+          echo "cores(hw.ncpu): $(sysctl -n hw.ncpu 2>/dev/null || echo '?')"
+          echo "mem(hw.memsize): $(sysctl -n hw.memsize 2>/dev/null || echo '?')"
+          xcodebuild -version 2>/dev/null || echo "xcodebuild: n/a"
+          echo "xcrun SDK version: $(xcrun --show-sdk-version 2>/dev/null || echo '?')"
+          CLANG="$(xcrun -f clang 2>/dev/null || echo clang)"
+          echo "clang: $CLANG -> $("$CLANG" --version 2>/dev/null | head -1)"
+          echo "cmake: $(cmake --version 2>/dev/null | head -1 || echo 'none')"
+          echo "--- natives fingerprint (must be identical across arms) ---"
+          echo "aarch64-apple-ios     base fp: $(tools/scripts/natives-fingerprint.sh aarch64-apple-ios base 2>/dev/null || echo 'FP-FAILED')"
+          echo "aarch64-apple-ios-sim base fp: $(tools/scripts/natives-fingerprint.sh aarch64-apple-ios-sim base 2>/dev/null || echo 'FP-FAILED')"
+          echo "::endgroup::"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            aarch64-apple-ios,
+            aarch64-apple-ios-sim,
+            aarch64-apple-darwin
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      # Per-arm cache namespace (matrix.label) — isolates warm-vs-warm and never
+      # touches the production `apple-xcframework` bucket.
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "warpab"
+          shared-key: "apple-${{ matrix.label }}"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Cache boltffi CLI
+        id: cache-boltffi
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/boltffi
+          key: boltffi-cli-warpab-${{ matrix.label }}-0.25.3
+
+      - name: Install boltffi CLI
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
+
+      - name: Setup oras
+        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      - name: Log in to ghcr (best-effort, same-repo)
+        continue-on-error: true
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Pull prebuilt natives (iOS device + sim, best-effort)
+        continue-on-error: true
+        env:
+          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
+        run: |
+          DEST="$RUNNER_TEMP/natives"
+          got_any=0
+          for triple in aarch64-apple-ios aarch64-apple-ios-sim; do
+            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+              echo "prebuilt natives staged for $triple (will skip cmake)"
+              got_any=1
+            else
+              echo "no prebuilt natives for $triple — compiles from source"
+            fi
+          done
+          if [ "$got_any" = 1 ]; then
+            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
+          else
+            echo "no prebuilt natives — compiles from source (unchanged)"
+          fi
+
+      - name: Build XCFramework
+        run: cargo xtask build-xcframework --release
+
+      - name: Verify XCFramework
+        run: |
+          XCFW_PATH="bindings/apple/XCFrameworks/XybridFFI.xcframework"
+          if [ ! -d "$XCFW_PATH" ]; then
+            echo "Error: XCFramework not found at $XCFW_PATH"
+            exit 1
+          fi
+          find "$XCFW_PATH" -name '*.a' | while read -r lib; do file "$lib"; done
+
+      - name: Compile Swift binding wrapper (iOS Simulator)
+        run: |
+          set -euo pipefail
+          ./bindings/apple/scripts/set-natives-mode.sh --set-local
+          xcodebuild -resolvePackageDependencies
+          xcodebuild build \
+            -scheme Xybrid \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Check iOS vision build (compile-only, not shipped)
+        run: cargo check -p xybrid-sdk --features platform-ios,llm-llamacpp-vision --target aarch64-apple-ios

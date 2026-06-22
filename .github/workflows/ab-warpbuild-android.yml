@@ -1,0 +1,177 @@
+# A/B: Build Android .so (all ABIs) on GitHub vs WarpBuild runners.
+#
+# ISOLATED EXPERIMENT — does not touch production CI. Triggers ONLY on push to
+# the `theGlenn/ci-warpbuild-ab` branch (and manual dispatch once on master).
+# See ab-warpbuild-apple.yml header for why push (not pure workflow_dispatch).
+#
+# Builds the SAME commit on GitHub vs a high-core WarpBuild Linux runner, in
+# parallel, identical steps — only `runs-on` varies. The dominant cost here is
+# the Rust release-compile of 3 ABIs (~16min), which is what extra cores attack.
+# Each arm has its OWN cache namespace (never touches the production
+# `android-bolt` bucket).
+#
+# Methodology: run #1 = cold/cold; re-run jobs = warm/warm. Compare the named
+# steps `Build Android .so files (all ABIs)` and `Check Android vision build`.
+# Per-step timings:
+#   gh api repos/<owner>/<repo>/actions/jobs/<JOBID> \
+#     --jq '.steps[] | "\(.name)\t\(.started_at)\t\(.completed_at)"'
+#
+# The android natives fingerprint folds the NDK revision + cmake (NOT Xcode), and
+# NDK_VERSION is pinned below, so the fingerprint should match across arms and
+# both arms should hit the published android slices. The "Runner fingerprint"
+# step prints it to confirm.
+name: AB WarpBuild Android
+
+on:
+  push:
+    branches: [theGlenn/ci-warpbuild-ab]
+  workflow_dispatch:
+
+concurrency:
+  group: ab-warp-android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  NDK_VERSION: "27.0.12077973"
+
+jobs:
+  android:
+    name: Android .so (${{ matrix.label }})
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, label: github-ubuntu }
+          - { runner: warp-ubuntu-latest-x64-16x, label: warp-ubuntu-16x }
+          # Optional extra arm — uncomment to see whether 32 vCPU buys more over
+          # 16 (Rust codegen parallelism flattens out at some point):
+          # - { runner: warp-ubuntu-latest-x64-32x, label: warp-ubuntu-32x }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Runner fingerprint (core count + cache parity)
+        run: |
+          echo "::group::${{ matrix.label }} on ${{ matrix.runner }}"
+          echo "nproc: $(nproc)"
+          echo "mem: $(free -h 2>/dev/null | awk '/Mem:/{print $2}' || echo '?')"
+          echo "clang: $(clang --version 2>/dev/null | head -1 || echo 'n/a')"
+          echo "cmake: $(cmake --version 2>/dev/null | head -1 || echo 'n/a')"
+          echo "--- natives fingerprint (must be identical across arms) ---"
+          echo "aarch64-linux-android   base fp: $(tools/scripts/natives-fingerprint.sh aarch64-linux-android base 2>/dev/null || echo 'FP-FAILED')"
+          echo "::endgroup::"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android,
+            i686-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "warpab"
+          shared-key: "android-${{ matrix.label }}"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Install patchelf
+        run: sudo apt-get update && sudo apt-get install -y patchelf
+
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          key: android-ndk-warpab-${{ matrix.label }}-${{ env.NDK_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install NDK
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Set NDK environment
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Install cargo-ndk
+        run: which cargo-ndk || cargo install cargo-ndk
+
+      - name: Cache boltffi CLI
+        id: cache-boltffi
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/boltffi
+          key: boltffi-cli-warpab-${{ matrix.label }}-0.25.3
+
+      - name: Install boltffi CLI
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
+
+      - name: Setup oras
+        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      - name: Log in to ghcr (best-effort, same-repo)
+        continue-on-error: true
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull prebuilt natives (all shipped ABIs, best-effort)
+        continue-on-error: true
+        env:
+          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
+        run: |
+          DEST="$RUNNER_TEMP/natives"
+          got_any=0
+          for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
+            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+              echo "prebuilt natives staged for $triple (will skip cmake)"
+              got_any=1
+            else
+              echo "no prebuilt natives for $triple — compiles from source"
+            fi
+          done
+          if [ "$got_any" = 1 ]; then
+            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
+          else
+            echo "no prebuilt natives for any ABI — all compile from source (unchanged)"
+          fi
+
+      - name: Build Android .so files (all ABIs)
+        run: cargo xtask build-android --release
+
+      - name: Verify .so files
+        run: |
+          SO_BASE="bindings/kotlin/libs"
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            SO="$SO_BASE/$abi/libxybrid-bolt.so"
+            if [ ! -f "$SO" ]; then
+              echo "Error: $SO not found"
+              exit 1
+            fi
+            echo "OK: $SO ($(du -h "$SO" | cut -f1))"
+          done
+
+      - name: Check Android vision build (compile-only, not shipped)
+        run: cargo ndk --target aarch64-linux-android --platform 28 check -p xybrid-sdk --features platform-android,llm-llamacpp-vision
