@@ -1,0 +1,19 @@
+.github/workflows/ab-warpbuild-apple.yml
+  s_21930872c0635e::t_ee0ddcf813e2d2 56-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "f82f6786207422626bb1a110f3b83a499e18e7c6",
+  "prompts": {},
+  "sessions": {
+    "s_21930872c0635e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d1617b5-d132-459b-b40e-4d41d232b7f5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
