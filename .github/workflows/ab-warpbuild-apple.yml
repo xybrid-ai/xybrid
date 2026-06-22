@@ -53,9 +53,11 @@ jobs:
       matrix:
         include:
           - { runner: macos-14, label: github-macos-14 }
-          - { runner: warp-macos-14-arm64-12x, label: warp-macos-14-12x }
-          # Optional extra arm — uncomment to also test the 6-vCPU box:
-          # - { runner: warp-macos-14-arm64-6x, label: warp-macos-14-6x }
+          - { runner: warp-macos-14-arm64-6x, label: warp-macos-14-6x }
+          # NOTE: warp-macos-14-arm64-12x queued indefinitely — no macOS runner was
+          # assigned on this org/plan (WarpBuild provisions macOS as M4 Pro 6 vCPU;
+          # 12x macOS may be a higher tier / disabled / capacity-bound). Use -6x.
+          # - { runner: warp-macos-14-arm64-12x, label: warp-macos-14-12x }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
