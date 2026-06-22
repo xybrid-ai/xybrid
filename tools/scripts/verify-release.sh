@@ -174,11 +174,20 @@ test_ios() {
     local derived="$WORK/ios-derived"
     # Use a generic iOS Simulator destination so we don't depend on a
     # specific simulator runtime being installed.
+    #
+    # EXCLUDED_ARCHS=x86_64: the shipped XybridFFI.xcframework intentionally
+    # carries an arm64-only simulator slice (crates/xybrid-bolt/boltffi.toml
+    # `simulator_architectures = ["arm64"]` — ort-sys has no prebuilt
+    # x86_64-apple-ios binaries, so Intel-Mac simulators are unsupported by
+    # design). A generic simulator destination otherwise compiles every sim
+    # arch and fails to link x86_64. Real consumers on Apple Silicon build
+    # arm64-only (Debug ONLY_ACTIVE_ARCH); this matches that.
     if xcodebuild \
             -project "$proj" \
             -scheme XybridExample \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$derived" \
+            EXCLUDED_ARCHS=x86_64 \
             CODE_SIGNING_ALLOWED=NO \
             build > "$WORK/ios.log" 2>&1; then
         DETAIL[ios]="built examples/ios/XybridExample against Package.swift @ workspace"
