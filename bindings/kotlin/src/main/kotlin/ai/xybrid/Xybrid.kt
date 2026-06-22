@@ -204,6 +204,9 @@ suspend fun XybridModel.runAsync(
 /** Warm up the model off the caller's thread (on [Dispatchers.IO]). */
 suspend fun XybridModel.warmupAsync() = withContext(Dispatchers.IO) { this@warmupAsync.warmup() }
 
+/** Unload the model, freeing its memory, off the caller's thread (on [Dispatchers.IO]). */
+suspend fun XybridModel.unloadAsync() = withContext(Dispatchers.IO) { this@unloadAsync.unload() }
+
 /** The result of a model inference operation. */
 typealias Result = XybridResult
 

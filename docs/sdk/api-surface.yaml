@@ -196,8 +196,12 @@ classes:
       benchmark:
         async: true
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      warmup:
+        notes: "Runs a tiny inference so the first real call pays no cold-start cost. Exposed on the model as a Future/throwing call (Dart Future<void>, Swift/Kotlin throwing/Unit + *Async variants). Not yet on the Unity C-ABI (pending Unity's migration off the pre-bolt C ABI)."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
       unload:
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Genuinely frees model memory: resets the SDK executor and drops the backend session (ONNX session removed from cache; llama.cpp model/context dropped). Dart binds it as Future<void> (NOT a sync void). Not yet on the Unity C-ABI (pending migration off the pre-bolt C ABI)."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
       executionProviderInfo:
         return: ExecutionProviderInfo
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
