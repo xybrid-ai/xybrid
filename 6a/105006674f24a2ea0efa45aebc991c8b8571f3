@@ -1,0 +1,37 @@
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_cd3154b14e8c61::t_b8f4fdda83c786 207-209
+docs/sdk/api-surface.yaml
+  s_cd3154b14e8c61::t_c84cc08a43243f 199-201,203-204
+bindings/flutter/lib/src/rust/api/model.dart
+  s_cd3154b14e8c61::t_b029b25ba555fb 164-180
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_cd3154b14e8c61::t_b029b25ba555fb 82,230-233,1485-1536,1543,1568,1593,1619,1648,1673,1699,1722,1746,1769,1793,1816,1840,1865,1892,1917,1944,1970,1995,2018,2043,2067,2092,2115,2138,4963-4985
+docs/sdk/API_REFERENCE.md
+  s_cd3154b14e8c61::t_16d698dc13eaf9 374-380
+  s_cd3154b14e8c61::t_08b577f4f6fa64 340-345
+  s_cd3154b14e8c61::t_1a14cd75389c40 423-424
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_cd3154b14e8c61::t_e0952e53d8ba31 219-224
+bindings/flutter/lib/src/model_loader.dart
+  s_cd3154b14e8c61::t_95cc9937655668 595-625
+bindings/flutter/rust/src/api/model.rs
+  s_cd3154b14e8c61::t_3fc266b87d8550 1018-1038
+bindings/flutter/rust/src/frb_generated.rs
+  s_cd3154b14e8c61::t_b029b25ba555fb 46,1762-1859,3630-3632,3727-3733,3738,3743,3748,3753,3758,3763,3768,3773,3778,3783,3788,3793,3798,3803,3808,3813,3818
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "6a105006674f24a2ea0efa45aebc991c8b8571f3",
+  "prompts": {},
+  "sessions": {
+    "s_cd3154b14e8c61": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92d4f0bd-b569-4d16-9ede-04c0eb5d2acd",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
