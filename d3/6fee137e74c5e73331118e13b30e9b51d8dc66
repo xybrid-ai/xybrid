@@ -1,0 +1,21 @@
+bindings/react-native/android/build.gradle
+  s_9f87bfb9c88973::t_adf2e9efaee867 94
+bindings/react-native/example/plugins/withXybridDevAndroid.js
+  s_9f87bfb9c88973::t_b2ca34abfff0c8 3-4,6-12,14-17,19-24,26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "d36fee137e74c5e73331118e13b30e9b51d8dc66",
+  "prompts": {},
+  "sessions": {
+    "s_9f87bfb9c88973": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "960d065d-74dd-49d6-b24f-b0fd6f06eb14",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
