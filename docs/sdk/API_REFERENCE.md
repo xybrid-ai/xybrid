@@ -337,7 +337,12 @@ class XybridModel {
   });
 
   // Lifecycle
-  void unload();
+  //
+  // Both run on a background worker and return a Future — `unload()` is NOT a
+  // synchronous `void`. `unload()` genuinely frees model memory: the executor
+  // is reset and the underlying ORT / GGUF inference session is dropped.
+  Future<void> warmup();
+  Future<void> unload();
 
   // Hardware info
   ExecutionProviderInfo executionProviderInfo();
@@ -366,6 +371,13 @@ class XybridModel {
     context: ConversationContext,
     config: GenerationConfig? = null
   ): XybridResult
+
+  // Lifecycle — `unload()` frees model memory (resets the executor, drops the
+  // ORT / GGUF session). Sync on the model; `*Async` variants hop to Dispatchers.IO.
+  fun warmup()
+  fun unload()
+  suspend fun warmupAsync()
+  suspend fun unloadAsync()
 }
 ```
 
@@ -408,7 +420,8 @@ impl XybridModel {
 | `runStreamingWithContext()` | ✅ | — | — | ✅ |
 | `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |
 | `benchmark()` | — | — | — | — |
-| `unload()` | — | — | — | — |
+| `warmup()` | ✅ | ✅ | ✅ | — |
+| `unload()` | ✅ | ✅ | ✅ | — |
 | `executionProviderInfo()` | — | — | — | — |
 
 ---

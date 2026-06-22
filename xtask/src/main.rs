@@ -1264,17 +1264,20 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
 /// - NDK r27 toolchain env vars (`CC_/CXX_/AR_/CARGO_TARGET_*_LINKER` per
 ///   ABI), so `cc-rs` can find the API-suffixed clang binaries that NDK
 ///   r27+ ships and llama.cpp's CMake build links cleanly.
-/// - `boltffi pack android --release --features platform-android` —
-///   pulls in `xybrid-core/{ort-dynamic, llm-llamacpp, candle}`.
+/// - A two-phase build (`boltffi build android` with the real NDK, then
+///   `boltffi pack android --no-build` through a clang shim) with
+///   `--features platform-android` — pulls in
+///   `xybrid-core/{ort-dynamic, llm-llamacpp, candle}`. The shim injects
+///   `-lc++_shared` + `-Wl,-z,max-page-size=16384` into boltffi's final
+///   relink (which otherwise emits only `-lm -llog -ldl`), so the shipped
+///   `.so` is a clean linker output: 16 KB-aligned and with the C++ runtime
+///   in DT_NEEDED, with no post-link patchelf rewrite to corrupt under a
+///   consumer's AGP strip.
 /// - `libonnxruntime.so` from `vendor/ort-android/` bundled alongside
 ///   `libxybrid-bolt.so` (ort-dynamic dlopens it at runtime).
 /// - `libc++_shared.so` from the NDK sysroot for every ABI (CMake builds
 ///   llama.cpp / cpp-httplib / candle native deps with
 ///   `-DANDROID_STL=c++_shared`).
-/// - `patchelf --add-needed libc++_shared.so` on every emitted `.so`,
-///   working around a boltffi 0.25 bug where the android pack's second
-///   link step drops the c++_shared dep regardless of `.cargo/config.toml`
-///   rustflags.
 ///
 /// The `--abi` / `--release` / `--version` knobs that the previous
 /// uniffi-based implementation exposed via clap are accepted for
