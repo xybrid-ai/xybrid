@@ -60,7 +60,16 @@ dependencies {
 
 mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
-    signAllPublications()
+    // Sign only when a GPG key is present. The release pipeline sets
+    // ORG_GRADLE_PROJECT_signingInMemoryKey (→ the `signingInMemoryKey`
+    // project property) from secrets.GPG_PRIVATE_KEY, so Maven Central
+    // publishes stay signed. Local `publishToMavenLocal` (used to consume
+    // the binding from working-tree source in the RN/Android examples) has
+    // no key configured, so it skips signing instead of failing on a
+    // missing .asc artifact.
+    if (project.findProperty("signingInMemoryKey") != null) {
+        signAllPublications()
+    }
 
     coordinates("ai.xybrid", "xybrid-kotlin", version.toString())
 

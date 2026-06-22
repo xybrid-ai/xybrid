@@ -234,3 +234,152 @@ jobs:
             --allow-warnings \
             --quick \
             --verbose
+
+  # The real end-to-end gate: build the Expo example app for Android from
+  # working-tree source. This compiles the bolt .so, publishes the kotlin
+  # binding to mavenLocal, runs RN codegen, and assembles the APK — the path
+  # that would have caught every defect that previously slipped through
+  # (non-exhaustive when, missing codegen wiring, version skew, .so strip).
+  # It does NOT run inference (no emulator); assembleDebug proves the whole
+  # build + link + autolink chain. Mirrors the documented local dev flow.
+  build-android-example:
+    name: Build Android example (from source)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Keep LLVM (large-packages: false): the bolt build runs bindgen for
+      # the llama/ggml C++ via libclang. Removing system LLVM breaks it with
+      # "'stdbool.h' file not found".
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: false
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: false
+          swap-storage: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android,
+            i686-linux-android
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Configure sccache environment
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: "rn-android-example"
+          cache-all-crates: "true"
+          save-if: "true"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install NDK
+        run: sdkmanager --install "ndk;27.1.12297006"
+
+      - name: Set NDK environment
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> $GITHUB_ENV
+
+      # build-android-bolt.sh adds the libc++_shared DT_NEEDED via patchelf,
+      # which isn't preinstalled on the runner.
+      - name: Install patchelf + cargo-ndk
+        run: |
+          sudo apt-get update && sudo apt-get install -y patchelf
+          which cargo-ndk || cargo install cargo-ndk
+
+      - name: Install boltffi CLI
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
+
+      # Prebuilt-natives fast path (mirrors build-android.yml). Best-effort:
+      # pull the prebuilt llama.cpp slice per ABI from ghcr so each ABI skips
+      # the ~25-min cmake compile. ANY miss/error is a silent no-op
+      # (continue-on-error) → that ABI compiles from source, never breaks the
+      # build. build.rs keys on XYBRID_NATIVES_PREBUILT_DIR/<target>.
+      - name: Setup oras
+        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      - name: Log in to ghcr (best-effort, same-repo)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull prebuilt natives (all shipped ABIs, best-effort)
+        continue-on-error: true
+        env:
+          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
+        run: |
+          DEST="$RUNNER_TEMP/natives"
+          got_any=0
+          for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
+            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+              echo "prebuilt natives staged for $triple (will skip cmake)"
+              got_any=1
+            else
+              echo "no prebuilt natives for $triple — compiles from source"
+            fi
+          done
+          if [ "$got_any" = 1 ]; then
+            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
+          else
+            echo "no prebuilt natives for any ABI — all compile from source (unchanged)"
+          fi
+
+      # 1. Build the bolt .so for all ABIs (staged into bindings/kotlin/libs).
+      - name: Build Android native libs
+        run: cargo xtask build-android --release
+
+      # 2. Publish the kotlin binding from source to mavenLocal (no signing —
+      #    guarded on signingInMemoryKey, absent here).
+      - name: Publish xybrid-kotlin to mavenLocal
+        working-directory: bindings/kotlin
+        run: ./gradlew publishToMavenLocal --no-daemon
+
+      # 3. Build the example app: install JS deps, prebuild (codegen +
+      #    config plugin → mavenLocal + keepDebugSymbols), assemble the APK.
+      - name: Install example deps
+        working-directory: bindings/react-native/example
+        run: npm install --no-audit --no-fund
+
+      - name: Expo prebuild (android)
+        working-directory: bindings/react-native/example
+        run: CI=1 npx expo prebuild --platform android --no-install
+
+      - name: Assemble debug APK
+        working-directory: bindings/react-native/example/android
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload example APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: xybrid-example-android-debug
+          path: bindings/react-native/example/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
