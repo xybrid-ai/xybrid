@@ -1,0 +1,21 @@
+.github/workflows/ab-warpbuild-apple.yml
+  s_d6a0be035f8060::t_181a8557989ac2 1-173
+.github/workflows/ab-warpbuild-android.yml
+  s_d6a0be035f8060::t_5f57a981ccb959 1-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "c815b2bffa54c67a8d93ca5e28dee70bdafa96c4",
+  "prompts": {},
+  "sessions": {
+    "s_d6a0be035f8060": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cb0555f-c4ca-463c-9d68-6ef76cd68e8d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
