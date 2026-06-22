@@ -14,7 +14,7 @@ name = "xybrid"
 path = "src/lib.rs"
 
 [dependencies]
-xybrid-sdk = { version = "0.2.0-alpha", path = "../xybrid-sdk", default-features = false }
+xybrid-sdk = { version = "0.2.0-rc1", path = "../xybrid-sdk", default-features = false }
 
 [features]
 default = []
