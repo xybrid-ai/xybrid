@@ -44,6 +44,14 @@ export default function App() {
     setBusy(true);
     setSteps([]);
     try {
+      // Release the previously-loaded model BEFORE loading another. Models
+      // hold hundreds of MB in the native heap; loading a second while the
+      // first is still resident can OOM the device on repeat runs.
+      if (model) {
+        await model.release().catch(() => {});
+        setModel(null);
+      }
+
       await timed('Xybrid.initialize()', () => Xybrid.initialize(), push);
 
       const loaded = await timed(
@@ -79,7 +87,7 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [modelId, push]);
+  }, [modelId, model, push]);
 
   return (
     <SafeAreaView style={styles.root}>
