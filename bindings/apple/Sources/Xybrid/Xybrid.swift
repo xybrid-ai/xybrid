@@ -216,6 +216,12 @@ public extension XybridModel {
     func warmupAsync() async throws {
         try await Task.detached { try self.warmup() }.value
     }
+
+    /// Unload the model, freeing its memory, without blocking the calling
+    /// thread or actor.
+    func unloadAsync() async throws {
+        try await Task.detached { try self.unload() }.value
+    }
 }
 
 /// Input data for model inference.

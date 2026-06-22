@@ -592,4 +592,35 @@ class XybridModel {
       );
     }
   }
+
+  /// Warm up the model so the first real inference pays no cold-start cost.
+  ///
+  /// Runs a tiny inference on a background worker; the returned [Future] does
+  /// not block the UI isolate. Safe to call once after [XybridModelLoader.load]
+  /// completes.
+  ///
+  /// Throws [XybridException] if the warmup inference fails.
+  Future<void> warmup() async {
+    try {
+      await inner.warmup();
+    } catch (e) {
+      throw XybridException('Warmup failed: $e');
+    }
+  }
+
+  /// Unload the model, freeing its memory.
+  ///
+  /// This genuinely releases the underlying inference session: the executor is
+  /// reset and the ORT / GGUF session is dropped on the Rust side. The handle
+  /// stays valid but unloaded — call this when you are done with a model and
+  /// want its memory back without disposing the loader.
+  ///
+  /// Throws [XybridException] if unloading fails.
+  Future<void> unload() async {
+    try {
+      await inner.unload();
+    } catch (e) {
+      throw XybridException('Unload failed: $e');
+    }
+  }
 }
