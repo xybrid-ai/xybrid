@@ -161,6 +161,23 @@ abstract class FfiModel implements RustOpaqueInterface {
       {required FfiEnvelope envelope,
       required FfiConversationContext context,
       FfiGenerationConfig? config});
+
+  /// Unload the model, dropping the executor and freeing the underlying
+  /// ORT / GGUF inference session.
+  ///
+  /// This genuinely releases model memory: the SDK resets the executor and
+  /// the backend drops its session (ONNX session removed from cache,
+  /// llama.cpp model/context taken and dropped). The `FfiModel` handle stays
+  /// valid but unloaded; a subsequent call reloads on demand. Returns an
+  /// error string if unloading fails.
+  Future<void> unload();
+
+  /// Warm up the model by running a tiny inference so the first real call
+  /// pays no cold-start cost.
+  ///
+  /// Runs on FRB's worker pool, so the returned `Future` does not block the
+  /// Dart isolate. Returns an error string if the warmup inference fails.
+  Future<void> warmup();
 }
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>>

@@ -32,16 +32,16 @@ import PackageDescription
 //                            external SPM consumers resolve.
 //
 // =============================================================================
-let useLocalNatives = true
+let useLocalNatives = false
 
 // Version for remote XybridFFI download (used when useLocalNatives = false).
 // Updated by the release workflow at tag time.
-let sdkVersion = "0.1.2"
+let sdkVersion = "0.2.0-rc1"
 
 // SHA-256 of XybridFFI-v<sdkVersion>.xcframework.zip on the GitHub release.
 // Updated by `bindings/apple/scripts/sync-spm-checksum.sh` (or the release
 // workflow) so the manifest at the tagged commit matches the published asset.
-let xybridFFIChecksum = "e9d8b652eb4be17add14502012b0ae9f306361b92ac130d6974e6d3770f655af"
+let xybridFFIChecksum = "42d1845688dd6303497edc42a3f48199968192ea8179023ce52a76e1fa92d1da"
 
 let package = Package(
     name: "Xybrid",

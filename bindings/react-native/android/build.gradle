@@ -24,6 +24,15 @@ buildscript {
 
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
+// Apply the React Native gradle plugin so this library runs codegen for its
+// TurboModule spec (`codegenConfig` in package.json). Without it, RN
+// autolinking references the generated `react_codegen_RNXybridSpec` JNI
+// target but nothing produces it, and any New-Architecture host app fails
+// at CMake with "react_codegen_RNXybridSpec is not built by this project".
+// The plugin itself is made available to every subproject by the host app's
+// settings.gradle (`pluginManagement { includeBuild(reactNativeGradlePlugin) }`).
+// RN 0.80+ is New-Architecture-only, so this is applied unconditionally.
+apply plugin: "com.facebook.react"
 
 def isNewArchitectureEnabled() {
   return rootProject.hasProperty("newArchEnabled") &&
@@ -81,6 +90,6 @@ dependencies {
   // `libxybrid-bolt.so` + the ORT runtime in the AAR. Bolt talks to the
   // native layer over JNI directly, so there is no JNA dependency (unlike
   // the previous uniffi binding). Keep this version in lockstep with the
-  // workspace SDK version.
-  implementation "ai.xybrid:xybrid-kotlin:0.1.2"
+  // workspace SDK version (bindings/kotlin/build.gradle.kts `version`).
+  implementation "ai.xybrid:xybrid-kotlin:0.2.0-rc1"
 }

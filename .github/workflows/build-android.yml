@@ -10,6 +10,8 @@ on:
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
       - 'tools/scripts/build-android-bolt.sh'
+      - 'tools/scripts/android-dlopen-gate.sh'
+      - 'tools/scripts/android-dlopen-probe.c'
       - 'xtask/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
@@ -33,6 +35,8 @@ on:
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
       - 'tools/scripts/build-android-bolt.sh'
+      - 'tools/scripts/android-dlopen-gate.sh'
+      - 'tools/scripts/android-dlopen-probe.c'
       - 'xtask/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
@@ -98,12 +102,6 @@ jobs:
           cache-all-crates: "true"
           save-if: "true"
 
-      # patchelf is required by build-android-bolt.sh to add the
-      # libc++_shared.so DT_NEEDED entry (boltffi 0.25's android pack
-      # drops it).
-      - name: Install patchelf
-        run: sudo apt-get update && sudo apt-get install -y patchelf
-
       # Cache Android NDK to avoid the ~1.5GB download on every build.
       - name: Cache Android NDK
         id: cache-ndk
@@ -122,6 +120,14 @@ jobs:
       - name: Set NDK environment
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
+      # cargo-ndk drives a single-target Android cross-compile that accepts a
+      # `--features` arg (the bolt pack script the shipped build uses can't).
+      # Same idempotent `which || install` pattern as test-ci.yml /
+      # release.yml / build-unity.yml. Used only by the vision compile-check
+      # below — it does not touch the shipped AAR build path.
+      - name: Install cargo-ndk
+        run: which cargo-ndk || cargo install cargo-ndk
+
       # boltffi CLI provides the `boltffi pack android` the build script
       # calls. Cache the installed binary across runs.
       - name: Cache boltffi CLI
@@ -129,17 +135,65 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/bin/boltffi
-          key: boltffi-cli-${{ runner.os }}-0.25
+          key: boltffi-cli-${{ runner.os }}-0.25.3
 
       - name: Install boltffi CLI
         # `which || install` is idempotent whether or not the cache
         # populated the binary (actions/cache only sets cache-hit on an
         # exact key match).
-        # `--locked` is required: boltffi_cli 0.25.0 fails to compile against
-        # the newer 0.25.1 of its own lib crates (boltffi_bindgen added
-        # required `KotlinOptions` fields in a non-additive minor bump). The
-        # bundled Cargo.lock pins those libs to 0.25.0.
-        run: which boltffi || cargo install boltffi_cli --version 0.25.0 --locked
+        # Pinned to 0.25.3 to MATCH the runtime `boltffi` crate (Cargo.lock):
+        # a CLI/runtime version skew mis-generates unit-ok `Result<(), E>`
+        # exports (model warmup/unload) as a `void` foreign function that drops
+        # the error and leaks the result buffer. `--locked` installs against
+        # the CLI's own bundled Cargo.lock for reproducibility.
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
+
+      # Prebuilt-natives fast path. Best-effort: pull the prebuilt llama.cpp
+      # slice for each shipped ABI from ghcr and point build.rs at it so that
+      # ABI skips the ~25-min cmake compile. On ANY miss/error this is a silent
+      # no-op (continue-on-error) and the affected ABI compiles from source
+      # exactly as before — it can never break the build. build.rs keys on
+      # XYBRID_NATIVES_PREBUILT_DIR/<target>, so each ABI in the single
+      # `cargo xtask build-android` invocation resolves its own slice (or falls
+      # through to source on a miss).
+      - name: Setup oras
+        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      # Best-effort ghcr login for SAME-REPO runs (not forks — they have no
+      # token): lets the consumer pull the natives package even while it is
+      # private and survives a visibility reset. `read-all` already grants
+      # packages:read. Forks skip this and rely on anonymous (public) pull;
+      # either way a miss falls through to a source compile.
+      - name: Log in to ghcr (best-effort, same-repo)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull prebuilt natives (all shipped ABIs, best-effort)
+        continue-on-error: true
+        env:
+          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
+        run: |
+          # One base dir holds a per-triple subdir for each ABI that has a
+          # published slice. The i686/x86 ABI is built but not packaged, so it
+          # is not pulled.
+          DEST="$RUNNER_TEMP/natives"
+          got_any=0
+          for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
+            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+              echo "prebuilt natives staged for $triple (will skip cmake)"
+              got_any=1
+            else
+              echo "no prebuilt natives for $triple — compiles from source"
+            fi
+          done
+          if [ "$got_any" = 1 ]; then
+            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
+          else
+            echo "no prebuilt natives for any ABI — all compile from source (unchanged)"
+          fi
 
       - name: Build Android .so files (all ABIs)
         run: cargo xtask build-android --release
@@ -147,6 +201,7 @@ jobs:
       - name: Verify .so files
         run: |
           SO_BASE="bindings/kotlin/libs"
+          READELF="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
           # The AAR ships these three ABIs (abiFilters in
           # bindings/kotlin/build.gradle.kts). i686/x86 is built but not
           # packaged, so it's not verified here.
@@ -157,14 +212,31 @@ jobs:
               exit 1
             fi
             echo "OK: $SO ($(du -h "$SO" | cut -f1))"
-            # libc++_shared must be a declared dependency (the patchelf
-            # step in build-android-bolt.sh adds it). Guard against a
-            # regression that would dlopen-fail on device.
-            if ! readelf -d "$SO" | grep -q 'libc++_shared.so'; then
+            # libc++_shared must be a declared dependency. It's added at link
+            # time by the clang shim in build-android-bolt.sh (no patchelf), so
+            # the .so is a clean linker output that survives a consumer's strip.
+            # Guard against a shim regression that would dlopen-fail on device.
+            if ! "$READELF" -d "$SO" | grep -q 'libc++_shared.so'; then
               echo "Error: $SO is missing libc++_shared.so in DT_NEEDED"
               exit 1
             fi
             echo "  DT_NEEDED libc++_shared.so: present"
+            # The 64-bit ABIs must be 16 KB-aligned or they won't load on
+            # Android 15+ (16 KB-page) devices. A LOAD segment aligned below
+            # 0x4000 means the shim's -Wl,-z,max-page-size=16384 didn't land.
+            case "$abi" in
+              arm64-v8a | x86_64)
+                bad=0
+                while read -r al; do
+                  [ "$((al))" -lt 16384 ] && { echo "  LOAD align $al < 16 KB"; bad=1; }
+                done < <("$READELF" -l "$SO" | awk '$1=="LOAD"{if(NF>4){print $NF}else{getline;print $NF}}')
+                if [ "$bad" != 0 ]; then
+                  echo "Error: $SO has a LOAD segment aligned below 16 KB"
+                  exit 1
+                fi
+                echo "  16 KB LOAD alignment: present"
+                ;;
+            esac
           done
 
       - name: Verify ORT runtime bundled (arm64-v8a, x86_64)
@@ -181,9 +253,134 @@ jobs:
             done
           done
 
+      - name: Check Android vision build (compile-only, not shipped)
+        # Compile-only gate for the OPT-IN native llama.cpp vision backend
+        # (mtmd) — in NO platform preset and NOT packaged in the AAR above.
+        # Proves the `llm-llamacpp-vision` (mtmd) chain still cross-compiles
+        # for Android, the gate the UniFFI->bolt migration dropped (it pointed
+        # at the deleted `xybrid-uniffi`; retargeted here at `xybrid-sdk`:
+        # platform-android + llm-llamacpp-vision -> xybrid-core/llm-llamacpp-vision
+        # -> xybrid-llama-sys/vision; -sys crate at crates/llama-cpp-sys/).
+        # One ABI (arm64-v8a) exercises the C++/mtmd cmake build, matching the
+        # baseline. `check` is sufficient: crates/llama-cpp-sys/build.rs
+        # compiles llama.cpp + mtmd via cmake on `check` (gated on
+        # CARGO_FEATURE_VISION). cargo-ndk uses ANDROID_NDK_HOME (set above)
+        # for the NDK toolchain; llama.cpp source comes from build.rs's
+        # OUT_DIR clone, same as the shipped llm-llamacpp build.
+        run: cargo ndk --target aarch64-linux-android --platform 28 check -p xybrid-sdk --features platform-android,llm-llamacpp-vision
+
       - name: Upload Android .so artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-so-files
           path: bindings/kotlin/libs/
           if-no-files-found: error
+
+      # Stage everything the dlopen-gate job needs (x86_64 — the ABI the CI
+      # emulator runs). Done here because this job has the NDK; the gate job
+      # is then a cheap emulator-only step with no toolchain.
+      - name: Stage dlopen-gate artifacts (x86_64)
+        run: |
+          NDKBIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          SRC="bindings/kotlin/libs/x86_64"
+          mkdir -p dlopen-gate
+          cp "$SRC/libxybrid-bolt.so" "$SRC/libc++_shared.so" "$SRC/libonnxruntime.so" dlopen-gate/
+          # AGP-style strip — the exact step that corrupted the old patchelf'd
+          # .so. The fixed clean .so must still dlopen after it.
+          cp "$SRC/libxybrid-bolt.so" dlopen-gate/libxybrid-bolt.stripped.so
+          "$NDKBIN/llvm-strip" --strip-all dlopen-gate/libxybrid-bolt.stripped.so
+          # Probe executable for the emulator's x86_64 ABI.
+          "$NDKBIN/x86_64-linux-android24-clang" \
+            tools/scripts/android-dlopen-probe.c -o dlopen-gate/android-dlopen-probe
+          ls -la dlopen-gate
+
+      - name: Upload dlopen-gate artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-dlopen-gate
+          path: dlopen-gate/
+          if-no-files-found: error
+
+  # Compiles the Kotlin binding wrapper (hand-written Xybrid.kt + the
+  # bolt-generated XybridBolt.kt) and runs the pure-Kotlin unit tests — the
+  # gate that catches wrapper-level breaks (a non-exhaustive `when`, an
+  # enum-shape change, a missing import) that the native .so build above does
+  # NOT, and that no PR-to-master job compiles today (test-ci.yml's
+  # assembleRelease is workflow_dispatch-only; release-dryrun.yml's
+  # bundleReleaseAar fires only on PRs to `main`, filtered to build.gradle.kts —
+  # not the wrapper .kt sources). Standalone (no `needs:`) so it runs in
+  # parallel and stays cheap: JDK + Android SDK + gradle, no ~35-min
+  # cross-compile. The .so is a runtime-only artifact (loaded lazily in
+  # `Native`'s init{}), so compile + JVM unit test need neither it nor Rust.
+  kotlin-wrapper:
+    name: Compile + test Kotlin wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # AGP 8.2.2 requires JDK 17+. `cache: gradle` caches the Gradle user home
+      # (resolved deps + wrapper distribution) across runs.
+      - name: Set up JDK 17
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: bindings/kotlin/**/*.gradle*
+
+      # Provides ANDROID_HOME so AGP resolves the SDK; AGP auto-downloads the
+      # compileSdk=34 platform on first build (same as release-publish.yml).
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      # compile* type-checks Xybrid.kt + XybridBolt.kt (both variants, so an
+      # enum-shape break that only trips one buildType is still caught);
+      # testDebugUnitTest runs the pure-Kotlin EnvelopeTest. No native .so is
+      # present on a fresh checkout and none is needed.
+      - name: Compile wrapper + run unit tests
+        working-directory: bindings/kotlin
+        run: ./gradlew compileReleaseKotlin compileDebugKotlin testDebugUnitTest --console=plain --stacktrace
+
+  # The authoritative gate: actually dlopen the shipped libxybrid-bolt.so on an
+  # emulator — as built AND after an AGP-style strip. This is the regression
+  # guard the strip-fragility bug needed and never had: nothing in CI ever
+  # loaded the bolt .so in a process, so a .so that passed `readelf` but failed
+  # bionic's loader (the "empty/missing DT_HASH/DT_GNU_HASH" crash) shipped
+  # silently. readelf reads section headers; the loader reads program headers —
+  # only an on-device dlopen proves a load. Runs the x86_64 slice (the ABI a
+  # GitHub KVM runner can emulate); the build job's static checks + the clean
+  # (patchelf-free) link cover the other ABIs.
+  dlopen-gate:
+    name: dlopen gate (x86_64 emulator)
+    needs: build-android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # KVM is required for a usable (hardware-accelerated) x86_64 emulator on
+      # the Linux runner; without it boot times out.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Download dlopen-gate artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-dlopen-gate
+          path: dlopen-gate
+
+      # api-level 35 = Android 15 bionic, which is strict enough to reject the
+      # DT_GNU_HASH corruption this gate guards against.
+      - name: dlopen libxybrid-bolt.so (as built + after AGP strip)
+        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: bash tools/scripts/android-dlopen-gate.sh dlopen-gate
