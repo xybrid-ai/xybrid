@@ -1,0 +1,44 @@
+bindings/react-native/src/presets.ts
+  s_76df1cc1e73bf2::t_0ee793b533c882 1-28
+bindings/react-native/src/index.ts
+  s_76df1cc1e73bf2::t_772083b8083306 7,13,20,26-49
+  s_76df1cc1e73bf2::t_df8babd734ce53 145-156,160,165-180
+bindings/react-native/src/types.ts
+  s_76df1cc1e73bf2::t_ddff7a4c67b21d 43-72
+bindings/react-native/README.md
+  s_76df1cc1e73bf2::t_ebb16b94dbef93 9-13
+  s_76df1cc1e73bf2::t_b9cbbb41fcb2a2 48
+  s_76df1cc1e73bf2::t_b7d76076d3743a 92-122
+  s_76df1cc1e73bf2::t_107156f229fc86 140-142,144-151
+bindings/react-native/example/App.tsx
+  s_76df1cc1e73bf2::t_4b98abd1d0696c 68
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_76df1cc1e73bf2::t_35fc7e5afe7a0e 14
+  s_76df1cc1e73bf2::t_ed636f28435d42 128-139
+  s_76df1cc1e73bf2::t_d48aae2e2fbadf 267-287
+  s_76df1cc1e73bf2::t_465edcae07aca6 329-332,334-368,385-392,396-402
+bindings/react-native/src/NativeXybrid.ts
+  s_76df1cc1e73bf2::t_8c71ea2d8c73ba 27-34,36-41
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_76df1cc1e73bf2::t_1c4b1af2ecd4f2 86-99
+  s_76df1cc1e73bf2::t_1ccc47399dd3f0 237-258
+  s_76df1cc1e73bf2::t_8b3090acaa24ef 293-296,298-307,313,322-331
+bindings/react-native/ios/XybridModule.mm
+  s_76df1cc1e73bf2::t_3f21ff3aba57b3 74-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "ed7f9fb3ed70c128e27a8f7238552442ed46bd3f",
+  "prompts": {},
+  "sessions": {
+    "s_76df1cc1e73bf2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b476efa-eb10-48ca-98c8-631d386da679",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
