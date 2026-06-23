@@ -124,7 +124,7 @@ jobs:
           DEST="$RUNNER_TEMP/natives"
           got_any=0
           for triple in aarch64-apple-ios aarch64-apple-ios-sim; do
-            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+            if tools/scripts/natives-pull.sh "$triple" vision "$DEST"; then
               echo "prebuilt natives staged for $triple (will skip cmake)"
               got_any=1
             else
@@ -340,7 +340,7 @@ jobs:
           DEST="$RUNNER_TEMP/natives"
           got_any=0
           for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
-            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+            if tools/scripts/natives-pull.sh "$triple" vision "$DEST"; then
               echo "prebuilt natives staged for $triple (will skip cmake)"
               got_any=1
             else

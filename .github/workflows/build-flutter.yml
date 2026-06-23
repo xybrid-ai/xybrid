@@ -177,7 +177,7 @@ jobs:
           XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
         run: |
           DEST="$RUNNER_TEMP/natives"
-          if tools/scripts/natives-pull.sh x86_64-unknown-linux-gnu base "$DEST"; then
+          if tools/scripts/natives-pull.sh x86_64-unknown-linux-gnu vision "$DEST"; then
             echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
             echo "prebuilt natives staged at $DEST (linux will skip cmake)"
           else

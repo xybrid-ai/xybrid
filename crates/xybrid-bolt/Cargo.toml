@@ -34,12 +34,11 @@ platform-ios = ["xybrid-sdk/platform-ios"]
 platform-macos = ["xybrid-sdk/platform-macos"]
 platform-desktop = ["xybrid-sdk/platform-desktop"]
 
-# MEASUREMENT-ONLY. Forwards xybrid-sdk's vision backend so the native
-# mtmd/vision size delta can be built through this crate (which, unlike
-# xybrid-sdk, emits a real shippable staticlib/cdylib to size). Used by
-# tools/scripts/measure-binary-size.sh. Deliberately NOT added to any
-# platform-* preset, so NO shipped mobile artifact links the mtmd backend —
-# it is reachable only via an explicit `--features platform-macos,llm-llamacpp-vision`
-# build. Do not add this to a preset (see the binary-size measurement note).
+# Explicit forwarder for the native VLM (mtmd/clip) backend. As of 0.2.1 the
+# platform-* presets above already pull this in transitively (via
+# `xybrid-sdk/platform-*`), so every shipped mobile artifact links mtmd; the
+# measured cost is ~0.7 MiB stripped on the Android cdylib proxy. This standalone
+# feature is kept for tools/scripts/measure-binary-size.sh, which builds the
+# base-vs-vision delta through this crate's real staticlib/cdylib.
 # `xybrid-sdk/llm-llamacpp-vision` already pulls `llm-llamacpp` transitively.
 llm-llamacpp-vision = ["xybrid-sdk/llm-llamacpp-vision"]
