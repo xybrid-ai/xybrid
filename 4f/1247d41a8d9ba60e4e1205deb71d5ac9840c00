@@ -1,0 +1,19 @@
+bindings/react-native/src/index.ts
+  s_76df1cc1e73bf2::t_f82267d1b6ebd3 44-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "4f1247d41a8d9ba60e4e1205deb71d5ac9840c00",
+  "prompts": {},
+  "sessions": {
+    "s_76df1cc1e73bf2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b476efa-eb10-48ca-98c8-631d386da679",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
