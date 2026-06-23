@@ -41,7 +41,9 @@ const RUN_OPTION_KEYS = [
 function normalizeRunOptions(
   options: RunOptions | GenerationConfig | undefined,
 ): RunOptions | null {
-  if (!options) return null;
+  // Guard the `in` checks below: a JS caller can pass a non-object despite the
+  // TS types, and `in` on a primitive throws a TypeError.
+  if (!options || typeof options !== 'object') return null;
   const isRunOptions = RUN_OPTION_KEYS.some((k) => k in options);
   return isRunOptions
     ? (options as RunOptions)
