@@ -40,6 +40,36 @@ export interface GenerationConfig {
   stopSequences?: string[];
 }
 
+/**
+ * Device-stress signals that abort an in-flight run early. Mirrors the bolt
+ * `XybridAbortSignal` enum 1:1; the native shims map each string onto the
+ * corresponding enum case.
+ */
+export type AbortSignalKind =
+  | 'memoryPressureWarn'
+  | 'memoryPressureCritical'
+  | 'thermalHot'
+  | 'thermalCritical';
+
+/**
+ * Per-call execution policy, mirroring the bolt `XybridRunOptions` surface the
+ * Apple/Kotlin SDKs expose. `generationConfig` carries the sampling params;
+ * the remaining fields drive the platform plane (cloud fallback, abort-on-stress,
+ * telemetry correlation).
+ */
+export interface RunOptions {
+  /** Sampling parameters for LLM inference. */
+  generationConfig?: GenerationConfig;
+  /** Device-stress signals that abort the run early. */
+  abortOn?: AbortSignalKind[];
+  /** Allow this call to fall back to the cloud gateway under device stress. */
+  fallbackToCloud?: boolean;
+  /** Tokens to emit after an abort signal before stopping (grace window). */
+  maxGraceTokens?: number;
+  /** Correlation ID threaded into telemetry for this call. */
+  correlationId?: string;
+}
+
 export interface InferenceResult {
   success: boolean;
   text?: string;

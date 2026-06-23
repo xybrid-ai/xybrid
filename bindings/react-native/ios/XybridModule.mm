@@ -71,6 +71,22 @@ RCT_REMAP_METHOD(releaseModel,
   [_impl releaseModel:handle resolve:resolve reject:reject];
 }
 
+#pragma mark - Model lifecycle
+
+RCT_REMAP_METHOD(warmup,
+                 warmup:(NSString *)handle
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl warmup:handle resolve:resolve reject:reject];
+}
+
+RCT_REMAP_METHOD(unload,
+                 unload:(NSString *)handle
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl unload:handle resolve:resolve reject:reject];
+}
+
 #pragma mark - Inference
 
 RCT_REMAP_METHOD(run,
