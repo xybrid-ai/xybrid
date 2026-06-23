@@ -1,0 +1,19 @@
+bindings/unity/Runtime/Api/Envelope.cs
+  s_565f3c23e5c596::t_6507b5c8b22b30 235-236,238-242,244-253,255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "662363f379d45724717e11d83d5c42d208c68c3d",
+  "prompts": {},
+  "sessions": {
+    "s_565f3c23e5c596": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "046cda6d-cf6f-4ab5-9df4-fc8edd33506d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
