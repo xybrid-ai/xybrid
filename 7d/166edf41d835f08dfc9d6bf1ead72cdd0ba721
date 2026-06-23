@@ -1,0 +1,44 @@
+crates/xybrid-cli/Cargo.toml
+  s_4e841541491380::t_f17fa6fc446856 42-47
+.github/workflows/build-apple.yml
+  s_4e841541491380::t_bca8dd0d9a4b86 133
+  s_4e841541491380::t_512732a85c0811 202-209
+.github/workflows/build-react-native.yml
+  s_4e841541491380::t_459999385be6be 127,343
+.github/workflows/build-android.yml
+  s_4e841541491380::t_377f79236be4c0 185
+  s_4e841541491380::t_ccbeab1c461e6a 256-262
+bindings/flutter/rust/Cargo.toml
+  s_4e841541491380::t_60164da682e6ee 49,53,57
+.github/workflows/build-flutter.yml
+  s_4e841541491380::t_0f5c5a691353ed 180
+crates/xybrid-bolt/Cargo.toml
+  s_4e841541491380::t_6cd77e5bad448a 37-42
+crates/xybrid-sdk/Cargo.toml
+  s_4e841541491380::t_5124f200649d9c 61-66,69,72,75,78
+.github/workflows/build-natives.yml
+  s_4e841541491380::t_3a08a5841f4270 57,64-77
+  s_4e841541491380::t_d8aac53e659857 180,186-192,195,197,200
+tools/scripts/measure-binary-size.sh
+  s_4e841541491380::t_2a598e3e704d29 28,34
+  s_4e841541491380::t_10cea36b625647 4-6,9-13
+  s_4e841541491380::t_6de727a2dc923e 16-18
+  s_4e841541491380::t_70af0cbbe60500 47-52
+  s_4e841541491380::t_ce25e20de98a31 98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "7d166edf41d835f08dfc9d6bf1ead72cdd0ba721",
+  "prompts": {},
+  "sessions": {
+    "s_4e841541491380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ac3d14d-bba3-453b-8774-4782348cbf38",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
