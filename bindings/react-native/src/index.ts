@@ -4,21 +4,51 @@ import type {
   GenerationConfig,
   InferenceResult,
   ModelHandle,
+  RunOptions,
   ThermalState,
   VoiceInfo,
 } from './types';
 
 export type {
+  AbortSignalKind,
   AudioEnvelope,
   EmbeddingEnvelope,
   Envelope,
   GenerationConfig,
   InferenceResult,
   ModelHandle,
+  RunOptions,
   TextEnvelope,
   ThermalState,
   VoiceInfo,
 } from './types';
+
+export { GenerationConfigs, creative, greedy } from './presets';
+
+// Keys that only appear on `RunOptions`, never on a bare `GenerationConfig`.
+// Used to tell the two apart when a caller passes either form to `run()`.
+const RUN_OPTION_KEYS = [
+  'generationConfig',
+  'abortOn',
+  'fallbackToCloud',
+  'maxGraceTokens',
+  'correlationId',
+] as const;
+
+// Accept either the canonical `RunOptions` or a bare `GenerationConfig`
+// (the pre-RunOptions shorthand) and produce the wire object the native
+// shims decode — or `null` when there's nothing to send.
+function normalizeRunOptions(
+  options: RunOptions | GenerationConfig | undefined,
+): RunOptions | null {
+  // Guard the `in` checks below: a JS caller can pass a non-object despite the
+  // TS types, and `in` on a primitive throws a TypeError.
+  if (!options || typeof options !== 'object') return null;
+  const isRunOptions = RUN_OPTION_KEYS.some((k) => k in options);
+  return isRunOptions
+    ? (options as RunOptions)
+    : { generationConfig: options as GenerationConfig };
+}
 
 // Cache the in-flight init promise so concurrent callers all await the same
 // underlying native call. The native side is documented as idempotent, but
@@ -114,13 +144,41 @@ export class Model {
     return this.handle;
   }
 
-  async run(envelope: Envelope, config?: GenerationConfig): Promise<InferenceResult> {
+  /**
+   * Run inference. The second argument is a {@link RunOptions} carrying the
+   * sampling config plus the platform-plane knobs (cloud fallback,
+   * abort-on-stress, telemetry correlation), mirroring the Apple/Kotlin SDKs.
+   *
+   * A bare {@link GenerationConfig} is also accepted as shorthand for
+   * `{ generationConfig }`.
+   */
+  async run(
+    envelope: Envelope,
+    options?: RunOptions | GenerationConfig,
+  ): Promise<InferenceResult> {
     const result = (await NativeXybrid.run(
       this.handle,
       envelope,
-      config ?? null,
+      normalizeRunOptions(options),
     )) as InferenceResult;
     return result;
+  }
+
+  /**
+   * Warm up the model with a priming inference, so first-token latency on the
+   * next `run` is attributable to inference rather than cold start.
+   */
+  warmup(): Promise<void> {
+    return NativeXybrid.warmup(this.handle);
+  }
+
+  /**
+   * Unload the model's weights to free native memory while keeping this handle
+   * valid — a later `run` transparently reloads. Use this to shed memory under
+   * pressure without discarding the handle (contrast with {@link release}).
+   */
+  unload(): Promise<void> {
+    return NativeXybrid.unload(this.handle);
   }
 
   async voices(): Promise<VoiceInfo[] | null> {

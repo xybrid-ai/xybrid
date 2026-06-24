@@ -65,6 +65,7 @@ export default function App() {
         const voices = await timed('model.voices()', () => loaded.voices(), push);
         push({ label: `→ ${voices?.length ?? 0} voices`, durationMs: 0, ok: true });
       } else {
+        await timed('model.warmup()', () => loaded.warmup(), push);
         const result = await timed(
           'model.run(text envelope)',
           () => loaded.run({ kind: 'text', text: 'hello from expo' }),

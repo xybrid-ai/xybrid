@@ -24,11 +24,21 @@ export interface Spec extends TurboModule {
   loadFromHuggingface(repo: string): Promise<string>;
   releaseModel(handle: string): Promise<void>;
 
+  // -- Model lifecycle --
+  // Warm up the model (runs a priming inference so first-token latency is
+  // attributable to warmup vs. inference) and unload it (frees native memory
+  // while keeping the handle valid for a later reload). Mirror the
+  // Apple/Kotlin/Flutter `warmup`/`unload` surface.
+  warmup(handle: string): Promise<void>;
+  unload(handle: string): Promise<void>;
+
   // -- Inference --
-  // `envelope` and `config` cross as Objects; the TS facade narrows to the
-  // discriminated `Envelope` union. Native side validates `kind` and rejects
-  // with an Error if it doesn't match a known variant.
-  run(handle: string, envelope: Object, config: Object | null): Promise<Object>;
+  // `envelope` and `options` cross as Objects; the TS facade narrows to the
+  // discriminated `Envelope` union and normalizes the second arg to a
+  // `RunOptions` shape (`{ generationConfig, abortOn, fallbackToCloud,
+  // maxGraceTokens, correlationId }`). Native side validates `kind` and
+  // rejects with an Error if it doesn't match a known variant.
+  run(handle: string, envelope: Object, options: Object | null): Promise<Object>;
 
   // -- TTS introspection --
   voices(handle: string): Promise<Object[] | null>;
