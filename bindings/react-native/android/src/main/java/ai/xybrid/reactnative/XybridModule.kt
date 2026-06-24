@@ -11,6 +11,7 @@ package ai.xybrid.reactnative
 
 import ai.xybrid.Envelope
 import ai.xybrid.Xybrid
+import ai.xybrid.XybridAbortSignal
 import ai.xybrid.XybridEnvelope
 import ai.xybrid.XybridError
 import ai.xybrid.XybridGenerationConfig
@@ -122,6 +123,18 @@ class XybridModule(reactContext: ReactApplicationContext) :
   fun releaseModel(handle: String, promise: Promise) {
     models.remove(handle)?.close()
     promise.resolve(null)
+  }
+
+  // -- Model lifecycle --
+
+  @ReactMethod
+  fun warmup(handle: String, promise: Promise) {
+    runVoid(handle, promise) { it.warmup() }
+  }
+
+  @ReactMethod
+  fun unload(handle: String, promise: Promise) {
+    runVoid(handle, promise) { it.unload() }
   }
 
   // -- Inference --
@@ -251,6 +264,27 @@ class XybridModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // Run a void-returning model op (warmup / unload) off the RN thread,
+  // resolving on success and mapping XybridError on failure.
+  private fun runVoid(handle: String, promise: Promise, op: suspend (XybridModel) -> Unit) {
+    val model = models[handle]
+    if (model == null) {
+      promise.reject("xybrid_handle", "Unknown model handle: $handle")
+      return
+    }
+    scope.launch {
+      try {
+        op(model)
+        promise.resolve(null)
+      } catch (e: XybridError) {
+        rejectXybrid(promise, e)
+      } catch (t: Throwable) {
+        if (t is CancellationException) throw t
+        promise.reject("xybrid", t.message, t)
+      }
+    }
+  }
+
   // Build a bolt [XybridEnvelope] via the `Envelope` factories, which fold the
   // well-known TTS / ASR options (sample_rate, channels, voice_id, speed) into
   // envelope metadata entries — the bolt `XybridEnvelopeKind` variants
@@ -292,10 +326,46 @@ class XybridModule(reactContext: ReactApplicationContext) :
     return out
   }
 
-  // Map the JS generation-config payload onto bolt's XybridRunOptions. The JS
-  // surface only exposes sampling params today, so the abort / cloud-fallback
-  // fields are left at their defaults.
+  // Map the JS `RunOptions` payload onto bolt's XybridRunOptions. The JS facade
+  // normalizes its argument to `{ generationConfig, abortOn, fallbackToCloud,
+  // maxGraceTokens, correlationId }`, so every field the Apple/Kotlin SDKs
+  // expose is reachable from React Native.
   private fun decodeRunOptions(map: ReadableMap): XybridRunOptions {
+    val gc = if (map.hasKey("generationConfig") && !map.isNull("generationConfig")) {
+      map.getMap("generationConfig")?.let(::decodeGenerationConfig)
+    } else {
+      null
+    }
+    val abortOn = if (map.hasKey("abortOn") && !map.isNull("abortOn")) {
+      val arr = map.getArray("abortOn")!!
+      val out = ArrayList<XybridAbortSignal>(arr.size())
+      for (i in 0 until arr.size()) {
+        decodeAbortSignal(arr.getString(i))?.let(out::add)
+      }
+      out
+    } else {
+      emptyList()
+    }
+    val maxGrace = if (map.hasKey("maxGraceTokens") && !map.isNull("maxGraceTokens")) {
+      map.getInt("maxGraceTokens").coerceAtLeast(0).toUInt()
+    } else {
+      0u
+    }
+    return XybridRunOptions(
+      generationConfig = gc,
+      abortOn = abortOn,
+      fallbackToCloud = map.hasKey("fallbackToCloud") && !map.isNull("fallbackToCloud") &&
+        map.getBoolean("fallbackToCloud"),
+      maxGraceTokens = maxGrace,
+      correlationId = if (map.hasKey("correlationId") && !map.isNull("correlationId")) {
+        map.getString("correlationId")
+      } else {
+        null
+      },
+    )
+  }
+
+  private fun decodeGenerationConfig(map: ReadableMap): XybridGenerationConfig {
     fun uintOrNull(key: String): UInt? {
       if (!map.hasKey(key) || map.isNull(key)) return null
       // Guard against negative JS values wrapping around to a huge UInt.
@@ -312,21 +382,23 @@ class XybridModule(reactContext: ReactApplicationContext) :
     } else {
       emptyList()
     }
-    return XybridRunOptions(
-      generationConfig = XybridGenerationConfig(
-        maxTokens = uintOrNull("maxTokens"),
-        temperature = floatOrNull("temperature"),
-        topP = floatOrNull("topP"),
-        minP = floatOrNull("minP"),
-        topK = uintOrNull("topK"),
-        repetitionPenalty = floatOrNull("repetitionPenalty"),
-        stopSequences = stops,
-      ),
-      abortOn = emptyList(),
-      fallbackToCloud = false,
-      maxGraceTokens = 0u,
-      correlationId = null,
+    return XybridGenerationConfig(
+      maxTokens = uintOrNull("maxTokens"),
+      temperature = floatOrNull("temperature"),
+      topP = floatOrNull("topP"),
+      minP = floatOrNull("minP"),
+      topK = uintOrNull("topK"),
+      repetitionPenalty = floatOrNull("repetitionPenalty"),
+      stopSequences = stops,
     )
+  }
+
+  private fun decodeAbortSignal(raw: String?): XybridAbortSignal? = when (raw) {
+    "memoryPressureWarn" -> XybridAbortSignal.MEMORY_PRESSURE_WARN
+    "memoryPressureCritical" -> XybridAbortSignal.MEMORY_PRESSURE_CRITICAL
+    "thermalHot" -> XybridAbortSignal.THERMAL_HOT
+    "thermalCritical" -> XybridAbortSignal.THERMAL_CRITICAL
+    else -> null
   }
 
   private fun encodeResult(r: XybridResult): WritableMap {

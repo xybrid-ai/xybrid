@@ -83,6 +83,20 @@ public final class XybridModuleImpl: NSObject {
     resolve(nil)
   }
 
+  // -- Model lifecycle --
+
+  @objc public func warmup(_ handle: String,
+                           resolve: @escaping RCTPromiseResolveBlock,
+                           reject: @escaping RCTPromiseRejectBlock) {
+    runAsyncVoid(handle: handle, resolve: resolve, reject: reject) { try $0.warmup() }
+  }
+
+  @objc public func unload(_ handle: String,
+                           resolve: @escaping RCTPromiseResolveBlock,
+                           reject: @escaping RCTPromiseRejectBlock) {
+    runAsyncVoid(handle: handle, resolve: resolve, reject: reject) { try $0.unload() }
+  }
+
   // -- Inference --
 
   @objc public func run(_ handle: String,
@@ -220,6 +234,28 @@ public final class XybridModuleImpl: NSObject {
     }
   }
 
+  // Run a throwing, void-returning model op (warmup / unload) off the RN
+  // thread, resolving on success and mapping XybridError on failure.
+  private func runAsyncVoid(handle: String,
+                            resolve: @escaping RCTPromiseResolveBlock,
+                            reject: @escaping RCTPromiseRejectBlock,
+                            _ op: @escaping (XybridModel) throws -> Void) {
+    guard let model = lookup(handle) else {
+      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
+      return
+    }
+    Task.detached {
+      do {
+        try op(model)
+        resolve(nil)
+      } catch let error as XybridError {
+        self.rejectXybrid(error, reject)
+      } catch {
+        reject("xybrid", error.localizedDescription, error)
+      }
+    }
+  }
+
   // Build a bolt [XybridEnvelope] via the `XybridEnvelope` factories in
   // Xybrid.swift, which fold the well-known TTS / ASR options (sample_rate,
   // channels, voice_id, speed) into envelope metadata entries — the bolt
@@ -254,16 +290,27 @@ public final class XybridModuleImpl: NSObject {
     }
   }
 
-  // Map the JS generation-config payload onto bolt's XybridRunOptions. The JS
-  // surface only exposes sampling params today, so the abort / cloud-fallback
-  // fields are left at their defaults.
+  // Map the JS `RunOptions` payload onto bolt's XybridRunOptions. The JS facade
+  // normalizes its argument to `{ generationConfig, abortOn, fallbackToCloud,
+  // maxGraceTokens, correlationId }`, so every field the Apple/Kotlin SDKs
+  // expose is reachable from React Native.
   private func decodeRunOptions(_ dict: NSDictionary) -> XybridRunOptions {
+    return XybridRunOptions(
+      generationConfig: (dict["generationConfig"] as? NSDictionary).map(decodeGenerationConfig),
+      abortOn: (dict["abortOn"] as? [String])?.compactMap(decodeAbortSignal) ?? [],
+      fallbackToCloud: (dict["fallbackToCloud"] as? NSNumber)?.boolValue ?? false,
+      maxGraceTokens: (dict["maxGraceTokens"] as? NSNumber).flatMap { $0.intValue >= 0 ? $0.uint32Value : nil } ?? 0,
+      correlationId: dict["correlationId"] as? String
+    )
+  }
+
+  private func decodeGenerationConfig(_ dict: NSDictionary) -> XybridGenerationConfig {
     // Guard against negative JS values wrapping around to a huge UInt32.
     func uint32OrNil(_ key: String) -> UInt32? {
       guard let n = dict[key] as? NSNumber, n.intValue >= 0 else { return nil }
       return n.uint32Value
     }
-    let gc = XybridGenerationConfig(
+    return XybridGenerationConfig(
       maxTokens: uint32OrNil("maxTokens"),
       temperature: (dict["temperature"] as? NSNumber)?.floatValue,
       topP: (dict["topP"] as? NSNumber)?.floatValue,
@@ -272,13 +319,16 @@ public final class XybridModuleImpl: NSObject {
       repetitionPenalty: (dict["repetitionPenalty"] as? NSNumber)?.floatValue,
       stopSequences: dict["stopSequences"] as? [String] ?? []
     )
-    return XybridRunOptions(
-      generationConfig: gc,
-      abortOn: [],
-      fallbackToCloud: false,
-      maxGraceTokens: 0,
-      correlationId: nil
-    )
+  }
+
+  private func decodeAbortSignal(_ raw: String) -> XybridAbortSignal? {
+    switch raw {
+    case "memoryPressureWarn": return .memoryPressureWarn
+    case "memoryPressureCritical": return .memoryPressureCritical
+    case "thermalHot": return .thermalHot
+    case "thermalCritical": return .thermalCritical
+    default: return nil
+    }
   }
 
   private func encodeResult(_ r: XybridResult) -> [String: Any] {
