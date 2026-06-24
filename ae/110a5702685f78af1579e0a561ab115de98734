@@ -1,0 +1,20 @@
+tools/scripts/version-sync.sh
+  s_76df1cc1e73bf2::t_11963b7965ba87 134-135,138-146
+  s_76df1cc1e73bf2::t_f4ad910500a924 69,71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "ae110a5702685f78af1579e0a561ab115de98734",
+  "prompts": {},
+  "sessions": {
+    "s_76df1cc1e73bf2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b476efa-eb10-48ca-98c8-631d386da679",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
