@@ -42,7 +42,6 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -55,6 +54,9 @@ env:
 jobs:
   publish-native:
     name: Publish native (${{ matrix.target }}, base)
+    permissions:
+      contents: read
+      packages: write   # oras login + push of the prebuilt native slice to ghcr
     runs-on: ${{ matrix.runner }}
     strategy:
       # One slice miss must not abort the others — write-once makes every row
