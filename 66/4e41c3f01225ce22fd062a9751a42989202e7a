@@ -1,0 +1,19 @@
+crates/xybrid-bolt/Cargo.toml
+  s_4e841541491380::t_22dbc9bf3cc3b3 37-38,40-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "664e41c3f01225ce22fd062a9751a42989202e7a",
+  "prompts": {},
+  "sessions": {
+    "s_4e841541491380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ac3d14d-bba3-453b-8774-4782348cbf38",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
