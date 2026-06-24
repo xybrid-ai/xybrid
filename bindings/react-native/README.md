@@ -6,9 +6,11 @@ to JavaScript through a TurboModule.
 
 ## Status
 
-**Spike / pre-release.** Surface covers loader → `run()` plus voice
-introspection and platform-state push. Streaming (ASR partials, LLM token
-streams) and per-call generation config are not yet wired through — see
+**Pre-release.** The synchronous surface is at 1:1 parity with the Apple and
+Kotlin SDKs: loader → `run()` with full `RunOptions` (sampling config plus
+cloud fallback / abort-on-stress / correlation ID), `warmup`/`unload`,
+`GenerationConfigs` presets, voice introspection, and platform-state push.
+Streaming (ASR partials, LLM token streams) is the remaining gap — see
 "Open work" below.
 
 ## Architecture
@@ -43,6 +45,7 @@ bindings/react-native/
 ├── src/
 │   ├── index.ts             # Public TS facade (Xybrid, ModelLoader, Model)
 │   ├── NativeXybrid.ts      # TurboModule spec (codegen input)
+│   ├── presets.ts           # GenerationConfigs.greedy() / .creative()
 │   └── types.ts
 ├── ios/
 │   ├── XybridModule.{h,mm}  # ObjC++ TurboModule registration
@@ -86,6 +89,37 @@ await model.release();
 > stability even though the native bolt layer collapsed the loader into the
 > `XybridModel` factories — `index.ts` maps the old shape onto the new calls.
 
+### Run options, warmup/unload, presets
+
+`run()` takes a `RunOptions` second argument mirroring the bolt
+`XybridRunOptions` the Apple/Kotlin SDKs expose — sampling config plus the
+platform-plane knobs. A bare `GenerationConfig` is still accepted as shorthand
+for `{ generationConfig }`.
+
+```ts
+import { ModelLoader, GenerationConfigs } from 'react-native-xybrid';
+
+const model = await ModelLoader.fromRegistry('llama-3.2-1b').load();
+
+// Optional: prime the model so first-token latency is inference, not cold start.
+await model.warmup();
+
+const result = await model.run(
+  { kind: 'text', text: 'Write a haiku about the sea.' },
+  {
+    generationConfig: GenerationConfigs.creative(),
+    fallbackToCloud: true,                 // allow cloud under device stress
+    abortOn: ['thermalCritical'],          // bail early if the device overheats
+    maxGraceTokens: 16,
+    correlationId: 'req-42',               // threaded into telemetry
+  },
+);
+console.log(result.text);
+
+// Shed weights under memory pressure; the handle stays valid and reloads on next run.
+await model.unload();
+```
+
 ## Requirements
 
 - React Native ≥ 0.74 (TurboModules + codegen).
@@ -103,16 +137,15 @@ await model.release();
 
 1. **Streaming.** ASR partial results and LLM token streams aren't surfaced to
    JS yet — they need an `EventEmitter` (legacy) or a JSI `HostObject` wrapper
-   for low-jitter token delivery.
-2. **Generation config on `run`.** The bolt `XybridModel.run(envelope)` does
-   not yet accept a per-call `GenerationConfig`; the JS `config` argument is
-   currently ignored. Unblocks once the facade/bolt surface threads config
-   through `run`.
-3. **Binary payloads.** Audio bytes ride as base64 strings today. Move to
+   for low-jitter token delivery. This is the last synchronous-surface parity
+   gap with the native SDKs.
+2. **Binary payloads.** Audio bytes ride as base64 strings today. Move to
    `ArrayBuffer` via JSI to drop the encode/decode hop on every chunk.
-4. **TypeScript codegen.** The `Spec` interface is hand-written; once the
-   surface stabilizes, generate `NativeXybrid.ts` from the same bolt `#[data]`
-   definitions the other bindings derive from, to keep them in lockstep.
-5. **Example app + automated smoke test.** No `example/` directory yet.
-   The CI workflow builds and lints the package but does not yet run a
-   sample app end-to-end.
+3. **TypeScript codegen.** The `Spec` interface and the native shim mappers are
+   hand-written, so RN is the one binding not generated from the bolt
+   `#[data]`/facade source of truth — every new core field must be hand-wired
+   here (as `RunOptions` / `warmup` / `unload` just were). Generate them from
+   the same definitions the other bindings derive from to keep parity
+   structural rather than a manual chase. See the JSI re-architecture plan.
+4. **End-to-end smoke test.** The `example/` Expo app and CI build/lint the
+   package, but CI does not yet run inference end-to-end on a device/emulator.
