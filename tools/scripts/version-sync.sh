@@ -66,10 +66,9 @@ get_swift_version() {
     grep '^let sdkVersion = ' "$SWIFT_PACKAGE" | sed 's/let sdkVersion = "\(.*\)"/\1/'
 }
 
-# Extract version from React Native package.json (top-level "version" only —
-# nested keys live at deeper indentation, so the 2-space anchor is exact).
+# Extract version from React Native package.json (parsed, like Unity's).
 get_rn_version() {
-    grep '^  "version":' "$RN_PACKAGE" | head -1 | sed 's/.*: *"\(.*\)".*/\1/'
+    python3 -c "import json; print(json.load(open('$RN_PACKAGE'))['version'])"
 }
 
 # Extract the ai.xybrid:xybrid-kotlin AAR version the RN Android binding pins.
@@ -132,12 +131,19 @@ set_swift_version() {
     rm -f "$SWIFT_PACKAGE.bak"
 }
 
-# Set version in React Native package.json. Anchored to the 2-space top-level
-# "version" line so nested keys (codegenConfig, deps) are untouched.
+# Set version in React Native package.json (parsed + rewritten, like Unity's —
+# robust against reformatting; preserves the file's standard 2-space layout).
 set_rn_version() {
     local version="$1"
-    sed -i.bak "s/^  \"version\": \".*\"/  \"version\": \"$version\"/" "$RN_PACKAGE"
-    rm -f "$RN_PACKAGE.bak"
+    python3 -c "
+import json
+with open('$RN_PACKAGE', 'r') as f:
+    data = json.load(f)
+data['version'] = '$version'
+with open('$RN_PACKAGE', 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+"
 }
 
 # Set the ai.xybrid:xybrid-kotlin AAR pin in the RN Android build.gradle so the
