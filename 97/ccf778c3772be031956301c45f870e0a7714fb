@@ -1,0 +1,26 @@
+tools/scripts/version-sync.sh
+  s_76df1cc1e73bf2::t_6ebe4df3c3e16a 160
+  s_76df1cc1e73bf2::t_174cdf30979cd8 28-33
+  s_76df1cc1e73bf2::t_c1325af7f2b139 69-79
+  s_76df1cc1e73bf2::t_91da36a2e4a22c 197-198
+  s_76df1cc1e73bf2::t_d970f913a8c663 219-220
+  s_76df1cc1e73bf2::t_1cc3a73a1331c7 135-150
+bindings/react-native/package.json
+  s_76df1cc1e73bf2::t_5e38ae96afe494 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "97ccf778c3772be031956301c45f870e0a7714fb",
+  "prompts": {},
+  "sessions": {
+    "s_76df1cc1e73bf2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b476efa-eb10-48ca-98c8-631d386da679",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
