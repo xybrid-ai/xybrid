@@ -37,6 +37,8 @@ compile_error!(
 pub mod arch;
 #[doc(hidden)]
 pub mod bench_fixtures;
+#[doc(hidden)]
+pub mod bench_report;
 pub mod chat_template;
 pub mod embedding;
 pub mod generate;
