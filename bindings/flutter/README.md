@@ -15,7 +15,7 @@ Or add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.1.2
+  xybrid_flutter: ^0.2.0
 ```
 
 <details>
