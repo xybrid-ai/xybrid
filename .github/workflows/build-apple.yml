@@ -130,7 +130,7 @@ jobs:
           DEST="$RUNNER_TEMP/natives"
           got_any=0
           for triple in aarch64-apple-ios aarch64-apple-ios-sim; do
-            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+            if tools/scripts/natives-pull.sh "$triple" vision "$DEST"; then
               echo "prebuilt natives staged for $triple (will skip cmake)"
               got_any=1
             else
@@ -199,16 +199,14 @@ jobs:
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Check iOS vision build (compile-only, not shipped)
-        # Compile-only gate for the OPT-IN native llama.cpp vision backend
-        # (mtmd). This backend is in NO platform preset and is NOT shipped in
-        # the XCFramework above — this step only proves the
-        # `llm-llamacpp-vision` (mtmd) chain still cross-compiles for iOS, the
-        # gate the UniFFI->bolt migration dropped (it pointed at the deleted
-        # `xybrid-uniffi`; retargeted here at `xybrid-sdk`, which now carries
-        # both `platform-ios` and `llm-llamacpp-vision`: xybrid-sdk ->
-        # xybrid-core/llm-llamacpp-vision -> xybrid-llama-sys/vision; the -sys
-        # crate lives at crates/llama-cpp-sys/, package `xybrid-llama-sys`).
+      - name: Check iOS vision build (fast early-fail smoke)
+        # Fast `cargo check` smoke for the native llama.cpp vision backend
+        # (mtmd). As of 0.2.1 `platform-ios` ships this backend, so the
+        # XCFramework above already compiles it — this step is a redundant but
+        # cheap early-fail signal that surfaces an mtmd cross-compile break in
+        # ~1-2 min instead of waiting on the full xcframework cycle. The chain:
+        # xybrid-sdk -> xybrid-core/llm-llamacpp-vision -> xybrid-llama-sys/vision
+        # (the -sys crate lives at crates/llama-cpp-sys/, package `xybrid-llama-sys`).
         #
         # `check` (not `build`) is sufficient and matches the old gate: the
         # crates/llama-cpp-sys/build.rs runs on `check` and is what compiles

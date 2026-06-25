@@ -39,10 +39,12 @@ llm-llamacpp-vision = ["llm-llamacpp", "xybrid-sdk/llm-llamacpp-vision"]
 
 # PLATFORM PRESETS (composed from individual features above)
 # This ensures #[cfg(feature = "...")] checks work correctly in this crate.
-platform-android = ["ort-dynamic", "llm-llamacpp", "candle", "huggingface"]
-platform-ios = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp", "huggingface"]
-platform-macos = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp", "huggingface"]
-platform-desktop = ["ort-download", "llm-llamacpp", "huggingface"]
+# These mirror xybrid-sdk's presets and ship the native VLM (mtmd) backend via
+# `llm-llamacpp-vision` so the CLI can run vision-language models out of the box.
+platform-android = ["ort-dynamic", "llm-llamacpp-vision", "candle", "huggingface"]
+platform-ios = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp-vision", "huggingface"]
+platform-macos = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp-vision", "huggingface"]
+platform-desktop = ["ort-download", "llm-llamacpp-vision", "huggingface"]
 
 
 [dependencies]
