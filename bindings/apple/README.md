@@ -2,7 +2,7 @@
 
 > **Status**: Coming Soon — Swift bindings are in development. Use [Flutter](../flutter/) or [Kotlin](../kotlin/) for production use today.
 
-Native iOS and macOS SDK for [Xybrid](https://github.com/xybrid-ai/xybrid), providing on-device ML inference via UniFFI-generated Swift bindings.
+Native iOS and macOS SDK for [Xybrid](https://github.com/xybrid-ai/xybrid), providing on-device ML inference via BoltFFI-generated Swift bindings.
 
 ## Installation
 
@@ -111,13 +111,8 @@ apple/
 ├── Sources/
 │   └── Xybrid/                      # Swift source
 │       ├── Xybrid.swift             # Public API, extensions, type aliases
-│       └── xybrid_uniffi.swift      # UniFFI-generated Swift bindings (DO NOT EDIT)
-├── Sources/xybrid_uniffiFFI/        # C FFI headers (bundled into XCFramework)
-│   ├── include/
-│   │   ├── xybrid_uniffiFFI.h       # C header for FFI
-│   │   └── module.modulemap         # Clang module map
-│   └── shim.c                       # Placeholder (symbols from XCFramework)
-└── XCFrameworks/                    # Pre-built binary frameworks
+│       └── xybrid_bolt.swift        # BoltFFI-generated Swift bindings (DO NOT EDIT)
+└── XCFrameworks/                    # Pre-built binary frameworks (C headers bundled inside)
     ├── XybridFFI.xcframework/       # Latest build (for local dev)
     └── XybridFFI-{version}.xcframework/  # Versioned copy
 ```
@@ -183,11 +178,11 @@ After a successful build:
 bindings/apple/XCFrameworks/
 ├── XybridFFI.xcframework/
 │   ├── ios-arm64/
-│   │   └── libxybrid_uniffi.a
+│   │   └── libxybrid-bolt.a
 │   ├── ios-arm64_x86_64-simulator/
-│   │   └── libxybrid_uniffi.a
+│   │   └── libxybrid-bolt.a
 │   └── macos-arm64_x86_64/
-│       └── libxybrid_uniffi.a
+│       └── libxybrid-bolt.a
 └── XybridFFI-{version}.xcframework/    # Versioned copy
 ```
 
@@ -239,8 +234,8 @@ XCFramework builds require macOS with Xcode. If you're developing on Linux or Wi
 
 ## FFI Strategy
 
-The Swift bindings are generated from `crates/xybrid-uniffi/` using [UniFFI](https://mozilla.github.io/uniffi-rs/):
-- Single Rust source generates both Swift and Kotlin
+The Swift bindings are generated from `crates/xybrid-bolt/` using [BoltFFI](https://crates.io/crates/boltffi):
+- Single Rust source generates Swift, Kotlin, Java, C#, WASM, and a C header
 - Native async/await support
 - Memory-safe wrappers
 - Automatic error handling
