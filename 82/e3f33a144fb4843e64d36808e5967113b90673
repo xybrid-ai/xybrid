@@ -1,0 +1,58 @@
+tools/README.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 245
+docs/FEATURE_MATRIX.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 305
+.github/workflows/build-react-native.yml
+  s_86e74cbccbf9ac::t_92282216afe20f 34
+  s_86e74cbccbf9ac::t_01c855426aceba 14-16
+bindings/unity/README.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 32
+docs/content/docs/quickstart.zh.mdx
+  s_86e74cbccbf9ac::t_5234ea6821defb 15,57,89,154
+.github/ISSUE_TEMPLATE/bug_report.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 11
+docs/content/docs/quickstart.mdx
+  s_86e74cbccbf9ac::t_5234ea6821defb 15,57,89,153
+bindings/kotlin/README.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 15
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_86e74cbccbf9ac::t_5234ea6821defb 18
+bindings/apple/README.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 15,22
+bindings/flutter/README.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 18
+crates/xybrid/README.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 9
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_86e74cbccbf9ac::t_5234ea6821defb 14
+README.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 133,150,168,202
+README.zh-CN.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 148,165,183,217
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_86e74cbccbf9ac::t_5234ea6821defb 18
+README.ja-JP.md
+  s_86e74cbccbf9ac::t_5234ea6821defb 148,165,183,217
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_86e74cbccbf9ac::t_5234ea6821defb 14
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_86e74cbccbf9ac::t_5234ea6821defb 14
+docs/content/docs/(integration)/sdks/android.mdx
+  s_86e74cbccbf9ac::t_5234ea6821defb 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "82e3f33a144fb4843e64d36808e5967113b90673",
+  "prompts": {},
+  "sessions": {
+    "s_86e74cbccbf9ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e616a7de-09ce-4c37-97a0-a55595d0a4d5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
