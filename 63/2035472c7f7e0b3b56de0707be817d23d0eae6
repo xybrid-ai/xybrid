@@ -1,0 +1,83 @@
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_41962081cb4b2a::t_3520b272883163 219-248,592-634,869-885,888-910,912
+  s_41962081cb4b2a::t_694f6d3b3be82d 886-887
+  s_41962081cb4b2a::t_f50c064f220315 911,913
+crates/xybrid-bolt/src/lib.rs
+  s_41962081cb4b2a::t_75c6fbe7a98832 459-508
+  s_41962081cb4b2a::t_c61056e9dc1de8 786,850-878
+  s_41962081cb4b2a::t_afd873dcce771f 749-761,781-785,787
+  s_41962081cb4b2a::t_59607035a9392a 625-628
+  s_41962081cb4b2a::t_26a6b422a7baad 765-766
+  s_41962081cb4b2a::t_cae3abe5972627 762-764,767-780
+  s_41962081cb4b2a::t_6fa6b5f7d37339 788
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_41962081cb4b2a::t_3520b272883163 1009-1072,1310-1341,1598-1613,1616-1659,1822-1824
+  s_41962081cb4b2a::t_694f6d3b3be82d 1614-1615
+bindings/react-native/src/NativeXybrid.ts
+  s_41962081cb4b2a::t_e2174c23f94722 43-52
+bindings/react-native/src/index.ts
+  s_41962081cb4b2a::t_bf4181e8b7903b 190-202,219,227-232,237-238
+  s_41962081cb4b2a::t_60f3de67ad1998 8-9,23-24
+  s_41962081cb4b2a::t_83733132a3123f 172-189,203-218,220-226,233-236,239-242
+  s_41962081cb4b2a::t_2978c55576ae85 171
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_41962081cb4b2a::t_d317962d67f8be 18-23
+  s_41962081cb4b2a::t_27d5a8cf8c5747 143-203
+  s_41962081cb4b2a::t_62b17d9e371659 294-307
+  s_41962081cb4b2a::t_4d4aa4420606de 434-439,442-443,445-448,450,452,454-456
+  s_41962081cb4b2a::t_f96e55697f3603 440-441,444,449,451,453
+  s_41962081cb4b2a::t_8bd90fb1ba0bfa 89-94
+bindings/react-native/README.md
+  s_41962081cb4b2a::t_85bcb2eef07d2a 9-13
+  s_41962081cb4b2a::t_7e2f7a81965468 122-144
+  s_41962081cb4b2a::t_37233c049c8b48 160-166
+crates/xybrid-ffi-facade/src/lib.rs
+  s_41962081cb4b2a::t_be482a82c18c5a 898-930,935-943,961-977
+  s_41962081cb4b2a::t_36720d07b662bd 1242-1274,1299-1301,1312-1320
+  s_41962081cb4b2a::t_57c93e9dd33b1f 931-934
+  s_41962081cb4b2a::t_f8d0dd2ac69582 1275-1298,1302-1311
+  s_41962081cb4b2a::t_f65f83e0f943ff 1432-1441,1446-1484
+  s_41962081cb4b2a::t_be014a62133040 944-960
+  s_41962081cb4b2a::t_ae06e3785a14f5 1431
+  s_41962081cb4b2a::t_aff5ef5c7db108 1485
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_41962081cb4b2a::t_920e99c4910750 215-246
+  s_41962081cb4b2a::t_17f11186011413 23-27
+bindings/react-native/example/App.tsx
+  s_41962081cb4b2a::t_19b66fd3acb86a 80-98
+  s_41962081cb4b2a::t_d5a7229bc11a6f 117
+bindings/react-native/src/types.ts
+  s_41962081cb4b2a::t_3fb271898e493e 82-103,107-108,112
+  s_41962081cb4b2a::t_4efa12b4194065 104-106,109-111
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_41962081cb4b2a::t_8e9b1435f02c0a 225-268
+bindings/react-native/ios/XybridModule.mm
+  s_41962081cb4b2a::t_b934d46cf4fa98 101-125
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_41962081cb4b2a::t_353595542b6f8c 21-22
+  s_41962081cb4b2a::t_d4824d187151b0 188-245
+  s_41962081cb4b2a::t_91a6941d9ac5cf 561,575-576,579-580,597-598,611-614
+  s_41962081cb4b2a::t_6a7b8c385fdfe3 492-498,500-502,506-511,513-515,517-522
+  s_41962081cb4b2a::t_18c3ef2cd8fe1d 562-574,577-578,581-596,599-610
+  s_41962081cb4b2a::t_2027237494fe5d 131-140
+  s_41962081cb4b2a::t_249750ec61fee8 499,503-505,512,516
+  s_41962081cb4b2a::t_d8ae2b9a56d5dc 59,66-67,71-72
+CHANGELOG.md
+  s_41962081cb4b2a::t_50d75cab9aae23 10-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.1",
+  "base_commit_sha": "632035472c7f7e0b3b56de0707be817d23d0eae6",
+  "prompts": {},
+  "sessions": {
+    "s_41962081cb4b2a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "373f2214-d840-46a5-8b85-a4625ec606c8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
