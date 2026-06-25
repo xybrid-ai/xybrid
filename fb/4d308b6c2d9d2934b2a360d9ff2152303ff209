@@ -1,0 +1,21 @@
+bindings/apple/README.md
+  s_b7fd2f7e86a91a::t_2abfb00e9e29a6 5
+bindings/kotlin/README.md
+  s_b7fd2f7e86a91a::t_d953d6a359da06 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.1",
+  "base_commit_sha": "fb4d308b6c2d9d2934b2a360d9ff2152303ff209",
+  "prompts": {},
+  "sessions": {
+    "s_b7fd2f7e86a91a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4907525d-aa8f-4910-ac45-babdb6c1be0f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
