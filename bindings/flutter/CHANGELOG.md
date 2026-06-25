@@ -23,6 +23,7 @@ real-time camera vision primitives behind Studio's live loop.
 * Raw-frame path avoids per-frame JPEG re-encoding: `imageRaw` packs RGB pixel buffers straight through to the multimodal runtime; the encoded `image` path remains the fallback (xybrid-ai/xybrid#245)
 * Streaming TTS support on top of the new audio generation path (xybrid-ai/xybrid#245)
 * Live-mode telemetry is rate-limited by a per-session sampler (≈1 row/sec/session), so live camera sessions no longer emit a telemetry row per frame (xybrid-ai/xybrid#245)
+* `XybridModel.warmup` / `unload` are now exposed on the Flutter binding, completing the sync/async method symmetry (xybrid-ai/xybrid#293)
 * Fixed: TTS text chunking is now UTF-8-safe — multi-byte codepoints are no longer split mid-character (xybrid-ai/xybrid#249)
 * Fixed: `.npz` voice files are detected by magic header rather than file extension (xybrid-ai/xybrid#252)
 * Fixed: `tokens_out` is now emitted on local LLM telemetry paths (xybrid-ai/xybrid#253)

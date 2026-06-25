@@ -71,8 +71,11 @@ than UniFFI, and the run/envelope call shapes changed accordingly.
   `ModelLoader::with_speculative_cloud` / `will_speculate` let the loader begin a
   cloud execution while the local model is still downloading.
 - **React Native binding** (#93, #260): a React Native binding, now ported onto
-  BoltFFI alongside the other foreign-language bindings.
+  BoltFFI alongside the other foreign-language bindings, with a runnable Expo
+  example and an Android build-from-source CI gate (#294).
 - **Async/suspend conveniences restored** (#269) for Swift and Kotlin load + run.
+- **Model `warmup` / `unload` exposed on Flutter** (#293), filling the sync/async
+  symmetry across the binding surface.
 
 ### Changed
 
@@ -88,12 +91,26 @@ than UniFFI, and the run/envelope call shapes changed accordingly.
   clarified (#248).
 - **Release/CI**: `llama-cpp-sys` renamed to `xybrid-llama-sys` (#247) and both
   `xybrid-llama-sys` + `xybrid-llama` now publish to crates.io (#246); native
-  build cache is warmed on master pushes (#268).
+  build cache is warmed on master pushes (#268); Swift + Kotlin wrapper compiles
+  are gated in CI (#275). A prebuilt-llama.cpp-slices pipeline on ghcr
+  (compile-once/link-many) now covers Android (3 ABIs), iOS device + simulator,
+  and Linux x86_64, cutting native build time from ~25 min to seconds
+  (#281, #284–#286, #288, #289, #291).
 
 ### Fixed
 
+- **BoltFFI CLI/runtime aligned to 0.25.3** (#276): a CLI/runtime skew mis-generated
+  unit-ok `Result<(), E>` exports (model warmup/unload) as a `void` foreign function
+  that dropped the error and leaked the result buffer; pinned in lockstep.
+- **Android `.so` is strip-safe and 16 KB-page aligned** (#287): the bolt `.so` now
+  links `c++_shared` + 16 KB alignment via a clang shim instead of a post-link
+  patchelf step (which appended a LOAD segment AGP strip corrupted, crashing
+  `dlopen` on 16 KB-page devices); guarded by a dlopen CI gate.
 - **Kotlin image format validation** restored and `EnvelopeTest` fixed for the bolt
-  envelope shape (#266).
+  envelope shape (#266); `displayMessage` `when()` made exhaustive over the new
+  error variants (#273).
+- **iOS-simulator bindgen** now passes clang the canonical simulator triple (#274),
+  unblocking the cross-compile vision compile-check.
 - **`tokens_out` emitted** on local LLM telemetry paths (#253).
 - **`.npz` voice files detected** by magic header rather than extension (#252).
 - **TTS text chunking is UTF-8-safe** (#249) — no longer splits multi-byte
