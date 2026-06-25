@@ -124,7 +124,7 @@ jobs:
           DEST="$RUNNER_TEMP/natives"
           got_any=0
           for triple in aarch64-apple-ios aarch64-apple-ios-sim; do
-            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+            if tools/scripts/natives-pull.sh "$triple" vision "$DEST"; then
               echo "prebuilt natives staged for $triple (will skip cmake)"
               got_any=1
             else
@@ -251,10 +251,17 @@ jobs:
       # Keep LLVM (large-packages: false): the bolt build runs bindgen for
       # the llama/ggml C++ via libclang. Removing system LLVM breaks it with
       # "'stdbool.h' file not found".
+      #
+      # tool-cache: true reclaims /opt/hostedtoolcache (~10 GB). This step runs
+      # first, before Set up JDK / Use Node.js, so those re-provision their
+      # toolchains afterward — the build never reads the preinstalled cache.
+      # The extra headroom is needed because the from-source path compiles
+      # llama.cpp + the bolt .so for every ABI and then assembles the APK,
+      # which exhausted the runner ("No space left on device") at assembleDebug.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
         with:
-          tool-cache: false
+          tool-cache: true
           android: false
           dotnet: true
           haskell: true
@@ -340,7 +347,7 @@ jobs:
           DEST="$RUNNER_TEMP/natives"
           got_any=0
           for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
-            if tools/scripts/natives-pull.sh "$triple" base "$DEST"; then
+            if tools/scripts/natives-pull.sh "$triple" vision "$DEST"; then
               echo "prebuilt natives staged for $triple (will skip cmake)"
               got_any=1
             else
