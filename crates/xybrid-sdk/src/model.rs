@@ -4780,6 +4780,7 @@ mod tests {
             version: "1.0".to_string(),
             output_type: OutputType::Text,
             supports_streaming: false,
+            current_run: Arc::new(Mutex::new(None)),
         }
     }
 

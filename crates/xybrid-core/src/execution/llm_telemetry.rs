@@ -189,6 +189,7 @@ mod tests {
             files: Vec::new(),
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: bundle_metadata,
             voices: None,
             max_chunk_chars: None,

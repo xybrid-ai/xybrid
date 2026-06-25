@@ -1347,9 +1347,10 @@ mod tests {
 
     #[test]
     fn sdk_regular_error_stays_string_ffi_stream_event() {
-        let event = stream_error_event(xybrid_sdk::SdkError::InferenceError(
-            "runtime failed".to_string(),
-        ));
+        let event = stream_error_event(xybrid_sdk::SdkError::InferenceError {
+            message: "runtime failed".to_string(),
+            source: None,
+        });
 
         match event {
             FfiStreamEvent::Error(message) => {

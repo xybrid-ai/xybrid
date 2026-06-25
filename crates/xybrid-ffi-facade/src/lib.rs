@@ -323,6 +323,9 @@ pub enum EnvelopeKind {
     Embedding {
         values: Vec<f32>,
     },
+    TokenIds {
+        ids: Vec<i64>,
+    },
     /// Encoded image input (PNG/JPEG/WebP) for vision-capable models. The
     /// bytes are decode-validated and the dimensions derived when this is
     /// lowered to the SDK in [`Envelope::into_sdk`] — so construction is
@@ -366,6 +369,13 @@ impl Envelope {
     pub fn embedding(values: Vec<f32>) -> Self {
         Self {
             kind: EnvelopeKind::Embedding { values },
+            metadata: HashMap::new(),
+        }
+    }
+
+    pub fn token_ids(ids: Vec<i64>) -> Self {
+        Self {
+            kind: EnvelopeKind::TokenIds { ids },
             metadata: HashMap::new(),
         }
     }
@@ -430,6 +440,7 @@ impl Envelope {
             EnvelopeKind::Text { text } => sdk::ir::EnvelopeKind::Text(text),
             EnvelopeKind::Audio { bytes } => sdk::ir::EnvelopeKind::Audio(bytes),
             EnvelopeKind::Embedding { values } => sdk::ir::EnvelopeKind::Embedding(values),
+            EnvelopeKind::TokenIds { ids } => sdk::ir::EnvelopeKind::TokenIds(ids),
             EnvelopeKind::Image { bytes, format } => {
                 // Decode-validates the bytes and derives dimensions, then carry
                 // this envelope's metadata onto the validated kind via
@@ -454,6 +465,7 @@ impl Envelope {
             sdk::ir::EnvelopeKind::Text(text) => EnvelopeKind::Text { text },
             sdk::ir::EnvelopeKind::Audio(bytes) => EnvelopeKind::Audio { bytes },
             sdk::ir::EnvelopeKind::Embedding(values) => EnvelopeKind::Embedding { values },
+            sdk::ir::EnvelopeKind::TokenIds(ids) => EnvelopeKind::TokenIds { ids },
             sdk::ir::EnvelopeKind::Image { source } => match source.as_encoded() {
                 Some((bytes, format)) => EnvelopeKind::Image {
                     bytes: bytes.to_vec(),

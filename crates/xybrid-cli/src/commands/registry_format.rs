@@ -18,8 +18,8 @@ fn registry_backend_selectable_kind(task: &str) -> Option<&'static str> {
 fn registry_metadata_error_can_fall_back_to_default(err: &SdkError) -> bool {
     matches!(
         err,
-        SdkError::Offline(_)
-            | SdkError::NetworkError(_)
+        SdkError::Offline { .. }
+            | SdkError::NetworkError { .. }
             | SdkError::Timeout { .. }
             | SdkError::CircuitOpen(_)
     )

@@ -668,11 +668,13 @@ impl CacheManager {
         let extracted_root = self.extracted_root();
         if extracted_root.exists() {
             std::fs::remove_dir_all(&extracted_root).map_err(|e| {
-                SdkError::CacheError(format!(
-                    "Failed to remove extracted model cache {}: {}",
-                    extracted_root.display(),
-                    e
-                ))
+                SdkError::cache_src(
+                    format!(
+                        "Failed to remove extracted model cache {}",
+                        extracted_root.display()
+                    ),
+                    e,
+                )
             })?;
         }
 
@@ -709,14 +711,12 @@ where
     }
 
     for entry in std::fs::read_dir(parent).map_err(|e| {
-        SdkError::CacheError(format!(
-            "Failed to read cache directory {}: {}",
-            parent.display(),
-            e
-        ))
+        SdkError::cache_src(
+            format!("Failed to read cache directory {}", parent.display()),
+            e,
+        )
     })? {
-        let entry = entry
-            .map_err(|e| SdkError::CacheError(format!("Failed to read cache entry: {}", e)))?;
+        let entry = entry.map_err(|e| SdkError::cache_src("Failed to read cache entry", e))?;
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
@@ -737,14 +737,12 @@ fn remove_all_children(parent: &Path) -> Result<(), SdkError> {
     }
 
     for entry in std::fs::read_dir(parent).map_err(|e| {
-        SdkError::CacheError(format!(
-            "Failed to read cache directory {}: {}",
-            parent.display(),
-            e
-        ))
+        SdkError::cache_src(
+            format!("Failed to read cache directory {}", parent.display()),
+            e,
+        )
     })? {
-        let entry = entry
-            .map_err(|e| SdkError::CacheError(format!("Failed to read cache entry: {}", e)))?;
+        let entry = entry.map_err(|e| SdkError::cache_src("Failed to read cache entry", e))?;
         remove_path(&entry.path())?;
     }
 
@@ -753,13 +751,11 @@ fn remove_all_children(parent: &Path) -> Result<(), SdkError> {
 
 fn remove_path(path: &Path) -> Result<(), SdkError> {
     if path.is_dir() {
-        std::fs::remove_dir_all(path).map_err(|e| {
-            SdkError::CacheError(format!("Failed to remove {}: {}", path.display(), e))
-        })?;
+        std::fs::remove_dir_all(path)
+            .map_err(|e| SdkError::cache_src(format!("Failed to remove {}", path.display()), e))?;
     } else {
-        std::fs::remove_file(path).map_err(|e| {
-            SdkError::CacheError(format!("Failed to remove {}: {}", path.display(), e))
-        })?;
+        std::fs::remove_file(path)
+            .map_err(|e| SdkError::cache_src(format!("Failed to remove {}", path.display()), e))?;
     }
 
     Ok(())

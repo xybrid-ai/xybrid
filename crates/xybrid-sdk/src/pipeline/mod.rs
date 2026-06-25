@@ -164,7 +164,6 @@ fn pipeline_input_type_from_metadata(metadata: &ModelMetadata) -> PipelineInputT
             // Image-preprocessing steps don't pin the *pipeline* input type
             // here: vision input classification rides the VisionLanguage
             // template / task path below.
-            #[cfg(feature = "llm-llamacpp-vision")]
             PreprocessingStep::ImageDecode { .. }
             | PreprocessingStep::ImageResize { .. }
             | PreprocessingStep::ImageNormalize { .. }
@@ -1122,7 +1121,7 @@ impl Pipeline {
         let stage_configs = self
             .handle
             .read()
-            .map_err(|_| SdkError::PipelineError("Failed to read handle".to_string()))?
+            .map_err(|_| SdkError::pipeline("Failed to read handle"))?
             .stage_configs
             .clone();
         let selector_cfg = SelectorCfg::current();
@@ -2324,6 +2323,7 @@ stages:
             preprocessing: Vec::new(),
             postprocessing: Vec::new(),
             files: vec!["model.gguf".to_string()],
+            vision_encoder: None,
             description: None,
             backend: None,
             metadata: std::collections::HashMap::new(),

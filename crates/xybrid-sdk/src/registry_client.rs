@@ -2318,49 +2318,6 @@ mod tests {
         bundle_path
     }
 
-    fn sha256_hex(bytes: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(bytes);
-        format!("{:x}", hasher.finalize())
-    }
-
-    fn linux_llamacpp_selector_cfg() -> SelectorCfg {
-        SelectorCfg {
-            target: "linux-x86_64".to_string(),
-            host_is_apple_arm64: false,
-            mlx_compiled: false,
-            llamacpp_compiled: true,
-            mistral_compiled: false,
-            mlx_runtime_ok: false,
-        }
-    }
-
-    fn macos_all_backends_selector_cfg() -> SelectorCfg {
-        SelectorCfg {
-            target: "macos-aarch64".to_string(),
-            host_is_apple_arm64: true,
-            mlx_compiled: true,
-            llamacpp_compiled: true,
-            mistral_compiled: true,
-            mlx_runtime_ok: true,
-        }
-    }
-
-    fn write_cached_task_metadata(
-        client: &RegistryClient,
-        model_id: &str,
-        format: &str,
-        task: &str,
-    ) {
-        let model_dir = client.extraction_dir_with_format(model_id, format);
-        std::fs::create_dir_all(&model_dir).unwrap();
-        std::fs::write(
-            model_dir.join("model_metadata.json"),
-            format!(r#"{{"metadata":{{"task":"{task}"}}}}"#),
-        )
-        .unwrap();
-    }
-
     #[test]
     fn classify_download_source_recognises_r2_hosts() {
         // Xybrid's R2 mirror serves both the registry's primary bundle

@@ -27,17 +27,20 @@
 
 use log::{debug, info, warn};
 
+#[cfg(feature = "llm-mlx")]
+use super::template::is_mlx_embedding_safetensors_metadata;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::template::PostprocessingStep;
 use super::template::{
-    backend_label_from_template, quantization_label_from_metadata, span_kind_from_template,
-    stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
+    backend_label_from_template, explicit_llm_backend_hint, is_mlx_llm_safetensors_metadata,
+    quantization_label_from_metadata, span_kind_from_template, stage_kind_from_task, ExecutionMode,
+    ExecutionTemplate, ModelMetadata, PipelineStage,
 };
-#[cfg(feature = "llm-mlx")]
-use super::template::{is_mlx_embedding_safetensors_metadata, is_mlx_llm_safetensors_metadata};
 use crate::conversation::ConversationContext;
 use crate::ir::EnvelopeKind;
 use crate::ir::{Envelope, MessageRole};
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+use crate::runtime_adapter::BackendChoice;
 use crate::runtime_adapter::{AdapterError, ModelRuntime};
 use crate::tracing as xybrid_trace;
 use ndarray::ArrayD;
@@ -62,13 +65,19 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     }
 }
 
+fn llm_backend_hint(metadata: &ModelMetadata) -> Option<&str> {
+    explicit_llm_backend_hint(metadata).or_else(|| {
+        (cfg!(feature = "llm-mlx") && is_mlx_llm_safetensors_metadata(metadata)).then_some("mlx")
+    })
+}
+
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LlmAdapterCacheKey {
     model_path: String,
     chat_template_path: Option<String>,
     context_length: usize,
-    backend_hint: Option<String>,
+    backend: String,
     vision_encoder_path: Option<String>,
 }
 
@@ -85,15 +94,91 @@ impl LlmAdapterCacheKey {
             model_path,
             chat_template_path,
             context_length,
-            backend_hint: backend_hint.map(ToOwned::to_owned),
+            backend: llm_cache_backend_key(backend_hint),
             vision_encoder_path,
         }
     }
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+fn llm_cache_backend_key(backend_hint: Option<&str>) -> String {
+    let Some(hint) = backend_hint else {
+        return "auto".to_string();
+    };
+
+    match BackendChoice::parse(hint) {
+        Ok(Some(choice)) => choice.as_str().to_string(),
+        Ok(None) => "auto".to_string(),
+        Err(_) => format!("invalid:{hint}"),
+    }
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn resolve_optional_model_path(base_path: &str, path: Option<&str>) -> Option<String> {
     path.map(|p| Path::new(base_path).join(p).to_string_lossy().to_string())
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+fn llm_adapter_cache_key(
+    base_path: &str,
+    model_file: &str,
+    chat_template: Option<&str>,
+    context_length: usize,
+    backend_hint: Option<&str>,
+) -> LlmAdapterCacheKey {
+    LlmAdapterCacheKey::new(
+        resolve_llm_model_path(base_path, model_file),
+        resolve_optional_model_path(base_path, chat_template),
+        context_length,
+        backend_hint,
+        None,
+    )
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+fn llm_config_from_cache_key(key: &LlmAdapterCacheKey) -> LlmConfig {
+    let mut config = LlmConfig::new(key.model_path.clone()).with_context_length(key.context_length);
+    if let Some(template) = &key.chat_template_path {
+        config = config.with_chat_template(template.clone());
+    }
+    config
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+fn llm_execution_spec(
+    metadata: &ModelMetadata,
+) -> Option<(&str, Option<&str>, usize, Option<&str>)> {
+    match &metadata.execution_template {
+        ExecutionTemplate::Gguf {
+            model_file,
+            chat_template,
+            context_length,
+            ..
+        } if cfg!(any(feature = "llm-mistral", feature = "llm-llamacpp")) => Some((
+            model_file.as_str(),
+            chat_template.as_deref(),
+            *context_length,
+            llm_backend_hint(metadata),
+        )),
+        ExecutionTemplate::SafeTensors { .. }
+            if cfg!(feature = "llm-mlx") && is_mlx_llm_safetensors_metadata(metadata) =>
+        {
+            Some(("", None, mlx_context_length(metadata), Some("mlx")))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+fn resolve_llm_model_path(base_path: &str, model_file: &str) -> String {
+    if model_file.is_empty() {
+        base_path.to_string()
+    } else {
+        Path::new(base_path)
+            .join(model_file)
+            .to_string_lossy()
+            .to_string()
+    }
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
@@ -1520,16 +1605,12 @@ impl TemplateExecutor {
         ))]
         reject_text_only_model_image_input(metadata, input)?;
 
-        // Build full model path
-        let model_path = Path::new(&self.base_path).join(model_file);
-        let model_path_str = model_path.to_string_lossy().to_string();
-        let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
-        let cache_key = LlmAdapterCacheKey::new(
-            model_path_str.clone(),
-            chat_template_path.clone(),
+        let cache_key = llm_adapter_cache_key(
+            &self.base_path,
+            model_file,
+            chat_template,
             context_length,
             backend_hint,
-            None,
         );
 
         // Check if we have a cached adapter for this exact load config.
@@ -1540,13 +1621,7 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
-
-            if let Some(template_path) = chat_template_path {
-                config = config.with_chat_template(template_path);
-            }
-
+            let config = llm_config_from_cache_key(&cache_key);
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
@@ -1633,15 +1708,12 @@ impl TemplateExecutor {
         xybrid_trace::add_metadata("message_count", messages.len().to_string());
         stamp_llm_span_cost_attribution(metadata);
 
-        // Build full model path
-        let model_path = Path::new(&self.base_path).join(model_file);
-        let model_path_str = model_path.to_string_lossy().to_string();
-        let cache_key = LlmAdapterCacheKey::new(
-            model_path_str.clone(),
+        let cache_key = llm_adapter_cache_key(
+            &self.base_path,
+            model_file,
             None,
             context_length,
             backend_hint,
-            None,
         );
 
         // Check if we have a cached adapter for this exact load config.
@@ -1652,8 +1724,7 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
-
+            let config = llm_config_from_cache_key(&cache_key);
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
@@ -1763,8 +1834,7 @@ impl TemplateExecutor {
         xybrid_trace::add_metadata("image_count", image_count.to_string());
         stamp_llm_span_cost_attribution(metadata);
 
-        let model_path = Path::new(&self.base_path).join(model_file);
-        let model_path_str = model_path.to_string_lossy().to_string();
+        let model_path_str = resolve_llm_model_path(&self.base_path, model_file);
         let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
         let vision_encoder_path = metadata.vision_encoder.as_ref().map(|vision_encoder| {
             Path::new(&self.base_path)
@@ -1887,8 +1957,7 @@ impl TemplateExecutor {
         xybrid_trace::add_metadata("image_count", image_count.to_string());
         stamp_llm_span_cost_attribution(metadata);
 
-        let model_path = Path::new(&self.base_path).join(model_file);
-        let model_path_str = model_path.to_string_lossy().to_string();
+        let model_path_str = resolve_llm_model_path(&self.base_path, model_file);
         let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
         let vision_encoder_path = metadata.vision_encoder.as_ref().map(|vision_encoder| {
             Path::new(&self.base_path)
@@ -1990,15 +2059,12 @@ impl TemplateExecutor {
         xybrid_trace::add_metadata("message_count", messages.len().to_string());
         stamp_llm_span_cost_attribution(metadata);
 
-        // Build full model path
-        let model_path = Path::new(&self.base_path).join(model_file);
-        let model_path_str = model_path.to_string_lossy().to_string();
-        let cache_key = LlmAdapterCacheKey::new(
-            model_path_str.clone(),
+        let cache_key = llm_adapter_cache_key(
+            &self.base_path,
+            model_file,
             None,
             context_length,
             backend_hint,
-            None,
         );
 
         // Check if we have a cached adapter for this exact load config.
@@ -2009,8 +2075,7 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
-
+            let config = llm_config_from_cache_key(&cache_key);
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
@@ -2090,17 +2155,14 @@ impl TemplateExecutor {
         ))]
         reject_text_only_model_image_input(metadata, input)?;
 
-        // Build full model path
-        let model_path = Path::new(&self.base_path).join(model_file);
-        let model_path_str = model_path.to_string_lossy().to_string();
-        let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
-        let cache_key = LlmAdapterCacheKey::new(
-            model_path_str.clone(),
-            chat_template_path.clone(),
+        let cache_key = llm_adapter_cache_key(
+            &self.base_path,
+            model_file,
+            chat_template,
             context_length,
             backend_hint,
-            None,
         );
+        let model_path_str = cache_key.model_path.clone();
 
         // Check if we have a cached adapter for this exact load config.
         let need_load = match &self.llm_adapter_cache {
@@ -2126,12 +2188,7 @@ impl TemplateExecutor {
         // Load model if needed (cache miss or different model)
         if need_load {
             // Create LLM config
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
-
-            if let Some(template_path) = chat_template_path {
-                config = config.with_chat_template(template_path);
-            }
+            let config = llm_config_from_cache_key(&cache_key);
 
             // Create adapter with the appropriate backend based on hint
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
@@ -3101,6 +3158,7 @@ mod tests {
                 patch_size: Some(14),
             }),
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -3221,6 +3279,7 @@ mod tests {
                 patch_size: Some(16),
             }),
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -3304,6 +3363,7 @@ mod tests {
                 patch_size: Some(16),
             }),
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -3447,6 +3507,7 @@ mod tests {
             files: vec!["missing-text-only.gguf".to_string()],
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -3512,6 +3573,7 @@ mod tests {
                 patch_size: Some(14),
             }),
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -3677,6 +3739,7 @@ mod tests {
                 patch_size: Some(1),
             }),
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -3838,6 +3901,7 @@ mod tests {
                 patch_size: Some(14),
             }),
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -3958,7 +4022,6 @@ mod tests {
             preprocessing: vec![],
             postprocessing: vec![],
             files: vec!["model.gguf".to_string()],
-            #[cfg(feature = "llm-llamacpp-vision")]
             vision_encoder: None,
             description: None,
             backend: None,
@@ -4045,7 +4108,6 @@ mod tests {
                 "tokenizer.json".to_string(),
                 "model.safetensors".to_string(),
             ],
-            #[cfg(feature = "llm-llamacpp-vision")]
             vision_encoder: None,
             description: None,
             backend: Some("mlx".to_string()),
@@ -4087,7 +4149,6 @@ mod tests {
                 "tokenizer.json".to_string(),
                 "model.safetensors".to_string(),
             ],
-            #[cfg(feature = "llm-llamacpp-vision")]
             vision_encoder: None,
             description: None,
             backend: Some("auto".to_string()),
