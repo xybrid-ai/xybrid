@@ -1222,6 +1222,7 @@ abstract class FfiStreamEvent_CloudFallbackAbort extends FfiStreamEvent {
       get copyWith => throw _privateConstructorUsedError;
 }
 
+/// @nodoc
 mixin _$FfiTtsStreamEvent {
   @optionalTypeArgs
   TResult when<TResult extends Object?>({

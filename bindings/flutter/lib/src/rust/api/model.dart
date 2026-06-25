@@ -7,8 +7,6 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
-import 'dart:typed_data';
-
 import '../frb_generated.dart';
 import 'context.dart';
 import 'envelope.dart';
@@ -17,7 +15,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_backend_to_loader`, `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_sdk_with_cancellation`, `to_sdk`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_backend_to_loader`, `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation`, `to_sdk`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
@@ -164,6 +162,13 @@ abstract class FfiModel implements RustOpaqueInterface {
       required FfiConversationContext context,
       FfiGenerationConfig? config});
 
+  /// Check if this model supports true token-by-token streaming.
+  ///
+  /// Returns `true` for token-streaming LLM models (GGUF or runtime-ready
+  /// MLX SafeTensors), `false` for other model types or non-linking MLX
+  /// skeleton builds.
+  bool supportsTokenStreaming();
+
   /// Unload the model, dropping the executor and freeing the underlying
   /// ORT / GGUF inference session.
   ///
@@ -180,13 +185,6 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// Runs on FRB's worker pool, so the returned `Future` does not block the
   /// Dart isolate. Returns an error string if the warmup inference fails.
   Future<void> warmup();
-
-  /// Check if this model supports true token-by-token streaming.
-  ///
-  /// Returns `true` for token-streaming LLM models (GGUF or runtime-ready
-  /// MLX SafeTensors), `false` for other model types or non-linking MLX
-  /// skeleton builds.
-  bool supportsTokenStreaming();
 }
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>>

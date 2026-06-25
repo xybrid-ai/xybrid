@@ -79,7 +79,7 @@ class XybridRustLib extends BaseEntrypoint<XybridRustLibApi,
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -738506137;
+  int get rustContentHash => 591235616;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -226,6 +226,8 @@ abstract class XybridRustLibApi extends BaseApi {
       required FfiEnvelope envelope,
       required FfiConversationContext context,
       FfiGenerationConfig? config});
+
+  bool crateApiModelFfiModelSupportsTokenStreaming({required FfiModel that});
 
   Future<void> crateApiModelFfiModelUnload({required FfiModel that});
 
@@ -1485,6 +1487,31 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       );
 
   @override
+  bool crateApiModelFfiModelSupportsTokenStreaming({required FfiModel that}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+            that, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 38)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_bool,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiModelFfiModelSupportsTokenStreamingConstMeta,
+      argValues: [that],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiModelFfiModelSupportsTokenStreamingConstMeta =>
+      const TaskConstMeta(
+        debugName: "FfiModel_supports_token_streaming",
+        argNames: ["that"],
+      );
+
+  @override
   Future<void> crateApiModelFfiModelUnload({required FfiModel that}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1492,7 +1519,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 38, port: port_);
+            funcId: 39, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1518,7 +1545,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 39, port: port_);
+            funcId: 40, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1542,7 +1569,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 40)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 41)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1567,7 +1594,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 41)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 42)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1592,7 +1619,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(yaml, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 42)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 43)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1618,7 +1645,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 43)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 44)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_String,
@@ -1647,7 +1674,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
             envelope, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 44, port: port_);
+            funcId: 45, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_result,
@@ -1672,7 +1699,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 45)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 46)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_usize,
@@ -1698,7 +1725,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 46)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 47)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_String,
@@ -1721,7 +1748,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 47)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 48)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1745,7 +1772,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 48)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 49)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1768,7 +1795,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 49)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 50)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1792,7 +1819,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 50)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 51)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1815,7 +1842,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 51)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 52)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_resource_snapshot,
@@ -1839,7 +1866,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_u_8(percent, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 52)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 53)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1864,7 +1891,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_ffi_thermal_state(state, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 53)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 54)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1891,7 +1918,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_String(apiKey, serializer);
         sse_encode_opt_String(ingestUrl, serializer);
         sse_encode_opt_String(resourceTelemetry, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 54)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 55)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1916,7 +1943,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 55)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 56)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1943,7 +1970,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(cacheDir, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 56)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 57)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1969,7 +1996,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(endpoint, serializer);
         sse_encode_String(apiKey, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 57)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 58)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1994,7 +2021,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(modelId, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 58)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 59)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -2017,7 +2044,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 59)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 60)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -2042,7 +2069,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 60)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 61)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_String,
@@ -2066,7 +2093,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(apiKey, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 61)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 62)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2091,7 +2118,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(gatewayUrl, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 62)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 63)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2114,7 +2141,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 63)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 64)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_generation_config,
@@ -2137,7 +2164,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 64)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 65)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_generation_config,
@@ -2728,6 +2755,10 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case 2:
         return FfiStreamEvent_Error(
           dco_decode_String(raw[1]),
+        );
+      case 3:
+        return FfiStreamEvent_CloudFallbackAbort(
+          dco_decode_box_autoadd_ffi_cloud_fallback_abort(raw[1]),
         );
       default:
         throw Exception("unreachable");
@@ -3543,6 +3574,10 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case 2:
         var var_field0 = sse_decode_String(deserializer);
         return FfiStreamEvent_Error(var_field0);
+      case 3:
+        var var_field0 =
+            sse_decode_box_autoadd_ffi_cloud_fallback_abort(deserializer);
+        return FfiStreamEvent_CloudFallbackAbort(var_field0);
       default:
         throw UnimplementedError('');
     }
@@ -4437,6 +4472,9 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case FfiStreamEvent_Error(field0: final field0):
         sse_encode_i_32(2, serializer);
         sse_encode_String(field0, serializer);
+      case FfiStreamEvent_CloudFallbackAbort(field0: final field0):
+        sse_encode_i_32(3, serializer);
+        sse_encode_box_autoadd_ffi_cloud_fallback_abort(field0, serializer);
     }
   }
 
@@ -5097,6 +5135,16 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
           FfiGenerationConfig? config}) =>
       XybridRustLib.instance.api.crateApiModelFfiModelRunWithContext(
           that: this, envelope: envelope, context: context, config: config);
+
+  /// Check if this model supports true token-by-token streaming.
+  ///
+  /// Returns `true` for token-streaming LLM models (GGUF or runtime-ready
+  /// MLX SafeTensors), `false` for other model types or non-linking MLX
+  /// skeleton builds.
+  bool supportsTokenStreaming() =>
+      XybridRustLib.instance.api.crateApiModelFfiModelSupportsTokenStreaming(
+        that: this,
+      );
 
   /// Unload the model, dropping the executor and freeing the underlying
   /// ORT / GGUF inference session.
