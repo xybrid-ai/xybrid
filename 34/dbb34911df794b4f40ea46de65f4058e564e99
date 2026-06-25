@@ -1,0 +1,28 @@
+bindings/kotlin/README.md
+  s_b7fd2f7e86a91a::t_5d51e28c373209 320-322
+  s_b7fd2f7e86a91a::t_92085a2b5f2a7d 207
+  s_b7fd2f7e86a91a::t_b3d1ae9f9f30bb 218
+  s_b7fd2f7e86a91a::t_b9b53d7f5391d8 194,196,198,202,212,214,332,336,338,343,347,349,400
+  s_b7fd2f7e86a91a::t_22e742461c188b 226-227
+bindings/apple/README.md
+  s_b7fd2f7e86a91a::t_54e7b1745096c3 114-115
+  s_b7fd2f7e86a91a::t_28936e81869715 238
+  s_b7fd2f7e86a91a::t_84c9c6f31e7376 181,183,185
+  s_b7fd2f7e86a91a::t_7556b2f98ce91f 237
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.1",
+  "base_commit_sha": "34dbb34911df794b4f40ea46de65f4058e564e99",
+  "prompts": {},
+  "sessions": {
+    "s_b7fd2f7e86a91a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4907525d-aa8f-4910-ac45-babdb6c1be0f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
