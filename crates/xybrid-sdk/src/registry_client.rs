@@ -2271,7 +2271,6 @@ mod tests {
         .unwrap();
     }
 
-    #[cfg(feature = "llm-llamacpp-vision")]
     fn create_vlm_bundle(temp_dir: &tempfile::TempDir, model_id: &str) -> PathBuf {
         let model_dir = temp_dir.path().join("bundle_model_files");
         std::fs::create_dir_all(&model_dir).unwrap();
