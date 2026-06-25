@@ -242,7 +242,7 @@ cargo xtask build-flutter --platform macos --release
 cargo xtask build-all --release
 
 # Package a release
-cargo xtask package --version 0.1.2
+cargo xtask package --version 0.2.0
 ```
 
 ## Shell Scripts
