@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # measure-binary-size.sh — size the native mtmd/vision delta on the host.
 #
-# The native vision backend (`llm-llamacpp-vision`, llama.cpp's mtmd/clip) is
-# OPT-IN and ships in NO mobile artifact. This script answers "how many bytes
-# would it add?" by building the xybrid-bolt staticlib + cdylib for the host
+# The native vision backend (`llm-llamacpp-vision`, llama.cpp's mtmd/clip) ships
+# in every `platform-*` preset as of 0.2.1. This script answers "how many bytes
+# does it add?" by building the xybrid-bolt staticlib + cdylib for the host
 # platform twice and diffing them:
 #
-#   baseline : --features <PRESET>                     (platform preset; no vision)
-#   vision   : --features <PRESET>,llm-llamacpp-vision (adds the native mtmd backend)
+#   baseline : --features llm-llamacpp         (llama.cpp, no mtmd)
+#   vision   : --features llm-llamacpp-vision  (adds the native mtmd backend)
+#
+# The accelerators (ORT / Candle) the presets add are constant on both sides, so
+# they cancel out of the delta — the figure below is the pure mtmd cost.
 #
 # This is a LOCAL PROXY for the per-platform shipped-artifact delta (iOS .a /
-# Android .so), not a substitute: the host is aarch64-apple-darwin with
-# platform-macos (CoreML/Metal ORT + Candle-metal), so the mtmd/llama.cpp delta
-# is directionally representative but absolute byte counts differ per target.
+# Android .so), not a substitute: it builds for the host triple, so the
+# mtmd/llama.cpp delta is directionally representative but absolute byte counts
+# differ per target.
 # The staticlib (.a) is the closest proxy for the shipped iOS .a; the cdylib
 # (.dylib) for the Android .so. Prefer the STRIPPED delta as the meaningful
 # figure. For the true shipped numbers, read the per-ABI / per-slice sizes the
@@ -22,15 +25,13 @@
 # this is invoked explicitly — it is NOT wired into CI.
 #
 # Usage:
-#   tools/scripts/measure-binary-size.sh                    # platform-macos (default on this host)
-#   PRESET=platform-desktop tools/scripts/measure-binary-size.sh   # CPU-only preset (no Metal/CoreML)
+#   tools/scripts/measure-binary-size.sh    # builds for the host platform
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PRESET="${PRESET:-platform-macos}"
 PKG="xybrid-bolt"
 LIB="libxybrid_bolt"   # crate lib name (xybrid-bolt -> underscored)
-# cdylib extension is .dylib on macOS, .so on Linux (e.g. PRESET=platform-desktop).
+# cdylib extension is .dylib on macOS, .so on Linux.
 SO_EXT="so"; [ "$(uname)" = "Darwin" ] && SO_EXT="dylib"
 
 # Separate target dirs: the two builds differ only by the mtmd cmake target;
@@ -43,8 +44,12 @@ build () {  # $1=target-dir  $2=feature-list
   CARGO_TARGET_DIR="$1" cargo build --release -p "$PKG" --features "$2"
 }
 
-build "$BASE_TGT" "$PRESET"
-build "$VIS_TGT"  "$PRESET,llm-llamacpp-vision"
+# As of 0.2.1 every `platform-*` preset bundles `llm-llamacpp-vision`, so a
+# preset can no longer serve as the no-vision baseline. The mtmd delta is
+# independent of the ORT/Candle accelerators (identical on both sides), so we
+# isolate it by diffing the llama backend with vs without mtmd directly.
+build "$BASE_TGT" "llm-llamacpp"
+build "$VIS_TGT"  "llm-llamacpp-vision"
 
 # Correctness guard: the vision build must actually link the native mtmd code,
 # otherwise a broken sdk->core->llama-sys/vision chain would silently report a
@@ -90,5 +95,5 @@ printf '%-30s %10s %10s %9s %12s %12s %10s\n' \
 row "$LIB.a  (staticlib ~ iOS .a)"   "$BASE_TGT/release/$LIB.a"     "$VIS_TGT/release/$LIB.a"
 row "$LIB.$SO_EXT (cdylib ~ Android .so)" "$BASE_TGT/release/$LIB.$SO_EXT" "$VIS_TGT/release/$LIB.$SO_EXT"
 echo
-echo "Preset: $PRESET   Host: $(rustc -vV | sed -n 's/^host: //p')"
+echo "Host: $(rustc -vV | sed -n 's/^host: //p')"
 echo "Note: host proxy, not the shipped per-platform delta (see header)."

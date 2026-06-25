@@ -46,15 +46,15 @@ xybrid-sdk = { path = "../../../crates/xybrid-sdk", default-features = false, fe
 ort = { version = "2.0.0-rc.11", default-features = false, features = ["ndarray", "std", "coreml"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# SDK preset handles: ort-download, ort-coreml, candle-metal, llm-llamacpp
+# SDK preset handles: ort-download, ort-coreml, candle-metal, llm-llamacpp-vision
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-macos"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# SDK preset handles: ort-download, llm-llamacpp
+# SDK preset handles: ort-download, llm-llamacpp-vision
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-desktop"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# SDK preset handles: ort-download, llm-llamacpp
+# SDK preset handles: ort-download, llm-llamacpp-vision
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-desktop"] }
 
 [features]

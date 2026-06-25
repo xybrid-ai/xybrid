@@ -447,3 +447,20 @@ extension XybridError: LocalizedError {
         }
     }
 }
+
+// MARK: - FfiError Extensions
+
+// `FfiError` (in the generated `xybrid_bolt.swift`) is thrown by the low-level
+// FFI paths that don't carry a typed `XybridError` wire payload — the model-load
+// inits (`fromRegistry`/`fromDirectory`/`fromBundle`/`fromHuggingface`, via
+// `boltffi_last_error_message`) and the `checkStatus` ABI guard. It already holds
+// the real Rust error string in `.message`, but as a bare `Error` struct its
+// `localizedDescription` collapses to the opaque "The operation couldn't be
+// completed. (Xybrid.FfiError error 1.)". Conforming to `LocalizedError` here
+// (regen-safe — this hand-written file is never overwritten by `boltffi
+// generate`) surfaces the actual message to callers' error UI.
+extension FfiError: LocalizedError {
+    public var errorDescription: String? {
+        message.isEmpty ? "Unknown FFI error" : message
+    }
+}

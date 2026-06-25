@@ -53,7 +53,7 @@ env:
 
 jobs:
   publish-native:
-    name: Publish native (${{ matrix.target }}, base)
+    name: Publish native (${{ matrix.target }}, ${{ matrix.feature }})
     permissions:
       contents: read
       packages: write   # oras login + push of the prebuilt native slice to ghcr
@@ -63,6 +63,20 @@ jobs:
       # idempotent, so let them attempt independently.
       fail-fast: false
       matrix:
+        # Two feature-sets per target: `base` (shipped llm-llamacpp) and
+        # `vision` (+ the mtmd/clip VLM backend). As of 0.2.1 every platform
+        # preset ships vision, so the consumer workflows pull the `vision`
+        # slice; `base` is kept published for custom non-vision builds. The
+        # feature × target cartesian is merged with the per-target runner /
+        # needs-ndk via the include list below.
+        feature: [base, vision]
+        target:
+          - aarch64-linux-android
+          - armv7-linux-androideabi
+          - x86_64-linux-android
+          - aarch64-apple-ios
+          - aarch64-apple-ios-sim
+          - x86_64-unknown-linux-gnu
         include:
           # --- Android (cross-compiled on Linux via cargo-ndk + NDK) ---
           - target: aarch64-linux-android
@@ -165,17 +179,24 @@ jobs:
           XYBRID_NATIVES_EXPORT_DIR: ${{ runner.temp }}/natives-export
         run: |
           set -euo pipefail
-          FP="$(tools/scripts/natives-fingerprint.sh ${{ matrix.target }} base)"
+          FP="$(tools/scripts/natives-fingerprint.sh ${{ matrix.target }} ${{ matrix.feature }})"
           echo "fingerprint=$FP"
           if oras manifest fetch --descriptor "$XYBRID_NATIVES_PKG:$FP" >/dev/null 2>&1; then
             echo "already published — nothing to build"
             exit 0
           fi
+          # `vision` adds the -sys crate's `vision` feature (mtmd/clip); `base`
+          # is plain `bindings`. Both transitively trigger the cmake compile.
+          if [ "${{ matrix.feature }}" = "vision" ]; then
+            FEATURES="bindings,vision"
+          else
+            FEATURES="bindings"
+          fi
           if [ "${{ matrix.needs-ndk }}" = "true" ]; then
             cargo ndk --target ${{ matrix.target }} --platform 28 \
-              build --release -p xybrid-llama-sys --features bindings
+              build --release -p xybrid-llama-sys --features "$FEATURES"
           else
-            cargo build --release -p xybrid-llama-sys --features bindings \
+            cargo build --release -p xybrid-llama-sys --features "$FEATURES" \
               --target ${{ matrix.target }}
           fi
-          tools/scripts/natives-push.sh ${{ matrix.target }} base "$XYBRID_NATIVES_EXPORT_DIR"
+          tools/scripts/natives-push.sh ${{ matrix.target }} ${{ matrix.feature }} "$XYBRID_NATIVES_EXPORT_DIR"

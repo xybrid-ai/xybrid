@@ -58,18 +58,24 @@ huggingface = ["dep:hf-hub"]
 onnx-inspect = ["dep:ort", "ort/download-binaries", "ort/tls-native"]
 
 # PLATFORM PRESETS (SINGLE SOURCE OF TRUTH)
+#
+# The platform presets ship the native VLM (mtmd/clip) backend via
+# `llm-llamacpp-vision` (which transitively enables `llm-llamacpp`). The
+# measured size cost is ~0.7 MiB stripped on the Android `.so` proxy and
+# ~1.5 MiB on the iOS static-lib proxy — noise against the ~30/160 MiB
+# baselines — so vision runs out of the box rather than being a BYO-build.
 
 # Android: Dynamic ORT loading + Candle + llama.cpp (mistral.rs has SIGILL issues on ARM)
-platform-android = ["xybrid-core/ort-dynamic", "xybrid-core/candle", "llm-llamacpp"]
+platform-android = ["xybrid-core/ort-dynamic", "xybrid-core/candle", "llm-llamacpp-vision"]
 
 # iOS: CoreML + Metal acceleration + llama.cpp
-platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "llm-llamacpp"]
+platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "llm-llamacpp-vision"]
 
 # macOS: CoreML + Metal + llama.cpp
-platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "llm-llamacpp"]
+platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "llm-llamacpp-vision"]
 
 # Desktop (Linux/Windows): CPU with llama.cpp
-platform-desktop = ["xybrid-core/ort-download", "llm-llamacpp"]
+platform-desktop = ["xybrid-core/ort-download", "llm-llamacpp-vision"]
 
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 
