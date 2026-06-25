@@ -2,7 +2,7 @@
 
 > **Status**: Active - Real inference via TemplateExecutor
 
-This directory contains the Android library for Xybrid, providing native Kotlin/Java support via UniFFI-generated bindings. The SDK supports real ML inference (TTS, ASR, embeddings) on-device via ONNX Runtime.
+This directory contains the Android library for Xybrid, providing native Kotlin/Java support via BoltFFI-generated bindings. The SDK supports real ML inference (TTS, ASR, embeddings) on-device via ONNX Runtime.
 
 ## Installation
 
