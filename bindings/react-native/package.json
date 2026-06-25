@@ -1,6 +1,6 @@
 {
   "name": "react-native-xybrid",
-  "version": "0.1.0-beta12",
+  "version": "0.2.0-rc1",
   "description": "On-device + cloud ML inference for React Native (iOS + Android), backed by the Xybrid Rust SDK",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
