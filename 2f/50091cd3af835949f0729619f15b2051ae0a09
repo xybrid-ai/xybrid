@@ -1,0 +1,59 @@
+bindings/kotlin/build.gradle.kts
+  s_4e841541491380::t_df6f60b86b0ff5 8
+Cargo.toml
+  s_4e841541491380::t_df6f60b86b0ff5 20
+crates/xybrid/Cargo.toml
+  s_4e841541491380::t_fa23516bb0ee87 17
+bindings/flutter/rust/Cargo.toml
+  s_4e841541491380::t_df6f60b86b0ff5 3
+README.ja-JP.md
+  s_4e841541491380::t_b3742358127e57 384
+  s_4e841541491380::t_2b467dca560954 148,165,183,217
+  s_4e841541491380::t_ea0031dc8d3fa8 319-324
+bindings/flutter/pubspec.yaml
+  s_4e841541491380::t_df6f60b86b0ff5 3
+bindings/react-native/package.json
+  s_4e841541491380::t_df6f60b86b0ff5 3
+crates/xybrid-sdk/Cargo.toml
+  s_4e841541491380::t_fa23516bb0ee87 17,37,42
+Package.swift
+  s_4e841541491380::t_df6f60b86b0ff5 39
+CHANGELOG.md
+  s_4e841541491380::t_68fece680a8eb0 17-47
+README.md
+  s_4e841541491380::t_7f7608f145de9e 389
+  s_4e841541491380::t_2b467dca560954 133,150,168,202
+  s_4e841541491380::t_461f1d1b0aa404 324-329
+bindings/unity/package.json
+  s_4e841541491380::t_df6f60b86b0ff5 3
+bindings/react-native/android/build.gradle
+  s_4e841541491380::t_df6f60b86b0ff5 94
+crates/xybrid-core/Cargo.toml
+  s_4e841541491380::t_fa23516bb0ee87 28-29
+crates/xybrid-llama/Cargo.toml
+  s_4e841541491380::t_fa23516bb0ee87 24
+bindings/flutter/CHANGELOG.md
+  s_4e841541491380::t_c2c706dbe5e03c 3-10
+README.zh-CN.md
+  s_4e841541491380::t_9baafdd17fdeee 319-324
+  s_4e841541491380::t_6084ada9a81053 384
+  s_4e841541491380::t_2b467dca560954 148,165,183,217
+Cargo.lock
+  s_4e841541491380::t_3c79860ab3383c 2932,6747,6762,6769,6778,6806,6871,6883,6892,6901,6910,6919,6945
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.1",
+  "base_commit_sha": "2f50091cd3af835949f0729619f15b2051ae0a09",
+  "prompts": {},
+  "sessions": {
+    "s_4e841541491380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ac3d14d-bba3-453b-8774-4782348cbf38",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
