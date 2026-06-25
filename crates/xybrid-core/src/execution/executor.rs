@@ -160,9 +160,8 @@ fn llm_execution_spec(
             *context_length,
             llm_backend_hint(metadata),
         )),
-        ExecutionTemplate::SafeTensors { .. }
-            if cfg!(feature = "llm-mlx") && is_mlx_llm_safetensors_metadata(metadata) =>
-        {
+        #[cfg(feature = "llm-mlx")]
+        ExecutionTemplate::SafeTensors { .. } if is_mlx_llm_safetensors_metadata(metadata) => {
             Some(("", None, mlx_context_length(metadata), Some("mlx")))
         }
         _ => None,
@@ -3490,7 +3489,10 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(all(
+        feature = "llm-llamacpp-vision",
+        any(feature = "llm-mistral", feature = "llm-llamacpp")
+    ))]
     #[test]
     fn gguf_image_input_returns_text_only_model_error_before_load() {
         let metadata = ModelMetadata {
@@ -3548,7 +3550,10 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(all(
+        feature = "llm-llamacpp-vision",
+        any(feature = "llm-mistral", feature = "llm-llamacpp")
+    ))]
     #[test]
     fn vision_language_streaming_uses_multimodal_streaming_span() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -4070,7 +4075,6 @@ mod tests {
             preprocessing: vec![],
             postprocessing: vec![],
             files: vec!["model.gguf".to_string()],
-            #[cfg(feature = "llm-llamacpp-vision")]
             vision_encoder: None,
             description: None,
             backend: Some("llamacpp".to_string()),
