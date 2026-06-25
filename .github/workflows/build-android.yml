@@ -69,10 +69,10 @@ jobs:
     name: Build Android .so (all ABIs)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # stable
         with:
           toolchain: stable
           # All four ABIs the bolt config builds (the AAR ships the first
@@ -84,7 +84,7 @@ jobs:
             i686-linux-android
 
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Configure sccache environment
         shell: bash
@@ -105,13 +105,13 @@ jobs:
       # Cache Android NDK to avoid the ~1.5GB download on every build.
       - name: Cache Android NDK
         id: cache-ndk
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
           key: android-ndk-${{ env.NDK_VERSION }}
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
       - name: Install NDK
         if: steps.cache-ndk.outputs.cache-hit != 'true'
@@ -132,7 +132,7 @@ jobs:
       # calls. Cache the installed binary across runs.
       - name: Cache boltffi CLI
         id: cache-boltffi
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: ~/.cargo/bin/boltffi
           key: boltffi-cli-${{ runner.os }}-0.25.3
@@ -166,7 +166,7 @@ jobs:
       - name: Log in to ghcr (best-effort, same-repo)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -269,7 +269,7 @@ jobs:
         run: cargo ndk --target aarch64-linux-android --platform 28 check -p xybrid-sdk --features platform-android,llm-llamacpp-vision
 
       - name: Upload Android .so artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: android-so-files
           path: bindings/kotlin/libs/
@@ -294,7 +294,7 @@ jobs:
           ls -la dlopen-gate
 
       - name: Upload dlopen-gate artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: android-dlopen-gate
           path: dlopen-gate/
@@ -315,12 +315,12 @@ jobs:
     name: Compile + test Kotlin wrapper
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # AGP 8.2.2 requires JDK 17+. `cache: gradle` caches the Gradle user home
       # (resolved deps + wrapper distribution) across runs.
       - name: Set up JDK 17
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
         with:
           distribution: temurin
           java-version: '17'
@@ -330,7 +330,7 @@ jobs:
       # Provides ANDROID_HOME so AGP resolves the SDK; AGP auto-downloads the
       # compileSdk=34 platform on first build (same as release-publish.yml).
       - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
       # compile* type-checks Xybrid.kt + XybridBolt.kt (both variants, so an
       # enum-shape break that only trips one buildType is still caught);
@@ -354,7 +354,7 @@ jobs:
     needs: build-android
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # KVM is required for a usable (hardware-accelerated) x86_64 emulator on
       # the Linux runner; without it boot times out.
@@ -366,7 +366,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Download dlopen-gate artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: android-dlopen-gate
           path: dlopen-gate
