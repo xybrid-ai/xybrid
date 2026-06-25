@@ -1,6 +1,6 @@
 name: xybrid_flutter
 description: "Xybrid Flutter SDK — run ML models on-device or in the cloud with intelligent hybrid routing and streaming inference."
-version: 0.2.0-rc1
+version: 0.2.0
 homepage: https://github.com/xybrid-ai/xybrid
 repository: https://github.com/xybrid-ai/xybrid
 issue_tracker: https://github.com/xybrid-ai/xybrid/issues
@@ -17,15 +17,15 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # Effectively pinned to 2.11.1: must equal the Rust
-  # `flutter_rust_bridge = "=2.11.1"` crate and the codegen version, or the
-  # generated bindings throw a codegen/runtime version-mismatch at startup.
-  # `^2.11.1` floats up to 2.12.x and breaks consumers. The two-sided range
-  # below resolves to only 2.11.1 (same as a bare `2.11.1`) but, unlike an
-  # exact-version constraint, does not trip pub.dev's "allow more than one
-  # version" publish warning — which `pub publish --dry-run` now treats as a
-  # hard failure (exit 65).
-  flutter_rust_bridge: '>=2.11.1 <2.11.2'
+  # Must match the Rust `flutter_rust_bridge = "=2.11.1"` crate and the
+  # codegen version, or the generated bindings throw a codegen/runtime
+  # version-mismatch at startup. `^2.11.1` floats up to 2.12.x and breaks
+  # consumers, but `pub publish` rejects an exact single-version pin. A
+  # bounded `>=2.11.1 <2.12.0` range threads both: it stays inside the
+  # 2.11.x line (currently only 2.11.1 exists, so it resolves there) while
+  # satisfying pub.dev's "allow more than one version" rule. Bump the lower
+  # bound (and the Rust pin) in lockstep if a compatible 2.11.x patch ships.
+  flutter_rust_bridge: ">=2.11.1 <2.12.0"
   plugin_platform_interface: ^2.0.2
   freezed_annotation: ^2.0.0
   path_provider: ^2.1.5
