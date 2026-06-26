@@ -209,6 +209,24 @@ fn define_from_env_or(cmake_config: &mut cmake::Config, name: &str, default: &st
     cmake_config.define(name, value);
 }
 
+fn configure_x86_64_simd_baseline(cmake_config: &mut cmake::Config) {
+    define_from_env_or(cmake_config, "GGML_NATIVE", "OFF");
+    define_from_env_or(cmake_config, "GGML_SSE42", "ON");
+    define_from_env_or(cmake_config, "GGML_AVX", "ON");
+    define_from_env_or(cmake_config, "GGML_AVX2", "ON");
+    define_from_env_or(cmake_config, "GGML_FMA", "ON");
+    define_from_env_or(cmake_config, "GGML_F16C", "ON");
+    define_from_env_or(cmake_config, "GGML_BMI2", "ON");
+    define_from_env_or(cmake_config, "GGML_AVX_VNNI", "OFF");
+    define_from_env_or(cmake_config, "GGML_AVX512", "OFF");
+    define_from_env_or(cmake_config, "GGML_AVX512_VBMI", "OFF");
+    define_from_env_or(cmake_config, "GGML_AVX512_VNNI", "OFF");
+    define_from_env_or(cmake_config, "GGML_AVX512_BF16", "OFF");
+    define_from_env_or(cmake_config, "GGML_AMX_TILE", "OFF");
+    define_from_env_or(cmake_config, "GGML_AMX_INT8", "OFF");
+    define_from_env_or(cmake_config, "GGML_AMX_BF16", "OFF");
+}
+
 /// Get platform-specific CMake installation instructions
 fn cmake_install_instructions() -> &'static str {
     if cfg!(target_os = "macos") {
@@ -582,26 +600,15 @@ fn build_from_source(ctx: &BuildContext, llama_cpp_dir: &Path, vision_enabled: b
             .define("GGML_METAL", "OFF")
             .define("GGML_CUDA", "OFF");
         if ctx.target_arch == "x86_64" {
-            define_from_env_or(&mut cmake_config, "GGML_NATIVE", "OFF");
-            define_from_env_or(&mut cmake_config, "GGML_SSE42", "ON");
-            define_from_env_or(&mut cmake_config, "GGML_AVX", "ON");
-            define_from_env_or(&mut cmake_config, "GGML_AVX2", "ON");
-            define_from_env_or(&mut cmake_config, "GGML_FMA", "ON");
-            define_from_env_or(&mut cmake_config, "GGML_F16C", "ON");
-            define_from_env_or(&mut cmake_config, "GGML_BMI2", "ON");
-            define_from_env_or(&mut cmake_config, "GGML_AVX_VNNI", "OFF");
-            define_from_env_or(&mut cmake_config, "GGML_AVX512", "OFF");
-            define_from_env_or(&mut cmake_config, "GGML_AVX512_VBMI", "OFF");
-            define_from_env_or(&mut cmake_config, "GGML_AVX512_VNNI", "OFF");
-            define_from_env_or(&mut cmake_config, "GGML_AVX512_BF16", "OFF");
-            define_from_env_or(&mut cmake_config, "GGML_AMX_TILE", "OFF");
-            define_from_env_or(&mut cmake_config, "GGML_AMX_INT8", "OFF");
-            define_from_env_or(&mut cmake_config, "GGML_AMX_BF16", "OFF");
+            configure_x86_64_simd_baseline(&mut cmake_config);
         }
     } else if ctx.target_os == "windows" {
         cmake_config
             .define("GGML_METAL", "OFF")
             .define("GGML_CUDA", "OFF");
+        if ctx.target_arch == "x86_64" {
+            configure_x86_64_simd_baseline(&mut cmake_config);
+        }
 
         // Force CMake Release build on Windows to match the cc crate's CRT choice.
         // The cc crate always emits /MD (release CRT) — it never emits /MDd, even in
