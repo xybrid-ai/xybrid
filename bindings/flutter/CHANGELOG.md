@@ -8,6 +8,8 @@ vision on Android and iOS; `0.2.1` brings the native VLM backend
 macOS, Linux, and Windows — so a Flutter desktop app can run a vision-language
 model out of the box, matching mobile (xybrid-ai/xybrid#296).
 
+* Fixed: GGUF models with custom or non-standard chat templates now load and run — when llama.cpp's built-in template matcher rejects the embedded template, it is rendered via a real Jinja engine (minijinja) instead of failing (xybrid-ai/xybrid#304)
+
 ## 0.2.0-rc1
 
 Release candidate for `0.2.0`, published so consumers can validate the vision

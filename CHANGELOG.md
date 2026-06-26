@@ -35,6 +35,11 @@ preset: vision-language inference works out of the box, at a measured
 
 ### Fixed
 
+- **Unrecognized GGUF chat templates now render** (#304): when llama.cpp's
+  hardcoded template matcher rejects a model's embedded chat template, xybrid
+  falls back to a real Jinja engine (minijinja) to render it instead of failing
+  — so GGUF models with custom or non-standard chat templates load and run
+  correctly. Gated into `llm-llamacpp`, so non-llama builds pay zero cost.
 - **Readable Apple FFI errors** (#296): `FfiError` now conforms to
   `LocalizedError`, so model-load and other low-level FFI failures surface their
   real message (e.g. a registry `ModelNotFound`) instead of the opaque
