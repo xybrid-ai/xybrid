@@ -104,16 +104,16 @@ impl JinjaChatTemplate {
         env.add_template("chat", &self.template)
             .map_err(|e| JinjaTemplateError::Render(format!("compile: {e}")))?;
 
-        // Messages flow into the template as a list of maps. Using
-        // `Value::from_serialize` preserves the `{role, content}` shape
-        // every HF template expects.
+        // Messages flow into the template as a list of `{role, content}` maps —
+        // the shape every HF template expects. `context!` builds each map as a
+        // minijinja `Value` directly, without an intermediate `serde_json::Value`.
         let messages_value: Vec<Value> = messages
             .iter()
             .map(|m| {
-                Value::from_serialize(serde_json::json!({
-                    "role": m.role.as_str(),
-                    "content": &m.content,
-                }))
+                context! {
+                    role => m.role.as_str(),
+                    content => m.content.as_str(),
+                }
             })
             .collect();
 
