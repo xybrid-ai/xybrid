@@ -1,0 +1,29 @@
+crates/xybrid-core/Cargo.toml
+  s_4e841541491380::t_cf5d21ee3b7b4b 30-35,158-159
+crates/xybrid-core/src/runtime_adapter/llama_cpp/jinja_template.rs
+  s_4e841541491380::t_cf5d21ee3b7b4b 1-268
+crates/xybrid-core/src/runtime_adapter/llama_cpp/chat.rs
+  s_4e841541491380::t_cf5d21ee3b7b4b 3,5-6,12-24,26-65,67-104
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_4e841541491380::t_cf5d21ee3b7b4b 31
+integration-tests/tests/llm_chat_template.rs
+  s_4e841541491380::t_cf5d21ee3b7b4b 272-351
+Cargo.lock
+  s_4e841541491380::t_54449a55c77f8e 3321-3326,3363-3382,6853-6854
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "3ae4f25b0a71ca23a181db14009af7d17c3060b3",
+  "prompts": {},
+  "sessions": {
+    "s_4e841541491380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ac3d14d-bba3-453b-8774-4782348cbf38",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
