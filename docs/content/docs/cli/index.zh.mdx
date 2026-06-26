@@ -1,0 +1,87 @@
+---
+title: 命令行
+description: 安装并使用 Xybrid 命令行工具
+---
+
+`xybrid` CLI 让你在终端中运行模型和流水线 — 在集成 SDK 之前试用模型的最快方式。
+
+## 安装
+
+### 安装脚本（推荐）
+
+```bash
+# macOS / Linux
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
+```
+
+脚本会检测你的平台并安装最新的发布版二进制。
+
+### 预编译二进制
+
+从 [GitHub Releases](https://github.com/xybrid-ai/xybrid/releases) 下载 macOS（arm64）、Linux（x86_64）和 Windows（x86_64）的二进制文件。
+
+### 从源码构建
+
+```bash
+cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos
+```
+
+在 Linux/Windows 上将 `platform-macos` 替换为 `platform-desktop`。
+
+### 验证
+
+```bash
+xybrid --help
+xybrid models list
+```
+
+## 命令
+
+| 命令 | 用途 |
+|------|------|
+| [`xybrid run`](/docs/cli/reference/run) | 运行模型或流水线（文本、音频、LLM） |
+| `xybrid repl` | 保持模型常驻的交互式会话（`--stream`、`--system`） |
+| `xybrid models` | 浏览注册表：`list`、`search <query>`、`info <id>`、`voices <id>` |
+| `xybrid fetch` | 预下载模型到本地缓存 |
+| `xybrid cache` | 管理本地缓存：`list`、`status`、`clear [id]` |
+| `xybrid prepare` | 解析并校验流水线 YAML |
+| `xybrid plan` | 显示执行计划：模型、目标、下载状态 |
+| [`xybrid trace`](/docs/cli/reference/trace) | 查看历史运行的遥测数据 |
+| `xybrid init` | 为模型目录生成 `model_metadata.json` |
+| `xybrid pack` | 从模型目录创建 `.xyb` Bundle |
+| `xybrid bundle` | 拉取注册表模型并生成 `.xyb` Bundle |
+| `xybrid telemetry` | 管理注册表遥测设置 |
+
+## 常用工作流
+
+```bash
+# 语音合成
+xybrid run --model kokoro-82m --input-text "Hello from Xybrid!" -o hello.wav
+
+# 语音识别
+xybrid run --model whisper-tiny --input-audio recording.wav
+
+# 与本地 LLM 对话（流式输出）
+xybrid repl --model qwen2.5-0.5b-instruct --stream
+
+# 直接运行 HuggingFace 上的 GGUF
+xybrid run --huggingface bartowski/google_gemma-3-1b-it-GGUF --input-text "Hi!"
+
+# 预下载以便离线使用
+xybrid fetch --model kokoro-82m
+```
+
+## 全局选项
+
+| 选项 | 环境变量 | 说明 |
+|------|----------|------|
+| `--api-key` | `XYBRID_API_KEY` | Xybrid 平台 API Key（可选 — 不提供则匿名运行） |
+| `--platform-url` | — | 平台/注册表 URL（默认 `https://api.xybrid.dev`） |
+| `--device-id` | `XYBRID_DEVICE_ID` | 用于遥测的稳定设备标识 |
+| `-v`、`-vv` | — | 详细输出（`-vv` 包含库日志） |
+| `-q` | — | 安静模式（仅输出错误） |

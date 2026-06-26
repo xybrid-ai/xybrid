@@ -8,6 +8,10 @@
 pub mod envelope;
 
 pub use envelope::{AudioSamples, Envelope, EnvelopeKind};
+pub use envelope::{
+    ImageDimensions, ImageFormat, ImagePlane, ImageSource, ImageSummary, ImageSummarySource,
+    ImageValidationLimits, PixelFormat, RawImageRef, YuvColorInfo, YuvColorMatrix, YuvColorRange,
+};
 // Note: MessageRole is defined below in this file and is public by default
 
 /// Message role in a conversation.

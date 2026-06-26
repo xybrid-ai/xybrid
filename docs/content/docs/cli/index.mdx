@@ -1,0 +1,87 @@
+---
+title: CLI
+description: Install and use the Xybrid command-line interface
+---
+
+The `xybrid` CLI runs models and pipelines from the terminal — the fastest way to try a model before integrating an SDK.
+
+## Installation
+
+### Install script (recommended)
+
+```bash
+# macOS / Linux
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
+```
+
+The script detects your platform and installs the latest release binary.
+
+### Pre-built binaries
+
+Download binaries for macOS (arm64), Linux (x86_64), and Windows (x86_64) from [GitHub Releases](https://github.com/xybrid-ai/xybrid/releases).
+
+### From source
+
+```bash
+cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos
+```
+
+Replace `platform-macos` with `platform-desktop` on Linux/Windows.
+
+### Verify
+
+```bash
+xybrid --help
+xybrid models list
+```
+
+## Commands
+
+| Command | Purpose |
+|---------|---------|
+| [`xybrid run`](/docs/cli/reference/run) | Run a model or pipeline (text, audio, LLM) |
+| `xybrid repl` | Interactive chat session that keeps the model loaded (`--stream`, `--system`) |
+| `xybrid models` | Browse the registry: `list`, `search <query>`, `info <id>`, `voices <id>` |
+| `xybrid fetch` | Pre-download models to the local cache |
+| `xybrid cache` | Manage the local cache: `list`, `status`, `clear [id]` |
+| `xybrid prepare` | Parse and validate a pipeline YAML |
+| `xybrid plan` | Show the execution plan: models, targets, download status |
+| [`xybrid trace`](/docs/cli/reference/trace) | Inspect telemetry from previous runs |
+| `xybrid init` | Generate `model_metadata.json` for a model directory |
+| `xybrid pack` | Create a `.xyb` bundle from a model directory |
+| `xybrid bundle` | Fetch a registry model and produce a `.xyb` bundle |
+| `xybrid telemetry` | Manage registry telemetry settings |
+
+## Common workflows
+
+```bash
+# Text-to-speech
+xybrid run --model kokoro-82m --input-text "Hello from Xybrid!" -o hello.wav
+
+# Speech-to-text
+xybrid run --model whisper-tiny --input-audio recording.wav
+
+# Chat with a local LLM (streaming)
+xybrid repl --model qwen2.5-0.5b-instruct --stream
+
+# Run a GGUF straight from HuggingFace
+xybrid run --huggingface bartowski/google_gemma-3-1b-it-GGUF --input-text "Hi!"
+
+# Pre-download for offline use
+xybrid fetch --model kokoro-82m
+```
+
+## Global flags
+
+| Flag | Environment variable | Description |
+|------|----------------------|-------------|
+| `--api-key` | `XYBRID_API_KEY` | API key for the Xybrid platform (optional — runs anonymously without one) |
+| `--platform-url` | — | Platform/registry URL (default `https://api.xybrid.dev`) |
+| `--device-id` | `XYBRID_DEVICE_ID` | Stable device identifier for telemetry |
+| `-v`, `-vv` | — | Verbose output (`-vv` includes library logs) |
+| `-q` | — | Quiet mode (errors only) |

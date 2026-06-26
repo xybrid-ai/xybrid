@@ -36,6 +36,15 @@ Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
 push it to crate level or fix the lint. Never bypass hooks (`--no-verify`).
 
+**Releases are cut by branch name, not by hand.** Push a `release/v<version>`
+branch and `.github/workflows/release-prep.yml` does the rest (manifest-version
+check, artifact builds, `Package.swift` checksum patch, draft GitHub Release, and
+the `Release v<version>` PR to master). Don't `gh pr create` a release or run
+`just bump-version` on a feature branch and open a PR from it — that bypasses the
+pipeline and ships nothing. Never commit `Package.swift useLocalNatives = true`
+(local-dev only; breaks remote SPM — run `bindings/apple/scripts/set-natives-mode.sh
+--set-remote`). Full ritual + gotchas: **CLAUDE.md § Releases**.
+
 ---
 
 # Section 1 — Microsoft Pragmatic Rust (rule index)

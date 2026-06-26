@@ -28,9 +28,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use flutter_rust_bridge::frb;
+use xybrid_ffi_facade as facade;
 use xybrid_sdk::{MemoryPressure, ResourceSnapshot};
-
-use super::FLUTTER_BINDING;
 
 const DEBUG_MEMORY_PRESSURE_READS: u8 = 2;
 
@@ -71,17 +70,20 @@ pub enum FfiThermalState {
     Critical,
 }
 
-impl From<FfiThermalState> for xybrid_sdk::ThermalState {
+impl From<FfiThermalState> for facade::ThermalState {
     fn from(value: FfiThermalState) -> Self {
         match value {
-            FfiThermalState::Normal => xybrid_sdk::ThermalState::Normal,
-            FfiThermalState::Warm => xybrid_sdk::ThermalState::Warm,
-            FfiThermalState::Hot => xybrid_sdk::ThermalState::Hot,
-            FfiThermalState::Critical => xybrid_sdk::ThermalState::Critical,
+            FfiThermalState::Normal => facade::ThermalState::Normal,
+            FfiThermalState::Warm => facade::ThermalState::Warm,
+            FfiThermalState::Hot => facade::ThermalState::Hot,
+            FfiThermalState::Critical => facade::ThermalState::Critical,
         }
     }
 }
 
+// `FfiResourceSnapshot::from(xybrid_sdk::ResourceSnapshot)` still maps the
+// `thermal_state` field, so we keep the inbound conversion from the SDK
+// type. The outbound conversion goes through the facade enum above.
 impl From<xybrid_sdk::ThermalState> for FfiThermalState {
     fn from(value: xybrid_sdk::ThermalState) -> Self {
         match value {
@@ -164,8 +166,7 @@ impl XybridDevice {
     /// side, so the SDK has the freshest possible signal.
     #[frb(sync)]
     pub fn set_battery_level(percent: u8) {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
-        xybrid_sdk::set_battery_level(percent);
+        facade::set_battery_level(percent);
     }
 
     /// Mark the battery level as unknown.
@@ -176,22 +177,19 @@ impl XybridDevice {
     /// than substituting an optimistic default.
     #[frb(sync)]
     pub fn clear_battery_level() {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
-        xybrid_sdk::clear_battery_level();
+        facade::clear_battery_level();
     }
 
     /// Forward a thermal pressure reading from the host.
     #[frb(sync)]
     pub fn set_thermal_state(state: FfiThermalState) {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
-        xybrid_sdk::set_thermal_state(state.into());
+        facade::set_thermal_state(state.into());
     }
 
     /// Mark the thermal state as unknown.
     #[frb(sync)]
     pub fn clear_thermal_state() {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
-        xybrid_sdk::clear_thermal_state();
+        facade::clear_thermal_state();
     }
 
     /// Read the routing-engine's current device snapshot.
@@ -210,7 +208,6 @@ impl XybridDevice {
     /// decision.
     #[frb(sync)]
     pub fn current_snapshot() -> FfiResourceSnapshot {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
         current_snapshot_with_debug_memory_pressure(Duration::ZERO).into()
     }
 
@@ -221,14 +218,12 @@ impl XybridDevice {
     /// demo deterministic without leaving the process permanently poisoned.
     #[frb(sync)]
     pub fn apply_debug_memory_pressure() {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
         DEBUG_MEMORY_PRESSURE_REMAINING.store(DEBUG_MEMORY_PRESSURE_READS, Ordering::Release);
     }
 
     /// Clear any pending debug memory-pressure override.
     #[frb(sync)]
     pub fn clear_debug_memory_pressure() {
-        xybrid_sdk::set_binding(FLUTTER_BINDING);
         DEBUG_MEMORY_PRESSURE_REMAINING.store(0, Ordering::Release);
     }
 }
@@ -243,15 +238,25 @@ mod tests {
     // mapping at the conversion layer keeps these tests deterministic
     // regardless of test ordering.
     #[test]
-    fn thermal_state_round_trips_through_sdk_type() {
+    fn thermal_state_round_trips_through_facade_and_sdk() {
+        // Outbound: FfiThermalState → facade::ThermalState (used by
+        // XybridDevice::set_thermal_state). Inbound: sdk::ThermalState →
+        // FfiThermalState (used by FfiResourceSnapshot::from). Confirm both
+        // legs agree on the variant ordering.
         for variant in [
             FfiThermalState::Normal,
             FfiThermalState::Warm,
             FfiThermalState::Hot,
             FfiThermalState::Critical,
         ] {
-            let sdk: xybrid_sdk::ThermalState = variant.into();
-            let back: FfiThermalState = sdk.into();
+            let via_facade: facade::ThermalState = variant.into();
+            let sdk_form = match via_facade {
+                facade::ThermalState::Normal => xybrid_sdk::ThermalState::Normal,
+                facade::ThermalState::Warm => xybrid_sdk::ThermalState::Warm,
+                facade::ThermalState::Hot => xybrid_sdk::ThermalState::Hot,
+                facade::ThermalState::Critical => xybrid_sdk::ThermalState::Critical,
+            };
+            let back: FfiThermalState = sdk_form.into();
             assert_eq!(variant, back);
         }
     }
@@ -290,22 +295,22 @@ mod tests {
     }
 
     #[test]
-    fn thermal_state_maps_to_documented_sdk_variants() {
+    fn thermal_state_maps_to_documented_facade_variants() {
         assert_eq!(
-            xybrid_sdk::ThermalState::from(FfiThermalState::Normal),
-            xybrid_sdk::ThermalState::Normal
+            facade::ThermalState::from(FfiThermalState::Normal),
+            facade::ThermalState::Normal
         );
         assert_eq!(
-            xybrid_sdk::ThermalState::from(FfiThermalState::Warm),
-            xybrid_sdk::ThermalState::Warm
+            facade::ThermalState::from(FfiThermalState::Warm),
+            facade::ThermalState::Warm
         );
         assert_eq!(
-            xybrid_sdk::ThermalState::from(FfiThermalState::Hot),
-            xybrid_sdk::ThermalState::Hot
+            facade::ThermalState::from(FfiThermalState::Hot),
+            facade::ThermalState::Hot
         );
         assert_eq!(
-            xybrid_sdk::ThermalState::from(FfiThermalState::Critical),
-            xybrid_sdk::ThermalState::Critical
+            facade::ThermalState::from(FfiThermalState::Critical),
+            facade::ThermalState::Critical
         );
     }
 }

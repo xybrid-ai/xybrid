@@ -1,4 +1,0 @@
-module xybrid_uniffiFFI {
-    header "xybrid_uniffiFFI.h"
-    export *
-}

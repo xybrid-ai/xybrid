@@ -1,0 +1,149 @@
+---
+title: 流水线
+description: 用 YAML 将多个模型串联成多阶段推理流水线
+---
+
+流水线将多个模型串联成单一推理流程 — 例如一个语音助手：转录语音、生成回复、再朗读出来。流水线用 YAML 定义，并在所有平台上通过同一引擎运行。
+
+```yaml
+# voice-assistant.yaml
+name: voice-assistant
+stages:
+  - whisper-tiny          # 语音 → 文本
+  - qwen2.5-0.5b-instruct # 生成回复
+  - kokoro-82m            # 文本 → 语音
+```
+
+```bash
+xybrid run --config voice-assistant.yaml --input-audio question.wav -o response.wav
+```
+
+每个阶段输出的 `Envelope` 会成为下一阶段的输入：音频 → 文本 → 文本 → 音频。
+
+<Callout type="info">
+多模型流水线（MMP）目前为**实验特性**。单阶段流水线已稳定，SDK 内部即通过它运行单个模型。
+</Callout>
+
+## 流水线 Schema
+
+只有 `stages` 是必填项：
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 否 | 用于日志和追踪的显示名称 |
+| `registry` | 否 | 模型解析所用注册表 URL（默认 `https://api.xybrid.dev`） |
+| `stages` | **是** | 阶段列表 — 至少一个 |
+
+## 阶段格式
+
+阶段可以是普通字符串，也可以是完整对象。
+
+**简单格式** — 仅模型 ID，可选固定版本：
+
+```yaml
+stages:
+  - kokoro-82m
+  - qwen2.5-0.5b-instruct@1.0
+```
+
+**对象格式** — 完整控制路由和生成选项：
+
+```yaml
+stages:
+  - id: assistant
+    model: gpt-4o-mini
+    target: cloud
+    provider: openai
+    system_prompt: "You are a helpful voice assistant. Keep responses concise."
+    max_tokens: 150
+    temperature: 0.7
+```
+
+| 字段 | 说明 |
+|------|------|
+| `id` | 阶段标识符（默认为模型 ID） |
+| `model` | 注册表中的模型 ID，云端阶段则为提供商的模型名 |
+| `version` | 模型版本（如 `"1.0"`） |
+| `target` | 运行位置：`device`、`cloud` 或 `auto`（默认）— 参见[混合执行](/docs/concepts/hybrid-execution) |
+| `provider` | 云端阶段的提供商：`openai`、`anthropic`、`google`、`deepseek`、`elevenlabs`、`openrouter`、`custom` |
+| `execution_provider` | ONNX Runtime 覆盖：`cpu`、`coreml`、`coreml-ane`、`coreml-gpu`（不设置则自动选择） |
+| *（其他任意键）* | 作为阶段选项传递 — 常用：`system_prompt`、`max_tokens`、`temperature` |
+
+## 混合设备端与云端阶段
+
+流水线可以为每个阶段独立选择路由 — 音频留在设备端以保证隐私和延迟，需要更大模型时切到云端：
+
+```yaml
+name: voice-assistant
+stages:
+  - whisper-tiny              # 设备端 ASR
+
+  - model: gpt-4o-mini        # 云端 LLM
+    target: cloud
+    provider: openai
+    system_prompt: "You are a helpful voice assistant."
+    max_tokens: 150
+
+  - kokoro-82m                # 设备端 TTS
+```
+
+## 运行流水线
+
+### CLI
+
+```bash
+# 只校验 YAML，不运行
+xybrid prepare voice-assistant.yaml
+
+# 显示执行计划（模型、目标、下载状态）
+xybrid plan voice-assistant.yaml
+
+# 预览路由决策而不实际执行
+xybrid run --config voice-assistant.yaml --input-audio q.wav --dry-run
+
+# 运行
+xybrid run --config voice-assistant.yaml --input-audio q.wav -o response.wav
+```
+
+### Flutter
+
+```dart
+final pipeline = await Xybrid.pipeline(yaml: yamlString).load();
+await pipeline.loadModels(); // 可选预加载
+final result = await pipeline.run(
+  XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000),
+);
+```
+
+### Rust
+
+```rust
+use xybrid::Xybrid;
+use xybrid::ir::{Envelope, EnvelopeKind};
+
+let input = Envelope::new(EnvelopeKind::Audio(audio_bytes));
+
+// 一次调用：解析、解析模型、下载、执行
+let result = Xybrid::run_pipeline(&yaml, &input)?;
+
+// 或分步：先检查再预加载
+let pipeline = Xybrid::pipeline(&yaml)?.load()?;
+pipeline.load_models()?;
+let result = pipeline.run(&input)?;
+```
+
+### SDK 支持情况
+
+| 平台 | 流水线 |
+|------|--------|
+| Dart（Flutter） | ✅ 可用 |
+| Rust | ✅ 可用 |
+| Kotlin | 🚧 规划中 |
+| Swift | 🚧 规划中 |
+| C#（Unity） | 🚧 规划中 |
+
+## 相关阅读
+
+- [混合执行](/docs/concepts/hybrid-execution) — `target: auto` 如何在设备与云端之间决策
+- [模型目录](/docs/concepts/models) — 模型清单
+- [xybrid run](/docs/cli/reference/run) — 完整 CLI 参考

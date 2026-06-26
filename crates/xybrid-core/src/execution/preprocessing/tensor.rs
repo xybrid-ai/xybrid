@@ -28,16 +28,51 @@ pub fn normalize_step(
         }
     };
 
+    if mean.is_empty() || mean.len() != std.len() {
+        return Err(AdapterError::InvalidInput(
+            "Normalize requires non-empty mean/std arrays with matching lengths".to_string(),
+        ));
+    }
+    if std.contains(&0.0) {
+        return Err(AdapterError::InvalidInput(
+            "Normalize std values must be non-zero".to_string(),
+        ));
+    }
+
+    let shape = tensor.shape().to_vec();
     let tensor_slice = tensor.as_slice_mut().ok_or_else(|| {
         AdapterError::InvalidInput("Normalize requires a contiguous tensor".to_string())
     })?;
 
     for (i, val) in tensor_slice.iter_mut().enumerate() {
-        let channel = i % mean.len();
+        let channel = normalize_channel_for_index(i, &shape, mean.len());
         *val = (*val - mean[channel]) / std[channel];
     }
 
     Ok(PreprocessedData::Tensor(tensor))
+}
+
+fn normalize_channel_for_index(index: usize, shape: &[usize], channels: usize) -> usize {
+    if channels == 1 {
+        return 0;
+    }
+
+    match shape {
+        // NCHW
+        [_, c, h, w] if *c == channels => (index / (h * w)) % channels,
+        // NHWC
+        [_, _, _, c] if *c == channels => index % channels,
+        // CHW
+        [c, h, w] if *c == channels => index / (h * w),
+        // HWC
+        [_, _, c] if *c == channels => index % channels,
+        // NC
+        [_, c] if *c == channels => index % channels,
+        // CN
+        [c, n] if *c == channels => index / n,
+        // Preserve historical flat-buffer behavior for unsupported shapes.
+        _ => index % channels,
+    }
 }
 
 /// Reshape tensor to target dimensions.
@@ -115,6 +150,25 @@ mod tests {
         let result = normalize_step(input, &mean, &std);
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_normalize_step_nchw_uses_channel_axis() {
+        let data =
+            ndarray::Array4::from_shape_vec((1, 3, 1, 2), vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
+                .unwrap()
+                .into_dyn();
+        let input = PreprocessedData::Tensor(data);
+
+        let result = normalize_step(input, &[0.5, 1.5, 2.5], &[0.5, 0.5, 0.5]).unwrap();
+
+        match result {
+            PreprocessedData::Tensor(tensor) => {
+                let values: Vec<f32> = tensor.iter().copied().collect();
+                assert_eq!(values, vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
+            }
+            _ => panic!("Expected Tensor output"),
+        }
     }
 
     #[test]

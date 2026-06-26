@@ -89,6 +89,17 @@ fn parse_compound_voice_id(voice_id: &str) -> Option<Vec<VoiceComponent>> {
     Some(components)
 }
 
+/// Returns true when the file starts with the ZIP magic ("PK"), meaning it
+/// is an NPZ archive regardless of what the metadata loader claims.
+fn file_is_npz(path: &Path) -> bool {
+    use std::io::Read;
+    let mut magic = [0u8; 2];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut magic))
+        .map(|_| &magic == b"PK")
+        .unwrap_or(false)
+}
+
 /// Trait for loading voice embeddings.
 ///
 /// This trait enables mocking voice loading in tests without file system access.
@@ -342,14 +353,19 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
                     })
             }
             VoiceSelectionStrategy::FixedIndex => {
-                // Determine loader type from config
+                // NPZ archives are keyed by voice name; catalog indexes only
+                // describe raw binary packs. Trust the file magic over the
+                // declared loader so an NPZ shipped as `voices.bin` with a
+                // binary loader label (e.g. kokoro-82m) resolves by name
+                // instead of indexing zip entry order, which returns the
+                // wrong voice (bm_george → bf_emma).
                 let is_npz = matches!(
                     &voice_config.format,
                     VoiceFormat::Embedded {
                         loader: VoiceLoader::NumpyNpz,
                         ..
                     }
-                );
+                ) || file_is_npz(voice_path);
 
                 if is_npz {
                     // NPZ format: load by voice name
@@ -850,6 +866,27 @@ mod tests {
             .load_legacy(Path::new("/models/voices.bin"), None)
             .unwrap();
         assert_eq!(result, embedding);
+    }
+
+    #[test]
+    fn test_fixed_index_loads_by_name_when_file_is_actually_npz() {
+        // kokoro-82m ships an NPZ archive named voices.bin with a binary
+        // loader label; indexing zip entry order returned the wrong voice
+        // (bm_george → bf_emma). The file magic must win over the label.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("voices.bin"), b"PK\x03\x04not-a-real-zip").unwrap();
+
+        let by_name = vec![1.0, 1.0];
+        let by_index = vec![0.0, 0.0];
+        let source = MockVoiceSource::new()
+            .with_voice_by_name("voice_b", by_name.clone())
+            .with_voice_at_index(1, by_index);
+        let loader = TtsVoiceLoader::with_source(dir.path().to_path_buf(), source);
+        let metadata = create_test_metadata_with_voices();
+        let input = create_test_envelope_with_voice("voice_b");
+
+        let result = loader.load(&metadata, &input).unwrap();
+        assert_eq!(result, by_name);
     }
 
     // ============================================================================

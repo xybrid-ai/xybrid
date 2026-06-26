@@ -18,11 +18,12 @@ pub use metadata::{
     span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate,
     GenerationParams, ModelMetadata, PipelineStage, RefinementSchedule,
 };
+pub use metadata::{VisionEncoderConfig, VisionPreprocessingPreset};
 
 // Re-export step types
 pub use steps::{
-    InterpolationMethod, MelScaleType, PhonemizerBackend, PostprocessingStep, PreprocessingStep,
-    TokenizerType,
+    ImageNormalizePreset, ImageResizeMode, ImageTensorLayout, InterpolationMethod, MelScaleType,
+    PhonemizerBackend, PostprocessingStep, PreprocessingStep, TokenizerType,
 };
 
 // Re-export voice types

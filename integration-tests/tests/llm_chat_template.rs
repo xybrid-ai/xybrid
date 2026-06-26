@@ -207,6 +207,8 @@ const TEMPLATE_MARKERS: &[&str] = &[
     "<|endoftext|>",
     "<start_of_turn>",
     "<end_of_turn>",
+    "<turn|>",
+    "<end_of_utterance>",
     "<|begin_of_text|>",
     "<|end_of_text|>",
     "<|eot_id|>",
@@ -266,4 +268,84 @@ fn test_gemma_executor_output_clean() {
     }
 
     assert!(!response.trim().is_empty(), "Response should not be empty");
+}
+
+// =============================================================================
+// Regression: unrecognized embedded template renders via minijinja fallback
+// =============================================================================
+
+/// Regression: gemma-4's GGUF embeds a 16KB tool-calling Jinja template with
+/// no `<start_of_turn>` literal, so llama.cpp's non-Jinja matcher returns -1.
+/// Before the minijinja fallback, chat-mode generate() hard-failed with
+/// "Chat template render failed: native formatter initial render returned
+/// error code -1". This asserts chat generation now succeeds.
+#[test]
+fn test_gemma4_unrecognized_template_renders_via_minijinja() {
+    let model_name = "gemma-4-e2b";
+
+    let Some(model_dir) = fixtures::model_if_available(model_name) else {
+        eprintln!(
+            "Skipping {}: model not downloaded. Run: ./integration-tests/download.sh {}",
+            model_name, model_name
+        );
+        return;
+    };
+
+    // The fixture dir ships a committed `model_metadata.json` (it doubles as
+    // the VLM correctness fixture), so `model_if_available` returns `Some`
+    // even when the multi-GB GGUFs themselves were never downloaded. Skip
+    // cleanly in that case rather than panicking — the GGUF is the real
+    // prerequisite for this regression.
+    let gguf_path = std::fs::read_dir(&model_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| {
+            p.extension().map(|ext| ext == "gguf").unwrap_or(false)
+                && !p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().starts_with("mmproj"))
+                    .unwrap_or(false)
+        });
+    let Some(gguf_path) = gguf_path else {
+        eprintln!(
+            "Skipping {}: GGUF not downloaded. Run: ./integration-tests/download.sh {}",
+            model_name, model_name
+        );
+        return;
+    };
+
+    let mut backend = LlamaCppBackend::new().expect("Failed to create backend");
+    let config = LlmConfig::new(gguf_path.to_str().unwrap()).with_context_length(2048);
+    backend.load(&config).expect("Failed to load model");
+
+    let gen_config = GenerationConfig {
+        max_tokens: 16,
+        temperature: 0.0,
+        ..Default::default()
+    };
+
+    let output = backend
+        .generate(&[ChatMessage::user("Hello")], &gen_config)
+        .expect("gemma-4 chat generate must succeed via minijinja fallback");
+
+    // Primary regression: before the fallback this hard-failed with code -1.
+    // It must now produce tokens.
+    assert!(
+        !output.text.trim().is_empty(),
+        "gemma-4 fallback produced empty output"
+    );
+
+    // No-leakage: turn headers live only in the prompt and `<turn|>` is an EOG
+    // stop marker, so none of these structural markers may appear in the
+    // user-facing reply. (gemma-4's `<|channel>thought…<channel|>` reasoning
+    // markers are suppressed at the prompt level via `enable_thinking=false`;
+    // full channel-aware output stripping is tracked as a separate follow-up.)
+    for marker in ["<start_of_turn>", "<|turn>", "<turn|>"] {
+        assert!(
+            !output.text.contains(marker),
+            "template marker {marker:?} leaked into gemma-4 output: {:?}",
+            output.text
+        );
+    }
 }

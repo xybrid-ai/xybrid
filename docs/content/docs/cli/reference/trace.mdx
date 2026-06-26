@@ -113,8 +113,7 @@ and in exported Chrome traces:
 | `tokens_generated` | Total tokens produced |
 | `finish_reason` | `"stop"`, `"length"`, or `"unknown"` |
 
-Non-LLM stages do not emit these fields. See
-[LLM Metrics](/docs/internals/llm-metrics) for the full contract.
+Non-LLM stages do not emit these fields.
 
 ## Trace Storage
 
@@ -165,5 +164,3 @@ xybrid trace --latest
 # Export for analysis
 xybrid trace --latest --export debug.json
 ```
-
-See [Observability](/docs/internals/observability) for telemetry configuration.
