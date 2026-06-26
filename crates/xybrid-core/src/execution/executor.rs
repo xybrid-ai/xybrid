@@ -341,9 +341,10 @@ impl TemplateExecutor {
     }
 
     fn session_options(&self) -> SessionOptions {
-        let mut options = SessionOptions::default();
-        options.intra_threads = self.cpu_threads;
-        options
+        SessionOptions {
+            intra_threads: self.cpu_threads,
+            ..Default::default()
+        }
     }
 
     /// Create the default set of runtimes based on enabled features.
