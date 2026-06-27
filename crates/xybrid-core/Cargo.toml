@@ -110,12 +110,9 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 # `xybrid-mlx/bindings` for Apple Silicon runtime execution.
 xybrid-mlx = { path = "../xybrid-mlx", optional = true }
 
-# MinimalJinja — used by the MLX adapter's chat template renderer (US-014).
-# Gated behind `llm-mlx` since that's the only consumer today; the GGUF /
-# mistral.rs paths have their own template stacks (minijinja is just the
-# HuggingFace-style template flavor that MLX-LM bundles ship).
-minijinja = { version = "2.5", default-features = false, features = ["builtins", "loader", "macros", "serde"], optional = true }
-minijinja-contrib = { version = "2.5", features = ["pycompat"], optional = true }
+# The MLX adapter's chat template renderer (US-014) reuses the same
+# `minijinja` / `minijinja-contrib` deps declared above for the llama.cpp
+# fallback; the `llm-mlx` feature pulls them in via `dep:minijinja` too.
 rand = { version = "0.8", default-features = false, features = ["std", "std_rng"], optional = true }
 
 [features]
