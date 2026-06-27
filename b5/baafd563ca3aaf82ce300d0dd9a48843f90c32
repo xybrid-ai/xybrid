@@ -1,0 +1,68 @@
+crates/xybrid-core/src/runtime_adapter/llama_cpp/chat.rs
+  s_a619afae87b555::t_dafc786a474f37 25-35
+  s_a619afae87b555::t_90d829aef732c3 3,5-6,22-23,50-127
+  s_a619afae87b555::t_5a9202e448ef82 24
+  s_a619afae87b555::t_bc7a2b7d342eee 128
+bindings/react-native/package.json
+  s_a619afae87b555::t_90d829aef732c3 3
+bindings/flutter/pubspec.yaml
+  s_a619afae87b555::t_90d829aef732c3 3
+crates/xybrid-llama/Cargo.toml
+  s_a619afae87b555::t_90d829aef732c3 24
+bindings/flutter/rust/Cargo.toml
+  s_a619afae87b555::t_90d829aef732c3 3
+Cargo.toml
+  s_a619afae87b555::t_90d829aef732c3 20
+crates/xybrid-sdk/Cargo.toml
+  s_a619afae87b555::t_90d829aef732c3 17,37,42
+integration-tests/tests/llm_chat_template.rs
+  s_a619afae87b555::t_90d829aef732c3 272-351
+README.ja-JP.md
+  s_a619afae87b555::t_90d829aef732c3 148,165,183,217,319-324,384
+bindings/kotlin/README.md
+  s_a619afae87b555::t_90d829aef732c3 5,194,196,198,202,207,212,214,218,226-227,320-322,332,336,338,343,347,349,400
+crates/xybrid-core/src/runtime_adapter/llama_cpp/jinja_template.rs
+  s_a619afae87b555::t_90d829aef732c3 1-268
+README.zh-CN.md
+  s_a619afae87b555::t_90d829aef732c3 148,165,183,217,319-324,384
+bindings/unity/package.json
+  s_a619afae87b555::t_90d829aef732c3 3
+bindings/kotlin/build.gradle.kts
+  s_a619afae87b555::t_90d829aef732c3 8
+CHANGELOG.md
+  s_a619afae87b555::t_90d829aef732c3 17-52
+crates/xybrid-core/Cargo.toml
+  s_a619afae87b555::t_90d829aef732c3 28-35,158-159
+README.md
+  s_a619afae87b555::t_90d829aef732c3 133,150,168,202,324-329,389
+bindings/apple/README.md
+  s_a619afae87b555::t_90d829aef732c3 5,114-115,181,183,185,237-238
+crates/xybrid/Cargo.toml
+  s_a619afae87b555::t_90d829aef732c3 17
+Package.swift
+  s_a619afae87b555::t_90d829aef732c3 39,44
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_a619afae87b555::t_90d829aef732c3 31
+bindings/react-native/android/build.gradle
+  s_a619afae87b555::t_90d829aef732c3 94
+bindings/flutter/CHANGELOG.md
+  s_a619afae87b555::t_90d829aef732c3 3-12
+Cargo.lock
+  s_a619afae87b555::t_244430478a5121 2932,3321-3326,3363-3382,6773,6788,6795,6804,6832,6853-6854,6899,6911,6920,6929,6938,6947,6973
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "b5baafd563ca3aaf82ce300d0dd9a48843f90c32",
+  "prompts": {},
+  "sessions": {
+    "s_a619afae87b555": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6fe5db3-dfc5-4fa6-b5ce-50fc626aab2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
