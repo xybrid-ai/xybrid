@@ -3412,7 +3412,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-c-sys"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bindgen",
 ]
@@ -6829,7 +6829,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-mlx"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "metal 0.29.0",
  "mlx-c-sys",
