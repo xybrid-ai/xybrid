@@ -1,7 +1,9 @@
 //! Chat prompt formatting policy for the llama.cpp adapter.
 
+use super::jinja_template::{JinjaChatTemplate, RenderOptions};
 use crate::runtime_adapter::llm::LlmResult;
-use crate::runtime_adapter::ChatMessage;
+use crate::runtime_adapter::{AdapterError, ChatMessage};
+use xybrid_llama::LlamaError;
 
 /// The reasoning-channel opener primed onto the assistant turn for
 /// thinking models. The model continues from here, emitting its
@@ -17,18 +19,20 @@ pub(super) fn format_chat_prompt(
     messages: &[ChatMessage],
     reasoning: bool,
 ) -> LlmResult<String> {
-    let roles: Vec<&str> = messages
-        .iter()
-        .map(|message| message.role.as_str())
-        .collect();
-    let contents: Vec<&str> = messages
-        .iter()
-        .map(|message| message.content.as_str())
-        .collect();
+    let roles: Vec<&str> = messages.iter().map(|m| m.role.as_str()).collect();
+    let contents: Vec<&str> = messages.iter().map(|m| m.content.as_str()).collect();
 
-    let mut prompt = match xybrid_llama::format_chat(model, &roles, &contents)? {
-        Some(prompt) => prompt,
-        None => format_chat_chatml(messages),
+    // Base prompt: the model's native template via llama.cpp, the built-in
+    // ChatML fallback when the model has no template, or a minijinja render of
+    // the model's own embedded template when llama.cpp's non-Jinja matcher
+    // rejects it (e.g. gemma-4 returns code -1).
+    let mut prompt = match xybrid_llama::format_chat(model, &roles, &contents) {
+        Ok(Some(prompt)) => prompt,
+        Ok(None) => format_chat_chatml(messages),
+        Err(err @ LlamaError::ChatTemplateFailed { .. }) => {
+            render_embedded_fallback(model, messages, err)?
+        }
+        Err(err) => return Err(err.into()),
     };
 
     // Thinking models (metadata `reasoning: true`) gate their `<think>` block
@@ -41,6 +45,85 @@ pub(super) fn format_chat_prompt(
     }
 
     Ok(prompt)
+}
+
+/// Render the model's own embedded chat template through minijinja and return
+/// it as a raw prompt. This is the fallback for when llama.cpp's non-Jinja
+/// matcher rejects an otherwise-valid embedded template (e.g. gemma-4, which
+/// returns code -1) — the same engine the MLX path uses.
+///
+/// Policy: never substitute a different prompt family. If minijinja also fails,
+/// surface an error chaining both causes (the original llama rejection and the
+/// minijinja failure) rather than silently swapping templates.
+///
+/// `model.chat_template()` is re-read here and is expected to be `Some`:
+/// `format_chat` only returns `ChatTemplateFailed` when a template is present
+/// (it returns `Ok(None)` otherwise). The `None` guard is defensive — if that
+/// cross-crate invariant ever changed it re-surfaces the original `err` rather
+/// than panicking.
+fn render_embedded_fallback(
+    model: &xybrid_llama::LlamaModel,
+    messages: &[ChatMessage],
+    err: LlamaError,
+) -> LlmResult<String> {
+    let Some(template) = model.chat_template() else {
+        return Err(err.into());
+    };
+
+    // BOS is deliberately suppressed (passed as `None`): `tokenize_chat_prompt`
+    // tokenizes this prompt with `add_special = true`, so llama.cpp prepends the
+    // BOS token itself. HF Jinja templates (gemma-4's included) emit a literal
+    // `{{ bos_token }}` which `parse_special` would turn into a *second* BOS —
+    // and gemma degrades badly on a doubled BOS. llama.cpp's own native gemma
+    // template likewise emits no leading BOS and relies on `add_special`; we
+    // match that contract. This assumes the model adds BOS at tokenization,
+    // which holds for every template that reaches this chat path.
+    //
+    // EOS is passed through for templates that interpolate `{{ eos_token }}` to
+    // terminate prior assistant turns; where it appears it is mid-prompt, so
+    // `add_special` does not duplicate it. (gemma-4 itself uses the literal
+    // `<turn|>` marker and never references `eos_token`, so this is a no-op for
+    // the motivating model but keeps other templates correct.)
+    let tpl = JinjaChatTemplate::new(template, None, detokenize_special(model, model.token_eos()));
+
+    // `enable_thinking = false`: xybrid's llama.cpp backend is a raw
+    // tokenize → generate → detokenize loop with no parser for gemma-4's
+    // `<|channel>thought … <channel|>` reasoning blocks (unlike llama.cpp's own
+    // chat server). Requesting a reasoning channel would leak its markers and
+    // reasoning text into the user-facing output, which the post-processing
+    // stop/strip patterns don't yet understand. Asking for a direct answer makes
+    // gemma-4's template pre-fill an empty thought and emit the response
+    // straight away.
+    let options = RenderOptions {
+        add_generation_prompt: true,
+        enable_thinking: false,
+    };
+
+    match tpl.render(messages, &options) {
+        Ok(prompt) => Ok(prompt),
+        Err(render_err) => {
+            tracing::warn!(
+                target: "xybrid_core",
+                "minijinja chat template fallback failed: {render_err}"
+            );
+            Err(AdapterError::RuntimeError(format!(
+                "llama.cpp did not recognize the embedded chat template ({err}); minijinja fallback also failed ({render_err})"
+            )))
+        }
+    }
+}
+
+/// Detokenize a single special token (the EOS token) to its text form for the
+/// Jinja context. Never panics: a negative/invalid token id or a detokenize
+/// error yields `None`, so the template sees an empty `eos_token`.
+fn detokenize_special(model: &xybrid_llama::LlamaModel, token: i32) -> Option<String> {
+    if token < 0 {
+        return None;
+    }
+    match model.detokenize(&[token]) {
+        Ok(s) if !s.is_empty() => Some(s),
+        _ => None,
+    }
 }
 
 fn format_chat_chatml(messages: &[ChatMessage]) -> String {
